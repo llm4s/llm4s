@@ -151,6 +151,10 @@ class Llm4sWatsonXModuleSpec extends AnyWordSpec with Matchers with ProviderModu
       withServer("/")(routed(sendSseResponse(_, sseBody)))(baseUrl => assertStreams(clientAt(baseUrl)))
     }
 
+    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+      assertModelCallContract(WatsonXContractFixtures.replies(routed))(clientAt)
+    }
+
     "return CancelledError when a call is interrupted" in {
       withServer("/")(routed(holdOpen))(baseUrl => assertCancelsWhenInterrupted(clientAt(baseUrl)))
     }

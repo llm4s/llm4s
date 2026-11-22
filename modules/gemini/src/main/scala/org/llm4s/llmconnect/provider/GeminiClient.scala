@@ -214,7 +214,9 @@ class GeminiClient(
             val rawStream   = StringBuilder()
             val signatures  = scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
             val citations   = scala.collection.mutable.ArrayBuffer.empty[Citation]      // grounding sources, in order
-            var textLength = 0 // characters of answer text streamed so far: where a text signature sits
+            var textLength = 0     // characters of answer text streamed so far: where a text signature sits
+            var callsSeen  = false // whether a function call has streamed: a STOP after one is ToolCalls
+            var lastUsage = Option.empty[TokenUsage] // the last usage a chunk reported
             // a chunk nested too deeply, or a filter stop: the stream fails with it, unread past it
             var refused = Option.empty[LLMError]
             var finish  = Option.empty[String] // the last finish reason a chunk stated
@@ -234,25 +236,33 @@ class GeminiClient(
                       BoundedJson.read(jsonStr) match {
                         case Right(json) =>
                           GeminiBlocked.filtered(json, "Gemini", textLength) match {
+                            case Some(filtered) if filtered.usage.isEmpty =>
+                              // the usage reported on an earlier chunk, when the filter's chunk states none
+                              refused = Some(filtered.withUsage(lastUsage))
                             case Some(filtered) =>
                               // a filter stop ends the stream with its reason, as the same reply fails `complete`;
                               // the text already delivered stays delivered
                               refused = Some(filtered)
                             case None =>
                               GeminiBlocked.finishReason(json).foreach(reason => finish = Some(reason))
-                              parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
-                                textLength += parsed.text.length
-                                signatures ++= parsed.signatures
-                                chunks.foreach { chunk =>
-                                  accumulator.addChunk(chunk)
-                                  onChunk(chunk)
-                                }
+                              parseStreamChunk(json, messageId, textLength, callsSeen).foreach {
+                                case (parsed, chunks) =>
+                                  textLength += parsed.text.length
+                                  callsSeen = callsSeen || parsed.calls.nonEmpty
+                                  signatures ++= parsed.signatures
+                                  chunks.foreach { chunk =>
+                                    accumulator.addChunk(chunk)
+                                    onChunk(chunk)
+                                  }
                               }
                               // grounding metadata usually arrives with the last chunk; collect it from any chunk
                               Try(json("candidates").arr.headOption).toOption.flatten
                                 .foreach(candidate => citations ++= GeminiGrounding.citations(candidate))
                               // token usage, thinking and cached tokens included, when this chunk reports it
-                              GeminiUsage.fromResponse(json).foreach(accumulator.updateUsage)
+                              GeminiUsage.fromResponse(json).foreach { usage =>
+                                lastUsage = Some(usage)
+                                accumulator.updateUsage(usage)
+                              }
                           }
                         case Left(tooDeep @ BoundedJson.TooDeep()) =>
                           logger.warn(
@@ -521,8 +531,7 @@ class GeminiClient(
             usage = usageOpt,
             estimatedCost = cost,
             citations = GeminiGrounding.citations(candidate),
-            // the raw finishReason until RFC 0009 PR 2 maps it
-            finishReason = GeminiBlocked.finishReason(json).map(FinishReason.Other(_)).getOrElse(FinishReason.Other(""))
+            finishReason = GeminiBlocked.mapped(GeminiBlocked.finishReason(json), toolCalls.nonEmpty)
           )
         )
       }
@@ -536,7 +545,8 @@ class GeminiClient(
   private def parseStreamChunk(
     json: ujson.Value,
     messageId: String,
-    textOffset: Int
+    textOffset: Int,
+    callsBefore: Boolean
   ): Option[(GeminiThoughtSignatures.Parsed, Seq[StreamedChunk])] =
     Try {
       val candidates = json("candidates").arr
@@ -548,8 +558,9 @@ class GeminiClient(
         val parsed =
           GeminiThoughtSignatures.parse(providerName, parts, textOffset, () => UUID.randomUUID().toString)
 
-        // Extract finish reason
+        // the finish reason, ToolCalls for a STOP after a function call in this chunk or an earlier one
         val finishReason = Try(candidate("finishReason").str).toOption
+          .map(raw => GeminiBlocked.mapped(Some(raw), callsBefore || parsed.calls.nonEmpty))
 
         Some((parsed, GeminiThoughtSignatures.chunks(parsed, messageId, finishReason)))
       } else {

@@ -108,8 +108,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
     result.isRight shouldBe true
     result.toOption.get.content shouldBe "Hello!"
-    // RFC 0009 PR 1: the raw finishReason, not a Stop the client did not map (PR 2 maps it)
-    result.toOption.get.finishReason shouldBe FinishReason.Other("STOP")
+    // RFC 0009: STOP with no function call
+    result.toOption.get.finishReason shouldBe FinishReason.Stop
   }
 
   it should "parse token usage from the response" in {
@@ -552,7 +552,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     }
     completion.content shouldBe ""
     completion.usage shouldBe Some(noPartsUsage)
-    chunks.flatMap(_.finishReason) shouldBe List(FinishReason.Other("MAX_TOKENS")) // mapped in RFC 0009 PR 2
+    chunks.flatMap(_.finishReason) shouldBe List(FinishReason.Length)
     chunks.flatMap(_.content) shouldBe empty
   }
 
@@ -714,6 +714,18 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     noContentMessage(streamOf(sse, chunks += _)) shouldBe
       "Gemini stopped the reply after 3 characters of text: finishReason SAFETY"
     chunks.flatMap(_.content) shouldBe List("Hel") // what was delivered stays delivered
+  }
+
+  "A filtered reply" should "keep the token usage it was billed, from complete and from a stream (#2676)" in {
+    val usage = ""","usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3,"totalTokenCount":11}"""
+    val body =
+      s"""{"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"},"finishReason":"SAFETY"}]$usage}"""
+    val sse = s"""data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"}}]$usage}\n\n""" +
+      s"""data: {"candidates":[{"content":{"role":"model"},"finishReason":"SAFETY"}]}\n\n"""
+    Seq(completeOf(body), streamOf(sse, _ => ())).foreach {
+      case Left(e: org.llm4s.error.ContentFilteredError) => e.usage.map(_.totalTokens) shouldBe Some(11)
+      case other                                         => fail(s"expected a ContentFilteredError, got $other")
+    }
   }
 
   "A reply that produced text before an abnormal finish" should "be the text, from complete and from a stream" in {

@@ -107,6 +107,10 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
       }
     }
 
+    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+      assertModelCallContract(OllamaContractFixtures.replies)(clientAt)
+    }
+
     "send text and inline images, and refuse every other content part" in {
       val done = """{"message":{"role":"assistant","content":"ok"},"done":true}"""
       // a provider's 400 or 413 - a vendor limit llm4s leaves to it - is a typed error with its message

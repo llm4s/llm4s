@@ -238,6 +238,49 @@ trait ProviderModuleChecks extends Assertions:
       case Right(_)                   => succeed
 
   /**
+   * `client` reports how a reply ended the way RFC 0009 says, on `complete` and on `streamComplete` alike, for every
+   * [[ContractCase]]. `cases` names each one: [[Applicability.Applies]] with the provider's reply, or
+   * [[Applicability.NotApplicable]] with the reason it cannot happen; a case left out fails the check, so none is
+   * missed silently.
+   *
+   * For each case that applies, a [[LocalProviderTestServer]] answers `complete` with the reply's `complete` handler
+   * and `streamComplete` with its `stream` handler, and the result must be:
+   *
+   *  - [[ContractCase.CleanText]]: `Right`, `FinishReason.Stop`, non-empty text and no tool call;
+   *  - [[ContractCase.TextCutByLimit]]: `Right`, `FinishReason.Length` and non-empty text;
+   *  - [[ContractCase.ToolCall]]: `Right`, `FinishReason.ToolCalls` and at least one tool call, each with a JSON
+   *    object for its arguments;
+   *  - [[ContractCase.ContentFiltered]]: `Left(ContentFilteredError)`.
+   *
+   * A stream that succeeds must also have delivered what it returned: its chunks' text joined is the `Completion`'s
+   * text, the last reason a chunk carried is its finish reason, and its chunks name the same tool calls.
+   *
+   * @param cases  every [[ContractCase]], with whether and how it applies
+   * @param path   the path the server answers on; `/` answers every path
+   * @param client builds the client for the server's base URL (`http://localhost:<port>`)
+   */
+  def assertModelCallContract(cases: Map[ContractCase, Applicability], path: String = "/")(
+    client: String => LLMClient
+  )(using pos: Position): Assertion =
+    val missing = ContractCase.values.filterNot(cases.contains)
+    if missing.nonEmpty then
+      failAt(s"no Applicability declared for ${missing.mkString(", ")}: declare each case Applies or NotApplicable")
+    ContractCase.values.foreach { c =>
+      cases(c) match
+        case Applicability.NotApplicable(reason) =>
+          if reason.trim.isEmpty then failAt(s"$c is NotApplicable without a reason")
+        case Applicability.Applies(reply) =>
+          val completed = ModelCallContractRun.call(path, reply.complete, client)(_.complete(_))
+          ModelCallContractRun.expect(c, "complete", completed)
+          val chunks = ListBuffer.empty[StreamedChunk]
+          val streamed =
+            ModelCallContractRun.call(path, reply.stream, client)(_.streamComplete(_, onChunk = chunks += _))
+          ModelCallContractRun.expect(c, "streamComplete", streamed)
+          streamed.foreach(ModelCallContractRun.delivered(c, chunks.toList, _))
+    }
+    succeed
+
+  /**
    * A client built with `LlmClientOptions.withHttpClient` sends its `complete` and `streamComplete` requests
    * through the supplied client, and closing it leaves the supplied client open: the caller owns it (#2341).
    * The supplied client records each request and answers `400`, so no server is needed and each call ends in a

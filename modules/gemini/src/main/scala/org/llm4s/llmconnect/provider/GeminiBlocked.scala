@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ ContentFilteredError, ValidationError }
-import org.llm4s.llmconnect.model.Completion
+import org.llm4s.llmconnect.model.{ Completion, FinishReason }
 
 /**
  * How a Gemini or Vertex AI reply that did not finish normally ends, the same way for `complete` and for a stream:
@@ -15,6 +15,8 @@ import org.llm4s.llmconnect.model.Completion
  *    returned with what was produced. A stream decides this at its end, from what it accumulated.
  *  - `STOP`, `MAX_TOKENS` or `CONTINUATION` with nothing produced (a thinking model that spent its whole budget
  *    thinking) is an empty answer.
+ *
+ * A reply that is returned carries its [[mapped]] finish reason (RFC 0009).
  */
 private[provider] object GeminiBlocked {
 
@@ -46,16 +48,29 @@ private[provider] object GeminiBlocked {
       .flatMap(_.headOption)
       .filter(_.objOpt.isDefined)
 
+  /**
+   * A `finishReason` as a [[FinishReason]] (RFC 0009): `STOP` is `ToolCalls` when the reply has a function call and
+   * `Stop` otherwise, and `MAX_TOKENS` is `Length`. Any other (`CONTINUATION`, `MALFORMED_FUNCTION_CALL`, `OTHER`,
+   * ...) is kept as `Other`, and none read as `Other("")`. A filter finish never reaches a reply: [[filtered]] makes
+   * it an error.
+   */
+  def mapped(finishReason: Option[String], hasCalls: Boolean): FinishReason = finishReason match {
+    case Some("STOP")       => if (hasCalls) FinishReason.ToolCalls else FinishReason.Stop
+    case Some("MAX_TOKENS") => FinishReason.Length
+    case Some(other)        => FinishReason.Other(other)
+    case None               => FinishReason.Other("")
+  }
+
   /** The first candidate's `finishReason`, when the response (or chunk) states one. */
   def finishReason(json: ujson.Value): Option[String] =
     candidate(json).flatMap(_.obj.get("finishReason")).flatMap(_.strOpt)
 
   /**
-   * The error for a reply a content filter stopped, or for a blocked prompt; `None` for any other response.
-   * `priorText` is the answer text a stream delivered before this chunk.
+   * The error for a reply a content filter stopped, or for a blocked prompt, with the usage the response reported
+   * (#2676); `None` for any other response. `priorText` is the answer text a stream delivered before this chunk.
    */
   def filtered(json: ujson.Value, service: String, priorText: Int = 0): Option[ContentFilteredError] =
-    candidate(json) match {
+    (candidate(json) match {
       case Some(c) =>
         finishReason(json).filter(FilterFinishes.contains).map { reason =>
           ContentFilteredError.reply(service, reason, cutAfterChars = priorText + answerText(c))
@@ -67,7 +82,7 @@ private[provider] object GeminiBlocked {
           .flatMap(_.get("blockReason"))
           .flatMap(_.strOpt)
           .map(reason => ContentFilteredError.prompt(service, reason))
-    }
+    }).map(_.withUsage(GeminiUsage.fromResponse(json)))
 
   /** The error for a reply that ended abnormally (not by a filter) having produced no text and no tool call. */
   def unanswered(finishReason: Option[String], reply: Completion, service: String): Option[ValidationError] =

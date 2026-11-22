@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.error.{
   AuthenticationError,
   CancelledError,
+  ContentFilteredError,
   LLMError,
   NetworkError,
   ProcessingError,
@@ -347,7 +348,10 @@ class BedrockClient(
       onChunk(chunk)
     }
 
-    var stopped = false
+    var stopped    = false
+    var filtered   = Option.empty[ContentFilteredError] // a guardrail or filter stop: the stream fails with it
+    var textLength = 0                                  // characters of answer text delivered
+    var usage      = Option.empty[TokenUsage]           // the usage the metadata event reported
 
     // The stream timeout bounds the whole call, so it is a deadline rather than a per-event wait.
     val deadline = streamTimeout.map(t => (t, System.nanoTime() + t.toNanos))
@@ -378,6 +382,7 @@ class BedrockClient(
           raw.append(signal.toString).append('\n')
           signal match {
             case StreamSignal.Text(text) =>
+              textLength += text.length
               emit(StreamedChunk(messageId, Some(text), None, None))
               drain()
             case StreamSignal.Reasoning(index, text) =>
@@ -401,9 +406,14 @@ class BedrockClient(
               drain()
             case StreamSignal.Stop(reason) =>
               stopped = true
-              emit(StreamedChunk(messageId, None, None, Some(FinishReason.Other(reason)))) // mapped in RFC 0009 PR 2
+              // a guardrail or filter stop fails the stream once it ends, with its usage, as it fails `complete`;
+              // the text already delivered stays delivered
+              filtered = BedrockClient.filtered(reason, textLength, None)
+              if (filtered.isEmpty)
+                emit(StreamedChunk(messageId, None, None, Some(BedrockClient.finishReason(reason))))
               drain()
             case StreamSignal.Usage(input, output) =>
+              usage = Some(TokenUsage(promptTokens = input, completionTokens = output, totalTokens = input + output))
               accumulator.updateTokens(input, output)
               drain()
             case StreamSignal.Finished(Some(error))      => Left(mapException(error))
@@ -412,7 +422,7 @@ class BedrockClient(
               // delivered is a truncated answer, and a truncated tool call is worse.
               Left(NetworkError("ConverseStream ended before messageStop", None, endpointLabel))
             case StreamSignal.Finished(None) =>
-              accumulator.toCompletion.map { c =>
+              filtered.map(_.withUsage(usage)).toLeft(()).flatMap(_ => accumulator.toCompletion).map { c =>
                 // the accumulator knows only the reasoning text; the blocks carry their signatures
                 val message =
                   if (reasoning.isEmpty) c.message
@@ -629,7 +639,7 @@ class BedrockClient(
         }
       }
 
-    toolCalls.map { toolCalls =>
+    toolCalls.flatMap { toolCalls =>
       val message =
         AssistantMessage(
           contentOpt = Option(textContent).filter(_.nonEmpty),
@@ -645,21 +655,21 @@ class BedrockClient(
         )
       }
 
-      Completion(
-        id = java.util.UUID.randomUUID().toString,
-        created = Instant.now(),
-        content = textContent,
-        model = config.model,
-        message = message,
-        toolCalls = toolCalls,
-        usage = usage,
-        estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model, u)),
-        // the raw stopReason until RFC 0009 PR 2 maps it
-        finishReason = Option(response.stopReasonAsString())
-          .filter(_.nonEmpty)
-          .map(FinishReason.Other(_))
-          .getOrElse(FinishReason.Other(""))
-      )
+      val stopReason = Option(response.stopReasonAsString()).filter(_.nonEmpty)
+      // a guardrail or filter stop is an error, whatever text came first (RFC 0009)
+      stopReason.flatMap(BedrockClient.filtered(_, textContent.length, usage)).toLeft {
+        Completion(
+          id = java.util.UUID.randomUUID().toString,
+          created = Instant.now(),
+          content = textContent,
+          model = config.model,
+          message = message,
+          toolCalls = toolCalls,
+          usage = usage,
+          estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model, u)),
+          finishReason = stopReason.fold(FinishReason.Other(""))(BedrockClient.finishReason)
+        )
+      }
     }
   }
 
@@ -752,6 +762,36 @@ class BedrockClient(
 }
 
 object BedrockClient {
+
+  // ---- finish reasons ----
+
+  /** The `stopReason`s of a reply a guardrail or content filter stopped: a `ContentFilteredError` (RFC 0009). */
+  private val FilterStops = Set("guardrail_intervened", "content_filtered")
+
+  /**
+   * Converse's `stopReason` as a [[FinishReason]] (RFC 0009): `end_turn` and `stop_sequence` are `Stop`, `tool_use`
+   * is `ToolCalls`, `max_tokens` and `model_context_window_exceeded` are `Length`; any other is kept as `Other`. A
+   * guardrail or filter stop never reaches a `Completion`: [[filtered]] makes it an error.
+   */
+  private[provider] def finishReason(raw: String): FinishReason = raw match {
+    case "end_turn" | "stop_sequence"                   => FinishReason.Stop
+    case "tool_use"                                     => FinishReason.ToolCalls
+    case "max_tokens" | "model_context_window_exceeded" => FinishReason.Length
+    case other                                          => FinishReason.Other(other)
+  }
+
+  /**
+   * The error for a reply a guardrail or content filter stopped after `cutAfterChars` characters of text, with the
+   * usage it billed; `None` for any other `stopReason`.
+   */
+  private[provider] def filtered(
+    stopReason: String,
+    cutAfterChars: Int,
+    usage: Option[TokenUsage]
+  ): Option[ContentFilteredError] =
+    Option.when(FilterStops.contains(stopReason))(
+      ContentFilteredError.reply("Bedrock", stopReason, cutAfterChars).withUsage(usage)
+    )
 
   // ---- content parts ----
 

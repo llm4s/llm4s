@@ -1,15 +1,18 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.error.ContentFilteredError
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, sendSseResponse, withServer }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /**
  * RFC 0009 Part 1, the chat-completions row: `stop`, `tool_calls` (and the older `function_call`) and `length` map to
- * their `FinishReason`; any other value, `content_filter` included until PR 2, is kept as `Other`. A reply that sent
- * no reason is `Other("")`, never a made-up `Stop`.
+ * their `FinishReason`; any other value is kept as `Other`. A reply that sent no reason is `Other("")`, never a
+ * made-up `Stop`. `content_filter` is read as `Other("content_filter")`, and the client fails the call with a
+ * `ContentFilteredError` on it (PR 2), on `complete` and on a stream alike.
  */
 class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
 
@@ -33,6 +36,13 @@ class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
     ujson.read(
       s"""{"id":"c1","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"Hi"}$finish}]}"""
     )
+
+  private def clientAt(baseUrl: String) = new OpenAICompatibleClient(
+    OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", baseUrl, None)),
+    OpenAICompatibleDialect.Standard
+  )
+
+  private val usage = """"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13}"""
 
   "complete" should "map the choice's finish_reason" in {
     mapped.foreach { case (raw, reason) =>
@@ -59,5 +69,40 @@ class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
       withClue(raw)(chunk(s""""$raw"""").map(_.finishReason) shouldBe Seq(Some(reason)))
     }
     chunk("null").map(_.finishReason) shouldBe Seq(None)
+  }
+
+  "a content_filter finish" should "fail complete with a ContentFilteredError carrying the billed usage" in {
+    val body =
+      s"""{"id":"c1","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"Here"},"finish_reason":"content_filter"}],$usage}"""
+    withServer("/")(sendJsonResponse(_, 200, body)) { baseUrl =>
+      clientAt(baseUrl).complete(Conversation(Seq(UserMessage("Hi")))) match {
+        case Left(e: ContentFilteredError) =>
+          e.reason shouldBe "content_filter"
+          e.promptBlocked shouldBe false
+          e.message should include("after 4 characters")
+          e.usage.map(_.totalTokens) shouldBe Some(13)
+        case other => fail(s"expected a ContentFilteredError, got $other")
+      }
+    }
+  }
+
+  it should "fail a stream, keeping the text already delivered, with the usage sent after it" in {
+    val stream = Seq(
+      """data: {"id":"c1","choices":[{"index":0,"delta":{"content":"Here"},"finish_reason":null}]}""",
+      """data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"content_filter"}]}""",
+      s"""data: {"id":"c1","choices":[],$usage}""",
+      "data: [DONE]"
+    ).mkString("", "\n\n", "\n\n")
+    val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
+    withServer("/")(sendSseResponse(_, stream)) { baseUrl =>
+      clientAt(baseUrl).streamComplete(Conversation(Seq(UserMessage("Hi"))), onChunk = chunks += _) match {
+        case Left(e: ContentFilteredError) =>
+          e.message should include("after 4 characters")
+          e.usage.map(_.totalTokens) shouldBe Some(13)
+        case other => fail(s"expected a ContentFilteredError, got $other")
+      }
+    }
+    chunks.flatMap(_.content).mkString shouldBe "Here"
+    chunks.flatMap(_.finishReason) shouldBe empty
   }
 }

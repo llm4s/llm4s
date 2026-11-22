@@ -2,7 +2,14 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
-import org.llm4s.error.{ AuthenticationError, LLMError, NetworkError, ServiceError, ValidationError }
+import org.llm4s.error.{
+  AuthenticationError,
+  ContentFilteredError,
+  LLMError,
+  NetworkError,
+  ServiceError,
+  ValidationError
+}
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.auth.{
@@ -132,6 +139,7 @@ class OpenAICompatibleClient(
             val result =
               if (response.statusCode >= 200 && response.statusCode < 300)
                 Try(parseCompletion(readReply(body))).toResult
+                  .flatMap(filteredReply)
                   .map(bindThinking(_, conversation, options).withAdjustments(adjustments))
               else
                 HttpErrorMapper.mapHttpError(
@@ -223,6 +231,8 @@ class OpenAICompatibleClient(
     var servedModel = Option.empty[String]
     var ended       = false
     var failure     = Option.empty[LLMError]
+    var filtered    = Option.empty[ContentFilteredError] // a content-filter finish: the stream's end
+    var textLength  = 0                                  // characters of answer text delivered
     Iterator.continually(if (failure.isEmpty) reader.readLine() else null).takeWhile(_ != null).foreach { line =>
       rawStream.append(line).append('\n')
       sseParser.addChunk(line + "\n")
@@ -239,16 +249,33 @@ class OpenAICompatibleClient(
             // the model that served the request, which a router may choose; reported as `Completion.model`
             json.obj.get("model").flatMap(_.strOpt).filter(_.nonEmpty).foreach(m => servedModel = Some(m))
             details ++= streamedThinkingDetails(json)
-            if (failure.isEmpty)
-              parseStreamingChunks(json, toolCalls).foreach { chunk =>
-                chunk.finishReason.foreach { reason =>
+            if (failure.isEmpty && filtered.isEmpty) {
+              val chunks = parseStreamingChunks(json, toolCalls)
+              // a content-filter finish fails the stream, as the same reply fails `complete`; the text already
+              // delivered stays delivered, and the event that stopped it is not. Reading goes on to the end,
+              // since the usage the call was billed may come on an event of its own.
+              ChatCompletionsFinishReason.filtered(
+                providerName,
+                chunks.flatMap(_.finishReason).headOption,
+                textLength + chunks.flatMap(_.content).map(_.length).sum,
+                None
+              ) match {
+                case Some(stopped) =>
                   ended = true
-                  if (reason == FinishReason.Other("error"))
-                    failure = Some(ServiceError(502, providerName, "the stream ended with finish_reason 'error'"))
-                }
-                accumulator.addChunk(chunk)
-                onChunk(chunk)
+                  filtered = Some(stopped)
+                case None =>
+                  chunks.foreach { chunk =>
+                    chunk.finishReason.foreach { reason =>
+                      ended = true
+                      if (reason == FinishReason.Other("error"))
+                        failure = Some(ServiceError(502, providerName, "the stream ended with finish_reason 'error'"))
+                    }
+                    textLength += chunk.content.map(_.length).getOrElse(0)
+                    accumulator.addChunk(chunk)
+                    onChunk(chunk)
+                  }
               }
+            }
           }
         }
     }
@@ -258,16 +285,21 @@ class OpenAICompatibleClient(
     val unfinished = Option.when(!ended)(
       NetworkError("stream ended without a finish_reason or [DONE]; the reply is incomplete", None, endpoint)
     )
-    failure.orElse(unfinished).toLeft(()).flatMap(_ => accumulator.toCompletion).map { c =>
-      val finalUsage = usage.orElse(c.usage)
-      val message =
-        if (opaqueThinking.isEmpty) c.message else c.message.withThinking(c.message.thinking ++ opaqueThinking)
-      c.withMessage(message)
-        .withModel(servedModel.getOrElse(settings.model))
-        .withToolCalls(c.message.toolCalls.toList)
-        .withUsage(finalUsage)
-        .withEstimatedCost(finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u)))
-    }
+    failure
+      .orElse(filtered.map(_.withUsage(usage)))
+      .orElse(unfinished)
+      .toLeft(())
+      .flatMap(_ => accumulator.toCompletion)
+      .map { c =>
+        val finalUsage = usage.orElse(c.usage)
+        val message =
+          if (opaqueThinking.isEmpty) c.message else c.message.withThinking(c.message.thinking ++ opaqueThinking)
+        c.withMessage(message)
+          .withModel(servedModel.getOrElse(settings.model))
+          .withToolCalls(c.message.toolCalls.toList)
+          .withUsage(finalUsage)
+          .withEstimatedCost(finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u)))
+      }
   }
 
   /**
@@ -552,6 +584,15 @@ class OpenAICompatibleClient(
     val adjustments = dialect.addReasoning(body, settings.model, options)
     (body, adjustments)
   }
+
+  /**
+   * A reply the content filter stopped (`finish_reason` `content_filter`) as a `ContentFilteredError`, with the
+   * usage it was billed; any other reply unchanged.
+   */
+  private def filteredReply(c: Completion): Result[Completion] =
+    ChatCompletionsFinishReason
+      .filtered(providerName, Some(c.finishReason), c.content.length, c.usage)
+      .toLeft(c)
 
   /** Reads a non-streaming reply. Throws on a malformed one; `complete` turns that into a `Left`. */
   protected[provider] def parseCompletion(json: ujson.Value): Completion = {

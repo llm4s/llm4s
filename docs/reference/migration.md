@@ -33,7 +33,8 @@ and [the remaining config, model and util types](#config-model-and-util-types-ar
 [a Gemini reply a content filter stopped is an error](#a-gemini-reply-a-content-filter-stopped-is-an-error-2563); and
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115),
-and [finish reasons are typed](#finish-reasons-are-typed-2613).
+[finish reasons are typed](#finish-reasons-are-typed-2613),
+and [every provider's content-filter stop is an error](#every-providers-content-filter-stop-is-an-error-2677).
 
 ## Finish reasons are typed (#2613)
 
@@ -61,17 +62,39 @@ client.complete(conversation, options).map { c =>
   its nine-field one.
 - `Completion(...)` with named arguments keeps compiling and gets `FinishReason.Stop`. A client or fake that builds
   one sets the reason it read; one it did not read is `FinishReason.Other("")`, which tracing leaves out.
-- Until RFC 0009 PR 2, Gemini, Vertex AI and Bedrock report `Other` with their raw value and Anthropic `Other("")`,
-  and a Spring AI model's reason is always `Other(raw)`, since Spring AI has no common vocabulary. So match `Stop` only
-  where the client maps it: OpenAI, Azure, the OpenAI-compatible clients, watsonx, Perplexity, Ollama and Jlama.
+- Every chat client maps it (RFC 0009 PR 2 added Anthropic's `stop_reason`, Gemini's and Vertex AI's `finishReason`
+  and Bedrock's `stopReason`): a natural end or stop sequence is `Stop`, a tool call `ToolCalls` (Gemini's `STOP` after
+  a function call too), a token or context-window limit `Length` (`max_tokens`, `MAX_TOKENS`,
+  `model_context_window_exceeded`). Any other value is `Other(raw)`, such as Anthropic's `pause_turn` or Gemini's
+  `CONTINUATION`. A Spring AI model's reason is always `Other(raw)`, since Spring AI has no common vocabulary.
 - Behaviour that changes with the reason: tracing reports it for `complete`, where it reported none, and an Anthropic
-  stream traces none until PR 2, where it traced a made-up `stop`; OpenAI's fake
+  stream traces the `stop_reason` of `message_delta`, where it traced a made-up `stop`; OpenAI's fake
   streaming (o1) ends with the reply's own reason, not `stop`; Ollama reads `done_reason`, where it guessed `stop` or
   `tool_calls` from `done`; and Perplexity reports an `incomplete` reply that has a call as `Length`, not `ToolCalls`.
 - An agent's `AgentEvents.ModelCallCompleted` gains `finishReason: Option[FinishReason]` (default `None`), after
   `adjustments`, filled from each call's `Completion` (PR 6). Construction is unchanged; a positional pattern needs a
   ninth binder, `case ModelCallCompleted(a, m, n, t, u, c, p, adj, _)`, or match on the type and read the fields. An
   event stored before reads with `None`.
+
+## Every provider's content-filter stop is an error (#2677)
+
+The rule the Gemini clients follow since [#2563](#a-gemini-reply-a-content-filter-stopped-is-an-error-2563) now holds
+for every chat client ([RFC 0009](../rfcs/0009-model-call-contract) PR 2). A reply the provider's content filter
+stopped is a `Left(ContentFilteredError)`, from `complete` and from `streamComplete` alike, even after some text. That
+covers the chat-completions `finish_reason` `content_filter` (OpenAI, Azure OpenAI, Requesty and the
+OpenAI-compatible clients), Anthropic's `stop_reason` `refusal`, and Bedrock's `stopReason` `guardrail_intervened`
+or `content_filtered`. Azure OpenAI's 400 for a prompt its filter blocked (`code: content_filter`) is one too, with
+`promptBlocked = true`, where it was a `ValidationError`. Each of these used to come back as a finished `Completion`,
+possibly empty or cut short, with the provider's reason as `Other`.
+
+- A stream's text already passed to `onChunk` stays delivered; no chunk carries the filter's reason, and the error's
+  message says how many characters the filter cut after.
+- `ContentFilteredError.usage` carries the tokens the provider reported for the filtered call, which it bills, on
+  both paths and for Gemini and Vertex AI too (#2676). A client's metrics record them; a trace's `ErrorOccurred`
+  does not carry usage.
+- Match `ContentFilteredError` (`provider`, `reason`, `promptBlocked`) where you read a `content_filter`, `refusal`
+  or guardrail reason off a `Completion`. `ReliableClient`'s circuit breaker counts it as neither a success nor a
+  failure, and it is not retried.
 
 ## Changes since 0.5.1 that no rule automates
 

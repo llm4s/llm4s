@@ -4,7 +4,7 @@ import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.JlamaConfig
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.testkit.{ ProviderModuleChecks, ProviderTestConfig }
+import org.llm4s.testkit.{ Applicability, ContractCase, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -113,6 +113,20 @@ class Llm4sJlamaModuleSpec extends AnyWordSpec with Matchers with ProviderModule
 
     "actually stream, not silently fall back to complete()" in {
       assertStreams(client(new ScriptedEngine()))
+    }
+
+    "declare each RFC 0009 ending it cannot be served over a wire" in {
+      // the model runs in-process: there are no provider bytes to serve, so JlamaClientSpec checks Stop and Length
+      // on complete and on a stream against a scripted engine instead
+      val inProcess = "an in-process engine with no wire format; JlamaClientSpec checks it with a scripted engine"
+      assertModelCallContract(
+        Map(
+          ContractCase.CleanText       -> Applicability.NotApplicable(inProcess),
+          ContractCase.TextCutByLimit  -> Applicability.NotApplicable(inProcess),
+          ContractCase.ToolCall        -> Applicability.NotApplicable("JlamaClient does not call tools"),
+          ContractCase.ContentFiltered -> Applicability.NotApplicable("a local model has no content filter")
+        )
+      )(_ => client(new ScriptedEngine()))
     }
 
     "return CancelledError when a call is interrupted while the model generates" in {

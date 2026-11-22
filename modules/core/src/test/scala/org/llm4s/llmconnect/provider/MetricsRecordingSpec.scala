@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ AuthenticationError, RateLimitError }
+import org.llm4s.error.{ AuthenticationError, ContentFilteredError, RateLimitError }
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.metrics.{ ErrorKind, MockMetricsCollector }
 import org.llm4s.types.Result
@@ -88,6 +88,31 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
     tokenCall._2 shouldBe "test-model"
     tokenCall._3 shouldBe 100 // input tokens
     tokenCall._4 shouldBe 50  // output tokens
+  }
+
+  it should "record the tokens a filtered call was billed, and none for any other error (#2676)" in {
+    val mockMetrics = new MockMetricsCollector()
+    val client      = new TestMetricsClient(mockMetrics)
+    val usage       = TokenUsage(promptTokens = 8, completionTokens = 3, totalTokens = 11)
+
+    client.testWithMetrics(
+      provider = "gemini",
+      model = "gemini-2.0-flash",
+      f = Left(ContentFilteredError.reply("Gemini", "SAFETY").withUsage(usage)),
+      extractUsage = (_: String) => None,
+      extractCost = (_: String) => None
+    )
+    client.testWithMetrics(
+      provider = "gemini",
+      model = "gemini-2.0-flash",
+      f = Left(ContentFilteredError.reply("Gemini", "SAFETY")),
+      extractUsage = (_: String) => None,
+      extractCost = (_: String) => None
+    )
+
+    mockMetrics.totalRequests shouldBe 2
+    mockMetrics.tokenCalls.toList shouldBe List(("gemini", "gemini-2.0-flash", 8L, 3L))
+    mockMetrics.totalCostCalls shouldBe 0
   }
 
   it should "count thinking tokens as output tokens, since completionTokens leaves them out" in {

@@ -148,8 +148,8 @@ class AnthropicWebSearchSpec extends AnyFlatSpec with Matchers {
       completion.citations.foreach(_.hasSpan shouldBe false)
       completion.content shouldBe "Here is what I found. Scala 3.8 is out. Also, again."
       completion.toolCalls shouldBe empty
-      // RFC 0009 PR 1: stop_reason is read in PR 2, so no reason, never a Stop the client did not read
-      completion.finishReason shouldBe FinishReason.Other("")
+      // a server-side search is not a tool call: the reply's end_turn is a Stop (RFC 0009)
+      completion.finishReason shouldBe FinishReason.Stop
     }
   }
 

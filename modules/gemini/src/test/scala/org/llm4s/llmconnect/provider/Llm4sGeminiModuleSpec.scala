@@ -112,6 +112,9 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
       else Right(HttpResponse(200, tokenBody, Map.empty))
     }
     (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.postStream _).when(*, *, *, *).onCall { (_, headers, body, timeout) =>
+      real.postStream(s"$baseUrl/vertex", headers, body, timeout)
+    }
     new VertexAIClient(
       vertexConfig,
       org.llm4s.metrics.MetricsCollector.noop,
@@ -232,6 +235,10 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
       }
     }
 
+    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+      assertModelCallContract(GeminiContractFixtures.replies)(geminiClientAt)
+    }
+
     "return CancelledError when a call is interrupted" in {
       withServer("/")(holdOpen)(baseUrl => assertCancelsWhenInterrupted(geminiClientAt(baseUrl)))
     }
@@ -256,6 +263,10 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
         )
       )(vertexClientAt)
       assertContentParts("vertexai", sendJsonResponse(_, 200, geminiReply))(vertexParts*)(vertexClientAt)
+    }
+
+    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+      assertModelCallContract(GeminiContractFixtures.replies)(vertexClientAt)
     }
 
     "actually stream, not silently fall back to complete()" in {

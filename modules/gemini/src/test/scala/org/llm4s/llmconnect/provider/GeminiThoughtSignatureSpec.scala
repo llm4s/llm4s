@@ -647,22 +647,22 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       signatures = Seq.empty
     )
 
-    val chunks = GeminiThoughtSignatures.chunks(parsed, "m", Some("STOP"))
+    val chunks = GeminiThoughtSignatures.chunks(parsed, "m", Some(FinishReason.ToolCalls))
 
     chunks.map(_.toolCall.map(_.id)) shouldBe Seq(Some("a"), Some("b"))
     chunks.map(_.content) shouldBe Seq(Some("hi"), None)
     chunks.map(_.thinkingDelta) shouldBe Seq(Some("hmm"), None)
-    chunks.map(_.finishReason) shouldBe Seq(None, Some(FinishReason.Other("STOP"))) // mapped in RFC 0009 PR 2
+    chunks.map(_.finishReason) shouldBe Seq(None, Some(FinishReason.ToolCalls))
   }
 
   it should "make a single chunk when there is no function call, even for an empty part" in {
     val parsed = GeminiThoughtSignatures.Parsed("", "", Seq.empty, Seq.empty)
 
-    val chunks = GeminiThoughtSignatures.chunks(parsed, "m", Some("STOP"))
+    val chunks = GeminiThoughtSignatures.chunks(parsed, "m", Some(FinishReason.Stop))
 
     chunks should have size 1
     chunks.head.content shouldBe None
-    chunks.head.finishReason shouldBe Some(FinishReason.Other("STOP")) // mapped in RFC 0009 PR 2
+    chunks.head.finishReason shouldBe Some(FinishReason.Stop)
   }
 
   // -------------------------------------------------------------------------

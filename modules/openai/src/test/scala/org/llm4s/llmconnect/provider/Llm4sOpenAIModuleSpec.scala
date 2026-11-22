@@ -237,6 +237,39 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       }
     }
 
+    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+      assertModelCallContract(OpenAIContractFixtures.replies)(openAIClientAt)
+      assertModelCallContract(OpenAIContractFixtures.replies) { baseUrl =>
+        val config =
+          AzureConfig
+            .fromValues("my-deploy", Secret("azure-key"), baseUrl, AzureConfig.DEFAULT_API_VERSION)
+            .toOption
+            .get
+        AzureProvider.buildClient(config, LlmClientOptions.default).toOption.get
+      }
+    }
+
+    "report Azure's 400 for a prompt its content filter blocked as a ContentFilteredError (#2677)" in {
+      val body =
+        """{"error":{"message":"The response was filtered","type":null,"param":"prompt","code":"content_filter","status":400}}"""
+      LocalProviderTestServer.withServer("/")(LocalProviderTestServer.sendJsonResponse(_, 400, body)) { baseUrl =>
+        val config =
+          AzureConfig
+            .fromValues("my-deploy", Secret("azure-key"), baseUrl, AzureConfig.DEFAULT_API_VERSION)
+            .toOption
+            .get
+        val client = AzureProvider.buildClient(config, LlmClientOptions.default).toOption.get
+        client.complete(
+          org.llm4s.llmconnect.model.Conversation(Seq(org.llm4s.llmconnect.model.UserMessage("Hi")))
+        ) match
+          case Left(e: org.llm4s.error.ContentFilteredError) =>
+            e.promptBlocked shouldBe true
+            e.provider shouldBe "Azure OpenAI"
+            e.reason shouldBe "content_filter"
+          case other => fail(s"expected a ContentFilteredError, got $other")
+      }
+    }
+
     "send exactly one tool message per tool call, keeping every call and result (design 5.3)" in {
       assertOneToolResultPerCall(ToolMessageFormat.OpenAIChat, LocalProviderTestServer.openAICompletion("done"))(
         openAIClientAt

@@ -25,6 +25,7 @@ import com.anthropic.models.messages.{
   OutputConfig,
   RawMessageStreamEvent,
   RedactedThinkingBlockParam,
+  StopReason,
   TextBlockParam,
   ThinkingBlockParam,
   ThinkingConfigAdaptive,
@@ -60,6 +61,7 @@ import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
 import org.llm4s.error.{
   AuthenticationError,
+  ContentFilteredError,
   LLMError,
   ProcessingError,
   RateLimitError,
@@ -273,6 +275,7 @@ class AnthropicClient(
         // sealed thinking is bound to the request it answers, so it is replayed only while that holds
         val result = attempt
           .flatMap(convertFromAnthropicResponse)
+          .flatMap(AnthropicClient.refused)
           .map(c =>
             c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, transformed.messages, transformed.options))
               .withAdjustments(adjustments)
@@ -361,6 +364,9 @@ curl https://api.anthropic.com/v1/messages \
         // thinking blocks by content-block index, so each keeps its own text and signature
         val thinkingBlocks = mutable.TreeMap.empty[Long, AnthropicClient.StreamedThinking]
         val rawStream      = StringBuilder()
+        // the stop_reason `message_delta` reported, and the characters of answer text streamed
+        var stopReason = Option.empty[String]
+        var textLength = 0
 
         // Process the stream
         val attempt = Try {
@@ -394,6 +400,7 @@ curl https://api.anthropic.com/v1/messages \
                     val textDelta = textOpt.get()
                     val text      = textDelta.text()
                     if (text != null && text.nonEmpty) {
+                      textLength += text.length
                       val chunk = StreamedChunk(
                         id = currentMessageId.getOrElse(""),
                         content = Some(text),
@@ -493,14 +500,19 @@ curl https://api.anthropic.com/v1/messages \
                 }
               }
 
+              // `message_delta` carries the stop_reason; `message_stop` ends the message
+              event.messageDelta().toScala.flatMap(d => AnthropicClient.rawStopReason(d.delta().stopReason())).foreach {
+                reason => stopReason = Some(reason)
+              }
+
               val messageStopOpt = event.messageStop()
-              if (messageStopOpt != null && messageStopOpt.isPresent) {
+              // a refusal ends in an error, not a finish: no chunk says the reply finished
+              if (messageStopOpt != null && messageStopOpt.isPresent && !stopReason.contains(AnthropicClient.Refusal)) {
                 val chunk = StreamedChunk(
                   id = currentMessageId.getOrElse(""),
                   content = None,
                   toolCall = None,
-                  // stop_reason is read in RFC 0009 PR 2; until then no reason, not a made-up "stop"
-                  finishReason = Some(FinishReason.Other(""))
+                  finishReason = Some(stopReason.fold(FinishReason.Other(""))(AnthropicClient.finishReason))
                 )
                 accumulator.addChunk(chunk)
                 onChunk(chunk)
@@ -516,20 +528,28 @@ curl https://api.anthropic.com/v1/messages \
         }.toEither.left
           .map(AnthropicClient.mapError(_))
 
-        // Return the accumulated completion
+        // Return the accumulated completion; a refusal fails the stream, as it fails `complete`, the text already
+        // delivered staying delivered
         val result = attempt.flatMap(_ =>
-          accumulator.toCompletion.map { c =>
-            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            // the accumulator knows only the thinking text; the blocks carry their signatures
-            val message =
-              if (thinkingBlocks.isEmpty) c.message
-              else c.message.withThinking(thinkingBlocks.values.map(_.toBlock).toSeq)
-            c.withModel(config.model)
-              .withMessage(ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options))
-              .withEstimatedCost(cost)
-              .withCitations(citations.toList)
-              .withAdjustments(adjustments)
-          }
+          accumulator.toCompletion
+            .flatMap(c =>
+              stopReason
+                .filter(_ == AnthropicClient.Refusal)
+                .map(reason => AnthropicClient.filtered(reason, textLength, c.usage))
+                .toLeft(c)
+            )
+            .map { c =>
+              val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+              // the accumulator knows only the thinking text; the blocks carry their signatures
+              val message =
+                if (thinkingBlocks.isEmpty) c.message
+                else c.message.withThinking(thinkingBlocks.values.map(_.toBlock).toSeq)
+              c.withModel(config.model)
+                .withMessage(ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options))
+                .withEstimatedCost(cost)
+                .withCitations(citations.toList)
+                .withAdjustments(adjustments)
+            }
         )
 
         recordingExchange(startedAt, requestBody)(result)(
@@ -787,7 +807,11 @@ curl https://api.anthropic.com/v1/messages \
         usage = Some(tokenUsage),
         estimatedCost = cost,
         citations = AnthropicWebSearch.citations(contentBlocks),
-        finishReason = FinishReason.Other("") // stop_reason is read in RFC 0009 PR 2
+        finishReason = AnthropicClient
+          .rawStopReason(response.stopReason())
+          .fold(FinishReason.Other(""))(
+            AnthropicClient.finishReason
+          )
       )
   }
 
@@ -918,6 +942,39 @@ curl https://api.anthropic.com/v1/messages \
 }
 
 object AnthropicClient {
+
+  /** The `stop_reason` of a reply Anthropic's safety classifiers stopped: a `ContentFilteredError` (RFC 0009). */
+  private[provider] val Refusal = "refusal"
+
+  /** The provider name a refusal's `ContentFilteredError` carries. */
+  private val DisplayName = "Anthropic"
+
+  /**
+   * Anthropic's `stop_reason` as a [[FinishReason]] (RFC 0009): `end_turn` and `stop_sequence` are `Stop`, `tool_use`
+   * is `ToolCalls`, `max_tokens` and `model_context_window_exceeded` are `Length`; any other (`pause_turn`) is kept as
+   * `Other`. `refusal` never reaches a `Completion`: [[refused]] makes it an error.
+   */
+  private[provider] def finishReason(raw: String): FinishReason = raw match {
+    case "end_turn" | "stop_sequence"                   => FinishReason.Stop
+    case "tool_use"                                     => FinishReason.ToolCalls
+    case "max_tokens" | "model_context_window_exceeded" => FinishReason.Length
+    case other                                          => FinishReason.Other(other)
+  }
+
+  /** The `stop_reason` as the service sent it, when it sent one. */
+  private[provider] def rawStopReason(reason: java.util.Optional[StopReason]): Option[String] =
+    Try(reason.toScala.map(_.asString())).toOption.flatten.filter(_.nonEmpty)
+
+  /** The error for a reply Anthropic refused after `cutAfterChars` characters of text, with the usage it billed. */
+  private[provider] def filtered(reason: String, cutAfterChars: Int, usage: Option[TokenUsage]): ContentFilteredError =
+    ContentFilteredError.reply(DisplayName, reason, cutAfterChars).withUsage(usage)
+
+  /** A reply whose `stop_reason` is `refusal` as a `ContentFilteredError`; any other reply unchanged. */
+  private[provider] def refused(c: Completion): Result[Completion] =
+    c.finishReason match {
+      case FinishReason.Other(Refusal) => Left(filtered(Refusal, c.content.length, c.usage))
+      case _                           => Right(c)
+    }
 
   /**
    * Registers the bearer token of each request it passes on, through its own [[TokenGenerations]], so an error
