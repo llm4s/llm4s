@@ -347,4 +347,27 @@ class RunQueueSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     interrupted.state shouldBe "interrupted"
     EntryOutcome.fromJson(ujson.Obj("state" -> "lost")).isLeft shouldBe true
   }
+
+  "TakeRequest" should "skip nothing by default, and set each field with its setter" in {
+    val other   = AgentId.of("other").value
+    val request = TakeRequest("worker", Set(agent), 30.seconds)
+    request.skip shouldBe Set.empty
+    val changed = request.withHolder("w2").withAgents(Set(other)).withTtl(5.seconds).withSkip(Set(EntryId.of(7L).value))
+    changed.holder shouldBe "w2"
+    changed.agents shouldBe Set(other)
+    changed.ttl shouldBe 5.seconds
+    changed.skip shouldBe Set(EntryId.of(7L).value)
+    an[IllegalArgumentException] should be thrownBy request.withTtl(Duration.Zero)
+  }
+
+  "Submission" should "set its thread, agent and input with their setters, keeping the other fields" in {
+    val other      = AgentId.of("other").value
+    val submission = Submission(thread, agent, QueuedInput.query("a")).withMaxAttempts(4)
+    val changed    = submission.withThreadId(ThreadId("t2")).withAgentId(other).withInput(QueuedInput.query("b"))
+    changed.threadId shouldBe ThreadId("t2")
+    changed.agentId shouldBe other
+    QueuedInput.toJson(changed.input) shouldBe QueuedInput.toJson(QueuedInput.query("b"))
+    changed.maxAttempts shouldBe 4
+    changed.policy shouldBe submission.policy
+  }
 }

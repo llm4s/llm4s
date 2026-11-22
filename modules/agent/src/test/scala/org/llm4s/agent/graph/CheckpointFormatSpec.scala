@@ -79,6 +79,24 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     Checkpoint.fromJson(Checkpoint.toJson(checkpoint)).value shouldBe checkpoint
   }
 
+  it should "set its parent from an id or an Option" in {
+    val b     = GraphBuilder("g", "v1")
+    val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty))
+    val graph = b.compile(start)(_ => Right(())).value
+    val checkpoint = Checkpoint(
+      Checkpoint.CurrentFormat,
+      "run-1/1",
+      None,
+      "thread",
+      "run-1",
+      CheckpointStatus.Running,
+      Instant.parse("2026-10-02T12:00:00Z"),
+      graph.snapshot(graph.start(())).value
+    )
+    checkpoint.withParent("run-0/4").parent shouldBe Some("run-0/4")
+    checkpoint.withParent("run-0/4").withParent(None).parent shouldBe None
+  }
+
   it should "migrate a format-1 checkpoint, written before suspension existed" in {
     val b     = GraphBuilder("g", "v1")
     val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty))

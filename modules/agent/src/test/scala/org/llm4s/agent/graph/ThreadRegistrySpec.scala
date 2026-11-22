@@ -134,4 +134,16 @@ class ThreadRegistrySpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
     await(running)
     listed(store, thread).value.metadata shouldBe ThreadMetadata.empty
   }
+
+  "ThreadSummary" should "set each field with its setter" in {
+    val at      = java.time.Instant.parse("2026-01-01T00:00:00Z")
+    val summary = ThreadSummary(ThreadId("a"), None, "g1", ThreadStatus.Idle, "c1", ThreadMetadata.empty, at)
+    val changed = summary.withThreadId(ThreadId("b")).withTenantId(TenantId("t")).withAgent("g2").withCheckpointId("c2")
+    changed.threadId shouldBe ThreadId("b")
+    changed.tenantId shouldBe Some(TenantId("t"))
+    changed.agent shouldBe "g2"
+    changed.checkpointId shouldBe "c2"
+    changed.updatedAt shouldBe at
+    changed.withTenantId(None).tenantId shouldBe None
+  }
 }
