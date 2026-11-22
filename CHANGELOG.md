@@ -24,7 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TraceEvent.ErrorOccurred` gains `usage`;
   [migration](docs/reference/migration.md#every-providers-content-filter-stop-is-an-error-2677). So is a stream that
   ends without its end marker or reports an error event, on OpenAI, Anthropic, Gemini, Vertex AI and Ollama (PR 4);
-  [migration](docs/reference/migration.md#a-stream-that-did-not-finish-is-an-error-2613).
+  [migration](docs/reference/migration.md#a-stream-that-did-not-finish-is-an-error-2613). So is a tool call whose
+  arguments are not a JSON object, or in a reply cut by the output limit, and `StreamingToolArgumentParser.parse` and
+  the dialect's `parseToolCalls` return `Result` (PR 3);
+  [migration](docs/reference/migration.md#a-broken-or-cut-tool-call-is-an-error-2613).
 
 ### Providers
 
@@ -56,7 +59,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and traces carry on `TraceEvent.ErrorOccurred`'s new `usage`
   ([migration](docs/reference/migration.md#every-providers-content-filter-stop-is-an-error-2677)). A stream with no end
   marker is a `NetworkError` and an error event fails it, on every client, checked by the suite's `StreamEndsEarly` and `ErrorEvent`
-  ([migration](docs/reference/migration.md#a-stream-that-did-not-finish-is-an-error-2613), RFC 0009 PR 4) [#2613](https://github.com/llm4s/llm4s/issues/2613) [#2677](https://github.com/llm4s/llm4s/issues/2677) [#2676](https://github.com/llm4s/llm4s/issues/2676).
+  ([migration](docs/reference/migration.md#a-stream-that-did-not-finish-is-an-error-2613), RFC 0009 PR 4). A broken or cut
+  tool call is the malformed-tool-call `ProcessingError` where it was `{}` or dropped, checked by `NoArgumentToolCall`,
+  `ToolCallCutByLimit` and `MalformedArguments`
+  ([migration](docs/reference/migration.md#a-broken-or-cut-tool-call-is-an-error-2613), PR 3) [#2613](https://github.com/llm4s/llm4s/issues/2613) [#2677](https://github.com/llm4s/llm4s/issues/2677) [#2676](https://github.com/llm4s/llm4s/issues/2676).
 - **Fixed** `LLMCompressor.squeezeDigest` keeps each compressed `[HISTORY_SUMMARY]` digest in its original position instead of
   moving every digest to the end of the conversation [#2481](https://github.com/llm4s/llm4s/issues/2481).
 - **Fixed** `HistoryCompressor`, `LLMCompressor` and `TokenWindow` recognise a history digest the same way: a `SystemMessage`
