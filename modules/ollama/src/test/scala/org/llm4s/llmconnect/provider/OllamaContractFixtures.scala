@@ -37,6 +37,12 @@ object OllamaContractFixtures {
 
   private val call = """[{"function":{"name":"get_weather","arguments":{"city":"Paris"}}}]"""
 
+  // a tool with no parameters: `arguments` `{}`
+  private val noArgs = """[{"function":{"name":"get_time","arguments":{}}}]"""
+
+  // arguments a model wrote as text that is not a JSON object, as some OpenAI-style templates make it send them
+  private val badArgs = """[{"function":{"name":"get_weather","arguments":"{city: Paris"}}]"""
+
   /** Every case, as Ollama answers it. */
   val replies: Map[ContractCase, Applicability] = Map(
     ContractCase.CleanText -> applies(
@@ -50,6 +56,19 @@ object OllamaContractFixtures {
     ContractCase.ToolCall -> applies(
       reply(message("", call), "stop"),
       ndjson(line(message("", call)), reply(message(""), "stop"))
+    ),
+    ContractCase.NoArgumentToolCall -> applies(
+      reply(message("", noArgs), "stop"),
+      ndjson(line(message("", noArgs)), reply(message(""), "stop"))
+    ),
+    // `length` ended the reply while it called a tool: no call runs
+    ContractCase.ToolCallCutByLimit -> applies(
+      reply(message("", call), "length"),
+      ndjson(line(message("", call)), reply(message(""), "length"))
+    ),
+    ContractCase.MalformedArguments -> applies(
+      reply(message("", badArgs), "stop"),
+      ndjson(line(message("", badArgs)), reply(message(""), "stop"))
     ),
     ContractCase.ContentFiltered -> Applicability.NotApplicable("Ollama has no content filter"),
     // text, then the connection closes before the `done: true` line

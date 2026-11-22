@@ -44,7 +44,7 @@ class OpenAICompatibleCitationsSpec extends AnyFlatSpec with Matchers with Eithe
     )
 
   "a completion" should "carry the url citations of the message, with every field the provider sent" in {
-    val completion = client.parseCompletion(annotated(full))
+    val completion = client.parsedCompletion(annotated(full))
 
     completion.citations shouldBe List(
       Citation(
@@ -63,27 +63,27 @@ class OpenAICompatibleCitationsSpec extends AnyFlatSpec with Matchers with Eithe
     val b = urlCitation(""""url":"https://b.example","title":"B","start_index":6,"end_index":9""")
     val c = urlCitation(""""url":"https://c.example"""")
 
-    client.parseCompletion(annotated(a, b, c)).citations.map(_.url) shouldBe
+    client.parsedCompletion(annotated(a, b, c)).citations.map(_.url) shouldBe
       List("https://a.example", "https://b.example", "https://c.example")
   }
 
   it should "report only what was sent, leaving the rest unset" in {
-    val completion = client.parseCompletion(annotated(urlCitation(""""url":"https://only.example"""")))
+    val completion = client.parsedCompletion(annotated(urlCitation(""""url":"https://only.example"""")))
 
     completion.citations shouldBe List(Citation("https://only.example"))
     completion.citations.head.hasSpan shouldBe false
   }
 
   it should "have no citations when the message has no annotations, or an empty or null list" in {
-    client.parseCompletion(reply("")).citations shouldBe Nil
-    client.parseCompletion(reply(""","annotations":[]""")).citations shouldBe Nil
-    client.parseCompletion(reply(""","annotations":null""")).hasCitations shouldBe false
+    client.parsedCompletion(reply("")).citations shouldBe Nil
+    client.parsedCompletion(reply(""","annotations":[]""")).citations shouldBe Nil
+    client.parsedCompletion(reply(""","annotations":null""")).hasCitations shouldBe false
   }
 
   it should "skip an annotation of another type, and keep the url citations around it" in {
     val other = """{"type":"file_citation","file_citation":{"file_id":"f","quote":"q"}}"""
 
-    client.parseCompletion(annotated(other, full, other)).citations.map(_.url) shouldBe
+    client.parsedCompletion(annotated(other, full, other)).citations.map(_.url) shouldBe
       List("https://example.com/scala3")
   }
 
@@ -91,7 +91,7 @@ class OpenAICompatibleCitationsSpec extends AnyFlatSpec with Matchers with Eithe
     val wrongType = """{"type":"file_citation","url_citation":{"url":"https://wrong-type.example"}}"""
     val noType    = """{"url_citation":{"url":"https://no-type.example"}}"""
 
-    client.parseCompletion(annotated(wrongType, noType, full)).citations.map(_.url) shouldBe
+    client.parsedCompletion(annotated(wrongType, noType, full)).citations.map(_.url) shouldBe
       List("https://example.com/scala3")
   }
 
@@ -101,7 +101,7 @@ class OpenAICompatibleCitationsSpec extends AnyFlatSpec with Matchers with Eithe
     )
     val fractional = urlCitation(""""url":"https://frac.example","start_index":1.5,"end_index":2""")
 
-    client.parseCompletion(annotated(bad, fractional)).citations shouldBe List(
+    client.parsedCompletion(annotated(bad, fractional)).citations shouldBe List(
       Citation("https://idx.example"),
       Citation("https://frac.example", endIndex = Some(2))
     )
@@ -114,7 +114,10 @@ class OpenAICompatibleCitationsSpec extends AnyFlatSpec with Matchers with Eithe
     val badCited  = """{"type":"url_citation"}"""
     val nonObject = """{"type":"url_citation","url_citation":"https://not-an-object.example"}"""
 
-    client.parseCompletion(annotated(noUrl, emptyUrl, nullUrl, badCited, nonObject, full)).citations.map(_.url) shouldBe
+    client
+      .parsedCompletion(annotated(noUrl, emptyUrl, nullUrl, badCited, nonObject, full))
+      .citations
+      .map(_.url) shouldBe
       List("https://example.com/scala3")
   }
 
@@ -123,21 +126,21 @@ class OpenAICompatibleCitationsSpec extends AnyFlatSpec with Matchers with Eithe
       """"url":"https://odd.example","title":42,"content":["x"],"start_index":"0","end_index":3.5"""
     )
 
-    client.parseCompletion(annotated(odd)).citations shouldBe List(Citation("https://odd.example"))
+    client.parsedCompletion(annotated(odd)).citations shouldBe List(Citation("https://odd.example"))
   }
 
   it should "survive annotations that are not a list, or entries that are not objects" in {
-    client.parseCompletion(reply(""","annotations":"nope"""")).citations shouldBe Nil
-    client.parseCompletion(reply(""","annotations":{"type":"url_citation"}""")).citations shouldBe Nil
+    client.parsedCompletion(reply(""","annotations":"nope"""")).citations shouldBe Nil
+    client.parsedCompletion(reply(""","annotations":{"type":"url_citation"}""")).citations shouldBe Nil
 
-    val mixed = client.parseCompletion(reply(s""","annotations":[7,null,"x",$full,[1]]"""))
+    val mixed = client.parsedCompletion(reply(s""","annotations":[7,null,"x",$full,[1]]"""))
     mixed.citations.map(_.url) shouldBe List("https://example.com/scala3")
     mixed.content shouldBe "Scala 3 was released in 2021."
   }
 
   it should "keep citations from changing the message the conversation continues with" in {
-    val withCitations    = client.parseCompletion(annotated(full))
-    val withoutCitations = client.parseCompletion(reply(""))
+    val withCitations    = client.parsedCompletion(annotated(full))
+    val withoutCitations = client.parsedCompletion(reply(""))
 
     withCitations.message shouldBe withoutCitations.message
     withCitations.withCitations(Nil) shouldBe withoutCitations.withId("c1")

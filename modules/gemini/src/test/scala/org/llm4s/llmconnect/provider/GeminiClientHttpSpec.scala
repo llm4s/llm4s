@@ -77,8 +77,8 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     ),
     // not a filter: still no answer, named after its reason, but a ValidationError
     (
-      """{"candidates":[{"content":{"role":"model"},"finishReason":"MALFORMED_FUNCTION_CALL"}]}""",
-      "returned no content: finishReason MALFORMED_FUNCTION_CALL",
+      """{"candidates":[{"content":{"role":"model"},"finishReason":"OTHER"}]}""",
+      "returned no content: finishReason OTHER",
       false
     )
   )
@@ -697,7 +697,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   // text, then a finish that is not a normal one: `complete` (one candidate with the text and the finish) and a
   // stream (the text, then a chunk with the finish and no parts) must end the same way
-  private def helThen: Seq[(String, String)] = Seq("SAFETY", "MALFORMED_FUNCTION_CALL").map { reason =>
+  private def helThen: Seq[(String, String)] = Seq("SAFETY", "OTHER").map { reason =>
     (
       s"""{"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"},"finishReason":"$reason"}]}""",
       s"""data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"}}]}\n\n""" +

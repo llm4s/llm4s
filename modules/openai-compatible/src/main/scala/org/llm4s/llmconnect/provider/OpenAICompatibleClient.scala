@@ -138,8 +138,9 @@ class OpenAICompatibleClient(
             if (logger.isDebugEnabled) logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
             val result =
               if (response.statusCode >= 200 && response.statusCode < 300)
-                Try(parseCompletion(readReply(body))).toResult
+                Try(parseCompletion(readReply(body))).toResult.flatten
                   .flatMap(filteredReply)
+                  .flatMap(ToolCallRules.checked)
                   .map(bindThinking(_, conversation, options).withAdjustments(adjustments))
               else
                 HttpErrorMapper.mapHttpError(
@@ -573,13 +574,40 @@ class OpenAICompatibleClient(
       .filtered(providerName, Some(c.finishReason), c.content.length, c.usage)
       .toLeft(c)
 
-  /** Reads a non-streaming reply. Throws on a malformed one; `complete` turns that into a `Left`. */
-  protected[provider] def parseCompletion(json: ujson.Value): Completion = {
-    val choice    = json("choices")(0)
-    val message   = choice("message")
-    val toolCalls = message.obj.get("tool_calls").filterNot(_.isNull).map(dialect.parseToolCalls).getOrElse(Seq.empty)
-    val content   = message.obj.get("content").flatMap(dialect.decodeContent)
-    val usage     = json.obj.get("usage").flatMap(parseUsage)
+  /**
+   * Reads a non-streaming reply. Throws on a reply of the wrong shape; `complete` turns that into a `Left`. A tool
+   * call whose arguments are not a JSON object, or that has none in a reply that did not end with `tool_calls` or
+   * `stop`, is a `Left`, the malformed-tool-call `ProcessingError` (RFC 0009, Part 3).
+   */
+  protected[provider] def parseCompletion(json: ujson.Value): Result[Completion] = {
+    val choice       = json("choices")(0)
+    val message      = choice("message")
+    val finishReason = ChatCompletionsFinishReason.of(choice).getOrElse(FinishReason.Other(""))
+    // a filtered reply's calls are not read: the filter fails the reply (`filteredReply`)
+    val rawCalls =
+      message.obj
+        .get("tool_calls")
+        .filterNot(_.isNull)
+        .filterNot(_ => ChatCompletionsFinishReason.isFiltered(finishReason))
+    for {
+      toolCalls <- rawCalls.map(dialect.parseToolCalls).getOrElse(Right(Seq.empty))
+      _ <- rawCalls.toSeq
+        .flatMap(OpenAICompatibleDialect.blankArgumentCalls)
+        .foldLeft[Result[Unit]](Right(()))((ok, name) =>
+          ok.flatMap(_ => ToolCallRules.blankArguments(name, finishReason))
+        )
+    } yield parsedCompletion(json, choice, message, toolCalls, finishReason)
+  }
+
+  private def parsedCompletion(
+    json: ujson.Value,
+    choice: ujson.Value,
+    message: ujson.Value,
+    toolCalls: Seq[ToolCall],
+    finishReason: FinishReason
+  ): Completion = {
+    val content      = message.obj.get("content").flatMap(dialect.decodeContent)
+    val usage        = json.obj.get("usage").flatMap(parseUsage)
     val thinkingText = dialect.thinking(message).orElse(dialect.thinking(choice)).filter(_.nonEmpty)
     val thinking =
       thinkingText.map(ThinkingBlock.Text(_)).toSeq ++
@@ -599,7 +627,7 @@ class OpenAICompatibleClient(
       usage = usage,
       estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u)),
       citations = parseCitations(message),
-      finishReason = ChatCompletionsFinishReason.of(choice).getOrElse(FinishReason.Other(""))
+      finishReason = finishReason
     )
   }
 

@@ -277,7 +277,9 @@ class WatsonXClient(
           .flatMap { response =>
             noteStatus(response.statusCode, token)
             val result =
-              if (response.statusCode >= 200 && response.statusCode < 300) parseCompletion(response.body)
+              // RFC 0009, Part 3: a reply `length` cut while it made a tool call runs no call
+              if (response.statusCode >= 200 && response.statusCode < 300)
+                parseCompletion(response.body).flatMap(ToolCallRules.checked)
               else
                 HttpErrorMapper.mapHttpError(
                   response.statusCode,
@@ -337,7 +339,7 @@ class WatsonXClient(
     var streamError: Option[LLMError] = None
 
     def emit(chunk: StreamedChunk): Unit = {
-      accumulator.addChunk(chunk)
+      accumulator.addChunk(ToolCallRules.wholeCall(chunk))
       onChunk(chunk)
     }
 
@@ -785,10 +787,13 @@ object WatsonXClient {
     case None | Some(ujson.Null)                    => Right(ujson.Obj())
     case Some(obj: ujson.Obj)                       => Right(obj)
     case Some(ujson.Str(text)) if text.trim.isEmpty => Right(ujson.Obj())
-    case Some(ujson.Str(text)) =>
-      Try(ujson.read(text)).toOption match {
-        case Some(parsed: ujson.Obj) => Right(parsed)
-        case _                       => Left(malformed("the arguments are not a JSON object"))
+    case Some(ujson.Str(text))                      =>
+      // model output: nested more than 512 levels deep it is refused before it is parsed (#1562)
+      BoundedJson.read(text) match {
+        case Right(parsed: ujson.Obj) => Right(parsed)
+        case Left(BoundedJson.TooDeep()) =>
+          Left(malformed(s"the arguments are nested more than ${BoundedJson.MaxDepth} levels deep"))
+        case _ => Left(malformed("the arguments are not a JSON object"))
       }
     case Some(_) => Left(malformed("the arguments are neither a JSON object nor a string"))
   }

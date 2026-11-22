@@ -31,10 +31,18 @@ object PerplexityContractFixtures {
   /** Every case, as the Agent API answers it. */
   val replies: Map[ContractCase, Applicability] = {
     val called = response(s"[${functionCall("call_1", "get_weather", """{"city":"Paris"}""")}]")
+    // a function with no parameters: blank arguments
+    val noArgs = response(s"[${functionCall("call_1", "get_time", "")}]")
+    // `incomplete` at the output limit while the reply made the call
+    val cut       = response(s"[${functionCall("call_1", "get_weather", """{"city":"Par""")}]", status = "incomplete")
+    val malformed = response(s"[${functionCall("call_1", "get_weather", "{city: Paris")}]")
     Map(
-      ContractCase.CleanText      -> answered("The answer is 4.", "completed", "The answer", " is 4."),
-      ContractCase.TextCutByLimit -> answered("The answer is", "incomplete", "The answer", " is"),
-      ContractCase.ToolCall       -> applies(called, sseBody(created, completedEvent(called))),
+      ContractCase.CleanText          -> answered("The answer is 4.", "completed", "The answer", " is 4."),
+      ContractCase.TextCutByLimit     -> answered("The answer is", "incomplete", "The answer", " is"),
+      ContractCase.ToolCall           -> applies(called, sseBody(created, completedEvent(called))),
+      ContractCase.NoArgumentToolCall -> applies(noArgs, sseBody(created, completedEvent(noArgs))),
+      ContractCase.ToolCallCutByLimit -> applies(cut, sseBody(created, completedEvent(cut))),
+      ContractCase.MalformedArguments -> applies(malformed, sseBody(created, completedEvent(malformed))),
       ContractCase.ContentFiltered -> Applicability.NotApplicable(
         "the Agent API reports no content-filter status: a refused request is `failed`, an error"
       ),

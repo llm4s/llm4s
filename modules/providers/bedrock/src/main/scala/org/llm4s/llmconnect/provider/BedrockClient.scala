@@ -207,7 +207,8 @@ class BedrockClient(
         val outcome = Try(sdkClient.converse(request)).toEither.left.map(mapException)
         outcome
           .flatMap { response =>
-            parseConverseResponse(response).map { parsed =>
+            // RFC 0009, Part 3: a tool call whose input is not an object, or in a reply `max_tokens` cut, never runs
+            parseConverseResponse(response).flatMap(ToolCallRules.checked).map { parsed =>
               // sealed thinking is bound to the request it answers, so it is replayed only while that holds
               val completion =
                 parsed

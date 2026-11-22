@@ -35,7 +35,8 @@ and [the remaining config, model and util types](#config-model-and-util-types-ar
 Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115),
 [finish reasons are typed](#finish-reasons-are-typed-2613),
 [every provider's content-filter stop is an error](#every-providers-content-filter-stop-is-an-error-2677),
-and [a stream that did not finish is an error](#a-stream-that-did-not-finish-is-an-error-2613).
+[a stream that did not finish is an error](#a-stream-that-did-not-finish-is-an-error-2613),
+and [a broken or cut tool call is an error](#a-broken-or-cut-tool-call-is-an-error-2613).
 
 ## Finish reasons are typed (#2613)
 
@@ -132,6 +133,33 @@ Text already passed to `onChunk` stays delivered; the `Left` says the reply is i
 reply as an answer should treat the `Left` as a failed call, or retry it. A Gemini or Vertex AI data line that is
 not JSON is still skipped.
 
+## A broken or cut tool call is an error (#2613)
+
+A tool call the client cannot run as the model meant it is a `Left`, the malformed-tool-call `ProcessingError`, on
+`complete` and on a stream alike ([RFC 0009](../rfcs/0009-model-call-contract) PR 3). It used to become `{}`, be
+dropped, or be passed on as a raw string, and an agent then ran the tool on arguments the model never wrote:
+
+- **Arguments that are not a JSON object** - cut or invalid JSON, JSON of another type, or JSON nested more than 512
+  levels deep, which is still never parsed (#1562). The OpenAI-compatible clients' `complete` made them `{}`;
+  `OpenAIClient` dropped the call, so a reply whose only call was broken came back as an answer with no call; a
+  stream's call kept them as a raw `ujson.Str`. Gemini and Vertex AI's `MALFORMED_FUNCTION_CALL` finish, a call
+  Gemini dropped, is the same error, whether or not text came before it; it used to return the text.
+- **A tool call in a reply cut by the output limit** (`FinishReason.Length`): every client, even when the call's
+  arguments parse. A later call may be missing, or the arguments a valid prefix of what the model meant.
+- **A call with no arguments** is `{}` only when the reply ended `ToolCalls` or `Stop`; otherwise it is a `Left`.
+
+Code that ran the tool on the `{}`, or read the raw string, gets the `Left` instead; treat it as a failed call
+(`ProcessingError` is not retried). In the agent runtime the run ends with the error rather than running a tool.
+
+Source changes, all in the provider-author SPI:
+
+- `StreamingToolArgumentParser.parse(raw)` returns `Result[ujson.Value]`: `Right({})` for blank, `Right` of the
+  object, otherwise the `Left`. `StreamingAccumulator.currentToolCalls`, the live view, still shows unfinished
+  arguments as the raw `Str`; `toCompletion` applies the rules.
+- `OpenAICompatibleDialect.parseToolCalls` and `OpenAICompatibleDialect.lenientToolCalls` return
+  `Result[Seq[ToolCall]]`. A dialect that overrides `parseToolCalls` returns a `Left` for a call whose arguments are
+  not a JSON object; `lenientToolCalls` is still lenient about a missing `id` or `name`, not about arguments.
+
 ## Changes since 0.5.1 that no rule automates
 
 The Scalafix rule `Llm4sMigrate_1_0` ([Scalafix](scalafix#migration-rules)) rewrites the mechanical source breaks
@@ -146,7 +174,8 @@ on 0.6.x, run only the rules for the breaks since 0.6.0 ([Scalafix](scalafix#mig
   kinds (#2311, #2275, #2531, #2137), `RetentionPolicy.maxAge` (#2130), and the dependencies `llm4s-java-api` and the
   Spring Boot starter no longer bring (#1496), `TokenUsage.completionTokens`, which no longer includes thinking
   tokens (#2564), a Gemini or Vertex AI reply a content filter stopped, now a `ContentFilteredError` (#2563), what
-  `Thinking.Off` sends on OpenAI and Anthropic (#2115), and the finish reasons the clients now map (#2613).
+  `Thinking.Off` sends on OpenAI and Anthropic (#2115), the finish reasons the clients now map (#2613), and a broken
+  or cut tool call, now a `Left` where it was `{}` or dropped (#2613).
 - New cases and methods: exhaustive matches on `AgentStatus` (`TokenLimitReached`), `StreamEvent` (`Nested`) and
   `ReasoningEffort` (`Minimal`, `XHigh`, `Max`; reported), an
   `OpenAICompatibleDialect` that overrides `addReasoning` (now returns `List[RequestAdjustment]`, #2115), and
@@ -157,7 +186,9 @@ on 0.6.x, run only the rules for the breaks since 0.6.0 ([Scalafix](scalafix#mig
   (was a class with no `copy`), and a key passed by position or another credential that is now a `Secret` (Langfuse,
   search-tool and store keys, `VectorStoreFactory.Config.withSecret`), `withBudgetTokens(n)`, whose replacement
   `Thinking.budget(n)` is a `Result` (reported), and a `StreamedChunk` finish reason set from a `String` that is not a
-  literal (reported).
+  literal (reported), and `StreamingToolArgumentParser.parse`, `OpenAICompatibleDialect.parseToolCalls` and
+  `lenientToolCalls`, now a `Result` (#2613): the compiler names each, and only the caller can say what a broken
+  call does.
 - Removed or moved: `WorkspaceTools` (#1906), and `UsingOps` and `ModelSelector`, which need `llm4s-agent-tools` and
   `llm4s-rag` (#2358).
 

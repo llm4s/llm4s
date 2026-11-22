@@ -92,7 +92,7 @@ class MistralDialectSpec extends AnyFlatSpec with Matchers {
   }
 
   "a Mistral reply" should "read a reasoning model's content chunks as text and thinking" in {
-    val completion = client.parseCompletion(
+    val completion = client.parsedCompletion(
       ujson.read(
         """{"id":"r","created":1,"model":"magistral-medium-latest","choices":[{"message":{"role":"assistant",
           |"content":[{"type":"thinking","thinking":[{"type":"text","text":"Add them."}]},
@@ -107,7 +107,7 @@ class MistralDialectSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "read a plain string reply with no thinking" in {
-    val completion = client.parseCompletion(
+    val completion = client.parsedCompletion(
       ujson.read("""{"id":"r","created":1,"model":"m","choices":[{"message":{"content":"plain"}}]}""")
     )
     completion.content shouldBe "plain"

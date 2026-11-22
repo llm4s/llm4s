@@ -218,7 +218,7 @@ class OpenAIClient private[provider] (
       _    = adjustmentLog.record(model, adjustments) // once the request is built, so a failed build spends no warning
       body = serializeParams(params)
       response   <- call("completion")(transport.createChatCompletion(params))
-      completion <- filteredReply(convertFromOpenAIFormat(response).withAdjustments(adjustments))
+      completion <- convertFromOpenAIFormat(response).flatMap(c => filteredReply(c.withAdjustments(adjustments)))
       _ = recordExchange(
         startedAt,
         Some(body),
@@ -306,7 +306,7 @@ class OpenAIClient private[provider] (
         Left(error)
       case Right(response) =>
         // a filtered reply fails before any chunk, as `complete` fails on it
-        val result = filteredReply(convertFromOpenAIFormat(response).withAdjustments(adjustments))
+        val result = convertFromOpenAIFormat(response).flatMap(c => filteredReply(c.withAdjustments(adjustments)))
         result.foreach(emitCompletionAsChunks(_, onChunk))
         recordExchange(startedAt, Some(requestBody), Some(serialize(response)), result)
         result
@@ -772,13 +772,34 @@ class OpenAIClient private[provider] (
    *
    * Reads the first choice, including content, tool calls, token usage and estimated cost.
    * Fields are read leniently: a field the response omits is treated as absent rather than
-   * failing the whole call.
+   * failing the whole call. Tool calls are not: one that breaks RFC 0009's rules is a `Left`
+   * ([[extractToolCalls]], `ToolCallRules.checked`).
    */
-  private def convertFromOpenAIFormat(response: ChatCompletion): Completion = {
-    val choice    = known(response._choices()).flatMap(_.asScala.headOption)
-    val message   = choice.flatMap(c => known(c._message()))
-    val toolCalls = message.map(extractToolCalls).getOrElse(Seq.empty)
-    val content   = message.flatMap(m => known(m._content())).getOrElse("")
+  private def convertFromOpenAIFormat(response: ChatCompletion): Result[Completion] = {
+    val choice  = known(response._choices()).flatMap(_.asScala.headOption)
+    val message = choice.flatMap(c => known(c._message()))
+    val finishReason = choice
+      .flatMap(c => known(c._finishReason()))
+      .map(_.asString())
+      .filter(_.nonEmpty)
+      .map(ChatCompletionsFinishReason(_))
+      .getOrElse(FinishReason.Other(""))
+    // a filtered reply's calls are not read: the filter fails the reply (`filteredReply`)
+    message
+      .filterNot(_ => ChatCompletionsFinishReason.isFiltered(finishReason))
+      .map(extractToolCalls(_, finishReason))
+      .getOrElse(Right(Seq.empty))
+      .map(completionOf(response, message, _, finishReason))
+      .flatMap(ToolCallRules.checked)
+  }
+
+  private def completionOf(
+    response: ChatCompletion,
+    message: Option[ChatCompletionMessage],
+    toolCalls: Seq[ToolCall],
+    finishReason: FinishReason
+  ): Completion = {
+    val content = message.flatMap(m => known(m._content())).getOrElse("")
     val assistantMessage =
       AssistantMessage(contentOpt = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
 
@@ -799,12 +820,7 @@ class OpenAIClient private[provider] (
       usage = usage,
       estimatedCost = cost,
       citations = message.map(extractCitations).getOrElse(List.empty),
-      finishReason = choice
-        .flatMap(c => known(c._finishReason()))
-        .map(_.asString())
-        .filter(_.nonEmpty)
-        .map(ChatCompletionsFinishReason(_))
-        .getOrElse(FinishReason.Other(""))
+      finishReason = finishReason
     )
   }
 
@@ -850,26 +866,28 @@ class OpenAIClient private[provider] (
   }
 
   /**
-   * Extracts function tool calls from a response message, parsing each one's arguments once.
-   * A call whose arguments are not valid JSON is dropped, as is one whose arguments are nested
-   * more than 512 levels deep: they are model output, and a value that deep overflows the stack
-   * of whatever renders it next (#1562).
+   * Extracts function tool calls from a response message, parsing each one's arguments once (RFC 0009, Part 3).
+   * A call whose arguments are not a JSON object is a `Left`, the malformed-tool-call `ProcessingError`, never
+   * dropped: dropped, a reply whose only call was cut came back as an answer with no call, and the caller could not
+   * see why. Arguments nested more than 512 levels deep fail the same way, unparsed: they are model output, and a
+   * value that deep overflows the stack of whatever renders it next (#1562). Absent or blank arguments are `{}` only
+   * when the reply ended with `tool_calls` or `stop`.
    */
-  private def extractToolCalls(message: ChatCompletionMessage): Seq[ToolCall] =
+  private def extractToolCalls(message: ChatCompletionMessage, finishReason: FinishReason): Result[Seq[ToolCall]] =
     known(message._toolCalls())
       .map(_.asScala.toSeq)
       .getOrElse(Seq.empty)
       .filter(_.isFunction)
       .map(_.asFunction())
-      .flatMap { ftc =>
+      .foldLeft[Result[Vector[ToolCall]]](Right(Vector.empty)) { (done, ftc) =>
         val function = known(ftc._function())
-        function.flatMap(f => known(f._arguments())).flatMap(raw => BoundedJson.read(raw).toOption).map { args =>
-          ToolCall(
-            id = known(ftc._id()).getOrElse(""),
-            name = function.flatMap(f => known(f._name())).getOrElse(""),
-            arguments = args
-          )
-        }
+        val name     = function.flatMap(f => known(f._name())).getOrElse("")
+        val raw      = function.flatMap(f => known(f._arguments())).getOrElse("")
+        for {
+          calls     <- done
+          _         <- if (raw.trim.isEmpty) ToolCallRules.blankArguments(name, finishReason) else Right(())
+          arguments <- ToolCallRules.parseArguments(name, raw)
+        } yield calls :+ ToolCall(id = known(ftc._id()).getOrElse(""), name = name, arguments = arguments)
       }
 
   private def recordExchange(

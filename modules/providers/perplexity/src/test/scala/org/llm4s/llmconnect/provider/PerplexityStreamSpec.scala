@@ -69,11 +69,11 @@ class PerplexityStreamSpec extends AnyWordSpec with Matchers:
     }
 
     // RFC 0009: `incomplete` is a limit, so Length even with a call in it (a cut call is PR 3's to refuse)
-    "end an incomplete response with a call as length, not tool_calls" in {
+    "fail an incomplete response with a call, delivering no call (RFC 0009, Part 3)" in {
       val done = response(s"[${functionCall("call_1", "get_weather", """{"city":"Oslo"}""")}]", status = "incomplete")
       val (_, result, chunks) = streamed(sse(created, completedEvent(done)))
-      chunks.last.finishReason shouldBe Some(FinishReason.Length)
-      result.map(_.finishReason) shouldBe Right(FinishReason.Length)
+      chunks.flatMap(_.toolCall) shouldBe empty
+      result.left.map(_.message.contains("FinishReason.Length")) shouldBe Left(true)
     }
 
     "end an incomplete response with finish reason length" in {

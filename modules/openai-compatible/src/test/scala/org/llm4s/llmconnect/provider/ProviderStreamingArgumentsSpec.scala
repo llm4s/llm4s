@@ -62,7 +62,7 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
   private def withSseServer(payload: String)(test: String => Unit): Unit =
     scala.util.Using.resource(new SseServerResource(payload))(resource => test(resource.baseUrl))
 
-  "OpenRouterClient" should "preserve invalid tool-call arguments as raw string" in {
+  "OpenRouterClient" should "pass argument fragments on as raw strings, and fail the calls they never complete (RFC 0009)" in {
     val payload = ssePayload(
       Seq(
         toolCallEvent("call-1", ""),
@@ -89,12 +89,12 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
         chunk => chunk.toolCall.foreach(tc => captured += tc.arguments)
       )
 
-      result.isRight shouldBe true
+      result.left.map(_.message.contains("malformed tool call")) shouldBe Left(true)
       captured.toList shouldBe List(ujson.Obj(), ujson.Str("{not json"))
     }
   }
 
-  "ZaiClient" should "preserve invalid tool-call arguments as raw string" in {
+  "ZaiClient" should "pass argument fragments on as raw strings, and fail the calls they never complete (RFC 0009)" in {
     val payload = ssePayload(
       Seq(
         toolCallEvent("call-1", ""),
@@ -120,12 +120,12 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
         chunk => chunk.toolCall.foreach(tc => captured += tc.arguments)
       )
 
-      result.isRight shouldBe true
+      result.left.map(_.message.contains("malformed tool call")) shouldBe Left(true)
       captured.toList shouldBe List(ujson.Obj(), ujson.Str("{not json"))
     }
   }
 
-  "DeepSeekClient" should "preserve invalid tool-call arguments as raw string" in {
+  "DeepSeekClient" should "pass argument fragments on as raw strings, and fail the calls they never complete (RFC 0009)" in {
     val payload = ssePayload(
       Seq(
         toolCallEvent("call-1", ""),
@@ -151,7 +151,7 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
         chunk => chunk.toolCall.foreach(tc => captured += tc.arguments)
       )
 
-      result.isRight shouldBe true
+      result.left.map(_.message.contains("malformed tool call")) shouldBe Left(true)
       captured.toList shouldBe List(ujson.Obj(), ujson.Str("{not json"))
     }
   }

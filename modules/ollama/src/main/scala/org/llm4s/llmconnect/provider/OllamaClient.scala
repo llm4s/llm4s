@@ -135,6 +135,8 @@ class OllamaClient(
           if (response.statusCode >= 200 && response.statusCode < 300) {
             Try(ujson.read(response.body)).toResult
               .flatMap(json => Try(parseCompletion(json)).toResult.flatMap(identity))
+              // RFC 0009, Part 3: a reply `length` cut while it called a tool runs no call
+              .flatMap(ToolCallRules.checked)
           } else {
             mapError(response.statusCode, response.body, response.headers, options)
           }
@@ -292,7 +294,7 @@ class OllamaClient(
                           withText ++ callChunks ++ closing
                         }
                       chunks.foreach { chunk =>
-                        accumulator.addChunk(chunk)
+                        accumulator.addChunk(ToolCallRules.wholeCall(chunk))
                         onChunk(chunk)
                       }
 

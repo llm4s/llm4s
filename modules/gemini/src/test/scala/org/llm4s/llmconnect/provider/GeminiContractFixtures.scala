@@ -6,8 +6,9 @@ import org.llm4s.testkit.{ Applicability, ContractCase, LocalProviderTestServer,
  * `generateContent` and `streamGenerateContent?alt=sse` replies for each RFC 0009 [[ContractCase]], for
  * `assertModelCallContract`: the shape the Gemini API and Vertex AI share. Hand-written in the documented shape; the
  * `MAX_TOKENS` chunk with no `parts` follows the live capture in `GeminiClientHttpSpec`. A function call finishes
- * `STOP`, and a filter stop is a `finishReason` such as `SAFETY`. A stream ends on a chunk whose candidate states a
- * `finishReason`; a failure after the 200 status is a chunk carrying an `error` object, as Google's APIs report one.
+ * `STOP`, and a filter stop is a `finishReason` such as `SAFETY`. A call's `args` is a JSON object in the envelope, so a
+ * malformed call never reaches the client as one: Gemini drops it and ends the reply `MALFORMED_FUNCTION_CALL`. A
+ * stream ends on a chunk whose candidate states a `finishReason`; a failure after the 200 status is a chunk carrying an `error` object, as Google's APIs report one.
  */
 object GeminiContractFixtures {
 
@@ -44,6 +45,9 @@ object GeminiContractFixtures {
 
   private val call = """[{"functionCall":{"name":"get_weather","args":{"city":"Paris"}}}]"""
 
+  // a function with no parameters: Gemini leaves `args` out
+  private val noArgs = """[{"functionCall":{"name":"get_time"}}]"""
+
   /** Every case, as the Gemini API and Vertex AI answer it. */
   val replies: Map[ContractCase, Applicability] = Map(
     ContractCase.CleanText -> applies(
@@ -57,6 +61,20 @@ object GeminiContractFixtures {
     ContractCase.ToolCall -> applies(
       reply(call, "STOP"),
       sse(chunk(call), chunk("", Some("STOP")))
+    ),
+    ContractCase.NoArgumentToolCall -> applies(
+      reply(noArgs, "STOP"),
+      sse(chunk(noArgs), chunk("", Some("STOP")))
+    ),
+    // MAX_TOKENS ended the reply while it made the call: whatever args arrived, no call runs
+    ContractCase.ToolCallCutByLimit -> applies(
+      reply(call, "MAX_TOKENS"),
+      sse(chunk(call), chunk("", Some("MAX_TOKENS")))
+    ),
+    // Gemini's report of a call it could not read: the call dropped, after some text
+    ContractCase.MalformedArguments -> applies(
+      reply(text("Let me check."), "MALFORMED_FUNCTION_CALL"),
+      sse(chunk(text("Let me check.")), chunk("", Some("MALFORMED_FUNCTION_CALL")))
     ),
     ContractCase.ContentFiltered -> applies(
       reply(text("Here is how"), "SAFETY"),

@@ -24,6 +24,24 @@ object WatsonXContractFixtures {
   private val call =
     """{"id":"chatcmpl-tool-1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}"""
 
+  private def callWith(name: String, arguments: String): String =
+    s"""{"id":"chatcmpl-tool-1","type":"function","function":{"name":"$name","arguments":${ujson
+        .Str(arguments)
+        .render()}}}"""
+
+  /** A streamed call: its first event names it and carries the first fragment; each later one, a fragment. */
+  private def streamedCall(name: String, fragments: String*): String = {
+    val first = fragments.headOption.getOrElse("")
+    event(
+      s"""{"role":"assistant","tool_calls":[{"index":0,"id":"chatcmpl-tool-1","type":"function","function":{"name":"$name","arguments":${ujson
+          .Str(first)
+          .render()}}}]}"""
+    ) + fragments
+      .drop(1)
+      .map(f => event(s"""{"tool_calls":[{"index":0,"function":{"arguments":${ujson.Str(f).render()}}}]}"""))
+      .mkString
+  }
+
   /** Every case, as watsonx.ai answers it; `route` wraps each reply so the IAM token endpoint still answers. */
   def replies(route: (HttpExchange => Unit) => HttpExchange => Unit): Map[ContractCase, Applicability] = {
     def applies(complete: String, stream: String): Applicability =
@@ -51,6 +69,20 @@ object WatsonXContractFixtures {
         ) +
           event("""{"tool_calls":[{"index":0,"function":{"arguments":"\"Paris\"}"}}]}""") +
           event("{}", "tool_calls")
+      ),
+      // a tool with no parameters: blank arguments
+      ContractCase.NoArgumentToolCall -> applies(
+        reply(s"""{"role":"assistant","tool_calls":[${callWith("get_time", "")}]}""", "tool_calls"),
+        streamedCall("get_time") + event("{}", "tool_calls")
+      ),
+      // the limit cut the call's arguments
+      ContractCase.ToolCallCutByLimit -> applies(
+        reply(s"""{"role":"assistant","tool_calls":[${callWith("get_weather", """{"city":"Par""")}]}""", "length"),
+        streamedCall("get_weather", """{"city":""", """"Par""") + event("{}", "length")
+      ),
+      ContractCase.MalformedArguments -> applies(
+        reply(s"""{"role":"assistant","tool_calls":[${callWith("get_weather", "{city: Paris")}]}""", "tool_calls"),
+        streamedCall("get_weather", "{city: ", "Paris") + event("{}", "tool_calls")
       ),
       ContractCase.ContentFiltered -> Applicability.NotApplicable(
         "watsonx.ai documents no content-filter finish_reason; its guardrails are not wired into llm4s"

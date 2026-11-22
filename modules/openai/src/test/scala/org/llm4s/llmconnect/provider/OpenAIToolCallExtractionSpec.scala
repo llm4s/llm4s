@@ -82,7 +82,7 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with 
     completion.toolCalls(1).arguments("operation").str shouldBe "add"
   }
 
-  "OpenAIClient.extractToolCalls" should "ignore tool calls with invalid JSON arguments" in {
+  "OpenAIClient.extractToolCalls" should "fail a reply with a tool call whose arguments are invalid JSON, never dropping it (RFC 0009)" in {
     val model = "gpt-4"
 
     val config = OpenAIConfig
@@ -132,17 +132,16 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with 
 
     val result = client.complete(Conversation(Seq(UserMessage("test"))), CompletionOptions())
 
-    val completion = result.getOrElse(fail("Expected successful completion"))
-    // Only valid tool call should be extracted
-    completion.toolCalls should have size 1
-    completion.toolCalls(0).id shouldBe "call-valid"
-    completion.toolCalls(0).name shouldBe "valid_func"
+    // dropped, the call left a reply that looked whole; the caller could not see why the call was missing
+    result.left.map(_.message) should matchPattern {
+      case Left(message: String) if message.contains("malformed tool call 'invalid_func'") =>
+    }
   }
 
-  // The arguments string is model output: nested too deeply it is dropped like any other unparseable
+  // The arguments string is model output: nested too deeply it fails the reply like any other unparseable
   // arguments, before it becomes a value that overflows the stack of whatever renders it next (#1562).
   // On a 1 MB stack, so deterministic; the ids are extracted inside it so no deep value is rendered.
-  it should "drop a tool call whose arguments are nested too deeply instead of parsing them" in {
+  it should "fail a tool call whose arguments are nested too deeply, without parsing them" in {
     val model = "gpt-4"
 
     val config = OpenAIConfig
@@ -175,9 +174,12 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with 
 
     val client = OpenAIClient.forTest(model, transport(complete = _ => completions), config)
 
-    val ids = SmallStack.run(
-      client.complete(Conversation(Seq(UserMessage("test"))), CompletionOptions()).map(_.toolCalls.map(_.id))
+    val failed = SmallStack.run(
+      client
+        .complete(Conversation(Seq(UserMessage("test"))), CompletionOptions())
+        .left
+        .map(_.message.contains("'deep_func': the arguments are nested more than 512 levels deep"))
     )
-    ids shouldBe Right(Right(Seq("call-valid")))
+    failed shouldBe Right(Left(true))
   }
 }

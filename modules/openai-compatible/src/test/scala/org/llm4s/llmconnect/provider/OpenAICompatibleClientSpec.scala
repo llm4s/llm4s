@@ -150,7 +150,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
       OpenAICompatibleClient.settings(config("http://localhost:1/v1")),
       OpenAICompatibleDialect.Standard
     )
-    val completion = c.parseCompletion(
+    val completion = c.parsedCompletion(
       ujson.read(
         """{"id":"x","created":1,"model":"m","choices":[{"message":{"content":"a","reasoning_content":"r","thinking":"t"}}]}"""
       )
@@ -166,7 +166,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
       OpenAICompatibleClient.settings(config("http://localhost:1/v1")),
       OpenAICompatibleDialect.Standard
     )
-    val completion = c.parseCompletion(
+    val completion = c.parsedCompletion(
       ujson.read(
         """{"choices":[{"message":{"content":null}}],"usage":[{"prompt_tokens":3,"completion_tokens":4}]}"""
       )
@@ -185,23 +185,24 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
       OpenAICompatibleDialect.Standard
     )
     def created(value: String): Instant =
-      c.parseCompletion(ujson.read(s"""{"created":$value,"choices":[{"message":{"content":"a"}}]}""")).created
+      c.parsedCompletion(ujson.read(s"""{"created":$value,"choices":[{"message":{"content":"a"}}]}""")).created
 
     created("1677652288") shouldBe Instant.parse("2023-03-01T06:31:28Z")
     created("1e300") shouldBe Instant.EPOCH
   }
 
-  it should "parse tool calls leniently" in {
+  it should "parse tool calls leniently about their shape, and strictly about their arguments" in {
     OpenAICompatibleDialect.lenientToolCalls(
-      ujson.read(
-        """[{"id":"a","function":{"name":"f","arguments":"{\"x\":1}"}},{"function":{"arguments":"{bad"}},{}]"""
+      ujson.read("""[{"id":"a","function":{"name":"f","arguments":"{\"x\":1}"}},{"function":{}},{}]""")
+    ) shouldBe Right(
+      Seq(
+        ToolCall("a", "f", ujson.Obj("x" -> 1)),
+        ToolCall("", "", ujson.Obj()),
+        ToolCall("", "", ujson.Obj())
       )
-    ) shouldBe Seq(
-      ToolCall("a", "f", ujson.Obj("x" -> 1)),
-      ToolCall("", "", ujson.Obj()),
-      ToolCall("", "", ujson.Obj())
     )
-    OpenAICompatibleDialect.lenientToolCalls(ujson.Null) shouldBe empty
+    OpenAICompatibleDialect.lenientToolCalls(ujson.read("""[{"function":{"arguments":"{bad"}}]""")).isLeft shouldBe true
+    OpenAICompatibleDialect.lenientToolCalls(ujson.Null) shouldBe Right(Seq.empty)
   }
 
   it should "skip a streamed event with no choices" in {

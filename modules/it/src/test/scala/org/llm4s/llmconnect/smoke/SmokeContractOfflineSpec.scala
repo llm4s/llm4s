@@ -310,11 +310,31 @@ class SmokeContractOfflineSpec
 
   it should "fail a streamed tool call whose chunks do not reassemble, even when the completion is right" in {
     // A client that builds the right completion but hands `onChunk` fragments a consumer cannot put back together
-    // (here, `":"` parsed to the bare string `:`).
+    // (here, `":"` parsed to the bare string `:`): the fragments join to text that is not JSON, which the
+    // accumulator refuses as a malformed tool call (RFC 0009, Part 3).
     val client = stub(onStream = (_, _, onChunk) => {
       Seq[ujson.Value](ujson.Str("{\"topic"), ujson.Str(":"), ujson.Str("\"vault\"}")).foreach { fragment =>
         onChunk(
           StreamedChunk(id = "s", content = None, toolCall = Some(ToolCall("call_1", "get_secret_code", fragment)))
+        )
+      }
+      Right(completion("", List(ToolCall("call_1", "get_secret_code", vaultCall))))
+    })
+    failedMessage(SmokeChecks.run(Capability.StreamedToolCalling, client)).value should (
+      startWith("[streamed tool call]").and(include("did not reassemble")).and(include("malformed tool call"))
+    )
+  }
+
+  it should "fail a streamed tool call whose chunks reassemble to other arguments than the completion's" in {
+    // the fragments join to a JSON object, but not the one the completion reports, and not one the tool declares
+    val client = stub(onStream = (_, _, onChunk) => {
+      Seq("{\"other", "\":\"x\"}").foreach { fragment =>
+        onChunk(
+          StreamedChunk(
+            id = "s",
+            content = None,
+            toolCall = Some(ToolCall("call_1", "get_secret_code", ujson.Str(fragment)))
+          )
         )
       }
       Right(completion("", List(ToolCall("call_1", "get_secret_code", vaultCall))))

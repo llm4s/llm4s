@@ -277,6 +277,8 @@ class AnthropicClient(
         val result = attempt
           .flatMap(convertFromAnthropicResponse)
           .flatMap(AnthropicClient.refused)
+          // RFC 0009, Part 3: a reply `max_tokens` cut while it made a call runs no call
+          .flatMap(ToolCallRules.checked)
           .map(c =>
             c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, transformed.messages, transformed.options))
               .withAdjustments(adjustments)
@@ -843,8 +845,10 @@ curl https://api.anthropic.com/v1/messages \
         val input   = ObjectMappers.jsonMapper().writeValueAsString(toolUse._input())
         calls.flatMap { taken =>
           BoundedJson.read(input) match {
-            case Right(arguments) =>
+            case Right(arguments: ujson.Obj) =>
               Right(taken :+ ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = arguments))
+            // an input that is not an object is never passed on (RFC 0009, Part 3)
+            case Right(_) => Left(malformedToolCall(s"'${toolUse.name()}': the input is not a JSON object"))
             case Left(BoundedJson.TooDeep()) =>
               Left(malformedToolCall(s"arguments are nested more than ${BoundedJson.MaxDepth} levels deep"))
             case Left(e) => Left(malformedToolCall(e.message))
