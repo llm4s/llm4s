@@ -5,13 +5,7 @@ import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.WatsonXConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.testkit.LocalProviderTestServer.{
-  holdOpen,
-  sendJsonResponse,
-  sendSseResponse,
-  streamThenHold,
-  withServer
-}
+import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendJsonResponse, streamThenHold, withServer }
 import org.llm4s.testkit.{ ContentPartCase, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
@@ -147,11 +141,7 @@ class Llm4sWatsonXModuleSpec extends AnyWordSpec with Matchers with ProviderModu
       assertContentParts("watsonx", routed(sendJsonResponse(_, 200, body)))(ContentPartCase.UserImageInline)(clientAt)
     }
 
-    "actually stream, not silently fall back to complete()" in {
-      withServer("/")(routed(sendSseResponse(_, sseBody)))(baseUrl => assertStreams(clientAt(baseUrl)))
-    }
-
-    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+    "report how each reply ended, on complete and on a stream alike, and really stream (RFC 0009)" in {
       assertModelCallContract(WatsonXContractFixtures.replies(routed))(clientAt)
     }
 

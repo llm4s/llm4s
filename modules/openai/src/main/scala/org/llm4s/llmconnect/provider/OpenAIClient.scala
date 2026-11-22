@@ -11,7 +11,13 @@ import com.openai.client.{ OpenAIClient => SdkClient, OpenAIClientImpl }
 import com.openai.core.{ ClientOptions, JsonField, ObjectMappers, RequestOptions, Timeout }
 import com.openai.core.http.{ HttpClient => SdkHttpClient, ProxyAuthenticator, StreamResponse }
 import com.openai.credential.BearerTokenCredential
-import com.openai.errors.{ OpenAIException, OpenAIIoException, OpenAIServiceException, UnauthorizedException }
+import com.openai.errors.{
+  OpenAIException,
+  OpenAIIoException,
+  OpenAIServiceException,
+  SseException,
+  UnauthorizedException
+}
 import com.openai.models.chat.completions.{
   ChatCompletion,
   ChatCompletionAssistantMessageParam,
@@ -30,7 +36,7 @@ import com.openai.models.chat.completions.{
 }
 import com.openai.models.completions.CompletionUsage
 import com.openai.models.{ ResponseFormatJsonObject, ResponseFormatJsonSchema }
-import org.llm4s.error.{ ContentFilteredError, LLMError, UnknownError }
+import org.llm4s.error.{ ContentFilteredError, LLMError, NetworkError, ServiceError, UnknownError }
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
@@ -53,7 +59,7 @@ import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.media.{ MediaSource, MediaType }
-import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult }
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult, UnmappedOptions }
 import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -201,7 +207,7 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
-      adjustments             = withUnsentSampling(options, transformed) ++ effortPlan(transformed.options).adjustments
+      adjustments             = openAIAdjustments(options, transformed)
       transformedConversation = conversation.withMessages(transformed.messages)
       params <- buildParams(
         transformedConversation,
@@ -212,7 +218,7 @@ class OpenAIClient private[provider] (
       _    = adjustmentLog.record(model, adjustments) // once the request is built, so a failed build spends no warning
       body = serializeParams(params)
       response   <- call("completion")(transport.createChatCompletion(params))
-      completion <- filteredReply(convertFromOpenAIFormat(response).withAdjustments(adjustments))
+      completion <- convertFromOpenAIFormat(response).flatMap(c => filteredReply(c.withAdjustments(adjustments)))
       _ = recordExchange(
         startedAt,
         Some(body),
@@ -242,7 +248,7 @@ class OpenAIClient private[provider] (
         dropUnsupported = true
       )
       .flatMap { transformed =>
-        val adjustments = withUnsentSampling(options, transformed) ++ effortPlan(transformed.options).adjustments
+        val adjustments             = openAIAdjustments(options, transformed)
         val transformedConversation = conversation.withMessages(transformed.messages)
         // A faked stream is an ordinary completion call, which must not carry `stream_options`.
         buildParams(
@@ -300,7 +306,7 @@ class OpenAIClient private[provider] (
         Left(error)
       case Right(response) =>
         // a filtered reply fails before any chunk, as `complete` fails on it
-        val result = filteredReply(convertFromOpenAIFormat(response).withAdjustments(adjustments))
+        val result = convertFromOpenAIFormat(response).flatMap(c => filteredReply(c.withAdjustments(adjustments)))
         result.foreach(emitCompletionAsChunks(_, onChunk))
         recordExchange(startedAt, Some(requestBody), Some(serialize(response)), result)
         result
@@ -335,6 +341,8 @@ class OpenAIClient private[provider] (
       // a content-filter finish fails the stream, with the usage reported after it
       attempt
         .flatMap(_ => state.filtered.map(_.withUsage(state.usage)).toLeft(()))
+        // checked here, not left to the SDK, which ends the stream quietly at the end of the body (RFC 0009, rule 1)
+        .filterOrElse(_ => state.finished, OpenAIClient.unfinished(config.endpointUrl.getOrElse(displayName)))
         .flatMap(_ =>
           // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
           // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
@@ -397,8 +405,11 @@ class OpenAIClient private[provider] (
         None
       ) match {
         // the event that stopped the reply is not delivered; the text before it stays delivered
-        case Some(filtered) => state.filtered = Some(filtered)
+        case Some(filtered) =>
+          state.finished = true
+          state.filtered = Some(filtered)
         case None =>
+          if (finishReason.isDefined) state.finished = true
           state.textLength += contentOpt.map(_.length).getOrElse(0)
           emitStreamingChunks(chunkId, contentOpt, calls, finishReason, accumulator, onChunk)
       }
@@ -412,9 +423,10 @@ class OpenAIClient private[provider] (
 
   /** What a native stream has seen so far, beyond what the accumulator holds. */
   final private class StreamState {
-    var textLength: Int                        = 0    // characters of answer text delivered
-    var filtered: Option[ContentFilteredError] = None // a content-filter finish: the reply's end
-    var usage: Option[TokenUsage]              = None // the last usage report
+    var textLength: Int                        = 0     // characters of answer text delivered
+    var filtered: Option[ContentFilteredError] = None  // a content-filter finish: the reply's end
+    var usage: Option[TokenUsage]              = None  // the last usage report
+    var finished: Boolean                      = false // whether a choice stated its finish_reason
   }
 
   /**
@@ -520,6 +532,17 @@ class OpenAIClient private[provider] (
   /** The `reasoning_effort` for `options` and what was not sent as asked (see [[OpenAIReasoning.plan]]). */
   private def effortPlan(options: CompletionOptions): OpenAIReasoning.EffortPlan =
     OpenAIReasoning.plan(model, options, reasoningCapabilities, sendsEffort)
+
+  /**
+   * Everything reported for a request: the sampling a reasoning model leaves out, what `reasoning` and `thinking`
+   * were sent as, and a `promptCache`, which OpenAI does not need asked for (RFC 0008).
+   */
+  private def openAIAdjustments(
+    requested: CompletionOptions,
+    transformed: TransformationResult
+  ): List[RequestAdjustment] =
+    withUnsentSampling(requested, transformed) ++ effortPlan(transformed.options).adjustments ++
+      UnmappedOptions.promptCacheAutomatic("OpenAI", transformed.options)
 
   /** The `reasoning_effort` to send for `options`, if any. */
   private def reasoningEffortFor(options: CompletionOptions): Option[com.openai.models.ReasoningEffort] =
@@ -760,13 +783,34 @@ class OpenAIClient private[provider] (
    *
    * Reads the first choice, including content, tool calls, token usage and estimated cost.
    * Fields are read leniently: a field the response omits is treated as absent rather than
-   * failing the whole call.
+   * failing the whole call. Tool calls are not: one that breaks RFC 0009's rules is a `Left`
+   * ([[extractToolCalls]], `ToolCallRules.checked`).
    */
-  private def convertFromOpenAIFormat(response: ChatCompletion): Completion = {
-    val choice    = known(response._choices()).flatMap(_.asScala.headOption)
-    val message   = choice.flatMap(c => known(c._message()))
-    val toolCalls = message.map(extractToolCalls).getOrElse(Seq.empty)
-    val content   = message.flatMap(m => known(m._content())).getOrElse("")
+  private def convertFromOpenAIFormat(response: ChatCompletion): Result[Completion] = {
+    val choice  = known(response._choices()).flatMap(_.asScala.headOption)
+    val message = choice.flatMap(c => known(c._message()))
+    val finishReason = choice
+      .flatMap(c => known(c._finishReason()))
+      .map(_.asString())
+      .filter(_.nonEmpty)
+      .map(ChatCompletionsFinishReason(_))
+      .getOrElse(FinishReason.Other(""))
+    // a filtered reply's calls are not read: the filter fails the reply (`filteredReply`)
+    message
+      .filterNot(_ => ChatCompletionsFinishReason.isFiltered(finishReason))
+      .map(extractToolCalls(_, finishReason))
+      .getOrElse(Right(Seq.empty))
+      .map(completionOf(response, message, _, finishReason))
+      .flatMap(ToolCallRules.checked)
+  }
+
+  private def completionOf(
+    response: ChatCompletion,
+    message: Option[ChatCompletionMessage],
+    toolCalls: Seq[ToolCall],
+    finishReason: FinishReason
+  ): Completion = {
+    val content = message.flatMap(m => known(m._content())).getOrElse("")
     val assistantMessage =
       AssistantMessage(contentOpt = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
 
@@ -787,12 +831,7 @@ class OpenAIClient private[provider] (
       usage = usage,
       estimatedCost = cost,
       citations = message.map(extractCitations).getOrElse(List.empty),
-      finishReason = choice
-        .flatMap(c => known(c._finishReason()))
-        .map(_.asString())
-        .filter(_.nonEmpty)
-        .map(ChatCompletionsFinishReason(_))
-        .getOrElse(FinishReason.Other(""))
+      finishReason = finishReason
     )
   }
 
@@ -838,26 +877,28 @@ class OpenAIClient private[provider] (
   }
 
   /**
-   * Extracts function tool calls from a response message, parsing each one's arguments once.
-   * A call whose arguments are not valid JSON is dropped, as is one whose arguments are nested
-   * more than 512 levels deep: they are model output, and a value that deep overflows the stack
-   * of whatever renders it next (#1562).
+   * Extracts function tool calls from a response message, parsing each one's arguments once (RFC 0009, Part 3).
+   * A call whose arguments are not a JSON object is a `Left`, the malformed-tool-call `ProcessingError`, never
+   * dropped: dropped, a reply whose only call was cut came back as an answer with no call, and the caller could not
+   * see why. Arguments nested more than 512 levels deep fail the same way, unparsed: they are model output, and a
+   * value that deep overflows the stack of whatever renders it next (#1562). Absent or blank arguments are `{}` only
+   * when the reply ended with `tool_calls` or `stop`.
    */
-  private def extractToolCalls(message: ChatCompletionMessage): Seq[ToolCall] =
+  private def extractToolCalls(message: ChatCompletionMessage, finishReason: FinishReason): Result[Seq[ToolCall]] =
     known(message._toolCalls())
       .map(_.asScala.toSeq)
       .getOrElse(Seq.empty)
       .filter(_.isFunction)
       .map(_.asFunction())
-      .flatMap { ftc =>
+      .foldLeft[Result[Vector[ToolCall]]](Right(Vector.empty)) { (done, ftc) =>
         val function = known(ftc._function())
-        function.flatMap(f => known(f._arguments())).flatMap(raw => BoundedJson.read(raw).toOption).map { args =>
-          ToolCall(
-            id = known(ftc._id()).getOrElse(""),
-            name = function.flatMap(f => known(f._name())).getOrElse(""),
-            arguments = args
-          )
-        }
+        val name     = function.flatMap(f => known(f._name())).getOrElse("")
+        val raw      = function.flatMap(f => known(f._arguments())).getOrElse("")
+        for {
+          calls     <- done
+          _         <- if (raw.trim.isEmpty) ToolCallRules.blankArguments(name, finishReason) else Right(())
+          arguments <- ToolCallRules.parseArguments(name, raw)
+        } yield calls :+ ToolCall(id = known(ftc._id()).getOrElse(""), name = name, arguments = arguments)
       }
 
   private def recordExchange(
@@ -954,6 +995,8 @@ object OpenAIClient {
    * exchange puts the endpoint's reply in one - is redacted the same way, and truncated.
    */
   private def mapSdkError(e: Throwable, provider: String): LLMError = e match {
+    // an `error` event in a stream, after the 200 status: read as OpenAICompatibleClient reads one
+    case sse: SseException => streamError(sse, provider)
     case service: OpenAIServiceException if service.statusCode() == 400 && promptFiltered(service) =>
       // Azure OpenAI refuses a prompt its content filter blocks with a 400 whose code is `content_filter`
       ContentFilteredError.prompt(displayName(ProviderId(provider)), ChatCompletionsFinishReason.ContentFilter)
@@ -972,6 +1015,25 @@ object OpenAIClient {
     case io: OpenAIIoException if io.getCause != null => redactMessage(io.getCause.toLLMError, io.getCause)
     case other                                        => redactMessage(other.toLLMError, other)
   }
+
+  /**
+   * The error a stream's `error` event reports. The SDK hands over the event's `error` value (or, should that change,
+   * the whole event); [[OpenAICompatibleClient.streamedError]] maps it, keeping an HTTP failure status the error
+   * states and otherwise making it a 502.
+   */
+  private def streamError(sse: SseException, provider: String): LLMError =
+    Try(ObjectMappers.jsonMapper().writeValueAsString(sse.body())).toOption
+      .flatMap(body => BoundedJson.read(body).toOption)
+      .map(error => error.objOpt.flatMap(_.get("error")).getOrElse(error))
+      .flatMap(OpenAICompatibleClient.streamedError(_, provider))
+      .getOrElse(ServiceError(502, provider, "the stream reported an error"))
+
+  /**
+   * A native stream that ended with no choice stating a `finish_reason`: cut off, so a retry may succeed (RFC 0009,
+   * rule 1). OpenAI and Azure OpenAI send one before `[DONE]`, which the SDK reads and does not pass on.
+   */
+  private[provider] def unfinished(endpoint: String): NetworkError =
+    NetworkError("stream ended without a finish_reason; the reply is incomplete", None, endpoint)
 
   /**
    * Whether a service error's body is `{"error":{"code":"content_filter",...}}`, a prompt the filter blocked. The SDK

@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.streaming
 
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.ToolCallRules
 import org.llm4s.types.Result
 
 import java.time.Instant
@@ -19,17 +20,18 @@ import scala.collection.mutable
 @Stable
 final class StreamingAccumulator private () {
 
-  private val contentBuilder                     = new StringBuilder()
-  private val thinkingBuilder                    = new StringBuilder()
-  private val toolCalls                          = mutable.ArrayBuffer[ToolCall]()
-  private var messageId: Option[String]          = None
-  private var finishReason: Option[FinishReason] = None
-  private var promptTokens: Int                  = 0
-  private var completionTokens: Int              = 0
-  private var thinkingTokens: Int                = 0
-  private var cachedTokens: Option[Int]          = None
-  private var cacheCreationTokens: Option[Int]   = None
-  private var reportedTotal: Option[Int]         = None
+  private val contentBuilder                       = new StringBuilder()
+  private val thinkingBuilder                      = new StringBuilder()
+  private val toolCalls                            = mutable.ArrayBuffer[ToolCall]()
+  private var messageId: Option[String]            = None
+  private var finishReason: Option[FinishReason]   = None
+  private var promptTokens: Int                    = 0
+  private var completionTokens: Int                = 0
+  private var thinkingTokens: Int                  = 0
+  private var cachedTokens: Option[Int]            = None
+  private var cacheCreationTokens: Option[Int]     = None
+  private var longCacheCreationTokens: Option[Int] = None
+  private var reportedTotal: Option[Int]           = None
 
   // For accumulating partial tool calls, keyed by id. Insertion-ordered, so tool calls come
   // back in the order the stream first named them - the provider's index order - rather than
@@ -101,19 +103,39 @@ final class StreamingAccumulator private () {
     if (thinkingBuilder.isEmpty) None else Some(thinkingBuilder.toString)
 
   /**
-   * Get the current tool calls, in the order each was first seen in the stream
+   * The tool calls so far, in the order each was first seen in the stream: a live view, for showing progress. A
+   * call whose arguments are not yet a JSON object (still arriving, or broken) carries them as the raw `Str`; empty
+   * is `{}`. Only [[toCompletion]] decides whether the calls stand (RFC 0009, Part 3).
    */
   def currentToolCalls: Seq[ToolCall] = {
     val completed = toolCalls.toSeq
     val partial = partialToolCalls.values.map { p =>
-      // the one boundary parser: empty -> {}, unparseable or nested too deeply -> the raw Str (#1562)
-      ToolCall(
-        id = p.id,
-        name = p.name,
-        arguments = StreamingToolArgumentParser.parse(p.argumentsBuilder.toString)
-      )
+      val raw = p.argumentsBuilder.toString
+      // the one boundary parser: unparseable or nested too deeply stays the raw Str, never parsed (#1562)
+      ToolCall(id = p.id, name = p.name, arguments = StreamingToolArgumentParser.parse(raw).getOrElse(ujson.Str(raw)))
     }.toSeq
     completed ++ partial
+  }
+
+  /**
+   * The tool calls as the stream ended them, under RFC 0009's rules: a `Left` for any call when the output limit cut
+   * the stream, for a call whose arguments are not a JSON object, and for a call with no arguments when the stream
+   * did not end with `ToolCalls` or `Stop`.
+   */
+  private def finishedToolCalls(reason: FinishReason): Result[Seq[ToolCall]] = {
+    val pending = partialToolCalls.values.toList
+    // rule 3 first: a cut call's arguments are often cut JSON too, and the limit is the reason it broke
+    val cut =
+      Option.when(reason == FinishReason.Length && pending.nonEmpty)(ToolCallRules.cutByLimit(pending.map(_.name)))
+    val partial = pending.foldLeft[Result[Vector[ToolCall]]](cut.toLeft(Vector.empty)) { (done, p) =>
+      val raw = p.argumentsBuilder.toString
+      for {
+        calls     <- done
+        _         <- if (raw.trim.isEmpty) ToolCallRules.blankArguments(p.name, reason) else Right(())
+        arguments <- ToolCallRules.parseArguments(p.name, raw)
+      } yield calls :+ ToolCall(id = p.id, name = p.name, arguments = arguments)
+    }
+    partial.map(toolCalls.toSeq ++ _)
   }
 
   /**
@@ -135,10 +157,19 @@ final class StreamingAccumulator private () {
    * Convert accumulated data to a Completion, stamped with the given creation time.
    * Pure given the accumulator's current state - split out from the no-arg overload
    * so the conversion itself is testable without a real clock.
+   *
+   * A `Left`, the malformed-tool-call [[org.llm4s.error.ProcessingError ProcessingError]], when a tool call breaks
+   * one of RFC 0009's rules: its arguments are not a JSON object (cut, invalid, not an object, or nested more than
+   * 512 levels deep); it has no arguments and the stream did not end with `ToolCalls` or `Stop`; or the output limit
+   * cut the stream (`Length`) while it made tool calls. A broken call is never `{}` and never dropped.
    */
   def toCompletion(created: Instant): Result[Completion] = {
-    val finalToolCalls = currentToolCalls
+    // the last reason a chunk carried; none read is Other(""), never a Stop the provider didn't send
+    val reason = finishReason.getOrElse(FinishReason.Other(""))
+    finishedToolCalls(reason).map(completion(created, _, reason)).flatMap(ToolCallRules.checked)
+  }
 
+  private def completion(created: Instant, finalToolCalls: Seq[ToolCall], reason: FinishReason): Completion = {
     // the streamed thinking is unsigned text; a client whose provider signs its thinking blocks
     // replaces it on the message with the blocks it tracked
     val message = AssistantMessage(
@@ -156,22 +187,20 @@ final class StreamingAccumulator private () {
           totalTokens = reportedTotal.getOrElse(promptTokens + completionTokens + thinkingTokens),
           thinkingTokens = thinkingTokensOpt,
           cachedTokens = cachedTokens,
-          cacheCreationTokens = cacheCreationTokens
+          cacheCreationTokens = cacheCreationTokens,
+          longCacheCreationTokens = longCacheCreationTokens
         )
       )
     } else None
 
-    Right(
-      Completion(
-        id = messageId.getOrElse(""),
-        created = created,
-        content = contentBuilder.toString(),
-        model = "unknown",
-        message = message,
-        usage = usage,
-        // the last reason a chunk carried; none read is Other(""), never a Stop the provider didn't send
-        finishReason = finishReason.getOrElse(FinishReason.Other(""))
-      )
+    Completion(
+      id = messageId.getOrElse(""),
+      created = created,
+      content = contentBuilder.toString(),
+      model = "unknown",
+      message = message,
+      usage = usage,
+      finishReason = reason
     )
   }
 
@@ -205,7 +234,7 @@ final class StreamingAccumulator private () {
    *
    * Call it once per usage report the stream carries. Each field follows the latest report that
    * states it: `promptTokens` and `completionTokens` when positive, the `Option` fields
-   * (`thinkingTokens`, `cachedTokens`, `cacheCreationTokens`) when defined, and `totalTokens`
+   * (`thinkingTokens`, `cachedTokens`, `cacheCreationTokens`, `longCacheCreationTokens`) when defined, and `totalTokens`
    * when positive. A field a report leaves at zero or `None` keeps its earlier value, so a
    * provider that splits its usage across events (input and cache counts first, output last)
    * can pass each part as it arrives. When no report states a total, the completion's total is
@@ -225,6 +254,7 @@ final class StreamingAccumulator private () {
     usage.thinkingTokens.foreach(t => thinkingTokens = t)
     usage.cachedTokens.foreach(c => cachedTokens = Some(c))
     usage.cacheCreationTokens.foreach(c => cacheCreationTokens = Some(c))
+    usage.longCacheCreationTokens.foreach(c => longCacheCreationTokens = Some(c))
     if (usage.totalTokens > 0) reportedTotal = Some(usage.totalTokens)
   }
 
@@ -243,6 +273,7 @@ final class StreamingAccumulator private () {
     thinkingTokens = 0
     cachedTokens = None
     cacheCreationTokens = None
+    longCacheCreationTokens = None
     reportedTotal = None
   }
 

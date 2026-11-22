@@ -117,7 +117,7 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "read `reasoning_content` onto the returned message" in {
-    val completion = client(ZaiDialect).parseCompletion(
+    val completion = client(ZaiDialect).parsedCompletion(
       ujson.read(
         """{"id":"1","created":0,"model":"glm","choices":[{"index":0,"message":{"role":"assistant","content":"Sunny.","reasoning_content":"Check."}}]}"""
       )
@@ -168,7 +168,7 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
   }
 
   "every dialect" should "put the thinking it reads on the returned message, not only on the completion" in {
-    val completion = client(DeepSeekDialect).parseCompletion(
+    val completion = client(DeepSeekDialect).parsedCompletion(
       ujson.read(
         """{"id":"1","created":0,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"4","reasoning_content":"2+2"}}]}"""
       )

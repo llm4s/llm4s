@@ -261,7 +261,7 @@ have been replayed.
 Purely additive.
 
 ```scala
-@Experimental
+@Stable   // decision 16
 final case class PromptCache private (scope: Set[PromptCache.Scope], ttl: PromptCache.Ttl)
 object PromptCache {
   enum Scope { case System, Tools, Conversation }
@@ -322,7 +322,8 @@ below).
 
 - **Modules and tiers:** `llm4s-core` (Frozen at 1.0): `CompletionOptions`, `ReasoningEffort`, `Completion`,
   `TransformationResult` and `ModelCapabilities` change. `RequestOption` and `RequestAdjustment` are new and
-  `@Stable` (decision 12), and so is `Thinking` (decision 14); `PromptCache` is new and `@Experimental`. `llm4s-agent`: `AgentEvents.ModelCallCompleted` gains a defaulted field.
+  `@Stable` (decision 12), and so are `Thinking` (decision 14) and `PromptCache` (decision 16). `TokenUsage` gains
+  `longCacheCreationTokens` and `ModelPricing` `cacheCreationInputTokenCostAbove1hr`, defaulted (PR 6). `llm4s-agent`: `AgentEvents.ModelCallCompleted` gains a defaulted field.
   Provider modules change only internally, except `llm4s-openai-compatible`: `OpenAICompatibleDialect.addReasoning`
   returns the `List[RequestAdjustment]` it could not send instead of `Unit` (decision 13). `llm4s-java-api` and `kotlin-api` follow core: `JReasoningEffort` loses
   `NONE` and gains `MINIMAL`, `XHIGH` and `MAX`, `JCompletionOptions` loses `budgetTokens` and gains `thinking`, and
@@ -330,7 +331,7 @@ below).
 - **Binary:** there is no baseline yet (#1281), so no MiMa filter is needed.
 - **Source:** Parts 1 and 3 are additive, apart from the usual exception for any growth-pattern addition: a
   positional pattern match on a case-class extractor whose arity changes (`TransformationResult`, `Completion`,
-  `ModelCallCompleted`). Part 2 has the same exception for `ModelCapabilities` (PR 3), and breaks code that uses
+  `ModelCallCompleted`, and `TokenUsage` and `ModelPricing` in PR 6). Part 2 has the same exception for `ModelCapabilities` (PR 3), and breaks code that uses
   `budgetTokens`, `withBudgetTokens` or `ReasoningEffort.None` (PR 4); an exhaustive `match` on `ReasoningEffort`
   warns about the three new levels. Part 1 also breaks an
   `OpenAICompatibleDialect` that overrides `addReasoning` (PR 1, decision 13).
@@ -345,7 +346,8 @@ below).
 
 ## Migration
 
-Part 3 needs none. Part 1 needs one change, and only for an `OpenAICompatibleDialect` that overrides
+Part 3 needs none beyond the positional-pattern exception above for `TokenUsage` and
+`ModelPricing`. Part 1 needs one change, and only for an `OpenAICompatibleDialect` that overrides
 `addReasoning`: it returns what it did not send (PR 1, decision 13; `docs/reference/migration.md` has the
 before and after). Part 2 (PR 4):
 
@@ -472,6 +474,20 @@ PR 4 settled these:
     migration says: `Off` asks for the lowest effort. Perplexity and watsonx report theirs as well (added after PR 4),
     and watsonx's per-process warnings are gone. Claude Fable 5 rejects `thinking: disabled`, which its metadata does not say, so its patch entries carry
     `supports_none_reasoning_effort: false` beside PR 3's `supports_budget_thinking: false`.
+
+PR 6 settled these:
+
+16. **`PromptCache` is `@Stable`**, for decision 14's reason: `CompletionOptions` exposes it as a field.
+17. **`Conversation` is the request's top-level `cache_control`**, not a breakpoint written onto the last message:
+    Anthropic places it on the last block it can cache, walking back past a block that cannot be (a thinking block),
+    which a client-side choice would have to repeat. With `System` and `Tools` that is three of the four breakpoints a
+    request may have, all with one TTL, so the rule that a longer TTL comes first never applies. Anthropic documents
+    that `cache_control` markers are not part of the prompt a thinking signature is checked against, so they stay out
+    of the `ThinkingReplay` fingerprint (decision 4). Bedrock's legacy runtime rejects the top-level field; Bedrock
+    maps `promptCache` in its own follow-up.
+18. **The 1-hour write price needs the 1-hour write count.** `CostEstimator` gains the price as the RFC says, and
+    `TokenUsage` gains `longCacheCreationTokens` (Anthropic's `cache_creation.ephemeral_1h_input_tokens`), the writes
+    to price at it; a usage that does not break them out is priced as before.
 
 ## Open questions
 

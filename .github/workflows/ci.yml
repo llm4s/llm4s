@@ -123,10 +123,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -508,10 +509,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -612,10 +614,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -1387,11 +1390,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: github.event_name != 'pull_request'
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         if: github.event_name != 'pull_request'
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         if: github.event_name != 'pull_request'
@@ -1455,10 +1459,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: ${{ matrix.java }}
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -1555,10 +1560,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -1606,10 +1612,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -1746,10 +1753,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -1963,10 +1971,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -2106,7 +2115,7 @@ jobs:
 
       # Last of the builds: scala-cli-setup installs a JVM of its own and points JAVA_HOME at it, so the Maven and Gradle
       # builds above would compile against that JVM ("release version 21 not supported") if they came after it.
-      - uses: VirtusLab/scala-cli-setup@3f5bf11a33bb88343238780c18257c8fa43789e1 # v1.18.0
+      - uses: VirtusLab/scala-cli-setup@9d61091a7d9d19f69faa59b31cdbc6ef2537eccc # v1.19.0
         if: ${{ !cancelled() && steps.publish.outcome == 'success' }}
 
       # examples/repl's Scala CLI script and Metals worksheet, run with `scala-cli run` against the llm4s-repl just
@@ -2148,10 +2157,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -2188,10 +2198,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -2348,10 +2359,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -2417,10 +2429,11 @@ jobs:
           # is told to expect.
           fetch-depth: 0
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -2464,10 +2477,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -2525,10 +2539,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps

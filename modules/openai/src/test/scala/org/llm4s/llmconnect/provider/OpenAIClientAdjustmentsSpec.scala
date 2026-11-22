@@ -41,7 +41,9 @@ final class OpenAIClientAdjustmentsSpec extends AnyFlatSpec with Matchers with E
         streaming = params => {
           sent += params
           stream(
-            chunk("""{"id":"c1","created":0,"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}""")
+            chunk(
+              """{"id":"c1","created":0,"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"""
+            )
           )
         }
       ),

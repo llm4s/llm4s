@@ -8,9 +8,21 @@ nav_order: 1
 
 # RFC 0001: When `llm4s-agent` gets its MiMa baseline
 
-- **Status:** Proposed
+- **Status:** Rejected (2026-11-22): `llm4s-agent` takes the baseline with the other frozen modules
 - **Author(s):** @kannupriyakalra
 - **Tracking issue:** [#1281](https://github.com/llm4s/llm4s/issues/1281); depends on [#1266](https://github.com/llm4s/llm4s/issues/1266)
+
+## Decision
+
+Rejected on 2026-11-22. Every stage of the graph runtime (#1266) is complete, so the reason to wait has gone, and
+waiting would cost two more releases before 1.0. The release ceiling on Maven Central makes extra releases
+expensive. The agent API decisions still open when this was decided (a `Checkpointer` tenant lookup for #2642, a
+distinct status for an answer cut at the token limit from RFC 0009) land before the baseline release instead.
+
+`llm4s-agent` therefore takes the shared `mimaBaselineVersion` with the other six frozen modules, with no
+`mimaBaselineOverrides` entry. The open question below is answered: the maintainer declares the runtime's API
+final by closing #1266, which happens before the baseline release. The per-module override (#2355) stays
+available if that release slips.
 
 ## Summary
 

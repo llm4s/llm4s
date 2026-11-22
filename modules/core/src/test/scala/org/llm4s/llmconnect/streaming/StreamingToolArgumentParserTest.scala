@@ -1,44 +1,54 @@
 package org.llm4s.llmconnect.streaming
 
+import org.llm4s.error.ProcessingError
 import org.llm4s.testutil.SmallStack
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 class StreamingToolArgumentParserTest extends AnyFunSuite with Matchers {
 
-  test("empty input returns empty Obj sentinel") {
-    StreamingToolArgumentParser.parse("") shouldBe ujson.Obj()
+  private def malformed(raw: String): Boolean =
+    StreamingToolArgumentParser.parse(raw) match {
+      case Left(e: ProcessingError) => e.message.contains("malformed tool call")
+      case _                        => false
+    }
+
+  test("empty or blank input is {}, a call with no arguments") {
+    StreamingToolArgumentParser.parse("") shouldBe Right(ujson.Obj())
+    StreamingToolArgumentParser.parse("  ") shouldBe Right(ujson.Obj())
   }
 
-  test("valid JSON is parsed as-is") {
-    val result = StreamingToolArgumentParser.parse("""{"location":"SF"}""")
-    result("location").str shouldBe "SF"
+  test("a JSON object is parsed as-is") {
+    StreamingToolArgumentParser.parse("""{"location":"SF"}""").map(_("location").str) shouldBe Right("SF")
   }
 
-  test("partial/invalid JSON is preserved as raw Str") {
-    val result = StreamingToolArgumentParser.parse("""{"location":""")
-    result shouldBe ujson.Str("""{"location":""")
+  // RFC 0009, Part 3, rule 1: a broken call is never {} and never a raw string
+  test("partial or invalid JSON is a malformed-tool-call Left") {
+    malformed("""{"location":""") shouldBe true
+    malformed("{not json") shouldBe true
   }
 
-  test("valid JSON array is parsed correctly") {
-    val result = StreamingToolArgumentParser.parse("""[1,2,3]""")
-    result.arr.map(_.num.toInt) shouldBe Seq(1, 2, 3)
+  test("JSON that is not an object is a malformed-tool-call Left") {
+    malformed("[1,2,3]") shouldBe true
+    malformed("\"text\"") shouldBe true
+    malformed("42") shouldBe true
+    malformed("null") shouldBe true
   }
 
   // A model's arguments are untrusted. A document nested too deeply is refused before it is parsed,
   // because every later traversal of the value (rendering it back to the provider, `transform` into
   // a tool's argument type) recurses once per level and a StackOverflowError is not caught by `Try`
-  // (#1562). Run on a 1 MB stack so the outcome does not depend on the JVM's default stack size;
-  // the assertions compare inside it, so a deep value is never rendered by a failure message.
-  test("arguments nested too deeply are preserved as a raw Str, not parsed") {
+  // (#1562). Run on a 1 MB stack so the outcome does not depend on the JVM's default stack size.
+  test("arguments nested too deeply are a Left, never parsed") {
     val deep = "[" * 100000 + "]" * 100000
-    SmallStack.run(StreamingToolArgumentParser.parse(deep) == ujson.Str(deep)) shouldBe Right(true)
+    SmallStack.run(malformed(deep)) shouldBe Right(true)
   }
 
-  test("arguments nested 512 levels deep are parsed, 513 are preserved as a raw Str") {
-    val atLimit   = "[" * 512 + "]" * 512
-    val overLimit = "[" * 513 + "]" * 513
-    SmallStack.run(StreamingToolArgumentParser.parse(atLimit).isInstanceOf[ujson.Arr]) shouldBe Right(true)
-    SmallStack.run(StreamingToolArgumentParser.parse(overLimit) == ujson.Str(overLimit)) shouldBe Right(true)
+  test("an object nested 512 levels deep is parsed; nothing deeper than 512 levels is") {
+    def nested(levels: Int) = """{"a":""" * (levels - 1) + "{}" + "}" * (levels - 1)
+    SmallStack.run(StreamingToolArgumentParser.parse(nested(512)).isRight) shouldBe Right(true)
+    SmallStack.run(
+      StreamingToolArgumentParser.parse(nested(513)).left.exists(_.message.contains("more than 512 levels deep"))
+    ) shouldBe Right(true)
   }
 }

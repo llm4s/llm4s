@@ -1,7 +1,14 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
-import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, TroubleshootingLinks, ValidationError }
+import org.llm4s.error.{
+  AuthenticationError,
+  LLMError,
+  RateLimitError,
+  ServiceError,
+  TroubleshootingLinks,
+  ValidationError
+}
 import org.llm4s.http.HttpHeaders
 import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
@@ -77,6 +84,20 @@ object HttpErrorMapper {
     }
     // A 401/403, 429 or 404 says the next step and links its troubleshooting entry (#2285).
     mapped.left.map(TroubleshootingLinks.annotate)
+  }
+
+  /**
+   * The error a provider reported inside a stream, after the 200 status (RFC 0009, rule 2): mapped as a response with
+   * `status` would be, keeping `message` (redacted) in every error type, a `RateLimitError` included, so the caller
+   * sees the provider's explanation.
+   */
+  private[llm4s] def mapStreamError(status: Int, message: String, provider: String): LLMError = {
+    val safe = org.llm4s.util.Redaction.remoteBody(message)
+    val body = ujson.Obj("error" -> ujson.Obj("message" -> safe)).render()
+    mapHttpError(status, body, provider).swap.getOrElse(ServiceError(status, provider, safe)) match {
+      case limited: RateLimitError => limited.withDetail(extractErrorDetails(body, status, provider))
+      case other                   => other
+    }
   }
 
   /** The delay a `Retry-After` header asks for; see `HttpHeaders.retryAfter`, which parses it. */

@@ -63,9 +63,10 @@ import scala.collection.mutable.ListBuffer
  *   }
  * }}}
  *
- * Chat providers also run [[assertCancelsWhenInterrupted]] and [[assertCancelsStreamWhenInterrupted]]
+ * Chat providers also run [[assertModelCallContract]] (RFC 0009: how a reply ends, and that the
+ * client really streams), and [[assertCancelsWhenInterrupted]] and [[assertCancelsStreamWhenInterrupted]]
  * against [[LocalProviderTestServer.holdOpen]] and [[LocalProviderTestServer.streamThenHold]].
- * Those checks run the call on a virtual thread, and the server answers on one, so the testkit
+ * The cancellation checks run the call on a virtual thread, and the server answers on one, so the testkit
  * needs JDK 21 whatever the provider module itself targets.
  *
  * Modules are compared by class and descriptors by equality (normally reference equality on an
@@ -197,7 +198,7 @@ trait ProviderModuleChecks extends Assertions:
   /**
    * [[buildClient]], failing the test on a `Left`. The config-to-client round trip.
    *
-   * @return the client, for further checks such as [[assertStreams]]
+   * @return the client, for further checks such as [[assertCancelsWhenInterrupted]]
    */
   def assertBuildsClient(
     descriptor: ProviderDescriptor,
@@ -225,23 +226,11 @@ trait ProviderModuleChecks extends Assertions:
         failAt(s"${descriptor.id.asString} accepted another provider's config and built $client")
 
   /**
-   * `client.streamComplete` delivers at least one chunk for a one-message conversation and
-   * succeeds - so a client whose descriptor declares `features.streaming` really streams rather
-   * than silently falling back to `complete()`. Point the client at a stub server first;
-   * [[LocalProviderTestServer]] is one.
-   */
-  def assertStreams(client: LLMClient)(using pos: Position): Assertion =
-    val chunks = ListBuffer.empty[StreamedChunk]
-    client.streamComplete(Conversation(Seq(UserMessage("Hello"))), onChunk = chunks += _) match
-      case Left(error)                => failAt(s"streamComplete failed: ${error.message}")
-      case Right(_) if chunks.isEmpty => failAt("streamComplete succeeded without delivering a single chunk")
-      case Right(_)                   => succeed
-
-  /**
    * `client` reports how a reply ended the way RFC 0009 says, on `complete` and on `streamComplete` alike, for every
    * [[ContractCase]]. `cases` names each one: [[Applicability.Applies]] with the provider's reply, or
    * [[Applicability.NotApplicable]] with the reason it cannot happen; a case left out fails the check, so none is
-   * missed silently.
+   * missed silently. [[ContractCase.CleanText]] must apply: every chat provider can answer with text, and its stream is
+   * what proves the client really streams, rather than falling back to `complete()`.
    *
    * For each case that applies, a [[LocalProviderTestServer]] answers `complete` with the reply's `complete` handler
    * and `streamComplete` with its `stream` handler, and the result must be:
@@ -250,7 +239,12 @@ trait ProviderModuleChecks extends Assertions:
    *  - [[ContractCase.TextCutByLimit]]: `Right`, `FinishReason.Length` and non-empty text;
    *  - [[ContractCase.ToolCall]]: `Right`, `FinishReason.ToolCalls` and at least one tool call, each with a JSON
    *    object for its arguments;
-   *  - [[ContractCase.ContentFiltered]]: `Left(ContentFilteredError)`.
+   *  - [[ContractCase.ContentFiltered]]: `Left(ContentFilteredError)`;
+   *  - [[ContractCase.StreamEndsEarly]], stream only: `Left(NetworkError)`, or `Left(ServiceError)` with status 502;
+   *  - [[ContractCase.ErrorEvent]], stream only: a `Left` whose message carries
+   *    [[ContractCase.ProviderErrorMessage]], the provider's own error.
+   *
+   * A stream-only case ([[ContractCase.streamOnly]]) runs `streamComplete` alone.
    *
    * A stream that succeeds must also have delivered what it returned: its chunks' text joined is the `Completion`'s
    * text, the last reason a chunk carried is its finish reason, and its chunks name the same tool calls.
@@ -265,13 +259,20 @@ trait ProviderModuleChecks extends Assertions:
     val missing = ContractCase.values.filterNot(cases.contains)
     if missing.nonEmpty then
       failAt(s"no Applicability declared for ${missing.mkString(", ")}: declare each case Applies or NotApplicable")
+    cases(ContractCase.CleanText) match
+      case Applicability.NotApplicable(reason) =>
+        failAt(
+          s"CleanText is NotApplicable ($reason): every chat client answers with text, and its stream proves the client streams"
+        )
+      case Applicability.Applies(_) => ()
     ContractCase.values.foreach { c =>
       cases(c) match
         case Applicability.NotApplicable(reason) =>
           if reason.trim.isEmpty then failAt(s"$c is NotApplicable without a reason")
         case Applicability.Applies(reply) =>
-          val completed = ModelCallContractRun.call(path, reply.complete, client)(_.complete(_))
-          ModelCallContractRun.expect(c, "complete", completed)
+          if !c.streamOnly then
+            val completed = ModelCallContractRun.call(path, reply.complete, client)(_.complete(_))
+            ModelCallContractRun.expect(c, "complete", completed)
           val chunks = ListBuffer.empty[StreamedChunk]
           val streamed =
             ModelCallContractRun.call(path, reply.stream, client)(_.streamComplete(_, onChunk = chunks += _))

@@ -8,13 +8,7 @@ import org.llm4s.llmconnect.{ LLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, VertexAIConfig }
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.testkit.LocalProviderTestServer.{
-  holdOpen,
-  sendJsonResponse,
-  sendSseResponse,
-  streamThenHold,
-  withServer
-}
+import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendJsonResponse, streamThenHold, withServer }
 import org.llm4s.testkit.{ ContentPartCase, CredentialsRoundTrip, ProviderModuleChecks }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalamock.scalatest.MockFactory
@@ -40,26 +34,8 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
   private given ContextWindowResolver = ContextWindowResolver(registryService)
 
   /** One SSE data line, standing in for the Gemini API's streaming response. */
-  private val geminiSseBody: String = """data: {"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}""" + "\n\n"
-
-  /**
-   * A `VertexAIClient` backed by a mock HTTP client. Vertex AI's base URL is derived from
-   * `location`, not configurable, so unlike Gemini it cannot be pointed at a stub server
-   * through the descriptor - the client is built directly, the same way
-   * `VertexAIClientHttpSpec` does, stubbing both the oauth2 token endpoint and the GCE
-   * metadata fallback so the test is environment-agnostic.
-   */
-  private def vertexClientWithStubbedAuth(config: VertexAIConfig): VertexAIClient = {
-    val tokenBody = """{"access_token":"ya29.test-token","expires_in":3600}"""
-    val sseBody   = """data: {"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}""" + "\n\n"
-    val mockHttp  = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.postStream _)
-      .when(*, *, *, *)
-      .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(sseBody.getBytes(StandardCharsets.UTF_8)))))
-    new VertexAIClient(config, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
-  }
+  private val geminiSseBody: String =
+    """data: {"candidates":[{"content":{"parts":[{"text":"Hi"}]},"finishReason":"STOP"}]}""" + "\n\n"
 
   /**
    * A `VertexAIClient` whose model calls never answer: the token endpoints answer, but
@@ -229,13 +205,7 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
       assertContentParts("gemini", sendJsonResponse(_, 200, geminiReply))(geminiParts*)(geminiClientAt)
     }
 
-    "actually stream, not silently fall back to complete()" in {
-      withServer("/")(exchange => sendSseResponse(exchange, geminiSseBody)) { baseUrl =>
-        assertStreams(geminiClientAt(baseUrl))
-      }
-    }
-
-    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+    "report how each reply ended, on complete and on a stream alike, and really stream (RFC 0009)" in {
       assertModelCallContract(GeminiContractFixtures.replies)(geminiClientAt)
     }
 
@@ -265,18 +235,8 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
       assertContentParts("vertexai", sendJsonResponse(_, 200, geminiReply))(vertexParts*)(vertexClientAt)
     }
 
-    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+    "report how each reply ended, on complete and on a stream alike, and really stream (RFC 0009)" in {
       assertModelCallContract(GeminiContractFixtures.replies)(vertexClientAt)
-    }
-
-    "actually stream, not silently fall back to complete()" in {
-      // No apiKey: that field doubles as a credential file path for Vertex, and a
-      // nonexistent one would fail auth before the mocked HTTP client is ever reached.
-      val config = VertexAIProvider.buildConfig("test-instance", section(VertexAIProvider).withApiKey(None)) match
-        case Right(c: VertexAIConfig) => c
-        case other                    => fail(s"expected a VertexAIConfig, got $other")
-
-      assertStreams(vertexClientWithStubbedAuth(config))
     }
 
     "return CancelledError when a call is interrupted" in {

@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.caching
 
-import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, ResponseFormat, Thinking }
+import org.llm4s.llmconnect.model.{ CompletionOptions, PromptCache, ReasoningEffort, ResponseFormat, Thinking }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -42,5 +42,11 @@ class CompletionCacheKeySpec extends AnyFlatSpec with Matchers {
     CompletionCacheKey.of(base.withThinking(Thinking.Off)) should not be CompletionCacheKey.of(
       base.withThinking(Thinking.Adaptive)
     )
+  }
+
+  it should "leave out promptCache, which changes what a call costs and not what it returns" in {
+    CompletionCacheKey.Excluded shouldBe Set("promptCache")
+    CompletionCacheKey.of(CompletionOptions().withPromptCache(PromptCache.default)) shouldBe
+      CompletionCacheKey.of(CompletionOptions())
   }
 }

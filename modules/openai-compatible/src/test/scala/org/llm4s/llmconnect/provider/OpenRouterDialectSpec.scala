@@ -87,17 +87,17 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
            |"usage":{"prompt_tokens":1,"completion_tokens":9,"total_tokens":10,"reasoning_tokens":7}}""".stripMargin
       )
 
-    client.parseCompletion(reply("""{"content":"a","thinking":"t1"}""")).thinking shouldBe Some("t1")
-    client.parseCompletion(reply("""{"content":"a","reasoning":"t2"}""")).thinking shouldBe Some("t2")
-    client.parseCompletion(reply("""{"content":"a"}""", ""","thinking":"t3"""")).thinking shouldBe Some("t3")
-    client.parseCompletion(reply("""{"content":"a"}""")).usage.flatMap(_.thinkingTokens) shouldBe Some(7)
+    client.parsedCompletion(reply("""{"content":"a","thinking":"t1"}""")).thinking shouldBe Some("t1")
+    client.parsedCompletion(reply("""{"content":"a","reasoning":"t2"}""")).thinking shouldBe Some("t2")
+    client.parsedCompletion(reply("""{"content":"a"}""", ""","thinking":"t3"""")).thinking shouldBe Some("t3")
+    client.parsedCompletion(reply("""{"content":"a"}""")).usage.flatMap(_.thinkingTokens) shouldBe Some(7)
   }
 
   it should "take the reasoning tokens out of completion_tokens, read top-level or from completion_tokens_details" in {
     val client = new OpenRouterClient(config("openai/o3"))
     def usage(fields: String) =
       client
-        .parseCompletion(
+        .parsedCompletion(
           ujson.read(
             s"""{"id":"x","created":1,"model":"m","choices":[{"message":{"content":"a"}}],"usage":{$fields}}"""
           )
@@ -145,7 +145,7 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
     }
 
   it should "parse well-formed tool calls" in {
-    val completion = new OpenRouterClient(config("openai/gpt-4o")).parseCompletion(
+    val completion = new OpenRouterClient(config("openai/gpt-4o")).parsedCompletion(
       ujson.read(
         """{"id":"x","created":1,"model":"m","choices":[{"message":{"content":null,
           |"tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{\"a\":1}"}}]}}]}""".stripMargin

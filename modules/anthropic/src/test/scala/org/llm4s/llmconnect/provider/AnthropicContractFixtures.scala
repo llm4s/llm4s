@@ -5,7 +5,8 @@ import org.llm4s.testkit.{ Applicability, ContractCase, LocalProviderTestServer,
 /**
  * The Messages API's replies for each RFC 0009 [[ContractCase]], for `assertModelCallContract`, in the shape Anthropic
  * documents: a reply's `stop_reason`, and a stream's on `message_delta` before `message_stop`. Hand-written (no live
- * capture yet). `refusal` is the stop reason of a reply Anthropic's safety classifiers stopped.
+ * capture yet). `refusal` is the stop reason of a reply Anthropic's safety classifiers stopped. A stream ends with
+ * `message_stop`, and reports a failure after the 200 status as an `error` event.
  */
 object AnthropicContractFixtures {
 
@@ -36,6 +37,20 @@ object AnthropicContractFixtures {
     "message_stop" -> """{"type":"message_stop"}"""
   )
 
+  /** A streamed `tool_use` block: its start, with `input` `{}`, then each `partial_json` fragment. */
+  private def toolBlock(name: String, fragments: String*): Seq[(String, String)] =
+    ("content_block_start" ->
+      s"""{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"$name","input":{}}}""") +:
+      fragments.map(f =>
+        "content_block_delta" ->
+          s"""{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":${ujson
+              .Str(f)
+              .render()}}}"""
+      ) :+ ("content_block_stop" -> """{"type":"content_block_stop","index":0}""")
+
+  private def toolUse(name: String, input: String): String =
+    s"""[{"type":"tool_use","id":"toolu_1","name":"$name","input":$input}]"""
+
   private def applies(complete: String, stream: String): Applicability =
     Applicability.Applies(
       RecordedReply(
@@ -43,6 +58,9 @@ object AnthropicContractFixtures {
         LocalProviderTestServer.sendSseResponse(_, stream)
       )
     )
+
+  private def streamOnly(stream: String): Applicability =
+    Applicability.Applies(RecordedReply.streamOnly(LocalProviderTestServer.sendSseResponse(_, stream)))
 
   /** Every case, as the Messages API answers it. */
   val replies: Map[ContractCase, Applicability] = Map(
@@ -72,9 +90,35 @@ object AnthropicContractFixtures {
         ) ++ end("tool_use")*
       )
     ),
+    // a tool with no parameters: `input` `{}`, and on the stream an empty `partial_json`
+    ContractCase.NoArgumentToolCall -> applies(
+      message(toolUse("get_time", "{}"), "tool_use"),
+      sse((start +: toolBlock("get_time", "")) ++ end("tool_use")*)
+    ),
+    // `max_tokens` cut the call: whatever input arrived, no call runs
+    ContractCase.ToolCallCutByLimit -> applies(
+      message(toolUse("get_weather", """{"city":"Par"}"""), "max_tokens"),
+      sse((start +: toolBlock("get_weather", """{"city":""", """"Par""")) ++ end("max_tokens")*)
+    ),
+    // an input that is not a JSON object, and streamed fragments that never make one
+    ContractCase.MalformedArguments -> applies(
+      message(toolUse("get_weather", ujson.Str("{city: Paris").render()), "tool_use"),
+      sse((start +: toolBlock("get_weather", "{city: ", "Paris")) ++ end("tool_use")*)
+    ),
     ContractCase.ContentFiltered -> applies(
       message("""[{"type":"text","text":"Here is how"}]""", "refusal"),
       sse((start +: textBlock("Here is how")) ++ end("refusal")*)
+    ),
+    // the text block, and no `message_delta` or `message_stop`
+    ContractCase.StreamEndsEarly -> streamOnly(sse((start +: textBlock("The answer", " is"))*)),
+    // Anthropic's documented mid-stream error: an `error` event, after the 200 status
+    ContractCase.ErrorEvent -> streamOnly(
+      sse(
+        start +: textBlock("The answer") :+ ("error" -> (
+          """{"type":"error","error":{"type":"overloaded_error","message":""" +
+            ujson.Str(ContractCase.ProviderErrorMessage).render() + "}}"
+        ))*
+      )
     )
   )
 }

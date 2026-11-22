@@ -20,8 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pattern on `Completion` or `ModelCallCompleted` gains a field ([RFC 0009](docs/rfcs/0009-model-call-contract.md) PR 1);
   [migration](docs/reference/migration.md#finish-reasons-are-typed-2613).
 - A content-filter stop (`content_filter`, Anthropic's `refusal`, Bedrock's guardrail reasons) is a
-  `Left(ContentFilteredError)` on every client, not a `Completion` (RFC 0009 PR 2);
-  [migration](docs/reference/migration.md#every-providers-content-filter-stop-is-an-error-2677).
+  `Left(ContentFilteredError)` on every client, not a `Completion` (RFC 0009 PR 2); a positional pattern on
+  `TraceEvent.ErrorOccurred` gains `usage`;
+  [migration](docs/reference/migration.md#every-providers-content-filter-stop-is-an-error-2677). So is a stream that
+  ends without its end marker or reports an error event, on OpenAI, Anthropic, Gemini, Vertex AI and Ollama (PR 4);
+  [migration](docs/reference/migration.md#a-stream-that-did-not-finish-is-an-error-2613). So is a tool call whose
+  arguments are not a JSON object, or in a reply cut by the output limit, and `StreamingToolArgumentParser.parse` and
+  the dialect's `parseToolCalls` return `Result` (PR 3);
+  [migration](docs/reference/migration.md#a-broken-or-cut-tool-call-is-an-error-2613). `ProviderModuleChecks.assertStreams`
+  is removed: `assertModelCallContract` replaces it (PR 5).
+- A positional pattern on `TokenUsage` or `ModelPricing` gains a field (`longCacheCreationTokens`,
+  `cacheCreationInputTokenCostAbove1hr`; [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 6);
+  [migration](docs/reference/migration.md#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115).
 
 ### Providers
 
@@ -38,6 +48,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each reports what it changed on `Completion.adjustments` ([cost controls](docs/guide/cost-controls.md),
   [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4, decision 14); `CachingLLMClient` matches a cached answer on an
   explicit list of the options that change it, `thinking` and `reasoning` among them (PR 5, decision 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+- **Added** `CompletionOptions.promptCache` (`PromptCache`: scope `System`, `Tools`, `Conversation`, TTL `Short` or
+  `Long`): Anthropic sends `cache_control` breakpoints and reports a prefix too short to cache; OpenAI, Gemini and Vertex
+  AI report it `NotNeeded`, the rest `Dropped`. `TokenUsage.longCacheCreationTokens` and
+  `ModelPricing.cacheCreationInputTokenCostAbove1hr` price a 1-hour cache write; `CachingLLMClient` ignores
+  `promptCache` ([cost controls](docs/guide/cost-controls.md#provider-side-prompt-caching),
+  [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 6, decision 16) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 
 ### Java & Kotlin APIs
 
@@ -48,16 +64,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Core
 
 - **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
-  traces too, and on each agent call's `ModelCallCompleted` (an event stored before reads with none), mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider
-  ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1, 2 and 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
+  traces too, and on each agent call's `ModelCallCompleted` (an event stored before reads with none), mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider, in place of `assertStreams`
+  ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1, 2, 5 and 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
 - **Changed** with `Completion.finishReason` (#2613): Ollama reads `done_reason` instead of reporting `stop` for every finished reply,
   Anthropic streams trace `message_delta`'s `stop_reason` instead of `"stop"`, Perplexity's `incomplete` with a tool call is `Length`,
   and every client's content-filter stop is a `ContentFilteredError` carrying the billed `usage`, which metrics record
-  ([migration](docs/reference/migration.md#every-providers-content-filter-stop-is-an-error-2677)) [#2613](https://github.com/llm4s/llm4s/issues/2613) [#2677](https://github.com/llm4s/llm4s/issues/2677) [#2676](https://github.com/llm4s/llm4s/issues/2676).
+  and traces carry on `TraceEvent.ErrorOccurred`'s new `usage`
+  ([migration](docs/reference/migration.md#every-providers-content-filter-stop-is-an-error-2677)). A stream with no end
+  marker is a `NetworkError` and an error event fails it, on every client, as does a Gemini or Vertex AI data line that is not JSON (PR 5), checked by the suite's `StreamEndsEarly` and `ErrorEvent`
+  ([migration](docs/reference/migration.md#a-stream-that-did-not-finish-is-an-error-2613), RFC 0009 PR 4). A broken or cut
+  tool call is the malformed-tool-call `ProcessingError` where it was `{}` or dropped, checked by `NoArgumentToolCall`,
+  `ToolCallCutByLimit` and `MalformedArguments`
+  ([migration](docs/reference/migration.md#a-broken-or-cut-tool-call-is-an-error-2613), PR 3) [#2613](https://github.com/llm4s/llm4s/issues/2613) [#2677](https://github.com/llm4s/llm4s/issues/2677) [#2676](https://github.com/llm4s/llm4s/issues/2676).
 - **Fixed** `LLMCompressor.squeezeDigest` keeps each compressed `[HISTORY_SUMMARY]` digest in its original position instead of
   moving every digest to the end of the conversation [#2481](https://github.com/llm4s/llm4s/issues/2481).
 - **Fixed** `HistoryCompressor`, `LLMCompressor` and `TokenWindow` recognise a history digest the same way: a `SystemMessage`
   starting with `[HISTORY_SUMMARY]`, so `TokenWindow` no longer pins a message that merely quotes the marker [#2505](https://github.com/llm4s/llm4s/issues/2505).
+
+### Agent runtime
+
+- **Added** `Checkpointer.owner`: a thread's tenant and parent (`ThreadOwner`) without decoding its latest checkpoint, which
+  `Agent.forget` and `GraphRuntime.deleteThread` now check with; a default over `latest` keeps other stores compiling, and the in-memory, SQLite and PostgreSQL stores read it from their indexed columns [#2642](https://github.com/llm4s/llm4s/issues/2642).
 
 ### Agent harness
 
@@ -75,6 +102,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Changed** `llm4s-agent` takes the MiMa baseline with the other frozen modules, not a later one of its own: RFC 0001 is
+  rejected now that the graph runtime is complete ([RFC 0001](docs/rfcs/0001-agent-baseline.md)) [#1281](https://github.com/llm4s/llm4s/issues/1281).
 - **Added** SLSA build provenance for every release's jars and POMs, the SBOMs on its GitHub Release and the `workspace-runner` image, `verify-release.sh --attestations`,
   and a guide with the PGP key fingerprint [#2305](https://github.com/llm4s/llm4s/issues/2305); [Verifying Releases](docs/reference/verifying-releases.md).
 - **Changed** each published module's `-javadoc.jar` is a sub-1 KB pointer to [llm4s.org/scaladoc](https://llm4s.org/scaladoc/), not its own Scaladoc, and
@@ -83,7 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sbt testPerformance` runs only core and agent; MiMa and the config-policy CLIs moved into Quick Checks and the tests.
 - **Added** `llm4s-kotlin-api` publishes from its own workflow (`publish-kotlin.yml`), which a release calls and which can be run by hand for a tag whose Kotlin publish failed: it builds the tag's code with the current upload rules ([release guide](docs/reference/release.md#re-triggering-a-failed-release)).
 - **Added** `Llm4sMigrate_1_0` covers the breaks since 0.6.0: `ThinkingReplacesBudgetTokens` rewrites `ReasoningEffort.None` to `Thinking.Off` and reports `budgetTokens`,
-  `FinishReasonTyped` rewrites the string comparisons of `StreamedChunk.finishReason`, and positional `Completion` and `ModelCapabilities` patterns gain their fields; tested against 0.6.0 [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#migration-rules).
+  `FinishReasonTyped` rewrites the string comparisons of `StreamedChunk.finishReason` and reports a literal in the same expression that no rewrite gets right (0.6.0's raw Bedrock and Gemini values, a content filter's, Gemini's `STOP`), and positional `Completion`, `ModelCallCompleted` and `ModelCapabilities` patterns gain their fields; tested against 0.6.0 [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#migration-rules).
 - **Fixed** `llm4s-reactor` was never published (it was missing from the root aggregate, so 0.6.0 lacks it); `publishedArtifactsCheck` now fails on a published module outside the aggregate.
 
 ## [0.6.0] - 2026-11-21

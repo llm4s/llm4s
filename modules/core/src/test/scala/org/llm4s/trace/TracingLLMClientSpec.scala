@@ -1,6 +1,6 @@
 package org.llm4s.trace
 
-import org.llm4s.error.{ RateLimitError, UnknownError }
+import org.llm4s.error.{ ContentFilteredError, RateLimitError, UnknownError }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.*
@@ -142,6 +142,23 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       e.duration should not be empty
       e.toJson("error_type").str shouldBe "RateLimitError"
       e.toJson("operation").str shouldBe "chat"
+      e.usage shouldBe None
+      e.toJson.obj.contains("prompt_tokens") shouldBe false
+    }
+
+    "trace a content-filtered reply's billed usage on its error, on both paths (#2676)" in {
+      val filtered = ContentFilteredError.reply("Gemini", "SAFETY").withUsage(TokenUsage(7, 4, 11))
+      val tracing  = new Recording
+      val client   = TracingLLMClient(new Stub(Left(filtered)), tracing, config)
+      client.complete(conversation, options).isLeft shouldBe true
+      client.streamComplete(conversation, options, _ => ()).isLeft shouldBe true
+
+      val errors = tracing.events.collect { case e: TraceEvent.ErrorOccurred => e }
+      errors should have size 2
+      all(errors.map(_.usage)) shouldBe Some(TokenUsage(7, 4, 11))
+      errors.head.errorType shouldBe Some("ContentFilteredError")
+      errors.head.toJson("prompt_tokens").num shouldBe 7
+      errors.head.toJson("completion_tokens").num shouldBe 4
     }
 
     "return the call's result when tracing fails" in {

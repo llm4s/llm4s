@@ -34,7 +34,10 @@ and [the remaining config, model and util types](#config-model-and-util-types-ar
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115),
 [finish reasons are typed](#finish-reasons-are-typed-2613),
-and [every provider's content-filter stop is an error](#every-providers-content-filter-stop-is-an-error-2677).
+[every provider's content-filter stop is an error](#every-providers-content-filter-stop-is-an-error-2677),
+[a stream that did not finish is an error](#a-stream-that-did-not-finish-is-an-error-2613),
+[a broken or cut tool call is an error](#a-broken-or-cut-tool-call-is-an-error-2613),
+and [`TokenUsage` and `ModelPricing` gain a prompt-cache field](#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115).
 
 ## Finish reasons are typed (#2613)
 
@@ -55,7 +58,13 @@ client.complete(conversation, options).map { c =>
 - **Check every comparison against a string literal**: `chunk.finishReason.contains("stop")` still compiles, because
   `Option.contains` widens its argument, and is now always `false`. Write `contains(FinishReason.Stop)`. The
   `FinishReasonTyped` Scalafix rule ([Scalafix](scalafix#migration-rules)) rewrites these comparisons, a reason set
-  from a literal, and any other read to `.map(_.name)`, which keeps its `Option[String]` type.
+  from a literal, and any other read to `.map(_.name)`, which keeps its `Option[String]` type; the cases assume a
+  client that maps its reason, and a Spring AI model gives `FinishReason.Other(raw)` for any value. It reports, for
+  you to fix by hand, a comparison with 0.6.0's raw Bedrock or Gemini value (`end_turn`, `tool_use`, `MAX_TOKENS`,
+  ...), which those clients now map to a case while a Spring AI model still gives `FinishReason.Other(raw)`; with a
+  content filter's value (`content_filter`, `SAFETY`, ...), a `ContentFilteredError` now; and with Gemini's `STOP`,
+  which is `Stop` or `ToolCalls`. Any `"stop"`, `"tool_calls"` or `"length"` in the same comparison is reported with
+  it. A chunk set from a raw Bedrock or Gemini value, as in a test, gets the case that value maps to now.
 - `StreamedChunk(..., finishReason = Some("stop"))` and `withFinishReason("stop")` take a `FinishReason` instead.
 - A positional pattern on `Completion` gains a field: `case Completion(id, _, content, _, _, _, _, _, _, _, _)`.
   The `PositionalPatternsGainFields` Scalafix rule adds it to 0.6.0's ten-field pattern, and both fields since 0.5.1 to
@@ -73,8 +82,8 @@ client.complete(conversation, options).map { c =>
   `tool_calls` from `done`; and Perplexity reports an `incomplete` reply that has a call as `Length`, not `ToolCalls`.
 - An agent's `AgentEvents.ModelCallCompleted` gains `finishReason: Option[FinishReason]` (default `None`), after
   `adjustments`, filled from each call's `Completion` (PR 6). Construction is unchanged; a positional pattern needs a
-  ninth binder, `case ModelCallCompleted(a, m, n, t, u, c, p, adj, _)`, or match on the type and read the fields. An
-  event stored before reads with `None`.
+  ninth binder, `case ModelCallCompleted(a, m, n, t, u, c, p, adj, _)`, which the `PositionalPatternsGainFields`
+  Scalafix rule adds, or match on the type and read the fields. An event stored before reads with `None`.
 
 ## Every provider's content-filter stop is an error (#2677)
 
@@ -90,11 +99,96 @@ possibly empty or cut short, with the provider's reason as `Other`.
 - A stream's text already passed to `onChunk` stays delivered; no chunk carries the filter's reason, and the error's
   message says how many characters the filter cut after.
 - `ContentFilteredError.usage` carries the tokens the provider reported for the filtered call, which it bills, on
-  both paths and for Gemini and Vertex AI too (#2676). A client's metrics record them; a trace's `ErrorOccurred`
-  does not carry usage.
+  both paths and for Gemini and Vertex AI too (#2676). A client's metrics record them, and `TracingLLMClient` puts
+  them on the call's `TraceEvent.ErrorOccurred`, whose new last field is `usage: Option[TokenUsage]`; the
+  OpenTelemetry backend reports it as the `chat <model>` span's `gen_ai.usage.*`, Langfuse in the event's metadata.
+  `ContentFilteredError`'s own extractor still binds four fields.
+- A positional pattern on `TraceEvent.ErrorOccurred` gains a field:
+  `case TraceEvent.ErrorOccurred(error, context, _, _, _, _, _, _, _, _)`. The `PositionalPatternsGainFields` Scalafix
+  rule adds it to 0.6.0's nine-field pattern.
 - Match `ContentFilteredError` (`provider`, `reason`, `promptBlocked`) where you read a `content_filter`, `refusal`
   or guardrail reason off a `Completion`. `ReliableClient`'s circuit breaker counts it as neither a success nor a
   failure, and it is not retried.
+
+## A stream that did not finish is an error (#2613)
+
+`streamComplete` returns a `Completion` only when the provider said the reply ended
+([RFC 0009](../rfcs/0009-model-call-contract) PR 4), as the OpenAI-compatible, Bedrock, watsonx and Perplexity
+clients already did. A stream that stops without its provider's end marker - Anthropic's `message_stop`, a
+`finish_reason` on OpenAI and Azure OpenAI, a candidate `finishReason` on Gemini and Vertex AI, `done: true` on
+Ollama - is a `Left(NetworkError)`, which `ReliableClient` and `streamCompleteWithRetry` treat as retryable. These
+clients used to return what had arrived as a finished `Completion`.
+
+An error the provider reports after the 200 status ends the stream with that error, and nothing after it is read:
+
+- Gemini and Vertex AI: a chunk with an `error` object, mapped by its `code` (`503` a `ServiceError`, `429` a
+  `RateLimitError`; any other a `ServiceError` with status 502). These chunks used to be skipped.
+- Ollama: a line `{"error": "..."}`, a `ServiceError` with status 502. It used to be skipped.
+- Anthropic: an `error` event, mapped by its error type (`overloaded_error` a `ServiceError` with status 529,
+  `rate_limit_error` a `RateLimitError`), where it was a `ServiceError` with status 200.
+- OpenAI and Azure OpenAI: an event with an `error` object, mapped as the OpenAI-compatible client maps one (a
+  `ServiceError` with status 502 unless the error states an HTTP failure status), where it was a `ServiceError`
+  with status 200.
+
+Text already passed to `onChunk` stays delivered; the `Left` says the reply is incomplete. Code that kept a cut
+reply as an answer should treat the `Left` as a failed call, or retry it.
+
+A Gemini or Vertex AI `data:` line that is not JSON fails the stream too, a `ServiceError` with status 502, where it
+used to be skipped (RFC 0009 PR 5). Blank lines and SSE `:` comment lines, which is how a keep-alive is sent, are
+still ignored.
+
+`OpenAIClient` (`provider = "openai"` and `"azure"`) needs a `finish_reason` on the last choice: the OpenAI SDK
+reads the stream and never shows the client `[DONE]`, so a server that ends its stream with `[DONE]` alone, and no
+`finish_reason`, now fails with the `NetworkError`. Point such a server at the `openai-compatible` provider, which
+takes `[DONE]` as the end marker.
+
+**Provider authors:** `ProviderModuleChecks.assertStreams` is removed. `assertModelCallContract` checks how every
+reply ends on both paths, and requires `ContractCase.CleanText` to apply, whose stream proves the client streams.
+Replace an `assertStreams(client)` test with the full check, every `ContractCase` declared
+([writing a provider](../guide/writing-a-provider#the-model-call-contract)).
+
+## A broken or cut tool call is an error (#2613)
+
+A tool call the client cannot run as the model meant it is a `Left`, the malformed-tool-call `ProcessingError`, on
+`complete` and on a stream alike ([RFC 0009](../rfcs/0009-model-call-contract) PR 3). It used to become `{}`, be
+dropped, or be passed on as a raw string, and an agent then ran the tool on arguments the model never wrote:
+
+- **Arguments that are not a JSON object** - cut or invalid JSON, JSON of another type, or JSON nested more than 512
+  levels deep, which is still never parsed (#1562). The OpenAI-compatible clients' `complete` made them `{}`;
+  `OpenAIClient` dropped the call, so a reply whose only call was broken came back as an answer with no call; a
+  stream's call kept them as a raw `ujson.Str`. Gemini and Vertex AI's `MALFORMED_FUNCTION_CALL` finish, a call
+  Gemini dropped, is the same error, whether or not text came before it; it used to return the text.
+- **A tool call in a reply cut by the output limit** (`FinishReason.Length`): every client, even when the call's
+  arguments parse. A later call may be missing, or the arguments a valid prefix of what the model meant.
+- **A call with no arguments** is `{}` only when the reply ended `ToolCalls` or `Stop`; otherwise it is a `Left`.
+
+Code that ran the tool on the `{}`, or read the raw string, gets the `Left` instead; treat it as a failed call
+(`ProcessingError` is not retried). In the agent runtime the run ends with the error rather than running a tool.
+
+Source changes, all in the provider-author SPI:
+
+- `StreamingToolArgumentParser.parse(raw)` returns `Result[ujson.Value]`: `Right({})` for blank, `Right` of the
+  object, otherwise the `Left`. `StreamingAccumulator.currentToolCalls`, the live view, still shows unfinished
+  arguments as the raw `Str`; `toCompletion` applies the rules.
+- `OpenAICompatibleDialect.parseToolCalls` and `OpenAICompatibleDialect.lenientToolCalls` return
+  `Result[Seq[ToolCall]]`. A dialect that overrides `parseToolCalls` returns a `Left` for a call whose arguments are
+  not a JSON object; `lenientToolCalls` is still lenient about a missing `id` or `name`, not about arguments.
+
+## `TokenUsage` and `ModelPricing` gain a prompt-cache field (#2115)
+
+Provider-side prompt caching ([RFC 0008](../rfcs/0008-generation-controls) PR 6,
+[cost controls](../guide/cost-controls#provider-side-prompt-caching)) is opt-in through
+`CompletionOptions.withPromptCache`, and a call without it sends what it sent before. Two growth-safe types gain a
+defaulted field, so only a positional pattern on them changes:
+
+- `TokenUsage` gains `longCacheCreationTokens: Option[Int]`, the cache writes made with the 1-hour lifetime:
+  `case TokenUsage(p, c, t, _, _, _)` becomes `case TokenUsage(p, c, t, _, _, _, _)`.
+- `ModelPricing` gains `cacheCreationInputTokenCostAbove1hr: Option[Double]` as its last field.
+- Java and Kotlin see no Scala defaults, so a call to `TokenUsage.apply` or `ModelPricing.apply` from them passes
+  the new argument too (`Option.empty()`).
+
+The `PositionalPatternsGainFields` Scalafix rule does not add these binders yet; add them by hand, or match on the
+type and read the fields.
 
 ## Changes since 0.5.1 that no rule automates
 
@@ -110,7 +204,8 @@ on 0.6.x, run only the rules for the breaks since 0.6.0 ([Scalafix](scalafix#mig
   kinds (#2311, #2275, #2531, #2137), `RetentionPolicy.maxAge` (#2130), and the dependencies `llm4s-java-api` and the
   Spring Boot starter no longer bring (#1496), `TokenUsage.completionTokens`, which no longer includes thinking
   tokens (#2564), a Gemini or Vertex AI reply a content filter stopped, now a `ContentFilteredError` (#2563), what
-  `Thinking.Off` sends on OpenAI and Anthropic (#2115), and the finish reasons the clients now map (#2613).
+  `Thinking.Off` sends on OpenAI and Anthropic (#2115), the finish reasons the clients now map (#2613), and a broken
+  or cut tool call, now a `Left` where it was `{}` or dropped (#2613).
 - New cases and methods: exhaustive matches on `AgentStatus` (`TokenLimitReached`), `StreamEvent` (`Nested`) and
   `ReasoningEffort` (`Minimal`, `XHigh`, `Max`; reported), an
   `OpenAICompatibleDialect` that overrides `addReasoning` (now returns `List[RequestAdjustment]`, #2115), and
@@ -121,7 +216,9 @@ on 0.6.x, run only the rules for the breaks since 0.6.0 ([Scalafix](scalafix#mig
   (was a class with no `copy`), and a key passed by position or another credential that is now a `Secret` (Langfuse,
   search-tool and store keys, `VectorStoreFactory.Config.withSecret`), `withBudgetTokens(n)`, whose replacement
   `Thinking.budget(n)` is a `Result` (reported), and a `StreamedChunk` finish reason set from a `String` that is not a
-  literal (reported).
+  literal (reported), and `StreamingToolArgumentParser.parse`, `OpenAICompatibleDialect.parseToolCalls` and
+  `lenientToolCalls`, now a `Result` (#2613): the compiler names each, and only the caller can say what a broken
+  call does.
 - Removed or moved: `WorkspaceTools` (#1906), and `UsingOps` and `ModelSelector`, which need `llm4s-agent-tools` and
   `llm4s-rag` (#2358).
 

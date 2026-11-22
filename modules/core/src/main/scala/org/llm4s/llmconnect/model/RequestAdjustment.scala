@@ -8,8 +8,8 @@ import upickle.default.ReadWriter
  * [[RequestAdjustment.option]]. Matching on it is checked by the compiler, so a match survives a
  * field rename. A field that becomes adjustable later adds a case.
  *
- * `Thinking` names `CompletionOptions.thinking` (RFC 0008, PR 4). `PromptCache` names the field RFC 0008 adds in its
- * PR 6; until that lands no field is behind it, so no adjustment names it yet.
+ * `Thinking` names `CompletionOptions.thinking` and `PromptCache` `CompletionOptions.promptCache` (RFC 0008, PRs 4
+ * and 6).
  */
 @Stable
 enum RequestOption derives ReadWriter {

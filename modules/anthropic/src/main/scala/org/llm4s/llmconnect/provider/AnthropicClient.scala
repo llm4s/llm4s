@@ -63,6 +63,7 @@ import org.llm4s.error.{
   AuthenticationError,
   ContentFilteredError,
   LLMError,
+  NetworkError,
   ProcessingError,
   RateLimitError,
   ServiceError,
@@ -251,13 +252,16 @@ class AnthropicClient(
         val thinkingPlan = AnthropicThinking.plan(config.model, transformed.options, maxTokens, capabilities)
         applyThinking(paramsBuilder, thinkingPlan)
         applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
-        val adjustments = transformed.adjustments ++ thinkingPlan.adjustments
+        val adjustments =
+          transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options)
         adjustmentLog.record(config.model, adjustments)
+        // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
+        AnthropicPromptCache
+          .control(transformed.options, PromptCache.Scope.Conversation)
+          .foreach(paramsBuilder.cacheControl)
 
         // Add tools if specified
-        if (transformed.options.tools.nonEmpty) {
-          transformed.options.tools.foreach(tool => paramsBuilder.addTool(convertToolToAnthropicTool(tool)))
-        }
+        addTools(paramsBuilder, transformed.options)
         addWebSearch(paramsBuilder)
 
         // Add messages from conversation
@@ -276,9 +280,11 @@ class AnthropicClient(
         val result = attempt
           .flatMap(convertFromAnthropicResponse)
           .flatMap(AnthropicClient.refused)
+          // RFC 0009, Part 3: a reply `max_tokens` cut while it made a call runs no call
+          .flatMap(ToolCallRules.checked)
           .map(c =>
             c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, transformed.messages, transformed.options))
-              .withAdjustments(adjustments)
+              .withAdjustments(adjustments ++ answeredCache(transformed.options, c.usage))
           )
         val responseBody = attempt.toOption.map(serializeResponseBody)
         recordingExchange(startedAt, requestBody)(result)(responseBody)
@@ -342,12 +348,16 @@ curl https://api.anthropic.com/v1/messages \
         val thinkingPlan = AnthropicThinking.plan(config.model, transformed.options, maxTokens, capabilities)
         applyThinking(paramsBuilder, thinkingPlan)
         applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
-        val adjustments = transformed.adjustments ++ thinkingPlan.adjustments
+        val adjustments =
+          transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options)
         adjustmentLog.record(config.model, adjustments)
+        // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
+        AnthropicPromptCache
+          .control(transformed.options, PromptCache.Scope.Conversation)
+          .foreach(paramsBuilder.cacheControl)
 
         // Add tools if specified
-        if (transformed.options.tools.nonEmpty)
-          transformed.options.tools.foreach(t => paramsBuilder.addTool(convertToolToAnthropicTool(t)))
+        addTools(paramsBuilder, transformed.options)
         addWebSearch(paramsBuilder)
         // Add messages from conversation
         addMessagesToParams(transformedConversation, paramsBuilder, transformed.options)
@@ -367,6 +377,8 @@ curl https://api.anthropic.com/v1/messages \
         // the stop_reason `message_delta` reported, and the characters of answer text streamed
         var stopReason = Option.empty[String]
         var textLength = 0
+        // whether `message_stop` came: a stream without it was cut off, and is no reply (RFC 0009, rule 1)
+        var stopped = false
 
         // Process the stream
         val attempt = Try {
@@ -506,6 +518,7 @@ curl https://api.anthropic.com/v1/messages \
               }
 
               val messageStopOpt = event.messageStop()
+              if (messageStopOpt != null && messageStopOpt.isPresent) stopped = true
               // a refusal ends in an error, not a finish: no chunk says the reply finished
               if (messageStopOpt != null && messageStopOpt.isPresent && !stopReason.contains(AnthropicClient.Refusal)) {
                 val chunk = StreamedChunk(
@@ -527,6 +540,8 @@ curl https://api.anthropic.com/v1/messages \
           }
         }.toEither.left
           .map(AnthropicClient.mapError(_))
+          // an `error` event throws in the SDK, mapped above; a stream that ends with neither is cut off
+          .filterOrElse(_ => stopped, AnthropicClient.unfinished(config.baseUrl))
 
         // Return the accumulated completion; a refusal fails the stream, as it fails `complete`, the text already
         // delivered staying delivered
@@ -548,7 +563,7 @@ curl https://api.anthropic.com/v1/messages \
                 .withMessage(ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options))
                 .withEstimatedCost(cost)
                 .withCitations(citations.toList)
-                .withAdjustments(adjustments)
+                .withAdjustments(adjustments ++ answeredCache(transformed.options, c.usage))
             }
         )
 
@@ -614,7 +629,7 @@ curl https://api.anthropic.com/v1/messages \
     // Process messages in order
     messages.zipWithIndex.foreach {
       case (SystemMessage(content), _) =>
-        paramsBuilder.system(appendJsonInstruction(content, options))
+        setSystem(paramsBuilder, appendJsonInstruction(content, options), options)
         hasSystemMessage = true
 
       case (um: UserMessage, _) =>
@@ -682,8 +697,35 @@ curl https://api.anthropic.com/v1/messages \
     // well so structured-output requests keep the instruction when the caller supplied no system prompt
     if (!hasSystemMessage) {
       val base = "You are Claude, a helpful AI assistant."
-      paramsBuilder.system(appendJsonInstruction(base, options))
+      setSystem(paramsBuilder, appendJsonInstruction(base, options), options)
     }
+  }
+
+  /** Sets the system prompt, as one block with a `cache_control` breakpoint when `options` caches it. */
+  private def setSystem(paramsBuilder: MessageCreateParams.Builder, system: String, options: CompletionOptions): Unit =
+    AnthropicPromptCache.control(options, PromptCache.Scope.System) match {
+      case None => paramsBuilder.system(system)
+      case Some(control) =>
+        paramsBuilder.systemOfTextBlockParams(
+          List(TextBlockParam.builder().text(system).cacheControl(control).build()).asJava
+        )
+    }
+
+  /** Adds `options`' tools, the last with a `cache_control` breakpoint when `options` caches the tools. */
+  private def addTools(paramsBuilder: MessageCreateParams.Builder, options: CompletionOptions): Unit = {
+    val tools   = options.tools.map(convertToolToAnthropicTool)
+    val control = AnthropicPromptCache.control(options, PromptCache.Scope.Tools)
+    tools.zipWithIndex.foreach { (tool, index) =>
+      val last = index == tools.size - 1
+      paramsBuilder.addTool(control.filter(_ => last).fold(tool)(c => tool.toBuilder().cacheControl(c).build()))
+    }
+  }
+
+  /** The after-the-call report of a prompt cache that cached nothing, logged once like the rest. */
+  private def answeredCache(options: CompletionOptions, usage: Option[TokenUsage]): List[RequestAdjustment] = {
+    val report = AnthropicPromptCache.answered(options, usage)
+    adjustmentLog.record(config.model, report)
+    report
   }
 
   private[provider] def appendJsonInstruction(system: String, options: CompletionOptions): String =
@@ -790,7 +832,8 @@ curl https://api.anthropic.com/v1/messages \
         completionTokens = usage.outputTokens().toInt,
         totalTokens = (usage.inputTokens() + usage.outputTokens()).toInt,
         cachedTokens = cachedTokens,
-        cacheCreationTokens = cacheCreationTokens
+        cacheCreationTokens = cacheCreationTokens,
+        longCacheCreationTokens = AnthropicClient.longCacheWrites(usage)
       )
 
       // Estimate cost using CostEstimator
@@ -837,8 +880,10 @@ curl https://api.anthropic.com/v1/messages \
         val input   = ObjectMappers.jsonMapper().writeValueAsString(toolUse._input())
         calls.flatMap { taken =>
           BoundedJson.read(input) match {
-            case Right(arguments) =>
+            case Right(arguments: ujson.Obj) =>
               Right(taken :+ ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = arguments))
+            // an input that is not an object is never passed on (RFC 0009, Part 3)
+            case Right(_) => Left(malformedToolCall(s"'${toolUse.name()}': the input is not a JSON object"))
             case Left(BoundedJson.TooDeep()) =>
               Left(malformedToolCall(s"arguments are nested more than ${BoundedJson.MaxDepth} levels deep"))
             case Left(e) => Left(malformedToolCall(e.message))
@@ -1218,6 +1263,8 @@ object AnthropicClient {
       // the service refused the request - a vendor limit (an image count, a request size) among others: typed, with
       // its message, as HttpErrorMapper maps the other providers' responses
       case e: com.anthropic.errors.BadRequestException => ValidationError("request", safe(e.getMessage))
+      // an `error` event in a stream, after the 200 status: the status its error type stands for, and its message
+      case e: com.anthropic.errors.SseException => streamError(e.body())
       case e: com.anthropic.errors.AnthropicServiceException =>
         ServiceError(e.statusCode(), "anthropic", safe(e.getMessage))
       // the SDK wraps every I/O failure - a refused connection, a timeout - in one exception: map it by its
@@ -1230,6 +1277,37 @@ object AnthropicClient {
         }
     }
   }
+
+  /**
+   * The error a stream's `error` event reports (`{"type":"error","error":{"type":"overloaded_error","message":...}}`;
+   * the SDK may hand over the whole event or only its `error` object), mapped as the HTTP status its type stands for
+   * would be, so `overloaded_error` is a retryable 529. An unknown type is a 502, retried like a bad gateway.
+   */
+  private def streamError(body: com.anthropic.core.JsonValue): LLMError = {
+    val error = Try(ObjectMappers.jsonMapper().writeValueAsString(body)).toOption
+      .flatMap(json => BoundedJson.read(json).toOption)
+      .flatMap(_.objOpt)
+      .map(event => event.get("error").flatMap(_.objOpt).getOrElse(event))
+    val message = error.flatMap(_.get("message")).flatMap(_.strOpt).getOrElse("the stream reported an error")
+    val status  = error.flatMap(_.get("type")).flatMap(_.strOpt).flatMap(StreamErrorStatus.get).getOrElse(502)
+    HttpErrorMapper.mapStreamError(status, message, "anthropic")
+  }
+
+  /** The HTTP status each of Anthropic's documented error types stands for. */
+  private val StreamErrorStatus: Map[String, Int] = Map(
+    "invalid_request_error" -> 400,
+    "authentication_error"  -> 401,
+    "permission_error"      -> 403,
+    "not_found_error"       -> 404,
+    "request_too_large"     -> 413,
+    "rate_limit_error"      -> 429,
+    "api_error"             -> 500,
+    "overloaded_error"      -> 529
+  )
+
+  /** A stream that ended without `message_stop`: cut off, so a retry may succeed (RFC 0009, rule 1). */
+  private[provider] def unfinished(baseUrl: String): NetworkError =
+    NetworkError("stream ended without message_stop; the reply is incomplete", None, s"$baseUrl/v1/messages")
 
   /** The SDK's response headers as the multi-valued map `HttpErrorMapper` reads. */
   private def headerMap(headers: com.anthropic.core.http.Headers): Map[String, Seq[String]] =
@@ -1276,8 +1354,13 @@ object AnthropicClient {
       completionTokens = usage.outputTokens().toInt,
       totalTokens = 0,
       cachedTokens = optionalCount(usage.cacheReadInputTokens()),
-      cacheCreationTokens = optionalCount(usage.cacheCreationInputTokens())
+      cacheCreationTokens = optionalCount(usage.cacheCreationInputTokens()),
+      longCacheCreationTokens = longCacheWrites(usage)
     )
+
+  /** The prompt-cache writes with the 1-hour lifetime, billed at their own rate, when the usage breaks them out. */
+  private[provider] def longCacheWrites(usage: Usage): Option[Int] =
+    Try(usage.cacheCreation().toScala.map(_.ephemeral1hInputTokens().toInt)).toOption.flatten
 
   private def deltaUsage(usage: MessageDeltaUsage): TokenUsage =
     TokenUsage(

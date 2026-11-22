@@ -98,6 +98,11 @@ private[postgres] object Sql:
   def latest(t: Tables): String =
     s"SELECT checkpoint_json FROM ${t.threads} WHERE thread_id = ? AND checkpoint_json IS NOT NULL"
 
+  /** Whose the thread is (#2642): the registry's columns that follow the latest checkpoint, without its JSON. */
+  def owner(t: Tables): String =
+    s"""SELECT thread_status IS NOT NULL, tenant_id, parent_thread_id FROM ${t.threads}
+       |WHERE thread_id = ? AND checkpoint_json IS NOT NULL""".stripMargin
+
   /** The latest checkpoint, and the registry's columns that follow it (schema 2). */
   def setLatest(t: Tables): String =
     s"""UPDATE ${t.threads}

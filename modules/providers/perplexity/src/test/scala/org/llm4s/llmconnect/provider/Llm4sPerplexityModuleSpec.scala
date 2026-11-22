@@ -5,13 +5,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.PerplexityConfig
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.testkit.LocalProviderTestServer.{
-  holdOpen,
-  sendJsonResponse,
-  sendSseResponse,
-  streamThenHold,
-  withServer
-}
+import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendJsonResponse, streamThenHold, withServer }
 import org.llm4s.testkit.{ ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
@@ -27,8 +21,6 @@ class Llm4sPerplexityModuleSpec extends AnyWordSpec with Matchers with ProviderM
   import PerplexityFixtures.{ *, given }
 
   private val reply = response(s"[$searchResults,${textMessage("Hello there [web:1]")}]")
-
-  private val sseText = sseBody(created, delta("Hi"), delta("!"), completedEvent(response(s"[${textMessage("Hi!")}]")))
 
   private def section(baseUrl: String, extras: Map[String, String] = Map.empty): NamedProviderConfig =
     NamedProviderConfig(
@@ -159,11 +151,7 @@ class Llm4sPerplexityModuleSpec extends AnyWordSpec with Matchers with ProviderM
       }
     }
 
-    "actually stream, not silently fall back to complete()" in {
-      withServer("/")(sendSseResponse(_, sseText))(baseUrl => assertStreams(clientAt(baseUrl)))
-    }
-
-    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+    "report how each reply ended, on complete and on a stream alike, and really stream (RFC 0009)" in {
       assertModelCallContract(PerplexityContractFixtures.replies)(clientAt)
     }
 

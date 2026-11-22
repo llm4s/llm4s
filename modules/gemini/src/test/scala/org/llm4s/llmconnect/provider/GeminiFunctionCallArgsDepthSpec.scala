@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.error.ServiceError
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
 import org.llm4s.llmconnect.{ LLMClient, ProviderExchangeLogging }
@@ -126,14 +127,15 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions(), _ => ())))
   }
 
-  it should "still skip a chunk that is not JSON at all, as before" in {
+  it should "fail the stream on a chunk that is not JSON at all, as a 502 (RFC 0009, open question 5)" in {
     val mockHttp = stub[Llm4sHttpClient]
     (mockHttp.postStream _)
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, sse("{not json", textReply))))
-    val completion =
-      gemini(mockHttp).streamComplete(question, CompletionOptions(), _ => ()).fold(e => fail(e.message), identity)
-    completion.content shouldBe "Sunny"
+    gemini(mockHttp).streamComplete(question, CompletionOptions(), _ => ()) match {
+      case Left(e: ServiceError) => e.httpStatus shouldBe 502
+      case other                 => fail(s"expected Left(ServiceError(502)), got $other")
+    }
   }
 
   "VertexAIClient.complete" should "refuse a functionCall whose args are nested too deeply, never overflow" in {
@@ -149,16 +151,15 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions(), _ => ())))
   }
 
-  it should "still skip a chunk that is not JSON at all, as before" in {
+  it should "fail the stream on a chunk that is not JSON at all, as a 502 (RFC 0009, open question 5)" in {
     val mockHttp = stub[Llm4sHttpClient]
     (mockHttp.postStream _)
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, sse("{not json", textReply))))
-    val completion =
-      vertex(mockHttp, textReply)
-        .streamComplete(question, CompletionOptions(), _ => ())
-        .fold(e => fail(e.message), identity)
-    completion.content shouldBe "Sunny"
+    vertex(mockHttp, textReply).streamComplete(question, CompletionOptions(), _ => ()) match {
+      case Left(e: ServiceError) => e.httpStatus shouldBe 502
+      case other                 => fail(s"expected Left(ServiceError(502)), got $other")
+    }
   }
 
   "GeminiClient" should "still accept a functionCall whose args are nested to the limit" in {

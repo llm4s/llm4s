@@ -314,6 +314,18 @@ enum EncodedRoute derives ReadWriter:
 final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[PendingWrite])
 
 /**
+ * Whose a thread is, as [[Checkpointer.owner]] reads it from the thread's latest checkpoint without decoding it
+ * (#2642): that checkpoint's [[Checkpoint!.tenantId Checkpoint.tenantId]], and the parent its
+ * [[Checkpoint!.origin Checkpoint.origin]] names - `None` for a top-level thread.
+ */
+final case class ThreadOwner(tenantId: Option[String], parent: Option[ThreadId])
+
+object ThreadOwner:
+
+  /** The owner `checkpoint` records. */
+  def of(checkpoint: Checkpoint): ThreadOwner = ThreadOwner(checkpoint.tenantId, checkpoint.origin.map(_.parent))
+
+/**
  * One atomic write to a thread, fenced by the writing run's claim. The checkpointer applies all of it
  * or none of it:
  *

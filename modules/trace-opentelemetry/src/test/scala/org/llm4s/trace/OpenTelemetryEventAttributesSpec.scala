@@ -177,6 +177,32 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
     }
   }
 
+  "ErrorOccurred with an operation" should {
+
+    "be the call's span with the GenAI usage a content-filtered reply was billed (#2676)" in {
+      val filtered = TraceEvent.ErrorOccurred(
+        new RuntimeException("filtered"),
+        "chat",
+        at,
+        operation = Some("chat"),
+        model = Some("gemini-2.5-flash"),
+        errorType = Some("ContentFilteredError"),
+        usage = Some(TokenUsage(7, 4, 11, thinkingTokens = Some(2)))
+      )
+      val (name, attributes) = mapped(filtered)
+      name shouldBe "chat gemini-2.5-flash"
+      str(attributes, "error.type") shouldBe "ContentFilteredError"
+      long(attributes, "gen_ai.usage.input_tokens") shouldBe 7L
+      long(attributes, "gen_ai.usage.output_tokens") shouldBe 6L // thinking included, as billed
+    }
+
+    "carry no usage when the call reported none" in {
+      val (_, attributes) =
+        mapped(TraceEvent.ErrorOccurred(new RuntimeException("x"), "chat", at, operation = Some("chat")))
+      long(attributes, "gen_ai.usage.input_tokens") shouldBe null
+    }
+  }
+
   "TokenUsageRecorded" should {
 
     "be `Token Usage - <operation>` with the model and all three token counts" in {

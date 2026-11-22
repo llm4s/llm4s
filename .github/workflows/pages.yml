@@ -102,17 +102,18 @@ jobs:
           fetch-depth: 0  # needed for `git describe` to see release tags
 
       - name: Setup Ruby
-        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0
+        uses: ruby/setup-ruby@f9c4492e86def3e644ab32a0ef185eda5b0c20d0 # v1.342.0
         with:
           ruby-version: '3.2'
           bundler-cache: true
           working-directory: docs
 
       - name: Setup Java
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'temurin'
           java-version: '21'
+          problem-matcher: true
 
       # The sbt dependency cache that dependency-cache.yml saves, restored without saving. Written out rather than through
       # .github/actions/restore-sbt-deps because the checkout above may be an older release tag that has neither that

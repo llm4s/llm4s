@@ -26,7 +26,7 @@ import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.metrics.MetricsCollector
-import org.llm4s.model.{ AdjustmentLog, ModelRegistryService }
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, UnmappedOptions }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.util.{ BoundedJson, Redaction }
@@ -138,8 +138,9 @@ class OpenAICompatibleClient(
             if (logger.isDebugEnabled) logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
             val result =
               if (response.statusCode >= 200 && response.statusCode < 300)
-                Try(parseCompletion(readReply(body))).toResult
+                Try(parseCompletion(readReply(body))).toResult.flatten
                   .flatMap(filteredReply)
+                  .flatMap(ToolCallRules.checked)
                   .map(bindThinking(_, conversation, options).withAdjustments(adjustments))
               else
                 HttpErrorMapper.mapHttpError(
@@ -313,30 +314,9 @@ class OpenAICompatibleClient(
     if (BoundedJson.exceedsDepth(text)) throw new IllegalArgumentException(BoundedJson.tooDeep().message)
     else ujson.read(text)
 
-  /**
-   * The failure an event reports in an `error` field, which a server sends once the 200 status is
-   * already out. The field is an object with a `message` or a plain string; an empty one, which some
-   * proxies put on every event, is no failure. A `status_code` or numeric `code` that is an HTTP failure
-   * status keeps its meaning, so a request that can't succeed is not retried: Groq reports a tool call cut by
-   * the token limit this way, with a text `code` and `status_code` 400. Anything else is a 502, retried like a
-   * bad gateway.
-   */
+  /** The failure an event reports in an `error` field; see [[OpenAICompatibleClient.streamedError]]. */
   private def streamedError(json: ujson.Value): Option[LLMError] =
-    json.objOpt
-      .flatMap(_.get("error"))
-      .filter(error => error != ujson.Null && error != ujson.Obj() && error != ujson.Str(""))
-      .flatMap { error =>
-        val message =
-          error.objOpt.flatMap(_.get("message")).flatMap(_.strOpt).orElse(error.strOpt).getOrElse(error.render())
-        val status = error.objOpt.toSeq
-          .flatMap(fields => Seq("status_code", "code").flatMap(fields.get))
-          .flatMap(_.numOpt)
-          .map(_.toInt)
-          .find(code => code >= 400 && code <= 599)
-          .getOrElse(502)
-        val body = ujson.Obj("error" -> ujson.Obj("message" -> Redaction.remoteBody(message))).render()
-        HttpErrorMapper.mapHttpError(status, body, providerName).swap.toOption
-      }
+    json.objOpt.flatMap(_.get("error")).flatMap(OpenAICompatibleClient.streamedError(_, providerName))
 
   /** The replay data on a streamed event's delta, if it has one. */
   private def streamedThinkingDetails(json: ujson.Value): Seq[ujson.Value] =
@@ -581,7 +561,8 @@ class OpenAICompatibleClient(
     options.responseFormat.foreach { fmt =>
       dialect.encodeResponseFormat(fmt).foreach(rf => body("response_format") = rf)
     }
-    val adjustments = dialect.addReasoning(body, settings.model, options)
+    val adjustments =
+      dialect.addReasoning(body, settings.model, options) ++ UnmappedOptions.promptCache(settings.model, options)
     (body, adjustments)
   }
 
@@ -594,13 +575,40 @@ class OpenAICompatibleClient(
       .filtered(providerName, Some(c.finishReason), c.content.length, c.usage)
       .toLeft(c)
 
-  /** Reads a non-streaming reply. Throws on a malformed one; `complete` turns that into a `Left`. */
-  protected[provider] def parseCompletion(json: ujson.Value): Completion = {
-    val choice    = json("choices")(0)
-    val message   = choice("message")
-    val toolCalls = message.obj.get("tool_calls").filterNot(_.isNull).map(dialect.parseToolCalls).getOrElse(Seq.empty)
-    val content   = message.obj.get("content").flatMap(dialect.decodeContent)
-    val usage     = json.obj.get("usage").flatMap(parseUsage)
+  /**
+   * Reads a non-streaming reply. Throws on a reply of the wrong shape; `complete` turns that into a `Left`. A tool
+   * call whose arguments are not a JSON object, or that has none in a reply that did not end with `tool_calls` or
+   * `stop`, is a `Left`, the malformed-tool-call `ProcessingError` (RFC 0009, Part 3).
+   */
+  protected[provider] def parseCompletion(json: ujson.Value): Result[Completion] = {
+    val choice       = json("choices")(0)
+    val message      = choice("message")
+    val finishReason = ChatCompletionsFinishReason.of(choice).getOrElse(FinishReason.Other(""))
+    // a filtered reply's calls are not read: the filter fails the reply (`filteredReply`)
+    val rawCalls =
+      message.obj
+        .get("tool_calls")
+        .filterNot(_.isNull)
+        .filterNot(_ => ChatCompletionsFinishReason.isFiltered(finishReason))
+    for {
+      toolCalls <- rawCalls.map(dialect.parseToolCalls).getOrElse(Right(Seq.empty))
+      _ <- rawCalls.toSeq
+        .flatMap(OpenAICompatibleDialect.blankArgumentCalls)
+        .foldLeft[Result[Unit]](Right(()))((ok, name) =>
+          ok.flatMap(_ => ToolCallRules.blankArguments(name, finishReason))
+        )
+    } yield parsedCompletion(json, choice, message, toolCalls, finishReason)
+  }
+
+  private def parsedCompletion(
+    json: ujson.Value,
+    choice: ujson.Value,
+    message: ujson.Value,
+    toolCalls: Seq[ToolCall],
+    finishReason: FinishReason
+  ): Completion = {
+    val content      = message.obj.get("content").flatMap(dialect.decodeContent)
+    val usage        = json.obj.get("usage").flatMap(parseUsage)
     val thinkingText = dialect.thinking(message).orElse(dialect.thinking(choice)).filter(_.nonEmpty)
     val thinking =
       thinkingText.map(ThinkingBlock.Text(_)).toSeq ++
@@ -620,7 +628,7 @@ class OpenAICompatibleClient(
       usage = usage,
       estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u)),
       citations = parseCitations(message),
-      finishReason = ChatCompletionsFinishReason.of(choice).getOrElse(FinishReason.Other(""))
+      finishReason = finishReason
     )
   }
 
@@ -757,6 +765,29 @@ class OpenAICompatibleClient(
 }
 
 object OpenAICompatibleClient {
+
+  /**
+   * The failure a stream event reports in its `error` field, `error` being that field's value, which a server sends
+   * once the 200 status is already out. The field is an object with a `message` or a plain string; an empty one,
+   * which some proxies put on every event, is no failure. A `status_code` or numeric `code` that is an HTTP failure
+   * status keeps its meaning, so a request that can't succeed is not retried: Groq reports a tool call cut by the
+   * token limit this way, with a text `code` and `status_code` 400. Anything else is a 502, retried like a bad
+   * gateway. `OpenAIClient` reads the SDK's stream error with it too.
+   */
+  private[provider] def streamedError(error: ujson.Value, providerName: String): Option[LLMError] =
+    Some(error)
+      .filter(error => error != ujson.Null && error != ujson.Obj() && error != ujson.Str(""))
+      .map { error =>
+        val message =
+          error.objOpt.flatMap(_.get("message")).flatMap(_.strOpt).orElse(error.strOpt).getOrElse(error.render())
+        val status = error.objOpt.toSeq
+          .flatMap(fields => Seq("status_code", "code").flatMap(fields.get))
+          .flatMap(_.numOpt)
+          .map(_.toInt)
+          .find(code => code >= 400 && code <= 599)
+          .getOrElse(502)
+        HttpErrorMapper.mapStreamError(status, message, providerName)
+      }
 
   private[provider] val AuthorizationHeaderRefusal: String =
     "an Authorization header cannot be sent with a Dynamic or Exchange credential: the request's Authorization " +

@@ -33,5 +33,15 @@ object FinishReasonTypedTest {
 
   def copied(chunk: StreamedChunk, from: StreamedChunk): StreamedChunk = chunk.withFinishReason(from.finishReason)
 
-  def filtered(chunk: StreamedChunk): Boolean = chunk.finishReason.map(_.name).contains("content_filter")
+  // a raw value with no case of its own is still Other(raw), whose name is the raw value
+  def malformed(chunk: StreamedChunk): Boolean = chunk.finishReason.map(_.name).contains("MALFORMED_FUNCTION_CALL")
+
+  // a chunk built with 0.6.0's raw Bedrock or Gemini value means the state it names
+  def bedrockCut(chunk: StreamedChunk): StreamedChunk = chunk.withFinishReason(FinishReason.Length)
+
+  val bedrockDone = StreamedChunk("3", None, finishReason = Some(FinishReason.Stop))
+
+  // a vendor literal outside the comparison the read is part of is not about the reason
+  def unrelated(chunk: StreamedChunk, kind: String): Boolean =
+    chunk.finishReason.map(_.name).getOrElse("") == "x" && kind == "end_turn"
 }

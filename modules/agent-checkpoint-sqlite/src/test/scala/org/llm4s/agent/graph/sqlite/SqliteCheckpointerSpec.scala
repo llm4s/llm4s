@@ -765,6 +765,11 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     undecodable(store.latest(thread), "latest", "checkpoint")
     exec(db, "UPDATE llm4s_checkpoint_threads SET checkpoint_json = 'not json at all'")
     undecodable(store.latest(thread), "latest", "checkpoint")
+    // the owner is read from the registry's columns, without the checkpoint; a row schema 8 could not fill (#2642)
+    // is read through latest, which says why
+    store.owner(thread).value shouldBe Some(ThreadOwner(None, None))
+    exec(db, "UPDATE llm4s_checkpoint_threads SET thread_status = NULL")
+    undecodable(store.owner(thread), "latest", "checkpoint")
     exec(db, "UPDATE llm4s_checkpoint_threads SET checkpoint_json = '{\"formatVersion\": 999}'")
     store.latest(thread).left.value shouldBe GraphError.UnsupportedCheckpointFormat(999, Checkpoint.CurrentFormat)
     store.close()

@@ -38,9 +38,6 @@ object AcmeProvider extends ProviderDescriptor:
   val DefaultBaseUrl: String         = "https://acme.invalid/v1"
   val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DefaultBaseUrl, Seq("ACME_API_KEY"))
 
-  /** A model whose client succeeds without streaming, to prove `assertStreams` notices. */
-  val NonStreamingModel: String = "acme-no-stream"
-
   def buildConfig(providerName: String, section: NamedProviderConfig)(using
     ContextWindowResolver
   ): Result[ProviderConfig] =
@@ -69,7 +66,7 @@ final case class AcmeClient(config: AcmeConfig) extends LLMClient:
     options: CompletionOptions,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
-    if config.model != AcmeProvider.NonStreamingModel then onChunk(StreamedChunk("acme-1", Some("hi")))
+    onChunk(StreamedChunk("acme-1", Some("hi")))
     complete(conversation, options)
 
   def getContextWindow(): Int     = config.contextWindow

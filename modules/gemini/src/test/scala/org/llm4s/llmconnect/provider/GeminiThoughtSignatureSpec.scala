@@ -109,8 +109,15 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     s"""{"candidates":[${candidate(
         parts*
       )}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2,"totalTokenCount":5}}"""
+
+  /** A stream of `chunks`, the last one finishing `STOP`. */
   private def sse(chunks: String*): String =
-    chunks.map(c => s"""data: {"candidates":[{"content":{"role":"model","parts":[$c]}}]}""").mkString("", "\n", "\n")
+    chunks.zipWithIndex
+      .map { (c, i) =>
+        val finish = if (i == chunks.size - 1) ""","finishReason":"STOP"""" else ""
+        s"""data: {"candidates":[{"content":{"role":"model","parts":[$c]}$finish}]}"""
+      }
+      .mkString("", "\n", "\n")
 
   private val city = ujson.Obj("city" -> "Paris")
 

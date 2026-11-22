@@ -11,7 +11,6 @@ import org.llm4s.testkit.LocalProviderTestServer.{
   anthropicMessage,
   holdOpen,
   sendJsonResponse,
-  sendSseResponse,
   streamThenHold,
   withServer
 }
@@ -141,13 +140,7 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
       )
     }
 
-    "actually stream, not silently fall back to complete()" in {
-      withServer("/v1/messages")(exchange => sendSseResponse(exchange, streamingBody)) { baseUrl =>
-        assertStreams(clientAt(baseUrl))
-      }
-    }
-
-    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+    "report how each reply ended, on complete and on a stream alike, and really stream (RFC 0009)" in {
       assertModelCallContract(AnthropicContractFixtures.replies, "/v1/messages")(clientAt)
     }
 

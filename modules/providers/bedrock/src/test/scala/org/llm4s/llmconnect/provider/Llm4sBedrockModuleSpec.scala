@@ -144,11 +144,7 @@ class Llm4sBedrockModuleSpec extends AnyWordSpec with Matchers with ProviderModu
 
   "a client built by the bedrock descriptor" should {
 
-    "actually stream, not silently fall back to complete()" in {
-      withServer("/")(sendEventStream(_, textStream("Hi", "!")))(url => assertStreams(clientAt(url)))
-    }
-
-    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+    "report how each reply ended, on complete and on a stream alike, and really stream (RFC 0009)" in {
       assertModelCallContract(BedrockContractFixtures.replies)(clientAt)
     }
 

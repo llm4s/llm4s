@@ -59,6 +59,11 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
     c shouldBe TraceEvent.ErrorOccurred(other, "ctx2", t1, Some(span))
     c.withSpan(None).span shouldBe None
     c.withSpan(Some(span)).span shouldBe Some(span)
+    d.usage shouldBe None
+    c.withUsage(TokenUsage(1, 2, 3)).usage shouldBe Some(TokenUsage(1, 2, 3))
+    c.withUsage(TokenUsage(1, 2, 3)).withUsage(None).usage shouldBe None
+    TraceEvent.ErrorOccurred(boom, "ctx", t0, None, None, None, None, None, None) shouldBe
+      TraceEvent.ErrorOccurred(boom, "ctx", t0)
   }
 
   "TokenUsageRecorded" should "default its timestamp and span and set every field" in {

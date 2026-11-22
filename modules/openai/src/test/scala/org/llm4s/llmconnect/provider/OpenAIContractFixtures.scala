@@ -6,7 +6,7 @@ import org.llm4s.testkit.{ Applicability, ContractCase, LocalProviderTestServer,
  * OpenAI's chat-completions replies for each RFC 0009 [[ContractCase]], for `assertModelCallContract`: the shapes
  * OpenAI, Azure OpenAI and Requesty send. A stream with `stream_options.include_usage` ends on a usage-only
  * event with no choices. Hand-written in the documented shape (no live capture yet); a stream ends with
- * `finish_reason`, then usage, then `[DONE]`.
+ * `finish_reason`, then usage, then `[DONE]`. A failure after the 200 status is an event carrying an `error` object.
  */
 object OpenAIContractFixtures {
 
@@ -34,8 +34,22 @@ object OpenAIContractFixtures {
       )
     )
 
-  private val call =
-    """{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}"""
+  private def streamOnly(stream: String): Applicability =
+    Applicability.Applies(RecordedReply.streamOnly(LocalProviderTestServer.sendSseResponse(_, stream)))
+
+  private def callWith(name: String, arguments: String): String =
+    s"""{"id":"call_1","type":"function","function":{"name":"$name","arguments":${ujson.Str(arguments).render()}}}"""
+
+  private val call = callWith("get_weather", """{"city":"Paris"}""")
+
+  /** The first event of a streamed call: its id and name, arguments `""`. */
+  private def callOpens(name: String): String =
+    event(
+      s"""{"role":"assistant","content":null,"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"$name","arguments":""}}]}"""
+    )
+
+  private def argumentDelta(fragment: String): String =
+    event(s"""{"tool_calls":[{"index":0,"function":{"arguments":${ujson.Str(fragment).render()}}}]}""")
 
   /** Every case, as a chat-completions server answers it. */
   val replies: Map[ContractCase, Applicability] = Map(
@@ -66,12 +80,45 @@ object OpenAIContractFixtures {
         event("{}", "tool_calls")
       )
     ),
+    // a tool with no parameters: OpenAI sends "{}", streamed as one fragment after the opening ""
+    ContractCase.NoArgumentToolCall -> applies(
+      reply(s"""{"role":"assistant","content":null,"tool_calls":[${callWith("get_time", "{}")}]}""", "tool_calls"),
+      sse(callOpens("get_time"), argumentDelta("{}"), event("{}", "tool_calls"))
+    ),
+    // the limit cut the call's arguments
+    ContractCase.ToolCallCutByLimit -> applies(
+      reply(
+        s"""{"role":"assistant","content":null,"tool_calls":[${callWith("get_weather", """{"city":"Par""")}]}""",
+        "length"
+      ),
+      sse(callOpens("get_weather"), argumentDelta("""{"city":"""), argumentDelta(""""Par"""), event("{}", "length"))
+    ),
+    // arguments that are not JSON, in a reply that otherwise ended cleanly
+    ContractCase.MalformedArguments -> applies(
+      reply(
+        s"""{"role":"assistant","content":null,"tool_calls":[${callWith("get_weather", "{city: Paris")}]}""",
+        "tool_calls"
+      ),
+      sse(callOpens("get_weather"), argumentDelta("{city: "), argumentDelta("Paris"), event("{}", "tool_calls"))
+    ),
     ContractCase.ContentFiltered -> applies(
       reply("""{"role":"assistant","content":"Here is how"}""", "content_filter"),
       sse(
         event("""{"role":"assistant","content":"Here is how"}"""),
         event("{}", "content_filter")
       )
+    ),
+    // text, then the connection closes: no finish_reason, no usage, no [DONE]
+    ContractCase.StreamEndsEarly -> streamOnly(
+      Seq(event("""{"role":"assistant","content":"The answer"}"""), event("""{"content":" is"}"""))
+        .mkString("", "\n\n", "\n\n")
+    ),
+    ContractCase.ErrorEvent -> streamOnly(
+      Seq(
+        event("""{"role":"assistant","content":"The answer"}"""),
+        """data: {"error":{"message":""" + ujson.Str(ContractCase.ProviderErrorMessage).render() +
+          ""","type":"server_error","param":null,"code":null}}"""
+      ).mkString("", "\n\n", "\n\n")
     )
   )
 }

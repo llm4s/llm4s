@@ -117,7 +117,8 @@ class VertexAIClient(
       )
       .flatMap { transformed =>
         val adjustments =
-          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options)
+          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options) ++
+            UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options)
         adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
@@ -175,7 +176,8 @@ class VertexAIClient(
       )
       .flatMap { transformed =>
         val adjustments =
-          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options)
+          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options) ++
+            UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options)
         adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
@@ -215,13 +217,18 @@ class VertexAIClient(
                 Iterator.continually(reader.readLine()).takeWhile(l => l != null && refused.isEmpty).foreach { line =>
                   rawStream.append(line).append('\n')
                   val trimmed = line.trim
-                  if (trimmed.startsWith("data: ")) {
-                    val jsonStr = trimmed.stripPrefix("data: ").trim
+                  // SSE: a `data:` line carries a JSON chunk; blank lines, `:` comments (keep-alives) and the other
+                  // fields are not data and are ignored
+                  if (trimmed.startsWith("data:")) {
+                    val jsonStr = trimmed.stripPrefix("data:").trim
                     if (jsonStr.nonEmpty) {
                       // a chunk's functionCall.args is the model's JSON, native in the envelope: one nested too
                       // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
-                      // (#1562); a chunk that is not JSON at all is skipped, as it always was
+                      // (#1562); a data line that is not JSON at all fails the stream too (RFC 0009, open question 5)
                       BoundedJson.read(jsonStr) match {
+                        case Right(json) if GeminiStreamEnd.streamError(json, providerName).isDefined =>
+                          // an error after the 200 status ends the stream with it (RFC 0009, rule 2)
+                          refused = GeminiStreamEnd.streamError(json, providerName)
                         case Right(json) =>
                           GeminiBlocked.filtered(json, "Vertex AI", textLength) match {
                             case Some(filtered) if filtered.usage.isEmpty =>
@@ -239,7 +246,7 @@ class VertexAIClient(
                                   callsSeen = callsSeen || parsed.calls.nonEmpty
                                   signatures ++= parsed.signatures
                                   chunks.foreach { chunk =>
-                                    accumulator.addChunk(chunk)
+                                    accumulator.addChunk(ToolCallRules.wholeCall(chunk))
                                     onChunk(chunk)
                                   }
                               }
@@ -257,7 +264,9 @@ class VertexAIClient(
                             s"[VertexAI] Stream refused: a chunk is nested more than ${BoundedJson.MaxDepth} levels deep"
                           )
                           refused = Some(tooDeep)
-                        case Left(_) => () // unreadable chunk: skipped
+                        case Left(unparsed) =>
+                          logger.warn("[VertexAI] Stream refused: a data line is not JSON")
+                          refused = Some(GeminiStreamEnd.unreadable(unparsed.message, providerName))
                       }
                     }
                   }
@@ -265,6 +274,8 @@ class VertexAIClient(
               }.toEither.left
                 .map(HttpFailures.streamReadError(_, url, streamTimeout))
                 .flatMap(_ => refused.toLeft(()))
+                // a stream whose candidate never stated a finishReason was cut off (RFC 0009, rule 1)
+                .filterOrElse(_ => finish.isDefined, GeminiStreamEnd.unfinished(url))
                 .flatMap(_ =>
                   accumulator.toCompletion.map { c =>
                     val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
@@ -285,6 +296,7 @@ class VertexAIClient(
                   }
                 )
                 // an abnormal finish with nothing produced fails, decided from the whole stream as `complete` does
+                .flatMap(c => GeminiBlocked.malformedCall(finish, "Vertex AI").toLeft(c))
                 .flatMap(c => GeminiBlocked.unanswered(finish, c, "Vertex AI").toLeft(c))
                 .map { completion =>
                   recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
@@ -431,7 +443,10 @@ class VertexAIClient(
         .filtered(json, "Vertex AI")
         .toLeft(())
         .flatMap(_ => parseCandidate(json))
+        .flatMap(c => GeminiBlocked.malformedCall(GeminiBlocked.finishReason(json), "Vertex AI").toLeft(c))
         .flatMap(c => GeminiBlocked.unanswered(GeminiBlocked.finishReason(json), c, "Vertex AI").toLeft(c))
+        // RFC 0009, Part 3: a call whose args are not an object, or in a reply MAX_TOKENS cut, is never run
+        .flatMap(ToolCallRules.checked)
     }
 
   private def parseCandidate(json: ujson.Value): Result[Completion] =

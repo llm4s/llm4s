@@ -53,7 +53,7 @@ An accepted RFC can be amended by a later pull request; a change of direction is
 
 | RFC | Title | Status | Tracking |
 |---|---|---|---|
-| [0001](0001-agent-baseline) | When `llm4s-agent` gets its MiMa baseline | Proposed | [#1281](https://github.com/llm4s/llm4s/issues/1281), [#1266](https://github.com/llm4s/llm4s/issues/1266) |
+| [0001](0001-agent-baseline) | When `llm4s-agent` gets its MiMa baseline | Rejected: it takes the baseline with the other frozen modules | [#1281](https://github.com/llm4s/llm4s/issues/1281), [#1266](https://github.com/llm4s/llm4s/issues/1266) |
 | 0002 | Growth-prone data types: `final case class X private`, companion `apply`, `with*` setters, no public `copy` | Accepted (recorded retroactively) | [#1133](https://github.com/llm4s/llm4s/issues/1133) pass 5; [policy](../reference/compatibility-policy#changing-a-frozen-api-without-breaking-it) |
 | 0003 | Times in the public API: `FiniteDuration` for a duration, `Instant` for a point in time | Accepted (recorded retroactively) | [#1133](https://github.com/llm4s/llm4s/issues/1133) passes 6 and 7 |
 | 0004 | A frozen module's public signatures expose no third-party type and no wildcard-importable implicit | Accepted (recorded retroactively) | [#1133](https://github.com/llm4s/llm4s/issues/1133) pass 8; enforced by `stabilityTierCheck` ([#2357](https://github.com/llm4s/llm4s/issues/2357)) |
@@ -61,7 +61,7 @@ An accepted RFC can be amended by a later pull request; a change of direction is
 | 0006 | Tracing backends are `TracingBackend`s selected by `TracingMode.Named`; core reads no backend's keys | Accepted (recorded retroactively) | [#1233](https://github.com/llm4s/llm4s/issues/1233), [#1133](https://github.com/llm4s/llm4s/issues/1133) |
 | 0007 | Typed agent runtime: one execution model for the agent harness | Proposed (design document) | [#1266](https://github.com/llm4s/llm4s/issues/1266); [design](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime-design.md) |
 | [0008](0008-generation-controls) | Generation controls and reported adjustments: `thinking`, `promptCache`, `Completion.adjustments` | Accepted | [#2115](https://github.com/llm4s/llm4s/issues/2115) |
-| [0009](0009-model-call-contract) | The model call contract: a `FinishReason` on every `Completion`, stream endings, tool-call arguments | Proposed | [#2613](https://github.com/llm4s/llm4s/issues/2613) |
+| [0009](0009-model-call-contract) | The model call contract: a `FinishReason` on every `Completion`, stream endings, tool-call arguments | Implemented (release after 0.6.0) | [#2613](https://github.com/llm4s/llm4s/issues/2613); PRs [#2681](https://github.com/llm4s/llm4s/pull/2681), [#2688](https://github.com/llm4s/llm4s/pull/2688), [#2700](https://github.com/llm4s/llm4s/pull/2700), [#2691](https://github.com/llm4s/llm4s/pull/2691), [#2702](https://github.com/llm4s/llm4s/pull/2702), [#2687](https://github.com/llm4s/llm4s/pull/2687) |
 
 Rows 0002 to 0006 were decided before this process existed. They are listed so that the log is complete from the
 start; each links to where the decision was made and has no file of its own. Write one only if the decision is

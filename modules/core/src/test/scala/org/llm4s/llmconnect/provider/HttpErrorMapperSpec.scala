@@ -324,4 +324,16 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
       .message should
       include("request too large")
   }
+
+  "mapStreamError" should "map a mid-stream error by its status, keeping the provider's message in every error" in {
+    val limited = HttpErrorMapper.mapStreamError(429, "quota exceeded for this minute", "gemini")
+    limited shouldBe a[RateLimitError]
+    limited.message should include("quota exceeded for this minute")
+    val unavailable = HttpErrorMapper.mapStreamError(503, "overloaded", "gemini")
+    unavailable shouldBe a[ServiceError]
+    unavailable.asInstanceOf[ServiceError].httpStatus shouldBe 503
+    unavailable.message should include("overloaded")
+    (HttpErrorMapper.mapStreamError(502, "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789", "x").message should not)
+      .include("abcdefghijklmnopqrstuvwxyz0123456789")
+  }
 }

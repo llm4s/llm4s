@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.metrics.MockMetricsCollector
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.Result
 import java.time.Instant
 
 /**
@@ -441,13 +442,10 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
       )
     )
 
-    val toolCalls = helper.testParseToolCalls(json)
-
-    toolCalls should have size 1
-    toolCalls(0).id shouldBe "call-bad"
-    toolCalls(0).name shouldBe "test"
-    // Invalid JSON should fallback to empty object
-    toolCalls(0).arguments shouldBe a[ujson.Obj]
+    // invalid JSON is a malformed call, never the {} it used to become (RFC 0009)
+    helper.testReadToolCalls(json).left.map(_.message) should matchPattern {
+      case Left(message: String) if message.contains("malformed tool call 'test'") =>
+    }
   }
 
   // ============ Streaming Chunk Parsing Tests ============
@@ -579,7 +577,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
     val result = helper.testParseStreamingArguments("""{"key":"value"}""")
 
-    result("key").str shouldBe "value"
+    result.map(_("key").str) shouldBe Right("value")
   }
 
   it should "return empty object for empty string" in {
@@ -587,15 +585,15 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
     val result = helper.testParseStreamingArguments("")
 
-    result shouldBe ujson.Obj()
+    result shouldBe Right(ujson.Obj())
   }
 
-  it should "return raw string for invalid JSON" in {
+  it should "fail invalid JSON, never passing it on as a raw string (RFC 0009)" in {
     val helper = new ZaiClientTestHelper(testConfig)
 
     val result = helper.testParseStreamingArguments("not json {")
 
-    result shouldBe ujson.Str("not json {")
+    result.isLeft shouldBe true
   }
 }
 
@@ -603,7 +601,6 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
  * Test helper class that exposes private methods for unit testing.
  */
 class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends ZaiClient(config) {
-  import scala.util.Try
 
   def testCreateRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj =
     createRequestBody(conversation, options)
@@ -657,15 +654,10 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
   }
 
   def testParseToolCalls(toolCallsJson: ujson.Value): Seq[ToolCall] =
-    toolCallsJson.arr.map { call =>
-      val function = call("function")
-      val argsStr  = function.obj.get("arguments").flatMap(_.strOpt).getOrElse("{}")
-      ToolCall(
-        id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
-        name = function.obj.get("name").flatMap(_.strOpt).getOrElse(""),
-        arguments = Try(ujson.read(argsStr)).getOrElse(ujson.Obj())
-      )
-    }.toSeq
+    testReadToolCalls(toolCallsJson).fold(e => throw new AssertionError(e.message), identity)
+
+  def testReadToolCalls(toolCallsJson: ujson.Value): Result[Seq[ToolCall]] =
+    ZaiDialect.parseToolCalls(toolCallsJson)
 
   def testParseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
     val choices = json("choices").arr
@@ -688,7 +680,7 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
           ToolCall(
             id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
             name = function.obj.get("name").flatMap(_.strOpt).getOrElse(""),
-            arguments = testParseStreamingArguments(rawArgs)
+            arguments = ujson.Str(rawArgs)
           )
       }
 
@@ -727,7 +719,7 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
     }
   }
 
-  def testParseStreamingArguments(raw: String): ujson.Value =
+  def testParseStreamingArguments(raw: String): Result[ujson.Value] =
     org.llm4s.llmconnect.streaming.StreamingToolArgumentParser.parse(raw)
 }
 

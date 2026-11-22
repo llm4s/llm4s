@@ -1082,12 +1082,20 @@ final class GraphRuntime(
     fence: () => Boolean = () => true,
     above: Option[(ThreadId, FencingToken)] = None
   ): Result[Unit] =
+    // the owner alone, not the latest checkpoint: a delete reads nothing else of it (#2642)
     def checked: Result[Unit] =
       checkpointer
-        .latest(threadId)
+        .owner(threadId)
         .flatMap(
-          _.fold[Result[Unit]](Right(()))(stored =>
-            checkTenant(threadId, stored, config).flatMap(_ => if child then Right(()) else notChild(threadId, stored))
+          _.fold[Result[Unit]](Right(()))(owner =>
+            val requested = config.tenantId.map(_.value)
+            Either
+              .cond(owner.tenantId == requested, (), GraphError.TenantMismatch(threadId.value, requested))
+              .flatMap(_ =>
+                owner.parent match
+                  case Some(parent) if !child => Left(GraphError.ChildThread(threadId.value, parent.value))
+                  case _                      => Right(())
+              )
           )
         )
     // a delete that happened removed the claim with the thread: there is nothing to give back

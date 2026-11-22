@@ -4,7 +4,9 @@ import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.JlamaConfig
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.testkit.{ Applicability, ContractCase, ProviderModuleChecks, ProviderTestConfig }
+import com.sun.net.httpserver.HttpExchange
+import org.llm4s.testkit.{ Applicability, ContractCase, ProviderModuleChecks, ProviderTestConfig, RecordedReply }
+import org.llm4s.testkit.LocalProviderTestServer.sendJsonResponse
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -111,20 +113,25 @@ class Llm4sJlamaModuleSpec extends AnyWordSpec with Matchers with ProviderModule
 
   "a JlamaClient" should {
 
-    "actually stream, not silently fall back to complete()" in {
-      assertStreams(client(new ScriptedEngine()))
-    }
-
-    "declare each RFC 0009 ending it cannot be served over a wire" in {
-      // the model runs in-process: there are no provider bytes to serve, so JlamaClientSpec checks Stop and Length
-      // on complete and on a stream against a scripted engine instead
+    "report a clean ending on complete and on a stream alike, really stream, and declare the endings it cannot serve (RFC 0009)" in {
+      // the model runs in-process: there are no provider bytes to serve. CleanText runs against the scripted engine,
+      // which answers every call with text and Stop, so the reply the local server holds is never asked for; the
+      // other endings need a differently scripted engine, which JlamaClientSpec checks on complete and on a stream
       val inProcess = "an in-process engine with no wire format; JlamaClientSpec checks it with a scripted engine"
+      val unread =
+        (exchange: HttpExchange) => sendJsonResponse(exchange, 500, """{"error":"JlamaClient sends no request"}""")
       assertModelCallContract(
         Map(
-          ContractCase.CleanText       -> Applicability.NotApplicable(inProcess),
-          ContractCase.TextCutByLimit  -> Applicability.NotApplicable(inProcess),
-          ContractCase.ToolCall        -> Applicability.NotApplicable("JlamaClient does not call tools"),
-          ContractCase.ContentFiltered -> Applicability.NotApplicable("a local model has no content filter")
+          ContractCase.CleanText          -> Applicability.Applies(RecordedReply(unread, unread)),
+          ContractCase.TextCutByLimit     -> Applicability.NotApplicable(inProcess),
+          ContractCase.ToolCall           -> Applicability.NotApplicable("JlamaClient does not call tools"),
+          ContractCase.NoArgumentToolCall -> Applicability.NotApplicable("JlamaClient does not call tools"),
+          ContractCase.ToolCallCutByLimit -> Applicability.NotApplicable("JlamaClient does not call tools"),
+          ContractCase.MalformedArguments -> Applicability.NotApplicable("JlamaClient does not call tools"),
+          ContractCase.ContentFiltered    -> Applicability.NotApplicable("a local model has no content filter"),
+          // the engine's generate call returns or throws: there is no connection to drop, and no event to send
+          ContractCase.StreamEndsEarly -> Applicability.NotApplicable("an in-process engine has no stream to cut off"),
+          ContractCase.ErrorEvent -> Applicability.NotApplicable("an in-process engine reports a failure by throwing")
         )
       )(_ => client(new ScriptedEngine()))
     }

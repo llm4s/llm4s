@@ -59,7 +59,7 @@ internal fun reply(text: String = "Let me check.", cost: Option<Any> = Option.ap
     Completion.apply(
         "reply-1", Instant.EPOCH, text, "gpt-4o-2024-08-06", AssistantMessage.apply(text),
         scala.jdk.javaapi.CollectionConverters.asScala(listOf(ToolCall("c1", "weather", ujson.Str("Paris")))).toList(),
-        Option.apply(TokenUsage.apply(12, 5, 17, Option.empty(), Option.apply<Any>(8), Option.apply<Any>(3))),
+        Option.apply(TokenUsage.apply(12, 5, 17, Option.empty(), Option.apply<Any>(8), Option.apply<Any>(3), Option.empty())),
         cost,
         scala.jdk.javaapi.CollectionConverters.asScala(listOf<Citation>()).toList(),
     )

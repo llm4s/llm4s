@@ -101,13 +101,7 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
       assertUsesSuppliedHttpClient(OllamaProvider, section)
     }
 
-    "actually stream, not silently fall back to complete()" in {
-      withServer("/")(exchange => sendJsonResponse(exchange, 200, ndjsonBody)) { baseUrl =>
-        assertStreams(clientAt(baseUrl))
-      }
-    }
-
-    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+    "report how each reply ended, on complete and on a stream alike, and really stream (RFC 0009)" in {
       assertModelCallContract(OllamaContractFixtures.replies)(clientAt)
     }
 
