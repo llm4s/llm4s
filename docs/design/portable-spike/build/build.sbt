@@ -84,6 +84,7 @@ val portableCoreFiles = Seq(
   "llmconnect/model/EmbeddingRequest.scala",
   "llmconnect/model/EmbeddingResponse.scala",
   "llmconnect/model/EmbeddingVector.scala",
+  "llmconnect/model/FinishReason.scala",
   "llmconnect/model/InputPurpose.scala",
   "llmconnect/model/Message.scala",
   "llmconnect/model/Modality.scala",

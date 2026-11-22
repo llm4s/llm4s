@@ -77,6 +77,7 @@ object OpenAIChatProtocol {
         val choice  = json("choices")(0)
         val msg     = choice("message")
         val content = msg.obj.get("content").flatMap(_.strOpt)
+        val finish  = choice.obj.get("finish_reason").flatMap(_.strOpt).filter(_.nonEmpty).map(finishReason)
         val calls = msg.obj.get("tool_calls").flatMap(_.arrOpt).toList.flatten.map { c =>
           ToolCall(c("id").str, c("function")("name").str, arguments(c("function")("arguments")))
         }
@@ -87,10 +88,23 @@ object OpenAIChatProtocol {
           model = json.obj.get("model").flatMap(_.strOpt).getOrElse(""),
           message = AssistantMessage(content, calls),
           toolCalls = calls,
-          usage = json.obj.get("usage").flatMap(usage)
+          usage = json.obj.get("usage").flatMap(usage),
+          finishReason = finish.getOrElse(FinishReason.Other(""))
         )
       }.toEither.left.map(t => malformed(s"unexpected response shape: ${t.getMessage}"))
     }
+
+  /**
+   * A `finish_reason` as core's [[FinishReason]] (RFC 0009), as `llm4s-openai-compatible`'s mapping does: `stop`,
+   * `tool_calls` (or the older `function_call`) and `length` mapped, any other kept as `Other`. Spike scope: a
+   * `content_filter` stays `Other("content_filter")`, where the JVM clients make it a `ContentFilteredError`.
+   */
+  def finishReason(raw: String): FinishReason = raw match {
+    case "stop"                         => FinishReason.Stop
+    case "tool_calls" | "function_call" => FinishReason.ToolCalls
+    case "length"                       => FinishReason.Length
+    case other                          => FinishReason.Other(other)
+  }
 
   /** The error an unsuccessful HTTP status means. */
   def decodeError(status: Int, body: String, provider: String): LLMError = status match {
@@ -136,7 +150,7 @@ object OpenAIChatProtocol {
     private var id                            = ""
     private var model                         = ""
     private var created                       = Instant.EPOCH
-    private var finished: Option[String]      = None
+    private var finished: Option[FinishReason] = None
     private var lastUsage: Option[TokenUsage] = None
     private val calls = scala.collection.mutable.LinkedHashMap.empty[Int, (String, String, StringBuilder)]
     private var failure: Option[LLMError] = None
@@ -162,7 +176,7 @@ object OpenAIChatProtocol {
 
     private def choice(c: ujson.Value): Vector[StreamedChunk] = {
       val delta  = c.obj.get("delta").filterNot(_.isNull)
-      val finish = c.obj.get("finish_reason").flatMap(_.strOpt)
+      val finish = c.obj.get("finish_reason").flatMap(_.strOpt).filter(_.nonEmpty).map(finishReason)
       finish.foreach(f => finished = Some(f))
       val content = delta.flatMap(_.obj.get("content")).flatMap(_.strOpt).filter(_.nonEmpty)
       content.foreach(text.append)
@@ -203,7 +217,8 @@ object OpenAIChatProtocol {
               model = model,
               message = AssistantMessage(Option(content).filter(_.nonEmpty), toolCalls),
               toolCalls = toolCalls,
-              usage = lastUsage
+              usage = lastUsage,
+              finishReason = finished.getOrElse(FinishReason.Other(""))
             )
           )
         }
