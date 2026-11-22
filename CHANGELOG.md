@@ -110,6 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
+- **Added** `Agent.abandon(threadId, reason)`: closes a cancelled, failed or crashed run instead of recovering it - each unfinished tool call gets `reason` as its result,
+  a finished one keeps its own, nothing runs again and the thread takes a new turn ([guide](docs/guide/agents/index.md), [design 4.57](docs/design/typed-agent-runtime/4.57-stage-5-slice-w3-cancel-from-any-machine-and-the-busy-thread-policy.md)) [#1750](https://github.com/llm4s/llm4s/issues/1750).
 - **Added** `Checkpointer.owner`: a thread's tenant and parent (`ThreadOwner`) without decoding its latest checkpoint, which
   `Agent.forget` and `GraphRuntime.deleteThread` now check with; a default over `latest` keeps other stores compiling, and the in-memory, SQLite and PostgreSQL stores read it from their indexed columns [#2642](https://github.com/llm4s/llm4s/issues/2642).
 - **Changed** a turn whose final answer ended `FinishReason.Length` ends `AgentStatus.Truncated(partialAnswer)` (no `answer`;

@@ -201,7 +201,8 @@ final class Agent private[agent] (
 
   /**
    * Continues `threadId`'s failed or interrupted run, re-running only failed or unstarted work.
-   * Interrupting the calling thread cancels the turn, as for [[run]].
+   * Interrupting the calling thread cancels the turn, as for [[run]]. To close the run instead, running nothing
+   * again, see [[abandon]].
    */
   def recover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentResult] =
     blocking(startRecover(threadId, config))
@@ -209,6 +210,48 @@ final class Agent private[agent] (
   /** [[recover]], returning at once with the running turn - to cancel it, or to await its result. */
   def startRecover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentRun] =
     runtime.recover(threadId, loop.graph, configured(config)).map(agentRun(_, None, drain = false))
+
+  /**
+   * Closes `threadId`'s failed or interrupted run without continuing it
+   * ([[https://github.com/llm4s/llm4s/issues/1750 #1750]]): the other answer to a run that was cancelled, failed or
+   * crashed, for when [[recover]] would only run a misbehaving tool call again. Every tool call of the turn that has
+   * no result gets one - its own, if the tool had finished when the run stopped, else `reason` - so the model never
+   * sees a call with no result; no tool runs, and no model is called. The thread is then at rest, settled as a failure
+   * (`RunOutcome.Failed("Abandoned", ...)`): [[run]] starts its next turn, in which the model reads `reason` as those
+   * calls' results, and [[recover]] has nothing left to continue. A turn that stopped before its model answered has no
+   * call to answer and is closed all the same.
+   *
+   * `reason` is model-visible text, so say what the model should conclude - the default, [[Agent.AbandonedResult]],
+   * says the call did not complete. A blank one is refused (`ValidationError`). An abandoned call may still have had
+   * its effect: a tool cut short by a cancel or a crash is not known to have done nothing.
+   *
+   * Only a thread with an incomplete run is abandoned, and anything else is refused with the thread unchanged: a
+   * thread at rest or unknown is `GraphError.NothingToRecover`, a suspended one `GraphError.PendingInterrupts`
+   * (answer it with [[resume]]), one a run still holds - in this runtime, or by a live claim in any runtime sharing
+   * the store, a crashed process's until it lapses - `GraphError.ThreadBusy`, another tenant's
+   * `GraphError.TenantMismatch`, and a child thread `GraphError.ChildThread`. So after [[AgentRun.cancel]], await the
+   * run before abandoning its thread. The edit is made under the thread's claim, as run `config.runId`, so it cannot
+   * interleave with a run; a subagent the turn left running is settled as abandoned when the thread's next turn starts.
+   *
+   * A queued run is stopped through its queue, which settles the turn itself; abandoning a thread a queue entry was
+   * still to recover closes that entry as failed.
+   */
+  def abandon(
+    threadId: ThreadId,
+    reason: String = Agent.AbandonedResult,
+    config: RunConfig = RunConfig()
+  ): Result[Unit] =
+    if reason.trim.isEmpty then Left(ValidationError("reason", "the reason recorded as a tool call's result is blank"))
+    else
+      val settled = configured(config)
+      runtime.abandon(
+        threadId,
+        loop.graph,
+        RunOutcome.Failed("Abandoned", Agent.AbandonedMessage),
+        Agent.AbandonedMessage,
+        settled,
+        amend = state => SettledTurn.closing(state, s"${settled.runId.value}/abandoned", reason)
+      )
 
   /**
    * Answers some of `threadId`'s pending approvals, questions and breakpoints - built with
@@ -532,6 +575,13 @@ object Agent:
 
   /** Model calls per turn when [[AgentBuilder.withMaxSteps]] is not set. */
   val DefaultMaxSteps: Int = 50
+
+  /** The result [[Agent.abandon]] records for a tool call that had none, unless the caller gives its own. */
+  val AbandonedResult: String =
+    "abandoned: the run stopped before this tool call returned a result, and the call was not run again"
+
+  /** The failure an abandoned run is settled with: its `RunFailed` event's and its `RunOutcome.Failed`'s message. */
+  private val AbandonedMessage: String = "abandoned: the run was closed by its thread's owner rather than recovered"
 
   /** How many children [[Agent.children]] reads from the runtime at a time. */
   private val ChildPage: Int = 256
