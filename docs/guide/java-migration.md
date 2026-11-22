@@ -5,7 +5,8 @@ description: "Map LangChain4j and Spring AI concepts to llm4s-java-api, with com
 parent: User Guide
 nav_order: 39
 # Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one of them closes.
-cites_open_issues: [2277]
+cites_open_issues: []
+cites_closed_issues: [2277]
 ---
 
 # Moving a Java app from LangChain4j or Spring AI
@@ -398,8 +399,8 @@ Plainly, as of this page's sources:
 
 - **Spring Boot discovery of AI services.** `Llm4s.aiService` implements an annotated interface
   ([Java AI services](java-ai-services)), but the starter does not yet register such interfaces as beans, as
-  LangChain4j's `@AiService` does [L6]: declare a `@Bean` that builds the service. Tracked in
-  [#2277](https://github.com/llm4s/llm4s/issues/2277).
+  LangChain4j's `@AiService` does [L6]: declare a `@Bean` that builds the service. AI services themselves landed
+  under [#2277](https://github.com/llm4s/llm4s/issues/2277), without that discovery.
 - **A chat-memory store keyed by a conversation id**, as Spring AI's `ChatMemoryRepository`s are [S3]. An agent keeps
   its threads in memory until `forget`; you keep the `JAgentResult` that names each one. An AI service's `@MemoryId`
   methods do keep one conversation per id, in a `ChatMemoryStore` you can implement
