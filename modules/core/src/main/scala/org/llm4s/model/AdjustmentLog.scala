@@ -1,6 +1,13 @@
 package org.llm4s.model
 
-import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, RequestOption, Thinking }
+import org.llm4s.llmconnect.model.{
+  CompletionOptions,
+  ReasoningEffort,
+  RequestAdjustment,
+  RequestOption,
+  Thinking,
+  TokenUsage
+}
 import org.slf4j.{ Logger, LoggerFactory }
 
 import java.util.concurrent.ConcurrentHashMap
@@ -98,6 +105,39 @@ private[llm4s] object UnmappedOptions {
   /** [[reasoning]] and [[thinking]]: the report of a client that maps neither. */
   def reasoningAndThinking(model: String, options: CompletionOptions): List[RequestAdjustment] =
     reasoning(model, options) ++ thinking(model, options)
+}
+
+/**
+ * What a client that sends `promptCache` reports about it (RFC 0008, Part 3), the same on every provider that places
+ * its own cache breakpoints (Anthropic `cache_control`, Bedrock `cachePoint`).
+ */
+private[llm4s] object PromptCacheReport {
+
+  /** Reported before the call: a prompt cache whose scope names nothing has nothing to send. */
+  def emptyScope(options: CompletionOptions): List[RequestAdjustment] =
+    options.promptCache
+      .filter(_.scope.isEmpty)
+      .toList
+      .map(_ => RequestAdjustment.Dropped(RequestOption.PromptCache, "the prompt cache's scope names nothing to cache"))
+
+  /**
+   * Reported after the call. A provider does not cache a prefix shorter than the model's minimum cacheable length, and
+   * says nothing, so a request that sent a cache breakpoint and neither read from nor wrote to the cache is reported
+   * `Dropped`. Without usage it cannot be told, and nothing is reported.
+   *
+   * @param sent whether the request carried a breakpoint
+   */
+  def uncached(sent: Boolean, usage: Option[TokenUsage]): List[RequestAdjustment] =
+    if (!sent) Nil
+    else
+      usage.toList
+        .filter(u => u.cachedTokens.getOrElse(0) == 0 && u.cacheCreationTokens.getOrElse(0) == 0)
+        .map(_ =>
+          RequestAdjustment.Dropped(
+            RequestOption.PromptCache,
+            "nothing was cached: the prefix may be below the model's minimum cacheable length"
+          )
+        )
 }
 
 /**
