@@ -1727,6 +1727,22 @@ the `format` field of `/api/chat`, for streaming and non-streaming calls alike:
 object, which needs Ollama 0.5 or later. `JsonSchema.name` and `strict` have no Ollama equivalent
 and are ignored. With no `responseFormat`, no `format` field is sent.
 
+### Thinking (`think`)
+
+`CompletionOptions.thinking` and `reasoning` are sent as `/api/chat`'s `think` field, which takes `true`, `false`, or
+a level the model defines ([Ollama: thinking](https://docs.ollama.com/capabilities/thinking)). The client asks
+`/api/show` once, on the first request that sets either, for the values the model takes (`thinking.values`), and
+keeps the answer. On a server that lists none, a model whose `capabilities` lack `thinking` is sent no `think`, and
+otherwise the model name decides: gpt-oss takes `low`, `medium` and `high`, every other model `true` and `false`.
+
+- `reasoning` → the nearest level the model takes, or `true` on a model that takes only on and off (reported).
+- `Thinking.Off` → `false`, or the lowest level on a model that cannot turn thinking off (reported).
+- `Thinking.Adaptive` → `true`; a model that takes only levels keeps its default (`NotNeeded`).
+- `Thinking.budget(n)` → `true` (reported), or dropped on a model that takes only levels: `think` has no budget.
+- A model whose only value is `false` does not think: a request to think is reported `Dropped`.
+
+The reply's `message.thinking` is the completion's thinking.
+
 ### Available Models
 
 100+ models available:

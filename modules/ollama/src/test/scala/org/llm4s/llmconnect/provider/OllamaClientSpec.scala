@@ -328,8 +328,8 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     assert(opts("top_p").num == 0.9)
   }
 
-  test("a requested reasoning effort is reported as dropped, from complete and from a stream (RFC 0008)") {
-    // Ollama's request carries no reasoning setting (`think` is not mapped yet), so it is reported, not dropped silently
+  test("a requested reasoning effort is reported as adjusted, from complete and from a stream (RFC 0008)") {
+    // /api/show lists no thinking values here, so llama3.1 takes `think` on or off, and a level is sent as `true`
     val mockHttp = stub[Llm4sHttpClient]
     (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk("""{"message":{"content":"Hi"}}""")))
     (mockHttp.postStream _)
@@ -346,7 +346,8 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val reasoning = CompletionOptions().withReasoning(ReasoningEffort.High)
     val dropped =
       List(
-        RequestAdjustment.Dropped(RequestOption.Reasoning, "reasoning effort is not sent to llama3.1 by this client")
+        RequestAdjustment
+          .Adjusted(RequestOption.Reasoning, "high", "true", "llama3.1 takes thinking on or off, not a level")
       )
 
     assert(client.complete(conversation("Hello"), reasoning).toOption.get.adjustments == dropped)
