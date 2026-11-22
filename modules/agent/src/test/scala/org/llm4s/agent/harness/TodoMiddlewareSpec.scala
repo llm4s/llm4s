@@ -289,4 +289,11 @@ class TodoMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues wit
     json("todos")(0)("status").str shouldBe "in_progress"
     upickle.default.read[TodoList](json)(using TodoMiddleware.key.stateCodec) shouldBe list
   }
+
+  "Todo" should "set its id with withId, keeping its content and status" in {
+    val todo = Todo("1", "write tests", TodoStatus.Pending).withId("2")
+    todo.id shouldBe "2"
+    todo.content shouldBe "write tests"
+    todo.status shouldBe TodoStatus.Pending
+  }
 }

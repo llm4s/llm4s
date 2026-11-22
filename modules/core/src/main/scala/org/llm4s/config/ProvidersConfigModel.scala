@@ -188,29 +188,6 @@ object ProvidersConfigModel:
     ): NamedProviderConfig =
       new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, timeouts, auth, apiKeyFile)
 
-    /** The signature before `apiKeyFile` was added, kept so code compiled against it still links. */
-    def apply(
-      provider: ProviderId,
-      model: ModelName,
-      baseUrl: Option[BaseUrl],
-      apiKey: Option[ApiKey],
-      headers: Map[String, String],
-      extras: Map[String, String],
-      timeouts: ProviderTimeouts,
-      auth: Option[AuthConfig]
-    ): NamedProviderConfig =
-      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, timeouts, auth, None)
-
-    /** The signature before `timeouts` was added, kept so code compiled against it still links. */
-    def apply(
-      provider: ProviderId,
-      model: ModelName,
-      baseUrl: Option[BaseUrl],
-      apiKey: Option[ApiKey],
-      headers: Map[String, String],
-      extras: Map[String, String]
-    ): NamedProviderConfig =
-      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, ProviderTimeouts.default, None, None)
   }
 
   /**

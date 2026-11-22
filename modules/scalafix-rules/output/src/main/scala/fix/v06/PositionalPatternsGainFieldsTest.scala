@@ -2,8 +2,13 @@ package fix.v06
 
 import org.llm4s.agent.events.ModelCallCompleted
 import org.llm4s.error.ContentFilteredError
+import org.llm4s.agent.graph.toolloop.TurnState
 import org.llm4s.llmconnect.model.Completion
+import org.llm4s.llmconnect.model.CompletionOptions
+import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.model.ModelCapabilities
+import org.llm4s.model.ModelPricing
+import org.llm4s.rag.RAGConfig
 import org.llm4s.trace.TraceEvent
 
 object PositionalPatternsGainFieldsTest {
@@ -28,5 +33,30 @@ object PositionalPatternsGainFieldsTest {
   def failedModel(event: TraceEvent): Option[String] = event match {
     case TraceEvent.ErrorOccurred(_, _, _, _, _, model, _, _, _, _) => model
     case _ => None
+  }
+
+  // gained longCacheCreationTokens since 0.6.0 (RFC 0008 PR 6, #2115)
+  def prompt(usage: TokenUsage): Int = usage match {
+    case TokenUsage(promptTokens, _, _, _, _, _, _) => promptTokens
+  }
+
+  // gained cacheCreationInputTokenCostAbove1hr since 0.6.0 (#2115)
+  def inputCost(pricing: ModelPricing): Option[Double] = pricing match {
+    case ModelPricing(input, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => input
+  }
+
+  // budgetTokens became thinking and promptCache was appended since 0.6.0 (#2115)
+  def temperature(options: CompletionOptions): Double = options match {
+    case CompletionOptions(temperature, _, _, _, _, _, _, _, _, _) => temperature
+  }
+
+  // gained cut since 0.6.0 (#2613)
+  def steps(state: TurnState): Int = state match {
+    case TurnState(steps, _, _, _, _, _) => steps
+  }
+
+  // gained completionOptions since 0.6.0 (#2715)
+  def topK(config: RAGConfig): Int = config match {
+    case RAGConfig(_, _, _, _, _, _, topK, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => topK
   }
 }

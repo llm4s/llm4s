@@ -70,6 +70,7 @@ final case class Checkpoint private (
 ):
   def withFormatVersion(v: Int): Checkpoint                          = copy(formatVersion = v)
   def withId(i: String): Checkpoint                                  = copy(id = i)
+  def withParent(p: String): Checkpoint                              = copy(parent = Some(p))
   def withParent(p: Option[String]): Checkpoint                      = copy(parent = p)
   def withThreadId(t: String): Checkpoint                            = copy(threadId = t)
   def withRunId(r: String): Checkpoint                               = copy(runId = r)
@@ -122,54 +123,6 @@ object Checkpoint:
       deleting,
       trace
     )
-
-  /** A checkpoint recording no trace, as before `trace` existed. */
-  def apply(
-    formatVersion: Int,
-    id: String,
-    parent: Option[String],
-    threadId: String,
-    runId: String,
-    status: CheckpointStatus,
-    createdAt: Instant,
-    snapshot: GraphSnapshot,
-    tenantId: Option[String],
-    fencingToken: Option[FencingToken],
-    origin: Option[RunOrigin],
-    outcome: Option[RunOutcome],
-    deleting: Boolean
-  ): Checkpoint =
-    new Checkpoint(
-      formatVersion,
-      id,
-      parent,
-      threadId,
-      runId,
-      status,
-      createdAt,
-      snapshot,
-      tenantId,
-      fencingToken,
-      origin,
-      outcome,
-      deleting,
-      None
-    )
-
-  /** A checkpoint of a top-level thread recording no outcome, as before format 8. */
-  def apply(
-    formatVersion: Int,
-    id: String,
-    parent: Option[String],
-    threadId: String,
-    runId: String,
-    status: CheckpointStatus,
-    createdAt: Instant,
-    snapshot: GraphSnapshot,
-    tenantId: Option[String],
-    fencingToken: Option[FencingToken]
-  ): Checkpoint =
-    new Checkpoint(formatVersion, id, parent, threadId, runId, status, createdAt, snapshot, tenantId, fencingToken)
 
   /** The format this build writes. */
   val CurrentFormat: Int = 8
@@ -426,25 +379,6 @@ object Commit:
     fence: Option[(ThreadId, FencingToken)] = None,
     metadata: Option[ThreadMetadata] = None
   ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects, fence, metadata)
-
-  def apply(
-    token: FencingToken,
-    checkpoint: Option[Checkpoint],
-    pendingWrites: Vector[PendingWrite],
-    events: Vector[EventDraft],
-    retractTurn: Boolean,
-    effects: Vector[EffectRecord],
-    fence: Option[(ThreadId, FencingToken)]
-  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects, fence, None)
-
-  def apply(
-    token: FencingToken,
-    checkpoint: Option[Checkpoint],
-    pendingWrites: Vector[PendingWrite],
-    events: Vector[EventDraft],
-    retractTurn: Boolean,
-    effects: Vector[EffectRecord]
-  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects, None, None)
 
   /** The superstep that scheduled a task: its id is `"<superstep>.<ordinal>"`; another id reads as long past. */
   private def scheduledAt(taskId: TaskId): Int =

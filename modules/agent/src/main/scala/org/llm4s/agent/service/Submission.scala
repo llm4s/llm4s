@@ -33,6 +33,12 @@ final case class Submission private (
   maxAttempts: Int,
   traceContext: Option[TraceContext]
 ):
+  def withThreadId(t: ThreadId): Submission =
+    Submission(t, agentId, input, tenantId, policy, submissionKey, maxAttempts, traceContext)
+  def withAgentId(a: AgentId): Submission =
+    Submission(threadId, a, input, tenantId, policy, submissionKey, maxAttempts, traceContext)
+  def withInput(i: QueuedInput): Submission =
+    Submission(threadId, agentId, i, tenantId, policy, submissionKey, maxAttempts, traceContext)
   def withTenantId(t: TenantId): Submission = withTenantId(Some(t))
   def withTenantId(t: Option[TenantId]): Submission =
     Submission(threadId, agentId, input, t, policy, submissionKey, maxAttempts, traceContext)
