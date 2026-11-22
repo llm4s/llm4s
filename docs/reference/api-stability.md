@@ -168,8 +168,8 @@ they are not usable baselines for the split modules: the packages they hold have
 artifacts, and `llm4s-agent` and the provider modules do not exist there. The baseline is set at a pre-1.0
 release, version to be decided, once the designs are final
 ([#1281](https://github.com/llm4s/llm4s/issues/1281)); until then nothing is frozen.
-[RFC 0001](../rfcs/0001-agent-baseline) proposes that `llm4s-agent` takes a later baseline than the other
-frozen modules; the per-module baseline makes either answer a one-line change.
+`llm4s-agent` takes the same baseline as the other frozen modules: [RFC 0001](../rfcs/0001-agent-baseline), which
+proposed a later one, was rejected once the graph runtime ([#1266](https://github.com/llm4s/llm4s/issues/1266)) was complete.
 
 ### Setting and bumping the baseline
 
@@ -199,10 +199,10 @@ the file; they cannot be changed with `set`:
 Before the first run against the baseline, review the Beta parts that ship inside frozen modules, because
 [1.0 Scope](v1-scope) does not freeze them: `org.llm4s.assistant.*` (`llm4s-agent`) and the Mistral and
 Cohere dialect classes (`llm4s-openai-compatible`). Either exclude them with a documented filter or
-decide that they are frozen too. `llm4s-agent` may also wait for the graph runtime
-([#1266](https://github.com/llm4s/llm4s/issues/1266)) before it gets a baseline; if so, hold it back with
-`"llm4s-agent" -> None` in `mimaBaselineOverrides` until then, and give it `Some("X.Y.Z")` once its API is
-final. It stays a frozen module meanwhile: the stability, dependency and tier checks keep covering it.
+decide that they are frozen too. A module that must miss the shared baseline is held back with
+`"<module>" -> None` in `mimaBaselineOverrides` and given `Some("X.Y.Z")` later; it stays a frozen module
+meanwhile, so the stability, dependency and tier checks keep covering it. No module is planned to: `llm4s-agent`
+takes the shared baseline ([RFC 0001](../rfcs/0001-agent-baseline), rejected).
 
 The build is Scala 3 only, so one `sbt mimaReportBinaryIssues` covers every artifact. If a second Scala
 version returns, CI must run it cross-built (with sbt's `+` prefix) to check each version.
