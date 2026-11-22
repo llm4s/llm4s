@@ -169,8 +169,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ingestChunksWithPermissions` take `DocumentChunk`s and return the stored ids, with `RAG.chunk` and
   `ingestBytesWithPermissions` [#2732](https://github.com/llm4s/llm4s/issues/2732);
   [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
-- **Fixed** `SQLiteVectorStore` writes metadata as escaped JSON: a value with a quote or backslash no longer corrupts
-  its record's metadata [#2732](https://github.com/llm4s/llm4s/issues/2732).
 
 ### Build & tooling
 

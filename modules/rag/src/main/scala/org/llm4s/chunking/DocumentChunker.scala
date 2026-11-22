@@ -56,8 +56,11 @@ object ChunkMetadata {
   /** The record metadata key of [[ChunkMetadata.endOffset]]. */
   val EndOffsetKey: String = "chunk.endOffset"
 
-  /** The record metadata key of [[ChunkMetadata.headings]], a JSON array of strings. */
-  val HeadingsKey: String = "chunk.headings"
+  /**
+   * The prefix of the record metadata keys of [[ChunkMetadata.headings]]: one key per heading, `chunk.heading.0` for
+   * the outermost, then `chunk.heading.1`, and so on, so each value is a plain heading that a metadata filter matches.
+   */
+  val HeadingKeyPrefix: String = "chunk.heading."
 
   /** The record metadata key of [[ChunkMetadata.isCodeBlock]], present (as `"true"`) only for a code block. */
   val IsCodeBlockKey: String = "chunk.isCodeBlock"
@@ -74,7 +77,9 @@ object ChunkMetadata {
     metadata.sourceFile.map(SourceFileKey -> _).toMap ++
       metadata.startOffset.map(o => StartOffsetKey -> o.toString) ++
       metadata.endOffset.map(o => EndOffsetKey -> o.toString) ++
-      (if (metadata.headings.isEmpty) Map.empty else Map(HeadingsKey -> upickle.default.write(metadata.headings))) ++
+      metadata.headings.zipWithIndex.map { case (heading, i) =>
+        s"$HeadingKeyPrefix$i" -> heading
+      } ++
       (if (metadata.isCodeBlock) Map(IsCodeBlockKey -> "true") else Map.empty) ++
       metadata.language.map(LanguageKey -> _)
 
@@ -87,10 +92,13 @@ object ChunkMetadata {
       sourceFile = metadata.get(SourceFileKey),
       startOffset = metadata.get(StartOffsetKey).flatMap(_.toIntOption),
       endOffset = metadata.get(EndOffsetKey).flatMap(_.toIntOption),
-      headings = metadata
-        .get(HeadingsKey)
-        .flatMap(json => scala.util.Try(upickle.default.read[Seq[String]](json)).toOption)
-        .getOrElse(Seq.empty),
+      headings = metadata.toSeq
+        .flatMap { case (key, heading) =>
+          if (key.startsWith(HeadingKeyPrefix)) key.drop(HeadingKeyPrefix.length).toIntOption.map(_ -> heading)
+          else None
+        }
+        .sortBy(_._1)
+        .map(_._2),
       isCodeBlock = metadata.get(IsCodeBlockKey).contains("true"),
       language = metadata.get(LanguageKey)
     )
