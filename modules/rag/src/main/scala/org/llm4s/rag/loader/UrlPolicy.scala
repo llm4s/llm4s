@@ -54,10 +54,10 @@ object UrlPolicy {
   ) extends UrlPolicy {
 
     /** Only `hosts` and their subdomains may be fetched; an empty set lifts the restriction. */
-    def withAllowedHosts(hosts: Set[String]): Standard = copy(allowedHosts = hosts.map(normalize))
+    def withAllowedHosts(hosts: Set[String]): Standard = copy(allowedHosts = hosts.map(normalizeHost))
 
     /** Refuse `hosts` and their subdomains too. */
-    def withBlockedHosts(hosts: Set[String]): Standard = copy(blockedHosts = hosts.map(normalize))
+    def withBlockedHosts(hosts: Set[String]): Standard = copy(blockedHosts = hosts.map(normalizeHost))
 
     /** Whether a host may resolve to a non-public address, such as an intranet's. */
     def withAllowPrivateNetworks(allow: Boolean): Standard = copy(allowPrivateNetworks = allow)
@@ -75,7 +75,9 @@ object UrlPolicy {
           allowedSchemes.contains(scheme),
           s"Protocol '$scheme' is not allowed. Allowed: ${allowedSchemes.toSeq.sorted.mkString(", ")}"
         )
-        host <- Option(url.getHost).map(h => normalize(h).stripPrefix("[").stripSuffix("]")).filter(_.nonEmpty) match {
+        host <- Option(url.getHost)
+          .map(h => normalizeHost(h.stripPrefix("[").stripSuffix("]")))
+          .filter(_.nonEmpty) match {
           case Some(h) => Right(h)
           case None    => blocked("URL has no host")
         }
@@ -116,8 +118,8 @@ object UrlPolicy {
       resolver: String => Either[NetworkError, Seq[InetAddress]] = systemResolver
     ): Standard =
       new Standard(
-        allowedHosts.map(normalize),
-        blockedHosts.map(normalize),
+        allowedHosts.map(normalizeHost),
+        blockedHosts.map(normalizeHost),
         allowPrivateNetworks,
         allowedSchemes.map(normalize),
         resolver
@@ -141,6 +143,9 @@ object UrlPolicy {
     Set(NetworkSecurity.CloudMetadataIP, "fd00:ec2::254").map(InetAddress.getByName)
 
   private def normalize(s: String): String = s.trim.toLowerCase(Locale.ROOT)
+
+  /** A host name in canonical form: lower case, without the trailing dot of an absolute name (`example.com.`). */
+  private def normalizeHost(s: String): String = normalize(s).stripSuffix(".")
 
   private def matches(host: String, entry: String): Boolean =
     host == entry || host.endsWith(s".$entry")

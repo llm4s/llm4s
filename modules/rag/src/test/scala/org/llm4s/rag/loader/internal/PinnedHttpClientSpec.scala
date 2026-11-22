@@ -30,6 +30,13 @@ class PinnedHttpClientSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "percent-encode a literal non-ASCII path and query as UTF-8" in {
+    withServer("/日本語" -> Reply(200, "ja")) { server =>
+      get(s"${server.baseUrl}/日本語?q=東京").map(_.body) shouldBe Right("ja")
+      server.paths shouldBe Seq("/%E6%97%A5%E6%9C%AC%E8%AA%9E?q=%E6%9D%B1%E4%BA%AC")
+    }
+  }
+
   it should "decode a chunked body" in {
     val body = "chunk " * 5000
     withServer("/c" -> Reply(200, body, chunked = true)) { server =>

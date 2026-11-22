@@ -61,6 +61,14 @@ class DirectoryLoaderConfinementSpec extends AnyFlatSpec with Matchers with Befo
     contents(DirectoryLoader(root)) shouldBe Seq("inside", "inside", "nested")
   }
 
+  it should "not let a link past maxDepth hide the directory it points at" in {
+    val a = Files.createDirectory(root.resolve("a"))
+    val z = Files.createDirectory(root.resolve("z"))
+    Files.writeString(z.resolve("doc.txt"), "z doc")
+    link(a.resolve("link"), z) // reached first, at depth 2, beyond maxDepth 1
+    contents(DirectoryLoader(root).withMaxDepth(1)) shouldBe Seq("inside", "z doc")
+  }
+
   it should "not loop on a link back to the root" in {
     link(root.resolve("loop"), root)
     contents(DirectoryLoader(root)) shouldBe Seq("inside")

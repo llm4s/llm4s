@@ -85,7 +85,8 @@ final case class DirectoryLoader(
               if (!recursive) Seq.empty
               else
                 resolved.collect {
-                  case (entry, real) if Files.isDirectory(real) && visited.add(real) => walk(entry, depth + 1)
+                  case (entry, real) if depth < maxDepth && Files.isDirectory(real) && visited.add(real) =>
+                    walk(entry, depth + 1)
                 }.flatten
             files ++ subdirFiles
           }

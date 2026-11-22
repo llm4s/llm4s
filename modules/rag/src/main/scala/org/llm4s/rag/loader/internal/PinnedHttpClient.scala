@@ -133,10 +133,12 @@ private[loader] object PinnedHttpClient {
 
   /** TLS over the connected socket, verifying the certificate against `host` (not the address) and sending its SNI. */
   private def startTls(plain: Socket, host: String, port: Int): Socket = {
-    val tls    = SSLContext.getDefault.getSocketFactory.createSocket(plain, host, port, true).asInstanceOf[SSLSocket]
+    // An absolute name (`example.com.`) is the same host; SNI and the certificate check take it without the dot
+    val name   = host.stripSuffix(".")
+    val tls    = SSLContext.getDefault.getSocketFactory.createSocket(plain, name, port, true).asInstanceOf[SSLSocket]
     val params = tls.getSSLParameters
     params.setEndpointIdentificationAlgorithm("HTTPS")
-    if (!isIpLiteral(host)) params.setServerNames(java.util.List.of(new SNIHostName(host)))
+    if (!isIpLiteral(name)) params.setServerNames(java.util.List.of(new SNIHostName(name)))
     tls.setSSLParameters(params)
     tls.startHandshake()
     tls
@@ -152,8 +154,10 @@ private[loader] object PinnedHttpClient {
     scheme: String,
     headers: Seq[(String, String)]
   ): Array[Byte] = {
-    val path      = Option(uri.getRawPath).filter(_.nonEmpty).getOrElse("/")
-    val target    = Option(uri.getRawQuery).fold(path)(q => s"$path?$q")
+    // A literal non-ASCII character in the path or query, UTF-8 percent-encoded as HttpURLConnection sent it
+    val ascii     = URI.create(uri.toASCIIString)
+    val path      = Option(ascii.getRawPath).filter(_.nonEmpty).getOrElse("/")
+    val target    = Option(ascii.getRawQuery).fold(path)(q => s"$path?$q")
     val hostName  = if (host.contains(':')) s"[$host]" else host
     val default   = (scheme == "https" && port == 443) || (scheme == "http" && port == 80)
     val hostValue = if (default) hostName else s"$hostName:$port"

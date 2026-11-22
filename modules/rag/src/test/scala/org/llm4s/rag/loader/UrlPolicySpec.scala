@@ -74,6 +74,17 @@ class UrlPolicySpec extends AnyFlatSpec with Matchers {
     resolve(policy, "https://example.com/").isRight shouldBe true
   }
 
+  it should "match an absolute name with its trailing dot, and an entry written with one" in {
+    val policy = UrlPolicy.default
+      .withResolver(_ => Right(Seq(publicIp)))
+      .withBlockedHosts(Set("ads.example.com", "tracker.example."))
+    message(resolve(policy, "https://ads.example.com./")) should include("is blocked")
+    message(resolve(policy, "https://tracker.example/")) should include("is blocked")
+    message(resolve(UrlPolicy.default, "http://localhost./")) should include("is blocked")
+    val allowed = UrlPolicy.default.withResolver(_ => Right(Seq(publicIp))).withAllowedHosts(Set("docs.example.com"))
+    resolve(allowed, "https://docs.example.com./").isRight shouldBe true
+  }
+
   "withAllowPrivateNetworks" should "admit loopback, private addresses and localhost" in {
     val policy = UrlPolicy.default.withAllowPrivateNetworks(true)
     resolve(policy, "http://127.0.0.1:8080/").isRight shouldBe true
