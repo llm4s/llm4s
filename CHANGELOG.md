@@ -62,6 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each reports what it changed on `Completion.adjustments` ([cost controls](docs/guide/cost-controls.md),
   [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4, decision 14); Gemini and Vertex AI send `thinkingConfig`:
   a fitted `thinkingBudget` on Gemini 2.5 and the nearest `thinkingLevel` on Gemini 3 and later (the Gemini follow-up);
+  Ollama sends `think`, `true`/`false` or the nearest level the model lists in `/api/show`
+  ([#2726](https://github.com/llm4s/llm4s/issues/2726));
   `CachingLLMClient` matches a cached answer on an
   explicit list of the options that change it, `thinking` and `reasoning` among them (PR 5, decision 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Added** `CompletionOptions.promptCache` (`PromptCache`: scope `System`, `Tools`, `Conversation`, TTL `Short` or
