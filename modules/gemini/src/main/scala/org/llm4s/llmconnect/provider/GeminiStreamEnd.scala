@@ -10,9 +10,11 @@ import org.llm4s.error.{ LLMError, NetworkError }
  *    ([[streamError]]).
  *  - A stream whose candidate never stated a `finishReason` was cut off: a retryable
  *    [[org.llm4s.error.NetworkError]] ([[unfinished]]).
+ *  - A `data:` line that is not JSON fails the stream, a 502 like a bad gateway, and nothing after it is read
+ *    ([[unreadable]]). Blank lines and SSE `:` comment lines, which is how a keep-alive is sent, are not data lines
+ *    and are still ignored, as are the other SSE fields (RFC 0009, open question 5).
  *
- * Either way the text already delivered stays delivered. A data line that is not JSON is still skipped, as before:
- * whether it is an error under rule 2 or a tolerated keep-alive is RFC 0009's open question 5.
+ * Either way the text already delivered stays delivered.
  */
 private[provider] object GeminiStreamEnd {
 
@@ -36,6 +38,14 @@ private[provider] object GeminiStreamEnd {
           .getOrElse(502)
         HttpErrorMapper.mapStreamError(status, message, provider)
       }
+
+  /**
+   * A `data:` line that is not JSON: the service sent something that is not a chunk, so the reply cannot be trusted
+   * to be whole. A 502, as a bad gateway is, so `ReliableClient` may retry it while no chunk has been delivered.
+   * `reason` is the parser's, never the line itself.
+   */
+  def unreadable(reason: String, provider: String): LLMError =
+    HttpErrorMapper.mapStreamError(502, s"the stream sent a data line that is not JSON: $reason", provider)
 
   /** A stream whose candidate stated no `finishReason`: cut off, so a retry may succeed. */
   def unfinished(endpoint: String): NetworkError =

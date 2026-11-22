@@ -26,9 +26,10 @@ Requires JDK 21+: interruption checks and `LocalProviderTestServer` run on virtu
 
 | Helper | Type | What it does |
 |---|---|---|
-| `ProviderModuleChecks` | Trait & object | Assertions for `Llm4s<Name>ModuleSpec`: discovery (`assertModule`, `assertDiscovered`, `assertSoleSupplier`, `assertRegistrableWith`), client building (`assertBuildsClient`, `assertRefusesForeignConfig`), streaming (`assertStreams`), how a reply ended on `complete` and on a stream alike (`assertModelCallContract`, each `ContractCase` declared `Applies` with the provider's reply or `NotApplicable` with a reason, the stream-only `StreamEndsEarly` and `ErrorEvent` with `RecordedReply.streamOnly`, and the tool-argument cases `NoArgumentToolCall`, `ToolCallCutByLimit` and `MalformedArguments`; RFC 0009), cancellation when interrupted on virtual threads (`assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertEmbeddingCancelsWhenInterrupted`), tool-result contract (`assertOneToolResultPerCall`), and credential bindings (`assertCredentialBindings`, `assertEmbeddingCredentialBindings`). |
+| `ProviderModuleChecks` | Trait & object | Assertions for `Llm4s<Name>ModuleSpec`: discovery (`assertModule`, `assertDiscovered`, `assertSoleSupplier`, `assertRegistrableWith`), client building (`assertBuildsClient`, `assertRefusesForeignConfig`), the model call contract (`assertModelCallContract`: how a reply ended, on `complete` and on a stream alike, and that the client really streams; see [below](#the-model-call-contract)), cancellation when interrupted on virtual threads (`assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertEmbeddingCancelsWhenInterrupted`), tool-result contract (`assertOneToolResultPerCall`), and credential bindings (`assertCredentialBindings`, `assertEmbeddingCredentialBindings`). |
 | `ProviderTestConfig` | Object | Loads provider sections as an application does (`loadSection`, `loadProvider`, `loadEmbeddings`), resolving `${?VAR}` substitutions against a test-injected environment map with the real process environment disabled. |
 | `CredentialsRoundTrip` | Object | Proves that a provider module's `reference.conf` binds what its descriptor declares (`chatBindings`, `chatSectionKey`, `embeddingBindings`, `embeddingsKey`), testing credential fallbacks without leaking developer secrets. |
+| `ContractCase`, `Applicability`, `RecordedReply` | Enum & case classes | The nine RFC 0009 endings `assertModelCallContract` checks, whether each applies to a provider, and the provider's `complete` and stream replies for one. |
 | `LocalProviderTestServer` | Object | Ephemeral in-process JDK HTTP server on virtual threads for testing client requests, SSE streaming (`sendSseResponse`, `openAISseBody`), and cancellation (`holdOpen`, `streamThenHold`) with zero external network dependencies. |
 
 ## Module test skeleton
@@ -43,7 +44,6 @@ package com.acme.llm4s
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
-import org.llm4s.testkit.LocalProviderTestServer.{ sendSseResponse, withServer }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -58,8 +58,6 @@ class Llm4sAcmeModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
     extras = Map("region" -> "eu-west")
   )
 
-  private val streamBody = "data: {\"delta\":\"Hi\"}\n\ndata: [DONE]\n\n"
-
   "the llm4s-acme services entry" should {
     "register the module through META-INF/services" in assertModule(new Llm4sAcmeModule)
   }
@@ -70,9 +68,9 @@ class Llm4sAcmeModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
       assertRefusesForeignConfig(AcmeProvider)
     }
 
-    "actually stream" in {
-      withServer("/v1/chat")(exchange => sendSseResponse(exchange, streamBody)) { baseUrl =>
-        assertStreams(assertBuildsClient(AcmeProvider, section.withBaseUrl(Some(BaseUrl(baseUrl)))))
+    "report how each reply ended, on complete and on a stream alike, and really stream (RFC 0009)" in {
+      assertModelCallContract(AcmeContractFixtures.replies, "/v1/chat") { baseUrl =>
+        assertBuildsClient(AcmeProvider, section.withBaseUrl(Some(BaseUrl(baseUrl))))
       }
     }
 
@@ -94,6 +92,35 @@ class Llm4sAcmeModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
     }
   }
 ```
+
+## The model call contract
+
+`assertModelCallContract(cases, path)(baseUrl => client)` holds a chat client to
+[RFC 0009](../../docs/rfcs/0009-model-call-contract.md): for each `ContractCase` it serves the provider's reply
+from a `LocalProviderTestServer`, runs `complete` and `streamComplete`, and checks the result.
+
+| `ContractCase` | Required result |
+|---|---|
+| `CleanText` | `Right`, `FinishReason.Stop`, non-empty text, no tool call |
+| `TextCutByLimit` | `Right`, `FinishReason.Length`, the partial text |
+| `ToolCall` | `Right`, `FinishReason.ToolCalls`, each call's arguments a JSON object |
+| `NoArgumentToolCall` | `Right`, `FinishReason.ToolCalls`, arguments `{}` |
+| `ToolCallCutByLimit` | `Left(ProcessingError)`, the malformed tool call: no call in a `Length` reply runs |
+| `MalformedArguments` | `Left(ProcessingError)`, the malformed tool call: never `{}`, never dropped |
+| `ContentFiltered` | `Left(ContentFilteredError)` |
+| `StreamEndsEarly` (stream only) | `Left(NetworkError)`, or `Left(ServiceError)` with status 502 |
+| `ErrorEvent` (stream only) | a `Left` whose message carries `ContractCase.ProviderErrorMessage` |
+
+- Declare every case: `Applicability.Applies(RecordedReply(complete, stream))` with the provider's bytes (the
+  stream-only cases use `RecordedReply.streamOnly(stream)`), or `Applicability.NotApplicable(reason)` with a
+  non-blank reason when the provider cannot produce it. A case left out fails the check.
+- `CleanText` must apply: its stream is what proves the client really streams. A successful stream's chunks must add
+  up to its `Completion` (text, last finish reason, tool call ids).
+- The `complete` path's tool-call rules (a tool call in a `Length` reply, arguments that are not a JSON object) are
+  the client's own to apply; see [Writing a provider](../../docs/guide/writing-a-provider.md#the-model-call-contract).
+
+`assertStreams` is gone: `assertModelCallContract` proves streaming too. Replace an
+`assertStreams(client)` test with the full check.
 
 ## Working examples
 

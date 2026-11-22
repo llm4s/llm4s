@@ -2,13 +2,10 @@ package org.llm4s.testkit
 
 import org.llm4s.security.Secret
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.error.ServiceError
-import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
-import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, EmbeddingRequest, StreamedChunk }
+import org.llm4s.llmconnect.model.EmbeddingRequest
 import org.llm4s.testkit.fixtures.*
 import org.llm4s.types.ProviderModelTypes.*
-import org.llm4s.types.Result
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -95,33 +92,6 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
 
     "fail it for a descriptor that builds a client from any config" in {
       failureOf(assertRefusesForeignConfig(GreedyProvider)) should include("greedy accepted another provider's config")
-    }
-  }
-
-  "assertStreams" should {
-
-    "pass for a client that delivers chunks" in {
-      assertStreams(assertBuildsClient(AcmeProvider, section))
-    }
-
-    "fail for a client that succeeds without a chunk" in {
-      val client = assertBuildsClient(AcmeProvider, section.withModel(ModelName(AcmeProvider.NonStreamingModel)))
-      failureOf(assertStreams(client)) should include("without delivering a single chunk")
-    }
-
-    "fail for a client whose stream fails" in {
-      val failing = new LLMClient:
-        def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-          Left(ServiceError(503, "acme", "unavailable"))
-        def streamComplete(
-          conversation: Conversation,
-          options: CompletionOptions,
-          onChunk: StreamedChunk => Unit
-        ): Result[Completion] = complete(conversation, options)
-        def getContextWindow(): Int     = 8192
-        def getReserveCompletion(): Int = 1024
-
-      failureOf(assertStreams(failing)) should include("streamComplete failed")
     }
   }
 
