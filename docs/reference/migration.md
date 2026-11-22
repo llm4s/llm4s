@@ -42,6 +42,7 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [a workspace container has no egress](#a-workspace-container-has-no-egress-870),
 [a RAG with a `SearchIndex` ingests only with permissions](#a-rag-with-a-searchindex-ingests-only-with-permissions-2716),
 [the forwarding `apply` overloads are removed](#the-forwarding-apply-overloads-are-removed-1281),
+[`CompressionRule`'s `apply` field is `transform`](#compressionrules-apply-field-is-transform-1281)
 and [`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714).
 
 ## `DocumentRegistry` is source-scoped (#2714)
@@ -104,6 +105,31 @@ the companion's `apply$default$N()`, so a 9-argument `Completion.apply(...)` gai
 (`Completion.apply$default$10(), Completion.apply$default$11()` in Java). Building the value with the shorter `apply`
 a type keeps for Java (`OpenAIConfig.apply(apiKey, model)` and the other provider configs) and its `with*` setters
 avoids the long list.
+
+`OllamaConfig.apply(model, baseUrl, contextWindow, reserveCompletion)` gained defaults and a last `timeouts`
+parameter, like the other provider configs, so a Java or Kotlin call passing those four arguments passes
+`OllamaConfig.apply$default$5()` too; `OllamaConfig.apply(model, baseUrl)` and the setters are unchanged.
+
+## `CompressionRule`'s `apply` field is `transform` (#1281)
+
+`CompressionRule` (`org.llm4s.context`) held its function in a field named `apply`, which read like `apply` call
+syntax and made its setter `withApply`. The field is `transform` now, and the setter `withTransform`
+([#1281](https://github.com/llm4s/llm4s/issues/1281)):
+
+```scala
+// 0.6.0
+val keep = CompressionRule("keep_all", apply = messages => messages)
+val out  = keep.apply(messages)
+val drop = keep.withApply(_ => Seq.empty)
+
+// now
+val keep = CompressionRule("keep_all", transform = messages => messages)
+val out  = keep.transform(messages)
+val drop = keep.withTransform(_ => Seq.empty)
+```
+
+A rule built positionally, `CompressionRule(name, f)`, is unchanged. The Scalafix rule `CompressionRuleTransform`
+(in `Llm4sMigrate_1_0`) makes these edits.
 
 ## A RAG with a `SearchIndex` ingests only with permissions (#2716)
 
@@ -1459,7 +1485,7 @@ whose constructor and `copy` are private:
 
   | Type | Setters |
   |---|---|
-  | `CompressionRule` | `withName`, `withApply` |
+  | `CompressionRule` | `withName`, `withTransform` (`withApply` in 0.6.0; [note](#compressionrules-apply-field-is-transform-1281)) |
   | `ContextStep` | `withName`, `withConversation`, `withTokensBefore`, `withTokensAfter`, `withApplied` |
   | `PipelineStep` | `withName`, `withMessages`, `withTokensBefore`, `withTokensAfter`, `withApplied` |
   | `ManagedConversation` | `withConversation`, `withOriginalTokens`, `withFinalTokens`, `withSteps` |

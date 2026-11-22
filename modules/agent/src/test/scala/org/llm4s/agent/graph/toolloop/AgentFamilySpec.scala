@@ -61,6 +61,19 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def messagesOf(state: ThreadState): Vector[Message] = state.get(Messages.key).value.map(_.message)
 
+  "LoopAgent's setters" should "replace the id, model, tools and system prompt" in {
+    val model  = ScriptedModel()
+    val other  = ScriptedModel()
+    val agent  = LoopAgent(idA, model)
+    val change = agent.withId(idB).withModel(other).withTools(tools).withSystemPrompt("Be brief.")
+    change.id shouldBe idB
+    change.model shouldBe other
+    change.tools shouldBe tools
+    change.systemPrompt shouldBe Some("Be brief.")
+    change.withSystemPrompt(None).systemPrompt shouldBe None
+    agent.tools shouldBe ToolSet.empty
+  }
+
   "An agent family" should "send the system prompt first on every model call, and never store it" in {
     val model = ScriptedModel(echoCall("c1"), answer("done"))
     val loop  = family(LoopAgent(idA, model, tools).withSystemPrompt(Some("You are terse.")))

@@ -22,6 +22,7 @@ class CopyToWithSetters_1_0 extends CopyToSetters("CopyToWithSetters_1_0") {
   override protected def privateCopyGuide(owner: String): String = CopyToWithSetters_1_0.types(owner)
   override protected def setter(owner: String, field: String): String =
     if (owner == "org/llm4s/toolapi/StringSchema" && field == "enumValues") "withEnum"
+    else if (owner == "org/llm4s/context/CompressionRule" && field == "apply") "withTransform"
     else super.setter(owner, field)
 }
 
@@ -29,7 +30,8 @@ object CopyToWithSetters_1_0 {
 
   /**
    * The types, as 0.5.1 named them, and the migration note of each. Every field of each type's 0.5.1 constructor has a
-   * `with` setter of the same name on main (`StringSchema.enumValues`: `withEnum`), taking the value and, for an
+   * `with` setter of the same name on main (`StringSchema.enumValues`: `withEnum`; `CompressionRule.apply`, now
+   * `transform`: `withTransform`), taking the value and, for an
    * `Option` field, the `Option` too.
    */
   val types: Map[String, String] = {

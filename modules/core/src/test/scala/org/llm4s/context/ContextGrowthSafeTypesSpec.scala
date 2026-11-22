@@ -21,13 +21,13 @@ class ContextGrowthSafeTypesSpec extends AnyFlatSpec with Matchers {
     val drop: Seq[Message] => Seq[Message]     = _ => Seq.empty
     val rule                                   = CompressionRule("keep", identity)
     rule.name shouldBe "keep"
-    rule.apply(messages) shouldBe messages
+    rule.transform(messages) shouldBe messages
 
     rule.withName("renamed").name shouldBe "renamed"
-    rule.withName("renamed").apply shouldBe identity
-    val dropping = rule.withApply(drop)
+    rule.withName("renamed").transform shouldBe identity
+    val dropping = rule.withTransform(drop)
     dropping.name shouldBe "keep"
-    dropping.apply(messages) shouldBe empty
+    dropping.transform(messages) shouldBe empty
   }
 
   it should "keep its constructor and copy private" in {

@@ -123,7 +123,7 @@ object DeterministicCompressor {
       if (currTokens <= capTokens || rules.isEmpty) curr
       else {
         val rule       = rules.head
-        val next       = rule.apply(curr)
+        val next       = rule.transform(curr)
         val nextTokens = countTokens(next, tokenCounter)
         val (advance, tokens) =
           if (nextTokens < currTokens) (next, nextTokens) else (curr, currTokens)
@@ -159,16 +159,16 @@ object DeterministicCompressor {
  *  - '''Measurable''': Token reduction can be calculated
  *
  * @param name Identifier for logging and debugging
- * @param apply The transformation function
+ * @param transform The transformation function
  */
 @Stable
-final case class CompressionRule private (name: String, apply: Seq[Message] => Seq[Message]) {
+final case class CompressionRule private (name: String, transform: Seq[Message] => Seq[Message]) {
 
   /** Sets the rule's identifier. */
   def withName(name: String): CompressionRule = copy(name = name)
 
   /** Sets the transformation function. */
-  def withApply(apply: Seq[Message] => Seq[Message]): CompressionRule = copy(apply = apply)
+  def withTransform(transform: Seq[Message] => Seq[Message]): CompressionRule = copy(transform = transform)
 }
 
 /**
@@ -189,10 +189,10 @@ object CompressionRule {
    * Creates a [[CompressionRule]].
    *
    * @param name Identifier for logging and debugging
-   * @param apply The transformation function
+   * @param transform The transformation function
    */
-  def apply(name: String, apply: Seq[Message] => Seq[Message]): CompressionRule =
-    new CompressionRule(name, apply)
+  def apply(name: String, transform: Seq[Message] => Seq[Message]): CompressionRule =
+    new CompressionRule(name, transform)
 
   /** Removes phrases like "as I mentioned before", "like I said", etc. */
   val removeRedundantPhrases: CompressionRule = CompressionRule(

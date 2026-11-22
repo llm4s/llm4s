@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The forwarding `apply` overloads kept for types that gained a field (`Completion`, `NamedProviderConfig`, `RunConfig`,
   four `TraceEvent` cases and 14 more types) are removed: each type has one `apply`, with defaults, and Java and Kotlin pass
   every argument [#1281](https://github.com/llm4s/llm4s/issues/1281); [migration](docs/reference/migration.md#the-forwarding-apply-overloads-are-removed-1281).
+- `CompressionRule`'s function field `apply` is `transform`, and `withApply` is `withTransform`
+  [#1281](https://github.com/llm4s/llm4s/issues/1281); [migration](docs/reference/migration.md#compressionrules-apply-field-is-transform-1281).
 - On a `RAG` with a `SearchIndex`, plain `ingest*`, `sync`, `refresh`, `query`, `queryWithAnswer(Streaming)` and
   `clear` return a `ConfigurationError`, and a hybrid
   `queryWithPermissions` needs `SearchIndex.keywordQuery`, which replaces `queryHybrid` (#2716);
@@ -144,7 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Build & tooling
 
 - **Changed** a growth-prone type that gains a field adds no forwarding `apply` overload before the MiMa baseline (0.7.0), so the baseline freezes one `apply` per type
-  (CLAUDE.md, "Growth-prone data types"); `TakeRequest`, `Submission`, `ThreadSummary`, `BoundaryResult`, `Todo` and `Checkpoint` gain their missing `with*` setters [#1281](https://github.com/llm4s/llm4s/issues/1281).
+  (CLAUDE.md, "Growth-prone data types"); `TakeRequest`, `Submission`, `ThreadSummary`, `BoundaryResult`, `Todo`, `Checkpoint`, `AgentToolSpec` and `LoopAgent` gain their missing `with*` setters,
+  `CompressionRule.apply` is renamed `transform`, and `OllamaConfig.apply` gains defaults and `timeouts` [#1281](https://github.com/llm4s/llm4s/issues/1281).
 - **Changed** `llm4s-agent` takes the MiMa baseline with the other frozen modules, not a later one of its own: RFC 0001 is
   rejected now that the graph runtime is complete ([RFC 0001](docs/rfcs/0001-agent-baseline.md)) [#1281](https://github.com/llm4s/llm4s/issues/1281).
 - **Added** SLSA build provenance for every release's jars and POMs, the SBOMs on its GitHub Release and the `workspace-runner` image, `verify-release.sh --attestations`,

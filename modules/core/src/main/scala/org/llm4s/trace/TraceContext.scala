@@ -19,6 +19,12 @@ import java.util.Locale
  *
  * Whoever continues a context makes it the *remote parent* of the span it opens, so that span keeps the context's
  * trace id. A backend that cannot express a parent ignores it.
+ *
+ * `sampled` has a setter ([[withSampled]]); `traceId` and `spanId` have none, on purpose. The two ids are the
+ * context's identity, and a span id names a span only within its trace: a context with one id replaced would name a
+ * span that no emitter opened, or move a span into another trace. A different position is a different context, built
+ * with `apply`/[[TraceContext.of]], derived with [[spanFor]] or [[TraceContext.rootFor]], or drawn with
+ * [[TraceContext.random]].
  */
 @Stable
 final case class TraceContext private (traceId: String, spanId: String, sampled: Boolean):

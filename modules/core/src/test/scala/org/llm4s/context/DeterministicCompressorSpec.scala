@@ -89,7 +89,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
       AssistantMessage("Um, well, you know, basically I think, like, the answer is 42.")
     )
 
-    val result = CompressionRule.removeFillerWords.apply(messages)
+    val result = CompressionRule.removeFillerWords.transform(messages)
 
     // Some fillers should be removed from transcript-like content
     result.length shouldBe 1
@@ -104,7 +104,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
         |```""".stripMargin
     val messages = Seq(AssistantMessage(codeContent))
 
-    val result = CompressionRule.removeFillerWords.apply(messages)
+    val result = CompressionRule.removeFillerWords.transform(messages)
 
     result.head.content shouldBe codeContent
   }
@@ -113,7 +113,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
     val jsonContent = """{"well": "you know", "basically": {"like": 42}}"""
     val messages    = Seq(AssistantMessage(jsonContent))
 
-    val result = CompressionRule.removeFillerWords.apply(messages)
+    val result = CompressionRule.removeFillerWords.transform(messages)
 
     result.head.content shouldBe jsonContent
   }
@@ -122,7 +122,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
     val userContent = "Um, well, you know, I need help"
     val messages    = Seq(UserMessage(userContent))
 
-    val result = CompressionRule.removeFillerWords.apply(messages)
+    val result = CompressionRule.removeFillerWords.transform(messages)
 
     result.head.content shouldBe userContent
   }
@@ -133,7 +133,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
     val repetitive = "The answer is 42. The answer is 42. The answer is 42."
     val messages   = Seq(AssistantMessage(repetitive))
 
-    val result = CompressionRule.compressRepetitiveContent.apply(messages)
+    val result = CompressionRule.compressRepetitiveContent.transform(messages)
 
     result.length shouldBe 1
     // Should mark repetitions
@@ -145,7 +145,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
     val single   = "Just one sentence here"
     val messages = Seq(AssistantMessage(single))
 
-    val result = CompressionRule.compressRepetitiveContent.apply(messages)
+    val result = CompressionRule.compressRepetitiveContent.transform(messages)
 
     result.head.content shouldBe single
   }
@@ -157,7 +157,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
     val longContent = (1 to 100).map(i => s"Sentence number $i is about topic $i.").mkString(" ")
     val messages    = Seq(AssistantMessage(longContent))
 
-    val result = CompressionRule.truncateVerboseResponses.apply(messages)
+    val result = CompressionRule.truncateVerboseResponses.transform(messages)
 
     result.length shouldBe 1
     // Should be summarized/truncated
@@ -170,7 +170,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
       Seq(ThinkingBlock.Text("reasoning", Some("sig")), ThinkingBlock.Redacted("opaque"))
     )
 
-    val result = CompressionRule.truncateVerboseResponses.apply(Seq(signed))
+    val result = CompressionRule.truncateVerboseResponses.transform(Seq(signed))
 
     val truncated = result.collect { case a: AssistantMessage => a }.head
     (truncated.content should not).be(longContent)
@@ -182,8 +182,8 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
     val signed = AssistantMessage("This is a short answer.").withThinking(
       Seq(ThinkingBlock.Text("reasoning", Some("sig")), ThinkingBlock.Redacted("opaque"))
     )
-    CompressionRule.truncateVerboseResponses.apply(Seq(signed)) shouldBe Seq(signed)
-    CompressionRule.removeRedundantPhrases.apply(Seq(signed)) shouldBe Seq(signed)
+    CompressionRule.truncateVerboseResponses.transform(Seq(signed)) shouldBe Seq(signed)
+    CompressionRule.removeRedundantPhrases.transform(Seq(signed)) shouldBe Seq(signed)
   }
 
   it should "unseal a signed response another rule rewrites" in {
@@ -191,7 +191,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
       Seq(ThinkingBlock.Text("reasoning", Some("sig")), ThinkingBlock.Redacted("opaque"))
     )
     val result =
-      CompressionRule.removeRedundantPhrases.apply(Seq(signed)).collect { case a: AssistantMessage => a }.head
+      CompressionRule.removeRedundantPhrases.transform(Seq(signed)).collect { case a: AssistantMessage => a }.head
     (result.content should not).include("Like I said")
     result.hasSealedThinking shouldBe false
   }
@@ -200,7 +200,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
     val shortContent = "This is a short answer."
     val messages     = Seq(AssistantMessage(shortContent))
 
-    val result = CompressionRule.truncateVerboseResponses.apply(messages)
+    val result = CompressionRule.truncateVerboseResponses.transform(messages)
 
     result.head.content shouldBe shortContent
   }
@@ -209,7 +209,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
     val longUser = "A" * 2000
     val messages = Seq(UserMessage(longUser))
 
-    val result = CompressionRule.truncateVerboseResponses.apply(messages)
+    val result = CompressionRule.truncateVerboseResponses.transform(messages)
 
     result.head.content shouldBe longUser
   }
@@ -218,7 +218,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
     val longTool = """{"data": """ + "\"" + ("x" * 2000) + "\"}"
     val messages = Seq(ToolMessage(longTool, "call_1"))
 
-    val result = CompressionRule.truncateVerboseResponses.apply(messages)
+    val result = CompressionRule.truncateVerboseResponses.transform(messages)
 
     result.head.content shouldBe longTool
   }
@@ -232,7 +232,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
       AssistantMessage("One more example: third one")
     )
 
-    val result = CompressionRule.consolidateExamples.apply(messages)
+    val result = CompressionRule.consolidateExamples.transform(messages)
 
     // Should consolidate into fewer messages
     result.length should be < messages.length
@@ -244,7 +244,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
       AssistantMessage("Regular message two")
     )
 
-    val result = CompressionRule.consolidateExamples.apply(messages)
+    val result = CompressionRule.consolidateExamples.transform(messages)
 
     result.length shouldBe messages.length
   }
@@ -256,7 +256,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
       AssistantMessage("As I mentioned before, the answer is 42.")
     )
 
-    val result = CompressionRule.removeRedundantPhrases.apply(messages)
+    val result = CompressionRule.removeRedundantPhrases.transform(messages)
 
     (result.head.content should not).include("As I mentioned before")
     result.head.content should include("42")
@@ -267,7 +267,7 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
       AssistantMessage("Like I said, we should use Scala.")
     )
 
-    val result = CompressionRule.removeRedundantPhrases.apply(messages)
+    val result = CompressionRule.removeRedundantPhrases.transform(messages)
 
     (result.head.content should not).include("Like I said")
     result.head.content should include("Scala")

@@ -22,8 +22,12 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
  * core's Anthropic, Gemini and Vertex AI clients send. A call from a client that sends tools strict
  * (OpenAI and the OpenAI-compatible ones) carries every property, which that schema also accepts.
  *
- * @param validateDecoded a check on the decoded arguments; `Left` becomes an error the model sees
- * @param question the question this tool may ask; set by [[AgentTool.Asking]]
+ * Each field has a `with*` setter except `question`, which has none on purpose: it is the question
+ * [[AgentTool.Asking]] asks and the answer its `resume` takes, so only that tool sets it, from its own
+ * type parameters. A question set on any other tool's spec would advertise one that no `resume` answers.
+ *
+ * @param validateDecoded a check on the decoded arguments; `Left` becomes an error the model sees; see [[withValidation]]
+ * @param question the question this tool may ask; set by [[AgentTool.Asking]], and by nothing else
  * @param hints what the tool is likely to do, for a middleware to read; see [[org.llm4s.toolapi.ToolHints ToolHints]]
  * @param timeout how long one run of the tool may take; see [[withTimeout]]
  * @param resourcesOf what a call touches, from its decoded arguments; see [[withResources]]
@@ -40,6 +44,24 @@ final case class AgentToolSpec[A] private (
   resourcesOf: A => Vector[ToolResource],
   locksOf: Option[A => Set[LockKey]]
 )(using val codec: ReadWriter[A]):
+
+  /**
+   * Renames the tool. Throws `IllegalArgumentException` for a name that does not match
+   * `[a-zA-Z0-9_-]{1,64}`, as `apply` does. A spec that declares no resources of its own
+   * ([[withResources]]) touches the renamed tool's [[defaultResource]].
+   */
+  def withName(name: String): AgentToolSpec[A] =
+    require(AgentToolSpec.isValidName(name), s"Invalid tool name '$name': must match [a-zA-Z0-9_-]{1,64}")
+    val resources = resourcesOf match
+      case _: AgentToolSpec.InvokeResource[?] => AgentToolSpec.InvokeResource[A](name)
+      case declared                           => declared
+    copy(name = name, resourcesOf = resources)(using codec)
+
+  /** Replaces the description the model reads. */
+  def withDescription(description: String): AgentToolSpec[A] = copy(description = description)(using codec)
+
+  /** Replaces the argument schema; [[argumentSchema]] and [[toolDefinition]] follow it. */
+  def withSchema(schema: SchemaDefinition[A]): AgentToolSpec[A] = copy(schema = schema)(using codec)
 
   /** Adds a check on the decoded arguments, replacing any earlier one. */
   def withValidation(check: A => Result[Unit]): AgentToolSpec[A] = copy(validateDecoded = check)(using codec)
@@ -58,6 +80,10 @@ final case class AgentToolSpec[A] private (
   def withTimeout(timeout: FiniteDuration): AgentToolSpec[A] =
     require(timeout > Duration.Zero, s"tool '$name': timeout must be positive, was $timeout")
     copy(timeout = Some(timeout))(using codec)
+
+  /** Sets the tool's timeout as the `FiniteDuration`-taking `withTimeout` does, or with `None` removes it. */
+  def withTimeout(timeout: Option[FiniteDuration]): AgentToolSpec[A] =
+    timeout.fold(copy(timeout = None)(using codec))(withTimeout)
 
   /**
    * Declares what a call touches, from its decoded arguments, replacing the default
@@ -86,7 +112,10 @@ final case class AgentToolSpec[A] private (
    * chooses its target locks a key above every target it may pick, and an approval edit may narrow the
    * locks but not take one they do not cover (it is refused).
    */
-  def withLocks(locks: A => Set[LockKey]): AgentToolSpec[A] = copy(locksOf = Some(locks))(using codec)
+  def withLocks(locks: A => Set[LockKey]): AgentToolSpec[A] = withLocks(Some(locks))
+
+  /** Declares the locks a call holds as the function-taking `withLocks` does, or with `None` declares none. */
+  def withLocks(locks: Option[A => Set[LockKey]]): AgentToolSpec[A] = copy(locksOf = locks)(using codec)
 
   /** The resource a call of this tool touches when it declares none: invoking the tool. */
   def defaultResource: ToolResource = ToolResource(Operation.Invoke, name)
@@ -149,9 +178,13 @@ object AgentToolSpec:
       None,
       ToolHints.default,
       None,
-      _ => Vector(ToolResource(Operation.Invoke, name)),
+      InvokeResource[A](name),
       None
     )
+
+  /** The resources of a spec that declares none: invoking the tool `name`. [[AgentToolSpec.withName]] renames it. */
+  final private[tool] class InvokeResource[A](name: String) extends (A => Vector[ToolResource]):
+    def apply(args: A): Vector[ToolResource] = Vector(ToolResource(Operation.Invoke, name))
 
 /**
  * A tool call's own timeout, between the loop and the tool (#2098). The loop's per-call timeout marks the run of the
