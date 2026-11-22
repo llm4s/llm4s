@@ -245,7 +245,12 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
           accessibleChunks(auth, collectionPattern)
             .map { case (collId, docId, chunk, metadata, _) =>
               val hits = words.count(chunk.content.toLowerCase.contains)
-              KeywordSearchResult(chunkId(collId, docId, chunk), chunk.content, hits.toDouble, metadata + ("docId" -> docId))
+              KeywordSearchResult(
+                chunkId(collId, docId, chunk),
+                chunk.content,
+                hits.toDouble,
+                metadata + ("docId" -> docId)
+              )
             }
             .filter(_.score > 0)
             .sortBy(-_.score)
