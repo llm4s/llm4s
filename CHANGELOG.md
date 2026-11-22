@@ -103,6 +103,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   killed whole, so a daemon it starts cannot outlive it [#2008](https://github.com/llm4s/llm4s/issues/2008); [design §4.39](docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md).
 - **Fixed** cancelling a `ContainerisedWorkspace` command (an interrupted `executeCommand`, as when an agent run is cancelled)
   now cancels it on the runner too; it used to keep running, with any daemon it started [#2656](https://github.com/llm4s/llm4s/pull/2656).
+- **Changed** a workspace container whose sandbox allows no network (`networkAllowed = false`, the default) has no egress:
+  `ContainerisedWorkspace` starts it with `NET_ADMIN` and the image's entry point blocks every connection out, then drops
+  the capability; the path policy resolves `..` and links before `allowedPaths`/`readOnlyPaths` and returns its
+  refusals as values ([sandbox](docs/reference/workspace-sandbox.md#container-egress);
+  [migration](docs/reference/migration.md#a-workspace-container-has-no-egress-870)) [#870](https://github.com/llm4s/llm4s/issues/870).
 
 ### Tools
 
@@ -116,6 +121,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `RAGConfig.withCompletionOptions`: the options `queryWithAnswer` and `queryWithPermissionsAndAnswer` generate
   the answer with, which each call can override (`options = ...`); the default is still temperature 0.0. Java:
   `JRagBuilder.completionOptions` [#2715](https://github.com/llm4s/llm4s/issues/2715).
+- **Added** `RAG.queryWithAnswerStreaming` and `queryWithPermissionsAndAnswerStreaming`: the contexts to one callback
+  first, so a UI can show citations at once, then each `StreamedChunk` of the answer, then the whole
+  `RAGAnswerResult` [#2717](https://github.com/llm4s/llm4s/issues/2717).
 - **Fixed** a `RAG` with a `SearchIndex` refuses plain ingest and sync (a `ConfigurationError`) instead of writing rows
   no permission query finds; `deleteDocument` deletes from every collection; `queryWithPermissions` runs the configured
   fusion, keyword search and reranking [#2716](https://github.com/llm4s/llm4s/issues/2716);

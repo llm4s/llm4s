@@ -1,6 +1,7 @@
 package org.llm4s.rag
 
 import org.llm4s.chunking.{ ChunkerFactory, DocumentChunk, DocumentChunker }
+import org.llm4s.core.safety.Safety
 import org.llm4s.error.{ ConfigurationError, LLMError, ProcessingError }
 import org.llm4s.security.Secret
 import org.llm4s.knowledgegraph.graphrag.{ GraphRAG, GraphRAGAnswer, GraphRAGMode }
@@ -897,6 +898,51 @@ final class RAG private (
     }
 
   /**
+   * [[queryWithAnswer]], with the answer streamed as it is generated (#2717): for a chat UI that shows the sources
+   * while the answer arrives, over SSE or a WebSocket.
+   *
+   * In order, on the calling thread: `onContexts` gets the contexts the answer is generated from, once, before the
+   * model is called, so the citations can be shown first; `onChunk` gets each [[org.llm4s.llmconnect.model.StreamedChunk StreamedChunk]] of the answer as the
+   * provider sends it (through `LLMClient.streamComplete`); and the method returns the whole [[RAGAnswerResult]],
+   * as `queryWithAnswer` would, with the usage the provider reported.
+   *
+   * A failure before the contexts are found (no LLM client, the search) calls neither callback. A failure of the
+   * model's call, or an exception `onContexts` throws, is a `Left`, after the chunks already delivered.
+   *
+   * {{{
+   * rag.queryWithAnswerStreaming("What is X?")(
+   *   contexts => sendSources(contexts),
+   *   chunk    => chunk.content.foreach(sendText)
+   * )
+   * }}}
+   *
+   * @param question   the question to answer
+   * @param topK       override the default topK
+   * @param options    the completion options for this answer; the config's unless given
+   * @param onContexts the contexts the answer is generated from, before any chunk
+   * @param onChunk    each piece of the answer as it arrives
+   * @return the whole answer with its contexts, once the stream has ended
+   */
+  def queryWithAnswerStreaming(
+    question: String,
+    topK: Option[Int] = None,
+    options: CompletionOptions = config.completionOptions
+  )(onContexts: Seq[RAGSearchResult] => Unit, onChunk: StreamedChunk => Unit): Result[RAGAnswerResult] =
+    llmClient match {
+      case None =>
+        Left(
+          ConfigurationError(
+            "LLM client required for answer generation. Use .withLLM(client) when building RAG."
+          )
+        )
+      case Some(client) =>
+        for {
+          searchResults <- query(question, topK)
+          answer        <- streamAnswer(client, question, searchResults, options, onContexts, onChunk)
+        } yield answer
+    }
+
+  /**
    * Query through GraphRAG using router-selected mode.
    *
    * The router decides Global/Local/Hybrid first.
@@ -1108,6 +1154,41 @@ final class RAG private (
         for {
           searchResults <- queryWithPermissions(auth, collectionPattern, question, topK)
           answer        <- generateAnswer(client, question, searchResults, options)
+        } yield answer
+    }
+
+  /**
+   * [[queryWithPermissionsAndAnswer]], with the answer streamed as [[queryWithAnswerStreaming]] streams it: the
+   * permission-filtered contexts to `onContexts` first, then each chunk of the answer to `onChunk`, then the whole
+   * answer returned.
+   *
+   * @param auth              user authorization context
+   * @param collectionPattern pattern to filter collections
+   * @param question          the question to answer
+   * @param topK              maximum number of results
+   * @param options           the completion options for this answer; the config's unless given
+   * @param onContexts        the permission-filtered contexts the answer is generated from, before any chunk
+   * @param onChunk           each piece of the answer as it arrives
+   * @return the whole answer with its contexts, once the stream has ended
+   */
+  def queryWithPermissionsAndAnswerStreaming(
+    auth: UserAuthorization,
+    collectionPattern: CollectionPattern,
+    question: String,
+    topK: Option[Int] = None,
+    options: CompletionOptions = config.completionOptions
+  )(onContexts: Seq[RAGSearchResult] => Unit, onChunk: StreamedChunk => Unit): Result[RAGAnswerResult] =
+    llmClient match {
+      case None =>
+        Left(
+          ConfigurationError(
+            "LLM client required for answer generation. Use .withLLM(client) when building RAG."
+          )
+        )
+      case Some(client) =>
+        for {
+          searchResults <- queryWithPermissions(auth, collectionPattern, question, topK)
+          answer        <- streamAnswer(client, question, searchResults, options, onContexts, onChunk)
         } yield answer
     }
 
@@ -1472,7 +1553,33 @@ final class RAG private (
     question: String,
     contexts: Seq[RAGSearchResult],
     options: CompletionOptions
-  ): Result[RAGAnswerResult] = {
+  ): Result[RAGAnswerResult] =
+    client.complete(answerConversation(question, contexts), options).map(answerResult(question, contexts))
+
+  /** The contexts to `onContexts`, then the answer streamed to `onChunk`, then the whole answer. */
+  private def streamAnswer(
+    client: LLMClient,
+    question: String,
+    contexts: Seq[RAGSearchResult],
+    options: CompletionOptions,
+    onContexts: Seq[RAGSearchResult] => Unit,
+    onChunk: StreamedChunk => Unit
+  ): Result[RAGAnswerResult] =
+    for {
+      _          <- Safety.safely(onContexts(contexts))
+      completion <- client.streamComplete(answerConversation(question, contexts), options, onChunk)
+    } yield answerResult(question, contexts)(completion)
+
+  private def answerResult(question: String, contexts: Seq[RAGSearchResult])(completion: Completion): RAGAnswerResult =
+    RAGAnswerResult(
+      answer = completion.content,
+      question = question,
+      contexts = contexts,
+      usage = completion.usage
+    )
+
+  /** The system prompt, and the question with the numbered contexts, that an answer is generated from. */
+  private def answerConversation(question: String, contexts: Seq[RAGSearchResult]): Conversation = {
     val contextText = contexts.zipWithIndex
       .map { case (ctx, i) => s"[${i + 1}] ${ctx.content}" }
       .mkString("\n\n")
@@ -1486,21 +1593,12 @@ Question: $question
 
 Answer:"""
 
-    val conversation = Conversation(
+    Conversation(
       Seq(
         SystemMessage(systemPrompt),
         UserMessage(userPrompt)
       )
     )
-
-    client.complete(conversation, options).map { completion =>
-      RAGAnswerResult(
-        answer = completion.content,
-        question = question,
-        contexts = contexts,
-        usage = completion.usage
-      )
-    }
   }
 
   private val DefaultSystemPrompt =

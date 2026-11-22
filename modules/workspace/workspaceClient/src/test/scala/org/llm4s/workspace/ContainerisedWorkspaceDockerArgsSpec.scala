@@ -11,7 +11,8 @@ class ContainerisedWorkspaceDockerArgsSpec extends AnyFlatSpec with Matchers {
   private def args(extra: Set[String]) =
     ContainerisedWorkspace.dockerRunArgs("ws-test", 18080, 8080, "/tmp/ws", "llm4s/workspace-runner:dev", extra, None)
 
-  "ContainerisedWorkspace.dockerRunArgs" should "start the container with no extra environment by default" in {
+  "ContainerisedWorkspace.dockerRunArgs" should "start the container with no egress and no other environment by default" in {
+    // the runner's default, the permissive profile, allows no network: the container gets none (#870)
     args(Set.empty) shouldBe Right(
       Seq(
         "docker",
@@ -21,6 +22,10 @@ class ContainerisedWorkspaceDockerArgsSpec extends AnyFlatSpec with Matchers {
         "ws-test",
         "-p",
         "18080:8080",
+        "--cap-add",
+        "NET_ADMIN",
+        "-e",
+        "LLM4S_NO_EGRESS=1",
         "-v",
         "/tmp/ws:/workspace",
         "llm4s/workspace-runner:dev"
@@ -80,5 +85,23 @@ class ContainerisedWorkspaceDockerArgsSpec extends AnyFlatSpec with Matchers {
     )
     asked.last shouldBe "img"
     args(Set.empty).fold(fail(_), identity).exists(a => a.contains("cgroup") || a.contains("SYS_ADMIN")) shouldBe false
+  }
+
+  it should "block the container's egress when the sandbox allows no network, and only then (#870)" in {
+    def built(networkAllowed: Boolean) =
+      ContainerisedWorkspace
+        .dockerRunArgs(
+          "ws-test",
+          18080,
+          8080,
+          "/tmp/ws",
+          "img",
+          Set.empty,
+          Some(WorkspaceSandboxConfig.Permissive.copy(networkAllowed = networkAllowed))
+        )
+        .fold(fail(_), identity)
+    built(networkAllowed = false).containsSlice(ContainerisedWorkspace.NoEgressArgs) shouldBe true
+    built(networkAllowed = false).last shouldBe "img"
+    built(networkAllowed = true).exists(a => a.contains("NET_ADMIN") || a.contains("LLM4S_NO_EGRESS")) shouldBe false
   }
 }

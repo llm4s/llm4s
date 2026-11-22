@@ -42,7 +42,11 @@ import scala.concurrent.duration._
  *                             never a shell or a launcher (see [[org.llm4s.shared.WorkspaceSandboxConfig.withExtraCommands WorkspaceSandboxConfig.withExtraCommands]]), and
  *                             a container is not started with a name the runner would refuse
  * @param sandboxConfig        the runner's whole sandbox config, passed as `WORKSPACE_SANDBOX_CONFIG`; `None` leaves
- *                             the runner on its profile
+ *                             the runner on its profile. With `networkAllowed = false` (the default, and the
+ *                             permissive profile's) the container itself has no egress (#870): it starts with
+ *                             `--cap-add NET_ADMIN -e LLM4S_NO_EGRESS=1`, and the image's entry point lets it answer the
+ *                             published port but open no connection out, then drops `NET_ADMIN` before the runner
+ *                             starts. A Docker host where the entry point cannot set that up does not start the container
  * @param commandCgroups       start the container so the runner can give each command a cgroup of its own and kill it
  *                             whole, so a daemon a command starts (`setsid`) cannot outlive it (design §4.39, #2008):
  *                             `--cgroupns=private --cap-add SYS_ADMIN --security-opt apparmor=unconfined`. The image's
@@ -58,10 +62,11 @@ class ContainerisedWorkspace(
   val sandboxConfig: Option[WorkspaceSandboxConfig] = None,
   val commandCgroups: Boolean = false
 ) extends WorkspaceAgentInterface {
-  private val logger        = LoggerFactory.getLogger(getClass)
-  private val containerName = s"workspace-runner-${java.util.UUID.randomUUID().toString}"
-  private val containerPort = 8080
-  private val wsUrl         = s"ws://localhost:$hostPort/ws"
+  private val logger = LoggerFactory.getLogger(getClass)
+  // the container's name, which the integration suites `docker exec` into
+  private[workspace] val containerName = s"workspace-runner-${java.util.UUID.randomUUID().toString}"
+  private val containerPort            = 8080
+  private val wsUrl                    = s"ws://localhost:$hostPort/ws"
 
   // Constants
   private val HeartbeatIntervalSeconds = 5
@@ -667,6 +672,17 @@ object ContainerisedWorkspace {
   private[workspace] val CommandCgroupsArgs: Seq[String] =
     Seq("--cgroupns=private", "--cap-add", "SYS_ADMIN", "--security-opt", "apparmor=unconfined")
 
+  /** The image's entry point's environment variable asking it to block the container's egress (#870). */
+  private[workspace] val NoEgressEnvVar: String = "LLM4S_NO_EGRESS"
+
+  /**
+   * What `docker run` needs for a container with no egress when the sandbox allows commands no network (#870):
+   * `NET_ADMIN`, for the image's entry point to set the container's firewall (only connections the published port
+   * accepted, and loopback, may send), and the variable asking it to. The entry point drops `NET_ADMIN` before it starts
+   * the runner, and refuses to start it when the firewall cannot be set.
+   */
+  private[workspace] val NoEgressArgs: Seq[String] = Seq("--cap-add", "NET_ADMIN", "-e", s"$NoEgressEnvVar=1")
+
   /**
    * The `docker run` command that starts a workspace-runner container.
    *
@@ -694,8 +710,11 @@ object ContainerisedWorkspace {
         sandboxConfig.toSeq.flatMap(c =>
           Seq("-e", s"${WorkspaceSandboxConfig.ConfigEnvVar}=${upickle.default.write(c)}")
         )
+      // the runner's own default, the permissive profile, allows no network either
+      val noEgress = !sandboxConfig.getOrElse(WorkspaceSandboxConfig.Permissive).networkAllowed
       Seq("docker", "run", "-d", "--name", containerName, "-p", s"$hostPort:$containerPort") ++
-        (if (commandCgroups) CommandCgroupsArgs else Nil) ++ extraEnv ++ configEnv ++ Seq(
+        (if (commandCgroups) CommandCgroupsArgs else Nil) ++ (if (noEgress) NoEgressArgs else Nil) ++ extraEnv ++
+        configEnv ++ Seq(
           "-v",
           s"$workspaceDir:/workspace",
           imageName
