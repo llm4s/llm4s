@@ -42,8 +42,24 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [a workspace container has no egress](#a-workspace-container-has-no-egress-870),
 [a RAG with a `SearchIndex` ingests only with permissions](#a-rag-with-a-searchindex-ingests-only-with-permissions-2716),
 [the forwarding `apply` overloads are removed](#the-forwarding-apply-overloads-are-removed-1281),
-[`CompressionRule`'s `apply` field is `transform`](#compressionrules-apply-field-is-transform-1281)
-and [`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714).
+[`CompressionRule`'s `apply` field is `transform`](#compressionrules-apply-field-is-transform-1281),
+[`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714)
+and [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453).
+
+## The PostgreSQL checkpoint schema moves to version 6 (#2453)
+
+`PostgresCheckpointer` gains a long-term store, `longTermStore(limits)`
+([guide](../guide/agents/durable-checkpointers#long-term-memory-on-the-same-database)). Nothing in source changes
+unless you use it.
+
+- **The schema moves on, with no way back.** Opening a store brings its PostgreSQL schema from version 5 to 6: three
+  tables are added (`checkpoint_store_items`, `checkpoint_store_applied`, `checkpoint_store_fences`) and none is
+  changed. An older build refuses the new schema, so upgrade every process sharing a database together. The role
+  that first opens it needs `CREATE` on the schema, once.
+- **`deleteThread` and the sweep touch the new tables**, in their own transactions: a deleted thread's applied keys,
+  and a reclaimed thread's fence. They never remove an item.
+- **A custom `LongTermStore`** has a contract to pass: mix `LongTermStoreContract` (`llm4s-agent-testkit`) into a
+  spec. `InMemoryLongTermStore`'s behaviour is unchanged.
 
 ## `DocumentRegistry` is source-scoped (#2714)
 

@@ -2387,7 +2387,8 @@ lazy val agent = (project in file("modules/agent"))
 // `deleteThread`, run-claim leases and fencing, and two `GraphRuntime`s contending over one store -
 // plus the `ManualClock` it drives claim expiry with. It is published so that a store outside this
 // repository proves itself the way the in-repo ones do, as `llm4s-provider-testkit` is for providers.
-// It also has `FileBackendContract` (#1904), whose agent runs are driven by `llm4s-testkit`'s `ScriptedLLMClient`.
+// It also has `FileBackendContract` (#1904), whose agent runs are driven by `llm4s-testkit`'s `ScriptedLLMClient`,
+// and `LongTermStoreContract` (#2453), the suite every `LongTermStore` passes.
 // A test library, so ScalaTest is a compile dependency. `llm4s-agent`'s own tests cannot use it - that
 // would be a project cycle - so `InMemoryCheckpointer` passes it here, in the testkit's own tests.
 lazy val agentTestkit = (project in file("modules/agent-testkit"))
@@ -2440,7 +2441,8 @@ lazy val agentCheckpointSqlite = (project in file("modules/agent-checkpoint-sqli
 // every checkpoint adapter is, so `llm4s-agent` stays free of a JDBC driver; the driver and HikariCP are declared
 // here at the versions `llm4s-memory-postgres` uses. The suites that need a server - the `CheckpointerContract`, the
 // concurrency and cross-process cases - are in `modules/it` (`@Docker`); this module's own tests are the pure ones
-// (configuration, schema steps, statements, bounds).
+// (configuration, schema steps, statements, bounds). `PostgresCheckpointer.longTermStore` (#2453) is the harness's
+// `LongTermStore` in the same schema: it lives here because it needs this module's bounded calls and migrations.
 lazy val agentCheckpointPostgres = (project in file("modules/agent-checkpoint-postgres"))
   .dependsOn(agent)
   .settings(

@@ -39,6 +39,8 @@ import scala.util.Using
  *  - the run queue (version 4, design 4.55, [[addRunQueue]]): `checkpoint_queue_entries` and
  *    `checkpoint_queue_attempts`, with the sequences their ids and lease tokens come from, and `run_id` on every
  *    history row for the run-id lookup.
+ *  - the long-term store (version 6, #2453, [[addLongTermStore]]): `checkpoint_store_items`,
+ *    `checkpoint_store_applied` and `checkpoint_store_fences`.
  *
  * Opening a store brings the schema to [[Current]] in one transaction under a transaction-scoped advisory lock on the
  * schema's name, so instances that start together migrate it once; it refuses a schema whose version is newer than
@@ -49,14 +51,59 @@ import scala.util.Using
 private[postgres] object PostgresSchema:
 
   /** The schema version this build writes. */
-  val Current: Int = 5
+  val Current: Int = 6
 
   /** A migration from the version it is keyed by to the next, given the tables' names. */
   type Step = Tables => Vector[String]
 
   /** The steps, keyed by the version each upgrades from. */
   val steps: Map[Int, Step] =
-    Map(0 -> createTables, 1 -> addThreadRegistry, 2 -> addReclamation, 3 -> addRunQueue, 4 -> addStopRequests)
+    Map(
+      0 -> createTables,
+      1 -> addThreadRegistry,
+      2 -> addReclamation,
+      3 -> addRunQueue,
+      4 -> addStopRequests,
+      5 -> addLongTermStore
+    )
+
+  /**
+   * Version 6: the long-term store (#2453, `PostgresCheckpointer.longTermStore`). It adds tables and changes none, so
+   * a version-5 schema's threads and queue are untouched.
+   *
+   *  - `checkpoint_store_items`: one row per item, keyed by `(namespace_id, item_key)`. `namespace_id` is a digest of
+   *    the namespace, tenant included, because a namespace may be longer than an index row holds; `namespace` is the
+   *    namespace itself as a JSON array, tenant (or `null`) first, and `tenant_key` its tenant as
+   *    `checkpoint_threads.tenant_key` writes one (`=` and the tenant, or empty for none), both for whoever reads the
+   *    table. `value_json` is the value as ASCII JSON, `item_bytes` the item's size as `StoreLimits` counts it (its
+   *    key's and its compact value's UTF-8 bytes), and `updated_at` the database's clock at the write. Keys are
+   *    compared byte by byte (`COLLATE "C"`), whatever the database's collation.
+   *  - `checkpoint_store_applied`: the applied keys (design 4.24): an effect's key, its scope and its outcome as
+   *    JSON, written in the transaction of the effect's write and removed when the replay guard forgets it.
+   *  - `checkpoint_store_fences`: the newest fencing token any call carried for a scope (one per thread).
+   */
+  private def addLongTermStore(t: Tables): Vector[String] = Vector(
+    s"""CREATE TABLE ${t.storeItems} (
+       |  namespace_id text COLLATE "C" NOT NULL,
+       |  item_key     text COLLATE "C" NOT NULL,
+       |  tenant_key   text NOT NULL,
+       |  namespace    text NOT NULL,
+       |  value_json   text NOT NULL,
+       |  item_bytes   bigint NOT NULL,
+       |  updated_at   timestamptz NOT NULL,
+       |  PRIMARY KEY (namespace_id, item_key)
+       |)""".stripMargin,
+    s"""CREATE TABLE ${t.storeApplied} (
+       |  effect_key   text COLLATE "C" PRIMARY KEY,
+       |  scope        text COLLATE "C" NOT NULL,
+       |  outcome_json text NOT NULL
+       |)""".stripMargin,
+    s"CREATE INDEX checkpoint_store_applied_scope ON ${t.storeApplied} (scope)",
+    s"""CREATE TABLE ${t.storeFences} (
+       |  scope text COLLATE "C" PRIMARY KEY,
+       |  token bigint NOT NULL
+       |)""".stripMargin
+  )
 
   /**
    * Version 3: tombstone reclamation (Stage 5 slice S4, design 4.53). Each thread's row gains `deleted_at`, when the
@@ -219,6 +266,9 @@ private[postgres] object PostgresSchema:
     val queueEntries: String            = q("checkpoint_queue_entries")
     val queueAttempts: String           = q("checkpoint_queue_attempts")
     val reclaimed: String               = q("checkpoint_reclaimed")
+    val storeItems: String              = q("checkpoint_store_items")
+    val storeApplied: String            = q("checkpoint_store_applied")
+    val storeFences: String             = q("checkpoint_store_fences")
 
   /** Version 1: every table, as the store's Scaladoc describes them. */
   private def createTables(t: Tables): Vector[String] = Vector(

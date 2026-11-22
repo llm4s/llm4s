@@ -31,7 +31,8 @@ fencing, the run queue, the worker, retention - is in `llm4s-agent` (`org.llm4s.
 and your service puts its own endpoints, authentication and protocol in front of it. Each instance runs:
 
 - a **store** over the shared database (`PostgresCheckpointer`, `llm4s-agent-checkpoint-postgres`), which holds every
-  thread's checkpoints and events and the **run queue**;
+  thread's checkpoints and events and the **run queue**, and, if your agents keep files or memories across threads,
+  their [long-term store](durable-checkpointers#long-term-memory-on-the-same-database) (`store.longTermStore()`);
 - a **`RunSubmitter`** that your endpoints call to queue a run, follow its events, cancel it or delete a thread;
 - an **`AgentWorker`** that takes queued runs, runs them on your agents, recovers runs whose worker died, runs the
   retention sweep and drains on shutdown.
@@ -275,7 +276,7 @@ baseline.
 - **One database.** The SPI is open to another store, but PostgreSQL is the only multi-machine store shipped.
 - **No HTTP server product.** Endpoints, authentication, Agent Protocol, A2A and AG-UI belong to the service you build
   on the kernel; the example service shows one shape and authenticates nothing (its `X-Tenant-Id` header is not auth).
-- **Not yet:** a shared Postgres long-term memory store, cron and webhooks, versioned assistants, checkpoint encryption
+- **Not yet:** semantic search in the shared long-term store, cron and webhooks, versioned assistants, checkpoint encryption
   at rest, background subagents. See the [parity matrix](../../reference/agent-platform-parity) for where each went.
 
 ## See also
