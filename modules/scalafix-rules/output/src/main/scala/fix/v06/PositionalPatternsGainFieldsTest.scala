@@ -1,5 +1,7 @@
 package fix.v06
 
+import org.llm4s.agent.events.ModelCallCompleted
+import org.llm4s.error.ContentFilteredError
 import org.llm4s.llmconnect.model.Completion
 import org.llm4s.model.ModelCapabilities
 
@@ -10,5 +12,15 @@ object PositionalPatternsGainFieldsTest {
 
   def vision(capabilities: ModelCapabilities): Boolean = capabilities match {
     case ModelCapabilities(_, _, vision, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => vision.contains(true)
+  }
+
+  // gained finishReason since 0.6.0 (RFC 0009 PR 6, #2687)
+  def model(event: ModelCallCompleted): String = event match {
+    case ModelCallCompleted(_, model, _, _, _, _, _, _, _) => model
+  }
+
+  // gained usage since 0.6.0, but its hand-written unapply keeps 0.6.0's four fields: left alone
+  def blockedPrompt(error: ContentFilteredError): Boolean = error match {
+    case ContentFilteredError(_, _, _, promptBlocked) => promptBlocked
   }
 }

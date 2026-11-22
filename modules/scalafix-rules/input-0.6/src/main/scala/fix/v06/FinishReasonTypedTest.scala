@@ -35,5 +35,6 @@ object FinishReasonTypedTest {
 
   def copied(chunk: StreamedChunk, from: StreamedChunk): StreamedChunk = chunk.withFinishReason(from.finishReason)
 
-  def filtered(chunk: StreamedChunk): Boolean = chunk.finishReason.contains("content_filter")
+  // a raw value with no case of its own is still Other(raw), whose name is the raw value
+  def malformed(chunk: StreamedChunk): Boolean = chunk.finishReason.contains("MALFORMED_FUNCTION_CALL")
 }

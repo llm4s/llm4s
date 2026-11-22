@@ -90,7 +90,8 @@ object PositionalPatternsGainFields {
    * 0.6.0 does not have 0.5.1's arity, so the two maps never both match.
    */
   val arity06: Map[String, (Int, Int)] = Map(
-    "org/llm4s/llmconnect/model/Completion" -> (10 -> 11)
+    "org/llm4s/llmconnect/model/Completion"     -> (10 -> 11),
+    "org/llm4s/agent/events/ModelCallCompleted" -> (8  -> 9)
   )
 
   /** The number of fields a pattern of `size` arguments on `owner` lacks, if it has 0.5.1's or 0.6.0's arity. */
