@@ -5,7 +5,7 @@ import org.llm4s.knowledgegraph.graphrag.GraphRAGConfig
 import org.llm4s.knowledgegraph.storage.GraphStore
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.CompletionOptions
-import org.llm4s.rag.loader.{ DirectoryLoader, DocumentLoader, LoadingConfig }
+import org.llm4s.rag.loader.{ DirectoryLoader, DocumentLoader, DocumentRegistry, LoadingConfig }
 import org.llm4s.rag.permissions.SearchIndex
 import org.llm4s.trace.Tracing
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -91,7 +91,9 @@ final case class RAGConfig(
   graphStore: Option[GraphStore] = None,
   graphRAGConfig: GraphRAGConfig = GraphRAGConfig(),
   // Answer generation options
-  completionOptions: CompletionOptions = RAGConfig.DefaultCompletionOptions
+  completionOptions: CompletionOptions = RAGConfig.DefaultCompletionOptions,
+  // Where sync records what it indexed; None = in memory
+  documentRegistry: Option[DocumentRegistry] = None
 ) {
 
   // ========== Embedding Configuration ==========
@@ -370,6 +372,19 @@ final case class RAGConfig(
    */
   def withBatchSize(n: Int): RAGConfig =
     copy(loadingConfig = loadingConfig.copy(batchSize = n))
+
+  /**
+   * Record what `sync` has indexed in `registry` rather than in memory.
+   *
+   * With the default in-memory registry, a new `RAG` remembers nothing: its first sync re-embeds every document, and
+   * a document deleted from the source while the process was down is never removed from the index. A registry that
+   * outlives the process - `PgDocumentRegistry`, `SQLiteDocumentRegistry` - should sit beside an index that does
+   * too (`withPgVector`, `withSQLite`). The pipeline does not close it: its owner does.
+   *
+   * @param registry the registry, shared by every sync of the pipeline
+   */
+  def withDocumentRegistry(registry: DocumentRegistry): RAGConfig =
+    copy(documentRegistry = Some(registry))
 
   // ========== Permission-Based Search Configuration ==========
 

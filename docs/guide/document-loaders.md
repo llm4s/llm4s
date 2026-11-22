@@ -367,6 +367,37 @@ error). `sync` streams the loader, holding one document at a time; `refresh` hol
 document in memory before clearing the index, so that a listing failure leaves the index untouched.
 For a very large source prefer `sync`.
 
+**Keeping the registry across restarts.** The registry is in memory unless the config names another,
+so a new `RAG` remembers nothing: its first `sync` re-embeds every document, and a document deleted
+while the process was down stays in the index. For an index that outlives the process, give the
+pipeline a registry that does too:
+
+```scala
+import javax.sql.DataSource
+import org.llm4s.rag.{ RAG, RAGConfig }
+import org.llm4s.rag.loader.{ PgDocumentRegistry, SQLiteDocumentRegistry }
+import org.llm4s.security.Secret
+import org.llm4s.types.Result
+
+// Over the pool the application already has (doobie's HikariTransactor.kernel, a Play or Slick pool, ...);
+// the registry's table is llm4s_document_registry
+def pgConfig(dataSource: DataSource, jdbcUrl: String, user: String, password: Secret): Result[RAGConfig] =
+  PgDocumentRegistry.fromDataSource(dataSource).map { registry =>
+    RAG.builder()
+      .withPgVector(jdbcUrl, user, password, "vectors")
+      .withDocumentRegistry(registry)
+  }
+
+// A single process: the registry in a SQLite file beside the SQLite stores
+def sqliteConfig: Result[RAGConfig] =
+  SQLiteDocumentRegistry("./rag-registry.db").map(RAG.builder().withSQLite("./rag.db").withDocumentRegistry(_))
+```
+
+**Several loaders in one `RAG`.** `sync(loader)` treats the loader as the whole source, so syncing a
+second loader would delete the first one's documents. Give each loader a stable `sourceId`:
+`rag.sync(s3Loader, "s3://bucket/docs")`, `rag.sync(wikiLoader, "wiki")`. A sync then deletes only the
+documents its own source registered. `refresh` still clears every source.
+
 ---
 
 ## Safety
