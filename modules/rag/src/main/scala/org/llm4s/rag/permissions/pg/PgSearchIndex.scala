@@ -5,14 +5,21 @@ import org.llm4s.error.ProcessingError
 import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
 import org.llm4s.util.{ SqlIdentifier, Redaction }
-import org.llm4s.vectorstore.{ HikariDefaults, MetadataFilter, PgDataSources, ScoredRecord, VectorRecord }
+import org.llm4s.vectorstore.{
+  HikariDefaults,
+  KeywordSearchResult,
+  MetadataFilter,
+  PgDataSources,
+  ScoredRecord,
+  VectorRecord
+}
 import org.llm4s.util.RateLimitedLogger
 import org.llm4s.security.Secret
 import org.llm4s.vectorstore.JdbcUrlCredentials
 
 import org.slf4j.LoggerFactory
 
-import java.sql.{ Array => SqlArray, Connection, ResultSet }
+import java.sql.{ Array => SqlArray, Connection, PreparedStatement, ResultSet }
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.sql.DataSource
 import scala.collection.mutable.ArrayBuffer
@@ -89,6 +96,63 @@ final class PgSearchIndex private (
         }
     } yield results
 
+  /**
+   * The permission filter both searches share: the accessible collections, `readable_by` unless `auth` is admin, and
+   * `additionalFilter`. Returns the `WHERE` condition and a binder that sets its parameters from a given index,
+   * returning the next free one.
+   */
+  private def permissionFilter(
+    auth: UserAuthorization,
+    collectionIds: Seq[Int],
+    additionalFilter: Option[MetadataFilter]
+  ): (String, (Connection, PreparedStatement, Int) => Int) = {
+    val collectionPlaceholders = collectionIds.map(_ => "?").mkString(",")
+
+    val (additionalWhereClause, additionalParams) = additionalFilter match {
+      case Some(filter) => filterToSql(filter)
+      case None         => ("", Seq.empty[Any])
+    }
+
+    val whereClause = if (auth.isAdmin) {
+      s"collection_id IN ($collectionPlaceholders)" +
+        (if (additionalWhereClause.nonEmpty) s" AND $additionalWhereClause" else "")
+    } else {
+      s"collection_id IN ($collectionPlaceholders) AND (readable_by = '{}' OR readable_by && ?)" +
+        (if (additionalWhereClause.nonEmpty) s" AND $additionalWhereClause" else "")
+    }
+
+    val bind = (conn: Connection, stmt: PreparedStatement, from: Int) => {
+      var paramIdx = from
+
+      collectionIds.foreach { id =>
+        stmt.setInt(paramIdx, id)
+        paramIdx += 1
+      }
+
+      // Permission filter (unless admin)
+      if (!auth.isAdmin) {
+        stmt.setArray(paramIdx, createIntArray(conn, auth.asSeq))
+        paramIdx += 1
+      }
+
+      additionalParams.foreach { param =>
+        param match {
+          case s: String  => stmt.setString(paramIdx, s)
+          case i: Int     => stmt.setInt(paramIdx, i)
+          case l: Long    => stmt.setLong(paramIdx, l)
+          case d: Double  => stmt.setDouble(paramIdx, d)
+          case b: Boolean => stmt.setBoolean(paramIdx, b)
+          case _          => stmt.setObject(paramIdx, param)
+        }
+        paramIdx += 1
+      }
+
+      paramIdx
+    }
+
+    (whereClause, bind)
+  }
+
   private def searchWithPermissions(
     auth: UserAuthorization,
     collectionIds: Seq[Int],
@@ -97,24 +161,8 @@ final class PgSearchIndex private (
     additionalFilter: Option[MetadataFilter]
   ): Result[Seq[ScoredRecord]] = Try {
     withConnection { conn =>
-      val vectorStr = embeddingToString(queryVector)
-
-      // Build collection filter
-      val collectionPlaceholders = collectionIds.map(_ => "?").mkString(",")
-
-      // Build the query with permission filtering
-      val (additionalWhereClause, additionalParams) = additionalFilter match {
-        case Some(filter) => filterToSql(filter)
-        case None         => ("", Seq.empty[Any])
-      }
-
-      val whereClause = if (auth.isAdmin) {
-        s"collection_id IN ($collectionPlaceholders)" +
-          (if (additionalWhereClause.nonEmpty) s" AND $additionalWhereClause" else "")
-      } else {
-        s"collection_id IN ($collectionPlaceholders) AND (readable_by = '{}' OR readable_by && ?)" +
-          (if (additionalWhereClause.nonEmpty) s" AND $additionalWhereClause" else "")
-      }
+      val vectorStr           = embeddingToString(queryVector)
+      val (whereClause, bind) = permissionFilter(auth, collectionIds, additionalFilter)
 
       val sql = s"""
         SELECT id, embedding, embedding_dim, content, metadata,
@@ -126,44 +174,12 @@ final class PgSearchIndex private (
       """
 
       Using.resource(conn.prepareStatement(sql)) { stmt =>
-        var paramIdx = 1
-
         // Query vector for similarity calculation
-        stmt.setString(paramIdx, vectorStr)
-        paramIdx += 1
-
-        // Collection IDs
-        collectionIds.foreach { id =>
-          stmt.setInt(paramIdx, id)
-          paramIdx += 1
-        }
-
-        // Permission filter (unless admin)
-        if (!auth.isAdmin) {
-          val authArray = createIntArray(conn, auth.asSeq)
-          stmt.setArray(paramIdx, authArray)
-          paramIdx += 1
-        }
-
-        // Additional filter params
-        additionalParams.foreach { param =>
-          param match {
-            case s: String  => stmt.setString(paramIdx, s)
-            case i: Int     => stmt.setInt(paramIdx, i)
-            case l: Long    => stmt.setLong(paramIdx, l)
-            case d: Double  => stmt.setDouble(paramIdx, d)
-            case b: Boolean => stmt.setBoolean(paramIdx, b)
-            case _          => stmt.setObject(paramIdx, param)
-          }
-          paramIdx += 1
-        }
-
-        // Query vector for ordering
-        stmt.setString(paramIdx, vectorStr)
-        paramIdx += 1
-
-        // Limit
-        stmt.setInt(paramIdx, topK)
+        stmt.setString(1, vectorStr)
+        val next = bind(conn, stmt, 2)
+        // Query vector for ordering, then the limit
+        stmt.setString(next, vectorStr)
+        stmt.setInt(next + 1, topK)
 
         Using.resource(stmt.executeQuery()) { rs =>
           val buffer = ArrayBuffer[ScoredRecord]()
@@ -177,6 +193,66 @@ final class PgSearchIndex private (
       }
     }
   }.toEither.left.map(e => ProcessingError("pg-search-index-query", Redaction.scrubKnown(e.getMessage)))
+
+  /**
+   * Full-text search over the vectors table's `content`, with the permission filter of [[query]].
+   *
+   * The query is parsed with `websearch_to_tsquery` (quoted phrases, `-` to exclude, `or`) and ranked with
+   * `ts_rank_cd`, under the `english` text search configuration - as `PgKeywordIndex` does by default.
+   * `initializeSchema` creates the GIN index this search uses.
+   */
+  override def keywordQuery(
+    auth: UserAuthorization,
+    collectionPattern: CollectionPattern,
+    queryText: String,
+    topK: Int,
+    additionalFilter: Option[MetadataFilter]
+  ): Result[Seq[KeywordSearchResult]] =
+    for {
+      accessibleCollections <- _collections.findAccessible(auth, collectionPattern)
+      collectionIds = accessibleCollections.filter(_.isLeaf).map(_.id)
+      results <-
+        if (collectionIds.isEmpty || queryText.trim.isEmpty) Right(Seq.empty[KeywordSearchResult])
+        else keywordSearchWithPermissions(auth, collectionIds, queryText, topK, additionalFilter)
+    } yield results
+
+  private def keywordSearchWithPermissions(
+    auth: UserAuthorization,
+    collectionIds: Seq[Int],
+    queryText: String,
+    topK: Int,
+    additionalFilter: Option[MetadataFilter]
+  ): Result[Seq[KeywordSearchResult]] = Try {
+    withConnection { conn =>
+      val (whereClause, bind) = permissionFilter(auth, collectionIds, additionalFilter)
+
+      val sql = s"""
+        SELECT id, content, metadata, ts_rank_cd(${PgSearchIndex.ContentTsVector}, tsq) AS score
+        FROM $vectorTableName, websearch_to_tsquery('${PgSearchIndex.TextSearchConfig}', ?) AS tsq
+        WHERE ${PgSearchIndex.ContentTsVector} @@ tsq AND $whereClause
+        ORDER BY score DESC, id
+        LIMIT ?
+      """
+
+      Using.resource(conn.prepareStatement(sql)) { stmt =>
+        stmt.setString(1, queryText)
+        val next = bind(conn, stmt, 2)
+        stmt.setInt(next, topK)
+
+        Using.resource(stmt.executeQuery()) { rs =>
+          val buffer = ArrayBuffer[KeywordSearchResult]()
+          while (rs.next())
+            buffer += KeywordSearchResult(
+              id = rs.getString("id"),
+              content = Option(rs.getString("content")).getOrElse(""),
+              score = rs.getDouble("score"),
+              metadata = jsonToMap(rs.getString("metadata"))
+            )
+          buffer.toSeq
+        }
+      }
+    }
+  }.toEither.left.map(e => ProcessingError("pg-search-index-keyword-query", Redaction.scrubKnown(e.getMessage)))
 
   override def ingest(
     collectionPath: CollectionPath,
@@ -284,6 +360,19 @@ final class PgSearchIndex private (
       """)) { stmt =>
         stmt.setInt(1, collectionId)
         stmt.setString(2, documentId)
+        stmt.executeUpdate().toLong
+      }
+    }
+  }.toEither.left.map(e => ProcessingError("pg-search-index-delete-doc", Redaction.scrubKnown(e.getMessage)))
+
+  /** One statement over every collection: each chunk [[ingest]] writes carries its document id as `docId`. */
+  override def deleteDocumentFromAllCollections(documentId: String): Result[Long] = Try {
+    withConnection { conn =>
+      Using.resource(conn.prepareStatement(s"""
+        DELETE FROM $vectorTableName
+        WHERE collection_id IS NOT NULL AND metadata->>'docId' = ?
+      """)) { stmt =>
+        stmt.setString(1, documentId)
         stmt.executeUpdate().toLong
       }
     }
@@ -434,6 +523,15 @@ final class PgSearchIndex private (
 }
 
 object PgSearchIndex {
+
+  /** The text search configuration of [[PgSearchIndex.keywordQuery]]. */
+  private[pg] val TextSearchConfig = "english"
+
+  /**
+   * The expression [[PgSearchIndex.keywordQuery]] matches on. `PgSchemaManager.extendVectorsTable` indexes exactly
+   * this expression, so the two must stay identical for the index to be used.
+   */
+  private[pg] val ContentTsVector = s"to_tsvector('$TextSearchConfig', coalesce(content, ''))"
 
   /**
    * Create a new PgSearchIndex with the given configuration.

@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An agent turn whose answer was cut off at the output limit ends `AgentStatus.Truncated(partialAnswer)`, not
   `Completed`, and `AgentStatusKind` gains `TRUNCATED`; a `match` on `AgentStatus` needs the case (RFC 0009 open
   question 6); [migration](docs/reference/migration.md#a-cut-off-answer-ends-truncated-not-completed-2613).
+- On a `RAG` with a `SearchIndex`, plain `ingest*`, `sync` and `refresh` return a `ConfigurationError`, and a hybrid
+  `queryWithPermissions` needs `SearchIndex.keywordQuery`, which replaces `queryHybrid` (#2716);
+  [migration](docs/reference/migration.md#a-rag-with-a-searchindex-ingests-only-with-permissions-2716).
 - A `DocumentRegistry` of your own implements `register(docId, version, sourceId)` and `documentIds(sourceId)`
   (#2714); [migration](docs/reference/migration.md#documentregistry-is-source-scoped-2714).
 
@@ -123,6 +126,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `RAG.queryWithAnswerStreaming` and `queryWithPermissionsAndAnswerStreaming`: the contexts to one callback
   first, so a UI can show citations at once, then each `StreamedChunk` of the answer, then the whole
   `RAGAnswerResult` [#2717](https://github.com/llm4s/llm4s/issues/2717).
+- **Fixed** a `RAG` with a `SearchIndex` refuses plain ingest and sync (a `ConfigurationError`) instead of writing rows
+  no permission query finds; `deleteDocument` deletes from every collection; `queryWithPermissions` runs the configured
+  fusion, keyword search and reranking [#2716](https://github.com/llm4s/llm4s/issues/2716);
+  [migration](docs/reference/migration.md#a-rag-with-a-searchindex-ingests-only-with-permissions-2716).
 - **Added** `RAGConfig.withDocumentRegistry` with `PgDocumentRegistry` (can share a `DataSource`) and
   `SQLiteDocumentRegistry`, so `sync` survives a restart; `sync(loader, sourceId)` deletes only its own source's
   documents [#2714](https://github.com/llm4s/llm4s/issues/2714);

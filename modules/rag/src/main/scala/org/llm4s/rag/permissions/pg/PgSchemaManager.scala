@@ -104,6 +104,7 @@ object PgSchemaManager {
    * - collection_id column (foreign key to llm4s_collections)
    * - readable_by column (array of principal IDs)
    * - Indexes for efficient filtering
+   * - A full-text (GIN) index on `content`, for `PgSearchIndex.keywordQuery`
    *
    * @param conn Database connection
    * @param tableName The name of the vectors table to extend; must be a valid SQL identifier
@@ -151,6 +152,12 @@ object PgSchemaManager {
       stmt.execute(s"""
         CREATE INDEX IF NOT EXISTS idx_${tableName}_readable_by
         ON $tableName USING GIN(readable_by)
+      """)
+
+      // Full-text index for PgSearchIndex.keywordQuery, on exactly the expression it matches
+      stmt.execute(s"""
+        CREATE INDEX IF NOT EXISTS idx_${tableName}_content_fts
+        ON $tableName USING GIN(${PgSearchIndex.ContentTsVector})
       """)
 
       ()
@@ -283,6 +290,7 @@ object PgSchemaManager {
           END IF;
         END $$$$
       """)
+      stmt.execute(s"DROP INDEX IF EXISTS idx_${tableName}_content_fts")
 
       // Drop tables
       stmt.execute("DROP TABLE IF EXISTS llm4s_collections CASCADE")
