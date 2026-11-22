@@ -384,7 +384,7 @@ Great for cost-conscious projects and high-volume applications.
 ### Thinking
 
 `CompletionOptions.thinking` and `reasoning` go in `generationConfig.thinkingConfig`, for `gemini` and `vertexai`
-alike, by model generation ([Cost controls](cost-controls.md#thinking-and-reasoning-effort)):
+alike, by model generation ([Cost controls](cost-controls#thinking-and-reasoning-effort)):
 
 | Model | `thinking` | `reasoning` |
 |---|---|---|
