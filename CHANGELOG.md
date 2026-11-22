@@ -40,9 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every argument [#1281](https://github.com/llm4s/llm4s/issues/1281); [migration](docs/reference/migration.md#the-forwarding-apply-overloads-are-removed-1281).
 - `CompressionRule`'s function field `apply` is `transform`, and `withApply` is `withTransform`
   [#1281](https://github.com/llm4s/llm4s/issues/1281); [migration](docs/reference/migration.md#compressionrules-apply-field-is-transform-1281).
-- On a `RAG` with a `SearchIndex`, plain `ingest*`, `sync` and `refresh` return a `ConfigurationError`, and a hybrid
+- On a `RAG` with a `SearchIndex`, plain `ingest*`, `sync`, `refresh`, `query`, `queryWithAnswer(Streaming)` and
+  `clear` return a `ConfigurationError`, and a hybrid
   `queryWithPermissions` needs `SearchIndex.keywordQuery`, which replaces `queryHybrid` (#2716);
   [migration](docs/reference/migration.md#a-rag-with-a-searchindex-ingests-only-with-permissions-2716).
+- A `DocumentRegistry` of your own implements `register(docId, version, sourceId)` and `documentIds(sourceId)`
+  (#2714); [migration](docs/reference/migration.md#documentregistry-is-source-scoped-2714).
 
 ### Providers
 
@@ -130,9 +133,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first, so a UI can show citations at once, then each `StreamedChunk` of the answer, then the whole
   `RAGAnswerResult` [#2717](https://github.com/llm4s/llm4s/issues/2717).
 - **Fixed** a `RAG` with a `SearchIndex` refuses plain ingest and sync (a `ConfigurationError`) instead of writing rows
-  no permission query finds; `deleteDocument` deletes from every collection; `queryWithPermissions` runs the configured
-  fusion, keyword search and reranking [#2716](https://github.com/llm4s/llm4s/issues/2716);
+  no permission query finds, and plain `query`, `queryWithAnswer(Streaming)`, GraphRAG's Hybrid mode and `clear`
+  instead of searching or deleting every collection unfiltered; `deleteDocument` deletes from every collection;
+  `queryWithPermissions` runs the configured fusion, keyword search and reranking
+  [#2716](https://github.com/llm4s/llm4s/issues/2716);
   [migration](docs/reference/migration.md#a-rag-with-a-searchindex-ingests-only-with-permissions-2716).
+- **Added** `RAGConfig.withDocumentRegistry` with `PgDocumentRegistry` (can share a `DataSource`) and
+  `SQLiteDocumentRegistry`, so `sync` survives a restart; `sync(loader, sourceId)` deletes only its own source's
+  documents [#2714](https://github.com/llm4s/llm4s/issues/2714);
+  [migration](docs/reference/migration.md#documentregistry-is-source-scoped-2714).
 
 ### Build & tooling
 

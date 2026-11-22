@@ -41,8 +41,30 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [a cut-off answer ends `Truncated`, not `Completed`](#a-cut-off-answer-ends-truncated-not-completed-2613),
 [a workspace container has no egress](#a-workspace-container-has-no-egress-870),
 [a RAG with a `SearchIndex` ingests only with permissions](#a-rag-with-a-searchindex-ingests-only-with-permissions-2716),
-[the forwarding `apply` overloads are removed](#the-forwarding-apply-overloads-are-removed-1281)
-and [`CompressionRule`'s `apply` field is `transform`](#compressionrules-apply-field-is-transform-1281).
+[the forwarding `apply` overloads are removed](#the-forwarding-apply-overloads-are-removed-1281),
+[`CompressionRule`'s `apply` field is `transform`](#compressionrules-apply-field-is-transform-1281)
+and [`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714).
+
+## `DocumentRegistry` is source-scoped (#2714)
+
+`RAG.sync` records what it indexed in a `DocumentRegistry`, which was always an in-memory one, and its deletion pass
+removed every registered document the current loader did not list. Now:
+
+- **The registry is pluggable.** `RAGConfig.withDocumentRegistry(registry)` names it; the default is still
+  in memory. `PgDocumentRegistry` (`PgDocumentRegistry(jdbcUrl, user, password)` or
+  `PgDocumentRegistry.fromDataSource(dataSource)`, sharing a pool with a `PgVectorStore`) and
+  `SQLiteDocumentRegistry(path)` keep it across restarts, so the next sync re-embeds only what changed and deletes
+  what the source dropped meanwhile. Pair it with stores that persist too, keyword index included (`withPgHybrid`,
+  `withSQLite`): a sync skips documents the registry knows, so an empty store is never refilled for them. The
+  pipeline does not close the registry; its owner does.
+- **Sync is scoped by source.** `sync(loader, sourceId)` and `syncAsync(loader, sourceId)` delete only documents that
+  source registered, so several loaders can share one `RAG`. `sync(loader)` syncs the default source
+  (`DocumentRegistry.DefaultSourceId`, `"default"`), which also holds documents a plain ingest registered, and no
+  longer deletes documents a named source owns. With one loader and no `sourceId`, nothing changes. `refresh` still
+  clears every source.
+- **A `DocumentRegistry` of your own** implements `register(docId, version, sourceId)` in place of
+  `register(docId, version)` (now a concrete method that registers under the default source), and
+  `documentIds(sourceId)`.
 
 ## The forwarding `apply` overloads are removed (#1281)
 
@@ -123,6 +145,15 @@ case now either works or fails:
   collection: `PgSchemaManager`'s default collection is public, so a document ingested without naming its readers
   would become readable by every principal. Rows a plain ingest wrote before can be moved to that collection,
   if that is what you want, with `PgSchemaManager.migrateExistingVectors`, or deleted with `deleteDocument`.
+- **Plain search and `clear()` are refused.** `query`, `queryWithAnswer`, `queryWithAnswerStreaming` and GraphRAG's
+  Hybrid mode (`queryWithGraphRAG` when it routes there) return a `ConfigurationError` on a `RAG` with a
+  `SearchIndex`, before embedding the question or calling the model. With a `PgSearchIndex` they searched the index's
+  own table with no collection or `readable_by` filter, so any caller could retrieve every principal's documents. Use
+  `queryWithPermissions`, `queryWithPermissionsAndAnswer` or `queryWithPermissionsAndAnswerStreaming` with the
+  caller's `UserAuthorization`; `UserAuthorization.Admin` reads everything, deliberately. `clear()` is refused too:
+  it emptied that table, every collection's documents with it. It has no opt-in, because the permission API already
+  covers each deliberate use: `searchIndex.clearCollection(path)` for one collection, `deleteDocument(docId)` for
+  one document, and `searchIndex.dropSchema()` then `initializeSchema()` to reset the whole index.
 - **`deleteDocument(docId)` deletes more.** With a `SearchIndex` it also deletes the document from every collection
   (`SearchIndex.deleteDocumentFromAllCollections`, new), whose chunks are named `coll-<collectionId>-<docId>-chunk-<n>`.
   It used to return `Right(())` and leave those chunks retrievable. A failed delete is now the `Left`. A
