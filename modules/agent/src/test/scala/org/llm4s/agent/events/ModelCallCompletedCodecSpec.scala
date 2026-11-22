@@ -177,7 +177,7 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
       StoredWithoutFinishReason("assistant", "gpt-4o", 1, 0, usage, Some(0.01))
   }
 
-  it should "read a finish reason it cannot read, a case added later, as none and keep the rest" in {
+  it should "read a finish reason it cannot read, a case added later, as Other with its raw value, and keep the rest" in {
     val stored = ujson.read(
       write(
         ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, Some(0.01), None, adjustments, Some(FinishReason.Stop))
@@ -185,9 +185,17 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
     )
     stored("finishReason") = ujson.Str("ContentFiltered")
     val event = read[ModelCallCompleted](stored)
-    event.finishReason shouldBe None
+    event.finishReason shouldBe Some(FinishReason.Other("ContentFiltered"))
     event.adjustments shouldBe adjustments
     event.usage shouldBe usage
+    // a case with fields is stored under its tag, which is kept
+    stored("finishReason") = ujson.Obj("$type" -> "Refused", "category" -> "self-harm")
+    read[ModelCallCompleted](stored).finishReason shouldBe Some(FinishReason.Other("Refused"))
+    // nothing raw to keep, and no call: none
+    stored("finishReason") = ujson.Num(3)
+    read[ModelCallCompleted](stored).finishReason shouldBe None
+    stored("finishReason") = ujson.Obj("category" -> "self-harm")
+    read[ModelCallCompleted](stored).finishReason shouldBe None
     stored("finishReason") = ujson.Null
     read[ModelCallCompleted](stored).finishReason shouldBe None
   }

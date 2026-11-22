@@ -83,7 +83,7 @@ client.complete(conversation, options).map { c =>
 - An agent's `AgentEvents.ModelCallCompleted` gains `finishReason: Option[FinishReason]` (default `None`), after
   `adjustments`, filled from each call's `Completion` (PR 6). Construction is unchanged; a positional pattern needs a
   ninth binder, `case ModelCallCompleted(a, m, n, t, u, c, p, adj, _)`, which the `PositionalPatternsGainFields`
-  Scalafix rule adds, or match on the type and read the fields. An event stored before reads with `None`.
+  Scalafix rule adds, or match on the type and read the fields. An event stored before reads with `None`; a reason this version cannot read, a case a later one adds, reads as `FinishReason.Other` with its stored value.
 
 ## Every provider's content-filter stop is an error (#2677)
 

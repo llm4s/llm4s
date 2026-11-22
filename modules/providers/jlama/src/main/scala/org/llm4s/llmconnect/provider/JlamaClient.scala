@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.JlamaConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.metrics.MetricsCollector
+import org.llm4s.model.{ AdjustmentLog, UnmappedOptions }
 import org.llm4s.types.Result
 
 import java.time.Instant
@@ -23,7 +24,9 @@ import scala.util.{ Try, Using }
  *
  * Text only: an image, audio or file part is refused before the model runs. No tool calling: a request with tools, or
  * a conversation holding tool calls or tool results, is refused. `responseFormat` is not read, so
- * `completeStructured` gets whatever text the model writes. An interrupted call stops after the token being generated
+ * `completeStructured` gets whatever text the model writes. Jlama is given the temperature and the token limit only;
+ * `top_p`, the penalties, `responseFormat`, `reasoning` and `thinking` are reported `Dropped` on
+ * `Completion.adjustments` when set (RFC 0008). An interrupted call stops after the token being generated
  * and returns `Left(CancelledError)`.
  */
 @Experimental
@@ -45,8 +48,17 @@ final class JlamaClient private[provider] (
   override def getContextWindow(): Int     = config.contextWindow
   override def getReserveCompletion(): Int = config.reserveCompletion
 
+  // what the engine is not given goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(ProviderName)
+
+  private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
+    val adjustments = unsentOptions(config.model, options)
+    adjustmentLog.record(config.model, adjustments)
+    adjustments
+  }
+
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-    completeWithMetrics(run(conversation, options, _ => ()).map(_._1))
+    completeWithMetrics(run(conversation, options, _ => ()).map(_._1.withAdjustments(unsent(options))))
 
   override def streamComplete(
     conversation: Conversation,
@@ -58,7 +70,7 @@ final class JlamaClient private[provider] (
       run(conversation, options, token => onChunk(StreamedChunk(id = id, content = Some(token)))).map {
         (completion, finish) =>
           onChunk(StreamedChunk(id = id, content = None, finishReason = Some(finishReason(finish))))
-          completion.withId(id)
+          completion.withId(id).withAdjustments(unsent(options))
       }
     }
 
@@ -133,6 +145,16 @@ final class JlamaClient private[provider] (
 
 @Experimental
 object JlamaClient:
+
+  /** What `options` sets that the engine is not given, each `Dropped` (RFC 0008): it takes a temperature and a limit. */
+  private[provider] def unsentOptions(model: String, options: CompletionOptions): List[RequestAdjustment] =
+    def dropped(set: Boolean, option: RequestOption) =
+      Option.when(set)(RequestAdjustment.Dropped(option, s"Jlama is not given $option")).toList
+    dropped(options.topP != 1.0, RequestOption.TopP) ++
+      dropped(options.presencePenalty != 0.0, RequestOption.PresencePenalty) ++
+      dropped(options.frequencyPenalty != 0.0, RequestOption.FrequencyPenalty) ++
+      dropped(options.responseFormat.isDefined, RequestOption.ResponseFormat) ++
+      UnmappedOptions.reasoningAndThinking(model, options)
 
   /** The provider id: the `provider` of this client's errors and metrics. */
   val ProviderName: String = "jlama"

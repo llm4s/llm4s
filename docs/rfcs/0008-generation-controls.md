@@ -8,8 +8,8 @@ nav_order: 8
 
 # RFC 0008: Generation controls and reported adjustments
 
-- **Status:** Implemented, in the release after 0.6.0 (PRs #2532, #2617, #2666, #2706, and the Gemini follow-up
-  #2710); three follow-ups remain open (see [Delivery](#delivery))
+- **Status:** Implemented, in the release after 0.6.0 (PRs #2532, #2617, #2666, #2706, and the follow-ups #2699
+  and #2710); three follow-ups remain open (see [Delivery](#delivery))
 - **Author(s):** @jwgcooke
 - **Tracking issue:** [#2115](https://github.com/llm4s/llm4s/issues/2115)
 - **Pull request:** [#2445](https://github.com/llm4s/llm4s/pull/2445)
@@ -224,7 +224,9 @@ Mapping, each provider in its own module. Anything not listed is reported as `Dr
 | Z.ai | as #1691 | `Off` → `thinking.type: disabled` (or `low` on GLM-5.3, `Adjusted`) |
 | OpenRouter | as today | Anthropic models: `Budget(n)` → `thinking.budget_tokens: n`, as today; `Off` → no thinking block. Others `Dropped` |
 | Gemini / Vertex AI | `thinking_level` where supported (Gemini 3 and later) | Gemini 2.5: `thinkingBudget`: `Off` → 0, `Adaptive` → -1, `Budget(n)` → n, fitted to the model's range (`Adjusted` when fitted); 2.5 Pro cannot turn thinking off and gets its minimum. Gemini 3 and later deprecate `thinkingBudget` and reject it beside a level: `Off` → the lowest level, `Budget` `Dropped` (the Gemini follow-up) |
-| Bedrock, Ollama, watsonx, others | `Dropped` until mapped | `Dropped` until mapped (Ollama `think` in a follow-up) |
+| watsonx | gpt-oss models: `reasoning_effort`, a level it lacks `Adjusted` to the nearest; other models `Dropped` | gpt-oss: `Off` → `low` (`Adjusted`), `Adaptive` `NotNeeded`, `Budget` `Dropped`; other models `Dropped` |
+| Perplexity | `reasoning.effort`, every level by name | `Off` → `minimal` (`Adjusted`), `Adaptive` `NotNeeded`, `Budget` `Dropped` |
+| Bedrock, Ollama, others | `Dropped` until mapped | `Dropped` until mapped (Ollama `think` in a follow-up) |
 
 Apart from the exception above, Anthropic's `output_config.effort` applies only when a caller sets one of the new
 levels or sets `thinking` explicitly. A caller using `reasoning` alone on a model that takes a budget keeps today's
@@ -416,7 +418,8 @@ Each PR has its own review:
 
 Follow-ups, one provider or one control per PR, under this RFC: Bedrock `cachePoint`, Ollama `think`, Gemini
 thinking levels, and service tier. Gemini thinking levels are delivered in
-[#2710](https://github.com/llm4s/llm4s/pull/2710) (Gemini and Vertex AI send `thinkingConfig`, replacing #2623).
+[#2710](https://github.com/llm4s/llm4s/pull/2710) (Gemini and Vertex AI send `thinkingConfig`, replacing #2623), and watsonx, Perplexity and Jlama report what they
+leave out in [#2699](https://github.com/llm4s/llm4s/pull/2699).
 Bedrock `cachePoint`, Ollama `think` and service tier are still open; until each lands, its provider reports the
 option `Dropped` (service tier has no option yet).
 
@@ -477,8 +480,8 @@ PR 4 settled these:
     from one to the other sends the request it sent before (the compatibility promise above): Z.ai `thinking.type:
     disabled` or `reasoning_effort: none` by model, xAI and watsonx `low`, Perplexity `minimal`. Where that still thinks
     it is reported `Adjusted`, replacing the per-process warnings those clients logged. OpenAI differs, as the
-    migration says: `Off` asks for the lowest effort. Perplexity and watsonx report no adjustments yet, so theirs are a
-    follow-up. Claude Fable 5 rejects `thinking: disabled`, which its metadata does not say, so its patch entries carry
+    migration says: `Off` asks for the lowest effort. Perplexity and watsonx report theirs as well (added after PR 4),
+    and watsonx's per-process warnings are gone. Claude Fable 5 rejects `thinking: disabled`, which its metadata does not say, so its patch entries carry
     `supports_none_reasoning_effort: false` beside PR 3's `supports_budget_thinking: false`.
 
 PR 6 settled these:
