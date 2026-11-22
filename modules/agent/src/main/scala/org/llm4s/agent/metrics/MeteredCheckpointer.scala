@@ -148,6 +148,7 @@ final class MeteredCheckpointer private (val inner: Checkpointer, metrics: Metri
   // ---- forwarded as they are ----
 
   def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]             = inner.latest(threadId)
+  override def owner(threadId: ThreadId): Result[Option[ThreadOwner]]          = inner.owner(threadId)
   def effect(threadId: ThreadId, key: EffectKey): Result[Option[EffectRecord]] = inner.effect(threadId, key)
   def history(threadId: ThreadId, before: Option[String], limit: Int): Result[Vector[Checkpoint]] =
     inner.history(threadId, before, limit)

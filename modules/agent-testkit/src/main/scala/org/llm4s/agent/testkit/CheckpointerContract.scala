@@ -1893,6 +1893,46 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.children(ThreadId("elsewhere"), None, 10).value.map(_.threadId) shouldBe Vector(child)
   }
 
+  it should "give a thread's owner - its latest checkpoint's tenant and parent - as latest would, across a reopen (#2642)" in {
+    val s     = Store()
+    val top   = ThreadId(s"${s.thread.value}-top")
+    val child = ThreadId(s"${s.thread.value}/~task/worker/1")
+    def agrees(threadId: ThreadId): Assertion =
+      s.store.owner(threadId).value shouldBe s.store.latest(threadId).value.map(l => ThreadOwner.of(l.checkpoint))
+    // no checkpoint: an unknown thread, and a claimed one that has committed none
+    s.store.owner(ThreadId(s"${s.thread.value}-unknown")).value shouldBe None
+    val claimed = ThreadId(s"${s.thread.value}-claimed")
+    s.claim("run", on = claimed, tenant = Some("tenant-a")).value
+    s.store.owner(claimed).value shouldBe None
+
+    childCommitted(s, top, None, tenant = Some("tenant-a"))
+    childCommitted(s, child, Some(originOf(s.thread, 1)))
+    s.store.owner(top).value shouldBe Some(ThreadOwner(Some("tenant-a"), None))
+    s.store.owner(child).value shouldBe Some(ThreadOwner(None, Some(s.thread)))
+    agrees(top)
+    agrees(child)
+
+    // it follows the latest checkpoint: another tenant, no parent, then another parent
+    childCommitted(s, top, None, tenant = Some("tenant-b"), id = "c2")
+    childCommitted(s, child, None, tenant = Some("tenant-a"), id = "c2")
+    s.store.owner(top).value shouldBe Some(ThreadOwner(Some("tenant-b"), None))
+    s.store.owner(child).value shouldBe Some(ThreadOwner(Some("tenant-a"), None))
+    childCommitted(s, child, Some(originOf(ThreadId("elsewhere"), 1)), tenant = Some("tenant-a"), id = "c3")
+    s.store.owner(child).value shouldBe Some(ThreadOwner(Some("tenant-a"), Some(ThreadId("elsewhere"))))
+    s.reopened()
+    agrees(top)
+    agrees(child)
+
+    // a deleted thread has none, nor does a new thread of the id before its first checkpoint
+    val claim = s.claim("deleter", on = child, tenant = Some("tenant-a")).value
+    s.store.deleteThread(child, claim.token, None).value
+    s.store.owner(child).value shouldBe None
+    s.reopened()
+    s.store.owner(child).value shouldBe None
+    childCommitted(s, child, Some(originOf(s.thread, 2)), tenant = Some("tenant-c"), id = "c4")
+    s.store.owner(child).value shouldBe Some(ThreadOwner(Some("tenant-c"), Some(s.thread)))
+  }
+
   it should "read a format-7 checkpoint as a top-level thread with no outcome, listed as nobody's child" in {
     val s       = Store()
     val written = Checkpoint.fromJson(ujson.read(formatSeven)).value
