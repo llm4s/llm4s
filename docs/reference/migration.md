@@ -50,7 +50,9 @@ removed every registered document the current loader did not list. Now:
   in memory. `PgDocumentRegistry` (`PgDocumentRegistry(jdbcUrl, user, password)` or
   `PgDocumentRegistry.fromDataSource(dataSource)`, sharing a pool with a `PgVectorStore`) and
   `SQLiteDocumentRegistry(path)` keep it across restarts, so the next sync re-embeds only what changed and deletes
-  what the source dropped meanwhile. The pipeline does not close the registry; its owner does.
+  what the source dropped meanwhile. Pair it with stores that persist too, keyword index included (`withPgHybrid`,
+  `withSQLite`): a sync skips documents the registry knows, so an empty store is never refilled for them. The
+  pipeline does not close the registry; its owner does.
 - **Sync is scoped by source.** `sync(loader, sourceId)` and `syncAsync(loader, sourceId)` delete only documents that
   source registered, so several loaders can share one `RAG`. `sync(loader)` syncs the default source
   (`DocumentRegistry.DefaultSourceId`, `"default"`), which also holds documents a plain ingest registered, and no

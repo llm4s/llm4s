@@ -370,7 +370,9 @@ For a very large source prefer `sync`.
 **Keeping the registry across restarts.** The registry is in memory unless the config names another,
 so a new `RAG` remembers nothing: its first `sync` re-embeds every document, and a document deleted
 while the process was down stays in the index. For an index that outlives the process, give the
-pipeline a registry that does too:
+pipeline a registry that does too - and keep both the vector store and the keyword index persistent.
+A sync skips a document the registry knows as unchanged, so a store that starts empty (`withPgVector`
+alone keeps its keyword index in memory) is never refilled for it:
 
 ```scala
 import javax.sql.DataSource
@@ -384,7 +386,7 @@ import org.llm4s.types.Result
 def pgConfig(dataSource: DataSource, jdbcUrl: String, user: String, password: Secret): Result[RAGConfig] =
   PgDocumentRegistry.fromDataSource(dataSource).map { registry =>
     RAG.builder()
-      .withPgVector(jdbcUrl, user, password, "vectors")
+      .withPgHybrid(jdbcUrl, user, password, "vectors", "documents") // vectors and keywords both in Postgres
       .withDocumentRegistry(registry)
   }
 

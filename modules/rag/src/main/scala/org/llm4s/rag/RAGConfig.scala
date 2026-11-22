@@ -378,8 +378,10 @@ final case class RAGConfig(
    *
    * With the default in-memory registry, a new `RAG` remembers nothing: its first sync re-embeds every document, and
    * a document deleted from the source while the process was down is never removed from the index. A registry that
-   * outlives the process - `PgDocumentRegistry`, `SQLiteDocumentRegistry` - should sit beside an index that does
-   * too (`withPgVector`, `withSQLite`). The pipeline does not close it: its owner does.
+   * outlives the process - `PgDocumentRegistry`, `SQLiteDocumentRegistry` - needs stores that do too, both of them:
+   * `withPgHybrid` or `withSQLite`, not `withPgVector` alone, whose keyword index is in memory. A sync skips a
+   * document the registry knows as unchanged, so a store that starts empty is never refilled for it. The pipeline
+   * does not close the registry: its owner does.
    *
    * @param registry the registry, shared by every sync of the pipeline
    */
