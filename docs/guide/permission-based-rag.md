@@ -426,6 +426,10 @@ rag.ingestWithPermissions(
 )
 ```
 
+On a `RAG` with a `SearchIndex`, `ingestWithPermissions` is the only way to ingest. The plain `ingest*`, `sync` and
+`refresh` methods return a `ConfigurationError`: what they wrote would belong to no collection, so no permission
+query could return it.
+
 ### Two-Level Permission Model
 
 Permissions are checked at two levels:
@@ -442,9 +446,14 @@ Collection: "hr-docs" (queryableBy: [hr-group])
 
 **Query Flow:**
 1. Filter collections by user's principals (`queryableBy` check)
-2. Vector search within accessible collections
-3. Filter results by `readableBy` check
+2. Search within accessible collections, filtering by `readableBy`: vector search (`SearchIndex.query`), keyword
+   search (`SearchIndex.keywordQuery`) or both, as the pipeline's fusion strategy says
+3. Fuse the two result lists (RRF or weighted), then rerank if a reranker is configured
 4. Return permission-filtered results
+
+`PgSearchIndex.keywordQuery` is PostgreSQL full-text search over the chunks' content, with the `english` text search
+configuration; `initializeSchema()` creates its GIN index. A `SearchIndex` of your own without `keywordQuery` serves
+only a pipeline configured `.vectorOnly`; a hybrid query on it fails rather than quietly drop the keyword search.
 
 ### Deleting Documents
 
@@ -455,9 +464,15 @@ rag.deleteFromCollection(
   documentId = "doc-1"
 )
 
+// Delete a document from every collection it is in
+rag.deleteDocument("doc-1")
+
 // Clear all documents in a collection (via SearchIndex)
 searchIndex.clearCollection(CollectionPath.unsafe("public-docs"))
 ```
+
+`deleteDocument` returns `Right` only once every chunk of the document is gone, in every collection; if the index
+fails, it returns the error.
 
 ---
 
@@ -789,6 +804,15 @@ trait SearchIndex {
     additionalFilter: Option[MetadataFilter] = None
   ): Result[Seq[ScoredRecord]]
 
+  // Full-text search under the same permission filter; the default fails (no keyword search)
+  def keywordQuery(
+    auth: UserAuthorization,
+    collectionPattern: CollectionPattern,
+    queryText: String,
+    topK: Int = 10,
+    additionalFilter: Option[MetadataFilter] = None
+  ): Result[Seq[KeywordSearchResult]]
+
   def ingest(
     collectionPath: CollectionPath,
     documentId: String,
@@ -798,6 +822,7 @@ trait SearchIndex {
   ): Result[Int]
 
   def deleteDocument(collectionPath: CollectionPath, documentId: String): Result[Long]
+  def deleteDocumentFromAllCollections(documentId: String): Result[Long]
   def clearCollection(collectionPath: CollectionPath): Result[Long]
   def stats(collectionPath: CollectionPath): Result[CollectionStats]
   def initializeSchema(): Result[Unit]

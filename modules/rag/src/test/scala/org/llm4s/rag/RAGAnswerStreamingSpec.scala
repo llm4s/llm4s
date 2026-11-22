@@ -82,7 +82,9 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
   private def rag(client: Option[LLMClient], config: RAGConfig = RAGConfig.default): RAG = {
     val withClient = client.fold(config)(config.withLLM)
     val built = RAG.buildWithClient(withClient, new EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
-    built.ingestText("The answer to everything is 42.", "doc1").fold(e => fail(e.message), identity)
+    // A RAG with a SearchIndex refuses plain ingest (#2716): its one chunk comes from the index
+    if (!built.hasPermissions)
+      built.ingestText("The answer to everything is 42.", "doc1").fold(e => fail(e.message), identity)
     built
   }
 
@@ -143,7 +145,7 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
   "RAG.queryWithPermissionsAndAnswerStreaming" should "give the permitted contexts first, then the chunks" in {
     val events = mutable.Buffer.empty[String]
     val client = new StreamingClient(events)
-    val r      = rag(Some(client), RAGConfig.default.withSearchIndex(OneChunkIndex))
+    val r      = rag(Some(client), RAGConfig.default.withSearchIndex(OneChunkIndex).vectorOnly)
     try {
       val (onContexts, onChunk) = recorder(events)
       val cold                  = CompletionOptions(temperature = 0.2)
@@ -158,7 +160,7 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
 
   it should "call neither callback without an LLM client" in {
     val events = mutable.Buffer.empty[String]
-    val r      = rag(None, RAGConfig.default.withSearchIndex(OneChunkIndex))
+    val r      = rag(None, RAGConfig.default.withSearchIndex(OneChunkIndex).vectorOnly)
     try {
       val (onContexts, onChunk) = recorder(events)
       r.queryWithPermissionsAndAnswerStreaming(UserAuthorization.Admin, CollectionPattern.All, "Q?")(

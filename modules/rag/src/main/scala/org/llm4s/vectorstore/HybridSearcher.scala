@@ -212,18 +212,7 @@ final class HybridSearcher private (
     topK: Int = 10,
     filter: Option[MetadataFilter] = None
   ): Result[Seq[HybridSearchResult]] =
-    vectorStore.search(queryEmbedding, topK, filter).map { results =>
-      results.map { scored =>
-        HybridSearchResult(
-          id = scored.record.id,
-          content = scored.record.content.getOrElse(""),
-          score = scored.score,
-          vectorScore = Some(scored.score),
-          keywordScore = None,
-          metadata = scored.record.metadata
-        )
-      }
-    }
+    vectorStore.search(queryEmbedding, topK, filter).map(_.map(HybridFusion.fromVector))
 
   /**
    * Search with keyword matching only.
@@ -233,19 +222,7 @@ final class HybridSearcher private (
     topK: Int = 10,
     filter: Option[MetadataFilter] = None
   ): Result[Seq[HybridSearchResult]] =
-    keywordIndex.searchWithHighlights(queryText, topK, filter = filter).map { results =>
-      results.map { ksr =>
-        HybridSearchResult(
-          id = ksr.id,
-          content = ksr.content,
-          score = ksr.score,
-          vectorScore = None,
-          keywordScore = Some(ksr.score),
-          metadata = ksr.metadata,
-          highlights = ksr.highlights
-        )
-      }
-    }
+    keywordIndex.searchWithHighlights(queryText, topK, filter = filter).map(_.map(HybridFusion.fromKeyword))
 
   /**
    * Search with Reciprocal Rank Fusion.
@@ -261,40 +238,7 @@ final class HybridSearcher private (
       // Fetch more results than needed for better fusion
       vectorResults  <- vectorStore.search(queryEmbedding, topK * 2, filter)
       keywordResults <- keywordIndex.searchWithHighlights(queryText, topK * 2, filter = filter)
-    } yield {
-      // Build maps for quick lookup
-      val vectorMap: Map[String, (Int, ScoredRecord)] =
-        vectorResults.zipWithIndex.map { case (sr, idx) => sr.record.id -> (idx + 1, sr) }.toMap
-
-      val keywordMap: Map[String, (Int, KeywordSearchResult)] =
-        keywordResults.zipWithIndex.map { case (ksr, idx) => ksr.id -> (idx + 1, ksr) }.toMap
-
-      // Collect all unique IDs
-      val allIds = (vectorMap.keySet ++ keywordMap.keySet).toSeq
-
-      // Calculate RRF scores
-      val fused = allIds.map { id =>
-        val vectorContribution  = vectorMap.get(id).map { case (rank, _) => 1.0 / (k + rank) }.getOrElse(0.0)
-        val keywordContribution = keywordMap.get(id).map { case (rank, _) => 1.0 / (k + rank) }.getOrElse(0.0)
-        val rrfScore            = vectorContribution + keywordContribution
-
-        val vectorData  = vectorMap.get(id).map(_._2)
-        val keywordData = keywordMap.get(id).map(_._2)
-
-        HybridSearchResult(
-          id = id,
-          content = vectorData.flatMap(_.record.content).orElse(keywordData.map(_.content)).getOrElse(""),
-          score = rrfScore,
-          vectorScore = vectorData.map(_.score),
-          keywordScore = keywordData.map(_.score),
-          metadata = vectorData.map(_.record.metadata).orElse(keywordData.map(_.metadata)).getOrElse(Map.empty),
-          highlights = keywordData.map(_.highlights).getOrElse(Seq.empty)
-        )
-      }
-
-      // Sort by RRF score descending and take top K
-      fused.sortBy(-_.score).take(topK)
-    }
+    } yield HybridFusion.rrf(vectorResults, keywordResults, topK, k)
 
   /**
    * Search with weighted score combination.
@@ -310,45 +254,7 @@ final class HybridSearcher private (
     for {
       vectorResults  <- vectorStore.search(queryEmbedding, topK * 2, filter)
       keywordResults <- keywordIndex.searchWithHighlights(queryText, topK * 2, filter = filter)
-    } yield {
-      // Normalize each channel's scores to (0, 1]; a chunk a channel did not find scores 0 there.
-      val normalizeVector  = ScoreNormalisation.over(vectorResults.map(_.score))
-      val normalizeKeyword = ScoreNormalisation.over(keywordResults.map(_.score))
-
-      // Build maps
-      val vectorMap: Map[String, ScoredRecord] =
-        vectorResults.map(sr => sr.record.id -> sr).toMap
-
-      val keywordMap: Map[String, KeywordSearchResult] =
-        keywordResults.map(ksr => ksr.id -> ksr).toMap
-
-      val allIds      = (vectorMap.keySet ++ keywordMap.keySet).toSeq
-      val totalWeight = vectorWeight + keywordWeight
-
-      val fused = allIds.map { id =>
-        val normalizedVectorScore  = vectorMap.get(id).map(sr => normalizeVector(sr.score))
-        val normalizedKeywordScore = keywordMap.get(id).map(ksr => normalizeKeyword(ksr.score))
-
-        val combinedScore =
-          (normalizedVectorScore.getOrElse(0.0) * vectorWeight +
-            normalizedKeywordScore.getOrElse(0.0) * keywordWeight) / totalWeight
-
-        val vectorData  = vectorMap.get(id)
-        val keywordData = keywordMap.get(id)
-
-        HybridSearchResult(
-          id = id,
-          content = vectorData.flatMap(_.record.content).orElse(keywordData.map(_.content)).getOrElse(""),
-          score = combinedScore,
-          vectorScore = vectorData.map(_.score),
-          keywordScore = keywordData.map(_.score),
-          metadata = vectorData.map(_.record.metadata).orElse(keywordData.map(_.metadata)).getOrElse(Map.empty),
-          highlights = keywordData.map(_.highlights).getOrElse(Seq.empty)
-        )
-      }
-
-      fused.sortBy(-_.score).take(topK)
-    }
+    } yield HybridFusion.weighted(vectorResults, keywordResults, topK, vectorWeight, keywordWeight)
 
   /**
    * Close both the vector store and keyword index.
@@ -565,7 +471,138 @@ object HybridSearcher {
     } yield new HybridSearcher(vectorStore, keywordIndex, config.defaultStrategy)
 }
 
-private[vectorstore] object RerankMapping {
+/**
+ * The fusion arithmetic of [[HybridSearcher]], over result lists already fetched. `RAG.queryWithPermissions` shares
+ * it: there the two channels come from a `SearchIndex`, not from the pipeline's own stores.
+ */
+private[llm4s] object HybridFusion {
+
+  def fromVector(scored: ScoredRecord): HybridSearchResult =
+    HybridSearchResult(
+      id = scored.record.id,
+      content = scored.record.content.getOrElse(""),
+      score = scored.score,
+      vectorScore = Some(scored.score),
+      keywordScore = None,
+      metadata = scored.record.metadata
+    )
+
+  def fromKeyword(ksr: KeywordSearchResult): HybridSearchResult =
+    HybridSearchResult(
+      id = ksr.id,
+      content = ksr.content,
+      score = ksr.score,
+      vectorScore = None,
+      keywordScore = Some(ksr.score),
+      metadata = ksr.metadata,
+      highlights = ksr.highlights
+    )
+
+  /** Fuse with `strategy`; the single-channel strategies keep their one list. */
+  def fuse(
+    strategy: FusionStrategy,
+    vectorResults: Seq[ScoredRecord],
+    keywordResults: Seq[KeywordSearchResult],
+    topK: Int
+  ): Seq[HybridSearchResult] =
+    strategy match {
+      case FusionStrategy.VectorOnly  => vectorResults.take(topK).map(fromVector)
+      case FusionStrategy.KeywordOnly => keywordResults.take(topK).map(fromKeyword)
+      case FusionStrategy.RRF(k)      => rrf(vectorResults, keywordResults, topK, k)
+      case ws: FusionStrategy.WeightedScore =>
+        weighted(vectorResults, keywordResults, topK, ws.vectorWeight, ws.keywordWeight)
+    }
+
+  /** Reciprocal Rank Fusion: each id scores the sum of `1 / (k + rank)` over the lists it appears in. */
+  def rrf(
+    vectorResults: Seq[ScoredRecord],
+    keywordResults: Seq[KeywordSearchResult],
+    topK: Int,
+    k: Int
+  ): Seq[HybridSearchResult] = {
+    // Build maps for quick lookup
+    val vectorMap: Map[String, (Int, ScoredRecord)] =
+      vectorResults.zipWithIndex.map { case (sr, idx) => sr.record.id -> (idx + 1, sr) }.toMap
+
+    val keywordMap: Map[String, (Int, KeywordSearchResult)] =
+      keywordResults.zipWithIndex.map { case (ksr, idx) => ksr.id -> (idx + 1, ksr) }.toMap
+
+    // Collect all unique IDs
+    val allIds = (vectorMap.keySet ++ keywordMap.keySet).toSeq
+
+    // Calculate RRF scores
+    val fused = allIds.map { id =>
+      val vectorContribution  = vectorMap.get(id).map { case (rank, _) => 1.0 / (k + rank) }.getOrElse(0.0)
+      val keywordContribution = keywordMap.get(id).map { case (rank, _) => 1.0 / (k + rank) }.getOrElse(0.0)
+      val rrfScore            = vectorContribution + keywordContribution
+
+      val vectorData  = vectorMap.get(id).map(_._2)
+      val keywordData = keywordMap.get(id).map(_._2)
+
+      HybridSearchResult(
+        id = id,
+        content = vectorData.flatMap(_.record.content).orElse(keywordData.map(_.content)).getOrElse(""),
+        score = rrfScore,
+        vectorScore = vectorData.map(_.score),
+        keywordScore = keywordData.map(_.score),
+        metadata = vectorData.map(_.record.metadata).orElse(keywordData.map(_.metadata)).getOrElse(Map.empty),
+        highlights = keywordData.map(_.highlights).getOrElse(Seq.empty)
+      )
+    }
+
+    // Sort by RRF score descending and take top K
+    fused.sortBy(-_.score).take(topK)
+  }
+
+  /** Weighted fusion: each channel's scores normalised to (0, 1], then combined with the weights. */
+  def weighted(
+    vectorResults: Seq[ScoredRecord],
+    keywordResults: Seq[KeywordSearchResult],
+    topK: Int,
+    vectorWeight: Double,
+    keywordWeight: Double
+  ): Seq[HybridSearchResult] = {
+    // Normalize each channel's scores to (0, 1]; a chunk a channel did not find scores 0 there.
+    val normalizeVector  = ScoreNormalisation.over(vectorResults.map(_.score))
+    val normalizeKeyword = ScoreNormalisation.over(keywordResults.map(_.score))
+
+    // Build maps
+    val vectorMap: Map[String, ScoredRecord] =
+      vectorResults.map(sr => sr.record.id -> sr).toMap
+
+    val keywordMap: Map[String, KeywordSearchResult] =
+      keywordResults.map(ksr => ksr.id -> ksr).toMap
+
+    val allIds      = (vectorMap.keySet ++ keywordMap.keySet).toSeq
+    val totalWeight = vectorWeight + keywordWeight
+
+    val fused = allIds.map { id =>
+      val normalizedVectorScore  = vectorMap.get(id).map(sr => normalizeVector(sr.score))
+      val normalizedKeywordScore = keywordMap.get(id).map(ksr => normalizeKeyword(ksr.score))
+
+      val combinedScore =
+        (normalizedVectorScore.getOrElse(0.0) * vectorWeight +
+          normalizedKeywordScore.getOrElse(0.0) * keywordWeight) / totalWeight
+
+      val vectorData  = vectorMap.get(id)
+      val keywordData = keywordMap.get(id)
+
+      HybridSearchResult(
+        id = id,
+        content = vectorData.flatMap(_.record.content).orElse(keywordData.map(_.content)).getOrElse(""),
+        score = combinedScore,
+        vectorScore = vectorData.map(_.score),
+        keywordScore = keywordData.map(_.score),
+        metadata = vectorData.map(_.record.metadata).orElse(keywordData.map(_.metadata)).getOrElse(Map.empty),
+        highlights = keywordData.map(_.highlights).getOrElse(Seq.empty)
+      )
+    }
+
+    fused.sortBy(-_.score).take(topK)
+  }
+}
+
+private[llm4s] object RerankMapping {
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 

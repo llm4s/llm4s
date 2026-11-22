@@ -39,7 +39,36 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [a broken or cut tool call is an error](#a-broken-or-cut-tool-call-is-an-error-2613),
 [`TokenUsage` and `ModelPricing` gain a prompt-cache field](#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115),
 [a cut-off answer ends `Truncated`, not `Completed`](#a-cut-off-answer-ends-truncated-not-completed-2613),
-and [a workspace container has no egress](#a-workspace-container-has-no-egress-870).
+[a workspace container has no egress](#a-workspace-container-has-no-egress-870),
+and [a RAG with a `SearchIndex` ingests only with permissions](#a-rag-with-a-searchindex-ingests-only-with-permissions-2716).
+
+## A RAG with a `SearchIndex` ingests only with permissions (#2716)
+
+Mixing the plain RAG API with permission-aware RAG (`RAGConfig.withSearchIndex`) went wrong without an error. Each
+case now either works or fails:
+
+- **Plain ingest is refused.** `ingest` (a path or a loader), `ingestPath`, `ingestText`, `ingestChunks`,
+  `ingestBytes`, `ingestBytesMultiple`, `sync`, `refresh` and their `Async` forms return a `ConfigurationError` on a
+  `RAG` with a `SearchIndex`, before reading the loader or clearing anything, and so does `build` when the config
+  also names document loaders (`withDocuments`). They used to write chunks with no collection (`collection_id NULL`
+  in a `PgSearchIndex`'s table), which `queryWithPermissions` never returns. Ingest with
+  `ingestWithPermissions(collectionPath, documentId, content, ...)`. Plain ingest is not routed to a default
+  collection: `PgSchemaManager`'s default collection is public, so a document ingested without naming its readers
+  would become readable by every principal. Rows a plain ingest wrote before can be moved to that collection,
+  if that is what you want, with `PgSchemaManager.migrateExistingVectors`, or deleted with `deleteDocument`.
+- **`deleteDocument(docId)` deletes more.** With a `SearchIndex` it also deletes the document from every collection
+  (`SearchIndex.deleteDocumentFromAllCollections`, new), whose chunks are named `coll-<collectionId>-<docId>-chunk-<n>`.
+  It used to return `Right(())` and leave those chunks retrievable. A failed delete is now the `Left`. A
+  `SearchIndex` of your own inherits a default that calls `deleteDocument` for each leaf collection; override it if
+  your store can do it in one call. To delete from one collection only, `deleteFromCollection` is unchanged.
+- **`queryWithPermissions` searches as `query` does.** It applies the query transformers, the fusion strategy and the
+  reranker; it used to run vector search alone. A hybrid (`RRF`, the default, or `WeightedScore`) or keyword-only
+  query calls the new `SearchIndex.keywordQuery`. `PgSearchIndex` implements it with full-text search over the
+  vectors table's `content` (`english` configuration), and `initializeSchema()` adds the GIN index it uses: call it
+  once on an existing table. A `SearchIndex` of your own that does not implement `keywordQuery` fails such a query
+  with a `ConfigurationError`: implement it, or configure `.vectorOnly` for the previous, vector-only results.
+- **`SearchIndex.queryHybrid` is removed.** It ignored its text and ran `query`. Call `query` for vector search, or
+  `keywordQuery` for keyword search.
 
 ## A cut-off answer ends `Truncated`, not `Completed` (#2613)
 
