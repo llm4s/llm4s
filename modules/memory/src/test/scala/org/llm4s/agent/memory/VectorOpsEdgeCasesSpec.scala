@@ -10,7 +10,7 @@ class VectorOpsEdgeCasesSpec extends AnyFlatSpec with Matchers {
   private val a3  = Array(1f, 2f, 3f)
 
   "VectorOps.dotProduct" should "compute 1*4 + 2*5 + 3*6 = 32" in {
-    VectorOps.dotProduct(Array(1f, 2f, 3f), Array(4f, 5f, 6f)) shouldBe 32.0 +- tol
+    VectorOps.dotProduct(a3, Array(4f, 5f, 6f)) shouldBe 32.0 +- tol
   }
 
   it should "return 0.0 for empty arrays" in {
@@ -58,6 +58,7 @@ class VectorOpsEdgeCasesSpec extends AnyFlatSpec with Matchers {
     r(0).toDouble shouldBe 0.6 +- tol
     r(1).toDouble shouldBe 0.8 +- tol
   }
+
   "VectorOps.topKBySimilarity" should "return every candidate, best first, when k is larger than the candidates" in {
     val query = Array(1f, 0f)
     val candidates = Seq(
