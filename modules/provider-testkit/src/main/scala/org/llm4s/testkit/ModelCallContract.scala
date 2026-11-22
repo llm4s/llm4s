@@ -8,8 +8,7 @@ import com.sun.net.httpserver.HttpExchange
  * `ProviderModuleChecks.assertModelCallContract`, or declares it [[Applicability.NotApplicable]] with a reason, so a
  * gap shows in the spec instead of being missed.
  *
- * A later RFC 0009 PR adds the tool-argument cases (`NoArgumentToolCall`, `ToolCallCutByLimit`, `MalformedArguments`);
- * a spec that does not declare a new case fails until it does.
+ * A case added later fails every spec that does not declare it, until it does.
  */
 enum ContractCase:
 
@@ -21,6 +20,26 @@ enum ContractCase:
 
   /** The model asked for a tool call: `Right`, `FinishReason.ToolCalls`, each call's arguments a JSON object. */
   case ToolCall
+
+  /**
+   * The model called a tool that takes no parameters, its arguments absent or blank (or `{}`), and the reply ended
+   * cleanly: `Right`, `FinishReason.ToolCalls`, each call's arguments `{}` (RFC 0009, Part 3, rule 2).
+   */
+  case NoArgumentToolCall
+
+  /**
+   * The output limit cut the reply while it made a tool call: a `Left`, the malformed-tool-call
+   * [[org.llm4s.error.ProcessingError ProcessingError]]. No call is run on intent the model did not finish stating,
+   * even one whose arguments happen to parse (RFC 0009, Part 3, rule 3).
+   */
+  case ToolCallCutByLimit
+
+  /**
+   * A tool call's arguments are not a JSON object (invalid or cut JSON, or JSON of another type), in a reply that
+   * otherwise ended cleanly: a `Left`, the malformed-tool-call [[org.llm4s.error.ProcessingError ProcessingError]],
+   * never `{}`, never dropped (RFC 0009, Part 3, rule 1).
+   */
+  case MalformedArguments
 
   /** The provider's content filter stopped the reply: `Left(ContentFilteredError)`, where the provider has a filter. */
   case ContentFiltered

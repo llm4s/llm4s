@@ -40,17 +40,17 @@ class ZaiClientDialectSpec extends AnyFlatSpec with Matchers with EitherValues {
 
     val expected = Some(TokenUsage(1, 2, 3))
     client
-      .parseCompletion(reply("""{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}"""))
+      .parsedCompletion(reply("""{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}"""))
       .usage shouldBe expected
     client
-      .parseCompletion(reply("""[{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}]"""))
+      .parsedCompletion(reply("""[{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}]"""))
       .usage shouldBe expected
   }
 
   it should "read content given as a string or as an array of text parts" in {
     def content(value: String) =
       client
-        .parseCompletion(
+        .parsedCompletion(
           ujson.read(s"""{"id":"z","created":1,"model":"m","choices":[{"message":{"content":$value}}]}""")
         )
         .content

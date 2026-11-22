@@ -47,7 +47,7 @@ class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
   "complete" should "map the choice's finish_reason" in {
     mapped.foreach { case (raw, reason) =>
       withClue(raw) {
-        client.parseCompletion(reply(s""","finish_reason":"$raw"""")).finishReason shouldBe reason
+        client.parsedCompletion(reply(s""","finish_reason":"$raw"""")).finishReason shouldBe reason
       }
     }
   }
@@ -55,7 +55,7 @@ class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
   it should "give Other(\"\") for a reply with no finish_reason, a null or a blank one" in {
     Seq("", ""","finish_reason":null""", ""","finish_reason":""""").foreach { finish =>
       withClue(finish) {
-        client.parseCompletion(reply(finish)).finishReason shouldBe FinishReason.Other("")
+        client.parsedCompletion(reply(finish)).finishReason shouldBe FinishReason.Other("")
       }
     }
   }

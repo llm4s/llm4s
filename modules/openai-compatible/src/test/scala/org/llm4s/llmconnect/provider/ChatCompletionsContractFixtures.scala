@@ -36,8 +36,19 @@ object ChatCompletionsContractFixtures {
   private def streamOnly(stream: String): Applicability =
     Applicability.Applies(RecordedReply.streamOnly(LocalProviderTestServer.sendSseResponse(_, stream)))
 
-  private val call =
-    """{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}"""
+  private def callWith(name: String, arguments: String): String =
+    s"""{"id":"call_1","type":"function","function":{"name":"$name","arguments":${ujson.Str(arguments).render()}}}"""
+
+  private val call = callWith("get_weather", """{"city":"Paris"}""")
+
+  /** The first event of a streamed call: its id and name, no arguments yet. */
+  private def callOpens(name: String): String =
+    event(
+      s"""{"role":"assistant","content":null,"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"$name","arguments":""}}]}"""
+    )
+
+  private def argumentDelta(fragment: String): String =
+    event(s"""{"tool_calls":[{"index":0,"function":{"arguments":${ujson.Str(fragment).render()}}}]}""")
 
   /** Every case, as a chat-completions server answers it. */
   val replies: Map[ContractCase, Applicability] = Map(
@@ -67,6 +78,24 @@ object ChatCompletionsContractFixtures {
         event("""{"tool_calls":[{"index":0,"function":{"arguments":"\"Paris\"}"}}]}"""),
         event("{}", "tool_calls", usage = true)
       )
+    ),
+    // a tool with no parameters: blank arguments, and no argument fragment on the stream
+    ContractCase.NoArgumentToolCall -> applies(
+      reply(s"""{"role":"assistant","content":null,"tool_calls":[${callWith("get_time", "")}]}""", "tool_calls"),
+      sse(callOpens("get_time"), event("{}", "tool_calls", usage = true))
+    ),
+    // the limit cut the call's arguments
+    ContractCase.ToolCallCutByLimit -> applies(
+      reply(
+        s"""{"role":"assistant","content":null,"tool_calls":[${callWith("get_weather", """{"city":"Par""")}]}""",
+        "length"
+      ),
+      sse(callOpens("get_weather"), argumentDelta("""{"city":"""), argumentDelta(""""Par"""), event("{}", "length", usage = true))
+    ),
+    // arguments that are not JSON, in a reply that otherwise ended cleanly
+    ContractCase.MalformedArguments -> applies(
+      reply(s"""{"role":"assistant","content":null,"tool_calls":[${callWith("get_weather", "{city: Paris")}]}""", "tool_calls"),
+      sse(callOpens("get_weather"), argumentDelta("{city: "), argumentDelta("Paris"), event("{}", "tool_calls", usage = true))
     ),
     ContractCase.ContentFiltered -> applies(
       reply("""{"role":"assistant","content":"Here is how"}""", "content_filter"),

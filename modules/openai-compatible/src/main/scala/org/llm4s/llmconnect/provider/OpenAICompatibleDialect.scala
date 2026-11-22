@@ -12,7 +12,7 @@ import org.llm4s.llmconnect.model.{
 }
 import org.llm4s.media.MediaSource
 import org.llm4s.model.UnmappedOptions
-import org.llm4s.util.BoundedJson
+import org.llm4s.types.Result
 
 import scala.annotation.unused
 
@@ -201,14 +201,17 @@ trait OpenAICompatibleDialect:
   def reasoningInCompletion: Boolean = true
 
   /**
-   * Parses the `tool_calls` array of a non-streaming reply.
+   * Parses the `tool_calls` array of a non-streaming reply: a `Left`, the malformed-tool-call
+   * `ProcessingError`, for a call whose arguments are not a JSON object (RFC 0009, Part 3).
    *
-   * Standard: [[OpenAICompatibleDialect.lenientToolCalls]], which fills in
-   * missing fields and turns unparseable arguments into `{}`. Streamed tool
-   * calls do not come here: their argument fragments are passed on verbatim
-   * and reassembled by the stream's accumulator.
+   * Standard: [[OpenAICompatibleDialect.lenientToolCalls]], which fills in a
+   * missing `id` or `name`, and reads absent or blank arguments as `{}`. The client
+   * applies the rest of the rules: blank arguments stand only in a reply that ended with
+   * `tool_calls` or `stop`, and a reply cut by the output limit runs no call. Streamed tool
+   * calls do not come here: their argument fragments are passed on verbatim and reassembled,
+   * under the same rules, by the stream's accumulator.
    */
-  def parseToolCalls(toolCalls: ujson.Value): Seq[ToolCall] = OpenAICompatibleDialect.lenientToolCalls(toolCalls)
+  def parseToolCalls(toolCalls: ujson.Value): Result[Seq[ToolCall]] = OpenAICompatibleDialect.lenientToolCalls(toolCalls)
 
 object OpenAICompatibleDialect:
 
@@ -243,20 +246,47 @@ object OpenAICompatibleDialect:
       override val streamUsageOption: Boolean     = streamUsage
 
   /**
-   * Parses a `tool_calls` array without failing: a missing `id` or `name`
-   * becomes `""`, and missing or unparseable `arguments` become `{}`, as do
-   * arguments nested more than 512 levels deep - they are model output, and a
-   * value that deep overflows the stack of whatever renders it next (#1562).
+   * Parses a `tool_calls` array, lenient about the call's shape and strict about its arguments
+   * (RFC 0009, Part 3): a missing `id` or `name` becomes `""`, and absent, `null` or blank
+   * `arguments` are `{}`, a call with no arguments. Arguments that are not a JSON object - cut
+   * or invalid JSON, JSON of another type, or JSON nested more than 512 levels deep, which is
+   * never parsed: it is model output, and a value that deep overflows the stack of whatever
+   * renders it next (#1562) - are a `Left`, the malformed-tool-call `ProcessingError`, never `{}`.
    */
-  def lenientToolCalls(toolCalls: ujson.Value): Seq[ToolCall] =
-    toolCalls.arrOpt.toSeq.flatten.map { call =>
-      val function = call.obj.get("function").flatMap(_.objOpt)
-      val argsStr  = function.flatMap(_.get("arguments")).flatMap(_.strOpt).getOrElse("{}")
-      ToolCall(
-        id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
-        name = function.flatMap(_.get("name")).flatMap(_.strOpt).getOrElse(""),
-        arguments = BoundedJson.read(argsStr).getOrElse(ujson.Obj())
+  def lenientToolCalls(toolCalls: ujson.Value): Result[Seq[ToolCall]] =
+    toolCalls.arrOpt.toSeq.flatten.foldLeft[Result[Vector[ToolCall]]](Right(Vector.empty)) { (done, call) =>
+      val function = call.objOpt.flatMap(_.get("function")).flatMap(_.objOpt)
+      val name     = function.flatMap(_.get("name")).flatMap(_.strOpt).getOrElse("")
+      for {
+        calls     <- done
+        arguments <- toolArguments(name, function.flatMap(_.get("arguments")))
+      } yield calls :+ ToolCall(
+        id = call.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).getOrElse(""),
+        name = name,
+        arguments = arguments
       )
+    }
+
+  /** A call's `arguments`, a JSON string on the wire, as a JSON object; absent, `null` or blank is `{}`. */
+  private[provider] def toolArguments(name: String, raw: Option[ujson.Value]): Result[ujson.Value] = raw match {
+    case None | Some(ujson.Null) => Right(ujson.Obj())
+    case Some(ujson.Str(text))   => ToolCallRules.parseArguments(name, text)
+    case Some(other)             => ToolCallRules.requireObject(name, other)
+  }
+
+  /**
+   * Whether a `tool_calls` array has a call with absent, `null` or blank arguments, which stand for "no arguments"
+   * only in a reply that ended with `tool_calls` or `stop` (RFC 0009, Part 3, rule 2).
+   */
+  private[provider] def blankArgumentCalls(toolCalls: ujson.Value): Seq[String] =
+    toolCalls.arrOpt.toSeq.flatten.flatMap { call =>
+      val function = call.objOpt.flatMap(_.get("function")).flatMap(_.objOpt)
+      val blank = function.flatMap(_.get("arguments")) match {
+        case None | Some(ujson.Null) => true
+        case Some(ujson.Str(text))   => text.trim.isEmpty
+        case Some(_)                 => false
+      }
+      Option.when(blank)(function.flatMap(_.get("name")).flatMap(_.strOpt).getOrElse(""))
     }
 
   /** `usage.completion_tokens_details.reasoning_tokens`, OpenAI's reasoning-token count. */

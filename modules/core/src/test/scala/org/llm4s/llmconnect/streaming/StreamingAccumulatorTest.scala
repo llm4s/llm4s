@@ -1,7 +1,9 @@
 package org.llm4s.llmconnect.streaming
 
+import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.model._
 import org.llm4s.testutil.SmallStack
+import org.llm4s.types.Result
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import java.time.Instant
@@ -434,16 +436,68 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.toCompletion(Instant.EPOCH).toOption.get.message.toolCalls.map(_.id) shouldBe ids
   }
 
-  // Streamed arguments are model output: nested too deeply they stay a raw Str instead of becoming
-  // a value that overflows the stack of whatever renders it next (#1562). On a 1 MB stack, so
-  // deterministic; the comparisons happen inside it so no failure message renders a deep value.
-  test("tool-call arguments nested too deeply come back as a raw Str, not parsed") {
+  // Streamed arguments are model output: nested too deeply they are never parsed into a value that
+  // overflows the stack of whatever renders it next (#1562). The live view keeps them as the raw Str;
+  // the finished stream is a Left (RFC 0009, Part 3). On a 1 MB stack, so deterministic; the
+  // comparisons happen inside it so no failure message renders a deep value.
+  test("tool-call arguments nested too deeply are never parsed: a raw Str live, a Left at the end") {
     val deep        = "[" * 100000 + "]" * 100000
     val accumulator = StreamingAccumulator.create()
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(ToolCall("call-1", "f", ujson.Str(deep))), None))
+    accumulator.addChunk(StreamedChunk("msg-1", None, None, Some(FinishReason.ToolCalls)))
 
     SmallStack.run(accumulator.currentToolCalls.map(_.arguments == ujson.Str(deep))) shouldBe Right(Seq(true))
-    SmallStack.run(accumulator.toCompletion.map(_.message.toolCalls.map(_.arguments == ujson.Str(deep)))) shouldBe
-      Right(Right(Seq(true)))
+    SmallStack.run(accumulator.toCompletion.left.map(_.message.contains("more than 512 levels deep"))) shouldBe
+      Right(Left(true))
+  }
+
+  // ===========================================
+  // RFC 0009, Part 3: tool-call arguments
+  // ===========================================
+
+  private def streamed(arguments: Seq[String], reason: Option[FinishReason]): Result[Completion] = {
+    val accumulator = StreamingAccumulator.create()
+    accumulator.addChunk(StreamedChunk("msg-1", None, Some(ToolCall("call-1", "lookup", ujson.Obj())), None))
+    arguments.foreach { fragment =>
+      accumulator.addChunk(StreamedChunk("msg-1", None, Some(ToolCall("call-1", "", ujson.Str(fragment))), None))
+    }
+    reason.foreach(r => accumulator.addChunk(StreamedChunk("msg-1", None, None, Some(r))))
+    accumulator.toCompletion(Instant.EPOCH)
+  }
+
+  private def malformedCall(result: Result[Completion]): Boolean = result match {
+    case Left(e: ProcessingError) => e.message.contains("malformed tool call") && e.message.contains("lookup")
+    case _                        => false
+  }
+
+  test("a call whose streamed arguments never close is a Left, never {} (rule 1)") {
+    malformedCall(streamed(Seq("{\"q\":", "\"x"), Some(FinishReason.ToolCalls))) shouldBe true
+  }
+
+  test("a call whose streamed arguments are JSON but not an object is a Left (rule 1)") {
+    malformedCall(streamed(Seq("[1,", "2]"), Some(FinishReason.ToolCalls))) shouldBe true
+  }
+
+  test("a call with no arguments is {} after a ToolCalls or Stop end (rule 2)") {
+    Seq(FinishReason.ToolCalls, FinishReason.Stop).foreach { reason =>
+      streamed(Nil, Some(reason)).map(_.message.toolCalls.map(_.arguments)) shouldBe Right(Seq(ujson.Obj()))
+    }
+  }
+
+  test("a call with no arguments is a Left when the stream did not end with ToolCalls or Stop (rule 2)") {
+    malformedCall(streamed(Nil, None)) shouldBe true
+    malformedCall(streamed(Nil, Some(FinishReason.Other("function_call_filter")))) shouldBe true
+  }
+
+  test("a tool call in a stream the output limit cut is a Left, even with whole arguments (rule 3)") {
+    val cut = streamed(Seq("{\"q\":\"x\"}"), Some(FinishReason.Length))
+    malformedCall(cut) shouldBe true
+    cut.left.map(_.message.contains("FinishReason.Length")) shouldBe Left(true)
+  }
+
+  test("a stream cut by the output limit with no tool call is still a Right") {
+    val accumulator = StreamingAccumulator.create()
+    accumulator.addChunk(StreamedChunk("msg-1", Some("partial"), None, Some(FinishReason.Length)))
+    accumulator.toCompletion.map(_.finishReason) shouldBe Right(FinishReason.Length)
   }
 }

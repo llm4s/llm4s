@@ -1,7 +1,7 @@
 package org.llm4s.testkit
 
 import com.sun.net.httpserver.HttpExchange
-import org.llm4s.error.{ ContentFilteredError, NetworkError, ServiceError }
+import org.llm4s.error.{ ContentFilteredError, NetworkError, ProcessingError, ServiceError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Completion, Conversation, FinishReason, StreamedChunk, UserMessage }
 import org.llm4s.types.Result
@@ -43,6 +43,10 @@ private[testkit] object ModelCallContractRun:
         if !error.message.contains(ContractCase.ProviderErrorMessage) then
           fail(s"expected the provider's error '${ContractCase.ProviderErrorMessage}', got ${show(result)}")
       case (ContractCase.ErrorEvent, other) => fail(s"expected a Left, got ${show(other)}")
+      // RFC 0009, Part 3: a cut or broken call is the malformed-tool-call ProcessingError, never {} or dropped
+      case (ContractCase.ToolCallCutByLimit | ContractCase.MalformedArguments, Left(_: ProcessingError)) => ()
+      case (ContractCase.ToolCallCutByLimit | ContractCase.MalformedArguments, other) =>
+        fail(s"expected Left(ProcessingError), the malformed tool call, got ${show(other)}")
       case (_, Left(error)) => fail(s"expected a Right, got Left(${error.getClass.getSimpleName}: ${error.message})")
       case (ContractCase.CleanText, Right(completion)) =>
         reason(completion, FinishReason.Stop, fail)
@@ -56,6 +60,12 @@ private[testkit] object ModelCallContractRun:
         if calls(completion).isEmpty then fail("expected a tool call, got none")
         calls(completion).filterNot(_.arguments.objOpt.isDefined).foreach { call =>
           fail(s"tool call '${call.name}' has arguments that are not a JSON object: ${call.arguments.render()}")
+        }
+      case (ContractCase.NoArgumentToolCall, Right(completion)) =>
+        reason(completion, FinishReason.ToolCalls, fail)
+        if calls(completion).isEmpty then fail("expected a tool call, got none")
+        calls(completion).filterNot(_.arguments == ujson.Obj()).foreach { call =>
+          fail(s"tool call '${call.name}' takes no arguments, expected {}, got ${call.arguments.render()}")
         }
 
   /** Fails unless the chunks a successful stream delivered add up to the `Completion` it returned. */
@@ -83,5 +93,5 @@ private[testkit] object ModelCallContractRun:
   private def show(result: Result[Completion]): String =
     result.fold(
       error => s"Left(${error.getClass.getSimpleName}: ${error.message})",
-      c => s"Right(finishReason ${c.finishReason}, ${c.content.length} characters)"
+      c => s"Right(finishReason ${c.finishReason}, ${c.content.length} characters, ${calls(c).size} tool calls)"
     )

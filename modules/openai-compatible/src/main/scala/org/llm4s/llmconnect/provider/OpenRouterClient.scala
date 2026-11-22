@@ -16,7 +16,6 @@ import org.llm4s.llmconnect.model.{
   ToolCall
 }
 import org.llm4s.media.{ MediaSource, MediaType }
-import org.llm4s.llmconnect.serialization.StandardToolCallDeserializer
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.{ EffortMapping, ModelRegistryService }
 import org.llm4s.types.{ Result, TryOps }
@@ -325,5 +324,19 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
       .map(_.toInt)
       .orElse(OpenAICompatibleDialect.completionReasoningTokens(usage))
 
-  override def parseToolCalls(toolCalls: ujson.Value): Seq[ToolCall] =
-    StandardToolCallDeserializer.deserializeToolCalls(toolCalls)
+  /**
+   * Strict about each call's shape: a call without an `id`, a `function` or its `name` is a malformed call, not one
+   * filled in with `""`. Its arguments follow the shared rules (RFC 0009, Part 3): absent or blank is `{}`, anything
+   * that is not a JSON object a `Left`.
+   */
+  override def parseToolCalls(toolCalls: ujson.Value): Result[Seq[ToolCall]] =
+    Try(toolCalls.arr.toVector.map(call => (call("id").str, call("function")("name").str, call("function"))))
+      .toEither
+      .left
+      .map(e => ToolCallRules.malformed(s"a tool call is not in OpenRouter's shape: ${e.getMessage}"))
+      .flatMap(_.foldLeft[Result[Vector[ToolCall]]](Right(Vector.empty)) { case (done, (id, name, function)) =>
+        for {
+          calls     <- done
+          arguments <- OpenAICompatibleDialect.toolArguments(name, function.obj.get("arguments"))
+        } yield calls :+ ToolCall(id, name, arguments)
+      })
