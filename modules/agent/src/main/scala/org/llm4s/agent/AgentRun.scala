@@ -261,6 +261,7 @@ private[agent] object AgentRun:
       case RunResult.Completed(state, output, _) =>
         output.outcome match
           case TurnOutcome.Completed         => completedStatus(state)
+          case TurnOutcome.Truncated         => truncatedStatus(state)
           case TurnOutcome.StepLimitReached  => Right(AgentStatus.StepLimitReached)
           case TurnOutcome.TokenLimitReached => Right(AgentStatus.TokenLimitReached)
       case suspended: RunResult.Suspended =>
@@ -294,22 +295,27 @@ private[agent] object AgentRun:
    * The status of a settled turn, rebuilt from the thread alone (design 4.41): `outcome`, recorded on the turn's
    * terminal checkpoint ([[org.llm4s.agent.graph.Checkpoint.outcome]]), and `state`, that checkpoint's state, where
    * an answer is. Equal to the status [[AgentRun.await]] returned live: `Completed` with the last assistant message's
-   * content, `StepLimitReached`, `TokenLimitReached`, or `Blocked`. A turn whose live result was `Left` - its answer
+   * content, `Truncated` with it, `StepLimitReached`, `TokenLimitReached`, or `Blocked`. A turn whose live result was `Left` - its answer
    * failed its output schema, or a hook's failure blocked it - is `Left` again: `GraphError.OutputInvalid` with every error, or a
    * `ProcessingError` naming the failure's kind and message.
    */
   def settledStatus(outcome: RunOutcome, state: ThreadState): Result[AgentStatus] = outcome match
     case RunOutcome.Answered          => completedStatus(state)
+    case RunOutcome.Truncated         => truncatedStatus(state)
     case RunOutcome.StepLimitReached  => Right(AgentStatus.StepLimitReached)
     case RunOutcome.TokenLimitReached => Right(AgentStatus.TokenLimitReached)
     case RunOutcome.Blocked(g, r)     => Right(AgentStatus.Blocked(g, r))
     case RunOutcome.OutputInvalid(es) => Left(GraphError.OutputInvalid(es))
     case RunOutcome.Failed(kind, msg) => Left(ProcessingError("agent turn", s"$kind: $msg"))
 
-  private def completedStatus(state: ThreadState): Result[AgentStatus] =
+  private def completedStatus(state: ThreadState): Result[AgentStatus] = lastAnswer(state).map(AgentStatus.Completed(_))
+
+  private def truncatedStatus(state: ThreadState): Result[AgentStatus] = lastAnswer(state).map(AgentStatus.Truncated(_))
+
+  private def lastAnswer(state: ThreadState): Result[String] =
     state.get(Messages.key).flatMap { stored =>
       stored.reverseIterator
-        .collectFirst { case StoredMessage(_, a: AssistantMessage) => AgentStatus.Completed(a.content) }
+        .collectFirst { case StoredMessage(_, a: AssistantMessage) => a.content }
         .toRight(ValidationError("agent", "the turn completed without an assistant message"))
     }
 

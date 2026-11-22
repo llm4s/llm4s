@@ -200,7 +200,7 @@ against captured replies. Any other value is `Other(raw)`, so a new provider val
 - **Agent runs.** `AgentEvents.ModelCallCompleted` (`AgentEventPayloads.scala:33-41`) gains
   `finishReason: Option[FinishReason] = None`, filled from the call's `Completion`. A stored event written before the
   field existed still reads, as `None`. This follows RFC 0008's `adjustments` on the same event. The agent's own
-  behaviour on a `Length` text answer does not change here (open question 6).
+  behaviour on a `Length` text answer is open question 6, since decided: the run ends `AgentStatus.Truncated`.
 
 ### Part 2: Stream endings
 
@@ -314,8 +314,8 @@ Anthropic take a base URL; Bedrock's endpoint override is unverified.
 
 ### Not changed
 
-- **Agent statuses.** A `Length` text answer still ends an agent run `Completed`. The event carries the reason
-  (Part 1); whether the run should end differently is open question 6.
+- **Agent statuses**, in this RFC's PRs. A `Length` text answer ended an agent run `Completed`, the event carrying the
+  reason (Part 1); open question 6, decided since, makes it `AgentStatus.Truncated`.
 - **`RequestAdjustment`** (RFC 0008). It describes the request as sent. `finishReason` describes how the reply ended.
   Neither replaces the other.
 - **Usage on a failed call.** A billed call that ends in `Left` reports no usage. That is a separate problem
@@ -474,8 +474,15 @@ This RFC's own PR also adds its row to `docs/rfcs/README.md`.
    line: a `ServiceError` with status 502, as a bad gateway is, and nothing after it is read (PR 5). Blank lines and
    SSE `:` comment lines are still ignored, since a keep-alive is sent as a comment, and so are the other SSE fields
    (`event:`, `id:`).
-6. **Agent behaviour on `Length`.** Should an agent run whose last answer was cut end `Completed`, or should
-   `AgentStatus` say so? This touches the agent runtime's owners and could be its own RFC.
+6. **Agent behaviour on `Length`: decided.** The maintainers decided that a cut-off answer is not `Completed`. An
+   agent turn whose final answer ended `FinishReason.Length` ends `AgentStatus.Truncated(partialAnswer)`, a case of
+   its own carrying the text. `AgentResult.answer` is `None` for it, as for every status but `Completed`; the text
+   stays in the thread, so a next turn can ask the model to go on. The turn's checkpoint records
+   `RunOutcome.Truncated`, so a settled turn rebuilds the same status; tracing labels it `truncated`; a delegated child
+   that ends so is refused `TaskRefusal.Truncated`; and Java and Kotlin read `AgentStatusKind.TRUNCATED` with
+   `JAgentStatus.partialAnswer()`. The `AgentStatusGainsTruncated` Scalafix rule reports a `match` on `AgentStatus`
+   with no catch-all
+   ([migration](../reference/migration.md#a-cut-off-answer-ends-truncated-not-completed-2613)).
 7. **Content filter: decided.** #2664 made it a `Left(ContentFilteredError)` for Gemini and Vertex AI, whether or not
    text came first, and neutral for `ReliableClient`'s breaker. This RFC takes that rule for every provider, so
    `FinishReason` has no `ContentFilter` case.

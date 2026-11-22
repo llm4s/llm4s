@@ -310,6 +310,16 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     ended.head.usage.inputTokens shouldBe 40 // two calls of 20
   }
 
+  it should "end truncated when the answer was cut off at the output limit (RFC 0009, open question 6)" in {
+    val tracing = Recording()
+    val cut     = answer("half an ans").withFinishReason(org.llm4s.llmconnect.model.FinishReason.Length)
+    val agent   = traced(Scripted(Right(cut)), tracing)
+    agent.run(ThreadId("t-cut"), "go").fold(e => fail(e.message), identity)
+    val ended = endedOf(tracing)
+    ended.map(_.status) shouldBe Vector("truncated")
+    ended.head.messages.last shouldBe AssistantMessage("half an ans")
+  }
+
   it should "send only the turn's messages on the second turn" in {
     val tracing = Recording()
     val agent   = traced(Scripted(Right(answer("answer one")), Right(answer("answer two"))), tracing)

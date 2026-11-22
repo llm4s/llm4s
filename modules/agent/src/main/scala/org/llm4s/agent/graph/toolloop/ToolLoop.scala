@@ -547,6 +547,7 @@ object ToolLoop:
     case TurnOutcome.Completed         => RunOutcome.Answered
     case TurnOutcome.StepLimitReached  => RunOutcome.StepLimitReached
     case TurnOutcome.TokenLimitReached => RunOutcome.TokenLimitReached
+    case TurnOutcome.Truncated         => RunOutcome.Truncated
 
   /**
    * The error result of an approval whose edited arguments take a lock the proposed arguments' locks do
@@ -1387,7 +1388,10 @@ object ToolLoop:
         val prior = written(remembered(turn.priorValues, keysOf(update) ++ batch, state), keysOf(update), after)
         Command(update.combine(usageOf(context)), Nil)
           .update(messages, MessageUpdate.Append(stored))
-          .update(LoopKeys.turn, turn.copy(steps = turn.steps + 1, priorValues = prior))
+          .update(
+            LoopKeys.turn,
+            turn.copy(steps = turn.steps + 1, priorValues = prior, cut = completion.finishReason == FinishReason.Length)
+          )
       val calls = assistant.toolCalls.toVector
       def toolMessage(call: ToolCall, content: String) =
         MessageUpdate.Append(StoredMessage(s"$taskId/tool/${call.id}", ToolMessage(content, call.id)))
@@ -1617,7 +1621,9 @@ object ToolLoop:
         def blocked(error: LLMError) =
           retraction(history, turn, state, context)
             .fold(NodeResult.Fail(_), boundary(error, _, context, GuardrailPhase.Output))
-        val ended = turn.copy(outcome = Some(TurnOutcome.Completed), priorValues = Map.empty)
+        // an answer cut off at the output limit is not a final answer (RFC 0009, open question 6)
+        val outcome = if turn.cut then TurnOutcome.Truncated else TurnOutcome.Completed
+        val ended   = turn.copy(outcome = Some(outcome), priorValues = Map.empty, cut = false)
         def completed(update: StateUpdate) =
           Command(update.combine(usageOf(context)), Nil).update(LoopKeys.turn, ended)
         threaded(boundaryOwners, assistant.content, context, answers, state)(_.afterAgent(_, _, _)) match

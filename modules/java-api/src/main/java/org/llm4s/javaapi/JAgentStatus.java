@@ -13,6 +13,7 @@ import java.util.Optional;
  * JAgentStatus s = result.status();
  * switch (s.kind()) {
  *     case COMPLETED           -> System.out.println(s.answer().orElseThrow());
+ *     case TRUNCATED           -> System.out.println("Cut off: " + s.partialAnswer().orElseThrow());
  *     case BLOCKED             -> System.out.println(s.guardrail().orElseThrow() + ": " + s.reason().orElseThrow());
  *     case STEP_LIMIT_REACHED  -> System.out.println("Hit the step limit");
  *     case TOKEN_LIMIT_REACHED -> System.out.println("Hit the token budget");
@@ -29,6 +30,7 @@ public final class JAgentStatus {
 
   private final AgentStatusKind kind;
   private final Optional<String> answer;
+  private final Optional<String> partialAnswer;
   private final Optional<String> guardrail;
   private final Optional<String> reason;
   private final List<PendingInterrupt> pending;
@@ -36,11 +38,13 @@ public final class JAgentStatus {
   JAgentStatus(
       AgentStatusKind kind,
       Optional<String> answer,
+      Optional<String> partialAnswer,
       Optional<String> guardrail,
       Optional<String> reason,
       List<PendingInterrupt> pending) {
     this.kind = kind;
     this.answer = answer;
+    this.partialAnswer = partialAnswer;
     this.guardrail = guardrail;
     this.reason = reason;
     this.pending = pending;
@@ -51,9 +55,19 @@ public final class JAgentStatus {
     return kind;
   }
 
-  /** The final answer, for {@code COMPLETED}; empty otherwise. */
+  /**
+   * The final answer, for {@code COMPLETED}; empty otherwise - also for {@code TRUNCATED}, whose answer is
+   * incomplete: {@link #partialAnswer()}.
+   */
   public Optional<String> answer() {
     return answer;
+  }
+
+  /**
+   * What the agent wrote before the model's output limit cut it off, for {@code TRUNCATED}; empty otherwise.
+   */
+  public Optional<String> partialAnswer() {
+    return partialAnswer;
   }
 
   /** The name of the first guardrail that refused the turn, for {@code BLOCKED}; empty otherwise. */
@@ -79,6 +93,7 @@ public final class JAgentStatus {
     return other instanceof JAgentStatus that
         && kind == that.kind
         && answer.equals(that.answer)
+        && partialAnswer.equals(that.partialAnswer)
         && guardrail.equals(that.guardrail)
         && reason.equals(that.reason)
         && pending.equals(that.pending);
@@ -86,13 +101,14 @@ public final class JAgentStatus {
 
   @Override
   public int hashCode() {
-    return Objects.hash(kind, answer, guardrail, reason, pending);
+    return Objects.hash(kind, answer, partialAnswer, guardrail, reason, pending);
   }
 
   @Override
   public String toString() {
     return switch (kind) {
       case COMPLETED -> "COMPLETED(" + answer.orElse("") + ")";
+      case TRUNCATED -> "TRUNCATED(" + partialAnswer.orElse("") + ")";
       case BLOCKED -> "BLOCKED(" + guardrail.orElse("") + ": " + reason.orElse("") + ")";
       case SUSPENDED -> "SUSPENDED(" + pending.size() + " pending)";
       default -> kind.name();

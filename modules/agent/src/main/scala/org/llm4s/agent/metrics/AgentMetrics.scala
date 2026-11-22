@@ -108,7 +108,7 @@ object AgentMetrics:
 
   /**
    * Delegated tasks that ended (`agent.task_ended`): `agent`, `status` (`completed`, `blocked`, `step_limit_reached`,
-   * `token_limit_reached`, `output_invalid`, `failed`).
+   * `token_limit_reached`, `truncated`, `output_invalid`, `failed`).
    */
   val TasksEnded: Metric.Counter =
     Metric.counter("llm4s.agent.tasks.ended", "Delegated child tasks ended, by status", "agent", "status")

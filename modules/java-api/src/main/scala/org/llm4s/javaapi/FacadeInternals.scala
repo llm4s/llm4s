@@ -92,21 +92,59 @@ private[llm4s] object FacadeInternals {
   /** `status` as Java and Kotlin callers read it; a `Suspended` one's interrupts via [[pending]]. */
   def agentStatus(status: AgentStatus): JAgentStatus = status match {
     case AgentStatus.Completed(answer) =>
-      new JAgentStatus(AgentStatusKind.COMPLETED, Optional.ofNullable(answer), Optional.empty, Optional.empty, none)
+      new JAgentStatus(
+        AgentStatusKind.COMPLETED,
+        Optional.ofNullable(answer),
+        Optional.empty,
+        Optional.empty,
+        Optional.empty,
+        none
+      )
+    case AgentStatus.Truncated(partial) =>
+      new JAgentStatus(
+        AgentStatusKind.TRUNCATED,
+        Optional.empty,
+        Optional.ofNullable(partial),
+        Optional.empty,
+        Optional.empty,
+        none
+      )
     case AgentStatus.Blocked(guardrail, reason) =>
       new JAgentStatus(
         AgentStatusKind.BLOCKED,
+        Optional.empty,
         Optional.empty,
         Optional.ofNullable(guardrail),
         Optional.ofNullable(reason),
         none
       )
     case AgentStatus.StepLimitReached =>
-      new JAgentStatus(AgentStatusKind.STEP_LIMIT_REACHED, Optional.empty, Optional.empty, Optional.empty, none)
+      new JAgentStatus(
+        AgentStatusKind.STEP_LIMIT_REACHED,
+        Optional.empty,
+        Optional.empty,
+        Optional.empty,
+        Optional.empty,
+        none
+      )
     case AgentStatus.TokenLimitReached =>
-      new JAgentStatus(AgentStatusKind.TOKEN_LIMIT_REACHED, Optional.empty, Optional.empty, Optional.empty, none)
+      new JAgentStatus(
+        AgentStatusKind.TOKEN_LIMIT_REACHED,
+        Optional.empty,
+        Optional.empty,
+        Optional.empty,
+        Optional.empty,
+        none
+      )
     case suspended: AgentStatus.Suspended =>
-      new JAgentStatus(AgentStatusKind.SUSPENDED, Optional.empty, Optional.empty, Optional.empty, pending(suspended))
+      new JAgentStatus(
+        AgentStatusKind.SUSPENDED,
+        Optional.empty,
+        Optional.empty,
+        Optional.empty,
+        Optional.empty,
+        pending(suspended)
+      )
   }
 
   private def none: java.util.List[PendingInterrupt] = java.util.List.of()
