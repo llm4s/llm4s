@@ -135,7 +135,11 @@ object Completion {
 /**
  * Token usage statistics for a completion request.
  *
- * @param promptTokens Number of tokens in the prompt (input).
+ * @param promptTokens Number of tokens in the whole prompt (input), prompt-cache reads and writes included:
+ *                     `cachedTokens` and `cacheCreationTokens` are parts of it, and the uncached input is
+ *                     what is left. A provider whose API reports the uncached input alone (Anthropic's
+ *                     `input_tokens`) has its client add the cache counts, so `CostEstimator` prices each
+ *                     token once.
  * @param completionTokens Number of tokens in the completion (output).
  * @param totalTokens Total tokens (prompt + completion).
  * @param thinkingTokens Optional number of tokens used for thinking/reasoning, billed as output.
