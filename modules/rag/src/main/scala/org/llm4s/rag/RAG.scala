@@ -13,7 +13,7 @@ import org.llm4s.extract.TikaDocumentExtractor
 import org.llm4s.rag.loader.*
 import org.llm4s.rag.permissions.*
 import org.llm4s.rag.transform.QueryTransformer
-import org.llm4s.reranker.{ RerankProviderConfig, Reranker, RerankerFactory }
+import org.llm4s.reranker.{ RerankProviderConfig, RerankRequest, Reranker, RerankerFactory }
 import org.llm4s.trace.Tracing
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -115,14 +115,15 @@ final class RAG private (
   /**
    * Ingest a document from a Path with metadata.
    */
-  def ingestPath(path: Path, metadata: Map[String, String]): Result[Int] = {
-    val file = path.toFile
-    if (file.isDirectory) {
-      ingestDirectory(file, metadata)
-    } else {
-      ingestFile(file, metadata)
+  def ingestPath(path: Path, metadata: Map[String, String]): Result[Int] =
+    plainIngestAllowed("ingest").flatMap { _ =>
+      val file = path.toFile
+      if (file.isDirectory) {
+        ingestDirectory(file, metadata)
+      } else {
+        ingestFile(file, metadata)
+      }
     }
-  }
 
   /**
    * Ingest raw text content.
@@ -181,9 +182,10 @@ final class RAG private (
     documentId: String,
     metadata: Map[String, String] = Map.empty
   ): Result[Int] =
-    TikaDocumentExtractor.extract(content, filename).flatMap { extracted =>
-      val enrichedMetadata = metadata ++ extracted.metadata + ("format" -> extracted.format.name)
-      ingestText(extracted.text, documentId, enrichedMetadata)
+    plainIngestAllowed("ingestBytes").flatMap(_ => TikaDocumentExtractor.extract(content, filename)).flatMap {
+      extracted =>
+        val enrichedMetadata = metadata ++ extracted.metadata + ("format" -> extracted.format.name)
+        ingestText(extracted.text, documentId, enrichedMetadata)
     }
 
   /**
@@ -194,7 +196,7 @@ final class RAG private (
    */
   def ingestBytesMultiple(
     documents: Iterator[(Array[Byte], String, String, Map[String, String])]
-  ): Result[LoadStats] = {
+  ): Result[LoadStats] = plainIngestAllowed("ingestBytesMultiple").flatMap { _ =>
     var successful = 0
     var failed     = 0
     val errors     = scala.collection.mutable.ListBuffer[(String, org.llm4s.error.LLMError)]()
@@ -232,7 +234,8 @@ final class RAG private (
    * @param loader The document loader to ingest from
    * @return Loading statistics with success/failure counts
    */
-  def ingest(loader: DocumentLoader): Result[LoadStats] = ingestResults(loader.load())
+  def ingest(loader: DocumentLoader): Result[LoadStats] =
+    plainIngestAllowed("ingest").flatMap(_ => ingestResults(loader.load()))
 
   private def ingestResults(results: Iterator[LoadResult]): Result[LoadStats] = {
     case class State(
@@ -339,7 +342,10 @@ final class RAG private (
    * @param loader The document loader to sync with
    * @return Sync statistics, or the listing error
    */
-  def sync(loader: DocumentLoader): Result[SyncStats] = {
+  def sync(loader: DocumentLoader): Result[SyncStats] =
+    plainIngestAllowed("sync").flatMap(_ => syncLoader(loader))
+
+  private def syncLoader(loader: DocumentLoader): Result[SyncStats] = {
     var added                          = 0
     var updated                        = 0
     var unchanged                      = 0
@@ -477,6 +483,7 @@ final class RAG private (
    */
   def refresh(loader: DocumentLoader): Result[SyncStats] =
     for {
+      _       <- plainIngestAllowed("refresh")
       results <- readForRefresh(loader)
       _       <- registry.clear()
       _       <- clear()
@@ -521,12 +528,18 @@ final class RAG private (
    * whose chunks are `a-chunk-1-chunk-0`, ...). Avoid document ids of that shape. Re-ingesting a document is not
    * affected: it replaces chunks by their exact ids.
    *
+   * With a [[org.llm4s.rag.permissions.SearchIndex SearchIndex]] configured it also deletes the document from every
+   * collection [[ingestWithPermissions]] wrote it to (`SearchIndex.deleteDocumentFromAllCollections`), whose chunks
+   * are named differently. It returns `Right` only once both kinds are gone; if either delete fails it returns that
+   * error, and the document stays registered so that the delete can be retried.
+   *
    * @param docId Document ID to delete
    * @return Unit on success
    */
   def deleteDocument(docId: String): Result[Unit] =
     for {
       _ <- deleteDocumentChunks(docId)
+      _ <- config.searchIndex.fold[Result[Long]](Right(0L))(_.deleteDocumentFromAllCollections(docId))
       _ <- registry.unregister(docId)
     } yield ()
 
@@ -560,14 +573,17 @@ final class RAG private (
    * @param ec Execution context for async operations
    * @return Future with loading statistics
    */
-  def ingestAsync(loader: DocumentLoader)(implicit ec: ExecutionContext): Future[Result[LoadStats]] = {
-    // Collect all results to enable parallel processing
-    val results = loader.load().toSeq
-    firstListingError(results) match {
-      case Some(error) => Future.successful(Left(error))
-      case None        => ingestResultsAsync(results)
+  def ingestAsync(loader: DocumentLoader)(implicit ec: ExecutionContext): Future[Result[LoadStats]] =
+    plainIngestAllowed("ingestAsync") match {
+      case Left(error) => Future.successful(Left(error))
+      case Right(_)    =>
+        // Collect all results to enable parallel processing
+        val results = loader.load().toSeq
+        firstListingError(results) match {
+          case Some(error) => Future.successful(Left(error))
+          case None        => ingestResultsAsync(results)
+        }
     }
-  }
 
   private def firstListingError(results: Seq[LoadResult]): Option[LLMError] =
     results.collectFirst { case LoadResult.ListingFailure(_, error) => error }
@@ -662,17 +678,20 @@ final class RAG private (
    * @param ec Execution context for async operations
    * @return Future with sync statistics
    */
-  def syncAsync(loader: DocumentLoader)(implicit ec: ExecutionContext): Future[Result[SyncStats]] = {
-    val results = loader.load().toSeq
-    firstListingError(results) match {
-      case Some(error) => Future.successful(Left(error))
-      case None =>
-        syncDocumentsAsync(
-          results.collect { case LoadResult.Success(d) => d },
-          results.collect { case failure: LoadResult.Failure => failure }
-        )
+  def syncAsync(loader: DocumentLoader)(implicit ec: ExecutionContext): Future[Result[SyncStats]] =
+    plainIngestAllowed("syncAsync") match {
+      case Left(error) => Future.successful(Left(error))
+      case Right(_) =>
+        val results = loader.load().toSeq
+        firstListingError(results) match {
+          case Some(error) => Future.successful(Left(error))
+          case None =>
+            syncDocumentsAsync(
+              results.collect { case LoadResult.Success(d) => d },
+              results.collect { case failure: LoadResult.Failure => failure }
+            )
+        }
     }
-  }
 
   private def syncDocumentsAsync(
     docs: Seq[Document],
@@ -960,6 +979,12 @@ final class RAG private (
    * - Collection-level: Only search collections the user can access
    * - Document-level: Only return documents the user can read
    *
+   * The search runs as [[query]] does, inside those permissions: the configured query transformers, then the
+   * fusion strategy - vector search ([[org.llm4s.rag.permissions.SearchIndex.query SearchIndex.query]]), keyword
+   * search ([[org.llm4s.rag.permissions.SearchIndex.keywordQuery SearchIndex.keywordQuery]]) or both, fused - then
+   * the reranker, if one is configured. An index with no keyword search fails a hybrid or keyword-only query rather
+   * than fall back to vector search; configure `.vectorOnly` to query it.
+   *
    * @param auth User authorization context with principal IDs
    * @param collectionPattern Pattern to filter collections (e.g., "confluence" for all descendants)
    * @param queryText The search query
@@ -980,15 +1005,70 @@ final class RAG private (
           )
         )
       case Some(index) =>
+        val k = topK.getOrElse(config.topK)
+        // As HybridSearcher.searchWithReranking: with a reranker, fetch rerankTopK candidates for it to order
+        val candidates = if (reranker.isDefined) config.rerankTopK else k
         for {
-          queryEmbedding <- embedQuery(queryText)
-          results <- index.query(
-            auth = auth,
-            collectionPattern = collectionPattern,
-            queryVector = queryEmbedding,
-            topK = topK.getOrElse(config.topK)
+          transformedQuery <- applyQueryTransforms(queryText)
+          fused            <- permissionSearch(index, auth, collectionPattern, transformedQuery, candidates)
+          results <- reranker match {
+            case Some(r) =>
+              r.rerank(RerankRequest(transformedQuery, fused.map(_.content), Some(k)))
+                .flatMap(response => RerankMapping.applyRerank(fused, response.results))
+            case None => Right(fused.take(k))
+          }
+        } yield results.map(toSearchResult)
+    }
+
+  /**
+   * One permission-filtered search under the configured fusion strategy. The fused strategies fetch twice `topK`
+   * from each channel, as `HybridSearcher` does.
+   */
+  private def permissionSearch(
+    index: SearchIndex,
+    auth: UserAuthorization,
+    collectionPattern: CollectionPattern,
+    queryText: String,
+    topK: Int
+  ): Result[Seq[HybridSearchResult]] = {
+    def vector(n: Int): Result[Seq[ScoredRecord]] =
+      embedQuery(queryText).flatMap(embedding => index.query(auth, collectionPattern, embedding, n, None))
+    def keyword(n: Int): Result[Seq[KeywordSearchResult]] =
+      index.keywordQuery(auth, collectionPattern, queryText, n, None)
+
+    config.fusionStrategy match {
+      case FusionStrategy.VectorOnly =>
+        vector(topK).map(HybridFusion.fuse(FusionStrategy.VectorOnly, _, Seq.empty, topK))
+      case FusionStrategy.KeywordOnly =>
+        keyword(topK).map(HybridFusion.fuse(FusionStrategy.KeywordOnly, Seq.empty, _, topK))
+      case fused =>
+        for {
+          keywordResults <- keyword(topK * 2) // first: an index without keyword search fails before embedding
+          vectorResults  <- vector(topK * 2)
+        } yield HybridFusion.fuse(fused, vectorResults, keywordResults, topK)
+    }
+  }
+
+  /**
+   * A RAG with a [[org.llm4s.rag.permissions.SearchIndex SearchIndex]] ingests only through [[ingestWithPermissions]].
+   *
+   * The plain ingest API writes no collection, so a permission query could never return what it wrote; with a
+   * `PgSearchIndex` it would write rows with a `NULL` collection into the same table. Routing such writes to a default
+   * collection instead was rejected: `PgSchemaManager`'s default collection is public, so a document ingested
+   * without naming its readers would become readable by every principal.
+   */
+  private def plainIngestAllowed(operation: String): Result[Unit] =
+    config.searchIndex match {
+      case None => Right(())
+      case Some(_) =>
+        Left(
+          ConfigurationError(
+            s"$operation is not available on a RAG built with .withSearchIndex: documents it ingested would belong " +
+              "to no collection, so queryWithPermissions could never return them. Ingest with " +
+              "ingestWithPermissions(collectionPath, documentId, content, ...) instead. deleteDocument still " +
+              "deletes a document from every collection."
           )
-        } yield results.map(scoredRecordToSearchResult)
+        )
     }
 
   /**
@@ -1089,16 +1169,6 @@ final class RAG private (
         index.deleteDocument(collectionPath, documentId)
     }
 
-  private def scoredRecordToSearchResult(sr: ScoredRecord): RAGSearchResult =
-    RAGSearchResult(
-      id = sr.record.id,
-      content = sr.record.content.getOrElse(""),
-      score = sr.score,
-      metadata = sr.record.metadata,
-      vectorScore = Some(sr.score),
-      keywordScore = None
-    )
-
   // ========== Statistics API ==========
 
   /**
@@ -1190,6 +1260,7 @@ final class RAG private (
     val newIds = chunks.map(chunk => chunkId(docId, chunk.index))
 
     for {
+      _          <- plainIngestAllowed("ingest")
       embeddings <- if (chunks.isEmpty) Right(Seq.empty[Array[Float]]) else embedBatch(chunks.map(_.content))
       previous   <- storedVersion(docId)
       vectorRecords = chunks.zip(embeddings).map { case (chunk, embedding) =>

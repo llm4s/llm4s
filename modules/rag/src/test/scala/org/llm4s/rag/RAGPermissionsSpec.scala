@@ -7,10 +7,15 @@ import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
-import org.llm4s.vectorstore.{ MetadataFilter, ScoredRecord, VectorRecord }
+import org.llm4s.vectorstore.{ KeywordSearchResult, MetadataFilter, ScoredRecord, VectorRecord }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.rag.loader.{ DocumentLoader, LoadResult, TextLoader }
+import org.llm4s.rag.transform.QueryTransformer
+
 import java.time.Instant
+import scala.concurrent.Await
+import scala.concurrent.duration.*
 
 /**
  * Tests for RAG permission-aware operations using a mock SearchIndex.
@@ -57,7 +62,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
   /**
    * Simple in-memory SearchIndex for testing permission-aware RAG operations.
    */
-  class MockSearchIndex extends SearchIndex {
+  class MockSearchIndex(keywordSupported: Boolean = true) extends SearchIndex {
     import scala.collection.mutable
 
     private val principalMap  = mutable.Map[ExternalPrincipal, PrincipalId]()
@@ -182,39 +187,71 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
         }
     }
 
+    private def accessibleChunks(auth: UserAuthorization, collectionPattern: CollectionPattern) = {
+      val accessibleCollIds = collectionMap.values
+        .filter(c => collectionPattern.matches(c.path) && c.canQuery(auth))
+        .map(_.id)
+        .toSet
+
+      chunks.filter { case (collId, _, _, _, readableBy) =>
+        accessibleCollIds.contains(collId) &&
+        (readableBy.isEmpty || auth.isAdmin || auth.principalIds.exists(readableBy.contains))
+      }.toSeq
+    }
+
+    // The id scheme PgSearchIndex uses
+    private def chunkId(collId: Int, docId: String, chunk: ChunkWithEmbedding): String =
+      s"coll-$collId-$docId-chunk-${chunk.chunkIndex}"
+
+    var keywordQueries: Int = 0
+
     def query(
       auth: UserAuthorization,
       collectionPattern: CollectionPattern,
       queryVector: Array[Float],
       topK: Int,
       additionalFilter: Option[MetadataFilter]
-    ): Result[Seq[ScoredRecord]] = {
-      val accessibleCollIds = collectionMap.values
-        .filter(c => collectionPattern.matches(c.path) && c.canQuery(auth))
-        .map(_.id)
-        .toSet
+    ): Result[Seq[ScoredRecord]] =
+      Right(
+        accessibleChunks(auth, collectionPattern)
+          .take(topK)
+          .zipWithIndex
+          .map { case ((collId, docId, chunk, metadata, _), idx) =>
+            ScoredRecord(
+              VectorRecord(
+                id = chunkId(collId, docId, chunk),
+                embedding = chunk.embedding,
+                content = Some(chunk.content),
+                metadata = metadata + ("docId" -> docId)
+              ),
+              1.0 - (idx * 0.1)
+            )
+          }
+      )
 
-      val results = chunks
-        .filter { case (collId, _, _, _, readableBy) =>
-          accessibleCollIds.contains(collId) &&
-          (readableBy.isEmpty || auth.isAdmin || auth.principalIds.exists(readableBy.contains))
-        }
-        .take(topK)
-        .zipWithIndex
-        .map { case ((_, _, chunk, metadata, _), idx) =>
-          ScoredRecord(
-            VectorRecord(
-              id = s"chunk-$idx",
-              embedding = chunk.embedding,
-              content = Some(chunk.content),
-              metadata = metadata
-            ),
-            1.0 - (idx * 0.1)
-          )
-        }
-        .toSeq
-
-      Right(results)
+    /** Scores a chunk by how many of the query's words it contains; one with none is not a match. */
+    override def keywordQuery(
+      auth: UserAuthorization,
+      collectionPattern: CollectionPattern,
+      queryText: String,
+      topK: Int,
+      additionalFilter: Option[MetadataFilter]
+    ): Result[Seq[KeywordSearchResult]] = {
+      keywordQueries += 1
+      if (!keywordSupported) super.keywordQuery(auth, collectionPattern, queryText, topK, additionalFilter)
+      else {
+        val words = queryText.toLowerCase.split("\\W+").filter(_.nonEmpty).toSet
+        Right(
+          accessibleChunks(auth, collectionPattern)
+            .map { case (collId, docId, chunk, metadata, _) =>
+              val hits = words.count(chunk.content.toLowerCase.contains)
+              KeywordSearchResult(chunkId(collId, docId, chunk), chunk.content, hits.toDouble, metadata + ("docId" -> docId))
+            }
+            .filter(_.score > 0)
+            .sortBy(-_.score)
+            .take(topK)
+        )
+      }
     }
 
     def ingest(
@@ -432,6 +469,250 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
       )
       result.isLeft shouldBe true
     } finally rag.close()
+  }
+
+  // ==========================================================================
+  // The plain API on a RAG with a SearchIndex (#2716)
+  // ==========================================================================
+
+  private def isPlainIngestRefusal(result: Result[?]): Boolean =
+    result match {
+      case Left(e: ConfigurationError) => e.message.contains("ingestWithPermissions")
+      case _                           => false
+    }
+
+  /** A loader that records whether it was read. */
+  private class TrackingLoader extends DocumentLoader {
+    var loaded                                = false
+    override def load(): Iterator[LoadResult] = { loaded = true; TextLoader("Some text.", "doc-1").load() }
+    override def description: String          = "tracking"
+  }
+
+  "Plain ingest on a RAG with a SearchIndex" should "be refused, writing nothing, rather than ingest into no collection" in {
+    val (rag, _) = createRAGWithPermissions()
+    try {
+      isPlainIngestRefusal(rag.ingestText("Some text.", "doc-1")) shouldBe true
+      isPlainIngestRefusal(rag.ingestChunks("doc-1", Seq("Some text."))) shouldBe true
+      isPlainIngestRefusal(rag.ingestBytes("Some text.".getBytes, "a.txt", "doc-1")) shouldBe true
+      isPlainIngestRefusal(
+        rag.ingestBytesMultiple(Iterator(("Some text.".getBytes, "a.txt", "doc-1", Map.empty[String, String])))
+      ) shouldBe true
+      isPlainIngestRefusal(rag.ingest("does-not-matter.txt")) shouldBe true
+
+      rag.chunkCount shouldBe 0
+      rag.stats.map(_.vectorCount) shouldBe Right(0L)
+    } finally rag.close()
+  }
+
+  it should "refuse loader ingest, sync and refresh before reading the loader" in {
+    val (rag, _) = createRAGWithPermissions()
+    try {
+      val loaders = Seq.fill(5)(new TrackingLoader)
+      isPlainIngestRefusal(rag.ingest(loaders(0))) shouldBe true
+      isPlainIngestRefusal(rag.sync(loaders(1))) shouldBe true
+      isPlainIngestRefusal(rag.refresh(loaders(2))) shouldBe true
+
+      import scala.concurrent.ExecutionContext.Implicits.global
+      isPlainIngestRefusal(Await.result(rag.ingestAsync(loaders(3)), 10.seconds)) shouldBe true
+      isPlainIngestRefusal(Await.result(rag.syncAsync(loaders(4)), 10.seconds)) shouldBe true
+
+      loaders.map(_.loaded) shouldBe Seq.fill(5)(false)
+    } finally rag.close()
+  }
+
+  it should "fail the build when the config also names document loaders" in {
+    val embeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
+    val config = RAGConfig.default.withSearchIndex(new MockSearchIndex()).withDocuments(TextLoader("Text.", "d"))
+    isPlainIngestRefusal(RAG.buildWithClient(config, embeddingClient)) shouldBe true
+  }
+
+  "RAG.deleteDocument with a SearchIndex" should "delete the document from every collection it was ingested into" in {
+    val (rag, index) = createRAGWithPermissions()
+    try {
+      val a = CollectionPath.unsafe("a")
+      val b = CollectionPath.unsafe("b")
+      index.collections.create(CollectionConfig.publicLeaf(a))
+      index.collections.create(CollectionConfig.publicLeaf(b))
+      rag.ingestWithPermissions(a, "doc-1", "Scala is a language.").isRight shouldBe true
+      rag.ingestWithPermissions(b, "doc-1", "Scala is a language.").isRight shouldBe true
+      rag.ingestWithPermissions(b, "doc-2", "Scala is a language too.").isRight shouldBe true
+
+      rag.deleteDocument("doc-1") shouldBe Right(())
+
+      val remaining = rag.queryWithPermissions(UserAuthorization.Admin, CollectionPattern.All, "Scala")
+      remaining.map(_.map(_.metadata.get("docId")).distinct) shouldBe Right(Seq(Some("doc-2")))
+    } finally rag.close()
+  }
+
+  it should "return the index's error rather than report a delete that did not happen" in {
+    val failing = new MockSearchIndex() {
+      override def deleteDocumentFromAllCollections(documentId: String): Result[Long] =
+        Left(ConfigurationError("index unavailable"))
+    }
+    val rag = RAG
+      .buildWithClient(RAGConfig.default.withSearchIndex(failing), new EmbeddingClient(new MockEmbeddingProvider()))
+      .toOption
+      .get
+    try rag.deleteDocument("doc-1").left.map(_.message) shouldBe Left("index unavailable")
+    finally rag.close()
+  }
+
+  "SearchIndex.deleteDocumentFromAllCollections" should "by default delete from each leaf collection in turn" in {
+    val index = new MockSearchIndex()
+    val a     = CollectionPath.unsafe("a")
+    val b     = CollectionPath.unsafe("b")
+    index.collections.create(CollectionConfig.publicLeaf(a))
+    index.collections.create(CollectionConfig.publicLeaf(b))
+    val chunk = ChunkWithEmbedding("x", Array(0.1f), 0)
+    index.ingest(a, "doc-1", Seq(chunk))
+    index.ingest(b, "doc-1", Seq(chunk, chunk.copy(chunkIndex = 1)))
+    index.ingest(b, "doc-2", Seq(chunk))
+
+    index.deleteDocumentFromAllCollections("doc-1") shouldBe Right(3L)
+    index.query(UserAuthorization.Admin, CollectionPattern.All, Array(0.1f)).map(_.size) shouldBe Right(1)
+  }
+
+  // ==========================================================================
+  // Fusion, keyword search and reranking in permission queries (#2716)
+  // ==========================================================================
+
+  private def permissionRag(index: MockSearchIndex, config: RAGConfig => RAGConfig = identity): RAG =
+    RAG
+      .buildWithClient(
+        config(RAGConfig.default.withSearchIndex(index)),
+        new EmbeddingClient(new MockEmbeddingProvider())
+      )
+      .toOption
+      .get
+
+  /** Two public documents: "apple" is the first vector result, "banana" the only keyword match for "banana". */
+  private def twoDocuments(index: MockSearchIndex): Unit = {
+    val path = CollectionPath.unsafe("fruit")
+    index.collections.create(CollectionConfig.publicLeaf(path))
+    index.ingest(path, "apple", Seq(ChunkWithEmbedding("An apple a day.", Array(0.1f, 0.2f, 0.3f), 0)))
+    index.ingest(path, "banana", Seq(ChunkWithEmbedding("A ripe banana.", Array(0.3f, 0.2f, 0.1f), 0)))
+  }
+
+  "RAG.queryWithPermissions" should "fuse vector and keyword results under the default RRF strategy" in {
+    val index = new MockSearchIndex()
+    twoDocuments(index)
+    val rag = permissionRag(index)
+    try {
+      val results = rag.queryWithPermissions(UserAuthorization.Admin, CollectionPattern.All, "banana").toOption.get
+      index.keywordQueries shouldBe 1
+      results.map(_.metadata.get("docId")) shouldBe Seq(Some("banana"), Some("apple"))
+      results.head.keywordScore shouldBe defined
+      results.head.vectorScore shouldBe defined
+    } finally rag.close()
+  }
+
+  it should "use weighted fusion when configured" in {
+    val index = new MockSearchIndex()
+    twoDocuments(index)
+    val rag = permissionRag(index, _.withWeightedScore(vectorWeight = 0.1, keywordWeight = 0.9))
+    try {
+      val results = rag.queryWithPermissions(UserAuthorization.Admin, CollectionPattern.All, "banana").toOption.get
+      results.head.metadata.get("docId") shouldBe Some("banana")
+      results.head.keywordScore shouldBe defined
+    } finally rag.close()
+  }
+
+  it should "search vectors only, without keyword search, under vectorOnly" in {
+    val index = new MockSearchIndex()
+    twoDocuments(index)
+    val rag = permissionRag(index, _.vectorOnly)
+    try {
+      val results = rag.queryWithPermissions(UserAuthorization.Admin, CollectionPattern.All, "banana").toOption.get
+      index.keywordQueries shouldBe 0
+      results.map(_.metadata.get("docId")) shouldBe Seq(Some("apple"), Some("banana"))
+      results.forall(_.keywordScore.isEmpty) shouldBe true
+    } finally rag.close()
+  }
+
+  it should "search keywords only under keywordOnly" in {
+    val index = new MockSearchIndex()
+    twoDocuments(index)
+    val rag = permissionRag(index, _.keywordOnly)
+    try {
+      val results = rag.queryWithPermissions(UserAuthorization.Admin, CollectionPattern.All, "banana").toOption.get
+      results.map(_.metadata.get("docId")) shouldBe Seq(Some("banana"))
+      results.head.vectorScore shouldBe None
+    } finally rag.close()
+  }
+
+  it should "keep the permission filter in its keyword search" in {
+    val index = new MockSearchIndex()
+    val user1 = PrincipalId.user(1)
+    val path  = CollectionPath.unsafe("restricted")
+    index.collections.create(CollectionConfig.restrictedLeaf(path, Set(user1)))
+    index.ingest(path, "secret", Seq(ChunkWithEmbedding("A secret banana.", Array(0.1f, 0.2f, 0.3f), 0)))
+    val rag = permissionRag(index, _.keywordOnly)
+    try {
+      val outsider = UserAuthorization.forUser(PrincipalId.user(2), Set.empty)
+      rag.queryWithPermissions(outsider, CollectionPattern.All, "banana") shouldBe Right(Seq.empty)
+      rag
+        .queryWithPermissions(UserAuthorization.forUser(user1, Set.empty), CollectionPattern.All, "banana")
+        .map(_.size) shouldBe Right(1)
+    } finally rag.close()
+  }
+
+  it should "fail a hybrid query on an index without keyword search, not fall back to vector search" in {
+    val index = new MockSearchIndex(keywordSupported = false)
+    twoDocuments(index)
+    val rag = permissionRag(index)
+    try {
+      val result = rag.queryWithPermissions(UserAuthorization.Admin, CollectionPattern.All, "banana")
+      result.left.toOption.get shouldBe a[ConfigurationError]
+      result.left.toOption.get.message should include("vectorOnly")
+    } finally rag.close()
+  }
+
+  it should "query such an index under vectorOnly" in {
+    val index = new MockSearchIndex(keywordSupported = false)
+    twoDocuments(index)
+    val rag = permissionRag(index, _.vectorOnly)
+    try rag.queryWithPermissions(UserAuthorization.Admin, CollectionPattern.All, "banana").map(_.size) shouldBe Right(2)
+    finally rag.close()
+  }
+
+  it should "rerank its candidates with the configured reranker" in {
+    val index = new MockSearchIndex()
+    twoDocuments(index)
+    // The LLM reranker scores the candidates in order: apple (the first vector result) low, banana high
+    val reranking = new MockLLMClient {
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        Right(
+          Completion(
+            id = "rerank",
+            created = Instant.EPOCH,
+            content = "[0.1, 0.9]",
+            model = "mock",
+            message = AssistantMessage("[0.1, 0.9]"),
+            usage = None
+          )
+        )
+    }
+    val rag = permissionRag(index, _.vectorOnly.withLLM(reranking).withLLMReranking)
+    try {
+      val results = rag.queryWithPermissions(UserAuthorization.Admin, CollectionPattern.All, "fruit").toOption.get
+      results.map(_.metadata.get("docId")) shouldBe Seq(Some("banana"), Some("apple"))
+      results.head.score shouldBe 0.9
+    } finally rag.close()
+  }
+
+  it should "apply the configured query transformers" in {
+    val index = new MockSearchIndex()
+    twoDocuments(index)
+    val toBanana = new QueryTransformer {
+      override def name: String                             = "to-banana"
+      override def transform(query: String): Result[String] = Right("banana")
+    }
+    val rag = permissionRag(index, _.keywordOnly.withQueryTransformer(toBanana))
+    try
+      rag
+        .queryWithPermissions(UserAuthorization.Admin, CollectionPattern.All, "cherry")
+        .map(_.map(_.metadata.get("docId"))) shouldBe Right(Seq(Some("banana")))
+    finally rag.close()
   }
 
   // ==========================================================================

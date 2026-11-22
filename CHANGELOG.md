@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An agent turn whose answer was cut off at the output limit ends `AgentStatus.Truncated(partialAnswer)`, not
   `Completed`, and `AgentStatusKind` gains `TRUNCATED`; a `match` on `AgentStatus` needs the case (RFC 0009 open
   question 6); [migration](docs/reference/migration.md#a-cut-off-answer-ends-truncated-not-completed-2613).
+- On a `RAG` with a `SearchIndex`, plain `ingest*`, `sync` and `refresh` return a `ConfigurationError`, and a hybrid
+  `queryWithPermissions` needs `SearchIndex.keywordQuery`, which replaces `queryHybrid` (#2716);
+  [migration](docs/reference/migration.md#a-rag-with-a-searchindex-ingests-only-with-permissions-2716).
 
 ### Providers
 
@@ -105,6 +108,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path; a real drive path in a `/IG:` value is still confined [#1738](https://github.com/llm4s/llm4s/issues/1738), [#2625](https://github.com/llm4s/llm4s/pull/2625).
 - **Fixed** `file_info` describes the filesystem root instead of throwing, and its `sizeHuman` is `1.5 KB` under every
   default locale [#2670](https://github.com/llm4s/llm4s/issues/2670), [#2669](https://github.com/llm4s/llm4s/issues/2669).
+
+### Embeddings & RAG
+
+- **Fixed** a `RAG` with a `SearchIndex` refuses plain ingest and sync (a `ConfigurationError`) instead of writing rows
+  no permission query finds; `deleteDocument` deletes from every collection; `queryWithPermissions` runs the configured
+  fusion, keyword search and reranking [#2716](https://github.com/llm4s/llm4s/issues/2716);
+  [migration](docs/reference/migration.md#a-rag-with-a-searchindex-ingests-only-with-permissions-2716).
 
 ### Build & tooling
 
