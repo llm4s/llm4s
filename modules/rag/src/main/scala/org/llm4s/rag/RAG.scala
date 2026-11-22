@@ -340,13 +340,39 @@ final class RAG private (
    *
    * Read failures are logged at WARN.
    *
+   * '''What sync remembers.''' Versions are kept in the pipeline's [[org.llm4s.rag.loader.DocumentRegistry DocumentRegistry]],
+   * which is in memory unless `RAGConfig.withDocumentRegistry` names another. An in-memory registry starts empty in
+   * every new `RAG`: its first sync treats every document as new and re-embeds it, and a document the source dropped
+   * while no `RAG` was running is never deleted. For an index that outlives the process, use a registry that does
+   * too: `PgDocumentRegistry` or `SQLiteDocumentRegistry`.
+   *
+   * '''Sources.''' This form syncs the default source ([[org.llm4s.rag.loader.DocumentRegistry.DefaultSourceId]]),
+   * which also holds plainly ingested documents. To sync several loaders into one pipeline, give each its own
+   * `sourceId` with [[sync(loader:org\.llm4s\.rag\.loader\.DocumentLoader,sourceId:String)* sync(loader, sourceId)]]:
+   * otherwise each sync deletes the documents the others indexed.
+   *
    * @param loader The document loader to sync with
    * @return Sync statistics, or the listing error
    */
   def sync(loader: DocumentLoader): Result[SyncStats] =
-    plainIngestAllowed("sync").flatMap(_ => syncLoader(loader))
+    sync(loader, DocumentRegistry.DefaultSourceId)
 
-  private def syncLoader(loader: DocumentLoader): Result[SyncStats] = {
+  /**
+   * Sync with a loader as one source among several: as [[sync(loader:org\.llm4s\.rag\.loader\.DocumentLoader)* sync(loader)]],
+   * but the deletion pass considers only the documents `sourceId` owns - the ones a sync of `sourceId` registered
+   * last. Syncing source B never deletes what source A indexed.
+   *
+   * A document belongs to the source that registered it last: if two sources list the same document id, it moves to
+   * whichever synced it most recently, and only that source's sync deletes it.
+   *
+   * @param loader The document loader to sync with
+   * @param sourceId A stable name for the loader's source, e.g. `s3://bucket/prefix`; the same on every run
+   * @return Sync statistics, or the listing error
+   */
+  def sync(loader: DocumentLoader, sourceId: String): Result[SyncStats] =
+    plainIngestAllowed("sync").flatMap(_ => syncLoader(loader, sourceId))
+
+  private def syncLoader(loader: DocumentLoader, sourceId: String): Result[SyncStats] = {
     var added                          = 0
     var updated                        = 0
     var unchanged                      = 0
@@ -370,9 +396,9 @@ final class RAG private (
           registry.getVersion(doc.id) match {
             case Right(None) =>
               // New document
-              ingestDocument(doc) match {
+              ingestDocument(doc, sourceId) match {
                 case Right(_) =>
-                  registry.register(doc.id, docVersion)
+                  registry.register(doc.id, docVersion, sourceId)
                   added += 1
                 case Left(_) =>
                 // Failed to ingest - skip
@@ -381,9 +407,9 @@ final class RAG private (
             case Right(Some(existingVersion)) if existingVersion.contentHash != docVersion.contentHash =>
               // Changed document - re-ingest, which replaces its chunks. No delete first: a document
               // that fails to re-ingest keeps its previous version.
-              ingestDocument(doc) match {
+              ingestDocument(doc, sourceId) match {
                 case Right(_) =>
-                  registry.register(doc.id, docVersion)
+                  registry.register(doc.id, docVersion, sourceId)
                   updated += 1
                 case Left(_) =>
                 // Failed to ingest - skip
@@ -412,19 +438,24 @@ final class RAG private (
         Left(error)
 
       case None =>
-        val deleted = deleteUnlisted(seenIds.toSet, readFailures.result(), "sync")
+        val deleted = deleteUnlisted(sourceId, seenIds.toSet, readFailures.result(), "sync")
         Right(SyncStats(added, updated, deleted, unchanged))
     }
   }
 
   /**
-   * The deletion pass shared by [[sync]] and [[syncAsync]]: remove each registered document the
-   * loader did not list. A document whose read failed counts as listed. A read failure that does
+   * The deletion pass shared by [[sync]] and [[syncAsync]]: remove each document registered to
+   * `sourceId` that the loader did not list; other sources' documents are never considered. A document whose read failed counts as listed. A read failure that does
    * not name its document could be any unlisted one, so then nothing is deleted.
    *
    * @return the number of documents deleted
    */
-  private def deleteUnlisted(seenIds: Set[String], readFailures: Seq[LoadResult.Failure], operation: String): Int = {
+  private def deleteUnlisted(
+    sourceId: String,
+    seenIds: Set[String],
+    readFailures: Seq[LoadResult.Failure],
+    operation: String
+  ): Int = {
     val (named, unnamed) = readFailures.partition(_.documentId.isDefined)
     val keptIds          = named.flatMap(_.documentId).toSet
 
@@ -442,7 +473,7 @@ final class RAG private (
       )
       0
     } else {
-      registry.allDocumentIds() match {
+      registry.documentIds(sourceId) match {
         case Right(registeredIds) =>
           val deletedIds = registeredIds -- seenIds -- keptIds
           deletedIds.foreach { id =>
@@ -462,7 +493,8 @@ final class RAG private (
    * Full refresh - re-process all documents.
    *
    * Clears the registry and the index, then re-ingests every document from the loader. Use this
-   * when you want to ensure a clean slate.
+   * when you want to ensure a clean slate. It clears every source, not only the default one: after
+   * a refresh, the pipeline holds this loader's documents alone.
    *
    * '''The index is cleared only after the loader has been read in full.''' If the loader
    * reports a [[org.llm4s.rag.loader.LoadResult.ListingFailure LoadResult.ListingFailure]] (at any point, including a later S3 page), or - with
@@ -673,13 +705,26 @@ final class RAG private (
    * results are collected first, nothing is added, updated or deleted in that case. A document
    * whose read fails keeps its indexed version, and a read failure that does not name its
    * document skips the deletion pass, as in [[sync]]. Unlike [[sync]], it holds every loaded
-   * document in memory.
+   * document in memory. It syncs the default source; see [[sync]] on sources and on what a sync remembers.
    *
    * @param loader The document loader to sync with
    * @param ec Execution context for async operations
    * @return Future with sync statistics
    */
   def syncAsync(loader: DocumentLoader)(implicit ec: ExecutionContext): Future[Result[SyncStats]] =
+    syncAsync(loader, DocumentRegistry.DefaultSourceId)
+
+  /**
+   * [[syncAsync(loader:org\.llm4s\.rag\.loader\.DocumentLoader)* syncAsync(loader)]] as one source among several:
+   * the deletion pass considers only the documents `sourceId` owns, as in
+   * [[sync(loader:org\.llm4s\.rag\.loader\.DocumentLoader,sourceId:String)* sync(loader, sourceId)]].
+   *
+   * @param loader The document loader to sync with
+   * @param sourceId A stable name for the loader's source, the same on every run
+   * @param ec Execution context for async operations
+   * @return Future with sync statistics
+   */
+  def syncAsync(loader: DocumentLoader, sourceId: String)(implicit ec: ExecutionContext): Future[Result[SyncStats]] =
     plainIngestAllowed("syncAsync") match {
       case Left(error) => Future.successful(Left(error))
       case Right(_) =>
@@ -688,6 +733,7 @@ final class RAG private (
           case Some(error) => Future.successful(Left(error))
           case None =>
             syncDocumentsAsync(
+              sourceId,
               results.collect { case LoadResult.Success(d) => d },
               results.collect { case failure: LoadResult.Failure => failure }
             )
@@ -695,6 +741,7 @@ final class RAG private (
     }
 
   private def syncDocumentsAsync(
+    sourceId: String,
     docs: Seq[Document],
     readFailures: Seq[LoadResult.Failure]
   )(implicit ec: ExecutionContext): Future[Result[SyncStats]] = {
@@ -755,9 +802,9 @@ final class RAG private (
           case ProcessDoc(doc, NewDoc) =>
             seenIds += doc.id
             val docVersion = doc.version.getOrElse(DocumentVersion.fromContent(doc.content))
-            ingestDocument(doc) match {
+            ingestDocument(doc, sourceId) match {
               case Right(_) =>
-                registry.register(doc.id, docVersion)
+                registry.register(doc.id, docVersion, sourceId)
                 added += 1
               case Left(_) => // Failed to ingest - skip
             }
@@ -766,9 +813,9 @@ final class RAG private (
             seenIds += doc.id
             val docVersion = doc.version.getOrElse(DocumentVersion.fromContent(doc.content))
             // Re-ingesting replaces the chunks; a failure keeps the previous version, as in sync.
-            ingestDocument(doc) match {
+            ingestDocument(doc, sourceId) match {
               case Right(_) =>
-                registry.register(doc.id, docVersion)
+                registry.register(doc.id, docVersion, sourceId)
                 updated += 1
               case Left(_) => // Failed to ingest - skip
             }
@@ -781,7 +828,7 @@ final class RAG private (
             seenIds += doc.id
         }
 
-        val deleted = deleteUnlisted(seenIds.toSet, readFailures, "syncAsync")
+        val deleted = deleteUnlisted(sourceId, seenIds.toSet, readFailures, "syncAsync")
         Right(SyncStats(added, updated, deleted, unchanged))
       }
   }
@@ -800,7 +847,7 @@ final class RAG private (
   def refreshAsync(loader: DocumentLoader)(implicit ec: ExecutionContext): Future[Result[SyncStats]] =
     Future(refresh(loader)).recover { case ex => Left(org.llm4s.error.ThrowableOps.RichThrowable(ex).toLLMError) }
 
-  private def ingestDocument(doc: Document): Result[Int] = {
+  private def ingestDocument(doc: Document, sourceId: String = DocumentRegistry.DefaultSourceId): Result[Int] = {
     // Choose chunker based on hints if configured
     val effectiveChunker = if (config.loadingConfig.useHints) {
       doc.hints.flatMap(_.chunkingStrategy) match {
@@ -824,7 +871,7 @@ final class RAG private (
     // version, and registering the new one would make the next sync skip it as unchanged.
     if (config.loadingConfig.enableVersioning && result.isRight) {
       val version = doc.version.getOrElse(DocumentVersion.fromContent(doc.content))
-      registry.register(doc.id, version)
+      registry.register(doc.id, version, sourceId)
     }
 
     result
@@ -1743,10 +1790,8 @@ object RAG {
     } yield rag
   }
 
-  private def createRegistry(@scala.annotation.unused config: RAGConfig): Result[DocumentRegistry] =
-    // For now, use in-memory registry
-    // Future: SQLite registry when vectorStorePath is set
-    Right(InMemoryDocumentRegistry())
+  private def createRegistry(config: RAGConfig): Result[DocumentRegistry] =
+    Right(config.documentRegistry.getOrElse(InMemoryDocumentRegistry()))
 
   private def createGraphRAG(config: RAGConfig): Result[Option[GraphRAG]] =
     config.graphStore match {

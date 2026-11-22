@@ -512,16 +512,18 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
   it should "refuse loader ingest, sync and refresh before reading the loader" in {
     val (rag, _) = createRAGWithPermissions()
     try {
-      val loaders = Seq.fill(5)(new TrackingLoader)
+      val loaders = Seq.fill(7)(new TrackingLoader)
       isPlainIngestRefusal(rag.ingest(loaders(0))) shouldBe true
       isPlainIngestRefusal(rag.sync(loaders(1))) shouldBe true
+      isPlainIngestRefusal(rag.sync(loaders(5), "source")) shouldBe true
       isPlainIngestRefusal(rag.refresh(loaders(2))) shouldBe true
 
       import scala.concurrent.ExecutionContext.Implicits.global
       isPlainIngestRefusal(Await.result(rag.ingestAsync(loaders(3)), 10.seconds)) shouldBe true
       isPlainIngestRefusal(Await.result(rag.syncAsync(loaders(4)), 10.seconds)) shouldBe true
+      isPlainIngestRefusal(Await.result(rag.syncAsync(loaders(6), "source"), 10.seconds)) shouldBe true
 
-      loaders.map(_.loaded) shouldBe Seq.fill(5)(false)
+      loaders.map(_.loaded) shouldBe Seq.fill(7)(false)
     } finally rag.close()
   }
 
