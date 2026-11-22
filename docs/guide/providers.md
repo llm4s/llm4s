@@ -535,10 +535,10 @@ Behaviour to know about:
 - **Reasoning.** `CompletionOptions.reasoning` goes as `reasoning_effort` (`Low`, `Medium` and `High` as
   `low`, `medium` and `high`) to OpenAI's gpt-oss models (`openai/gpt-oss-120b`, `openai/gpt-oss-20b` and
   their variants), the models IBM's own clients send it to; `Minimal` goes as `low`, and `XHigh` and `Max` as `high`.
-  The chat API has no value that turns reasoning off, so `Thinking.Off` goes as `low`, and a warning is logged once per
-  process. Any other model
-  is sent nothing for `reasoning`, again with a warning logged once per process: IBM's Model Gateway
-  rejects the field for models without it, and whether the chat API does is unconfirmed.
+  The chat API has no value that turns reasoning off, so `Thinking.Off` goes as `low`. Any other model
+  is sent nothing for `reasoning`: IBM's Model Gateway rejects the field for models without it, and whether the chat
+  API does is unconfirmed. Each of these, and a thinking setting the chat API has no counterpart for, is reported on
+  `Completion.adjustments` (`Adjusted`, `NotNeeded` or `Dropped`) and logged once per model and option.
   `include_reasoning` is not sent; the service defaults it to true.
 - **Thinking.** A reply's `reasoning_content` (or `reasoning`) is read as thinking from any model:
   `Completion.thinking` on `complete`, and `StreamedChunk.thinkingDelta` on a stream, with the whole
