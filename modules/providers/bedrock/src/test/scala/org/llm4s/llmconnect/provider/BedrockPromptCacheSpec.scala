@@ -149,6 +149,19 @@ class BedrockPromptCacheSpec extends AnyWordSpec with Matchers {
       completion.adjustments.filter(_.option == RequestOption.PromptCache) shouldBe empty
     }
 
+    "read zero cache counts as none, so a model without cache prices keeps its cost estimate" in {
+      val usage = ujson.Obj(
+        "inputTokens"           -> 10,
+        "outputTokens"          -> 8,
+        "totalTokens"           -> 18,
+        "cacheReadInputTokens"  -> 0,
+        "cacheWriteInputTokens" -> 0
+      )
+      val (_, completion) = exchange(Nova, CompletionOptions(), usageResponse(usage))
+      completion.usage.map(u => (u.promptTokens, u.cachedTokens, u.cacheCreationTokens)) shouldBe Some((10, None, None))
+      completion.estimatedCost shouldBe defined
+    }
+
     "report a request that cached nothing, from a stream too" in {
       val nothingCached = RequestAdjustment.Dropped(
         RequestOption.PromptCache,

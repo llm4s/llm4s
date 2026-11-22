@@ -802,8 +802,10 @@ object BedrockClient {
    */
   private[provider] def tokenUsage(u: software.amazon.awssdk.services.bedrockruntime.model.TokenUsage): TokenUsage = {
     def count(n: Integer): Int = Option(n).fold(0)(_.intValue)
-    val reads                  = Option(u.cacheReadInputTokens()).map(_.intValue)
-    val writes                 = Option(u.cacheWriteInputTokens()).map(_.intValue)
+    // a zero count is no count: `CostEstimator` asks for cache prices only for a usage with cache counts, and a model
+    // without them (Nova) would otherwise lose its estimate on every reply that cached nothing
+    val reads  = Option(u.cacheReadInputTokens()).map(_.intValue).filter(_ > 0)
+    val writes = Option(u.cacheWriteInputTokens()).map(_.intValue).filter(_ > 0)
     val longWrites =
       Option
         .when(u.hasCacheDetails)(u.cacheDetails().asScala.filter(_.ttl() == CacheTTL.VALUE_1_H))
