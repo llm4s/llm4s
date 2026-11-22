@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.postgres
 
+import org.llm4s.agent.encryption.{ EncryptingCheckpointer, EncryptionKey, KeyId, StaticKeySource }
 import org.llm4s.agent.graph.Checkpointer
 import org.llm4s.agent.testkit.{ CheckpointerContract, ManualClock }
 import org.llm4s.it.tags.Docker
@@ -29,7 +30,18 @@ import scala.util.Try
 @Docker
 class PostgresCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract with BeforeAndAfterAll {
 
-  import PostgresCheckpointerContractSpec.*
+  /** This suite's state: a schema of its own, so a suite that extends this one shares nothing with it. */
+  protected def state: PostgresContractState = PostgresCheckpointerContractSpec
+
+  /** The store the contract is given for an open `store`: the store itself, or something over it. */
+  protected def wrapped(store: PostgresCheckpointer): Checkpointer = store
+
+  private def schema   = state.schema
+  private def config   = state.config
+  private def clocks   = state.clocks
+  private def clockIds = state.clockIds
+  private def opened   = state.opened
+  private def schemas  = state.schemas
 
   private def clockId(clock: Clock): String = clockIds.synchronized {
     Option(clockIds.get(clock)).getOrElse {
@@ -48,27 +60,29 @@ class PostgresCheckpointerContractSpec extends AnyFlatSpec with CheckpointerCont
 
   /** The configuration - the schema - `store` was opened with, so a reopen or a sibling opens the same storage. */
   private def configOf(store: Checkpointer): PostgresCheckpointerConfig = store match {
-    case postgres: PostgresCheckpointer => postgres.config
-    case _                              => config
+    case postgres: PostgresCheckpointer     => postgres.config
+    case encrypting: EncryptingCheckpointer => configOf(encrypting.inner)
+    case _                                  => config
   }
 
-  protected def newCheckpointer(clock: Clock): Checkpointer = open(clock)
+  protected def newCheckpointer(clock: Clock): Checkpointer = wrapped(open(clock))
 
   // the retention sweep's cases each get a schema of their own: they page through, and renumber, the whole store
   override protected def isolatedCheckpointer(clock: Clock): Checkpointer = {
     PgCheckpointerDb.require()
     val isolated = PgCheckpointerDb.freshSchema()
     schemas.add(isolated)
-    open(clock, PostgresCheckpointerConfig(schema = isolated))
+    wrapped(open(clock, PostgresCheckpointerConfig(schema = isolated)))
   }
 
   override protected def reopen(store: Checkpointer, clock: ManualClock): Checkpointer = {
     val in = configOf(store)
     closeExtra(store)
-    open(clock, in)
+    wrapped(open(clock, in))
   }
 
-  override protected def sibling(store: Checkpointer, clock: ManualClock): Checkpointer = open(clock, configOf(store))
+  override protected def sibling(store: Checkpointer, clock: ManualClock): Checkpointer =
+    wrapped(open(clock, configOf(store)))
 
   override protected def advanceStoreClock(store: Checkpointer, clock: ManualClock, by: FiniteDuration): Unit = {
     clock.advance(by)
@@ -95,7 +109,7 @@ class PostgresCheckpointerContractSpec extends AnyFlatSpec with CheckpointerCont
     val store = PgCheckpointerDb.store(boundConfig, maxPoolSize = 2)
     Some(
       CheckpointerContract.BoundedStore(
-        store,
+        wrapped(store),
         boundConfig.bound,
         () => {
           val holder = PgCheckpointerDb.connect()
@@ -126,7 +140,33 @@ class PostgresCheckpointerContractSpec extends AnyFlatSpec with CheckpointerCont
 }
 
 /** The suite's state, kept out of the class: the contract's cases call the hooks while the suite is constructed. */
-private object PostgresCheckpointerContractSpec {
+private object PostgresCheckpointerContractSpec extends PostgresContractState
+
+/**
+ * `EncryptingCheckpointer` over `PostgresCheckpointer` passes the same contract, against the same server, in a schema
+ * of its own (#2449): what one pool encrypted, a store over another pool reads, and nothing a runtime can observe of
+ * the store changes.
+ */
+@Docker
+class PostgresEncryptingCheckpointerContractSpec extends PostgresCheckpointerContractSpec {
+  import PostgresEncryptingCheckpointerContractSpec.keys
+
+  override protected def state: PostgresContractState = PostgresEncryptingCheckpointerContractSpec
+
+  override protected def wrapped(store: PostgresCheckpointer): Checkpointer = EncryptingCheckpointer(store, keys)
+
+  override protected def closeExtra(store: Checkpointer): Unit = store match {
+    case encrypting: EncryptingCheckpointer => super.closeExtra(encrypting.inner)
+    case other                              => super.closeExtra(other)
+  }
+}
+
+private object PostgresEncryptingCheckpointerContractSpec extends PostgresContractState {
+  val keys: StaticKeySource = StaticKeySource(EncryptionKey.generate(KeyId("postgres-contract")))
+}
+
+/** One contract suite's schema, clocks and open stores. */
+private class PostgresContractState {
   val schema: String                                      = PgCheckpointerDb.freshSchema()
   val config: PostgresCheckpointerConfig                  = PostgresCheckpointerConfig(schema = schema)
   lazy val clocks: PgCheckpointerDb.Clocks                = new PgCheckpointerDb.Clocks(schema)

@@ -275,8 +275,10 @@ baseline.
 - **One database.** The SPI is open to another store, but PostgreSQL is the only multi-machine store shipped.
 - **No HTTP server product.** Endpoints, authentication, Agent Protocol, A2A and AG-UI belong to the service you build
   on the kernel; the example service shows one shape and authenticates nothing (its `X-Tenant-Id` header is not auth).
-- **Not yet:** a shared Postgres long-term memory store, cron and webhooks, versioned assistants, checkpoint encryption
-  at rest, background subagents. See the [parity matrix](../../reference/agent-platform-parity) for where each went.
+- **Not yet:** a shared Postgres long-term memory store, cron and webhooks, versioned assistants, background
+  subagents. See the [parity matrix](../../reference/agent-platform-parity) for where each went. (Checkpoint
+  encryption at rest is [here](durable-checkpointers#encrypting-what-the-store-holds): wrap the store and its queue
+  on every instance, with the same keys.)
 
 ## See also
 
