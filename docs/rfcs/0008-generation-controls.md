@@ -9,7 +9,7 @@ nav_order: 8
 # RFC 0008: Generation controls and reported adjustments
 
 - **Status:** Implemented, in the release after 0.6.0 (PRs #2532, #2617, #2666, #2706, and the Gemini follow-up
-  #GEMINIPR); three follow-ups remain open (see [Delivery](#delivery))
+  #2710); three follow-ups remain open (see [Delivery](#delivery))
 - **Author(s):** @jwgcooke
 - **Tracking issue:** [#2115](https://github.com/llm4s/llm4s/issues/2115)
 - **Pull request:** [#2445](https://github.com/llm4s/llm4s/pull/2445)
@@ -416,7 +416,7 @@ Each PR has its own review:
 
 Follow-ups, one provider or one control per PR, under this RFC: Bedrock `cachePoint`, Ollama `think`, Gemini
 thinking levels, and service tier. Gemini thinking levels are delivered in
-[#GEMINIPR](https://github.com/llm4s/llm4s/pull/GEMINIPR) (Gemini and Vertex AI send `thinkingConfig`, replacing #2623).
+[#2710](https://github.com/llm4s/llm4s/pull/2710) (Gemini and Vertex AI send `thinkingConfig`, replacing #2623).
 Bedrock `cachePoint`, Ollama `think` and service tier are still open; until each lands, its provider reports the
 option `Dropped` (service tier has no option yet).
 
