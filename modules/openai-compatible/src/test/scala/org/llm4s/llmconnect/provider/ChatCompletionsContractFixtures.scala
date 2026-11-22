@@ -6,7 +6,8 @@ import org.llm4s.testkit.{ Applicability, ContractCase, LocalProviderTestServer,
  * A chat-completions server's replies for each RFC 0009 [[ContractCase]], for `assertModelCallContract`: the shapes
  * DeepSeek, Groq, Mistral and the other OpenAI-compatible servers send, `content_filter` as Azure-backed and
  * moderated servers send it. Hand-written in the documented shape (no live capture yet); a stream ends with
- * `finish_reason` and `[DONE]`, usage on the last event.
+ * `finish_reason` and `[DONE]`, usage on the last event. A failure after the 200 status is an event carrying an
+ * `error` object.
  */
 object ChatCompletionsContractFixtures {
 
@@ -31,6 +32,9 @@ object ChatCompletionsContractFixtures {
         LocalProviderTestServer.sendSseResponse(_, stream)
       )
     )
+
+  private def streamOnly(stream: String): Applicability =
+    Applicability.Applies(RecordedReply.streamOnly(LocalProviderTestServer.sendSseResponse(_, stream)))
 
   private val call =
     """{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}"""
@@ -70,6 +74,18 @@ object ChatCompletionsContractFixtures {
         event("""{"role":"assistant","content":"Here is how"}"""),
         event("{}", "content_filter", usage = true)
       )
+    ),
+    // text, then the connection closes: no finish_reason, no [DONE]
+    ContractCase.StreamEndsEarly -> streamOnly(
+      Seq(event("""{"role":"assistant","content":"The answer"}"""), event("""{"content":" is"}"""))
+        .mkString("", "\n\n", "\n\n")
+    ),
+    ContractCase.ErrorEvent -> streamOnly(
+      Seq(
+        event("""{"role":"assistant","content":"The answer"}"""),
+        """data: {"error":{"message":""" + ujson.Str(ContractCase.ProviderErrorMessage).render() +
+          ""","type":"server_error"}}"""
+      ).mkString("", "\n\n", "\n\n")
     )
   )
 }

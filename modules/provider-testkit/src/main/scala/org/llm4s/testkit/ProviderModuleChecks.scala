@@ -250,7 +250,12 @@ trait ProviderModuleChecks extends Assertions:
    *  - [[ContractCase.TextCutByLimit]]: `Right`, `FinishReason.Length` and non-empty text;
    *  - [[ContractCase.ToolCall]]: `Right`, `FinishReason.ToolCalls` and at least one tool call, each with a JSON
    *    object for its arguments;
-   *  - [[ContractCase.ContentFiltered]]: `Left(ContentFilteredError)`.
+   *  - [[ContractCase.ContentFiltered]]: `Left(ContentFilteredError)`;
+   *  - [[ContractCase.StreamEndsEarly]], stream only: `Left(NetworkError)`, or `Left(ServiceError)` with status 502;
+   *  - [[ContractCase.ErrorEvent]], stream only: a `Left` whose message carries
+   *    [[ContractCase.ProviderErrorMessage]], the provider's own error.
+   *
+   * A stream-only case ([[ContractCase.streamOnly]]) runs `streamComplete` alone.
    *
    * A stream that succeeds must also have delivered what it returned: its chunks' text joined is the `Completion`'s
    * text, the last reason a chunk carried is its finish reason, and its chunks name the same tool calls.
@@ -270,8 +275,9 @@ trait ProviderModuleChecks extends Assertions:
         case Applicability.NotApplicable(reason) =>
           if reason.trim.isEmpty then failAt(s"$c is NotApplicable without a reason")
         case Applicability.Applies(reply) =>
-          val completed = ModelCallContractRun.call(path, reply.complete, client)(_.complete(_))
-          ModelCallContractRun.expect(c, "complete", completed)
+          if !c.streamOnly then
+            val completed = ModelCallContractRun.call(path, reply.complete, client)(_.complete(_))
+            ModelCallContractRun.expect(c, "complete", completed)
           val chunks = ListBuffer.empty[StreamedChunk]
           val streamed =
             ModelCallContractRun.call(path, reply.stream, client)(_.streamComplete(_, onChunk = chunks += _))

@@ -1,13 +1,13 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.provider.BedrockTestSupport.{ eventFrame, sendEventStream, textDelta }
+import org.llm4s.llmconnect.provider.BedrockTestSupport.{ eventFrame, exceptionFrame, sendEventStream, textDelta }
 import org.llm4s.testkit.{ Applicability, ContractCase, LocalProviderTestServer, RecordedReply }
 
 /**
  * Converse and ConverseStream replies for each RFC 0009 [[ContractCase]], for `assertModelCallContract`, in the shape
  * the Bedrock Runtime API documents: a reply's `stopReason`, and a stream's on `messageStop` before the `metadata`
  * event that carries the usage. Hand-written (no live capture yet). A guardrail that intervened stops the reply with
- * `guardrail_intervened`.
+ * `guardrail_intervened`. A failure after the 200 status is an exception frame such as `modelStreamErrorException`.
  */
 object BedrockContractFixtures {
 
@@ -37,6 +37,9 @@ object BedrockContractFixtures {
     Applicability.Applies(
       RecordedReply(LocalProviderTestServer.sendJsonResponse(_, 200, complete), sendEventStream(_, frames))
     )
+
+  private def streamOnly(frames: Seq[Array[Byte]]): Applicability =
+    Applicability.Applies(RecordedReply.streamOnly(sendEventStream(_, frames)))
 
   private val toolUse = ujson.Arr(
     ujson.Obj(
@@ -76,6 +79,17 @@ object BedrockContractFixtures {
     ContractCase.ContentFiltered -> applies(
       reply(text("Here is how"), "guardrail_intervened"),
       stream(textBlock("Here is how"), "guardrail_intervened")
+    ),
+    // text, then the connection closes before `messageStop`
+    ContractCase.StreamEndsEarly -> streamOnly(
+      eventFrame("messageStart", """{"role":"assistant"}""") +: textBlock("The answer", " is")
+    ),
+    ContractCase.ErrorEvent -> streamOnly(
+      Seq(
+        eventFrame("messageStart", """{"role":"assistant"}"""),
+        textDelta("The answer"),
+        exceptionFrame("modelStreamErrorException", ContractCase.ProviderErrorMessage)
+      )
     )
   )
 }

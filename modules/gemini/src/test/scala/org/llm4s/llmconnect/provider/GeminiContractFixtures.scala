@@ -6,7 +6,8 @@ import org.llm4s.testkit.{ Applicability, ContractCase, LocalProviderTestServer,
  * `generateContent` and `streamGenerateContent?alt=sse` replies for each RFC 0009 [[ContractCase]], for
  * `assertModelCallContract`: the shape the Gemini API and Vertex AI share. Hand-written in the documented shape; the
  * `MAX_TOKENS` chunk with no `parts` follows the live capture in `GeminiClientHttpSpec`. A function call finishes
- * `STOP`, and a filter stop is a `finishReason` such as `SAFETY`.
+ * `STOP`, and a filter stop is a `finishReason` such as `SAFETY`. A stream ends on a chunk whose candidate states a
+ * `finishReason`; a failure after the 200 status is a chunk carrying an `error` object, as Google's APIs report one.
  */
 object GeminiContractFixtures {
 
@@ -38,6 +39,9 @@ object GeminiContractFixtures {
       )
     )
 
+  private def streamOnly(stream: String): Applicability =
+    Applicability.Applies(RecordedReply.streamOnly(LocalProviderTestServer.sendSseResponse(_, stream)))
+
   private val call = """[{"functionCall":{"name":"get_weather","args":{"city":"Paris"}}}]"""
 
   /** Every case, as the Gemini API and Vertex AI answer it. */
@@ -57,6 +61,15 @@ object GeminiContractFixtures {
     ContractCase.ContentFiltered -> applies(
       reply(text("Here is how"), "SAFETY"),
       sse(chunk(text("Here is how")), chunk("", Some("SAFETY")))
+    ),
+    // text, then the connection closes before a chunk states a finishReason
+    ContractCase.StreamEndsEarly -> streamOnly(sse(chunk(text("The answer")), chunk(text(" is")))),
+    ContractCase.ErrorEvent -> streamOnly(
+      sse(
+        chunk(text("The answer")),
+        """data: {"error":{"code":503,"message":""" + ujson.Str(ContractCase.ProviderErrorMessage).render() +
+          ""","status":"UNAVAILABLE"}}"""
+      )
     )
   )
 }

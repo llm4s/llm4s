@@ -1,6 +1,6 @@
 package org.llm4s.testkit
 
-import org.llm4s.error.ContentFilteredError
+import org.llm4s.error.{ ContentFilteredError, LLMError, NetworkError, ServiceError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.types.Result
@@ -16,13 +16,17 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
 
   /**
    * A client for a made-up wire format: `complete` reads `{"text","finish","calls":[...]}`, a stream one such object
-   * per line, and a `finish` of `filter` is a content-filter stop. `mapFinish` maps the wire's reason, so a test can
-   * give it a wrong mapping; `deliver` decides whether a stream chunk reaches `onChunk`.
+   * per line, and a `finish` of `filter` is a content-filter stop. A stream with no `finish` ended early, and a line
+   * `{"error":"..."}` is an error event. `mapFinish` maps the wire's reason, so a test can give it a wrong mapping;
+   * `deliver` decides whether a stream chunk reaches `onChunk`; `early` and `errorEvent` are the errors it returns for
+   * a stream that ended early and for an error event, `None` to return the `Completion` anyway.
    */
   private class Reference(
     baseUrl: String,
     mapFinish: String => FinishReason = Reference.finish,
-    deliver: StreamedChunk => Boolean = _ => true
+    deliver: StreamedChunk => Boolean = _ => true,
+    early: Option[LLMError] = Some(NetworkError("the stream ended early", None, "reference")),
+    errorEvent: String => Option[LLMError] = message => Some(ServiceError(502, "reference", message))
   ) extends LLMClient:
     private def fetch(): String =
       HttpClient
@@ -46,8 +50,11 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
 
     def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
       val events = fetch().linesIterator.filter(_.nonEmpty).map(ujson.read(_)).toList
+      val errors = events.flatMap(_.obj.get("error")).flatMap(e => errorEvent(e.str))
       if events.exists(_.obj.get("finish").exists(_.str == "filter")) then
         Left(ContentFilteredError.reply("Reference", "filter"))
+      else if errors.nonEmpty then Left(errors.head)
+      else if !events.exists(_.obj.contains("finish")) && early.isDefined then Left(early.get)
       else
         val chunks = events.flatMap { e =>
           val text   = e.obj.get("text").map(_.str).filter(_.nonEmpty)
@@ -84,6 +91,11 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
       )
     )
 
+  private def streamOnly(stream: String*): Applicability =
+    Applicability.Applies(
+      RecordedReply.streamOnly(LocalProviderTestServer.sendJsonResponse(_, 200, stream.mkString("\n")))
+    )
+
   private val call = """{"id":"c1","name":"lookup","args":{"q":"x"}}"""
 
   private val cases: Map[ContractCase, Applicability] = Map(
@@ -107,8 +119,15 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
       """{"text":"Hel","finish":"filter"}""",
       """{"text":"Hel"}""",
       """{"finish":"filter"}"""
+    ),
+    ContractCase.StreamEndsEarly -> streamOnly("""{"text":"Hello "}""", """{"text":"th"}"""),
+    ContractCase.ErrorEvent -> streamOnly(
+      """{"text":"Hello "}""",
+      s"""{"error":"${ContractCase.ProviderErrorMessage}"}"""
     )
   )
+
+  private val noEarly = ContractCase.StreamEndsEarly -> Applicability.NotApplicable("tested on its own")
 
   private def failure(check: => Any): String =
     intercept[TestFailedException](check).getMessage
@@ -166,4 +185,54 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
     failure(assertModelCallContract(cases)(new Reference(_, deliver = noReason))) should include(
       "the last finish reason a chunk carried is None"
     )
+  }
+
+  it should "fail a client that returns a stream with no end marker as a Right" in {
+    failure(assertModelCallContract(cases)(new Reference(_, early = None))) should include(
+      "StreamEndsEarly, streamComplete: expected Left(NetworkError)"
+    )
+  }
+
+  it should "accept a ServiceError with status 502 for a stream that ended early, and nothing else" in {
+    val badGateway = Some(ServiceError(502, "reference", "the stream ended early"))
+    assertModelCallContract(cases)(new Reference(_, early = badGateway))
+    val unavailable = Some(ServiceError(503, "reference", "the stream ended early"))
+    failure(assertModelCallContract(cases)(new Reference(_, early = unavailable))) should include("StreamEndsEarly")
+  }
+
+  it should "fail a client that ignores an error event" in {
+    // with no end marker either, the stream comes back a Right
+    val lenient = new Reference(_, early = None, errorEvent = _ => None)
+    failure(assertModelCallContract(cases - ContractCase.StreamEndsEarly + noEarly)(lenient)) should include(
+      "ErrorEvent, streamComplete: expected a Left"
+    )
+  }
+
+  it should "fail a client whose error loses the provider's message" in {
+    val generic = (_: String) => Some(ServiceError(502, "reference", "something went wrong"))
+    failure(assertModelCallContract(cases)(new Reference(_, errorEvent = generic))) should include(
+      "expected the provider's error"
+    )
+  }
+
+  it should "send no complete request for a stream-only case" in {
+    val completes = new java.util.concurrent.atomic.AtomicInteger
+    val counted = cases.updated(
+      ContractCase.ErrorEvent,
+      Applicability.Applies(
+        RecordedReply(
+          exchange =>
+            completes.incrementAndGet()
+            LocalProviderTestServer.sendJsonResponse(exchange, 500, "{}")
+          ,
+          LocalProviderTestServer.sendJsonResponse(
+            _,
+            200,
+            s"""{"error":"${ContractCase.ProviderErrorMessage}"}"""
+          )
+        )
+      )
+    )
+    assertModelCallContract(counted)(new Reference(_))
+    completes.get shouldBe 0
   }

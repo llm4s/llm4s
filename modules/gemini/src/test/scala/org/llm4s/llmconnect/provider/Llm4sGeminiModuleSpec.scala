@@ -40,7 +40,8 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
   private given ContextWindowResolver = ContextWindowResolver(registryService)
 
   /** One SSE data line, standing in for the Gemini API's streaming response. */
-  private val geminiSseBody: String = """data: {"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}""" + "\n\n"
+  private val geminiSseBody: String =
+    """data: {"candidates":[{"content":{"parts":[{"text":"Hi"}]},"finishReason":"STOP"}]}""" + "\n\n"
 
   /**
    * A `VertexAIClient` backed by a mock HTTP client. Vertex AI's base URL is derived from
@@ -51,7 +52,7 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
    */
   private def vertexClientWithStubbedAuth(config: VertexAIConfig): VertexAIClient = {
     val tokenBody = """{"access_token":"ya29.test-token","expires_in":3600}"""
-    val sseBody   = """data: {"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}""" + "\n\n"
+    val sseBody   = """data: {"candidates":[{"content":{"parts":[{"text":"Hi"}]},"finishReason":"STOP"}]}""" + "\n\n"
     val mockHttp  = stub[Llm4sHttpClient]
     (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
     (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))

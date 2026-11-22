@@ -220,8 +220,11 @@ class VertexAIClient(
                     if (jsonStr.nonEmpty) {
                       // a chunk's functionCall.args is the model's JSON, native in the envelope: one nested too
                       // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
-                      // (#1562); a chunk that is not JSON at all is skipped, as it always was
+                      // (#1562); a chunk that is not JSON at all is skipped, as it always was (RFC 0009, open question 5)
                       BoundedJson.read(jsonStr) match {
+                        case Right(json) if GeminiStreamEnd.streamError(json, providerName).isDefined =>
+                          // an error after the 200 status ends the stream with it (RFC 0009, rule 2)
+                          refused = GeminiStreamEnd.streamError(json, providerName)
                         case Right(json) =>
                           GeminiBlocked.filtered(json, "Vertex AI", textLength) match {
                             case Some(filtered) if filtered.usage.isEmpty =>
@@ -265,6 +268,8 @@ class VertexAIClient(
               }.toEither.left
                 .map(HttpFailures.streamReadError(_, url, streamTimeout))
                 .flatMap(_ => refused.toLeft(()))
+                // a stream whose candidate never stated a finishReason was cut off (RFC 0009, rule 1)
+                .filterOrElse(_ => finish.isDefined, GeminiStreamEnd.unfinished(url))
                 .flatMap(_ =>
                   accumulator.toCompletion.map { c =>
                     val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))

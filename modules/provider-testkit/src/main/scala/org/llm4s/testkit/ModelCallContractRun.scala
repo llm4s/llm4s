@@ -1,7 +1,7 @@
 package org.llm4s.testkit
 
 import com.sun.net.httpserver.HttpExchange
-import org.llm4s.error.ContentFilteredError
+import org.llm4s.error.{ ContentFilteredError, NetworkError, ServiceError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Completion, Conversation, FinishReason, StreamedChunk, UserMessage }
 import org.llm4s.types.Result
@@ -33,6 +33,16 @@ private[testkit] object ModelCallContractRun:
     (c, result) match
       case (ContractCase.ContentFiltered, Left(_: ContentFilteredError)) => ()
       case (ContractCase.ContentFiltered, other) => fail(s"expected Left(ContentFilteredError), got ${show(other)}")
+      // RFC 0009 rule 1: a retryable NetworkError, or the ServiceError(502) watsonx and Perplexity already return
+      case (ContractCase.StreamEndsEarly, Left(_: NetworkError))                                => ()
+      case (ContractCase.StreamEndsEarly, Left(error: ServiceError)) if error.httpStatus == 502 => ()
+      case (ContractCase.StreamEndsEarly, other) =>
+        fail(s"expected Left(NetworkError) or Left(ServiceError) with status 502, got ${show(other)}")
+      // RFC 0009 rule 2: the Left carries the provider's error
+      case (ContractCase.ErrorEvent, Left(error)) =>
+        if !error.message.contains(ContractCase.ProviderErrorMessage) then
+          fail(s"expected the provider's error '${ContractCase.ProviderErrorMessage}', got ${show(result)}")
+      case (ContractCase.ErrorEvent, other) => fail(s"expected a Left, got ${show(other)}")
       case (_, Left(error)) => fail(s"expected a Right, got Left(${error.getClass.getSimpleName}: ${error.message})")
       case (ContractCase.CleanText, Right(completion)) =>
         reason(completion, FinishReason.Stop, fail)

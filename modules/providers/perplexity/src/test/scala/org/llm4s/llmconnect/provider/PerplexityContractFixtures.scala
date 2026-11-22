@@ -5,7 +5,8 @@ import org.llm4s.testkit.{ Applicability, ContractCase, LocalProviderTestServer,
 /**
  * Agent API (`/v1/agent`) replies for each RFC 0009 [[ContractCase]], for `assertModelCallContract`, built from
  * [[PerplexityFixtures]]: a response's `status` (`completed`, or `incomplete` at a limit), and a stream's
- * `response.output_text.delta` events ending on `response.completed`.
+ * `response.output_text.delta` events ending on `response.completed`. A failure after the 200 status is a
+ * `response.failed` event carrying an `error`.
  */
 object PerplexityContractFixtures {
 
@@ -18,6 +19,9 @@ object PerplexityContractFixtures {
         LocalProviderTestServer.sendSseResponse(_, stream)
       )
     )
+
+  private def streamOnly(stream: String): Applicability =
+    Applicability.Applies(RecordedReply.streamOnly(LocalProviderTestServer.sendSseResponse(_, stream)))
 
   private def answered(text: String, status: String, deltas: String*): Applicability = {
     val done = response(s"[${textMessage(text)}]", status = status)
@@ -33,6 +37,25 @@ object PerplexityContractFixtures {
       ContractCase.ToolCall       -> applies(called, sseBody(created, completedEvent(called))),
       ContractCase.ContentFiltered -> Applicability.NotApplicable(
         "the Agent API reports no content-filter status: a refused request is `failed`, an error"
+      ),
+      // text, then the connection closes before `response.completed`
+      ContractCase.StreamEndsEarly -> streamOnly(sseBody(created, delta("The answer"), delta(" is"))),
+      ContractCase.ErrorEvent -> streamOnly(
+        sseBody(
+          created,
+          delta("The answer"),
+          ujson
+            .Obj(
+              "type"            -> "response.failed",
+              "sequence_number" -> 4,
+              "response" -> ujson.Obj(
+                "id"     -> "resp_s",
+                "status" -> "failed",
+                "error"  -> ujson.Obj("code" -> "server_error", "message" -> ContractCase.ProviderErrorMessage)
+              )
+            )
+            .render()
+        )
       )
     )
   }

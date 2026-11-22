@@ -537,7 +537,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
   "VertexAIClient.streamComplete()" should "emit a tool-call chunk for functionCall SSE data" in {
     val sseData =
       "data: {\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":" +
-        "{\"name\":\"get_weather\",\"args\":{\"location\":\"London\"}}}]}}]}\n"
+        "{\"name\":\"get_weather\",\"args\":{\"location\":\"London\"}}}]},\"finishReason\":\"STOP\"}]}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
 
     val mockHttp = stub[Llm4sHttpClient]
@@ -568,7 +568,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     val sseData =
       ": keep-alive\n" +
         "event: content\n" +
-        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]," +
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]},\"finishReason\":\"STOP\"}]," +
         "\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":1,\"totalTokenCount\":3}}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
 
@@ -592,7 +592,8 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
   it should "handle a data line with empty candidates gracefully" in {
     val sseData =
       "data: {\"candidates\":[]," +
-        "\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":0,\"totalTokenCount\":2}}\n"
+        "\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":0,\"totalTokenCount\":2}}\n" +
+        "data: {\"candidates\":[{\"content\":{\"role\":\"model\"},\"finishReason\":\"STOP\"}]}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
 
     val mockHttp = stub[Llm4sHttpClient]

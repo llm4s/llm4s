@@ -5,7 +5,7 @@ import org.llm4s.testkit.{ Applicability, ContractCase, LocalProviderTestServer,
 /**
  * Ollama `/api/chat` replies for each RFC 0009 [[ContractCase]], for `assertModelCallContract`: one JSON object, or
  * NDJSON lines ending on `"done":true` with its `done_reason`. Hand-written in the documented shape. Ollama has no
- * content filter.
+ * content filter. A failure after the 200 status is a line `{"error":"..."}`.
  */
 object OllamaContractFixtures {
 
@@ -32,6 +32,9 @@ object OllamaContractFixtures {
       )
     )
 
+  private def streamOnly(stream: String): Applicability =
+    Applicability.Applies(RecordedReply.streamOnly(LocalProviderTestServer.sendJsonResponse(_, 200, stream)))
+
   private val call = """[{"function":{"name":"get_weather","arguments":{"city":"Paris"}}}]"""
 
   /** Every case, as Ollama answers it. */
@@ -48,6 +51,11 @@ object OllamaContractFixtures {
       reply(message("", call), "stop"),
       ndjson(line(message("", call)), reply(message(""), "stop"))
     ),
-    ContractCase.ContentFiltered -> Applicability.NotApplicable("Ollama has no content filter")
+    ContractCase.ContentFiltered -> Applicability.NotApplicable("Ollama has no content filter"),
+    // text, then the connection closes before the `done: true` line
+    ContractCase.StreamEndsEarly -> streamOnly(ndjson(line(message("The answer")), line(message(" is")))),
+    ContractCase.ErrorEvent -> streamOnly(
+      ndjson(line(message("The answer")), ujson.Obj("error" -> ContractCase.ProviderErrorMessage).render())
+    )
   )
 }

@@ -240,6 +240,7 @@ class OllamaClient(
         val ids         = new OllamaClient.CallIds
         var failure     = Option.empty[org.llm4s.error.LLMError]
         var sawCalls    = false
+        var sawDone     = false // `done: true` ends the reply; a stream without it was cut off (RFC 0009, rule 1)
         val processResult = Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) {
           reader =>
             // Check `failure` before reading: a downstream predicate runs only after the next
@@ -252,6 +253,7 @@ class OllamaClient(
                   val json = ujson.read(trimmed)
                   // Ollama streams incremental content in json lines
                   val done = json.obj.get("done").exists(_.bool)
+                  sawDone = sawDone || done
                   val contentOpt = json.obj
                     .get("message")
                     .flatMap(_.obj.get("content"))
@@ -260,7 +262,9 @@ class OllamaClient(
                   val thinkingOpt = OllamaClient.thinking(json.obj.get("message"))
                   val id          = json.obj.get("id").flatMap(_.strOpt).getOrElse("")
 
-                  OllamaClient.parseToolCalls(json.obj.get("message"), ids) match {
+                  // an error after the 200 status, `{"error":"..."}`, ends the stream with it (RFC 0009, rule 2)
+                  OllamaClient.streamError(json, providerName).foreach(error => failure = Some(error))
+                  if (failure.isEmpty) OllamaClient.parseToolCalls(json.obj.get("message"), ids) match {
                     case Left(error) => failure = Some(error)
                     case Right(calls) =>
                       sawCalls = sawCalls || calls.nonEmpty
@@ -304,7 +308,9 @@ class OllamaClient(
         }.toEither.left.map(HttpFailures.streamReadError(_, url, streamTimeout))
 
         val result = processResult
-          .flatMap(_ => failure.fold(accumulator.toCompletion)(Left(_)))
+          .flatMap(_ => failure.toLeft(()))
+          .filterOrElse(_ => sawDone, OllamaClient.unfinished(url))
+          .flatMap(_ => accumulator.toCompletion)
           .map { c =>
             // the accumulator reports streamed calls on the message only
             val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
@@ -423,6 +429,24 @@ class OllamaClient(
 }
 
 object OllamaClient {
+
+  /**
+   * The failure a streamed line reports, `{"error":"..."}`, which Ollama sends once the 200 status is out (a model
+   * that fails to load, a runner that crashes). It states no status, so it is a 502, retried like a bad gateway.
+   */
+  private[provider] def streamError(json: ujson.Value, provider: String): Option[LLMError] =
+    json.objOpt
+      .flatMap(_.get("error"))
+      .filter(error => error != ujson.Null && error != ujson.Str(""))
+      .map { error =>
+        val message = error.strOpt.orElse(error.objOpt.flatMap(_.get("message")).flatMap(_.strOpt))
+        val body    = ujson.Obj("error" -> Redaction.remoteBody(message.getOrElse(error.render()))).render()
+        HttpErrorMapper.mapHttpError(502, body, provider).swap.getOrElse(ServiceError(502, provider, body))
+      }
+
+  /** A stream that ended without `done: true`: cut off, so a retry may succeed (RFC 0009, rule 1). */
+  private[provider] def unfinished(url: String): NetworkError =
+    NetworkError("stream ended without done: true; the reply is incomplete", None, url)
 
   /**
    * A refused connection - nothing listening at the section's `baseUrl` - with the command that starts the
