@@ -1,7 +1,8 @@
 package org.llm4s.rag.permissions
 
+import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
-import org.llm4s.vectorstore.{ MetadataFilter, ScoredRecord }
+import org.llm4s.vectorstore.{ KeywordSearchResult, MetadataFilter, ScoredRecord }
 import org.llm4s.security.Secret
 
 /**
@@ -51,26 +52,33 @@ trait SearchIndex {
   ): Result[Seq[ScoredRecord]]
 
   /**
-   * Query with a text query (for hybrid search).
+   * Keyword (full-text) search with the same two-stage permission filter as [[query]].
+   *
+   * `RAG.queryWithPermissions` calls it for every fusion strategy except `FusionStrategy.VectorOnly`, and fuses its
+   * results with [[query]]'s as `RAG.query` does. An index without keyword search keeps this default, which fails
+   * rather than return vector-only results: configure the pipeline with `.vectorOnly` to query such an index.
    *
    * @param auth User authorization context
    * @param collectionPattern Pattern to filter collections
-   * @param queryVector Embedding vector for semantic search
-   * @param queryText Text for keyword search (optional)
+   * @param queryText Text for keyword search
    * @param topK Maximum number of results
    * @param additionalFilter Optional additional metadata filter
-   * @return Permission-filtered search results
+   * @return Permission-filtered keyword results, best first
    */
-  def queryHybrid(
+  def keywordQuery(
     auth: UserAuthorization,
     collectionPattern: CollectionPattern,
-    queryVector: Array[Float],
-    queryText: Option[String],
+    queryText: String,
     topK: Int = 10,
     additionalFilter: Option[MetadataFilter] = None
-  ): Result[Seq[ScoredRecord]] = {
-    val _ = queryText // Future: use for hybrid search
-    query(auth, collectionPattern, queryVector, topK, additionalFilter)
+  ): Result[Seq[KeywordSearchResult]] = {
+    val _ = (auth, collectionPattern, queryText, topK, additionalFilter)
+    Left(
+      ConfigurationError(
+        s"${getClass.getSimpleName} has no keyword search, so it cannot serve a hybrid or keyword-only permission " +
+          "query. Configure the pipeline with .vectorOnly, or implement SearchIndex.keywordQuery."
+      )
+    )
   }
 
   /**
@@ -105,6 +113,23 @@ trait SearchIndex {
    * @return Number of chunks deleted
    */
   def deleteDocument(collectionPath: CollectionPath, documentId: String): Result[Long]
+
+  /**
+   * Delete a document from every collection that holds it.
+   *
+   * `RAG.deleteDocument` calls it, so that deleting a document by id removes what [[ingest]] wrote for it in any
+   * collection, not only what the plain ingest API wrote. The default deletes it from each leaf collection in turn and
+   * stops at the first failure; an index that can do it in one statement should override it.
+   *
+   * @param documentId The document identifier
+   * @return Number of chunks deleted
+   */
+  def deleteDocumentFromAllCollections(documentId: String): Result[Long] =
+    collections.list(CollectionPattern.All).flatMap { all =>
+      all.filter(_.isLeaf).foldLeft[Result[Long]](Right(0L)) { (acc, collection) =>
+        acc.flatMap(total => deleteDocument(collection.path, documentId).map(total + _))
+      }
+    }
 
   /**
    * Delete all documents in a collection.

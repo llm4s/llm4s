@@ -77,7 +77,9 @@ class RAGAnswerOptionsSpec extends AnyFlatSpec with Matchers {
   private def rag(client: LLMClient, config: RAGConfig = RAGConfig.default): RAG = {
     val built =
       RAG.buildWithClient(config.withLLM(client), new EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
-    built.ingestText("The answer to everything is 42.", "doc1").fold(e => fail(e.message), identity)
+    // A RAG with a SearchIndex refuses plain ingest (#2716): its one chunk comes from the index
+    if (!built.hasPermissions)
+      built.ingestText("The answer to everything is 42.", "doc1").fold(e => fail(e.message), identity)
     built
   }
 
@@ -119,7 +121,7 @@ class RAGAnswerOptionsSpec extends AnyFlatSpec with Matchers {
 
   "RAG.queryWithPermissionsAndAnswer" should "send the config's options, or a call's own" in {
     val client = new RecordingClient
-    val r      = rag(client, RAGConfig.default.withSearchIndex(OneChunkIndex).withCompletionOptions(warm))
+    val r      = rag(client, RAGConfig.default.withSearchIndex(OneChunkIndex).vectorOnly.withCompletionOptions(warm))
     try {
       val answered = r.queryWithPermissionsAndAnswer(UserAuthorization.Admin, CollectionPattern.All, "What is it?")
       answered.map(_.contexts.map(_.content)) shouldBe Right(Seq("The answer is 42."))
