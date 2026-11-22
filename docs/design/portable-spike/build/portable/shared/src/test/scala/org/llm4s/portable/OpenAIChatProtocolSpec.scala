@@ -59,6 +59,7 @@ class OpenAIChatProtocolSpec extends AnyFlatSpec with Matchers {
     completion.toolCalls shouldBe List(weatherCall)
     completion.message shouldBe AssistantMessage("Checking.", Seq(weatherCall))
     completion.usage shouldBe Some(TokenUsage(promptTokens = 12, completionTokens = 5, totalTokens = 17))
+    completion.finishReason shouldBe FinishReason.ToolCalls
   }
 
   it should "turn a body that is not a chat completion into a ProcessingError" in {
@@ -66,6 +67,14 @@ class OpenAIChatProtocolSpec extends AnyFlatSpec with Matchers {
     OpenAIChatProtocol.decodeCompletion("""{"choices":[]}""").left.map(_.getClass) shouldBe Left(
       classOf[ProcessingError]
     )
+  }
+
+  "finishReason" should "map the chat-completions names to core's cases and keep any other raw" in {
+    OpenAIChatProtocol.finishReason("stop") shouldBe FinishReason.Stop
+    OpenAIChatProtocol.finishReason("tool_calls") shouldBe FinishReason.ToolCalls
+    OpenAIChatProtocol.finishReason("function_call") shouldBe FinishReason.ToolCalls
+    OpenAIChatProtocol.finishReason("length") shouldBe FinishReason.Length
+    OpenAIChatProtocol.finishReason("content_filter") shouldBe FinishReason.Other("content_filter")
   }
 
   "decodeError" should "map the status to core's error types" in {
@@ -83,12 +92,13 @@ class OpenAIChatProtocolSpec extends AnyFlatSpec with Matchers {
       val chunks  = stream.grouped(pieceSize).toVector.flatMap(decoder.feed)
       chunks.flatMap(_.content).mkString shouldBe "Hello"
       chunks.flatMap(_.toolCall).map(c => (c.id, c.name)).distinct shouldBe Vector(("call_1", "get_weather"))
-      chunks.last.finishReason shouldBe Some("tool_calls")
+      chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
       val completion = decoder.completion.fold(e => fail(e.message), identity)
       completion.content shouldBe "Hello"
       completion.toolCalls shouldBe List(weatherCall)
       completion.usage shouldBe Some(TokenUsage(promptTokens = 3, completionTokens = 4, totalTokens = 7))
       completion.created shouldBe Instant.ofEpochSecond(1700000000L)
+      completion.finishReason shouldBe FinishReason.ToolCalls
     }
   }
 
