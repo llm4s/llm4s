@@ -384,8 +384,8 @@ object TraceEvent {
    * @param threadId the conversation's thread; backends use it as the session
    * @param runId    this run
    * @param agent    the agent active when the run ended
-   * @param status   `completed`, `suspended`, `step_limit_reached`, `blocked:<guardrail>`,
-   *                 `cancelled`, `timed_out` or `failed`
+   * @param status   `completed`, `step_limit_reached`, `token_limit_reached`, `truncated`, `suspended`,
+   *                 `blocked:<guardrail>`, `cancelled`, `timed_out` or `failed`
    * @param messages this turn's messages, from its user message on; empty when blocked, cancelled,
    *                 timed out or failed. Not included in [[toJson]], which stays a flat summary.
    * @param usage    this run's own token usage and cost, per model: the model calls the run made,
