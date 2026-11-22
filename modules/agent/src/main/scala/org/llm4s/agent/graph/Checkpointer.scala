@@ -166,6 +166,17 @@ trait Checkpointer:
   def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]
 
   /**
+   * Whose the thread is: the tenant and parent its latest checkpoint records ([[org.llm4s.agent.graph.ThreadOwner ThreadOwner]]),
+   * or `None` for a thread with no checkpoint - exactly what [[latest]] would give, without its pending writes or the
+   * checkpoint's state. `GraphRuntime.deleteThread` (and so `Agent.forget`) checks the caller's tenant with it.
+   *
+   * The default decodes [[latest]]. A store that keeps the tenant and parent beside the checkpoint - as its
+   * [[threads]] and [[children]] indexes need it to - overrides it to read just those (#2642). Needs no claim.
+   */
+  def owner(threadId: ThreadId): Result[Option[ThreadOwner]] =
+    latest(threadId).map(_.map(stored => ThreadOwner.of(stored.checkpoint)))
+
+  /**
    * The thread's effect record under `key` ([[org.llm4s.agent.graph.ReplayGuard ReplayGuard]], design §4.24); `None` if it has none, or
    * the thread is unknown. Needs no claim.
    */
@@ -672,6 +683,12 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
           checkpoint <- Checkpoint.fromJson(latest.json)
           writes     <- Try(current.pendingWrites.map(upickle.default.read[PendingWrite](_))).toResult
         yield Some(StoredCheckpoint(checkpoint, writes))
+  }
+
+  // the latest checkpoint's tenant is kept beside its JSON, and `child` follows its origin
+  override def owner(threadId: ThreadId): Result[Option[ThreadOwner]] = withLock(lock) {
+    val current = record(threadId)
+    Right(current.history.lastOption.map(latest => ThreadOwner(latest.tenant, current.child.map(c => ThreadId(c._1)))))
   }
 
   def effect(threadId: ThreadId, key: EffectKey): Result[Option[EffectRecord]] = withLock(lock) {

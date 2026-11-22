@@ -326,6 +326,26 @@ final class PostgresCheckpointer private (
         yield Some(StoredCheckpoint(checkpoint, decoded))
     }
 
+  /**
+   * Read from the registry's columns, which follow the latest checkpoint, without decoding it. A thread whose
+   * registry columns were never filled - its checkpoint's JSON had no status when schema 2 backfilled them - is read
+   * through [[latest]], which reports why.
+   */
+  override def owner(threadId: ThreadId): Result[Option[ThreadOwner]] =
+    reading("owner") { c =>
+      Right(
+        query(c, Sql.owner(t), threadId.value)(rows =>
+          Option.when(rows.getBoolean(1))(
+            ThreadOwner(Option(rows.getString(2)), Option(rows.getString(3)).map(ThreadId(_)))
+          )
+        ).headOption
+      )
+    }.flatMap {
+      case None              => Right(None)
+      case Some(Some(found)) => Right(Some(found))
+      case Some(None)        => super.owner(threadId)
+    }
+
   def effect(threadId: ThreadId, key: EffectKey): Result[Option[EffectRecord]] =
     reading("effect")(c => Right(query(c, Sql.effect(t), threadId.value, key.value)(_.getString(1)).headOption))
       .flatMap {

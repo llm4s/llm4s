@@ -317,6 +317,31 @@ final class SqliteCheckpointer private (
         yield Some(StoredCheckpoint(checkpoint, decoded))
     }
 
+  /**
+   * Read from the registry's columns, which follow the latest checkpoint (schema 6 and 8), without decoding it. A
+   * thread whose registry columns were never filled - its checkpoint could not be read when schema 8 backfilled them -
+   * is read through [[latest]], which reports why.
+   */
+  override def owner(threadId: ThreadId): Result[Option[ThreadOwner]] =
+    reading("owner") { c =>
+      Right(
+        query(
+          c,
+          """SELECT thread_status IS NOT NULL, tenant_id, parent_thread_id FROM llm4s_checkpoint_threads
+            |WHERE thread_id = ? AND checkpoint_json IS NOT NULL""".stripMargin,
+          threadId.value
+        )(rows =>
+          Option.when(rows.getBoolean(1))(
+            ThreadOwner(Option(rows.getString(2)), Option(rows.getString(3)).map(ThreadId(_)))
+          )
+        ).headOption
+      )
+    }.flatMap {
+      case None              => Right(None)
+      case Some(Some(found)) => Right(Some(found))
+      case Some(None)        => super.owner(threadId)
+    }
+
   def effect(threadId: ThreadId, key: EffectKey): Result[Option[EffectRecord]] =
     reading("effect") { c =>
       Right(
