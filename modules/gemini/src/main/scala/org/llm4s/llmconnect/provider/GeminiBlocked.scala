@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ ContentFilteredError, ValidationError }
+import org.llm4s.error.{ ContentFilteredError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.model.{ Completion, FinishReason }
 
 /**
@@ -10,7 +10,10 @@ import org.llm4s.llmconnect.model.{ Completion, FinishReason }
  *    not text came before it: a reply the filter cut short is not a finished answer. A stream's text already
  *    delivered stays delivered; the error says how much text the filter cut after. So is a
  *    `promptFeedback.blockReason` with no candidate: the prompt itself was blocked.
- *  - Any other `finishReason` but `STOP`, `MAX_TOKENS` or `CONTINUATION` (`MALFORMED_FUNCTION_CALL`, `OTHER`, ...)
+ *  - `MALFORMED_FUNCTION_CALL` is the malformed-tool-call [[org.llm4s.error.ProcessingError]] whether or not text came
+ *    before it: Gemini dropped a call the model wrote, and a dropped call is never a finished answer (RFC 0009,
+ *    Part 3, rule 1).
+ *  - Any other `finishReason` but `STOP`, `MAX_TOKENS` or `CONTINUATION` (`UNEXPECTED_TOOL_CALL`, `OTHER`, ...)
  *    is a `ValidationError` naming it when the whole reply has no text and no tool call; otherwise the reply is
  *    returned with what was produced. A stream decides this at its end, from what it accumulated.
  *  - `STOP`, `MAX_TOKENS` or `CONTINUATION` with nothing produced (a thinking model that spent its whole budget
@@ -83,6 +86,14 @@ private[provider] object GeminiBlocked {
           .flatMap(_.strOpt)
           .map(reason => ContentFilteredError.prompt(service, reason))
     }).map(_.withUsage(GeminiUsage.fromResponse(json)))
+
+  /** The error for a reply Gemini ended `MALFORMED_FUNCTION_CALL`, having dropped the call the model wrote. */
+  def malformedCall(finishReason: Option[String], service: String): Option[ProcessingError] =
+    finishReason
+      .filter(_ == MalformedFunctionCall)
+      .map(reason => ToolCallRules.malformed(s"$service ended the reply $reason: the model's function call was invalid"))
+
+  private val MalformedFunctionCall = "MALFORMED_FUNCTION_CALL"
 
   /** The error for a reply that ended abnormally (not by a filter) having produced no text and no tool call. */
   def unanswered(finishReason: Option[String], reply: Completion, service: String): Option[ValidationError] =

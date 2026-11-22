@@ -290,6 +290,7 @@ class VertexAIClient(
                   }
                 )
                 // an abnormal finish with nothing produced fails, decided from the whole stream as `complete` does
+                .flatMap(c => GeminiBlocked.malformedCall(finish, "Vertex AI").toLeft(c))
                 .flatMap(c => GeminiBlocked.unanswered(finish, c, "Vertex AI").toLeft(c))
                 .map { completion =>
                   recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
@@ -436,7 +437,10 @@ class VertexAIClient(
         .filtered(json, "Vertex AI")
         .toLeft(())
         .flatMap(_ => parseCandidate(json))
+        .flatMap(c => GeminiBlocked.malformedCall(GeminiBlocked.finishReason(json), "Vertex AI").toLeft(c))
         .flatMap(c => GeminiBlocked.unanswered(GeminiBlocked.finishReason(json), c, "Vertex AI").toLeft(c))
+        // RFC 0009, Part 3: a call whose args are not an object, or in a reply MAX_TOKENS cut, is never run
+        .flatMap(ToolCallRules.checked)
     }
 
   private def parseCandidate(json: ujson.Value): Result[Completion] =
