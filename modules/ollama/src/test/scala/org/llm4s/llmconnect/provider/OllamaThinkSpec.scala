@@ -121,10 +121,14 @@ class OllamaThinkSpec extends AnyWordSpec with Matchers {
 
     "read thinking.values, keeping the levels that are efforts, lowest first" in {
       val reply = ujson.read("""{"thinking":{"values":["high","low","turbo",true,false],"default":"medium"}}""")
-      OllamaThink.fromShow(reply) shouldBe
+      OllamaThink.fromShow("m", reply) shouldBe
         Some(Controls(List(ReasoningEffort.Low, ReasoningEffort.High), on = true, off = true))
-      OllamaThink.fromShow(ujson.read("""{"capabilities":["completion"]}""")) shouldBe None
-      OllamaThink.fromShow(ujson.Arr()) shouldBe None
+      OllamaThink.fromShow("m", ujson.read("""{"capabilities":["completion"]}""")) shouldBe
+        Some(Controls(Nil, on = false, off = false))
+      OllamaThink.fromShow("gpt-oss:20b", ujson.read("""{"capabilities":["completion","thinking"]}""")) shouldBe
+        Some(levels)
+      OllamaThink.fromShow("m", ujson.read("""{"modelfile":"FROM m"}""")) shouldBe None
+      OllamaThink.fromShow("m", ujson.Arr()) shouldBe None
     }
 
     "give gpt-oss levels and every other model on and off" in {
@@ -186,6 +190,17 @@ class OllamaThinkSpec extends AnyWordSpec with Matchers {
         client.complete(Conversation(Seq(UserMessage("Hi"))), off).isRight shouldBe true
         chats.asScala.map(_("think")).toList shouldBe List(ujson.False, ujson.False)
         shows.get shouldBe 2
+      }
+    }
+
+    "send no think to a model whose capabilities lack thinking, on a server without thinking values" in {
+      server(Some("""{"capabilities":["completion","tools"]}""")) { (client, shows, chats) =>
+        val high = CompletionOptions().withReasoning(ReasoningEffort.High)
+        client.complete(Conversation(Seq(UserMessage("Hi"))), high).toOption.value.adjustments shouldBe List(
+          RequestAdjustment.Dropped(RequestOption.Reasoning, "qwen3 does not think")
+        )
+        chats.asScala.head.obj.contains("think") shouldBe false
+        shows.get shouldBe 1
       }
     }
 

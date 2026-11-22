@@ -132,8 +132,9 @@ class OllamaClient(
   /**
    * The `think` values the model takes. `/api/show` lists them in `thinking.values`, so it is asked once, on the first
    * request that sets `thinking` or `reasoning`, and its answer kept. A reply without them (a server older than the
-   * metadata) is kept as the controls [[OllamaThink.byName]] gives; a failed call is not kept, so a later request asks
-   * again, and this one uses [[OllamaThink.byName]].
+   * metadata) is read from its `capabilities` (see [[OllamaThink.fromShow]]), or else kept as the controls
+   * [[OllamaThink.byName]] gives; a failed call is not kept, so a later request asks again, and this one uses
+   * [[OllamaThink.byName]].
    */
   private def thinkControls(): OllamaThink.Controls =
     discoveredThink.getOrElse {
@@ -142,7 +143,7 @@ class OllamaClient(
       http.post(s"${config.baseUrl}/api/show", headers, body, timeout = requestTimeout) match {
         case Right(response) if response.statusCode >= 200 && response.statusCode < 300 =>
           val controls = Try(ujson.read(response.body)).toOption
-            .flatMap(OllamaThink.fromShow)
+            .flatMap(OllamaThink.fromShow(config.model, _))
             .getOrElse(OllamaThink.byName(config.model))
           discoveredThink = Some(controls)
           controls

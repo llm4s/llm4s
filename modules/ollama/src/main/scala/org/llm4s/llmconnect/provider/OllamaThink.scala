@@ -21,7 +21,8 @@ import org.llm4s.model.EffortMapping
  *    (`NotNeeded`).
  *  - `thinking = Budget(n)`: Ollama takes no budget. `true` on a model that takes on and off (`Adjusted`), else not sent
  *    (`Dropped`).
- *  - A model whose only value is `false` does not think: a request to think is `Dropped`, and `Off` is `NotNeeded`.
+ *  - A model whose only value is `false`, or, from a server without that metadata, whose `capabilities` lack
+ *    `thinking`, does not think: a request to think is `Dropped`, `Off` is `NotNeeded`, and no `think` is sent.
  */
 private[provider] object OllamaThink {
 
@@ -53,9 +54,17 @@ private[provider] object OllamaThink {
   def byName(model: String): Controls =
     if (model.toLowerCase(java.util.Locale.ROOT).contains("gpt-oss")) GptOssLevels else OnOff
 
-  /** The controls an `/api/show` reply lists in `thinking.values`, or `None` when it lists none. */
-  def fromShow(reply: ujson.Value): Option[Controls] =
-    reply.objOpt
+  // a model that does not think: `think: true` is refused for it (Ollama 0.11's chat handler checks the capability)
+  private val NoThinking = Controls(Nil, on = false, off = false)
+
+  /**
+   * The controls an `/api/show` reply gives `model`: the values `thinking.values` lists; else, from a server older than
+   * that metadata, [[byName]]'s for a model whose `capabilities` include `thinking` and none for one whose do not, so a
+   * model that cannot think is never sent `think: true`; `None` when the reply says neither.
+   */
+  def fromShow(model: String, reply: ujson.Value): Option[Controls] = {
+    val fields = reply.objOpt
+    val listed = fields
       .flatMap(_.get("thinking"))
       .flatMap(_.objOpt)
       .flatMap(_.get("values"))
@@ -68,6 +77,13 @@ private[provider] object OllamaThink {
           off = values.contains(ujson.False)
         )
       }
+    listed.orElse(
+      fields
+        .flatMap(_.get("capabilities"))
+        .flatMap(_.arrOpt)
+        .map(capabilities => if (capabilities.contains(ujson.Str("thinking"))) byName(model) else NoThinking)
+    )
+  }
 
   /** Whether `options` asks for anything `think` carries, so the model's controls are needed. */
   def asked(options: CompletionOptions): Boolean = options.thinking.isDefined || options.reasoning.isDefined

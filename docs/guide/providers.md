@@ -1732,8 +1732,8 @@ and are ignored. With no `responseFormat`, no `format` field is sent.
 `CompletionOptions.thinking` and `reasoning` are sent as `/api/chat`'s `think` field, which takes `true`, `false`, or
 a level the model defines ([Ollama: thinking](https://docs.ollama.com/capabilities/thinking)). The client asks
 `/api/show` once, on the first request that sets either, for the values the model takes (`thinking.values`), and
-keeps the answer. A server that lists none is treated by model name: gpt-oss takes `low`, `medium` and `high`, every
-other model `true` and `false`.
+keeps the answer. On a server that lists none, a model whose `capabilities` lack `thinking` is sent no `think`, and
+otherwise the model name decides: gpt-oss takes `low`, `medium` and `high`, every other model `true` and `false`.
 
 - `reasoning` → the nearest level the model takes, or `true` on a model that takes only on and off (reported).
 - `Thinking.Off` → `false`, or the lowest level on a model that cannot turn thinking off (reported).
