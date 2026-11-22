@@ -131,6 +131,7 @@ neither read from nor wrote to it, the completion reports
 **Cost.** `TokenUsage.cachedTokens` are the tokens read from the cache and `cacheCreationTokens` those written to it,
 of which `longCacheCreationTokens` were written with the long lifetime. `CostEstimator` prices each at the model's own
 rate: a read at the cache-read price, a write at the cache-write price, and a long write at the 1-hour write price.
+Both are parts of `promptTokens`, which is always the whole input; the rest is priced at the input rate.
 
 ### Warm the cache before a fan-out
 

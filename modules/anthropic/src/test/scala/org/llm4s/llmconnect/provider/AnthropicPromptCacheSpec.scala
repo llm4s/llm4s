@@ -118,6 +118,20 @@ class AnthropicPromptCacheSpec extends AnyFlatSpec with Matchers {
     completion.usage.get.longCacheCreationTokens shouldBe Some(3000)
   }
 
+  it should "count the cache reads and writes in promptTokens, so the cost prices each input token once" in {
+    val usage =
+      """{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":3000,"cache_creation_input_tokens":500}"""
+    val (_, completion) = sent(withTools.withPromptCache(PromptCache.default), usage)
+    val tokens          = completion.usage.get
+    tokens.promptTokens shouldBe 3510
+    tokens.totalTokens shouldBe 3530
+    val pricing = summon[ModelRegistryService].lookup("claude-sonnet-4-6").toOption.get.pricing
+    val expected = 10 * pricing.inputCostPerToken.get + 3000 * pricing.cacheReadInputTokenCost.get +
+      500 * pricing.cacheCreationInputTokenCost.get + 20 * pricing.outputCostPerToken.get
+    completion.estimatedCost.get shouldBe expected +- 1e-12
+    CostEstimator.estimate("claude-sonnet-4-6", tokens).get shouldBe expected +- 1e-12
+  }
+
   it should "report it dropped when nothing was read from or written to the cache" in {
     val (_, completion) = sent(withTools.withPromptCache(PromptCache.default))
     completion.adjustments shouldBe List(
