@@ -6,7 +6,7 @@ nav_order: 29
 description: "Each OpenSSF Best Practices passing criterion, marked Met, Unmet or N/A for LLM4S with the file, workflow or page that proves it."
 search_title: "LLM4S and the OpenSSF Best Practices passing criteria"
 cites_open_issues: [2307]
-cites_closed_issues: [1408]
+cites_closed_issues: [1408, 1465]
 ---
 
 # OpenSSF Best Practices: passing-level evidence
@@ -75,7 +75,7 @@ The unmet criteria and the other things to fix are in [Follow-ups](#follow-ups).
 | `enhancement_responses` | SHOULD | Met | Of the 151 issues labelled `enhancement` opened in the same period, 146 have a comment or were closed. |
 | `report_archive` | MUST | Met | GitHub issues and pull requests are public and searchable. |
 | `vulnerability_report_process` | MUST | Met | [SECURITY.md](https://github.com/llm4s/llm4s/blob/main/SECURITY.md#reporting-a-vulnerability), linked from the site's [People](../people/#security-committee) page and the [Support Policy](support-policy). |
-| `vulnerability_report_private` | MUST | Met | SECURITY.md gives a private route: its preferred one, GitHub private vulnerability reporting, is enabled, and the Security Committee can also open a private Discord channel. |
+| `vulnerability_report_private` | MUST | Met | SECURITY.md gives two private routes: GitHub private vulnerability reporting, its preferred one, enabled on the repository ([#1465](https://github.com/llm4s/llm4s/issues/1465)), or a private Discord channel with the Security Committee. |
 | `vulnerability_report_response` | MUST | Met | The one report of the last six months, [#1408](https://github.com/llm4s/llm4s/issues/1408) (2026-10-07), was taken up the same day, and its first fix merged two days later. [MAINTAINERS.md](https://github.com/llm4s/llm4s/blob/main/MAINTAINERS.md#handling-security-reports) lists the steps. SECURITY.md promises no response time. |
 
 ## Quality

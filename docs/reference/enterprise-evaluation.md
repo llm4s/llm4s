@@ -5,6 +5,7 @@ parent: Reference
 nav_order: 25
 description: "Answers to the questions an open-source intake form asks about LLM4S, each linked to its evidence, with the known gaps."
 cites_open_issues: [1281, 2289, 2307, 2310]
+cites_closed_issues: [1465]
 ---
 
 # Enterprise Evaluation
@@ -142,11 +143,11 @@ Support policy: fixes ship in the latest release only (https://llm4s.org/referen
 Security: SECURITY.md; reports handled by the Security Committee and maintainers, best
   effort, no response-time commitment. Threat model: https://llm4s.org/reference/security.
   No published advisories. GitHub private vulnerability reporting
-  is enabled.
+  enabled (https://github.com/llm4s/llm4s/issues/1465).
 Supply chain: CycloneDX SBOM per module on each GitHub Release; OSV-Scanner weekly and on
   dependency changes. Maven Central artifacts PGP-signed (https://llm4s.org/reference/verifying-releases).
   OpenSSF Scorecard on every push to main (https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s). SLSA build
-  provenance attested for every release; no Best Practices badge
+  provenance attested for every release (https://llm4s.org/reference/verifying-releases); no Best Practices badge
   (https://github.com/llm4s/llm4s/issues/2307).
 Data protection: no telemetry; data goes only to the providers and stores you configure;
   default tracing prints metadata only (https://llm4s.org/guide/data-protection).

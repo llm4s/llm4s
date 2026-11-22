@@ -94,7 +94,9 @@ val hits = for {
 
 With no paths set, `RAG` keeps its vector and keyword stores in memory. For a file-backed index use
 `RAGConfig().withSQLite("./rag.db")`; for Postgres use `withPgVector(...)` or `withPgHybrid(...)`.
-Answer generation needs an LLM: add `withLLM(client)` and call `queryWithAnswer`.
+Answer generation needs an LLM: add `withLLM(client)` and call `queryWithAnswer`. It answers at temperature 0.0;
+`withCompletionOptions(options)` sets the options for every answer, and `queryWithAnswer(question, options = ...)`
+(or `queryWithPermissionsAndAnswer`) for one call.
 
 ## What it supports, and its limits
 

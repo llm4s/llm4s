@@ -56,9 +56,11 @@ object RagFakes {
    */
   final class EchoingLlm(failure: Option[LLMError] = None) extends LLMClient {
     val conversations: ArrayBuffer[Conversation] = ArrayBuffer.empty
+    val options: ArrayBuffer[CompletionOptions]  = ArrayBuffer.empty
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       conversations += conversation
+      this.options += options
       failure.toLeft {
         val prompt = conversation.messages.collect { case m: UserMessage => m.content }.mkString("\n")
         val answer = prompt.linesIterator

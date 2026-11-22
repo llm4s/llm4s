@@ -113,6 +113,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Embeddings & RAG
 
+- **Added** `RAGConfig.withCompletionOptions`: the options `queryWithAnswer` and `queryWithPermissionsAndAnswer` generate
+  the answer with, which each call can override (`options = ...`); the default is still temperature 0.0. Java:
+  `JRagBuilder.completionOptions` [#2715](https://github.com/llm4s/llm4s/issues/2715).
 - **Fixed** a `RAG` with a `SearchIndex` refuses plain ingest and sync (a `ConfigurationError`) instead of writing rows
   no permission query finds; `deleteDocument` deletes from every collection; `queryWithPermissions` runs the configured
   fusion, keyword search and reranking [#2716](https://github.com/llm4s/llm4s/issues/2716);

@@ -125,7 +125,9 @@ them. With nothing indexed, an answer has no sources and the model is asked anyw
 
 A question is answered from at most five chunks; set another number with the builder's `topK`, or for one question
 with `ask(question, topK)`. The model is told to answer from the chunks alone and to say when they are not enough;
-replace those instructions with the builder's `systemPrompt`.
+replace those instructions with the builder's `systemPrompt`. The model answers at temperature 0.0, so it keeps to the
+chunks; give the builder `completionOptions(JCompletionOptions.builder().temperature(0.3).maxTokens(512).build())`
+for other options.
 
 ## Search without a model
 

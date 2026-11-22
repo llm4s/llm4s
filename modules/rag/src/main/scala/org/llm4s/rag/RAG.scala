@@ -873,9 +873,15 @@ final class RAG private (
    *
    * @param question The question to answer
    * @param topK Override default topK (optional)
+   * @param options the completion options for this answer; the config's (`RAGConfig.withCompletionOptions`,
+   *                temperature 0.0 by default) unless given, so one pipeline can compare settings per call
    * @return Answer with supporting contexts
    */
-  def queryWithAnswer(question: String, topK: Option[Int] = None): Result[RAGAnswerResult] =
+  def queryWithAnswer(
+    question: String,
+    topK: Option[Int] = None,
+    options: CompletionOptions = config.completionOptions
+  ): Result[RAGAnswerResult] =
     llmClient match {
       case None =>
         Left(
@@ -886,7 +892,7 @@ final class RAG private (
       case Some(client) =>
         for {
           searchResults <- query(question, topK)
-          answer        <- generateAnswer(client, question, searchResults)
+          answer        <- generateAnswer(client, question, searchResults, options)
         } yield answer
     }
 
@@ -1080,13 +1086,16 @@ final class RAG private (
    * @param collectionPattern Pattern to filter collections
    * @param question The question to answer
    * @param topK Maximum number of results
+   * @param options the completion options for this answer; the config's (`RAGConfig.withCompletionOptions`,
+   *                temperature 0.0 by default) unless given
    * @return Answer with permission-filtered supporting contexts
    */
   def queryWithPermissionsAndAnswer(
     auth: UserAuthorization,
     collectionPattern: CollectionPattern,
     question: String,
-    topK: Option[Int] = None
+    topK: Option[Int] = None,
+    options: CompletionOptions = config.completionOptions
   ): Result[RAGAnswerResult] =
     llmClient match {
       case None =>
@@ -1098,7 +1107,7 @@ final class RAG private (
       case Some(client) =>
         for {
           searchResults <- queryWithPermissions(auth, collectionPattern, question, topK)
-          answer        <- generateAnswer(client, question, searchResults)
+          answer        <- generateAnswer(client, question, searchResults, options)
         } yield answer
     }
 
@@ -1461,7 +1470,8 @@ final class RAG private (
   private def generateAnswer(
     client: LLMClient,
     question: String,
-    contexts: Seq[RAGSearchResult]
+    contexts: Seq[RAGSearchResult],
+    options: CompletionOptions
   ): Result[RAGAnswerResult] = {
     val contextText = contexts.zipWithIndex
       .map { case (ctx, i) => s"[${i + 1}] ${ctx.content}" }
@@ -1483,7 +1493,7 @@ Answer:"""
       )
     )
 
-    client.complete(conversation, CompletionOptions(temperature = 0.0)).map { completion =>
+    client.complete(conversation, options).map { completion =>
       RAGAnswerResult(
         answer = completion.content,
         question = question,
