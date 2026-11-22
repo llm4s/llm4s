@@ -35,8 +35,10 @@ private given ReadWriter[List[RequestAdjustment]] =
         })
     )
 
-// A finish reason this version cannot read - a case added later (RFC 0009) - reads as None, so the event, and the
-// usage it carries, still reads. Written as FinishReason's own codec writes it.
+// A finish reason this version cannot read - a case added later (RFC 0009) - reads as FinishReason.Other with the raw
+// value it was stored as, so nothing of it is lost and the event, and the usage it carries, still reads: a case with
+// no fields is stored as its name, one with fields under its `$type` tag. A value with no raw string in it is None.
+// Written as FinishReason's own codec writes it.
 private given ReadWriter[Option[FinishReason]] =
   upickle.default
     .readwriter[ujson.Value]
@@ -47,8 +49,12 @@ private given ReadWriter[Option[FinishReason]] =
         case json =>
           Try(upickle.default.read[FinishReason](json)).fold(
             e =>
-              logger.debug(s"Left out a finish reason this version cannot read: ${e.getMessage}")
-              None
+              val raw = json match
+                case ujson.Str(name) => Some(name)
+                case obj: ujson.Obj  => obj.value.get("$type").collect { case ujson.Str(tag) => tag }
+                case _               => None
+              logger.debug(s"Read a finish reason this version cannot read as Other($raw): ${e.getMessage}")
+              raw.map(FinishReason.Other(_))
             ,
             Some(_)
           )
@@ -77,7 +83,7 @@ object CallUsage:
  * or a case added later, is left out rather than failing the event. `finishReason` is the completion's
  * (`Completion.finishReason`): why the model's turn ended (RFC 0009, #2613), `Length` when the reply was cut at an
  * output limit. `None` for usage recorded without a call, and in an event stored before the field existed; a reason
- * this version cannot read, a case added later, is `None` too.
+ * this version cannot read, a case added later, is `FinishReason.Other` with the value it was stored as.
  */
 final case class ModelCallCompleted(
   agent: String,
