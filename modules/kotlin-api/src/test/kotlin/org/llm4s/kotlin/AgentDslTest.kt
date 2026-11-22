@@ -66,6 +66,7 @@ class AgentDslTest {
                     CollectionConverters.asScala(listOf<ToolCall>()).toList(),
                     Option.empty(), Option.empty(),
                     CollectionConverters.asScala(listOf<Citation>()).toList(),
+                    Completion.`apply$default$10`(), Completion.`apply$default$11`(),
                 ),
             )
         }

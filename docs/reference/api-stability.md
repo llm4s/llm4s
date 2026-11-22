@@ -93,8 +93,9 @@ object Limits:
   def apply(maxTokens: Int = 1024, timeout: FiniteDuration = 30.seconds): Limits = new Limits(maxTokens, timeout)
 ```
 
-To add a field after the baseline, add it to the constructor and, with a default, to `apply`; keep the previous
-`apply` as an overload without defaults that forwards to the new one; and add a `withX` setter. Never re-expose
+To add a field, add it to the constructor and, with a default, to `apply`, and add a `withX` setter. After the
+baseline, also keep the previous `apply` as an overload without defaults that forwards to the new one; before it,
+there is one `apply` per type, so the baseline freezes no overload. Never re-expose
 `copy`. A case class with no fields is exempt. A type that is deliberately closed (a single-value wrapper, a fixed
 record) goes on the allow-list, `GrowthExempted` in `project/StabilityTiers.scala`, by fully qualified name with a
 one-line reason. Every type that predated the check has been converted or given its reason (#2377 to #2384).

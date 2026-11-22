@@ -31,6 +31,7 @@ object TodoStatus:
  */
 @Experimental
 final case class Todo private (id: String, content: String, status: TodoStatus):
+  def withId(i: String): Todo         = Todo(i, content, status)
   def withContent(c: String): Todo    = Todo(id, c, status)
   def withStatus(s: TodoStatus): Todo = Todo(id, content, s)
 

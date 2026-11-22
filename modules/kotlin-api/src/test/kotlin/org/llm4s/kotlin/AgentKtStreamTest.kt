@@ -98,6 +98,7 @@ class AgentKtStreamTest {
                 scala.jdk.javaapi.CollectionConverters.asScala(listOf<ToolCall>()).toList(),
                 Option.empty(), Option.empty(),
                 scala.jdk.javaapi.CollectionConverters.asScala(listOf<Citation>()).toList(),
+                Completion.`apply$default$10`(), Completion.`apply$default$11`(),
             ),
         )
 
@@ -145,6 +146,7 @@ class AgentKtStreamTest {
                             scala.jdk.javaapi.CollectionConverters.asScala(listOf<ToolCall>()).toList(),
                             Option.empty(), Option.empty(),
                             scala.jdk.javaapi.CollectionConverters.asScala(listOf<Citation>()).toList(),
+                            Completion.`apply$default$10`(), Completion.`apply$default$11`(),
                         ),
                     )
                 }

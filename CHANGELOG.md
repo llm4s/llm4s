@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An agent turn whose answer was cut off at the output limit ends `AgentStatus.Truncated(partialAnswer)`, not
   `Completed`, and `AgentStatusKind` gains `TRUNCATED`; a `match` on `AgentStatus` needs the case (RFC 0009 open
   question 6); [migration](docs/reference/migration.md#a-cut-off-answer-ends-truncated-not-completed-2613).
+- The forwarding `apply` overloads kept for types that gained a field (`Completion`, `NamedProviderConfig`, `RunConfig`,
+  four `TraceEvent` cases and 14 more types) are removed: each type has one `apply`, with defaults, and Java and Kotlin pass
+  every argument [#1281](https://github.com/llm4s/llm4s/issues/1281); [migration](docs/reference/migration.md#the-forwarding-apply-overloads-are-removed-1281).
 - On a `RAG` with a `SearchIndex`, plain `ingest*`, `sync`, `refresh`, `query`, `queryWithAnswer(Streaming)` and
   `clear` return a `ConfigurationError`, and a hybrid
   `queryWithPermissions` needs `SearchIndex.keywordQuery`, which replaces `queryHybrid` (#2716);
@@ -134,6 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Changed** a growth-prone type that gains a field adds no forwarding `apply` overload before the MiMa baseline (0.7.0), so the baseline freezes one `apply` per type
+  (CLAUDE.md, "Growth-prone data types"); `TakeRequest`, `Submission`, `ThreadSummary`, `BoundaryResult`, `Todo` and `Checkpoint` gain their missing `with*` setters [#1281](https://github.com/llm4s/llm4s/issues/1281).
 - **Changed** `llm4s-agent` takes the MiMa baseline with the other frozen modules, not a later one of its own: RFC 0001 is
   rejected now that the graph runtime is complete ([RFC 0001](docs/rfcs/0001-agent-baseline.md)) [#1281](https://github.com/llm4s/llm4s/issues/1281).
 - **Added** SLSA build provenance for every release's jars and POMs, the SBOMs on its GitHub Release and the `workspace-runner` image, `verify-release.sh --attestations`,
@@ -144,7 +149,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sbt testPerformance` runs only core and agent; MiMa and the config-policy CLIs moved into Quick Checks and the tests.
 - **Added** `llm4s-kotlin-api` publishes from its own workflow (`publish-kotlin.yml`), which a release calls and which can be run by hand for a tag whose Kotlin publish failed: it builds the tag's code with the current upload rules ([release guide](docs/reference/release.md#re-triggering-a-failed-release)).
 - **Added** `Llm4sMigrate_1_0` covers the breaks since 0.6.0: `ThinkingReplacesBudgetTokens` rewrites `ReasoningEffort.None` to `Thinking.Off` and reports `budgetTokens`,
-  `AgentStatusGainsTruncated` reports a `match` on `AgentStatus` with no catch-all, `FinishReasonTyped` rewrites the string comparisons of `StreamedChunk.finishReason` and reports a literal in the same expression that no rewrite gets right (0.6.0's raw Bedrock and Gemini values, a content filter's, Gemini's `STOP`), and positional `Completion`, `ModelCallCompleted` and `ModelCapabilities` patterns gain their fields; tested against 0.6.0 [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#migration-rules).
+  `AgentStatusGainsTruncated` reports a `match` on `AgentStatus` with no catch-all, `FinishReasonTyped` rewrites the string comparisons of `StreamedChunk.finishReason` and reports a literal in the same expression that no rewrite gets right (0.6.0's raw Bedrock and Gemini values, a content filter's, Gemini's `STOP`), and positional `Completion`, `ModelCallCompleted`, `ModelCapabilities`, `TokenUsage`, `ModelPricing`, `CompletionOptions`, `TurnState` and `RAGConfig` patterns gain their fields; tested against 0.6.0 [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#migration-rules).
 - **Fixed** `llm4s-reactor` was never published (it was missing from the root aggregate, so 0.6.0 lacks it); `publishedArtifactsCheck` now fails on a published module outside the aggregate.
 
 ## [0.6.0] - 2026-11-21

@@ -63,10 +63,6 @@ object RunBudgets:
     require(found.isEmpty, found.mkString("; "))
     new RunBudgets(maxSupersteps, timeout, maxConcurrency, maxTokens)
 
-  /** Budgets without a token budget, as before `maxTokens` existed. */
-  def apply(maxSupersteps: Int, timeout: Option[FiniteDuration], maxConcurrency: Int): RunBudgets =
-    apply(maxSupersteps, timeout, maxConcurrency, None)
-
   def of(
     maxSupersteps: Int = 1000,
     timeout: Option[FiniteDuration] = None,
@@ -194,80 +190,8 @@ object RunConfig:
       traceContext
     )
 
-  /** A config continuing no trace context, as before `traceContext` existed. */
-  def apply(
-    runId: RunId,
-    tenantId: Option[TenantId],
-    principal: Option[Principal],
-    budgets: RunBudgets,
-    metadata: Map[String, String],
-    interruptBefore: Set[NodeId],
-    interruptAfter: Set[NodeId],
-    retention: Option[RetentionPolicy],
-    childRetention: Int
-  ): RunConfig =
-    apply(
-      runId,
-      tenantId,
-      principal,
-      budgets,
-      metadata,
-      interruptBefore,
-      interruptAfter,
-      retention,
-      childRetention,
-      None
-    )
-
   /** Settled child threads a thread keeps unless its run says otherwise ([[RunConfig.withChildRetention]]). */
   val DefaultChildRetention: Int = 64
-
-  /** A config keeping [[DefaultChildRetention]] children, as before `childRetention` existed. */
-  def apply(
-    runId: RunId,
-    tenantId: Option[TenantId],
-    principal: Option[Principal],
-    budgets: RunBudgets,
-    metadata: Map[String, String],
-    interruptBefore: Set[NodeId],
-    interruptAfter: Set[NodeId],
-    retention: Option[RetentionPolicy]
-  ): RunConfig =
-    new RunConfig(
-      runId,
-      tenantId,
-      principal,
-      budgets,
-      metadata,
-      interruptBefore,
-      interruptAfter,
-      retention,
-      DefaultChildRetention,
-      None
-    )
-
-  /** A config without retention, as before `retention` existed. */
-  def apply(
-    runId: RunId,
-    tenantId: Option[TenantId],
-    principal: Option[Principal],
-    budgets: RunBudgets,
-    metadata: Map[String, String],
-    interruptBefore: Set[NodeId],
-    interruptAfter: Set[NodeId]
-  ): RunConfig =
-    new RunConfig(
-      runId,
-      tenantId,
-      principal,
-      budgets,
-      metadata,
-      interruptBefore,
-      interruptAfter,
-      None,
-      DefaultChildRetention,
-      None
-    )
 
 /**
  * Where a task runs. `checkpointId` is the checkpoint whose frontier it belongs to; `""` outside a

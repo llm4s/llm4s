@@ -44,9 +44,5 @@ object ProviderFeatures:
   ): ProviderFeatures =
     new ProviderFeatures(streaming, toolCalling, customHttpClient)
 
-  /** Creates a [[ProviderFeatures]] that does not claim to honour a supplied HTTP client. */
-  def apply(streaming: Boolean, toolCalling: Boolean): ProviderFeatures =
-    new ProviderFeatures(streaming, toolCalling, false)
-
   /** Streaming and tool calling; a supplied HTTP client is not claimed (opt in with `withCustomHttpClient(true)`). */
   val default: ProviderFeatures = ProviderFeatures()

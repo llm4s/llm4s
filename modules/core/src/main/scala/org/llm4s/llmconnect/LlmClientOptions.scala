@@ -50,9 +50,5 @@ object LlmClientOptions:
   ): LlmClientOptions =
     new LlmClientOptions(metrics, exchangeLogging, httpClient)
 
-  /** Creates [[LlmClientOptions]] with the provider's own HTTP client. */
-  def apply(metrics: MetricsCollector, exchangeLogging: ProviderExchangeLogging): LlmClientOptions =
-    new LlmClientOptions(metrics, exchangeLogging, None)
-
   /** No metrics, no exchange logging and the provider's own HTTP client. */
   val default: LlmClientOptions = LlmClientOptions()

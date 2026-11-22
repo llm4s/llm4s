@@ -210,29 +210,6 @@ object ProviderConfigSpec:
       keylessWhen
     )
 
-  /** The shape before `keylessWhen` (#2274), with no keyless authentication. */
-  def apply(
-    requiresApiKey: Boolean,
-    requiresBaseUrl: Boolean,
-    defaultBaseUrl: Option[String],
-    baseUrlExample: String,
-    baseUrlEnv: Option[String],
-    extras: Seq[ProviderConfigKey],
-    apiKeyEnv: Seq[String],
-    authExtras: Seq[ProviderConfigKey]
-  ): ProviderConfigSpec =
-    apply(
-      requiresApiKey,
-      requiresBaseUrl,
-      defaultBaseUrl,
-      baseUrlExample,
-      baseUrlEnv,
-      extras,
-      apiKeyEnv,
-      authExtras,
-      None
-    )
-
   /**
    * The fields every named provider section may carry, whatever its provider.
    * An [[ProviderConfigKey]] cannot reuse one of these names.
