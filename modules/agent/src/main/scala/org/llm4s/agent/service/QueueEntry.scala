@@ -374,7 +374,10 @@ final case class TakeRequest private (
   ttl: scala.concurrent.duration.FiniteDuration,
   skip: Set[EntryId]
 ):
-  def withSkip(ids: Set[EntryId]): TakeRequest = TakeRequest(holder, agents, ttl, ids)
+  def withHolder(h: String): TakeRequest                                = TakeRequest(h, agents, ttl, skip)
+  def withAgents(a: Set[AgentId]): TakeRequest                          = TakeRequest(holder, a, ttl, skip)
+  def withTtl(t: scala.concurrent.duration.FiniteDuration): TakeRequest = TakeRequest(holder, agents, t, skip)
+  def withSkip(ids: Set[EntryId]): TakeRequest                          = TakeRequest(holder, agents, ttl, ids)
 
 @Experimental
 object TakeRequest:
@@ -382,14 +385,11 @@ object TakeRequest:
   /** The most entries one take may pass over, so its query stays within the store's bound. */
   val MaxSkip: Int = 256
 
-  def apply(holder: String, agents: Set[AgentId], ttl: scala.concurrent.duration.FiniteDuration): TakeRequest =
-    apply(holder, agents, ttl, Set.empty)
-
   def apply(
     holder: String,
     agents: Set[AgentId],
     ttl: scala.concurrent.duration.FiniteDuration,
-    skip: Set[EntryId]
+    skip: Set[EntryId] = Set.empty
   ): TakeRequest =
     require(ttl > scala.concurrent.duration.Duration.Zero, s"ttl must be positive, was $ttl")
     require(skip.size <= MaxSkip, s"skip holds ${skip.size} entries, more than $MaxSkip")

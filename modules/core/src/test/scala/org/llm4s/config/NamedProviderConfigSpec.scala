@@ -100,7 +100,7 @@ class NamedProviderConfigSpec extends AnyFlatSpec with Matchers {
     original shouldBe configured()
   }
 
-  "apply overloads" should "preserve supplied fields and default omitted fields" in {
+  "apply" should "preserve supplied fields and default omitted trailing fields" in {
     val full = configured()
     val eight = NamedProviderConfig(
       full.provider,

@@ -414,37 +414,6 @@ object HarnessProfile:
       subagents
     )
 
-  /** A profile without subagents ([[SubagentConfig.none]]): the arguments `apply` took before subagents existed. */
-  def apply(
-    backend: FileBackend,
-    sandbox: Option[SandboxBackend],
-    tools: ToolSelection,
-    todos: Option[TodoConfig],
-    summarization: Option[SummarizationConfig],
-    offload: Option[OffloadConfig],
-    skills: Option[SkillsConfig],
-    instructions: Option[InstructionsConfig],
-    systemPrompt: PromptMode,
-    permissions: Vector[PermissionRule],
-    toolTimeout: Option[FiniteDuration],
-    retention: RetentionPolicy
-  ): HarnessProfile =
-    apply(
-      backend,
-      sandbox,
-      tools,
-      todos,
-      summarization,
-      offload,
-      skills,
-      instructions,
-      systemPrompt,
-      permissions,
-      toolTimeout,
-      retention,
-      SubagentConfig.none
-    )
-
   /**
    * The opinionated preset: the file tools over a new `StateFileBackend`, todos, summarisation (with the model-free
    * digest compressor), offload of large results, skills under `/skills` and instructions in `/AGENTS.md`, each at

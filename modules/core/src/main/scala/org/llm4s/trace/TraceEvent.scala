@@ -191,8 +191,6 @@ object TraceEvent {
         input
       )
 
-    def apply(id: String, model: String, toolCalls: Int, content: String, timestamp: Instant): CompletionReceived =
-      apply(id, model, toolCalls, content, timestamp, None)
   }
 
   final case class ToolExecuted private (
@@ -315,22 +313,6 @@ object TraceEvent {
       usage: Option[TokenUsage] = None
     ): ErrorOccurred =
       new ErrorOccurred(error, context, timestamp, span, operation, model, provider, errorType, duration, usage)
-
-    def apply(
-      error: Throwable,
-      context: String,
-      timestamp: Instant,
-      span: Option[TraceSpan],
-      operation: Option[String],
-      model: Option[String],
-      provider: Option[ProviderId],
-      errorType: Option[String],
-      duration: Option[FiniteDuration]
-    ): ErrorOccurred =
-      apply(error, context, timestamp, span, operation, model, provider, errorType, duration, None)
-
-    def apply(error: Throwable, context: String, timestamp: Instant, span: Option[TraceSpan]): ErrorOccurred =
-      apply(error, context, timestamp, span, None)
   }
 
   final case class TokenUsageRecorded private (
@@ -476,20 +458,6 @@ object TraceEvent {
         span,
         provider
       )
-
-    def apply(
-      threadId: String,
-      runId: String,
-      agent: String,
-      status: String,
-      messages: Seq[Message],
-      usage: UsageSummary,
-      timestamp: Instant,
-      parentThreadId: Option[String],
-      parentRunId: Option[String],
-      span: Option[TraceSpan]
-    ): AgentRunEnded =
-      apply(threadId, runId, agent, status, messages, usage, timestamp, parentThreadId, parentRunId, span, None)
   }
 
   final case class CustomEvent private (
@@ -584,15 +552,6 @@ object TraceEvent {
       duration: Option[FiniteDuration] = None
     ): EmbeddingUsageRecorded =
       new EmbeddingUsageRecorded(usage, model, operation, inputCount, timestamp, provider, duration)
-
-    def apply(
-      usage: EmbeddingUsage,
-      model: String,
-      operation: String,
-      inputCount: Int,
-      timestamp: Instant
-    ): EmbeddingUsageRecorded =
-      apply(usage, model, operation, inputCount, timestamp, None)
   }
 
   /**
