@@ -125,6 +125,19 @@ object RunnerMain extends cask.MainRoutes {
     case None => logger.warn("Not on Linux: commands run unconfined; only the command policy applies (design §4.39)")
   }
 
+  // said once, at startup: whether the container itself has egress (#870); the image's entry point sets
+  // LLM4S_EGRESS=blocked once it has taken it away
+  if (!sandboxConfig.getOrElse(WorkspaceSandboxConfig.Permissive).networkAllowed) {
+    if (Option(System.getenv("LLM4S_EGRESS")).contains("blocked"))
+      logger.info("The container has no egress: networkAllowed=false, and its firewall lets nothing out (#870)")
+    else
+      logger.warn(
+        "networkAllowed=false, but the container can still open connections out: only commands are kept off the " +
+          "network (seccomp, on Linux). Start the container with --cap-add NET_ADMIN -e LLM4S_NO_EGRESS=1 (as " +
+          "ContainerisedWorkspace does) to block its egress (#870)"
+      )
+  }
+
   // Track active connections and their last heartbeat
   private val connections = new ConcurrentHashMap[cask.WsChannelActor, AtomicLong]()
   // Processes are the workspace's ProcessRegistry's alone, each owned by its client's channel (per-client isolation)

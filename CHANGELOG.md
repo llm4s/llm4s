@@ -89,6 +89,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   killed whole, so a daemon it starts cannot outlive it [#2008](https://github.com/llm4s/llm4s/issues/2008); [design §4.39](docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md).
 - **Fixed** cancelling a `ContainerisedWorkspace` command (an interrupted `executeCommand`, as when an agent run is cancelled)
   now cancels it on the runner too; it used to keep running, with any daemon it started [#2656](https://github.com/llm4s/llm4s/pull/2656).
+- **Changed** a workspace container whose sandbox allows no network (`networkAllowed = false`, the default) has no egress:
+  `ContainerisedWorkspace` starts it with `NET_ADMIN` and the image's entry point blocks every connection out, then drops
+  the capability; the path policy resolves `..` and links before `allowedPaths`/`readOnlyPaths` and returns its
+  refusals as values ([sandbox](docs/reference/workspace-sandbox.md#container-egress);
+  [migration](docs/reference/migration.md#a-workspace-container-has-no-egress-870)) [#870](https://github.com/llm4s/llm4s/issues/870).
 
 ### Tools
 

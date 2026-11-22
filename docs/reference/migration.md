@@ -37,7 +37,8 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [every provider's content-filter stop is an error](#every-providers-content-filter-stop-is-an-error-2677),
 [a stream that did not finish is an error](#a-stream-that-did-not-finish-is-an-error-2613),
 [a broken or cut tool call is an error](#a-broken-or-cut-tool-call-is-an-error-2613),
-and [`TokenUsage` and `ModelPricing` gain a prompt-cache field](#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115).
+[`TokenUsage` and `ModelPricing` gain a prompt-cache field](#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115),
+and [a workspace container has no egress](#a-workspace-container-has-no-egress-870).
 
 ## Finish reasons are typed (#2613)
 
@@ -506,6 +507,21 @@ A queued run can be cancelled from any machine, and a submission's `BusyThreadPo
 - **`Reject` also refuses a thread a direct run holds.** A `Reject` submission (the default) is refused with `GraphError.ThreadBusy` while a live claim holds the thread, not only while it has an open queue entry. Submit with `Enqueue` to wait behind the direct run instead.
 - **A new abstract `RunQueue` method.** `cancel(tenantId, target, reason)` closes an unstarted entry at once and asks a started one to stop; a custom queue implements it, answers the request with every lease it grants or renews (`Lease.stop`) and on `QueueEntry.stopRequest`, and passes `RunQueueContract`'s new cases.
 - **Schemas move on again.** SQLite schema 11 and PostgreSQL schema 5 add each queue entry's stop request. An older build refuses the new schema, so upgrade every process sharing a file or database together.
+
+## A workspace container has no egress (#870)
+
+A `ContainerisedWorkspace` whose sandbox allows no network (`networkAllowed = false`, the default, also when no
+`sandboxConfig` is given) starts its container with `--cap-add NET_ADMIN -e LLM4S_NO_EGRESS=1`, and the image's entry
+point blocks every connection out of it ([Container egress](workspace-sandbox#container-egress)). Behaviour, not
+source:
+
+- Nothing in the container reaches another host or container any more; on Linux its commands already could not.
+  Set `networkAllowed = true` for a workspace that needs the network.
+- The container needs an image from this release (with `iptables`) and a Docker host that lets a container with
+  `NET_ADMIN` set its own firewall. Where it cannot, the container exits at start (status 78) and `startContainer`
+  fails, rather than run without the isolation the sandbox asked for.
+- A runner container started by hand keeps its egress unless it is given the same two flags; the runner says so at
+  startup.
 
 ## Workspace command confinement (#1983)
 
