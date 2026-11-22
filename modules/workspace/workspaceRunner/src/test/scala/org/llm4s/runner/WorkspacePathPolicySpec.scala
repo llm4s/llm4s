@@ -27,10 +27,10 @@ class WorkspacePathPolicySpec extends AnyFlatSpec with Matchers with BeforeAndAf
     base = Files.createTempDirectory("path-policy").toRealPath()
     root = Files.createDirectories(base.resolve("ws"))
     Files.createDirectories(root.resolve("src/main"))
-    Files.createDirectories(root.resolve("docs"))
+    Files.createDirectories(root.resolve("manual"))
     Files.createDirectories(base.resolve("outside"))
     Files.writeString(root.resolve("src/main/A.scala"), "a")
-    Files.writeString(root.resolve("docs/readme.md"), "r")
+    Files.writeString(root.resolve("manual/readme.md"), "r")
     Files.writeString(base.resolve("outside/secret"), "s"): Unit
   }
 
@@ -59,9 +59,9 @@ class WorkspacePathPolicySpec extends AnyFlatSpec with Matchers with BeforeAndAf
   it should "resolve .. before comparing against allowedPaths" in {
     val p = policy(allowed = List("src"))
     p.resolvePath("src/main/../main/A.scala", Access.Read).isRight shouldBe true
-    code(p.resolvePath("src/../docs/readme.md", Access.Read)) shouldBe Some("PATH_NOT_ALLOWED")
+    code(p.resolvePath("src/../manual/readme.md", Access.Read)) shouldBe Some("PATH_NOT_ALLOWED")
     // an allowedPaths entry written with .. names what it resolves to
-    policy(allowed = List("docs/../src")).resolvePath("src/main/A.scala", Access.Read).isRight shouldBe true
+    policy(allowed = List("manual/../src")).resolvePath("src/main/A.scala", Access.Read).isRight shouldBe true
   }
 
   it should "not take a sibling that shares a prefix for an allowed path" in {
@@ -70,13 +70,13 @@ class WorkspacePathPolicySpec extends AnyFlatSpec with Matchers with BeforeAndAf
   }
 
   it should "refuse a write under readOnlyPaths, and allow a read there" in {
-    val p = policy(readOnly = List("docs"))
-    p.resolvePath("docs/readme.md", Access.Read).isRight shouldBe true
-    val refused = p.resolvePath("docs/readme.md", Access.Write)
-    refused.left.toOption.map(r => (r.path, r.code)) shouldBe Some(("docs/readme.md", "PATH_READ_ONLY"))
-    refused.left.toOption.get.message should include("docs/readme.md")
-    code(p.resolvePath("docs/sub/new.md", Access.Write)) shouldBe Some("PATH_READ_ONLY")
-    code(p.resolvePath("src/../docs/new.md", Access.Write)) shouldBe Some("PATH_READ_ONLY")
+    val p = policy(readOnly = List("manual"))
+    p.resolvePath("manual/readme.md", Access.Read).isRight shouldBe true
+    val refused = p.resolvePath("manual/readme.md", Access.Write)
+    refused.left.toOption.map(r => (r.path, r.code)) shouldBe Some(("manual/readme.md", "PATH_READ_ONLY"))
+    refused.left.toOption.get.message should include("manual/readme.md")
+    code(p.resolvePath("manual/sub/new.md", Access.Write)) shouldBe Some("PATH_READ_ONLY")
+    code(p.resolvePath("src/../manual/new.md", Access.Write)) shouldBe Some("PATH_READ_ONLY")
     p.resolvePath("src/main/B.scala", Access.Write).isRight shouldBe true
   }
 
@@ -90,14 +90,14 @@ class WorkspacePathPolicySpec extends AnyFlatSpec with Matchers with BeforeAndAf
   }
 
   it should "not let a link inside allowedPaths reach a path outside them" in {
-    link(root.resolve("src/docs-link"), root.resolve("docs"))
-    code(policy(allowed = List("src")).resolvePath("src/docs-link/readme.md", Access.Read)) shouldBe
+    link(root.resolve("src/manual-link"), root.resolve("manual"))
+    code(policy(allowed = List("src")).resolvePath("src/manual-link/readme.md", Access.Read)) shouldBe
       Some("PATH_NOT_ALLOWED")
   }
 
   it should "not let a link outside readOnlyPaths write into one" in {
-    link(root.resolve("src/docs-link"), root.resolve("docs"))
-    code(policy(readOnly = List("docs")).resolvePath("src/docs-link/readme.md", Access.Write)) shouldBe
+    link(root.resolve("src/manual-link"), root.resolve("manual"))
+    code(policy(readOnly = List("manual")).resolvePath("src/manual-link/readme.md", Access.Write)) shouldBe
       Some("PATH_READ_ONLY")
   }
 
