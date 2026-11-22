@@ -482,7 +482,7 @@ This RFC's own PR also adds its row to `docs/rfcs/README.md`.
    that ends so is refused `TaskRefusal.Truncated`; and Java and Kotlin read `AgentStatusKind.TRUNCATED` with
    `JAgentStatus.partialAnswer()`. The `AgentStatusGainsTruncated` Scalafix rule reports a `match` on `AgentStatus`
    with no catch-all
-   ([migration](../reference/migration.md#a-cut-off-answer-ends-truncated-not-completed-2613)).
+   ([migration](../reference/migration#a-cut-off-answer-ends-truncated-not-completed-2613)).
 7. **Content filter: decided.** #2664 made it a `Left(ContentFilteredError)` for Gemini and Vertex AI, whether or not
    text came first, and neutral for `ReliableClient`'s breaker. This RFC takes that rule for every provider, so
    `FinishReason` has no `ContentFilter` case.
