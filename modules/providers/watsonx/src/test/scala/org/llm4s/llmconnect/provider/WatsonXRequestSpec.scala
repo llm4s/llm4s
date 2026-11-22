@@ -186,11 +186,12 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
     }
   }
 
-  test("Thinking.Off is sent to a gpt-oss model as low, the least, with a warning logged once") {
+  // RFC 0008 decision 15: the Adjusted report replaces the per-process warning this client logged
+  test("Thinking.Off is sent to a gpt-oss model as low, the least, and reported Adjusted") {
     gptOssBody(CompletionOptions().withThinking(Thinking.Off)).should(include(""""reasoning_effort":"low""""))
-    WatsonXClient.warnedReasoningNotDisabled.get() shouldBe true
-    // a second request logs nothing new and sends the same
-    gptOssBody(CompletionOptions().withThinking(Thinking.Off)).should(include(""""reasoning_effort":"low""""))
+    WatsonXClient.reasoningAdjustments("openai/gpt-oss-120b", CompletionOptions().withThinking(Thinking.Off)) match
+      case List(RequestAdjustment.Adjusted(RequestOption.Thinking, "Off", "low", _)) => succeed
+      case other                                                                     => fail(s"got $other")
   }
 
   test("Thinking.Off wins over a reasoning level also set") {
@@ -225,9 +226,17 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
     ).foreach(model => withClue(model)(WatsonXClient.takesReasoningEffort(model) shouldBe false))
   }
 
-  test("a model that does not take reasoning_effort is sent nothing for reasoning, with a warning logged once") {
+  // RFC 0008 decision 15: the Dropped report replaces the per-process warning this client logged
+  test("a model that does not take reasoning_effort is sent nothing for reasoning, and reports it Dropped") {
     ReasoningEffort.values.foreach(effort => body(x, CompletionOptions().withReasoning(effort)) shouldBe body(x))
-    WatsonXClient.warnedReasoningNotSent.get() shouldBe true
+    ReasoningEffort.values.foreach { effort =>
+      WatsonXClient.reasoningAdjustments(
+        WatsonXTestConfig.config.model,
+        CompletionOptions().withReasoning(effort)
+      ) match
+        case List(RequestAdjustment.Dropped(RequestOption.Reasoning, _)) => succeed
+        case other                                                       => fail(s"${effort.name}: got $other")
+    }
   }
 
   test(
