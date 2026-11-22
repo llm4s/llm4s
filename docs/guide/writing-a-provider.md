@@ -829,7 +829,7 @@ it fails it names the `reference.conf` line that is missing. Test the client its
 ### The model call contract
 
 Every chat client reports how a reply ended the same way, on `complete` and on `streamComplete`
-([RFC 0009](../rfcs/0009-model-call-contract.md)):
+([RFC 0009](../rfcs/0009-model-call-contract)):
 
 - **A finish reason on every `Completion`.** Map your provider's own value to `FinishReason`
   (`Stop`, `Length`, `ToolCalls`, or `Other(raw)` for anything else), in your own module. Never

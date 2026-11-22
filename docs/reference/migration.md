@@ -144,7 +144,7 @@ takes `[DONE]` as the end marker.
 **Provider authors:** `ProviderModuleChecks.assertStreams` is removed. `assertModelCallContract` checks how every
 reply ends on both paths, and requires `ContractCase.CleanText` to apply, whose stream proves the client streams.
 Replace an `assertStreams(client)` test with the full check, every `ContractCase` declared
-([writing a provider](../guide/writing-a-provider.md#the-model-call-contract)).
+([writing a provider](../guide/writing-a-provider#the-model-call-contract)).
 
 ## A broken or cut tool call is an error (#2613)
 
