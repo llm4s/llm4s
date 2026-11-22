@@ -77,6 +77,9 @@ enum TurnOutcome derives ReadWriter:
   /** The run used its `RunBudgets.maxTokens` without a final answer; no model call was made at the budget. */
   case TokenLimitReached
 
+  /** The active agent's final answer was cut off at the model's output limit (`FinishReason.Length`). */
+  case Truncated
+
 /**
  * What an output Block needs to undo a turn's writes to one key: its `value` before the turn first wrote it,
  * encoded with the key's codec (`None`: no stored entry), and the fingerprint of what the turn's own writes last
@@ -96,7 +99,9 @@ final case class TurnState(
   outcome: Option[TurnOutcome],
   startAgent: Option[AgentId] = None,
   startTransfer: Option[Transfer] = None,
-  priorValues: Map[String, PriorValue] = Map.empty
+  priorValues: Map[String, PriorValue] = Map.empty,
+  /** Whether the reply stored last ended at the model's output limit (`FinishReason.Length`); `false` when read from a turn stored before it. */
+  cut: Boolean = false
 ) derives ReadWriter
 
 /** A turn's result: how it ended, and the agent active at its end - the one the next turn starts with. */

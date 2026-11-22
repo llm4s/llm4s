@@ -133,7 +133,7 @@ val result = for {
 ```
 
 To name the thread yourself, use `agent.run(threadId, query)`; `agent.runMultiTurn(first, followUps)`
-runs several turns on one thread and stops at the first result that is not `Completed`. A `Left` carries no
+runs several turns on one thread and stops at the first result that is not `Completed` (a `Truncated` one included). A `Left` carries no
 thread id, so when a turn of `run(query)` or `runMultiTurn` fails or is cancelled, its thread is forgotten once
 the turn has ended; name the thread to recover such a turn.
 
@@ -147,6 +147,7 @@ defined way is `Right`, with a status:
 result.map { r =>
   r.status match {
     case AgentStatus.Completed(answer)         => println(answer)
+    case AgentStatus.Truncated(partial)        => println(s"Cut off at the output limit: $partial")
     case AgentStatus.Blocked(guardrail, why)   => println(s"Blocked by $guardrail: $why")
     case AgentStatus.StepLimitReached          => println("Hit the step limit")
     case AgentStatus.TokenLimitReached         => println("Hit the run's token budget")
@@ -155,8 +156,13 @@ result.map { r =>
 }
 ```
 
+An answer the model's output limit cut off - its reply ended `FinishReason.Length`, at `maxTokens` or the model's own
+cap - is `Truncated(partialAnswer)`, never `Completed`: `r.answer` is `None`, and the partial text stays in the
+thread, so `agent.continueConversation(r, "Please go on")` lets the model finish it. Raise `maxTokens`
+(`withCompletionOptions`) if it happens often.
+
 {% include api.html t="org.llm4s.agent.AgentResult" %} also carries `threadId`, `runId`, `activeAgent`, `messages` (the thread's full
-history, never a system prompt) and `usage`.
+history, never a system prompt) and `usage`. `r.answer` is the `Completed` answer, and `None` for every other status.
 
 ### A Typed Answer
 
@@ -222,7 +228,8 @@ which belong to the {% include api.html t="org.llm4s.agent.Agent" %}. `AgentResu
 The Java facade (`llm4s-java-api`) returns every turn as a `JAgentResult`, read without Scala types:
 `answer()` is an `Optional<String>`, `messages()` a `java.util.List<JMessage>`, `usage()` a
 `JUsageSummary`, and `status()` a `JAgentStatus` whose `kind()` is the Java enum `AgentStatusKind` -
-`COMPLETED`, `BLOCKED`, `STEP_LIMIT_REACHED`, `TOKEN_LIMIT_REACHED` or `SUSPENDED` - with `answer()`, `guardrail()` and
+`COMPLETED`, `TRUNCATED`, `BLOCKED`, `STEP_LIMIT_REACHED`, `TOKEN_LIMIT_REACHED` or `SUSPENDED` - with `answer()`,
+`partialAnswer()`, `guardrail()` and
 `reason()` as `Optional<String>`s (see the [Java guide](../java#an-agent-turn)). A `SUSPENDED`
 status's `pending()` is a `java.util.List<PendingInterrupt>`: the turn's approvals, then its tool
 questions, middleware questions and breakpoints; it is empty for any other status, and

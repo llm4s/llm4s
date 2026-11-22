@@ -32,9 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A positional pattern on `TokenUsage` or `ModelPricing` gains a field (`longCacheCreationTokens`,
   `cacheCreationInputTokenCostAbove1hr`; [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 6);
   [migration](docs/reference/migration.md#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115).
+- An agent turn whose answer was cut off at the output limit ends `AgentStatus.Truncated(partialAnswer)`, not
+  `Completed`, and `AgentStatusKind` gains `TRUNCATED`; a `match` on `AgentStatus` needs the case (RFC 0009 open
+  question 6); [migration](docs/reference/migration.md#a-cut-off-answer-ends-truncated-not-completed-2613).
 
 ### Providers
 
+- **Fixed** watsonx, Perplexity and Jlama leaving options out without reporting them: each now puts on
+  `Completion.adjustments` what it does not send as asked (`reasoning` and `thinking`; Perplexity and Jlama also the
+  penalties, Jlama also `top_p` and `responseFormat`), on `complete` and streams; watsonx's per-process warnings give way to the reports ([RFC 0008](docs/rfcs/0008-generation-controls.md) decision 15) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Added** `ModelCapabilities` reads the thinking and effort metadata: `supportsAdaptiveThinking`, `supportsOutputConfig`,
   `supportedReasoningEfforts`, `supportsThinkingOff`, and `supportsBudgetThinking`, which the overrides file's new patch
   entries set to `false` for Claude Opus 4.7/4.8 and Fable 5 ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
@@ -43,7 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `budget_tokens` and `output_config.effort`, and a `reasoning`-only request to a model that rejects a budget (Opus
   4.7 and later) as adaptive thinking instead of a 400; OpenAI sends the nearest `reasoning_effort` the model accepts;
   each reports what it changed on `Completion.adjustments` ([cost controls](docs/guide/cost-controls.md),
-  [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4, decision 14); `CachingLLMClient` matches a cached answer on an
+  [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4, decision 14); Gemini and Vertex AI send `thinkingConfig`:
+  a fitted `thinkingBudget` on Gemini 2.5 and the nearest `thinkingLevel` on Gemini 3 and later (the Gemini follow-up);
+  `CachingLLMClient` matches a cached answer on an
   explicit list of the options that change it, `thinking` and `reasoning` among them (PR 5, decision 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Added** `CompletionOptions.promptCache` (`PromptCache`: scope `System`, `Tools`, `Conversation`, TTL `Short` or
   `Long`): Anthropic sends `cache_control` breakpoints and reports a prefix too short to cache; OpenAI, Gemini and Vertex
@@ -61,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Core
 
 - **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
-  traces too, and on each agent call's `ModelCallCompleted` (an event stored before reads with none), mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider, in place of `assertStreams`
+  traces too, and on each agent call's `ModelCallCompleted` (an event stored before reads with none, a reason this version cannot read as `Other(raw)`), mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider, in place of `assertStreams`
   ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1, 2, 5 and 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
 - **Changed** with `Completion.finishReason` (#2613): Ollama reads `done_reason` instead of reporting `stop` for every finished reply,
   Anthropic streams trace `message_delta`'s `stop_reason` instead of `"stop"`, Perplexity's `incomplete` with a tool call is `Length`,
@@ -82,6 +90,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `Checkpointer.owner`: a thread's tenant and parent (`ThreadOwner`) without decoding its latest checkpoint, which
   `Agent.forget` and `GraphRuntime.deleteThread` now check with; a default over `latest` keeps other stores compiling, and the in-memory, SQLite and PostgreSQL stores read it from their indexed columns [#2642](https://github.com/llm4s/llm4s/issues/2642).
+- **Changed** a turn whose final answer ended `FinishReason.Length` ends `AgentStatus.Truncated(partialAnswer)` (no `answer`;
+  `RunOutcome.Truncated`, `TaskRefusal.Truncated`, traced `truncated`; Java `AgentStatusKind.TRUNCATED` and `JAgentStatus.partialAnswer()`),
+  with the `AgentStatusGainsTruncated` Scalafix lint ([migration](docs/reference/migration.md#a-cut-off-answer-ends-truncated-not-completed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) open question 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
 
 ### Agent harness
 
@@ -114,7 +125,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sbt testPerformance` runs only core and agent; MiMa and the config-policy CLIs moved into Quick Checks and the tests.
 - **Added** `llm4s-kotlin-api` publishes from its own workflow (`publish-kotlin.yml`), which a release calls and which can be run by hand for a tag whose Kotlin publish failed: it builds the tag's code with the current upload rules ([release guide](docs/reference/release.md#re-triggering-a-failed-release)).
 - **Added** `Llm4sMigrate_1_0` covers the breaks since 0.6.0: `ThinkingReplacesBudgetTokens` rewrites `ReasoningEffort.None` to `Thinking.Off` and reports `budgetTokens`,
-  `FinishReasonTyped` rewrites the string comparisons of `StreamedChunk.finishReason` and reports a literal in the same expression that no rewrite gets right (0.6.0's raw Bedrock and Gemini values, a content filter's, Gemini's `STOP`), and positional `Completion`, `ModelCallCompleted` and `ModelCapabilities` patterns gain their fields; tested against 0.6.0 [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#migration-rules).
+  `AgentStatusGainsTruncated` reports a `match` on `AgentStatus` with no catch-all, `FinishReasonTyped` rewrites the string comparisons of `StreamedChunk.finishReason` and reports a literal in the same expression that no rewrite gets right (0.6.0's raw Bedrock and Gemini values, a content filter's, Gemini's `STOP`), and positional `Completion`, `ModelCallCompleted` and `ModelCapabilities` patterns gain their fields; tested against 0.6.0 [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#migration-rules).
 - **Fixed** `llm4s-reactor` was never published (it was missing from the root aggregate, so 0.6.0 lacks it); `publishedArtifactsCheck` now fails on a published module outside the aggregate.
 
 ## [0.6.0] - 2026-11-21

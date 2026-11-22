@@ -468,8 +468,8 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val store   = InMemoryCheckpointer()
     val runtime = GraphRuntime(store)
     val agent   = Agent.builder("assistant", cut).withRuntime(runtime).build().fold(e => fail(e.message), identity)
-    // a cut answer still ends the run Completed (RFC 0009, open question 6)
-    agent.run(ThreadId("cut"), "go").map(_.answer) shouldBe Right(Some("cut sh"))
+    // a cut answer ends the run Truncated, never Completed (RFC 0009, open question 6)
+    agent.run(ThreadId("cut"), "go").map(_.status) shouldBe Right(AgentStatus.Truncated("cut sh"))
     val stored = replayed(runtime, store, ThreadId("cut")).collect {
       case EventRecord(_, _, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, payload)) =>
         upickle.default.read[ModelCallCompleted](ujson.read(payload.render())).finishReason
@@ -498,7 +498,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
       override def getContextWindow(): Int     = 4096
       override def getReserveCompletion(): Int = 1024
     val (result, c) = collect(agentWith(streamed).withStreaming(), "go")
-    result.map(_.answer) shouldBe Right(Some("cut"))
+    result.map(_.status) shouldBe Right(AgentStatus.Truncated("cut"))
     c.all.collect { case AgentEvents.ModelCallCompleted(m) => m.finishReason } shouldBe
       Vector(Some(FinishReason.Length))
   }

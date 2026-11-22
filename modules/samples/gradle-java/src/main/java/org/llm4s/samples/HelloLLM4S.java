@@ -169,6 +169,7 @@ public final class HelloLLM4S {
                 + result.get().usage().inputTokens() + " + " + result.get().usage().outputTokens() + " tokens)");
             case BLOCKED -> System.out.println("(blocked by " + status.guardrail().orElse("?") + ": "
                 + status.reason().orElse("") + ")");
+            case TRUNCATED -> System.out.println(status.partialAnswer().orElse("") + " (cut off at the output limit)");
             case STEP_LIMIT_REACHED -> System.out.println("(reached the step limit)");
             case TOKEN_LIMIT_REACHED -> System.out.println("(reached the token budget)");
             case SUSPENDED -> System.out.println("(waiting for " + status.pending().size() + " answers)");

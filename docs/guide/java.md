@@ -629,6 +629,7 @@ JAgentResult result = agent.run("What is 2+2?").get();
 
 switch (result.status().kind()) {
     case COMPLETED -> System.out.println(result.answer().orElseThrow());
+    case TRUNCATED -> System.out.println("Cut off: " + result.status().partialAnswer().orElseThrow());
     case BLOCKED -> System.out.println("Blocked by " + result.status().guardrail().orElseThrow());
     case STEP_LIMIT_REACHED -> System.out.println("Hit the step limit");
     case TOKEN_LIMIT_REACHED -> System.out.println("Hit the token budget");
@@ -643,7 +644,8 @@ System.out.println(usage.inputTokens() + " tokens in, " + usage.outputTokens() +
 JAgentResult next = agent.continueConversation(result, "And 3+3?").get();
 ```
 
-Each status's data has its own accessor, empty for the other kinds: `answer()` for `COMPLETED`, `guardrail()` and
+Each status's data has its own accessor, empty for the other kinds: `answer()` for `COMPLETED`, `partialAnswer()`
+for `TRUNCATED` - an answer the model's output limit cut off, which `answer()` never returns - `guardrail()` and
 `reason()` for `BLOCKED`, and `pending()` for `SUSPENDED` - the approvals and questions the turn waits for, which the
 agent guide's [suspended turns](agents/#suspended-turns-from-java-and-kotlin) section answers. A `JMessage` has a
 `role()` (the Java enum `JMessageRole`), its `content()`, the `toolCalls()` an assistant message asked for, with their

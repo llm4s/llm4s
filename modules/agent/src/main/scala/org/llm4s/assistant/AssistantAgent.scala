@@ -354,7 +354,9 @@ class AssistantAgent(
   private[assistant] def extractFinalResponse(state: SessionState): Either[AssistantError, String] =
     state.last.map(_.status) match {
       case None => Left(AssistantError.SessionError("No agent result available", state.sessionId, "extract-response"))
-      case Some(AgentStatus.Completed(answer))       => Right(answer)
+      case Some(AgentStatus.Completed(answer)) => Right(answer)
+      case Some(AgentStatus.Truncated(partial)) =>
+        Right(s"$partial\n[The answer was cut off at the model's output limit]")
       case Some(AgentStatus.Blocked(guardrail, why)) => Right(s"Blocked by guardrail '$guardrail': $why")
       case Some(AgentStatus.StepLimitReached) =>
         Left(

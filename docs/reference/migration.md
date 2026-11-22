@@ -38,7 +38,28 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [a stream that did not finish is an error](#a-stream-that-did-not-finish-is-an-error-2613),
 [a broken or cut tool call is an error](#a-broken-or-cut-tool-call-is-an-error-2613),
 [`TokenUsage` and `ModelPricing` gain a prompt-cache field](#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115),
+[a cut-off answer ends `Truncated`, not `Completed`](#a-cut-off-answer-ends-truncated-not-completed-2613),
 and [a workspace container has no egress](#a-workspace-container-has-no-egress-870).
+
+## A cut-off answer ends `Truncated`, not `Completed` (#2613)
+
+An agent turn whose final answer the model's output limit cut off - the reply ended `FinishReason.Length`, at
+`CompletionOptions.maxTokens` or the model's own cap - ends `AgentStatus.Truncated(partialAnswer)`. It used to end
+`Completed(answer)` with the cut text as if it were the whole answer ([RFC 0009](../rfcs/0009-model-call-contract),
+open question 6).
+
+- **`AgentResult.answer` is `None`** for it, as for every status but `Completed`, and `decodeOutput` is a
+  `ValidationError`. The partial text is `Truncated.partialAnswer`, and stays in the thread's messages, so the next
+  turn (`continueConversation`, "go on") sees it; the turn is a completed one, like `StepLimitReached`.
+- **A `match` on `AgentStatus` without a catch-all** needs a `Truncated` case. Scala 3 warns that the match is not
+  exhaustive; the `AgentStatusGainsTruncated` Scalafix rule (in `Llm4sMigrate_1_0`) reports each one.
+- **Delegation**: a child that ends `Truncated` is refused `TaskRefusal.Truncated`, as a child at its step limit is,
+  and `SubagentEvents.TaskEnded`'s status is `truncated`.
+- **Tracing**: `TraceEvent.AgentRunEnded.status` is `truncated`.
+- **Stored threads**: the checkpoint's `RunOutcome` gains `Truncated`, so a settled turn rebuilds as `Truncated`.
+  Threads stored before keep the status they had; a build before this one cannot read a `Truncated` outcome.
+- **Java and Kotlin**: `AgentStatusKind` gains `TRUNCATED`, and `JAgentStatus.partialAnswer()` carries the text;
+  `answer()` is empty for it. A `switch` or `when` over the kind without a `default` or `else` needs the case.
 
 ## Finish reasons are typed (#2613)
 
@@ -84,7 +105,7 @@ client.complete(conversation, options).map { c =>
 - An agent's `AgentEvents.ModelCallCompleted` gains `finishReason: Option[FinishReason]` (default `None`), after
   `adjustments`, filled from each call's `Completion` (PR 6). Construction is unchanged; a positional pattern needs a
   ninth binder, `case ModelCallCompleted(a, m, n, t, u, c, p, adj, _)`, which the `PositionalPatternsGainFields`
-  Scalafix rule adds, or match on the type and read the fields. An event stored before reads with `None`.
+  Scalafix rule adds, or match on the type and read the fields. An event stored before reads with `None`; a reason this version cannot read, a case a later one adds, reads as `FinishReason.Other` with its stored value.
 
 ## Every provider's content-filter stop is an error (#2677)
 

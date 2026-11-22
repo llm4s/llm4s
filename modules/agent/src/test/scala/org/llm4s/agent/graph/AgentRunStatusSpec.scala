@@ -59,6 +59,27 @@ class AgentRunStatusSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     AgentTracing.label(RunEvent.RunCompleted, status) shouldBe "token_limit_reached"
   }
 
+  it should "map a turn whose answer was cut off to Truncated with its last assistant message, and tracing call it truncated" in {
+    val state  = stateWith(UserMessage("q"), AssistantMessage("half"))
+    val ended  = RunResult.Completed(state, TurnOutput(TurnOutcome.Truncated, AgentId.unsafe("a")), 1)
+    val status = AgentRun.status(ended, isBlock = false, loop)
+    status shouldBe Right(AgentStatus.Truncated("half"))
+    AgentTracing.label(RunEvent.RunCompleted, status) shouldBe "truncated"
+  }
+
+  "TaskRefusal.Truncated" should "describe a child's cut-off answer without its content, labelled truncated" in {
+    import org.llm4s.agent.delegation.TaskRefusal
+    TaskRefusal.Truncated.describe shouldBe "its answer was cut off at the model's output limit"
+    TaskRefusal.label(TaskRefusal.Truncated) shouldBe "truncated"
+  }
+
+  "TurnState" should "round-trip a cut reply and a Truncated outcome, and read a turn stored before either as not cut" in {
+    import org.llm4s.agent.graph.toolloop.TurnState
+    val turn = TurnState(3, Some(TurnOutcome.Truncated), cut = true)
+    upickle.default.read[TurnState](upickle.default.write(turn)) shouldBe turn
+    upickle.default.read[TurnState]("""{"steps":2,"outcome":null}""") shouldBe TurnState(2, None)
+  }
+
   "TurnOutcome.TokenLimitReached" should "round-trip through the turn's stored codec" in {
     val turn = org.llm4s.agent.graph.toolloop.TurnState(3, Some(TurnOutcome.TokenLimitReached))
     upickle.default.read[org.llm4s.agent.graph.toolloop.TurnState](upickle.default.write(turn)) shouldBe turn

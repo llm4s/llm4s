@@ -40,6 +40,14 @@ class RunOutcomeRebuildSpec extends AnyFlatSpec with Matchers with EitherValues 
     rebuilt shouldBe live
   }
 
+  it should "rebuild Truncated from Truncated and the state's last answer" in {
+    val cut = CompletionFixture.simple("half an ans").withFinishReason(org.llm4s.llmconnect.model.FinishReason.Length)
+    val (live, rebuilt, outcome) = liveAndRebuilt(Agent.builder("assistant", ScriptedLLMClient.of(cut)), "go")
+    outcome shouldBe Some(RunOutcome.Truncated)
+    live.value shouldBe AgentStatus.Truncated("half an ans")
+    rebuilt shouldBe live
+  }
+
   it should "rebuild StepLimitReached" in {
     val looping                  = new NTurnFakeLLMClient(CompletionFixture.withToolCall("missing_tool", ujson.Obj()))
     val (live, rebuilt, outcome) = liveAndRebuilt(Agent.builder("assistant", looping).withMaxSteps(2), "loop")

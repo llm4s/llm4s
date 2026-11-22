@@ -10,7 +10,7 @@ import org.llm4s.media.MediaSource
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.security.TokenGenerations
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.model.{ AdjustmentLog, EffortMapping, ModelRegistryService, UnmappedOptions }
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.util.{ BoundedJson, Redaction }
 
@@ -18,7 +18,7 @@ import java.io.{ BufferedReader, InputStreamReader }
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Instant
-import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
 import scala.concurrent.duration.*
@@ -100,12 +100,14 @@ import scala.util.{ Try, Using }
  * types/vml_v1.ts:860-864 and vml_v1.ts:2828,3053 for `textChat` and `textChatStream`; PY `schema/_api.py:289`;
  * LCIBM chat_models.py:1010), but only to the models known to take it ([[WatsonXClient.takesReasoningEffort]]):
  * OpenAI's gpt-oss models, `openai/gpt-oss-*`, which IBM's clients send it to (`JAVA` ChatServiceThinkingTest;
- * LCIBM chat_models.py:657-690). Any other model is sent nothing, and a warning is logged once per process: IBM's
+ * LCIBM chat_models.py:657-690). Any other model is sent nothing: IBM's
  * Model Gateway rejects the parameter for models without it (`JAVA` ModelGatewayChatServiceIT), and whether the
  * chat API does is unchecked. The chat API has no value that turns reasoning off, so `Thinking.Off` is sent as
- * `low`, the least, winning over a `reasoning` also set, with a warning logged once per process; `Minimal` is sent
+ * `low`, the least, winning over a `reasoning` also set; `Minimal` is sent
  * as `low` and `XHigh` and `Max` as `high` ([[WatsonXClient.reasoningEffortValue]]). `Thinking.Adaptive` and
- * `Thinking.Budget` have no counterpart and are not sent (this client reports no adjustments yet).
+ * `Thinking.Budget` have no counterpart and are not sent. Each is reported on `Completion.adjustments` (RFC 0008):
+ * a level sent as another and `Thinking.Off` as `Adjusted`, a budget as `Dropped`, `Adaptive` as `NotNeeded`, and both
+ * as `Dropped` for a model that is not sent `reasoning_effort` ([[WatsonXClient.reasoningAdjustments]]).
  * `include_reasoning` is not sent: it defaults to true (NODE types/vml_v1.ts:858).
  *
  * A reply's reasoning is read as thinking, from any model: `message.reasoning_content` on `complete` (NODE
@@ -266,31 +268,43 @@ class WatsonXClient(
 
   private def endpoint(path: String): String = s"${config.baseUrl}$path?version=${config.apiVersion}"
 
+  // what the request does not send as asked goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(providerName)
+
+  private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
+    val adjustments = WatsonXClient.reasoningAdjustments(config.model, options)
+    adjustmentLog.record(config.model, adjustments)
+    adjustments
+  }
+
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     completeWithMetrics {
       // the parts are checked before the IAM exchange: a refused request sends nothing
-      createRequestBody(conversation, options).flatMap(body => bearerToken().map(_ -> body)).flatMap { (token, body) =>
-        val requestText = body.render()
-        val startedAt   = Instant.now()
-        http
-          .post(endpoint("/ml/v1/text/chat"), apiHeaders(token, "application/json"), requestText, requestTimeout)
-          .flatMap { response =>
-            noteStatus(response.statusCode, token)
-            val result =
-              // RFC 0009, Part 3: a reply `length` cut while it made a tool call runs no call
-              if (response.statusCode >= 200 && response.statusCode < 300)
-                parseCompletion(response.body).flatMap(ToolCallRules.checked)
-              else
-                HttpErrorMapper.mapHttpError(
-                  response.statusCode,
-                  Redaction.scrubRemote(response.body),
-                  providerName,
-                  response.headers
-                )
-            recordExchange(startedAt, requestText, response.body, result)
-            result
-          }
-      }
+      createRequestBody(conversation, options)
+        .flatMap(body => bearerToken().map(_ -> body))
+        .flatMap { (token, body) =>
+          val requestText = body.render()
+          val startedAt   = Instant.now()
+          http
+            .post(endpoint("/ml/v1/text/chat"), apiHeaders(token, "application/json"), requestText, requestTimeout)
+            .flatMap { response =>
+              noteStatus(response.statusCode, token)
+              val result =
+                // RFC 0009, Part 3: a reply `length` cut while it made a tool call runs no call
+                if (response.statusCode >= 200 && response.statusCode < 300)
+                  parseCompletion(response.body).flatMap(ToolCallRules.checked)
+                else
+                  HttpErrorMapper.mapHttpError(
+                    response.statusCode,
+                    Redaction.scrubRemote(response.body),
+                    providerName,
+                    response.headers
+                  )
+              recordExchange(startedAt, requestText, response.body, result)
+              result
+            }
+        }
+        .map(_.withAdjustments(unsent(options)))
     }
 
   override def streamComplete(
@@ -298,28 +312,31 @@ class WatsonXClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
-    createRequestBody(conversation, options).flatMap(body => bearerToken().map(_ -> body)).flatMap { (token, body) =>
-      val requestText = body.render()
-      val url         = endpoint("/ml/v1/text/chat_stream")
-      val startedAt   = Instant.now()
-      val raw         = new StringBuilder
+    createRequestBody(conversation, options)
+      .flatMap(body => bearerToken().map(_ -> body))
+      .flatMap { (token, body) =>
+        val requestText = body.render()
+        val url         = endpoint("/ml/v1/text/chat_stream")
+        val startedAt   = Instant.now()
+        val raw         = new StringBuilder
 
-      val result = http
-        .postStream(url, apiHeaders(token, "text/event-stream"), requestText, streamTimeout)
-        .flatMap { response =>
-          if (response.statusCode >= 200 && response.statusCode < 300)
-            readStream(response.body, url, raw, token, onChunk)
-          else {
-            val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
-            raw.append(err)
-            noteStatus(response.statusCode, token)
-            HttpErrorMapper
-              .mapHttpError(response.statusCode, Redaction.scrubRemote(err), providerName, response.headers)
+        val result = http
+          .postStream(url, apiHeaders(token, "text/event-stream"), requestText, streamTimeout)
+          .flatMap { response =>
+            if (response.statusCode >= 200 && response.statusCode < 300)
+              readStream(response.body, url, raw, token, onChunk)
+            else {
+              val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
+              raw.append(err)
+              noteStatus(response.statusCode, token)
+              HttpErrorMapper
+                .mapHttpError(response.statusCode, Redaction.scrubRemote(err), providerName, response.headers)
+            }
           }
-        }
-      recordExchange(startedAt, requestText, raw.result(), result)
-      result
-    }
+        recordExchange(startedAt, requestText, raw.result(), result)
+        result
+      }
+      .map(_.withAdjustments(unsent(options)))
   }
 
   private def readStream(
@@ -524,12 +541,10 @@ class WatsonXClient(
     options.responseFormat.foreach(format => body("response_format") = encodeResponseFormat(format))
     // see "Reasoning" in the class Scaladoc
     val off = options.thinking.contains(Thinking.Off)
-    if (off || options.reasoning.isDefined) {
-      if (!takesReasoningEffort(config.model)) warnReasoningNotSent(config.model)
-      else if (off) {
-        warnReasoningNotDisabled(config.model)
-        body("reasoning_effort") = "low"
-      } else options.reasoning.foreach(effort => body("reasoning_effort") = reasoningEffortValue(effort))
+    // what this leaves out is reported on the Completion (reasoningAdjustments), and logged once per model
+    if (takesReasoningEffort(config.model)) {
+      if (off) body("reasoning_effort") = "low"
+      else options.reasoning.foreach(effort => body("reasoning_effort") = reasoningEffortValue(effort))
     }
     if (options.tools.nonEmpty) {
       body("tools") = ujson.Arr.from(options.tools.map(tool => encodeTool(tool.toOpenAITool(strict = false))))
@@ -714,8 +729,6 @@ object WatsonXClient {
       )
   }
 
-  private val logger = org.slf4j.LoggerFactory.getLogger(classOf[WatsonXClient])
-
   private val GptOss = """openai/gpt-oss-.+""".r
 
   /**
@@ -737,25 +750,31 @@ object WatsonXClient {
     case ReasoningEffort.High | ReasoningEffort.XHigh | ReasoningEffort.Max => "high"
   }
 
-  /** Whether the `Thinking.Off` warning has been logged in this process. */
-  private[provider] val warnedReasoningNotDisabled = new AtomicBoolean(false)
-
-  /** Whether the warning that a model is not sent `reasoning_effort` has been logged in this process. */
-  private[provider] val warnedReasoningNotSent = new AtomicBoolean(false)
-
-  private def warnReasoningNotDisabled(model: String): Unit =
-    if (warnedReasoningNotDisabled.compareAndSet(false, true))
-      logger.warn(
-        s"watsonx model $model cannot turn reasoning off: Thinking.Off is sent as reasoning_effort=low, " +
-          "and the model still reasons. Logged once per process."
-      )
-
-  private def warnReasoningNotSent(model: String): Unit =
-    if (warnedReasoningNotSent.compareAndSet(false, true))
-      logger.warn(
-        s"watsonx model $model is not known to take reasoning_effort (only openai/gpt-oss-* models are sent it): " +
-          "CompletionOptions.reasoning and Thinking.Off are not sent. Logged once per process."
-      )
+  /**
+   * What a request leaves out of `reasoning` and `thinking`, as RFC 0008 reports it. A gpt-oss model is sent a level
+   * it lacks as the nearest it takes (`Adjusted`), `Thinking.Off` as `low` (`Adjusted`, with any `reasoning` it
+   * overrode), `Thinking.Adaptive` not at all since the effort sets how much it reasons (`NotNeeded`), and a budget
+   * not at all (`Dropped`); any other model is sent neither (`Dropped`).
+   */
+  private[provider] def reasoningAdjustments(model: String, options: CompletionOptions): List[RequestAdjustment] =
+    if (!takesReasoningEffort(model)) UnmappedOptions.reasoningAndThinking(model, options)
+    else {
+      val reasoning = options.thinking match {
+        case Some(Thinking.Off) =>
+          RequestAdjustment.Adjusted(RequestOption.Thinking, "Off", "low", s"$model cannot stop reasoning") ::
+            EffortMapping.overriddenByOff(options, "low")
+        case _ =>
+          options.reasoning.toList.flatMap(level => EffortMapping.level(model, level, reasoningEffortValue(level)))
+      }
+      val thinking = options.thinking match {
+        case Some(Thinking.Adaptive) =>
+          List(RequestAdjustment.NotNeeded(RequestOption.Thinking, s"$model sets how much it reasons by its effort"))
+        case Some(_: Thinking.Budget) =>
+          List(RequestAdjustment.Dropped(RequestOption.Thinking, s"watsonx takes no thinking budget for $model"))
+        case _ => Nil
+      }
+      reasoning ++ thinking
+    }
 
   /**
    * The reasoning in a reply's `message` or a stream's `delta`: `reasoning_content`, else `reasoning`, when a

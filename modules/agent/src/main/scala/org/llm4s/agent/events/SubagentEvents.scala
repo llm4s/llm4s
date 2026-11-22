@@ -23,8 +23,8 @@ final case class TaskStarted(child: ChildRef) derives ReadWriter
  * refusal the parent model sees as a tool error - so once per child. A call that fails its parent (under
  * `ChildFailure.Fail`) commits nothing, and its replay sends the one `TaskEnded`.
  *
- * `status` is `completed`, `blocked:<guardrail>`, `step_limit_reached`, `token_limit_reached`, `output_invalid` or
- * `failed`; a call whose child suspended commits none until a resumed call settles it. `usage` is the child's whole
+ * `status` is `completed`, `blocked:<guardrail>`, `step_limit_reached`, `token_limit_reached`, `truncated`,
+ * `output_invalid` or `failed`; a call whose child suspended commits none until a resumed call settles it. `usage` is the child's whole
  * life's model usage, every attempt and phase, the roll-up added to the parent. `duration` runs from the child's first admission (`RunOrigin.startedAt`) to the call's end, by the
  * runtime's clock; it is encoded in milliseconds. No request, report or reason: the child's own log and the parent's
  * tool message hold those (rule 9). It is the source of per-subagent count, latency, outcome and token metrics.
