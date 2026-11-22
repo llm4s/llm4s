@@ -61,7 +61,7 @@ class JavaRagGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
 
     "all be in RagGuideSnippets.java, so javac compiles each one" in {
       val blocks = blocksIn("java")
-      blocks should have size 7
+      blocks should have size 8
       blocks.foreach { block =>
         withClue(s"This block of $GuideFile is not in RagGuideSnippets.java:\n$block\n") {
           snippets should include(squash(block))
@@ -86,6 +86,18 @@ class JavaRagGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
         lines(1) should endWith("): Refunds are paid within 14 days.")
         lines.drop(1).exists(_.startsWith("  shipping.txt (")) shouldBe true
         RagGuideSnippets.search(rag).asScala.map(_.documentId).head shouldBe "refund-policy"
+      } finally rag.close()
+    }
+
+    "stream an answer: the sources first, then its text" in withDocs { docs =>
+      val rag = pipeline()
+      try {
+        RagGuideSnippets.ingest(rag, docs)
+        val answer   = new java.util.concurrent.atomic.AtomicReference[JRagAnswer]()
+        val (out, _) = captured(answer.set(RagGuideSnippets.stream(rag)))
+        // the echoing model streams no piece, so what is printed is the sources alone
+        out.linesIterator.toList.head shouldBe "[refund-policy]"
+        answer.get.answer shouldBe "Refunds are paid within 14 days."
       } finally rag.close()
     }
 

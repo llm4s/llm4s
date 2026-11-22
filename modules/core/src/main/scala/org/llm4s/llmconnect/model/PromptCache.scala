@@ -11,8 +11,9 @@ import org.llm4s.annotation.Stable
  * costs, not what it returns.
  *
  * Anthropic is sent `cache_control` breakpoints: on the last system block, the last tool and, for
- * [[PromptCache.Scope.Conversation]], the conversation so far, each with [[PromptCache.Ttl]]. OpenAI, Gemini and
- * Vertex AI cache on their own and report it `NotNeeded`; other providers report it `Dropped`. A prefix shorter than
+ * [[PromptCache.Scope.Conversation]], the conversation so far, each with [[PromptCache.Ttl]]. Bedrock Converse is sent
+ * `cachePoint` blocks in the same three places, for the Claude and Amazon Nova models that take them. OpenAI, Gemini
+ * and Vertex AI cache on their own and report it `NotNeeded`; other providers report it `Dropped`. A prefix shorter than
  * the model's minimum cacheable length is not cached and the provider says nothing, so when a request asked for a
  * prompt cache and nothing was read from or written to it, the completion reports `Dropped`.
  *

@@ -67,8 +67,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CachingLLMClient` matches a cached answer on an
   explicit list of the options that change it, `thinking` and `reasoning` among them (PR 5, decision 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Added** `CompletionOptions.promptCache` (`PromptCache`: scope `System`, `Tools`, `Conversation`, TTL `Short` or
-  `Long`): Anthropic sends `cache_control` breakpoints and reports a prefix too short to cache; OpenAI, Gemini and Vertex
-  AI report it `NotNeeded`, the rest `Dropped`. `TokenUsage.longCacheCreationTokens` and
+  `Long`): Anthropic sends `cache_control` breakpoints and Bedrock `cachePoint` blocks (Claude and Nova models, the
+  1-hour TTL where the model takes it, [#2726](https://github.com/llm4s/llm4s/issues/2726)), each reporting a prefix
+  too short to cache; OpenAI, Gemini and Vertex AI report it `NotNeeded`, the rest `Dropped`. `TokenUsage.longCacheCreationTokens` and
   `ModelPricing.cacheCreationInputTokenCostAbove1hr` price a 1-hour cache write; `CachingLLMClient` ignores
   `promptCache` ([cost controls](docs/guide/cost-controls.md#provider-side-prompt-caching),
   [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 6, decision 16) [#2115](https://github.com/llm4s/llm4s/issues/2115).
@@ -78,6 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `JThinking` (`off()`, `adaptive()`, `budget(n)`) and `JCompletionOptions.Builder.thinking`, the Kotlin
   `completionOptions { thinking = ... }` property, and `JReasoningEffort.MINIMAL`, `XHIGH` and `MAX`, replacing
   `budgetTokens` and `NONE` ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+- **Added** `JRag.askStream`, which streams a RAG answer to a `JRagStreamListener` with its sources first and can be
+  cancelled or awaited, and Reactor's `RagStreams.toFlux`, a `Flux<RagAnswerEvent>` over it [#2727](https://github.com/llm4s/llm4s/issues/2727).
 
 ### Core
 

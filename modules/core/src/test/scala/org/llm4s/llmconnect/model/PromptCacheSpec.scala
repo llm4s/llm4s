@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.model
 
 import org.llm4s.llmconnect.provider.CostEstimator
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
-import org.llm4s.model.{ ModelCapabilities, ModelMetadata, ModelMode, ModelPricing, UnmappedOptions }
+import org.llm4s.model.{ ModelCapabilities, ModelMetadata, ModelMode, ModelPricing, PromptCacheReport, UnmappedOptions }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -29,6 +29,22 @@ class PromptCacheSpec extends AnyFlatSpec with Matchers {
     CompletionOptions().promptCache shouldBe None
     CompletionOptions().withPromptCache(PromptCache.default).promptCache shouldBe Some(PromptCache.default)
     CompletionOptions(promptCache = Some(PromptCache.default)).withPromptCache(None) shouldBe CompletionOptions()
+  }
+
+  "PromptCacheReport" should "report an empty scope before the call, and a cache that took nothing after it" in {
+    val noScope = CompletionOptions().withPromptCache(PromptCache(Set.empty, PromptCache.Ttl.Short))
+    PromptCacheReport.emptyScope(noScope) shouldBe List(
+      RequestAdjustment.Dropped(RequestOption.PromptCache, "the prompt cache's scope names nothing to cache")
+    )
+    PromptCacheReport.emptyScope(CompletionOptions().withPromptCache(PromptCache.default)) shouldBe empty
+    PromptCacheReport.emptyScope(CompletionOptions()) shouldBe empty
+
+    val none = TokenUsage(promptTokens = 10, completionTokens = 1, totalTokens = 11)
+    PromptCacheReport.uncached(sent = true, Some(none)).map(_.option) shouldBe List(RequestOption.PromptCache)
+    PromptCacheReport.uncached(sent = true, Some(none.withCachedTokens(5))) shouldBe empty
+    PromptCacheReport.uncached(sent = true, Some(none.withCacheCreationTokens(5))) shouldBe empty
+    PromptCacheReport.uncached(sent = true, None) shouldBe empty
+    PromptCacheReport.uncached(sent = false, Some(none)) shouldBe empty
   }
 
   "UnmappedOptions" should "report a prompt cache as dropped, or as not needed by a provider that caches on its own" in {

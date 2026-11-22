@@ -1,7 +1,8 @@
 package org.llm4s.llmconnect.provider
 
 import com.anthropic.models.messages.CacheControlEphemeral
-import org.llm4s.llmconnect.model.{ CompletionOptions, PromptCache, RequestAdjustment, RequestOption, TokenUsage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, PromptCache, RequestAdjustment, TokenUsage }
+import org.llm4s.model.PromptCacheReport
 
 /**
  * `CompletionOptions.promptCache` on Anthropic (RFC 0008, PR 6): where its `cache_control` breakpoints go, and what
@@ -26,26 +27,9 @@ private[provider] object AnthropicPromptCache {
     }
 
   /** What is reported before the call: a prompt cache whose scope names nothing has nothing to send. */
-  def requested(options: CompletionOptions): List[RequestAdjustment] =
-    options.promptCache
-      .filter(_.scope.isEmpty)
-      .toList
-      .map(_ => RequestAdjustment.Dropped(RequestOption.PromptCache, "the prompt cache's scope names nothing to cache"))
+  def requested(options: CompletionOptions): List[RequestAdjustment] = PromptCacheReport.emptyScope(options)
 
-  /**
-   * What is reported after the call. Anthropic does not cache a prefix shorter than the model's minimum cacheable
-   * length, and says nothing, so a request that asked for a prompt cache and neither read from nor wrote to it is
-   * reported `Dropped`. Without usage it cannot be told, and nothing is reported.
-   */
+  /** What is reported after the call: a request that asked for a prompt cache and nothing was cached. */
   def answered(options: CompletionOptions, usage: Option[TokenUsage]): List[RequestAdjustment] =
-    if (!options.promptCache.exists(_.scope.nonEmpty)) Nil
-    else
-      usage.toList
-        .filter(u => u.cachedTokens.getOrElse(0) == 0 && u.cacheCreationTokens.getOrElse(0) == 0)
-        .map(_ =>
-          RequestAdjustment.Dropped(
-            RequestOption.PromptCache,
-            "nothing was cached: the prefix may be below the model's minimum cacheable length"
-          )
-        )
+    PromptCacheReport.uncached(options.promptCache.exists(_.scope.nonEmpty), usage)
 }

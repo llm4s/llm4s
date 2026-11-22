@@ -3,6 +3,7 @@ package org.llm4s.javaapi.reactor
 import org.llm4s.error.{ CancelledError, RateLimitError, ServiceError }
 import org.llm4s.javaapi.{ GuideDocs, JLlmClient, Llm4s }
 import org.llm4s.javaapi.StreamFixtures.*
+import org.llm4s.javaapi.rag.{ JRag, RagFakes }
 import org.llm4s.llmconnect.model.StreamedChunk
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -55,7 +56,7 @@ class ReactorGuideSpec extends AnyWordSpec with Matchers {
 
     "all be in ReactorGuideSnippets.java, so javac compiles each one" in {
       val blocks = blocksIn("java")
-      blocks should have size 4
+      blocks should have size 5
       blocks.foreach { block =>
         withClue(s"This block of $GuideFile is not in ReactorGuideSnippets.java:\n$block\n") {
           snippets should include(squash(block))
@@ -88,6 +89,24 @@ class ReactorGuideSpec extends AnyWordSpec with Matchers {
         )
       )
       ReactorGuideSnippets.firstPieces(endless).asScala shouldBe List("0", "1", "2", "3", "4")
+    }
+
+    "stream a RAG answer: its sources, then its text, returning the answer" in {
+      val model = new Scripted(
+        onChunk => {
+          Seq("Within ", "14 days.").foreach(p => onChunk(StreamedChunk(id = "c", content = Some(p))))
+          Right(completion("Within 14 days."))
+        },
+        () => Right(completion("Within 14 days."))
+      )
+      val rag = JRag.builder().embeddings(RagFakes.embeddings()).llm(RagFakes.llm(model)).build().get()
+      try {
+        rag.ingestText("Refunds are paid within 14 days.", "refund-policy").get()
+        var answer = ""
+        printed { answer = ReactorGuideSnippets.ragAnswer(rag) } shouldBe
+          s"[refund-policy]${System.lineSeparator}Within 14 days.${System.lineSeparator}"
+        answer shouldBe "Within 14 days."
+      } finally rag.close()
     }
 
     "react to each kind of failure" in {

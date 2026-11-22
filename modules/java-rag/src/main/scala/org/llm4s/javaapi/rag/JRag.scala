@@ -109,6 +109,51 @@ final class JRag private[rag] (token: RagFacadeToken, rag: RAG) extends AutoClos
     }
 
   /**
+   * Answers `question` as `ask(question)` does, streaming the answer to `listener` as it is generated (#2727): the
+   * sources first, once, before the model is asked, so a chat UI can show its citations while the answer arrives; then
+   * each piece of the answer's text; then the whole answer or the error (see [[JRagStreamListener]]). Returns at once
+   * with the running [[JRagAnswerStream]], which cancels the call (`close()` or `cancel()`) and awaits the answer
+   * (`await()`).
+   *
+   * {{{
+   * JRagAnswerStream stream = rag.askStream("How long do refunds take?", new JRagStreamListener() {
+   *     public void onSources(List<JRagSource> sources) { ui.showSources(sources); }
+   *     public void onChunk(String text) { ui.append(text); }
+   * }).get();
+   * JRagAnswer answer = stream.await().get();
+   * }}}
+   *
+   * What `ask` returns as a failed result at once - a `null` or blank question, a `null` listener, a pipeline built
+   * without a chat client - is a failed result here too, and the listener hears nothing. A failure once the call has
+   * started, of the embedding provider, the search or the model, reaches [[JRagStreamListener.onError]].
+   */
+  def askStream(question: String, listener: JRagStreamListener): LlmResult[JRagAnswerStream] =
+    askingStream(question, None, listener)
+
+  /** Streams the answer to `question` as `askStream(question, listener)` does, from at most `topK` chunks, at least 1. */
+  def askStream(question: String, topK: Int, listener: JRagStreamListener): LlmResult[JRagAnswerStream] =
+    askingStream(question, Some(topK), listener)
+
+  private def askingStream(
+    question: String,
+    topK: Option[Int],
+    listener: JRagStreamListener
+  ): LlmResult[JRagAnswerStream] =
+    RagBuilds.guarded("JRag.askStream") {
+      for {
+        q <- JRag.nonBlank("question", question)
+        k <- JRag.topKOf(topK)
+        l <- Option(listener).toRight(ValidationError.required("listener"))
+        _ <- Either.cond(rag.config.llmClient.isDefined, (), JRag.NoChatClient)
+      } yield new JRagAnswerStream(
+        RagFacadeToken.INSTANCE,
+        (onSources, onChunk) => rag.queryWithAnswerStreaming(q, k)(onSources, onChunk),
+        l,
+        JRagAnswerStream.CancelWaitMillis
+      )
+    }
+
+  /**
    * The chunks that match `query` best, at most the builder's `topK`, best first, without asking a model: what `ask`
    * would answer from. Works with or without a chat client. A `null` or blank query is a failed result of kind
    * `VALIDATION`. An unmodifiable list.
@@ -184,7 +229,7 @@ object JRag {
         .toLeft(entries.toMap)
     }
 
-  private def sources(results: Seq[RAGSearchResult]): java.util.List[JRagSource] =
+  private[rag] def sources(results: Seq[RAGSearchResult]): java.util.List[JRagSource] =
     java.util.List.copyOf(results.map(source).asJava)
 
   private def source(result: RAGSearchResult): JRagSource =
@@ -196,7 +241,7 @@ object JRag {
       java.util.Map.copyOf(result.metadata.asJava)
     )
 
-  private def answer(result: RAGAnswerResult): JRagAnswer =
+  private[rag] def answer(result: RAGAnswerResult): JRagAnswer =
     new JRagAnswer(
       Option(result.answer).getOrElse(""),
       result.question,

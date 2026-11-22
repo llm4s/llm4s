@@ -120,9 +120,10 @@ the provider. A prompt cache calls the provider every time; it changes what the 
 |---|---|
 | Anthropic | `cache_control` breakpoints: the last system block (`System`), the last tool (`Tools`), and the conversation so far through the request's top-level `cache_control` (`Conversation`), all with the one TTL |
 | OpenAI, Azure, Gemini, Vertex AI | reported `NotNeeded`: they cache a repeated prefix on their own |
-| Bedrock, Ollama, OpenAI-compatible, others | reported `Dropped` (Bedrock's `cachePoint` is a follow-up) |
+| Bedrock (Converse) | `cachePoint` blocks: after the system blocks (`System`), after the tools (`Tools`) and at the end of the last message (`Conversation`), with `ttl: 1h` for `Long`. Claude models take all three; Claude 3.x, Sonnet 4, Opus 4 and 4.1 keep a cache for 5 minutes only, so `Long` is sent as `Short` (`Adjusted`). Amazon Nova takes no tools checkpoint and 5 minutes only (`Adjusted`). Other models, and a model the registry lists without prompt caching, report `Dropped` |
+| Ollama, OpenAI-compatible, others | reported `Dropped` |
 
-**A prefix that is too short is not cached.** Anthropic caches nothing below the model's minimum cacheable length
+**A prefix that is too short is not cached.** Anthropic and Bedrock cache nothing below the model's minimum cacheable length
 (from 512 to 4,096 tokens, by model) and returns no error. When a request asked for a prompt cache and the response
 neither read from nor wrote to it, the completion reports
 `Dropped(PromptCache, "nothing was cached: the prefix may be below the model's minimum cacheable length")`.

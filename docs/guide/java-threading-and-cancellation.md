@@ -34,7 +34,9 @@ The Java snippets below are compiled by
 `*Async` variant - `completeAsync`, `completionAsync`, `runAsync`, `continueConversationAsync`, `resumeAsync`,
 `recoverAsync`, `embedAsync` - that returns a `CompletableFuture` at once and makes the same call on another thread
 (see [Asynchronous calls](java#asynchronous-calls)). `JAgent.stream`, `streamResume` and `streamRecover` return an
-`AgentStream` at once too. `LlmResult.toCompletableFuture()` does not make a call asynchronous: it returns a future that
+`AgentStream` at once too, and `llm4s-java-rag`'s `JRag.askStream` a `JRagAnswerStream`, whose search and model call
+run on a virtual thread of its own that `cancel()` interrupts (see [Stream an answer](java-rag#stream-an-answer)).
+`LlmResult.toCompletableFuture()` does not make a call asynchronous: it returns a future that
 is already complete, so `cancel(true)` on it returns `false` and changes nothing.
 
 To run a call off your own thread, use its `*Async` variant:
