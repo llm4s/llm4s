@@ -145,5 +145,11 @@ class ThreadRegistrySpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
     changed.checkpointId shouldBe "c2"
     changed.updatedAt shouldBe at
     changed.withTenantId(None).tenantId shouldBe None
+    val later = at.plusSeconds(1)
+    val moved = summary.withStatus(ThreadStatus.Running).withMetadata(ThreadMetadata("k" -> "v")).withUpdatedAt(later)
+    moved.status shouldBe ThreadStatus.Running
+    moved.metadata shouldBe ThreadMetadata("k" -> "v")
+    moved.updatedAt shouldBe later
+    moved.threadId shouldBe summary.threadId
   }
 }
