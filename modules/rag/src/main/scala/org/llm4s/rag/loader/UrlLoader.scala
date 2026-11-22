@@ -1,15 +1,13 @@
 package org.llm4s.rag.loader
 
-import org.llm4s.core.safety.NetworkSecurity
 import org.llm4s.error.NetworkError
-import org.llm4s.util.{ DurationRounding, Redaction }
+import org.llm4s.rag.loader.internal.PinnedHttpClient
+import org.llm4s.util.Redaction
 import org.llm4s.security.Secret
 
-import java.net.{ HttpURLConnection, URI }
-import scala.annotation.tailrec
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import scala.concurrent.duration.*
-import scala.io.Source
-import scala.util.Using
 
 /**
  * Load documents from URLs.
@@ -22,13 +20,16 @@ import scala.util.Using
  * @param timeout Connection and read timeout
  * @param metadata Additional metadata to attach
  * @param retryCount Number of retry attempts for failed requests
+ * @param urlPolicy Which URLs may be fetched, checked for each URL and every redirect hop, and the addresses the
+ *                  loader connects to (default: [[UrlPolicy.default]], public addresses only)
  */
 final case class UrlLoader(
   urls: Seq[String],
   headers: Map[String, String] = Map.empty,
   timeout: FiniteDuration = 30.seconds,
   metadata: Map[String, String] = Map.empty,
-  retryCount: Int = 2
+  retryCount: Int = 2,
+  urlPolicy: UrlPolicy = UrlPolicy.default
 ) extends DocumentLoader {
 
   /** The case class's form, with each credential-named header's value (`Authorization`, `x-api-key`, ...) masked. */
@@ -36,7 +37,7 @@ final case class UrlLoader(
     val shownHeaders = headers.map { case (name, value) =>
       name -> (if (Redaction.isCredentialName(name)) "***" else value)
     }
-    s"UrlLoader(${urls.map(Redaction.url)},$shownHeaders,$timeout,$metadata,$retryCount)"
+    s"UrlLoader(${urls.map(Redaction.url)},$shownHeaders,$timeout,$metadata,$retryCount,$urlPolicy)"
   }
 
   // Every failure names its document (the URL is the id): the URL is still in the list, so
@@ -44,35 +45,27 @@ final case class UrlLoader(
   def load(): Iterator[LoadResult] = urls.iterator.map(loadUrl)
 
   private def loadUrl(urlString: String): LoadResult =
-    // SSRF Protection: Validate URL before making request
-    NetworkSecurity.validateUrl(urlString) match {
+    PinnedHttpClient.get(urlString, requestHeaders, timeout, urlPolicy) match {
       case Left(error) => LoadResult.failure(urlString, error, documentId = urlString)
-      case Right(_)    => loadUrlUnsafe(urlString)
-    }
+      case Right(resp) if resp.status != 200 =>
+        LoadResult.failure(
+          urlString,
+          NetworkError(s"HTTP ${resp.status}: ${resp.reason}", None, "http"),
+          documentId = urlString
+        )
+      case Right(resp) =>
+        val content     = resp.body
+        val contentType = resp.header("Content-Type").getOrElse("text/plain")
+        val etag        = resp.header("ETag")
+        val lastMod     = resp.header("Last-Modified").flatMap(parseHttpDate)
 
-  private def loadUrlUnsafe(urlString: String): LoadResult =
-    openConnection(urlString, maxRedirects = 5) match {
-      case Left(error) =>
-        LoadResult.failure(urlString, error, documentId = urlString)
+        val version = DocumentVersion(
+          contentHash = DocumentVersion.fromContent(content).contentHash,
+          timestamp = lastMod,
+          etag = etag
+        )
 
-      case Right(conn) =>
-        val docResult = scala.util.Try {
-          val content = Using.resource(Source.fromInputStream(conn.getInputStream, "UTF-8")) {
-            _.mkString
-          }
-
-          val contentType = Option(conn.getContentType).getOrElse("text/plain")
-          val etag        = Option(conn.getHeaderField("ETag"))
-          val lastMod     = Option(conn.getLastModified).filter(_ > 0)
-
-          conn.disconnect()
-
-          val version = DocumentVersion(
-            contentHash = DocumentVersion.fromContent(content).contentHash,
-            timestamp = lastMod,
-            etag = etag
-          )
-
+        LoadResult.success(
           Document(
             id = urlString,
             content = content,
@@ -85,63 +78,20 @@ final case class UrlLoader(
             hints = Some(detectHints(urlString, contentType)),
             version = Some(version)
           )
-        }
-
-        docResult match {
-          case scala.util.Failure(error) =>
-            conn.disconnect()
-            LoadResult.failure(urlString, NetworkError(error.getMessage, None, "http"), documentId = urlString)
-          case scala.util.Success(doc) =>
-            LoadResult.success(doc)
-        }
+        )
     }
 
-  @tailrec
-  private def openConnection(
-    url: String,
-    maxRedirects: Int
-  ): Either[NetworkError, HttpURLConnection] =
-    scala.util.Try {
-      val uri           = new URI(url)
-      val conn          = uri.toURL.openConnection().asInstanceOf[HttpURLConnection]
-      val timeoutMillis = DurationRounding.ceilMillisInt(timeout)
-      conn.setConnectTimeout(timeoutMillis)
-      conn.setReadTimeout(timeoutMillis)
-      conn.setInstanceFollowRedirects(false)
-      conn.setRequestProperty("User-Agent", "LLM4S-RAG/1.0")
-      headers.foreach { case (k, v) => conn.setRequestProperty(k, v) }
-      conn
-    } match {
-      case scala.util.Failure(error) =>
-        Left(NetworkError(error.getMessage, None, "http"))
+  /** The caller's headers, with the default `User-Agent` unless they set one. */
+  private def requestHeaders: Seq[(String, String)] =
+    if (headers.keys.exists(_.equalsIgnoreCase("User-Agent"))) headers.toSeq
+    else ("User-Agent" -> "LLM4S-RAG/1.0") +: headers.toSeq
 
-      case scala.util.Success(conn) =>
-        val code = conn.getResponseCode
-        if (code >= 300 && code < 400) {
-          conn.disconnect()
-          if (maxRedirects <= 0) {
-            Left(NetworkError("Too many redirects", None, "http"))
-          } else {
-            Option(conn.getHeaderField("Location")) match {
-              case None =>
-                Left(NetworkError(s"HTTP $code redirect without Location header", None, "http"))
-              case Some(location) =>
-                val resolved = new URI(url).resolve(location).toString
-                NetworkSecurity.validateUrl(resolved) match {
-                  case Left(err) =>
-                    Left(NetworkError(s"Redirect blocked by SSRF protection: ${err.message}", None, "ssrf-protection"))
-                  case Right(_) =>
-                    openConnection(resolved, maxRedirects - 1)
-                }
-            }
-          }
-        } else if (code != 200) {
-          conn.disconnect()
-          Left(NetworkError(s"HTTP $code: ${conn.getResponseMessage}", None, "http"))
-        } else {
-          Right(conn)
-        }
-    }
+  /** An HTTP-date (`Last-Modified`) as epoch milliseconds, as `HttpURLConnection.getLastModified` gave it. */
+  private def parseHttpDate(value: String): Option[Long] =
+    scala.util
+      .Try(ZonedDateTime.parse(value.trim, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant.toEpochMilli)
+      .toOption
+      .filter(_ > 0)
 
   private def detectHints(url: String, contentType: String): DocumentHints =
     if (contentType.contains("markdown") || url.endsWith(".md")) {
@@ -167,6 +117,10 @@ final case class UrlLoader(
   /** Set timeout */
   def withTimeout(timeout: FiniteDuration): UrlLoader =
     copy(timeout = timeout)
+
+  /** Set the policy every URL and redirect hop is checked against */
+  def withUrlPolicy(policy: UrlPolicy): UrlLoader =
+    copy(urlPolicy = policy)
 
   /** Set retry count */
   def withRetries(n: Int): UrlLoader =

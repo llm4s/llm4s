@@ -164,13 +164,17 @@ val markdownOnly = DirectoryLoader.markdown("./docs")
 | `recursive` | `true` |
 | `maxDepth` | `10` (`0` is the directory itself only) |
 | `metadata` | empty; each document also gets `directory` (the directory's name) |
+| `confineToRoot` | `true`: a symbolic link whose real path is outside the directory is skipped (`withConfineToRoot(false)` follows it) |
 
 `DirectoryLoader.markdown`, `.code`, `.text`, `.pdf` and `.docx` preset the extensions. A
-directory that does not exist, or a path that is not a directory, is a `ListingFailure`.
+directory that does not exist, or a path that is not a directory, is a `ListingFailure`. Only regular files are
+read: a FIFO, device or socket is skipped, even when a link points at it. A link to a file or directory inside the
+root is followed, and a directory reached twice through links is listed once.
 
 ### UrlLoader
 
-Fetches each URL once, with `HttpURLConnection`.
+Fetches each URL once, checked by its [`UrlPolicy`](#ssrf-protection) and connected to the address the policy
+approved.
 
 ```scala
 import org.llm4s.rag.loader.UrlLoader
@@ -192,6 +196,7 @@ val privateDocs = UrlLoader.withAuth(Seq("https://docs.example.com/internal.md")
 | `timeout` | 30 seconds, for connecting and for reading |
 | `metadata` | empty; each document also gets `source`, `url`, `content_type`, and `etag` / `lastModified` when the server sends them |
 | `retryCount` | `2`; stored on the loader (`withRetries`), but `load()` does not currently retry - a failed URL is a `Failure` for that run |
+| `urlPolicy` | `UrlPolicy.default`: public addresses only; see [SSRF protection](#ssrf-protection) (`withUrlPolicy`) |
 
 The document's id is the URL. Its version is the content hash with the response's `ETag` and
 `Last-Modified`, when present. Up to 5 redirects are followed, each checked as described in
@@ -234,6 +239,7 @@ val onePage = WebCrawlerLoader.singlePage("https://example.com/about")
 | `includeQueryParams` | `false` | Whether URLs that differ only in their query string are different pages |
 | `sameDomainOnly` | `true` | Only follow links to the seeds' domains (and their subdomains) |
 | `acceptContentTypes` | `text/html`, `application/xhtml+xml` | Other content types are `Skipped` |
+| `urlPolicy` | `UrlPolicy.default` | Checks every seed, link, redirect hop and robots.txt; see [SSRF protection](#ssrf-protection) |
 
 Presets: `CrawlerConfig.default`, `CrawlerConfig.polite` (depth 2, 100 pages, 1 second delay),
 `CrawlerConfig.fast` (depth 5, 5000 pages, 100 ms delay) and `CrawlerConfig.singlePage`.
@@ -406,18 +412,47 @@ documents its own source registered. `refresh` still clears every source.
 
 ### SSRF protection
 
-`UrlLoader` and `WebCrawlerLoader` check every URL with `NetworkSecurity.validateUrl` (in
-`org.llm4s.core.safety`) before connecting, and again for every redirect target. Only `http` and
-`https` are allowed, and a host that resolves to a non-public address is refused: loopback
-(`localhost`, `127.0.0.0/8`, `::1`), private networks (`10/8`, `172.16/12`, `192.168/16`,
-`fc00::/7`), link-local addresses including the cloud metadata endpoint `169.254.169.254`, and the
-other special-purpose ranges. Redirects are followed by the loader itself, not by
-`HttpURLConnection`, so a public URL cannot redirect into the internal network: such a redirect
-fails with "Redirect blocked by SSRF protection".
+`UrlLoader` and `WebCrawlerLoader` ask a `UrlPolicy` before every request they make: each URL or seed, each crawled
+link, every redirect hop and the crawler's `robots.txt`. The policy returns the addresses the host may be reached at,
+and the loader connects to one of those addresses itself, sending the original `Host` header and, for `https`, the
+original host name for SNI and the certificate check. The host is not resolved again at connect time, so a name
+whose DNS answer changes after the check (DNS rebinding) cannot reach an address the policy refused. Redirects are
+followed by the loader, at most five, each checked again: a refused hop fails with "Redirect blocked by SSRF
+protection".
 
-This means neither loader can read from `localhost` or a private network. For internal documents,
-read them with `FileLoader`/`DirectoryLoader` or `S3Loader`, or fetch them yourself and pass them
-in with `TextLoader`.
+`UrlPolicy.default` is the check of `NetworkSecurity.validateUrl` (in `org.llm4s.core.safety`): only `http` and
+`https`, and a host that resolves to a non-public address is refused: loopback (`localhost`, `127.0.0.0/8`, `::1`),
+private networks (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`), link-local addresses including the cloud metadata
+endpoint `169.254.169.254`, and the other special-purpose ranges. Its setters build other rules:
+
+```scala
+import org.llm4s.rag.loader.{ CrawlerConfig, UrlLoader, UrlPolicy, WebCrawlerLoader }
+
+// Only these hosts and their subdomains, on every page and redirect
+val docsOnly = UrlPolicy.default.withAllowedHosts(Set("docs.example.com"))
+
+// An intranet crawl: private addresses allowed, a few hosts still refused
+val intranet = UrlPolicy.default
+  .withAllowPrivateNetworks(true)
+  .withBlockedHosts(Set("vault.corp.example"))
+
+val loader  = UrlLoader("https://docs.example.com/guide").withUrlPolicy(docsOnly)
+val crawler = WebCrawlerLoader("http://wiki.corp.example/").withUrlPolicy(intranet)
+```
+
+| Setter | Effect |
+|--------|--------|
+| `withAllowedHosts(hosts)` | Only these hosts and their subdomains; empty (the default) allows any public host |
+| `withBlockedHosts(hosts)` | Refuse these hosts and their subdomains as well |
+| `withAllowPrivateNetworks(true)` | Allow loopback, private and other non-public addresses. The cloud metadata endpoint (`169.254.169.254`, `fd00:ec2::254`, `metadata.google.internal`, `metadata.internal`) stays refused. |
+| `withAllowedSchemes(schemes)` | Narrow the schemes, for example to `https` only |
+| `withResolver(f)` | Resolve host names with `f` instead of `InetAddress.getAllByName` |
+
+Any other rule is a `UrlPolicy` of your own: one method, `resolve(url: URI): Either[NetworkError, Seq[InetAddress]]`,
+returning the addresses the loader may connect to.
+
+The loaders speak HTTP/1.1 over their own socket, so they use no proxy (`http.proxyHost` is ignored) and read each
+body as UTF-8. Request headers are sent on every redirect hop, including one to another host the policy allows.
 
 ### robots.txt
 
@@ -425,8 +460,9 @@ With `respectRobotsTxt = true` (the default), `WebCrawlerLoader` fetches `/robot
 scheme, host and port, caches the parsed rules for an hour, and uses the group for its `userAgent`
 (the longest matching `User-agent`, else `*`). A disallowed page is `Skipped` with
 "Blocked by robots.txt" and its links are not followed. The longest matching `Allow`/`Disallow`
-rule wins, and `Allow` wins a tie; `*` and `$` patterns are supported. A robots.txt that cannot be
-fetched, or answers anything other than 200, allows everything. A `Crawl-delay` longer than
+rule wins, and `Allow` wins a tie; `*` and `$` patterns are supported. The robots.txt request and its redirects
+are checked by the crawler's `UrlPolicy` like a page: a refused one is never requested. A robots.txt that is refused,
+cannot be fetched, or answers anything other than 200, allows everything. A `Crawl-delay` longer than
 `CrawlerConfig.delay` replaces it.
 
 `UrlLoader` does not read robots.txt: it fetches exactly the URLs you give it.

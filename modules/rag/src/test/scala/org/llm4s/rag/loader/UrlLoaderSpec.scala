@@ -161,4 +161,69 @@ class UrlLoaderSpec extends AnyFlatSpec with Matchers {
     shown should include("Accept -> text/html")
     shown should include("https://docs.example.com/page")
   }
+
+  // ==========================================================================
+  // URL policy (#2724)
+  // ==========================================================================
+
+  import LoopbackHttpServer.*
+
+  "UrlLoader with a UrlPolicy" should "load from a host the policy allows, at the address it returned" in {
+    val page = Reply(
+      200,
+      "# Title",
+      Map("Content-Type" -> "text/markdown", "ETag" -> "\"e1\"", "Last-Modified" -> "Wed, 21 Oct 2015 07:28:00 GMT")
+    )
+    withServer("/doc.md" -> page) { server =>
+      val url    = s"${server.url("docs.test")}/doc.md"
+      val policy = loopbackPolicy.withResolver(fakeDns("docs.test"))
+      val result = UrlLoader(url).withUrlPolicy(policy).withHeaders(Map("X-Key" -> "k")).load().next()
+
+      val doc = result.asInstanceOf[LoadResult.Success].document
+      doc.content shouldBe "# Title"
+      doc.metadata("content_type") shouldBe "text/markdown"
+      doc.metadata("etag") shouldBe "\"e1\""
+      doc.metadata("lastModified") shouldBe "1445412480000"
+      doc.version.flatMap(_.timestamp) shouldBe Some(1445412480000L)
+      doc.hints shouldBe Some(DocumentHints.markdown)
+
+      val seen = server.requests.head
+      seen.host shouldBe Some(s"docs.test:${server.port}")
+      seen.userAgent shouldBe Some("LLM4S-RAG/1.0")
+      seen.headers.get("x-key") shouldBe Some("k")
+    }
+  }
+
+  it should "send the caller's User-Agent instead of its own" in {
+    withServer("/p" -> Reply(200, "x")) { server =>
+      UrlLoader.withUserAgent(Seq(s"${server.baseUrl}/p"), "mine/2").withUrlPolicy(loopbackPolicy).load().next()
+      server.requests.map(_.userAgent) shouldBe Seq(Some("mine/2"))
+    }
+  }
+
+  it should "fail a non-200 answer, naming the document" in {
+    withServer() { server =>
+      val url    = s"${server.baseUrl}/gone"
+      val result = UrlLoader(url).withUrlPolicy(loopbackPolicy).load().next().asInstanceOf[LoadResult.Failure]
+      result.error.message should startWith("HTTP 404")
+      result.documentId shouldBe Some(url)
+    }
+  }
+
+  it should "check every redirect hop against the policy" in {
+    withServer("/start" -> redirect("http://other.test/secret")) { server =>
+      val policy = loopbackPolicy.withResolver(fakeDns("docs.test", "other.test")).withAllowedHosts(Set("docs.test"))
+      val result =
+        UrlLoader(s"${server.url("docs.test")}/start").withUrlPolicy(policy).load().next()
+      result.asInstanceOf[LoadResult.Failure].error.message should include("Redirect blocked by SSRF protection")
+      server.paths shouldBe Seq("/start")
+    }
+  }
+
+  it should "refuse a loopback server under the default policy, without a request" in {
+    withServer("/p" -> Reply(200, "x")) { server =>
+      UrlLoader(s"${server.baseUrl}/p").load().next() shouldBe a[LoadResult.Failure]
+      server.requests shouldBe empty
+    }
+  }
 }

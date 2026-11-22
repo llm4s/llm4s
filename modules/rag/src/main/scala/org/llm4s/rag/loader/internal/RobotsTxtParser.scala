@@ -1,13 +1,12 @@
 package org.llm4s.rag.loader.internal
 
-import org.llm4s.util.DurationRounding
+import org.llm4s.rag.loader.UrlPolicy
 
-import java.net.{ HttpURLConnection, URI }
+import java.net.URI
 import java.util.regex.Pattern
 import scala.collection.mutable
 import scala.concurrent.duration.*
-import scala.io.Source
-import scala.util.{ Try, Using }
+import scala.util.Try
 
 /**
  * Parser and cache for robots.txt files.
@@ -124,12 +123,18 @@ object RobotsTxtParser {
    * @param url URL to check
    * @param userAgent User agent string
    * @param timeout Request timeout
+   * @param policy Which URLs the robots.txt fetch may request, and where it connects
    * @return true if URL is allowed
    */
-  def isAllowed(url: String, userAgent: String, timeout: FiniteDuration = 30.seconds): Boolean =
+  def isAllowed(
+    url: String,
+    userAgent: String,
+    timeout: FiniteDuration = 30.seconds,
+    policy: UrlPolicy = UrlPolicy.default
+  ): Boolean =
     parseUrl(url)
       .map { parsed =>
-        val groups = getOrFetch(parsed, userAgent, timeout)
+        val groups = getOrFetch(parsed, userAgent, timeout, policy)
         val rules  = selectRules(groups, userAgent)
         rules.isAllowed(parsed.path)
       }
@@ -141,12 +146,18 @@ object RobotsTxtParser {
    * @param url URL to check
    * @param userAgent User agent string
    * @param timeout Request timeout
+   * @param policy Which URLs the robots.txt fetch may request, and where it connects
    * @return Parsed rules for this user agent
    */
-  def getRules(url: String, userAgent: String, timeout: FiniteDuration = 30.seconds): RobotsTxt =
+  def getRules(
+    url: String,
+    userAgent: String,
+    timeout: FiniteDuration = 30.seconds,
+    policy: UrlPolicy = UrlPolicy.default
+  ): RobotsTxt =
     parseUrl(url)
       .map { parsed =>
-        val groups = getOrFetch(parsed, userAgent, timeout)
+        val groups = getOrFetch(parsed, userAgent, timeout, policy)
         selectRules(groups, userAgent)
       }
       .getOrElse(RobotsTxt.empty)
@@ -154,7 +165,12 @@ object RobotsTxtParser {
   /**
    * Get cached robots.txt or fetch if expired/missing.
    */
-  private def getOrFetch(parsed: ParsedUrl, userAgent: String, timeout: FiniteDuration): Seq[RobotsGroup] = {
+  private def getOrFetch(
+    parsed: ParsedUrl,
+    userAgent: String,
+    timeout: FiniteDuration,
+    policy: UrlPolicy
+  ): Seq[RobotsGroup] = {
     val now = System.currentTimeMillis()
     val key = cacheKey(parsed)
 
@@ -162,40 +178,32 @@ object RobotsTxtParser {
       case Some((groups, fetchTime)) if now - fetchTime < cacheTtlMs =>
         groups // Cache hit
       case _ =>
-        val groups = fetch(parsed, userAgent, timeout)
-        cache(key) = (groups, now)
-        groups
+        fetch(parsed, userAgent, timeout, policy) match {
+          case Some(groups) =>
+            cache(key) = (groups, now)
+            groups
+          case None => Seq.empty // refused by the policy: not cached, so a policy that allows it still fetches
+        }
     }
   }
 
   /**
-   * Fetch and parse robots.txt for a domain.
+   * Fetch and parse robots.txt for a domain. The URL and every redirect hop are checked by `policy`, and the request
+   * goes only to an address it approved; a refused, failed or non-200 fetch allows everything. None when the
+   * policy refused the request.
    */
-  private def fetch(parsed: ParsedUrl, userAgent: String, timeout: FiniteDuration): Seq[RobotsGroup] =
-    Try {
-      val uri  = new URI(parsed.scheme, null, parsed.host, parsed.port, "/robots.txt", null, null)
-      val conn = uri.toURL.openConnection().asInstanceOf[HttpURLConnection]
-
-      val timeoutMillis = DurationRounding.ceilMillisInt(timeout)
-      conn.setConnectTimeout(timeoutMillis)
-      conn.setReadTimeout(timeoutMillis)
-      conn.setRequestProperty("User-Agent", userAgent)
-
-      Using.resource(new AutoCloseable {
-        override def close(): Unit = conn.disconnect()
-      }) { _ =>
-        val code = conn.getResponseCode
-        if (code == 200) {
-          val content = Using.resource(Source.fromInputStream(conn.getInputStream, "UTF-8")) {
-            _.mkString
-          }
-          parseAll(content)
-        } else {
-          // No robots.txt or error - allow all
-          Seq.empty
-        }
-      }
-    }.getOrElse(Seq.empty)
+  private def fetch(
+    parsed: ParsedUrl,
+    userAgent: String,
+    timeout: FiniteDuration,
+    policy: UrlPolicy
+  ): Option[Seq[RobotsGroup]] =
+    Try(new URI(parsed.scheme, null, parsed.host, parsed.port, "/robots.txt", null, null).toString).toOption
+      .map(url => PinnedHttpClient.get(url, Seq("User-Agent" -> userAgent), timeout, policy)) match {
+      case Some(Left(err)) if err.endpoint == "ssrf-protection" => None
+      case Some(Right(resp)) if resp.status == 200              => Some(parseAll(resp.body))
+      case _                                                    => Some(Seq.empty)
+    }
 
   private def parseUrl(url: String): Option[ParsedUrl] =
     Try {

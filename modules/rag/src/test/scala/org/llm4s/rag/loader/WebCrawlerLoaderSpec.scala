@@ -265,4 +265,67 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
       isFirstRequest = false
     ) shouldBe None
   }
+
+  // ==========================================================================
+  // URL policy (#2724)
+  // ==========================================================================
+
+  import LoopbackHttpServer.*
+
+  private def noDelay = CrawlerConfig().withDelay(Duration.Zero).withSameDomainOnly(false)
+
+  "WebCrawlerLoader with a UrlPolicy" should "crawl allowed links and request nothing from a host outside the allow-list" in {
+    withServer("/x" -> html("<html><body>secret</body></html>")) { other =>
+      val seed = html(
+        s"""<html><head><title>Seed</title></head><body><p>seed page</p>
+           |<a href="/child">child</a><a href="${other.url("other.test")}/x">other</a></body></html>""".stripMargin
+      )
+      withServer(
+        "/"           -> seed,
+        "/child"      -> html("<html><body><p>child page</p></body></html>"),
+        "/robots.txt" -> Reply(200, "User-agent: *\nAllow: /\n")
+      ) { site =>
+        val policy  = loopbackPolicy.withResolver(fakeDns("site.test", "other.test")).withAllowedHosts(Set("site.test"))
+        val results = WebCrawlerLoader(Seq(s"${site.url("site.test")}/"), noDelay.withUrlPolicy(policy)).load().toList
+
+        results.collect { case LoadResult.Success(doc) => doc.content }.mkString should include("child page")
+        results.collect { case f: LoadResult.Failure => f.error.message }.mkString should include(
+          "not in the allowed hosts"
+        )
+        other.requests shouldBe empty // neither the page nor its robots.txt
+        site.requests.flatMap(_.host).distinct shouldBe Seq(s"site.test:${site.port}")
+        (site.paths should contain).allOf("/robots.txt", "/", "/child")
+      }
+    }
+  }
+
+  it should "not fetch robots.txt for a link the policy refuses" in {
+    withServer("/robots.txt" -> Reply(200, "User-agent: *\nDisallow: /\n")) { internal =>
+      val loader = WebCrawlerLoader(Seq(s"${internal.baseUrl}/page"), noDelay)
+      loader.load().next() shouldBe a[LoadResult.Failure]
+      internal.requests shouldBe empty
+    }
+  }
+
+  it should "skip a page that is not HTML, and fail a redirect the policy refuses" in {
+    withServer(
+      "/data" -> Reply(200, "{}", Map("Content-Type" -> "application/json")),
+      "/r"    -> redirect("http://169.254.169.254/")
+    ) { site =>
+      val config = noDelay.withRobotsTxt(false).withUrlPolicy(loopbackPolicy)
+      WebCrawlerLoader(Seq(s"${site.baseUrl}/data"), config).load().next() shouldBe a[LoadResult.Skipped]
+      WebCrawlerLoader(Seq(s"${site.baseUrl}/r"), config).load().next() match {
+        case f: LoadResult.Failure => f.error.message should include("Redirect blocked by SSRF protection")
+        case other                 => fail(s"expected a failure, got $other")
+      }
+      WebCrawlerLoader(Seq(s"${site.baseUrl}/missing"), config).load().next() match {
+        case f: LoadResult.Failure => f.error.message should startWith("HTTP 404")
+        case other                 => fail(s"expected a failure, got $other")
+      }
+    }
+  }
+
+  it should "carry the policy through withUrlPolicy" in {
+    WebCrawlerLoader("https://example.com").withUrlPolicy(loopbackPolicy).config.urlPolicy shouldBe loopbackPolicy
+  }
 }

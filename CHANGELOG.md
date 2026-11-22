@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [migration](docs/reference/migration.md#a-rag-with-a-searchindex-ingests-only-with-permissions-2716).
 - A `DocumentRegistry` of your own implements `register(docId, version, sourceId)` and `documentIds(sourceId)`
   (#2714); [migration](docs/reference/migration.md#documentregistry-is-source-scoped-2714).
+- `DirectoryLoader` skips symbolic links that leave its root, and a positional pattern on `UrlLoader`, `CrawlerConfig`
+  or `DirectoryLoader` gains a field (#2724); [migration](docs/reference/migration.md#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724).
 
 ### Providers
 
@@ -139,6 +141,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Embeddings & RAG
 
+- **Added** `UrlPolicy` on `UrlLoader`, `WebCrawlerLoader` and robots.txt (allow-listed hosts, extra blocked hosts,
+  `allowPrivateNetworks`), checked on every request and redirect and connected to the approved address against DNS
+  rebinding; **Fixed** `DirectoryLoader` stays in its root and reads only regular files [#2724](https://github.com/llm4s/llm4s/issues/2724).
 - **Added** `RAGConfig.withCompletionOptions`: the options `queryWithAnswer` and `queryWithPermissionsAndAnswer` generate
   the answer with, which each call can override (`options = ...`); the default is still temperature 0.0. Java:
   `JRagBuilder.completionOptions` [#2715](https://github.com/llm4s/llm4s/issues/2715).
