@@ -8,7 +8,8 @@ nav_order: 8
 
 # RFC 0008: Generation controls and reported adjustments
 
-- **Status:** Accepted
+- **Status:** Implemented, in the release after 0.6.0 (PRs #2532, #2617, #2666, #2706, and the follow-ups #2699
+  and #2710); three follow-ups remain open (see [Delivery](#delivery))
 - **Author(s):** @jwgcooke
 - **Tracking issue:** [#2115](https://github.com/llm4s/llm4s/issues/2115)
 - **Pull request:** [#2445](https://github.com/llm4s/llm4s/pull/2445)
@@ -222,7 +223,7 @@ Mapping, each provider in its own module. Anything not listed is reported as `Dr
 | OpenAI / Azure | `reasoning_effort`; an unsupported level `Adjusted` to the nearest supported one | `Off` → the lowest supported effort (`Adjusted` unless it is `none`); `Budget` `Dropped` |
 | Z.ai | as #1691 | `Off` → `thinking.type: disabled` (or `low` on GLM-5.3, `Adjusted`) |
 | OpenRouter | as today | Anthropic models: `Budget(n)` → `thinking.budget_tokens: n`, as today; `Off` → no thinking block. Others `Dropped` |
-| Gemini / Vertex AI | `thinking_level` where supported | `thinkingBudget`: `Off` → 0, `Adaptive` → -1, `Budget(n)` → n, fitted to the model's range (`Adjusted` when fitted) |
+| Gemini / Vertex AI | `thinking_level` where supported (Gemini 3 and later) | Gemini 2.5: `thinkingBudget`: `Off` → 0, `Adaptive` → -1, `Budget(n)` → n, fitted to the model's range (`Adjusted` when fitted); 2.5 Pro cannot turn thinking off and gets its minimum. Gemini 3 and later deprecate `thinkingBudget` and reject it beside a level: `Off` → the lowest level, `Budget` `Dropped` (the Gemini follow-up) |
 | watsonx | gpt-oss models: `reasoning_effort`, a level it lacks `Adjusted` to the nearest; other models `Dropped` | gpt-oss: `Off` → `low` (`Adjusted`), `Adaptive` `NotNeeded`, `Budget` `Dropped`; other models `Dropped` |
 | Perplexity | `reasoning.effort`, every level by name | `Off` → `minimal` (`Adjusted`), `Adaptive` `NotNeeded`, `Budget` `Dropped` |
 | Bedrock, Ollama, others | `Dropped` until mapped | `Dropped` until mapped (Ollama `think` in a follow-up) |
@@ -385,6 +386,10 @@ completion.adjustments                                 // what was dropped, adju
 
 ## Delivery
 
+All six PRs are delivered: PR 1 in [#2532](https://github.com/llm4s/llm4s/pull/2532), PR 2 in
+[#2617](https://github.com/llm4s/llm4s/pull/2617), PRs 3 to 5 in [#2666](https://github.com/llm4s/llm4s/pull/2666) and
+PR 6 in [#2706](https://github.com/llm4s/llm4s/pull/2706), the last two replacing @q-nadeem's #2618 to #2620 and #2622.
+
 Each PR has its own review:
 
 1. **PR 1 (Part 1).** `RequestOption` and `RequestAdjustment` on `TransformationResult` and `Completion`, the
@@ -412,7 +417,11 @@ Each PR has its own review:
    Gemini.
 
 Follow-ups, one provider or one control per PR, under this RFC: Bedrock `cachePoint`, Ollama `think`, Gemini
-thinking levels, and service tier.
+thinking levels, and service tier. Gemini thinking levels are delivered in
+[#2710](https://github.com/llm4s/llm4s/pull/2710) (Gemini and Vertex AI send `thinkingConfig`, replacing #2623), and watsonx, Perplexity and Jlama report what they
+leave out in [#2699](https://github.com/llm4s/llm4s/pull/2699).
+Bedrock `cachePoint`, Ollama `think` and service tier are still open; until each lands, its provider reports the
+option `Dropped` (service tier has no option yet).
 
 The docs (`docs/guide/cost-controls.md` with the mapping table, precedence rule and warm-up pattern, rows in
 `providers.md`, and the adjustment contract in `writing-a-provider.md`) land with PRs 1, 4 and 6.
