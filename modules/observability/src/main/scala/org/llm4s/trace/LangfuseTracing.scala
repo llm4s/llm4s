@@ -381,11 +381,24 @@ class LangfuseTracing(
             "level"         -> "ERROR",
             "statusMessage" -> e.error.getMessage,
             "input"         -> ujson.Obj("error" -> e.error.getMessage),
-            "metadata" -> ujson.Obj(
-              "error_type"  -> e.error.getClass.getSimpleName,
-              "context"     -> e.context,
-              "stack_trace" -> e.error.getStackTrace.take(5).mkString("\n")
-            )
+            "metadata" -> {
+              val metadata = ujson.Obj(
+                "error_type"  -> e.error.getClass.getSimpleName,
+                "context"     -> e.context,
+                "stack_trace" -> e.error.getStackTrace.take(5).mkString("\n")
+              )
+              // a content-filtered reply's billed tokens (#2676)
+              e.usage.foreach { u =>
+                metadata("usage") = ujson.Obj(
+                  "prompt_tokens"     -> u.promptTokens,
+                  "completion_tokens" -> u.completionTokens,
+                  "thinking_tokens"   -> u.thinkingTokens.getOrElse(0),
+                  "output_tokens"     -> u.totalOutputTokens,
+                  "total_tokens"      -> u.totalTokens
+                )
+              }
+              metadata
+            }
           )
         )
 

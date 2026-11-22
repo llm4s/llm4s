@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pattern on `Completion` or `ModelCallCompleted` gains a field ([RFC 0009](docs/rfcs/0009-model-call-contract.md) PR 1);
   [migration](docs/reference/migration.md#finish-reasons-are-typed-2613).
 - A content-filter stop (`content_filter`, Anthropic's `refusal`, Bedrock's guardrail reasons) is a
-  `Left(ContentFilteredError)` on every client, not a `Completion` (RFC 0009 PR 2);
+  `Left(ContentFilteredError)` on every client, not a `Completion` (RFC 0009 PR 2); a positional pattern on
+  `TraceEvent.ErrorOccurred` gains `usage`;
   [migration](docs/reference/migration.md#every-providers-content-filter-stop-is-an-error-2677). So is a stream that
   ends without its end marker or reports an error event, on OpenAI, Anthropic, Gemini, Vertex AI and Ollama (PR 4);
   [migration](docs/reference/migration.md#a-stream-that-did-not-finish-is-an-error-2613).
@@ -52,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** with `Completion.finishReason` (#2613): Ollama reads `done_reason` instead of reporting `stop` for every finished reply,
   Anthropic streams trace `message_delta`'s `stop_reason` instead of `"stop"`, Perplexity's `incomplete` with a tool call is `Length`,
   and every client's content-filter stop is a `ContentFilteredError` carrying the billed `usage`, which metrics record
+  and traces carry on `TraceEvent.ErrorOccurred`'s new `usage`
   ([migration](docs/reference/migration.md#every-providers-content-filter-stop-is-an-error-2677)). A stream with no end
   marker is a `NetworkError` and an error event fails it, on every client, checked by the suite's `StreamEndsEarly` and `ErrorEvent`
   ([migration](docs/reference/migration.md#a-stream-that-did-not-finish-is-an-error-2613), RFC 0009 PR 4) [#2613](https://github.com/llm4s/llm4s/issues/2613) [#2677](https://github.com/llm4s/llm4s/issues/2677) [#2676](https://github.com/llm4s/llm4s/issues/2676).
