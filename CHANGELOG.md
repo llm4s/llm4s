@@ -85,6 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Changed** `llm4s-agent` takes the MiMa baseline with the other frozen modules, not a later one of its own: RFC 0001 is
+  rejected now that the graph runtime is complete ([RFC 0001](docs/rfcs/0001-agent-baseline.md)) [#1281](https://github.com/llm4s/llm4s/issues/1281).
 - **Added** SLSA build provenance for every release's jars and POMs, the SBOMs on its GitHub Release and the `workspace-runner` image, `verify-release.sh --attestations`,
   and a guide with the PGP key fingerprint [#2305](https://github.com/llm4s/llm4s/issues/2305); [Verifying Releases](docs/reference/verifying-releases.md).
 - **Changed** each published module's `-javadoc.jar` is a sub-1 KB pointer to [llm4s.org/scaladoc](https://llm4s.org/scaladoc/), not its own Scaladoc, and

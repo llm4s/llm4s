@@ -53,7 +53,7 @@ An accepted RFC can be amended by a later pull request; a change of direction is
 
 | RFC | Title | Status | Tracking |
 |---|---|---|---|
-| [0001](0001-agent-baseline) | When `llm4s-agent` gets its MiMa baseline | Proposed | [#1281](https://github.com/llm4s/llm4s/issues/1281), [#1266](https://github.com/llm4s/llm4s/issues/1266) |
+| [0001](0001-agent-baseline) | When `llm4s-agent` gets its MiMa baseline | Rejected: it takes the baseline with the other frozen modules | [#1281](https://github.com/llm4s/llm4s/issues/1281), [#1266](https://github.com/llm4s/llm4s/issues/1266) |
 | 0002 | Growth-prone data types: `final case class X private`, companion `apply`, `with*` setters, no public `copy` | Accepted (recorded retroactively) | [#1133](https://github.com/llm4s/llm4s/issues/1133) pass 5; [policy](../reference/compatibility-policy#changing-a-frozen-api-without-breaking-it) |
 | 0003 | Times in the public API: `FiniteDuration` for a duration, `Instant` for a point in time | Accepted (recorded retroactively) | [#1133](https://github.com/llm4s/llm4s/issues/1133) passes 6 and 7 |
 | 0004 | A frozen module's public signatures expose no third-party type and no wildcard-importable implicit | Accepted (recorded retroactively) | [#1133](https://github.com/llm4s/llm4s/issues/1133) pass 8; enforced by `stabilityTierCheck` ([#2357](https://github.com/llm4s/llm4s/issues/2357)) |
