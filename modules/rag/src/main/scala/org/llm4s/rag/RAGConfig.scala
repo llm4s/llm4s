@@ -4,11 +4,12 @@ import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig }
 import org.llm4s.knowledgegraph.graphrag.GraphRAGConfig
 import org.llm4s.knowledgegraph.storage.GraphStore
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model.CompletionOptions
+import org.llm4s.llmconnect.model.{ CompletionOptions, Message }
 import org.llm4s.rag.loader.{ DirectoryLoader, DocumentLoader, DocumentRegistry, LoadingConfig }
 import org.llm4s.rag.permissions.SearchIndex
 import org.llm4s.trace.Tracing
 import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.Result
 import org.llm4s.vectorstore.FusionStrategy
 import org.llm4s.rag.transform.QueryTransformer
 import org.llm4s.security.Secret
@@ -93,7 +94,9 @@ final case class RAGConfig(
   // Answer generation options
   completionOptions: CompletionOptions = RAGConfig.DefaultCompletionOptions,
   // Where sync records what it indexed; None = in memory
-  documentRegistry: Option[DocumentRegistry] = None
+  documentRegistry: Option[DocumentRegistry] = None,
+  // Builds the standalone question a chat follow-up is searched with
+  questionCondenser: Option[(String, Seq[Message]) => Result[String]] = None
 ) {
 
   // ========== Embedding Configuration ==========
@@ -299,6 +302,22 @@ final case class RAGConfig(
    */
   def withCompletionOptions(options: CompletionOptions): RAGConfig =
     copy(completionOptions = options)
+
+  /**
+   * How a chat follow-up is searched for: given the question and the conversation history passed to
+   * `queryWithAnswer` (or its permission and streaming variants), return a standalone question to retrieve with, so
+   * that "what about the second one?" searches for what it refers to. Called only when the history is non-empty; a
+   * `Left` fails the query. The model still answers the original question, with the history before it.
+   *
+   * {{{
+   * RAGConfig.default.withQuestionCondenser { (question, history) =>
+   *   client.complete(Conversation(history :+ UserMessage(s"Rewrite as a standalone search query: $question")))
+   *     .map(_.content)
+   * }
+   * }}}
+   */
+  def withQuestionCondenser(condense: (String, Seq[Message]) => Result[String]): RAGConfig =
+    copy(questionCondenser = Some(condense))
 
   // ========== Observability Configuration ==========
 

@@ -985,6 +985,11 @@ final class RAG private (
    * @param topK Override default topK (optional)
    * @param options the completion options for this answer; the config's (`RAGConfig.withCompletionOptions`,
    *                temperature 0.0 by default) unless given, so one pipeline can compare settings per call
+   * @param history the conversation so far, oldest first, for a chat: sent to the model between the system prompt and
+   *                the message with the contexts and the question. It holds no `SystemMessage` (the pipeline's system
+   *                prompt is the only one), or the call is a `ValidationError`. With a
+   *                [[RAGConfig.withQuestionCondenser question condenser]] configured and a non-empty history, the
+   *                search uses the standalone question the condenser builds; the model still gets `question`.
    * On a RAG with a [[org.llm4s.rag.permissions.SearchIndex SearchIndex]] it returns a `ConfigurationError`, as
    * [[query]] does: use [[queryWithPermissionsAndAnswer]].
    *
@@ -993,15 +998,17 @@ final class RAG private (
   def queryWithAnswer(
     question: String,
     topK: Option[Int] = None,
-    options: CompletionOptions = config.completionOptions
+    options: CompletionOptions = config.completionOptions,
+    history: Seq[Message] = Seq.empty
   ): Result[RAGAnswerResult] =
     plainQueryAllowed("queryWithAnswer", "queryWithPermissionsAndAnswer")
-      .flatMap(_ => answerFromQuery(question, topK, options))
+      .flatMap(_ => answerFromQuery(question, topK, options, history))
 
   private def answerFromQuery(
     question: String,
     topK: Option[Int],
-    options: CompletionOptions
+    options: CompletionOptions,
+    history: Seq[Message]
   ): Result[RAGAnswerResult] =
     answerClient match {
       case None =>
@@ -1013,8 +1020,9 @@ final class RAG private (
       case Some(client) =>
         val meter = new QueryMeter
         for {
-          searchResults <- retrieve(question, topK, meter)
-          answer        <- generateAnswer(client, question, searchResults, options, meter)
+          searchQuestion <- searchQuestion(question, history)
+          searchResults  <- retrieve(searchQuestion, topK, meter)
+          answer         <- generateAnswer(client, question, history, searchResults, options, meter)
         } yield answer
     }
 
@@ -1041,6 +1049,7 @@ final class RAG private (
    * @param question   the question to answer
    * @param topK       override the default topK
    * @param options    the completion options for this answer; the config's unless given
+   * @param history    the conversation so far, as [[queryWithAnswer]] takes it
    * @param onContexts the contexts the answer is generated from, before any chunk
    * @param onChunk    each piece of the answer as it arrives
    * @return the whole answer with its contexts, once the stream has ended
@@ -1048,16 +1057,18 @@ final class RAG private (
   def queryWithAnswerStreaming(
     question: String,
     topK: Option[Int] = None,
-    options: CompletionOptions = config.completionOptions
+    options: CompletionOptions = config.completionOptions,
+    history: Seq[Message] = Seq.empty
   )(onContexts: Seq[RAGSearchResult] => Unit, onChunk: StreamedChunk => Unit): Result[RAGAnswerResult] =
     plainQueryAllowed("queryWithAnswerStreaming", "queryWithPermissionsAndAnswerStreaming").flatMap { _ =>
-      streamAnswerFromQuery(question, topK, options, onContexts, onChunk)
+      streamAnswerFromQuery(question, topK, options, history, onContexts, onChunk)
     }
 
   private def streamAnswerFromQuery(
     question: String,
     topK: Option[Int],
     options: CompletionOptions,
+    history: Seq[Message],
     onContexts: Seq[RAGSearchResult] => Unit,
     onChunk: StreamedChunk => Unit
   ): Result[RAGAnswerResult] =
@@ -1071,8 +1082,9 @@ final class RAG private (
       case Some(client) =>
         val meter = new QueryMeter
         for {
-          searchResults <- retrieve(question, topK, meter)
-          answer        <- streamAnswer(client, question, searchResults, options, onContexts, onChunk, meter)
+          searchQuestion <- searchQuestion(question, history)
+          searchResults  <- retrieve(searchQuestion, topK, meter)
+          answer         <- streamAnswer(client, question, history, searchResults, options, onContexts, onChunk, meter)
         } yield answer
     }
 
@@ -1318,6 +1330,7 @@ final class RAG private (
    * @param topK Maximum number of results
    * @param options the completion options for this answer; the config's (`RAGConfig.withCompletionOptions`,
    *                temperature 0.0 by default) unless given
+   * @param history the conversation so far, as [[queryWithAnswer]] takes it
    * @return Answer with permission-filtered supporting contexts
    */
   def queryWithPermissionsAndAnswer(
@@ -1325,7 +1338,8 @@ final class RAG private (
     collectionPattern: CollectionPattern,
     question: String,
     topK: Option[Int] = None,
-    options: CompletionOptions = config.completionOptions
+    options: CompletionOptions = config.completionOptions,
+    history: Seq[Message] = Seq.empty
   ): Result[RAGAnswerResult] =
     answerClient match {
       case None =>
@@ -1337,8 +1351,9 @@ final class RAG private (
       case Some(client) =>
         val meter = new QueryMeter
         for {
-          searchResults <- retrieveWithPermissions(auth, collectionPattern, question, topK, meter)
-          answer        <- generateAnswer(client, question, searchResults, options, meter)
+          searchQuestion <- searchQuestion(question, history)
+          searchResults  <- retrieveWithPermissions(auth, collectionPattern, searchQuestion, topK, meter)
+          answer         <- generateAnswer(client, question, history, searchResults, options, meter)
         } yield answer
     }
 
@@ -1352,6 +1367,7 @@ final class RAG private (
    * @param question          the question to answer
    * @param topK              maximum number of results
    * @param options           the completion options for this answer; the config's unless given
+   * @param history           the conversation so far, as [[queryWithAnswer]] takes it
    * @param onContexts        the permission-filtered contexts the answer is generated from, before any chunk
    * @param onChunk           each piece of the answer as it arrives
    * @return the whole answer with its contexts, once the stream has ended
@@ -1361,7 +1377,8 @@ final class RAG private (
     collectionPattern: CollectionPattern,
     question: String,
     topK: Option[Int] = None,
-    options: CompletionOptions = config.completionOptions
+    options: CompletionOptions = config.completionOptions,
+    history: Seq[Message] = Seq.empty
   )(onContexts: Seq[RAGSearchResult] => Unit, onChunk: StreamedChunk => Unit): Result[RAGAnswerResult] =
     answerClient match {
       case None =>
@@ -1373,8 +1390,9 @@ final class RAG private (
       case Some(client) =>
         val meter = new QueryMeter
         for {
-          searchResults <- retrieveWithPermissions(auth, collectionPattern, question, topK, meter)
-          answer        <- streamAnswer(client, question, searchResults, options, onContexts, onChunk, meter)
+          searchQuestion <- searchQuestion(question, history)
+          searchResults  <- retrieveWithPermissions(auth, collectionPattern, searchQuestion, topK, meter)
+          answer         <- streamAnswer(client, question, history, searchResults, options, onContexts, onChunk, meter)
         } yield answer
     }
 
@@ -1809,18 +1827,20 @@ final class RAG private (
   private def generateAnswer(
     client: LLMClient,
     question: String,
+    history: Seq[Message],
     contexts: Seq[RAGSearchResult],
     options: CompletionOptions,
     meter: QueryMeter
   ): Result[RAGAnswerResult] =
     meter
-      .answering(client.complete(answerConversation(question, contexts), options))
+      .answering(client.complete(answerConversation(question, history, contexts), options))
       .map(answerResult(question, contexts, meter))
 
   /** The contexts to `onContexts`, then the answer streamed to `onChunk`, then the whole answer. */
   private def streamAnswer(
     client: LLMClient,
     question: String,
+    history: Seq[Message],
     contexts: Seq[RAGSearchResult],
     options: CompletionOptions,
     onContexts: Seq[RAGSearchResult] => Unit,
@@ -1830,7 +1850,7 @@ final class RAG private (
     for {
       _ <- Safety.safely(onContexts(contexts))
       completion <- meter.answering(
-        client.streamComplete(answerConversation(question, contexts), options, onChunk)
+        client.streamComplete(answerConversation(question, history, contexts), options, onChunk)
       )
     } yield answerResult(question, contexts, meter)(completion)
 
@@ -1849,8 +1869,33 @@ final class RAG private (
     )
   }
 
-  /** The system prompt, and the question with the numbered contexts, that an answer is generated from. */
-  private def answerConversation(question: String, contexts: Seq[RAGSearchResult]): Conversation = {
+  /**
+   * The question to search with: `question` itself, or, with a non-empty history and a question condenser configured,
+   * the standalone question the condenser builds from both. A history holding a `SystemMessage` is refused first.
+   */
+  private def searchQuestion(question: String, history: Seq[Message]): Result[String] =
+    if (history.exists(_.isInstanceOf[SystemMessage]))
+      Left(
+        ValidationError(
+          "history",
+          "must not contain a SystemMessage: the RAG pipeline sends its own system prompt (RAGConfig.withSystemPrompt)"
+        )
+      )
+    else
+      config.questionCondenser match {
+        case Some(condense) if history.nonEmpty => condense(question, history)
+        case _                                  => Right(question)
+      }
+
+  /**
+   * The system prompt, the conversation so far, and the question with the numbered contexts, that an answer is
+   * generated from.
+   */
+  private def answerConversation(
+    question: String,
+    history: Seq[Message],
+    contexts: Seq[RAGSearchResult]
+  ): Conversation = {
     val contextText = contexts.zipWithIndex
       .map { case (ctx, i) => s"[${i + 1}] ${ctx.content}" }
       .mkString("\n\n")
@@ -1864,12 +1909,7 @@ Question: $question
 
 Answer:"""
 
-    Conversation(
-      Seq(
-        SystemMessage(systemPrompt),
-        UserMessage(userPrompt)
-      )
-    )
+    Conversation((SystemMessage(systemPrompt) +: history) :+ UserMessage(userPrompt))
   }
 
   private val DefaultSystemPrompt =
