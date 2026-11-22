@@ -168,6 +168,11 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
     failure(assertModelCallContract(cases - ContractCase.ToolCall)(new Reference(_))) should include("ToolCall")
   }
 
+  it should "fail when CleanText is NotApplicable: it is what proves the client streams" in {
+    val noText = cases.updated(ContractCase.CleanText, Applicability.NotApplicable("no text"))
+    failure(assertModelCallContract(noText)(new Reference(_))) should include("CleanText is NotApplicable")
+  }
+
   it should "fail when a case is NotApplicable without a reason" in {
     val blank = cases.updated(ContractCase.ContentFiltered, Applicability.NotApplicable(" "))
     failure(assertModelCallContract(blank)(new Reference(_))) should include("without a reason")

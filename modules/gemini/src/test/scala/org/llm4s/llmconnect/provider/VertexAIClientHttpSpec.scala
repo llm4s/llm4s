@@ -693,8 +693,24 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     rateLimited.message should include("Resource exhausted")
   }
 
-  "A data line that is not JSON" should "still be skipped (RFC 0009, open question 5)" in {
-    val sse = "data: not json\n\n" +
+  "A data line that is not JSON" should "fail the stream, a 502, unread past it (RFC 0009, open question 5)" in {
+    val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
+    val sse =
+      """data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"}}]}""" + "\n\n" +
+        "data: not json\n\n" +
+        """data: {"candidates":[{"content":{"parts":[{"text":"lo"}],"role":"model"},"finishReason":"STOP"}]}""" + "\n\n"
+    streamOf(sse, chunks += _) match {
+      case Left(e: org.llm4s.error.ServiceError) =>
+        e.httpStatus shouldBe 502
+        e.message should include("not JSON")
+      case other => fail(s"expected a ServiceError, got $other")
+    }
+    // the text already delivered stays delivered; the chunk after the unreadable line is never read
+    chunks.flatMap(_.content) shouldBe List("Hel")
+  }
+
+  it should "not be confused with a blank line or an SSE comment, which a keep-alive is: both are ignored" in {
+    val sse = ": keep-alive\n\n" + "\n" + ":\n" +
       """data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"},"finishReason":"STOP"}]}""" + "\n\n"
     streamOf(sse, _ => ()).map(_.content) shouldBe Right("Hel")
   }

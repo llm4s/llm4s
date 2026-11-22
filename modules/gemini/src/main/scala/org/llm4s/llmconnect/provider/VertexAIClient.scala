@@ -215,12 +215,14 @@ class VertexAIClient(
                 Iterator.continually(reader.readLine()).takeWhile(l => l != null && refused.isEmpty).foreach { line =>
                   rawStream.append(line).append('\n')
                   val trimmed = line.trim
-                  if (trimmed.startsWith("data: ")) {
-                    val jsonStr = trimmed.stripPrefix("data: ").trim
+                  // SSE: a `data:` line carries a JSON chunk; blank lines, `:` comments (keep-alives) and the other
+                  // fields are not data and are ignored
+                  if (trimmed.startsWith("data:")) {
+                    val jsonStr = trimmed.stripPrefix("data:").trim
                     if (jsonStr.nonEmpty) {
                       // a chunk's functionCall.args is the model's JSON, native in the envelope: one nested too
                       // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
-                      // (#1562); a chunk that is not JSON at all is skipped, as it always was (RFC 0009, open question 5)
+                      // (#1562); a data line that is not JSON at all fails the stream too (RFC 0009, open question 5)
                       BoundedJson.read(jsonStr) match {
                         case Right(json) if GeminiStreamEnd.streamError(json, providerName).isDefined =>
                           // an error after the 200 status ends the stream with it (RFC 0009, rule 2)
@@ -260,7 +262,9 @@ class VertexAIClient(
                             s"[VertexAI] Stream refused: a chunk is nested more than ${BoundedJson.MaxDepth} levels deep"
                           )
                           refused = Some(tooDeep)
-                        case Left(_) => () // unreadable chunk: skipped
+                        case Left(unparsed) =>
+                          logger.warn("[VertexAI] Stream refused: a data line is not JSON")
+                          refused = Some(GeminiStreamEnd.unreadable(unparsed.message, providerName))
                       }
                     }
                   }

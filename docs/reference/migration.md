@@ -130,8 +130,21 @@ An error the provider reports after the 200 status ends the stream with that err
   with status 200.
 
 Text already passed to `onChunk` stays delivered; the `Left` says the reply is incomplete. Code that kept a cut
-reply as an answer should treat the `Left` as a failed call, or retry it. A Gemini or Vertex AI data line that is
-not JSON is still skipped.
+reply as an answer should treat the `Left` as a failed call, or retry it.
+
+A Gemini or Vertex AI `data:` line that is not JSON fails the stream too, a `ServiceError` with status 502, where it
+used to be skipped (RFC 0009 PR 5). Blank lines and SSE `:` comment lines, which is how a keep-alive is sent, are
+still ignored.
+
+`OpenAIClient` (`provider = "openai"` and `"azure"`) needs a `finish_reason` on the last choice: the OpenAI SDK
+reads the stream and never shows the client `[DONE]`, so a server that ends its stream with `[DONE]` alone, and no
+`finish_reason`, now fails with the `NetworkError`. Point such a server at the `openai-compatible` provider, which
+takes `[DONE]` as the end marker.
+
+**Provider authors:** `ProviderModuleChecks.assertStreams` is removed. `assertModelCallContract` checks how every
+reply ends on both paths, and requires `ContractCase.CleanText` to apply, whose stream proves the client streams.
+Replace an `assertStreams(client)` test with the full check, every `ContractCase` declared
+([writing a provider](../guide/writing-a-provider.md#the-model-call-contract)).
 
 ## A broken or cut tool call is an error (#2613)
 

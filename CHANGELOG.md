@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [migration](docs/reference/migration.md#a-stream-that-did-not-finish-is-an-error-2613). So is a tool call whose
   arguments are not a JSON object, or in a reply cut by the output limit, and `StreamingToolArgumentParser.parse` and
   the dialect's `parseToolCalls` return `Result` (PR 3);
-  [migration](docs/reference/migration.md#a-broken-or-cut-tool-call-is-an-error-2613).
+  [migration](docs/reference/migration.md#a-broken-or-cut-tool-call-is-an-error-2613). `ProviderModuleChecks.assertStreams`
+  is removed: `assertModelCallContract` replaces it (PR 5).
 
 ### Providers
 
@@ -51,14 +52,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Core
 
 - **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
-  traces too, and on each agent call's `ModelCallCompleted` (an event stored before reads with none), mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider
-  ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1, 2 and 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
+  traces too, and on each agent call's `ModelCallCompleted` (an event stored before reads with none), mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider, in place of `assertStreams`
+  ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1, 2, 5 and 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
 - **Changed** with `Completion.finishReason` (#2613): Ollama reads `done_reason` instead of reporting `stop` for every finished reply,
   Anthropic streams trace `message_delta`'s `stop_reason` instead of `"stop"`, Perplexity's `incomplete` with a tool call is `Length`,
   and every client's content-filter stop is a `ContentFilteredError` carrying the billed `usage`, which metrics record
   and traces carry on `TraceEvent.ErrorOccurred`'s new `usage`
   ([migration](docs/reference/migration.md#every-providers-content-filter-stop-is-an-error-2677)). A stream with no end
-  marker is a `NetworkError` and an error event fails it, on every client, checked by the suite's `StreamEndsEarly` and `ErrorEvent`
+  marker is a `NetworkError` and an error event fails it, on every client, as does a Gemini or Vertex AI data line that is not JSON (PR 5), checked by the suite's `StreamEndsEarly` and `ErrorEvent`
   ([migration](docs/reference/migration.md#a-stream-that-did-not-finish-is-an-error-2613), RFC 0009 PR 4). A broken or cut
   tool call is the malformed-tool-call `ProcessingError` where it was `{}` or dropped, checked by `NoArgumentToolCall`,
   `ToolCallCutByLimit` and `MalformedArguments`

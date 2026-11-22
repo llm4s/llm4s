@@ -8,7 +8,7 @@ nav_order: 9
 
 # RFC 0009: The model call contract
 
-- **Status:** Proposed
+- **Status:** Implemented, in the release after 0.6.0 (PRs #2681, #2688, #2700, #2691, #PR5, #2687)
 - **Author(s):** @Somay-kousis
 - **Tracking issue:** [#2613](https://github.com/llm4s/llm4s/issues/2613)
 - **Pull request:** [#2614](https://github.com/llm4s/llm4s/pull/2614)
@@ -280,8 +280,8 @@ the retry path.
 
 ### Part 5: The conformance suite
 
-`llm4s-provider-testkit` gains a check that every chat provider module runs from its `Llm4s<Name>ModuleSpec`, next
-to `assertStreams`:
+`llm4s-provider-testkit` gains a check that every chat provider module runs from its `Llm4s<Name>ModuleSpec`. It
+replaced `assertStreams` (PR 5), which is removed: `CleanText` must apply, and its stream proves the client streams.
 
 ```scala
 enum ContractCase {
@@ -421,7 +421,8 @@ Already done or in progress, no RFC needed:
 - **Gemini and Vertex AI (#2563, #2664, merged).** A candidate with no `parts` is an empty answer, and a content-filter
   finish or a blocked prompt a `ContentFilteredError`, on both paths.
 
-Under this RFC, each PR with its own review:
+Under this RFC, each PR with its own review. **With PR 5 all six are merged, and the RFC is delivered:** PR 1 #2681, PR 2
+#2688, PR 3 #2700, PR 4 #2691, PR 5 #PR5, PR 6 #2687.
 
 1. **PR 1 (Part 1, core).** `FinishReason`, `Completion.finishReason`, typed `StreamedChunk.finishReason`, the
    accumulator carrying it, `TracingLLMClient` reading it for `complete`. Mapped for the chat-completions clients
@@ -442,7 +443,8 @@ Under this RFC, each PR with its own review:
 4. **PR 4 (Part 2).** End markers and error events for Anthropic, OpenAI, Gemini, Vertex AI and Ollama. Adds
    `StreamEndsEarly` and `ErrorEvent` to the suite.
 5. **PR 5 (Part 5).** `assertStreams` is replaced by the full check in every chat provider's module spec, and
-   `docs/guide/writing-a-provider.md` documents it.
+   `docs/guide/writing-a-provider.md` documents it. `assertStreams` is removed, and `CleanText` must apply. Gemini
+   and Vertex AI fail a stream on a data line that is not JSON (open question 5).
 6. **PR 6 (agent).** `ModelCallCompleted.finishReason`.
 
 **Sequencing with RFC 0008.** #2532 (RFC 0008 PR 1) added `Completion.adjustments` and #2617 (PR 2)
@@ -467,8 +469,11 @@ This RFC's own PR also adds its row to `docs/rfcs/README.md`.
 4. **Where the chat-completions mapping lives.** It is shared by `llm4s-openai-compatible`, `llm4s-openai` (which
    depends on it) and `llm4s-watsonx` (which depends only on core). In core as a wire-format helper, or a small copy
    in watsonx?
-5. **Unreadable chunks.** Gemini and Vertex AI skip a data line that is not JSON (`GeminiClient.scala:240`). Is that a
-   `Left` under rule 2, or a tolerated keep-alive? There is no evidence either way yet.
+5. **Unreadable chunks: decided.** Gemini and Vertex AI skipped a data line that is not JSON
+   (`GeminiClient.scala:240`). The maintainers decided it is a `Left` under rule 2, a failed stream and never a skipped
+   line: a `ServiceError` with status 502, as a bad gateway is, and nothing after it is read (PR 5). Blank lines and
+   SSE `:` comment lines are still ignored, since a keep-alive is sent as a comment, and so are the other SSE fields
+   (`event:`, `id:`).
 6. **Agent behaviour on `Length`.** Should an agent run whose last answer was cut end `Completed`, or should
    `AgentStatus` say so? This touches the agent runtime's owners and could be its own RFC.
 7. **Content filter: decided.** #2664 made it a `Left(ContentFilteredError)` for Gemini and Vertex AI, whether or not

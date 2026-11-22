@@ -7,7 +7,7 @@ import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient, Multipart
 import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentitySource, TokenExchangeConfig }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.security.{ KnownSecrets, Secret }
 import org.llm4s.testkit.{ FakeTokenExchangeServer, ProviderModuleChecks, ProviderTestConfig, TestJwt }
@@ -38,6 +38,12 @@ class OpenAICompatibleWorkloadIdentitySpec
       .fold(error => fail(error.message), identity)
 
   private val conversation = Conversation(Seq(UserMessage("hi")))
+
+  /** A stream sent with the exchanged token succeeds and delivers at least one chunk. */
+  private def assertStreamsWithToken(client: LLMClient): Unit =
+    val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
+    client.streamComplete(conversation, CompletionOptions(), chunks += _).isRight shouldBe true
+    chunks should not be empty
 
   /** `body` run on a thread with a deliberately small (256 KB) stack; a throw, overflow included, fails the test. */
   private def onSmallStack[A](body: => A): A =
@@ -176,7 +182,7 @@ class OpenAICompatibleWorkloadIdentitySpec
       val jwt = TestJwt.es256("spiffe://llm4s.test/app", "databricks")
       val c   = client(fake, svidFile(jwt))
       c.complete(conversation, CompletionOptions()).isRight shouldBe true
-      assertStreams(c)
+      assertStreamsWithToken(c)
       fake.exchanges.head("subject_token") shouldBe jwt
       fake.exchanges.head("client_id") shouldBe "sp-uuid"
       fake.exchanges.head("scope") shouldBe "all-apis"

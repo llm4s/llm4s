@@ -3,7 +3,8 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ AnthropicConfig, AnthropicWorkloadIdentity, ContextWindowResolver }
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.security.{ KnownSecrets, Secret }
 import org.llm4s.testkit.{ FakeTokenExchangeServer, ProviderModuleChecks, ProviderTestConfig, TestJwt }
@@ -25,6 +26,12 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     sectionResult(body).fold(error => fail(error.message), identity)
 
   private val conversation = Conversation(Seq(UserMessage("hi")))
+
+  /** A stream sent with the exchanged token succeeds and delivers at least one chunk. */
+  private def assertStreamsWithToken(client: LLMClient): Unit =
+    val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
+    client.streamComplete(conversation, CompletionOptions(), chunks += _).isRight shouldBe true
+    chunks should not be empty
 
   // A Windows path has backslashes, which a quoted HOCON string reads as escapes (`\U` is not one).
   private def hoconEscaped(value: String): String = value.replace("\\", "\\\\")
@@ -117,7 +124,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     "exchange the SVID and stream messages with the access token" in FakeTokenExchangeServer.withServer { fake =>
       val file   = svidFile(TestJwt.es256("spiffe://llm4s.test/app", "https://api.anthropic.com"))
       val client = assertBuildsClient(AnthropicProvider, sectionOf(section(fake.baseUrl, file.toString)))
-      assertStreams(client)
+      assertStreamsWithToken(client)
       fake.exchanges should have size 1
       fake.apiAuthorizations shouldBe Seq("Bearer t1")
     }
@@ -125,9 +132,9 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     "refresh after a 401 while streaming" in FakeTokenExchangeServer.withServer { fake =>
       val file   = svidFile(TestJwt.es256("spiffe://llm4s.test/app", "https://api.anthropic.com"))
       val client = assertBuildsClient(AnthropicProvider, sectionOf(section(fake.baseUrl, file.toString)))
-      assertStreams(client)
+      assertStreamsWithToken(client)
       fake.rejectNextApiCalls(1)
-      assertStreams(client)
+      assertStreamsWithToken(client)
       fake.issuedTokens.size should be >= 2
       fake.apiAuthorizations.last shouldBe s"Bearer ${fake.issuedTokens.last}"
     }

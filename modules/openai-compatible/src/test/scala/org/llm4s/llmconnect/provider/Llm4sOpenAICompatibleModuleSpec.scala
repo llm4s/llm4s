@@ -11,7 +11,6 @@ import org.llm4s.testkit.LocalProviderTestServer.{
   openAICompletion,
   openAISseBody,
   sendJsonResponse,
-  sendSseResponse,
   streamThenHold,
   withServer
 }
@@ -158,20 +157,7 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
 
   "a client built by each openai-compatible descriptor" should {
 
-    "actually stream, not silently fall back to complete()" in {
-      expectations.foreach { (descriptor, _, _) =>
-        withClue(s"${descriptor.id.asString}: ") {
-          withServer("/")(exchange => sendSseResponse(exchange, openAISseBody(Seq("Hi")))) { baseUrl =>
-            assertStreams(assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl)))))
-          }
-        }
-      }
-    }
-  }
-
-  "a client built by each openai-compatible descriptor" should {
-
-    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+    "report how each reply ended, on complete and on a stream alike, and really stream (RFC 0009)" in {
       expectations.foreach { (descriptor, _, _) =>
         withClue(s"${descriptor.id.asString}: ") {
           assertModelCallContract(ChatCompletionsContractFixtures.replies) { baseUrl =>

@@ -754,7 +754,7 @@ It has these parts, all in `org.llm4s.testkit`:
 
 | | What it gives you |
 |---|---|
-| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertModelCallContract` (each `ContractCase` - clean text, text cut by the limit, a tool call, a call to a tool with no arguments (`{}`), a tool call the output limit cut and arguments that are not a JSON object (both a `Left(ProcessingError)`), a content-filter stop, and on a stream only a stream that ends before its end marker and an error event - declared `Applies` with your provider's `complete` and stream replies (`RecordedReply.streamOnly` for the stream-only cases), or `NotApplicable` with a reason; both paths must report the same `FinishReason`, or `ContentFilteredError`, a stream's chunks must add up to its `Completion`, a stream cut short must be a `NetworkError` (or a `ServiceError` with status 502), and an error event a `Left` carrying `ContractCase.ProviderErrorMessage`, the provider's message), `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertContentParts` (each `ContentPartCase` your client declares reaches a local server with its payload; every other fails with `UnsupportedContentPartError` and sends nothing), `assertHonoursApiKeyProvider` (two requests with the key rotated between them carry the old key and then the new), `assertEmbeddingHonoursApiKeyProvider` (the same for `embed`), `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`, `assertUsesSuppliedHttpClient` (a client built with `LlmClientOptions.withHttpClient` sends `complete` and `streamComplete` through it, and does not close it). Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
+| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertModelCallContract` (how a reply ends, on `complete` and on a stream alike, and that the client really streams: see [the model call contract](#the-model-call-contract)), `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertContentParts` (each `ContentPartCase` your client declares reaches a local server with its payload; every other fails with `UnsupportedContentPartError` and sends nothing), `assertHonoursApiKeyProvider` (two requests with the key rotated between them carry the old key and then the new), `assertEmbeddingHonoursApiKeyProvider` (the same for `embed`), `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`, `assertUsesSuppliedHttpClient` (a client built with `LlmClientOptions.withHttpClient` sends `complete` and `streamComplete` through it, and does not close it). Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
 | `ProviderTestConfig` | `loadSection`, `loadProvider` and `loadEmbeddings`: config loaded as an application loads it, from a HOCON string over every `reference.conf` on the classpath, with `${?VAR}` resolved against a `Map` you pass - never the real environment, so an exported `ACME_API_KEY` on your machine cannot make a test pass that fails in CI. |
 | `CredentialsRoundTrip` | `chatSectionKey`, `chatBindings`, `embeddingsKey`, `embeddingBindings`: which key a section or embeddings block with no `apiKey` of its own ends up with, for cases the assertions do not cover - an alias, two variables in precedence order, a variable that must *not* be picked up. |
 | `LocalProviderTestServer` | `withServer(path)(handler)(baseUrl => ...)`, `sendJsonResponse`, `sendSseResponse`, `holdOpen` / `streamThenHold` (requests that never finish, released when `withServer` ends), OpenAI-format bodies and an Anthropic-format `anthropicMessage`: the JDK's HTTP server on an ephemeral port, to point a client at. `ToolResultContract` (with `ToolMessageFormat`) reads a request body for the tool-result contract below. |
@@ -765,7 +765,6 @@ package com.acme.llm4s
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
-import org.llm4s.testkit.LocalProviderTestServer.{ sendSseResponse, withServer }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -777,8 +776,6 @@ class Llm4sAcmeModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
     apiKey = Some(ApiKey("test-key")),
     extras = Map("region" -> "eu-west") // built in code, so no validation fills the default
   )
-
-  private val streamBody = "data: {\"delta\":\"Hi\"}\n\ndata: [DONE]\n\n" // Acme's wire format
 
   "the my-llm4s-acme services entry" should {
     // Discovered by ProviderRegistry.discover(), every id and alias resolving to your
@@ -792,9 +789,10 @@ class Llm4sAcmeModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
       assertRefusesForeignConfig(AcmeProvider)
     }
 
-    "really stream" in {
-      withServer("/v1/chat")(exchange => sendSseResponse(exchange, streamBody)) { baseUrl =>
-        assertStreams(assertBuildsClient(AcmeProvider, section.withBaseUrl(BaseUrl(baseUrl))))
+    // AcmeContractFixtures.replies: one Applicability per ContractCase, below
+    "report how each reply ended, on complete and on a stream alike, and really stream (RFC 0009)" in {
+      assertModelCallContract(AcmeContractFixtures.replies, "/v1/chat") { baseUrl =>
+        assertBuildsClient(AcmeProvider, section.withBaseUrl(BaseUrl(baseUrl)))
       }
     }
 
@@ -827,6 +825,111 @@ class Llm4sAcmeModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
 with only that variable set, so the shared credential is the only place a key can come from; when
 it fails it names the `reference.conf` line that is missing. Test the client itself against
 `LocalProviderTestServer` too, including that an error status maps to the right `LLMError`.
+
+### The model call contract
+
+Every chat client reports how a reply ended the same way, on `complete` and on `streamComplete`
+([RFC 0009](../rfcs/0009-model-call-contract.md)):
+
+- **A finish reason on every `Completion`.** Map your provider's own value to `FinishReason`
+  (`Stop`, `Length`, `ToolCalls`, or `Other(raw)` for anything else), in your own module. Never
+  report `Stop` for a reason the provider did not send.
+- **A stream is `Right` only if the provider sent its end marker** (`finish_reason`, `[DONE]`,
+  `message_stop`, `done: true`, a `finishReason`...). A stream that ends without one was cut off:
+  a retryable `NetworkError`, or a `ServiceError` with status 502.
+- **An error ends the call.** An error event after the 200 status, or an error-class reason, is a
+  `Left` carrying the provider's message. A content filter is `Left(ContentFilteredError)`. Chunks
+  already delivered stay delivered.
+- **Tool-call arguments.** A call whose arguments are not a complete JSON object is the
+  malformed-tool-call `Left(ProcessingError)`, never `{}` and never dropped. Absent or blank
+  arguments mean `{}` only when the reply ended `ToolCalls` or `Stop`. A tool call in a reply that
+  ended `Length` is a `Left`: the model was cut while it wrote its calls, so none is run.
+
+`assertModelCallContract(cases, path)(baseUrl => client)` checks all of this. For each
+`ContractCase` you either supply your provider's bytes (`Applicability.Applies(RecordedReply(complete, stream))`,
+each a `LocalProviderTestServer` handler, captured from the real service where you can) or declare
+it `Applicability.NotApplicable(reason)`. A case missing from the map fails the check, so a gap
+shows in your spec instead of being missed, and a case added to the testkit later fails your spec
+until you declare it.
+
+| `ContractCase` | The reply | Required result |
+|---|---|---|
+| `CleanText` | the model ends its turn with text | `Right`, `FinishReason.Stop`, non-empty text, no tool call |
+| `TextCutByLimit` | the output limit cuts the text | `Right`, `FinishReason.Length`, the partial text |
+| `ToolCall` | the model calls a tool | `Right`, `FinishReason.ToolCalls`, each call's arguments a JSON object |
+| `NoArgumentToolCall` | a call to a tool with no parameters, arguments absent, blank or `{}` | `Right`, `FinishReason.ToolCalls`, arguments `{}` |
+| `ToolCallCutByLimit` | the output limit cuts the reply while it makes a tool call | `Left(ProcessingError)`, the malformed tool call |
+| `MalformedArguments` | arguments that are not a JSON object, in a reply that otherwise ended cleanly | `Left(ProcessingError)`, the malformed tool call |
+| `ContentFiltered` | the provider's content filter stops the reply | `Left(ContentFilteredError)` |
+| `StreamEndsEarly` | stream only: some text, then the stream ends without the end marker | `Left(NetworkError)`, or `Left(ServiceError)` with status 502 |
+| `ErrorEvent` | stream only: some text, then an error event stating `ContractCase.ProviderErrorMessage` | a `Left` whose message carries `ContractCase.ProviderErrorMessage` |
+
+The check runs `complete` with the reply's `complete` handler and `streamComplete` with its
+`stream` handler, each against a fresh local server. The two stream-only cases run
+`streamComplete` alone; build them with `RecordedReply.streamOnly(stream)`. A stream that
+succeeds must also have delivered what it returned: its chunks' text joined is the
+`Completion`'s text, the last reason a chunk carried is its finish reason, and its chunks name
+the same tool calls.
+
+`CleanText` must apply. Every chat client can answer with text, and that case's stream is what
+proves the client really streams rather than falling back to `complete()`. A client that runs
+in-process, with no wire format, still declares `CleanText` `Applies` and builds the client from a
+scripted engine whatever base URL it is given, as `llm4s-jlama` does.
+
+Declare a case `NotApplicable` only when your provider cannot produce it, and say why in the
+reason, which must not be blank: `NotApplicable("Acme has no content filter")`,
+`NotApplicable("Acme does not call tools")`.
+
+```scala
+object AcmeContractFixtures:
+  import org.llm4s.testkit.{ Applicability, ContractCase, RecordedReply }
+  import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, sendSseResponse }
+
+  private def applies(body: String, sse: String) =
+    Applicability.Applies(RecordedReply(sendJsonResponse(_, 200, body), sendSseResponse(_, sse)))
+
+  val replies: Map[ContractCase, Applicability] = Map(
+    ContractCase.CleanText -> applies(
+      """{"text":"Hello","stop":"end_turn"}""",
+      "data: {\"delta\":\"Hel\"}\n\ndata: {\"delta\":\"lo\",\"stop\":\"end_turn\"}\n\n"
+    ),
+    // ... TextCutByLimit, ToolCall, NoArgumentToolCall, ToolCallCutByLimit, MalformedArguments
+    ContractCase.ContentFiltered -> Applicability.NotApplicable("Acme has no content filter"),
+    ContractCase.StreamEndsEarly ->
+      Applicability.Applies(RecordedReply.streamOnly(sendSseResponse(_, "data: {\"delta\":\"Hel\"}\n\n"))),
+    ContractCase.ErrorEvent -> Applicability.Applies(
+      RecordedReply.streamOnly(
+        sendSseResponse(_, s"data: {\"delta\":\"Hel\"}\n\ndata: {\"error\":\"${ContractCase.ProviderErrorMessage}\"}\n\n")
+      )
+    )
+  )
+```
+
+The in-repo fixtures are worked examples of each wire format: `ChatCompletionsContractFixtures`
+(`modules/openai-compatible`), `AnthropicContractFixtures`, `GeminiContractFixtures`,
+`OllamaContractFixtures`, `BedrockContractFixtures`, `WatsonXContractFixtures` and
+`PerplexityContractFixtures`, each beside its module's `Llm4s<Name>ModuleSpec`.
+
+**Rule 3 on your `complete` path is yours to write.** `StreamingAccumulator.toCompletion` applies
+the tool-call rules to a stream, but llm4s's own helper for a whole reply is internal. After your
+client parses a `complete` reply, refuse one that ended `Length` with a tool call, and one whose
+call arguments are not a JSON object, with the malformed-tool-call error:
+
+```scala
+import org.llm4s.error.ProcessingError
+import org.llm4s.llmconnect.model.{ Completion, FinishReason }
+
+private def checkedToolCalls(completion: Completion): Result[Completion] =
+  val calls = completion.message.toolCalls
+  if calls.nonEmpty && completion.finishReason == FinishReason.Length then
+    Left(ProcessingError("acme", s"malformed tool call: the output limit cut the reply while it made tool calls ${calls.map(_.name).mkString(", ")}; none is run"))
+  else
+    calls.find(_.arguments.objOpt.isEmpty) match
+      case Some(call) => Left(ProcessingError("acme", s"malformed tool call '${call.name}': the arguments are not a JSON object"))
+      case None       => Right(completion)
+```
+
+The `ToolCallCutByLimit` and `MalformedArguments` cases fail on `complete` until you do.
 
 ### Cancellation
 
@@ -909,3 +1012,5 @@ classpath; for an OpenAI-compatible vendor, contribute a dialect there instead.
 - [ ] `Llm4s<Name>ModuleSpec`, on `llm4s-provider-testkit`, covering discovery, sole ownership,
       explicit registration, the config-to-client round trip and the credential binding
 - [ ] a chat provider that takes tools runs `assertOneToolResultPerCall`
+- [ ] a chat provider runs `assertModelCallContract`, every `ContractCase` declared, `CleanText` applying,
+      and its `complete` path refuses a tool call in a `Length` reply ([the model call contract](#the-model-call-contract))
