@@ -51,6 +51,21 @@ object BedrockContractFixtures {
     )
   )
 
+  private def toolUseOf(name: String, input: ujson.Value): ujson.Value =
+    ujson.Arr(ujson.Obj("toolUse" -> ujson.Obj("toolUseId" -> "tooluse_1", "name" -> name, "input" -> input)))
+
+  /** A streamed `toolUse` block: its start, then each `input` fragment. */
+  private def toolBlock(name: String, fragments: String*): Seq[Array[Byte]] =
+    eventFrame(
+      "contentBlockStart",
+      s"""{"contentBlockIndex":0,"start":{"toolUse":{"toolUseId":"tooluse_1","name":"$name"}}}"""
+    ) +: fragments.map(f =>
+      eventFrame(
+        "contentBlockDelta",
+        ujson.Obj("contentBlockIndex" -> 0, "delta" -> ujson.Obj("toolUse" -> ujson.Obj("input" -> f))).render()
+      )
+    ) :+ eventFrame("contentBlockStop", """{"contentBlockIndex":0}""")
+
   /** Every case, as Converse and ConverseStream answer it. */
   val replies: Map[ContractCase, Applicability] = Map(
     ContractCase.CleanText -> applies(
@@ -75,6 +90,21 @@ object BedrockContractFixtures {
         ),
         "tool_use"
       )
+    ),
+    // a tool with no parameters: `input` `{}`, and no input fragment on the stream
+    ContractCase.NoArgumentToolCall -> applies(
+      reply(toolUseOf("get_time", ujson.Obj()), "tool_use"),
+      stream(toolBlock("get_time"), "tool_use")
+    ),
+    // `max_tokens` ended the reply while it made the call: no call runs
+    ContractCase.ToolCallCutByLimit -> applies(
+      reply(toolUseOf("get_weather", ujson.Obj("city" -> "Par")), "max_tokens"),
+      stream(toolBlock("get_weather", """{"city":""", """"Par"""), "max_tokens")
+    ),
+    // an input that is not a JSON object, and streamed fragments that never make one
+    ContractCase.MalformedArguments -> applies(
+      reply(toolUseOf("get_weather", ujson.Str("{city: Paris")), "tool_use"),
+      stream(toolBlock("get_weather", "{city: ", "Paris"), "tool_use")
     ),
     ContractCase.ContentFiltered -> applies(
       reply(text("Here is how"), "guardrail_intervened"),

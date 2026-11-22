@@ -121,7 +121,8 @@ class PerplexityClient(
             .flatMap { response =>
               val result =
                 if (response.statusCode >= 200 && response.statusCode < 300)
-                  BoundedJson.read(response.body).flatMap(parseReply).map(completion)
+                  // RFC 0009, Part 3: a reply `incomplete` at a limit while it made a call runs no call
+                  BoundedJson.read(response.body).flatMap(parseReply).map(completion).flatMap(ToolCallRules.checked)
                 else
                   HttpErrorMapper.mapHttpError(
                     response.statusCode,
@@ -218,12 +219,14 @@ class PerplexityClient(
         ServiceError(502, providerName, "stream ended without response.completed; the response is incomplete")
       )
       reply <- parseReply(response)
+      whole = if (reply.text.nonEmpty) reply else reply.copy(text = streamed.result())
+      id    = if (whole.id.nonEmpty) whole.id else responseId
+      // checked before the calls are delivered: a call in a reply cut at a limit never reaches the caller
+      done <- ToolCallRules.checked(completion(whole.copy(id = id)))
     } yield {
-      val whole = if (reply.text.nonEmpty) reply else reply.copy(text = streamed.result())
-      val id    = if (whole.id.nonEmpty) whole.id else responseId
       whole.toolCalls.foreach(call => onChunk(StreamedChunk(id = id, content = None, toolCall = Some(call))))
       onChunk(StreamedChunk(id = id, content = None, finishReason = Some(finishReasonOf(whole))))
-      completion(whole.copy(id = id))
+      done
     }
   }
 
@@ -533,9 +536,12 @@ object PerplexityClient {
     case Some(obj: ujson.Obj)                       => Right(obj)
     case Some(ujson.Str(text)) if text.trim.isEmpty => Right(ujson.Obj())
     case Some(ujson.Str(text)) =>
-      Try(ujson.read(text)).toOption match {
-        case Some(parsed: ujson.Obj) => Right(parsed)
-        case _                       => Left(malformed("the arguments are not a JSON object"))
+      // model output: nested more than 512 levels deep it is refused before it is parsed (#1562)
+      BoundedJson.read(text) match {
+        case Right(parsed: ujson.Obj) => Right(parsed)
+        case Left(BoundedJson.TooDeep()) =>
+          Left(malformed(s"the arguments are nested more than ${BoundedJson.MaxDepth} levels deep"))
+        case _ => Left(malformed("the arguments are not a JSON object"))
       }
     case Some(_) => Left(malformed("the arguments are neither a JSON object nor a string"))
   }
