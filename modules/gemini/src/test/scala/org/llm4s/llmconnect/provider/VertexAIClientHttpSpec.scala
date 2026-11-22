@@ -720,4 +720,43 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
   private def streamOf(sse: String, onChunk: StreamedChunk => Unit): org.llm4s.types.Result[Completion] =
     streamingClient(sse).streamComplete(conversation("Hi"), CompletionOptions(), onChunk)
+
+  // ---- service tier (#2726) ----
+
+  "VertexAIClient" should "send Flex and Priority as the shared request type header, and Auto and Default as none" in {
+    var capturedHeaders: Map[String, String] = Map.empty
+    val mockHttp                             = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).onCall {
+      (url: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+        Right {
+          if (url.contains("oauth2.googleapis.com")) HttpResponse(200, tokenBody, Map.empty)
+          else {
+            capturedHeaders = headers
+            httpOk(successBody)
+          }
+        }
+    }
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    val client = new VertexAIClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
+    Seq(ServiceTier.Flex -> "flex", ServiceTier.Priority -> "priority").foreach { (tier, value) =>
+      client.complete(conversation("Hi"), CompletionOptions().withServiceTier(tier)).toOption.value.adjustments shouldBe
+        empty
+      capturedHeaders.get("X-Vertex-AI-LLM-Shared-Request-Type") shouldBe Some(value)
+    }
+    Seq(ServiceTier.Auto, ServiceTier.Default).foreach { tier =>
+      val completion = client.complete(conversation("Hi"), CompletionOptions().withServiceTier(tier)).toOption.value
+      capturedHeaders.keySet should not contain "X-Vertex-AI-LLM-Shared-Request-Type"
+      completion.adjustments shouldBe List(
+        RequestAdjustment.NotNeeded(
+          RequestOption.ServiceTier,
+          "Vertex AI serves a request that names no tier at its standard tier"
+        )
+      )
+    }
+  }
 }

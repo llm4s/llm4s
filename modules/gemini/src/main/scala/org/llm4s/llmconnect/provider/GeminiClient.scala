@@ -136,7 +136,8 @@ class GeminiClient(
       .flatMap { (transformed, key) =>
         val thinkingPlan = GeminiThinking.plan(config.model, transformed.options, capabilities)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
-          UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options)
+          UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options) ++
+          GeminiServiceTier.gemini(transformed.options)._2
         adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
@@ -193,7 +194,8 @@ class GeminiClient(
       .flatMap { (transformed, key) =>
         val thinkingPlan = GeminiThinking.plan(config.model, transformed.options, capabilities)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
-          UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options)
+          UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options) ++
+          GeminiServiceTier.gemini(transformed.options)._2
         adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
@@ -429,6 +431,7 @@ class GeminiClient(
       "contents"         -> ujson.Arr(contents.toSeq: _*),
       "generationConfig" -> generationConfig
     )
+    GeminiServiceTier.gemini(options)._1.foreach(tier => request("serviceTier") = tier)
 
     // Add system instruction if present
     systemInstr.foreach { sysContent =>

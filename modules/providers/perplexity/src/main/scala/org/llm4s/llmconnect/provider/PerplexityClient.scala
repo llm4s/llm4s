@@ -8,7 +8,7 @@ import org.llm4s.llmconnect.auth.CachingAccessTokenProvider
 import org.llm4s.llmconnect.config.PerplexityConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.metrics.MetricsCollector
-import org.llm4s.model.{ AdjustmentLog, EffortMapping, ModelRegistryService }
+import org.llm4s.model.{ AdjustmentLog, EffortMapping, ModelRegistryService, UnmappedOptions }
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.util.{ BoundedJson, Redaction }
 
@@ -114,7 +114,8 @@ class PerplexityClient(
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
 
   private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
-    val adjustments = PerplexityClient.unsentOptions(config.model, options)
+    val adjustments =
+      PerplexityClient.unsentOptions(config.model, options) ++ UnmappedOptions.serviceTier("Perplexity", options)
     adjustmentLog.record(config.model, adjustments)
     adjustments
   }

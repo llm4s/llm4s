@@ -43,7 +43,8 @@ private[caching] object CompletionCacheKey {
 
   /**
    * The `CompletionOptions` fields left out of the key because they do not change the answer: `promptCache`, a
-   * provider-side cache that changes what a call costs (RFC 0008, PR 6).
+   * provider-side cache that changes what a call costs (RFC 0008, PR 6), and `serviceTier`, which changes what it
+   * costs and how it is scheduled (#2726).
    */
-  val Excluded: Set[String] = Set("promptCache")
+  val Excluded: Set[String] = Set("promptCache", "serviceTier")
 }

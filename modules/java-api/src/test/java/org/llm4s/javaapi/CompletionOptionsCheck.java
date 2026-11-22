@@ -26,6 +26,7 @@ final class CompletionOptionsCheck {
         .frequencyPenalty(-0.5)
         .reasoning(JReasoningEffort.HIGH)
         .thinking(JThinking.budget(4096))
+        .serviceTier(JServiceTier.FLEX)
         .build();
   }
 
@@ -35,6 +36,7 @@ final class CompletionOptionsCheck {
         .maxTokens(OptionalInt.of(256))
         .reasoning(Optional.of(JReasoningEffort.LOW))
         .thinking(Optional.of(JThinking.adaptive()))
+        .serviceTier(Optional.of(JServiceTier.PRIORITY))
         .build();
   }
 
@@ -44,6 +46,7 @@ final class CompletionOptionsCheck {
         .maxTokens(OptionalInt.empty())
         .reasoning(Optional.empty())
         .thinking(Optional.empty())
+        .serviceTier(Optional.empty())
         .build();
   }
 
@@ -63,6 +66,7 @@ final class CompletionOptionsCheck {
     double frequencyPenalty = options.frequencyPenalty();
     Optional<JReasoningEffort> reasoning = options.reasoning();
     Optional<JThinking> thinking = options.thinking();
+    Optional<JServiceTier> serviceTier = options.serviceTier();
     log.add("temperature:" + temperature);
     log.add("topP:" + topP);
     log.add("maxTokens:" + (maxTokens.isPresent() ? String.valueOf(maxTokens.getAsInt()) : "none"));
@@ -70,6 +74,7 @@ final class CompletionOptionsCheck {
     log.add("frequencyPenalty:" + frequencyPenalty);
     log.add("reasoning:" + reasoning.map(CompletionOptionsCheck::describe).orElse("none"));
     log.add("thinking:" + thinking.map(JThinking::toString).orElse("none"));
+    log.add("serviceTier:" + serviceTier.map(JServiceTier::name).orElse("none"));
     return log;
   }
 

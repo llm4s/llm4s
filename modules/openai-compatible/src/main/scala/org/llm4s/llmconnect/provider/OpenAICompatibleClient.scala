@@ -562,7 +562,8 @@ class OpenAICompatibleClient(
       dialect.encodeResponseFormat(fmt).foreach(rf => body("response_format") = rf)
     }
     val adjustments =
-      dialect.addReasoning(body, settings.model, options) ++ UnmappedOptions.promptCache(settings.model, options)
+      dialect.addReasoning(body, settings.model, options) ++ UnmappedOptions.promptCache(settings.model, options) ++
+        UnmappedOptions.serviceTier(settings.displayName, options)
     (body, adjustments)
   }
 

@@ -542,7 +542,13 @@ class OpenAIClient private[provider] (
     transformed: TransformationResult
   ): List[RequestAdjustment] =
     withUnsentSampling(requested, transformed) ++ effortPlan(transformed.options).adjustments ++
-      UnmappedOptions.promptCacheAutomatic("OpenAI", transformed.options)
+      UnmappedOptions.promptCacheAutomatic("OpenAI", transformed.options) ++ serviceTierPlan(transformed.options)._2
+
+  /** The `service_tier` to send for `options`, and what was not sent as asked (see [[OpenAIServiceTier]]). */
+  private def serviceTierPlan(
+    options: CompletionOptions
+  ): (Option[ChatCompletionCreateParams.ServiceTier], List[RequestAdjustment]) =
+    OpenAIServiceTier.plan(providerName, displayName, options)
 
   /** The `reasoning_effort` to send for `options`, if any. */
   private def reasoningEffortFor(options: CompletionOptions): Option[com.openai.models.ReasoningEffort] =
@@ -638,6 +644,7 @@ class OpenAIClient private[provider] (
           .topP(options.topP.doubleValue())
 
       effort.foreach(e => builder.reasoningEffort(e))
+      serviceTierPlan(options)._1.foreach(t => builder.serviceTier(t))
 
       options.maxTokens.foreach { mt =>
         if (useMaxCompletionTokens || reasoningModel) builder.maxCompletionTokens(mt.toLong)

@@ -812,4 +812,35 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)))))
     mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), onChunk)
   }
+
+  // ---- service tier (#2726) ----
+
+  "GeminiClient" should "send a service tier as serviceTier, and report Auto as not needed" in {
+    var body: ujson.Value = ujson.Null
+    val mockHttp          = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).onCall {
+      (_: String, _: Map[String, String], sent: String, _: scala.concurrent.duration.FiniteDuration) =>
+        body = ujson.read(sent)
+        Right(httpOk(successBody))
+    }
+    val client = mkClient(mockHttp)
+    Seq(ServiceTier.Default -> "standard", ServiceTier.Flex -> "flex", ServiceTier.Priority -> "priority").foreach {
+      (tier, wire) =>
+        client
+          .complete(conversation("Hi"), CompletionOptions().withServiceTier(tier))
+          .toOption
+          .value
+          .adjustments shouldBe
+          empty
+        body("serviceTier").str shouldBe wire
+    }
+    val auto = client.complete(conversation("Hi"), CompletionOptions().withServiceTier(ServiceTier.Auto))
+    body.obj.contains("serviceTier") shouldBe false
+    auto.toOption.value.adjustments shouldBe List(
+      RequestAdjustment.NotNeeded(
+        RequestOption.ServiceTier,
+        "Gemini serves a request that names no tier at its standard tier"
+      )
+    )
+  }
 }

@@ -354,6 +354,24 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     assert(client.complete(conversation("Hello"), CompletionOptions()).toOption.get.adjustments.isEmpty)
   }
 
+  test("a service tier is reported as dropped: Ollama has none (#2726)") {
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk("""{"message":{"content":"Hi"}}""")))
+    val adjustments = mkClient(mockHttp)
+      .complete(conversation("Hello"), CompletionOptions().withServiceTier(ServiceTier.Priority))
+      .toOption
+      .get
+      .adjustments
+    assert(
+      adjustments == List(
+        RequestAdjustment.Dropped(
+          RequestOption.ServiceTier,
+          "Ollama has no service tier to choose; Priority is not sent"
+        )
+      )
+    )
+  }
+
   // ── streamComplete() tests ───────────────────────────────────────────────
 
   test("streamComplete() parses JSON lines and accumulates content") {

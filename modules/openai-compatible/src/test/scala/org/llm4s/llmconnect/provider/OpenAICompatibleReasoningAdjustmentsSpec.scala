@@ -54,4 +54,19 @@ class OpenAICompatibleReasoningAdjustmentsSpec extends AnyFlatSpec with Matchers
       client.complete(hello, CompletionOptions()).value.adjustments shouldBe empty
     }
   }
+
+  it should "report a service tier as dropped, sending none (#2726)" in {
+    val model = "mistral-small-latest"
+    withServer("/v1/chat/completions") { exchange =>
+      val request =
+        ujson.read(new String(exchange.getRequestBody.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8))
+      request.obj.contains("service_tier") shouldBe false
+      sendJsonResponse(exchange, 200, openAICompletion("Hi", model))
+    } { baseUrl =>
+      val client = new MistralClient(MistralConfig(Secret("test-key"), model, baseUrl, 128000, 4096))
+      client.complete(hello, CompletionOptions().withServiceTier(ServiceTier.Flex)).value.adjustments shouldBe List(
+        RequestAdjustment.Dropped(RequestOption.ServiceTier, "Mistral has no service tier to choose; Flex is not sent")
+      )
+    }
+  }
 }

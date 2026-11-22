@@ -47,6 +47,10 @@ class JlamaAdjustmentsSpec extends AnyWordSpec with Matchers:
       )
     }
 
+    "report a service tier Dropped, since a local engine has none (#2726)" in {
+      kinds(CompletionOptions().withServiceTier(ServiceTier.Flex)) shouldBe List(RequestOption.ServiceTier -> "Dropped")
+    }
+
     "be the same on a stream as on complete" in {
       val options = CompletionOptions().withTopP(0.5).withReasoning(ReasoningEffort.Low)
       kinds(options, streamed = true) shouldBe kinds(options)

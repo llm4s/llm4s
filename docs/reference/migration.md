@@ -333,8 +333,10 @@ defaulted field, so only a positional pattern on them changes:
 - `TokenUsage` gains `longCacheCreationTokens: Option[Int]`, the cache writes made with the 1-hour lifetime:
   `case TokenUsage(p, c, t, _, _, _)` becomes `case TokenUsage(p, c, t, _, _, _, _)`.
 - `ModelPricing` gains `cacheCreationInputTokenCostAbove1hr: Option[Double]` as its last field.
-- Java and Kotlin see no Scala defaults, so a call to `TokenUsage.apply` or `ModelPricing.apply` from them passes
-  the new argument too (`Option.empty()`).
+- `CompletionOptions` gains `promptCache` and then `serviceTier` (#2726) as its last fields:
+  `case CompletionOptions(t, _, _, _, _, _, _, _, _)` gains two `_`.
+- Java and Kotlin see no Scala defaults, so a call to `TokenUsage.apply`, `ModelPricing.apply` or
+  `CompletionOptions.apply` from them passes the new arguments too (`Option.empty()`).
 
 The `PositionalPatternsGainFields` Scalafix rule adds these binders ([Scalafix](scalafix#migration-rules)).
 

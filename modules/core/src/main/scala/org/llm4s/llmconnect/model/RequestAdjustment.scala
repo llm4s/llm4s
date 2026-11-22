@@ -8,13 +8,13 @@ import upickle.default.ReadWriter
  * [[RequestAdjustment.option]]. Matching on it is checked by the compiler, so a match survives a
  * field rename. A field that becomes adjustable later adds a case.
  *
- * `Thinking` names `CompletionOptions.thinking` and `PromptCache` `CompletionOptions.promptCache` (RFC 0008, PRs 4
- * and 6).
+ * `Thinking` names `CompletionOptions.thinking`, `PromptCache` `CompletionOptions.promptCache` (RFC 0008, PRs 4
+ * and 6) and `ServiceTier` `CompletionOptions.serviceTier` (#2726).
  */
 @Stable
 enum RequestOption derives ReadWriter {
   case Temperature, TopP, MaxTokens, PresencePenalty, FrequencyPenalty, Tools, ResponseFormat, Reasoning, Thinking,
-    PromptCache
+    PromptCache, ServiceTier
 }
 
 /**

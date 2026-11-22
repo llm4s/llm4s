@@ -2,6 +2,7 @@ package org.llm4s.kotlin
 
 import org.llm4s.javaapi.JCompletionOptions
 import org.llm4s.javaapi.JReasoningEffort
+import org.llm4s.javaapi.JServiceTier
 import org.llm4s.javaapi.JThinking
 
 /**
@@ -18,7 +19,7 @@ import org.llm4s.javaapi.JThinking
  * ```
  *
  * A setting left unset keeps [base]'s value, or core's default without one (temperature `0.7`, top-p `1.0`, no
- * penalties, no token limit, reasoning level or thinking mode). A value no provider accepts - a negative
+ * penalties, no token limit, reasoning level, thinking mode or service tier). A value no provider accepts - a negative
  * temperature, a top-p outside `0..1`, a token count below `1` - throws `IllegalArgumentException`, as the Java builder
  * does.
  */
@@ -49,6 +50,9 @@ class CompletionOptionsSpec internal constructor() {
     /** How the model thinks: [JThinking.off], [JThinking.adaptive] or a [JThinking.budget]; it wins over [reasoning]. */
     var thinking: JThinking? = null
 
+    /** The processing tier to ask for: [JServiceTier.FLEX] is cheaper and slower, [JServiceTier.PRIORITY] faster. */
+    var serviceTier: JServiceTier? = null
+
     internal fun build(base: JCompletionOptions?): JCompletionOptions {
         var builder = base?.toBuilder() ?: JCompletionOptions.builder()
         temperature?.let { builder = builder.temperature(it) }
@@ -58,6 +62,7 @@ class CompletionOptionsSpec internal constructor() {
         frequencyPenalty?.let { builder = builder.frequencyPenalty(it) }
         reasoning?.let { builder = builder.reasoning(it) }
         thinking?.let { builder = builder.thinking(it) }
+        serviceTier?.let { builder = builder.serviceTier(it) }
         return builder.build()
     }
 }

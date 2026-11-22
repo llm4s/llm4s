@@ -119,9 +119,10 @@ class VertexAIClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
-        val thinkingPlan = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val thinkingPlan                   = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val (tierHeaders, tierAdjustments) = GeminiServiceTier.vertex(transformed.options)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
-          UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options)
+          UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options) ++ tierAdjustments
         adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
@@ -135,7 +136,7 @@ class VertexAIClient(
 
         for {
           token <- authProvider.getAccessToken()
-          headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
+          headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token") ++ tierHeaders
           attempt <- http.post(url, headers, requestText, timeout = requestTimeout) match {
             case Left(error) =>
               recordExchange(startedAt, requestText, None, Left(error))
@@ -178,9 +179,10 @@ class VertexAIClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
-        val thinkingPlan = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val thinkingPlan                   = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val (tierHeaders, tierAdjustments) = GeminiServiceTier.vertex(transformed.options)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
-          UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options)
+          UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options) ++ tierAdjustments
         adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
@@ -191,7 +193,7 @@ class VertexAIClient(
 
         for {
           token <- authProvider.getAccessToken()
-          headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
+          headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token") ++ tierHeaders
           result <- http.postStream(url, headers, requestText, timeout = streamTimeout) match {
             case Left(error) =>
               recordExchange(startedAt, requestText, None, Left(error))

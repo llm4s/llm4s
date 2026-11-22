@@ -102,6 +102,15 @@ private[llm4s] object UnmappedOptions {
       RequestAdjustment.NotNeeded(RequestOption.PromptCache, s"$provider caches a repeated prompt prefix on its own")
     )
 
+  /** A `Dropped` for `serviceTier` when the caller set it, from a provider that has no service tier to choose. */
+  def serviceTier(provider: String, options: CompletionOptions): List[RequestAdjustment] =
+    options.serviceTier.toList.map(tier =>
+      RequestAdjustment.Dropped(
+        RequestOption.ServiceTier,
+        s"$provider has no service tier to choose; $tier is not sent"
+      )
+    )
+
   /** [[reasoning]] and [[thinking]]: the report of a client that maps neither. */
   def reasoningAndThinking(model: String, options: CompletionOptions): List[RequestAdjustment] =
     reasoning(model, options) ++ thinking(model, options)

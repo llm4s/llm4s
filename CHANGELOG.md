@@ -30,7 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [migration](docs/reference/migration.md#a-broken-or-cut-tool-call-is-an-error-2613). `ProviderModuleChecks.assertStreams`
   is removed: `assertModelCallContract` replaces it (PR 5).
 - A positional pattern on `TokenUsage` or `ModelPricing` gains a field (`longCacheCreationTokens`,
-  `cacheCreationInputTokenCostAbove1hr`; [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 6);
+  `cacheCreationInputTokenCostAbove1hr`; [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 6), and one on
+  `CompletionOptions` two (`promptCache`, `serviceTier`, [#2726](https://github.com/llm4s/llm4s/issues/2726));
   [migration](docs/reference/migration.md#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115).
 - An agent turn whose answer was cut off at the output limit ends `AgentStatus.Truncated(partialAnswer)`, not
   `Completed`, and `AgentStatusKind` gains `TRUNCATED`; a `match` on `AgentStatus` needs the case (RFC 0009 open
@@ -71,6 +72,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ModelPricing.cacheCreationInputTokenCostAbove1hr` price a 1-hour cache write; `CachingLLMClient` ignores
   `promptCache` ([cost controls](docs/guide/cost-controls.md#provider-side-prompt-caching),
   [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 6, decision 16) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+- **Added** `CompletionOptions.serviceTier` (`ServiceTier`: `Auto`, `Default`, `Flex`, `Priority`; Java `JServiceTier`,
+  Kotlin `serviceTier`): OpenAI and Azure send `service_tier`, Anthropic `auto` or `standard_only`, Gemini `serviceTier`,
+  Vertex AI its shared-request-type header and Bedrock `serviceTier`; each reports what it cannot send, and every
+  other provider reports it `Dropped` ([cost controls](docs/guide/cost-controls.md#service-tiers),
+  [#2726](https://github.com/llm4s/llm4s/issues/2726)).
 
 ### Java & Kotlin APIs
 
