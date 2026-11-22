@@ -487,7 +487,7 @@ final class RAG private (
       _       <- plainIngestAllowed("refresh")
       results <- readForRefresh(loader)
       _       <- registry.clear()
-      _       <- clear()
+      _       <- clearStores()
       stats   <- ingestResults(results.iterator)
     } yield SyncStats(added = stats.successful, updated = 0, deleted = 0, unchanged = 0)
 
@@ -853,6 +853,9 @@ final class RAG private (
    * to the query before embedding. The transformed query is used for
    * both vector search and keyword search.
    *
+   * On a RAG with a [[org.llm4s.rag.permissions.SearchIndex SearchIndex]] it returns a `ConfigurationError`: it would
+   * search every document with no permission filter. Use [[queryWithPermissions]].
+   *
    * @param query The search query
    * @param topK Override default topK (optional)
    * @return Ranked search results
@@ -861,6 +864,7 @@ final class RAG private (
     val k = topK.getOrElse(config.topK)
 
     for {
+      _                <- plainQueryAllowed("query", "queryWithPermissions")
       transformedQuery <- applyQueryTransforms(query)
       queryEmbedding   <- embedQuery(transformedQuery)
       results          <- searchWithStrategy(queryEmbedding, transformedQuery, k)
@@ -876,12 +880,23 @@ final class RAG private (
    * @param topK Override default topK (optional)
    * @param options the completion options for this answer; the config's (`RAGConfig.withCompletionOptions`,
    *                temperature 0.0 by default) unless given, so one pipeline can compare settings per call
+   * On a RAG with a [[org.llm4s.rag.permissions.SearchIndex SearchIndex]] it returns a `ConfigurationError`, as
+   * [[query]] does: use [[queryWithPermissionsAndAnswer]].
+   *
    * @return Answer with supporting contexts
    */
   def queryWithAnswer(
     question: String,
     topK: Option[Int] = None,
     options: CompletionOptions = config.completionOptions
+  ): Result[RAGAnswerResult] =
+    plainQueryAllowed("queryWithAnswer", "queryWithPermissionsAndAnswer")
+      .flatMap(_ => answerFromQuery(question, topK, options))
+
+  private def answerFromQuery(
+    question: String,
+    topK: Option[Int],
+    options: CompletionOptions
   ): Result[RAGAnswerResult] =
     llmClient match {
       case None =>
@@ -906,7 +921,8 @@ final class RAG private (
    * provider sends it (through `LLMClient.streamComplete`); and the method returns the whole [[RAGAnswerResult]],
    * as `queryWithAnswer` would, with the usage the provider reported.
    *
-   * A failure before the contexts are found (no LLM client, the search) calls neither callback. A failure of the
+   * A failure before the contexts are found (no LLM client, the search, a RAG with a `SearchIndex`, which must use
+   * [[queryWithPermissionsAndAnswerStreaming]]) calls neither callback. A failure of the
    * model's call, or an exception `onContexts` throws, is a `Left`, after the chunks already delivered.
    *
    * {{{
@@ -928,6 +944,17 @@ final class RAG private (
     topK: Option[Int] = None,
     options: CompletionOptions = config.completionOptions
   )(onContexts: Seq[RAGSearchResult] => Unit, onChunk: StreamedChunk => Unit): Result[RAGAnswerResult] =
+    plainQueryAllowed("queryWithAnswerStreaming", "queryWithPermissionsAndAnswerStreaming").flatMap { _ =>
+      streamAnswerFromQuery(question, topK, options, onContexts, onChunk)
+    }
+
+  private def streamAnswerFromQuery(
+    question: String,
+    topK: Option[Int],
+    options: CompletionOptions,
+    onContexts: Seq[RAGSearchResult] => Unit,
+    onChunk: StreamedChunk => Unit
+  ): Result[RAGAnswerResult] =
     llmClient match {
       case None =>
         Left(
@@ -999,6 +1026,8 @@ final class RAG private (
           case GraphRAGMode.Hybrid =>
             val k = topK.getOrElse(config.topK)
             for {
+              // Its vector half is a plain search, with no permission filter
+              _              <- plainQueryAllowed("GraphRAG's Hybrid mode", "queryWithPermissionsAndAnswer")
               queryEmbedding <- embedQuery(question)
               vectorResults  <- searchWithStrategy(queryEmbedding, question, k)
               hybrid         <- engine.hybridSearch(question, vectorResults, config.graphRAGConfig.localTraversalDepth)
@@ -1109,6 +1138,24 @@ final class RAG private (
    * collection instead was rejected: `PgSchemaManager`'s default collection is public, so a document ingested
    * without naming its readers would become readable by every principal.
    */
+  /**
+   * A RAG with a [[org.llm4s.rag.permissions.SearchIndex SearchIndex]] searches only through the permission API.
+   *
+   * With a `PgSearchIndex` the plain search reads the index's own table with no collection or `readable_by` filter,
+   * so it would return every principal's documents to any caller.
+   */
+  private def plainQueryAllowed(operation: String, instead: String): Result[Unit] =
+    config.searchIndex match {
+      case None => Right(())
+      case Some(_) =>
+        Left(
+          ConfigurationError(
+            s"$operation is not available on a RAG built with .withSearchIndex: it would search every document " +
+              s"with no permission filter. Use $instead(auth, collectionPattern, ...) instead."
+          )
+        )
+    }
+
   private def plainIngestAllowed(operation: String): Result[Unit] =
     config.searchIndex match {
       case None => Right(())
@@ -1284,8 +1331,28 @@ final class RAG private (
 
   /**
    * Clear all indexed data.
+   *
+   * On a RAG with a [[org.llm4s.rag.permissions.SearchIndex SearchIndex]] it returns a `ConfigurationError` and
+   * deletes nothing: with a `PgSearchIndex` the pipeline's vector store is the index's own table, so clearing it
+   * would delete every collection's documents, outside the permission API. Clear a collection with
+   * `searchIndex.clearCollection(path)`, delete a document everywhere with [[deleteDocument]], or reset the whole
+   * index with `searchIndex.dropSchema()` and `initializeSchema()`.
    */
   def clear(): Result[Unit] =
+    config.searchIndex match {
+      case Some(_) =>
+        Left(
+          ConfigurationError(
+            "clear is not available on a RAG built with .withSearchIndex: it would delete every collection's " +
+              "documents, bypassing the permission API. Use searchIndex.clearCollection(collectionPath) for one " +
+              "collection, deleteDocument(docId) for one document, or searchIndex.dropSchema() then " +
+              "initializeSchema() to reset the whole index."
+          )
+        )
+      case None => clearStores()
+    }
+
+  private def clearStores(): Result[Unit] =
     for {
       _ <- hybridSearcher.vectorStore.clear()
       _ <- hybridSearcher.keywordIndex.clear()
@@ -1519,6 +1586,14 @@ final class RAG private (
   }
 
   private def searchWithStrategy(
+    queryEmbedding: Array[Float],
+    queryText: String,
+    topK: Int
+  ): Result[Seq[HybridSearchResult]] =
+    // Every public caller checks first, with its own message; this keeps a new caller from searching unfiltered
+    plainQueryAllowed("search", "queryWithPermissions").flatMap(_ => plainSearch(queryEmbedding, queryText, topK))
+
+  private def plainSearch(
     queryEmbedding: Array[Float],
     queryText: String,
     topK: Int

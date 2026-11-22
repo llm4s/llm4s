@@ -721,6 +721,125 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
   }
 
   // ==========================================================================
+  // Plain search and clear on a RAG with a SearchIndex (#2716 follow-up)
+  // ==========================================================================
+
+  private def isPlainQueryRefusal(result: Result[?], instead: String): Boolean =
+    result match {
+      case Left(e: ConfigurationError) => e.message.contains("no permission filter") && e.message.contains(instead)
+      case _                           => false
+    }
+
+  /** A RAG with a SearchIndex and an LLM, holding one restricted document. */
+  private def restrictedRag(llm: LLMClient = new MockLLMClient()): (RAG, MockSearchIndex) = {
+    val index = new MockSearchIndex()
+    val path  = CollectionPath.unsafe("restricted")
+    index.collections.create(CollectionConfig.restrictedLeaf(path, Set(PrincipalId.user(1))))
+    index.ingest(path, "secret", Seq(ChunkWithEmbedding("Merger plans.", Array(0.1f, 0.2f, 0.3f), 0)))
+    val rag = RAG
+      .buildWithClient(
+        RAGConfig.default.withSearchIndex(index).withLLM(llm),
+        new EmbeddingClient(new MockEmbeddingProvider())
+      )
+      .toOption
+      .get
+    (rag, index)
+  }
+
+  "Plain search on a RAG with a SearchIndex" should "be refused by query, pointing to queryWithPermissions" in {
+    val (rag, _) = restrictedRag()
+    try isPlainQueryRefusal(rag.query("merger"), "queryWithPermissions") shouldBe true
+    finally rag.close()
+  }
+
+  it should "be refused by queryWithAnswer before the model is called, pointing to queryWithPermissionsAndAnswer" in {
+    val calls = new java.util.concurrent.atomic.AtomicInteger()
+    val llm = new MockLLMClient {
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+        calls.incrementAndGet()
+        super.complete(conversation, options)
+      }
+    }
+    val (rag, _) = restrictedRag(llm)
+    try {
+      isPlainQueryRefusal(rag.queryWithAnswer("merger"), "queryWithPermissionsAndAnswer") shouldBe true
+      calls.get shouldBe 0
+    } finally rag.close()
+  }
+
+  it should "be refused by queryWithAnswerStreaming, calling neither callback" in {
+    val (rag, _) = restrictedRag()
+    try {
+      var called = false
+      val result = rag.queryWithAnswerStreaming("merger")(_ => called = true, _ => called = true)
+      isPlainQueryRefusal(result, "queryWithPermissionsAndAnswerStreaming") shouldBe true
+      called shouldBe false
+    } finally rag.close()
+  }
+
+  it should "be refused by GraphRAG's Hybrid mode, whose vector half is a plain search" in {
+    val index = new MockSearchIndex()
+    val rag = RAG
+      .buildWithClient(
+        RAGConfig.default
+          .withSearchIndex(index)
+          .withLLM(new MockLLMClient())
+          .withGraphStore(new org.llm4s.knowledgegraph.storage.InMemoryGraphStore()),
+        new EmbeddingClient(new MockEmbeddingProvider())
+      )
+      .toOption
+      .get
+    try
+      isPlainQueryRefusal(
+        rag.queryWithGraphRAGMode("merger", org.llm4s.knowledgegraph.graphrag.GraphRAGMode.Hybrid),
+        "queryWithPermissionsAndAnswer"
+      ) shouldBe true
+    finally rag.close()
+  }
+
+  it should "leave the permission API working: the answer comes from the permitted document only" in {
+    val (rag, _) = restrictedRag()
+    try {
+      val owner = UserAuthorization.forUser(PrincipalId.user(1), Set.empty)
+      rag
+        .queryWithPermissionsAndAnswer(owner, CollectionPattern.All, "merger")
+        .map(_.contexts.map(_.content)) shouldBe Right(Seq("Merger plans."))
+      val outsider = UserAuthorization.forUser(PrincipalId.user(2), Set.empty)
+      rag.queryWithPermissionsAndAnswer(outsider, CollectionPattern.All, "merger").map(_.contexts) shouldBe
+        Right(Seq.empty)
+    } finally rag.close()
+  }
+
+  "RAG.clear on a RAG with a SearchIndex" should "be refused, deleting nothing" in {
+    val (rag, index) = restrictedRag()
+    try {
+      rag.clear() match {
+        case Left(e: ConfigurationError) => e.message should include("clearCollection")
+        case other                       => fail(s"expected a ConfigurationError, got $other")
+      }
+      index.query(UserAuthorization.Admin, CollectionPattern.All, Array(0.1f, 0.2f, 0.3f)).map(_.size) shouldBe
+        Right(1)
+    } finally rag.close()
+  }
+
+  "A RAG without a SearchIndex" should "still query, answer and clear" in {
+    val rag = RAG
+      .buildWithClient(
+        RAGConfig.default.withLLM(new MockLLMClient()),
+        new EmbeddingClient(new MockEmbeddingProvider())
+      )
+      .toOption
+      .get
+    try {
+      rag.ingestText("Plain text about Scala.", "doc-1").isRight shouldBe true
+      rag.query("Scala").map(_.nonEmpty) shouldBe Right(true)
+      rag.queryWithAnswer("Scala").isRight shouldBe true
+      rag.clear() shouldBe Right(())
+      rag.stats.map(_.vectorCount) shouldBe Right(0L)
+    } finally rag.close()
+  }
+
+  // ==========================================================================
   // hasPermissions and searchIndex
   // ==========================================================================
 

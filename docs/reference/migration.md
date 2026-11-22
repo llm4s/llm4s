@@ -56,6 +56,15 @@ case now either works or fails:
   collection: `PgSchemaManager`'s default collection is public, so a document ingested without naming its readers
   would become readable by every principal. Rows a plain ingest wrote before can be moved to that collection,
   if that is what you want, with `PgSchemaManager.migrateExistingVectors`, or deleted with `deleteDocument`.
+- **Plain search and `clear()` are refused.** `query`, `queryWithAnswer`, `queryWithAnswerStreaming` and GraphRAG's
+  Hybrid mode (`queryWithGraphRAG` when it routes there) return a `ConfigurationError` on a `RAG` with a
+  `SearchIndex`, before embedding the question or calling the model. With a `PgSearchIndex` they searched the index's
+  own table with no collection or `readable_by` filter, so any caller could retrieve every principal's documents. Use
+  `queryWithPermissions`, `queryWithPermissionsAndAnswer` or `queryWithPermissionsAndAnswerStreaming` with the
+  caller's `UserAuthorization`; `UserAuthorization.Admin` reads everything, deliberately. `clear()` is refused too:
+  it emptied that table, every collection's documents with it. It has no opt-in, because the permission API already
+  covers each deliberate use: `searchIndex.clearCollection(path)` for one collection, `deleteDocument(docId)` for
+  one document, and `searchIndex.dropSchema()` then `initializeSchema()` to reset the whole index.
 - **`deleteDocument(docId)` deletes more.** With a `SearchIndex` it also deletes the document from every collection
   (`SearchIndex.deleteDocumentFromAllCollections`, new), whose chunks are named `coll-<collectionId>-<docId>-chunk-<n>`.
   It used to return `Right(())` and leave those chunks retrievable. A failed delete is now the `Left`. A

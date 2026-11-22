@@ -430,6 +430,12 @@ On a `RAG` with a `SearchIndex`, `ingestWithPermissions` is the only way to inge
 `refresh` methods return a `ConfigurationError`: what they wrote would belong to no collection, so no permission
 query could return it.
 
+Likewise, it searches only through the permission API. Plain `query`, `queryWithAnswer`, `queryWithAnswerStreaming`
+and GraphRAG's Hybrid mode return a `ConfigurationError`, since they would search every document with no permission
+filter; use `queryWithPermissions`, `queryWithPermissionsAndAnswer` and `queryWithPermissionsAndAnswerStreaming`.
+`clear()` is refused as well: use `searchIndex.clearCollection(path)`, or `dropSchema()` and `initializeSchema()`
+to reset everything.
+
 ### Two-Level Permission Model
 
 Permissions are checked at two levels:
