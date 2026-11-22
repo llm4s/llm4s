@@ -295,7 +295,7 @@ Claude models generally score higher on reasoning benchmarks.
 - Exceptional at writing and analysis tasks
 - Excellent vision capabilities
 - Supports prompt caching for repeated queries: `CompletionOptions().withPromptCache(PromptCache.default)` sends
-  `cache_control` breakpoints ([provider-side prompt caching](cost-controls.md#provider-side-prompt-caching))
+  `cache_control` breakpoints ([provider-side prompt caching](cost-controls#provider-side-prompt-caching))
 
 ### Web search
 

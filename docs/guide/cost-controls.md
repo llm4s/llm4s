@@ -110,7 +110,7 @@ val cached = CompletionOptions().withPromptCache(PromptCache.default)
 val all = CompletionOptions().withPromptCache(PromptCache(PromptCache.Scope.values.toSet, PromptCache.Ttl.Long))
 ```
 
-This is not [`CachingLLMClient`](caching.md), which keeps whole answers on your side and returns one without calling
+This is not [`CachingLLMClient`](caching), which keeps whole answers on your side and returns one without calling
 the provider. A prompt cache calls the provider every time; it changes what the call costs, not what it returns, so
 `CachingLLMClient` ignores `promptCache` when it matches a cached answer.
 
