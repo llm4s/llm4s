@@ -32,9 +32,10 @@ enum RequestOption derives ReadWriter {
  * Reported today: every option the [[org.llm4s.model.RequestTransformer]] drops or adjusts (Anthropic,
  * OpenAI, Gemini, Vertex AI, Bedrock); a `reasoning` that Gemini, Vertex AI, Bedrock, Ollama or the
  * standard OpenAI-compatible dialect does not send; the sampling options OpenAI leaves out of a reasoning
- * model's request; and the penalties xAI leaves out of one. Other options a client leaves out, such as
- * Anthropic's `top_p` and penalties, are not reported yet and follow under RFC 0008, so an empty list
- * does not prove every option was sent.
+ * model's request; the penalties xAI leaves out of one; how watsonx and Perplexity send `reasoning` and
+ * `thinking`; the penalties Perplexity leaves out; and everything Jlama is not given but the temperature and the
+ * token limit. Other options a client leaves out, such as Anthropic's `top_p` and penalties, are not reported yet
+ * and follow under RFC 0008, so an empty list does not prove every option was sent.
  *
  * `reason`, `requested` and `sent` are for people and logs; match on [[option]] and the case.
  */

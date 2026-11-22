@@ -8,7 +8,7 @@ import org.llm4s.llmconnect.auth.CachingAccessTokenProvider
 import org.llm4s.llmconnect.config.PerplexityConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.metrics.MetricsCollector
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.model.{ AdjustmentLog, EffortMapping, ModelRegistryService }
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.util.{ BoundedJson, Redaction }
 
@@ -39,8 +39,8 @@ import scala.util.{ Try, Using }
  * `anthropic/` model without `max_output_tokens`, so such a request that sets no limit is sent the config's
  * `reserveCompletion`. `CompletionOptions.reasoning` is sent as `reasoning.effort`, and `Thinking.Off` as `minimal`, the
  * least the API takes, winning over a `reasoning` also set; `Thinking.Adaptive` and `Thinking.Budget` have no counterpart
- * and are not sent (this client reports no adjustments yet). The penalties have no counterpart in the
- * Agent API and are not sent. A `ResponseFormat.JsonSchema` is sent as `response_format`
+ * and are not sent. The penalties have no counterpart in the Agent API and are not sent. Each is reported on
+ * `Completion.adjustments` (RFC 0008, [[PerplexityClient.unsentOptions]]). A `ResponseFormat.JsonSchema` is sent as `response_format`
  * (`{"type":"json_schema","json_schema":{"name","schema","strict"}}`); the Agent API takes no plain JSON mode, so
  * `ResponseFormat.Json` is refused before anything is sent.
  *
@@ -110,10 +110,20 @@ class PerplexityClient(
   private def requestHeaders(key: String, accept: String): Map[String, String] =
     config.headers ++ Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $key", "Accept" -> accept)
 
+  // what the request does not send as asked goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(providerName)
+
+  private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
+    val adjustments = PerplexityClient.unsentOptions(config.model, options)
+    adjustmentLog.record(config.model, adjustments)
+    adjustments
+  }
+
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     completeWithMetrics {
-      createRequestBody(conversation, options, stream = false).flatMap(body => currentApiKey().map(_ -> body)).flatMap {
-        (key, body) =>
+      createRequestBody(conversation, options, stream = false)
+        .flatMap(body => currentApiKey().map(_ -> body))
+        .flatMap { (key, body) =>
           val requestText = body.render()
           val startedAt   = Instant.now()
           http
@@ -133,7 +143,8 @@ class PerplexityClient(
               recordExchange(startedAt, requestText, response.body, result)
               result
             }
-      }
+        }
+        .map(_.withAdjustments(unsent(options)))
     }
 
   override def streamComplete(
@@ -141,8 +152,9 @@ class PerplexityClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
-    createRequestBody(conversation, options, stream = true).flatMap(body => currentApiKey().map(_ -> body)).flatMap {
-      (key, body) =>
+    createRequestBody(conversation, options, stream = true)
+      .flatMap(body => currentApiKey().map(_ -> body))
+      .flatMap { (key, body) =>
         val requestText = body.render()
         val url         = config.agentUrl
         val startedAt   = Instant.now()
@@ -160,7 +172,8 @@ class PerplexityClient(
           }
         recordExchange(startedAt, requestText, raw.result(), result)
         result
-    }
+      }
+      .map(_.withAdjustments(unsent(options)))
   }
 
   private def readStream(
@@ -402,6 +415,36 @@ object PerplexityClient {
    * `xhigh` and `max`: each level by its own name. It has no "off"; `Thinking.Off` is sent as `minimal`, the least.
    */
   private[provider] def reasoningEffortValue(effort: ReasoningEffort): String = effort.name
+
+  /**
+   * What a request leaves out, as RFC 0008 reports it: `Thinking.Off` sent as `minimal` (`Adjusted`, with any
+   * `reasoning` it overrode), `Thinking.Adaptive` not sent since the effort sets how much the model reasons
+   * (`NotNeeded`), a thinking budget not sent (`Dropped`), and a penalty set away from 0 not sent (`Dropped`).
+   */
+  private[provider] def unsentOptions(model: String, options: CompletionOptions): List[RequestAdjustment] = {
+    val thinking = options.thinking match {
+      case Some(Thinking.Off) =>
+        RequestAdjustment.Adjusted(RequestOption.Thinking, "Off", "minimal", s"$model cannot stop reasoning") ::
+          EffortMapping.overriddenByOff(options, "minimal")
+      case Some(Thinking.Adaptive) =>
+        List(RequestAdjustment.NotNeeded(RequestOption.Thinking, s"$model sets how much it reasons by its effort"))
+      case Some(_: Thinking.Budget) =>
+        List(RequestAdjustment.Dropped(RequestOption.Thinking, "the Perplexity Agent API takes no thinking budget"))
+      case None => Nil
+    }
+    val penalties =
+      Option
+        .when(options.presencePenalty != 0.0)(
+          RequestAdjustment.Dropped(RequestOption.PresencePenalty, "the Perplexity Agent API takes no penalties")
+        )
+        .toList ++
+        Option
+          .when(options.frequencyPenalty != 0.0)(
+            RequestAdjustment.Dropped(RequestOption.FrequencyPenalty, "the Perplexity Agent API takes no penalties")
+          )
+          .toList
+    thinking ++ penalties
+  }
 
   private def encodeJsonSchema(format: ResponseFormat.JsonSchema): ujson.Value =
     ujson.Obj(
