@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the dialect's `parseToolCalls` return `Result` (PR 3);
   [migration](docs/reference/migration.md#a-broken-or-cut-tool-call-is-an-error-2613). `ProviderModuleChecks.assertStreams`
   is removed: `assertModelCallContract` replaces it (PR 5).
+- A positional pattern on `TokenUsage` or `ModelPricing` gains a field (`longCacheCreationTokens`,
+  `cacheCreationInputTokenCostAbove1hr`; [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 6);
+  [migration](docs/reference/migration.md#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115).
 
 ### Providers
 
@@ -42,6 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each reports what it changed on `Completion.adjustments` ([cost controls](docs/guide/cost-controls.md),
   [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4, decision 14); `CachingLLMClient` matches a cached answer on an
   explicit list of the options that change it, `thinking` and `reasoning` among them (PR 5, decision 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+- **Added** `CompletionOptions.promptCache` (`PromptCache`: scope `System`, `Tools`, `Conversation`, TTL `Short` or
+  `Long`): Anthropic sends `cache_control` breakpoints and reports a prefix too short to cache; OpenAI, Gemini and Vertex
+  AI report it `NotNeeded`, the rest `Dropped`. `TokenUsage.longCacheCreationTokens` and
+  `ModelPricing.cacheCreationInputTokenCostAbove1hr` price a 1-hour cache write; `CachingLLMClient` ignores
+  `promptCache` ([cost controls](docs/guide/cost-controls.md#provider-side-prompt-caching),
+  [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 6, decision 16) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 
 ### Java & Kotlin APIs
 

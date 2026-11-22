@@ -36,7 +36,8 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [finish reasons are typed](#finish-reasons-are-typed-2613),
 [every provider's content-filter stop is an error](#every-providers-content-filter-stop-is-an-error-2677),
 [a stream that did not finish is an error](#a-stream-that-did-not-finish-is-an-error-2613),
-and [a broken or cut tool call is an error](#a-broken-or-cut-tool-call-is-an-error-2613).
+[a broken or cut tool call is an error](#a-broken-or-cut-tool-call-is-an-error-2613),
+and [`TokenUsage` and `ModelPricing` gain a prompt-cache field](#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115).
 
 ## Finish reasons are typed (#2613)
 
@@ -172,6 +173,22 @@ Source changes, all in the provider-author SPI:
 - `OpenAICompatibleDialect.parseToolCalls` and `OpenAICompatibleDialect.lenientToolCalls` return
   `Result[Seq[ToolCall]]`. A dialect that overrides `parseToolCalls` returns a `Left` for a call whose arguments are
   not a JSON object; `lenientToolCalls` is still lenient about a missing `id` or `name`, not about arguments.
+
+## `TokenUsage` and `ModelPricing` gain a prompt-cache field (#2115)
+
+Provider-side prompt caching ([RFC 0008](../rfcs/0008-generation-controls) PR 6,
+[cost controls](../guide/cost-controls#provider-side-prompt-caching)) is opt-in through
+`CompletionOptions.withPromptCache`, and a call without it sends what it sent before. Two growth-safe types gain a
+defaulted field, so only a positional pattern on them changes:
+
+- `TokenUsage` gains `longCacheCreationTokens: Option[Int]`, the cache writes made with the 1-hour lifetime:
+  `case TokenUsage(p, c, t, _, _, _)` becomes `case TokenUsage(p, c, t, _, _, _, _)`.
+- `ModelPricing` gains `cacheCreationInputTokenCostAbove1hr: Option[Double]` as its last field.
+- Java and Kotlin see no Scala defaults, so a call to `TokenUsage.apply` or `ModelPricing.apply` from them passes
+  the new argument too (`Option.empty()`).
+
+The `PositionalPatternsGainFields` Scalafix rule does not add these binders yet; add them by hand, or match on the
+type and read the fields.
 
 ## Changes since 0.5.1 that no rule automates
 

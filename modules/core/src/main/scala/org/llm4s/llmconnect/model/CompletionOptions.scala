@@ -17,6 +17,8 @@ import org.llm4s.toolapi.ToolFunction
  *                  For non-reasoning models, this setting is silently ignored.
  * @param thinking Optional thinking mode: off, adaptive, or a token budget (see [[Thinking]]). An explicit
  *                 `thinking` wins over `reasoning`; see `withThinking`.
+ * @param promptCache Optional provider-side prompt cache (see [[PromptCache]]): changes what a call costs, not what it
+ *                    returns. Not [[org.llm4s.llmconnect.caching.CachingLLMClient]], which caches whole answers.
  * @param responseFormat Optional structured output format (e.g. JSON or JSON schema). Support is
  *                        provider- and model-dependent; see capability validation in RequestTransformer.
  *
@@ -51,7 +53,8 @@ final case class CompletionOptions private (
   tools: Seq[ToolFunction[_, _]],
   reasoning: Option[ReasoningEffort],
   thinking: Option[Thinking],
-  responseFormat: Option[ResponseFormat]
+  responseFormat: Option[ResponseFormat],
+  promptCache: Option[PromptCache]
 ) {
 
   /**
@@ -188,6 +191,27 @@ final case class CompletionOptions private (
     }
 
   /**
+   * Sets or clears a provider-side prompt cache: the provider keeps the start of the request, so a later request
+   * with the same start costs less and answers sooner. The answer is the same either way.
+   *
+   * Not [[org.llm4s.llmconnect.caching.CachingLLMClient]], which keeps whole answers on the client and skips the
+   * call. To fan out many requests that share a start, send one first and wait for it: requests sent together all
+   * miss a cache that is not yet written. See [[PromptCache]].
+   *
+   * @param promptCache what to cache and for how long; `None` asks for no prompt cache (the default)
+   * @return new CompletionOptions with promptCache set
+   */
+  def withPromptCache(promptCache: Option[PromptCache]): CompletionOptions = copy(promptCache = promptCache)
+
+  /**
+   * Asks for a provider-side prompt cache; see the `Option` overload.
+   *
+   * @param promptCache what to cache and for how long, such as `PromptCache.default`
+   * @return new CompletionOptions with promptCache set
+   */
+  def withPromptCache(promptCache: PromptCache): CompletionOptions = copy(promptCache = Some(promptCache))
+
+  /**
    * Request structured output in the given format.
    *
    * Support is provider- and model-dependent. Capability validation is applied
@@ -212,7 +236,8 @@ object CompletionOptions {
     tools: Seq[ToolFunction[_, _]] = Seq.empty,
     reasoning: Option[ReasoningEffort] = None,
     thinking: Option[Thinking] = None,
-    responseFormat: Option[ResponseFormat] = None
+    responseFormat: Option[ResponseFormat] = None,
+    promptCache: Option[PromptCache] = None
   ): CompletionOptions =
     new CompletionOptions(
       temperature,
@@ -223,6 +248,7 @@ object CompletionOptions {
       tools,
       reasoning,
       thinking,
-      responseFormat
+      responseFormat,
+      promptCache
     )
 }

@@ -207,6 +207,9 @@ object Completion {
  * @param cacheCreationTokens Optional number of tokens written into the provider's prompt cache.
  *                            When present, these tokens are billed at the cache-creation rate,
  *                            which is typically higher than the normal input rate.
+ * @param longCacheCreationTokens Optional number of `cacheCreationTokens` written with the provider's long lifetime
+ *                                (Anthropic's 1-hour cache), billed at its own, higher rate. The rest of
+ *                                `cacheCreationTokens` were written with the short lifetime.
  */
 @Stable
 final case class TokenUsage private (
@@ -215,7 +218,8 @@ final case class TokenUsage private (
   totalTokens: Int,
   thinkingTokens: Option[Int],
   cachedTokens: Option[Int],
-  cacheCreationTokens: Option[Int]
+  cacheCreationTokens: Option[Int],
+  longCacheCreationTokens: Option[Int]
 ) {
   def withPromptTokens(promptTokens: Int): TokenUsage             = copy(promptTokens = promptTokens)
   def withCompletionTokens(completionTokens: Int): TokenUsage     = copy(completionTokens = completionTokens)
@@ -228,6 +232,10 @@ final case class TokenUsage private (
     copy(cacheCreationTokens = Some(cacheCreationTokens))
   def withCacheCreationTokens(cacheCreationTokens: Option[Int]): TokenUsage =
     copy(cacheCreationTokens = cacheCreationTokens)
+  def withLongCacheCreationTokens(longCacheCreationTokens: Int): TokenUsage =
+    copy(longCacheCreationTokens = Some(longCacheCreationTokens))
+  def withLongCacheCreationTokens(longCacheCreationTokens: Option[Int]): TokenUsage =
+    copy(longCacheCreationTokens = longCacheCreationTokens)
 
   /**
    * Total output tokens: the completion plus any thinking, which `completionTokens` never includes.
@@ -251,9 +259,18 @@ object TokenUsage {
     totalTokens: Int,
     thinkingTokens: Option[Int] = None,
     cachedTokens: Option[Int] = None,
-    cacheCreationTokens: Option[Int] = None
+    cacheCreationTokens: Option[Int] = None,
+    longCacheCreationTokens: Option[Int] = None
   ): TokenUsage =
-    new TokenUsage(promptTokens, completionTokens, totalTokens, thinkingTokens, cachedTokens, cacheCreationTokens)
+    new TokenUsage(
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      thinkingTokens,
+      cachedTokens,
+      cacheCreationTokens,
+      longCacheCreationTokens
+    )
 }
 
 /**

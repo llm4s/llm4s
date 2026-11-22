@@ -41,6 +41,9 @@ private[caching] object CompletionCacheKey {
       responseFormat = options.responseFormat
     )
 
-  /** The `CompletionOptions` fields left out of the key because they do not change the answer. None yet. */
-  val Excluded: Set[String] = Set.empty
+  /**
+   * The `CompletionOptions` fields left out of the key because they do not change the answer: `promptCache`, a
+   * provider-side cache that changes what a call costs (RFC 0008, PR 6).
+   */
+  val Excluded: Set[String] = Set("promptCache")
 }

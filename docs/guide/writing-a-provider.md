@@ -551,7 +551,9 @@ requested options were not sent as asked from `Completion.adjustments`, a list o
 
 - calls `transform` with `dropUnsupported = true` (the default), and puts `t.adjustments` on every
   `Completion` it returns, streamed or not: `completion.withAdjustments(t.adjustments)`;
-- adds a `Dropped` for an option its own request mapping cannot send, rather than ignoring it.
+- adds a `Dropped` for an option its own request mapping cannot send, rather than ignoring it. A set `promptCache`
+  is `Dropped` when the request carries no cache setting, or `NotNeeded` when the provider caches a repeated prefix
+  on its own ([provider-side prompt caching](cost-controls#provider-side-prompt-caching)).
 
 An `OpenAICompatibleDialect` does the second through `addReasoning`, which returns what it could not
 send: the standard one reports a set `reasoning` or `thinking` as `Dropped`, and an override that sends them returns
