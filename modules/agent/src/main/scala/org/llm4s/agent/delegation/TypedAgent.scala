@@ -665,6 +665,7 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
         TaskOutcome.Refused(ref, TaskRefusal.Blocked(guardrail, reason), result.usage)
       case AgentStatus.StepLimitReached     => TaskOutcome.Refused(ref, TaskRefusal.StepLimitReached, result.usage)
       case AgentStatus.TokenLimitReached    => TaskOutcome.Refused(ref, TaskRefusal.TokenLimitReached, result.usage)
+      case AgentStatus.Truncated(_)         => TaskOutcome.Refused(ref, TaskRefusal.Truncated, result.usage)
       case suspended: AgentStatus.Suspended => TaskOutcome.Suspended(ref, suspended)
 
   /** The report in `answer`: the text itself for a text subagent, else the answer decoded as `O`. */

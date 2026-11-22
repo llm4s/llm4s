@@ -13,6 +13,7 @@ import java.util.Optional;
  * JAgentResult r = agent.run("What is 2+2?").get();
  * switch (r.status().kind()) {
  *     case COMPLETED           -> System.out.println(r.answer().orElseThrow());
+ *     case TRUNCATED           -> System.out.println("Cut off: " + r.status().partialAnswer().orElseThrow());
  *     case BLOCKED             -> System.out.println("Blocked by " + r.status().guardrail().orElseThrow());
  *     case STEP_LIMIT_REACHED  -> System.out.println("Hit the step limit");
  *     case TOKEN_LIMIT_REACHED -> System.out.println("Hit the token budget");
@@ -81,7 +82,10 @@ public final class JAgentResult {
     return usage;
   }
 
-  /** The final answer, when the turn {@link AgentStatusKind#COMPLETED completed}; otherwise empty. */
+  /**
+   * The final answer, when the turn {@link AgentStatusKind#COMPLETED completed}; otherwise empty - also when it was
+   * {@link AgentStatusKind#TRUNCATED cut off}, whose partial answer is {@code status().partialAnswer()}.
+   */
   public Optional<String> answer() {
     return status.answer();
   }

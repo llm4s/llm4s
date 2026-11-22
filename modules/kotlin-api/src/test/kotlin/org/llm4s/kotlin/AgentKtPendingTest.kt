@@ -230,6 +230,7 @@ class AgentKtPendingTest {
         val first = agent.run("deploy")
         fun describe(result: JAgentResult): String = when (result.status().kind()) {
             AgentStatusKind.COMPLETED -> "completed:" + result.answer().get()
+            AgentStatusKind.TRUNCATED -> "truncated:" + result.status().partialAnswer().get()
             AgentStatusKind.BLOCKED -> "blocked:" + result.status().guardrail().get()
             AgentStatusKind.STEP_LIMIT_REACHED -> "step-limit"
             AgentStatusKind.TOKEN_LIMIT_REACHED -> "token-limit"

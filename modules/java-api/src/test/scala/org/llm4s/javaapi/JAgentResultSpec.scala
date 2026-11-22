@@ -49,6 +49,17 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     s.toString shouldBe "COMPLETED(42)"
   }
 
+  it should "carry a truncated turn's partial answer, and no answer" in {
+    val s = FacadeInternals.agentStatus(AgentStatus.Truncated("The first half"))
+    pending(AgentStatusKind.TRUNCATED, s)
+    s.answer shouldBe Optional.empty
+    s.partialAnswer shouldBe Optional.of("The first half")
+    s.guardrail shouldBe Optional.empty
+    s.reason shouldBe Optional.empty
+    s.toString shouldBe "TRUNCATED(The first half)"
+    FacadeInternals.agentStatus(AgentStatus.Completed("42")).partialAnswer shouldBe Optional.empty
+  }
+
   it should "carry a blocked turn's guardrail and reason, and nothing else" in {
     val s = FacadeInternals.agentStatus(AgentStatus.Blocked("NoSecrets", "leaks a key"))
     pending(AgentStatusKind.BLOCKED, s)
@@ -120,7 +131,7 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   "AgentStatusKind" should "be a Java enum with the five cases, in order" in {
     classOf[AgentStatusKind].isEnum shouldBe true
     AgentStatusKind.values().toList.map(_.name) shouldBe
-      List("COMPLETED", "BLOCKED", "STEP_LIMIT_REACHED", "TOKEN_LIMIT_REACHED", "SUSPENDED")
+      List("COMPLETED", "TRUNCATED", "BLOCKED", "STEP_LIMIT_REACHED", "TOKEN_LIMIT_REACHED", "SUSPENDED")
   }
 
   "JMessage" should "read each role of the history" in {

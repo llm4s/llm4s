@@ -22,6 +22,15 @@ enum AgentStatus:
   case Completed(answer: String)
 
   /**
+   * The active agent's final answer was cut off: the model stopped at its output limit (`FinishReason.Length`,
+   * `CompletionOptions.maxTokens` or the model's own cap) before it finished. `partialAnswer` is what it wrote, stored
+   * in the thread as any answer is; it is not an [[AgentResult.answer]], since it is incomplete. Like
+   * `StepLimitReached`, a completed turn: the next turn runs normally, so a caller can ask the agent to go on, or
+   * run again with a higher limit (RFC 0009, open question 6).
+   */
+  case Truncated(partialAnswer: String)
+
+  /**
    * A guardrail refused the turn: `guardrail` is the first failing guardrail's name, `reason` every
    * failure's error. An input block stores nothing of the turn; an output block removes it - the
    * query, any tool calls and the answer - so `messages` is the history from before the turn. Usage
@@ -81,7 +90,10 @@ final case class AgentResult private (
   usage: UsageSummary
 ):
 
-  /** The final answer, when the turn `Completed`. */
+  /**
+   * The final answer, when the turn `Completed`. A turn whose answer was cut off at the model's output limit has
+   * none: its partial answer is on [[AgentStatus.Truncated]] (and in `messages`), never here.
+   */
   def answer: Option[String] = status match
     case AgentStatus.Completed(text) => Some(text)
     case _                           => None

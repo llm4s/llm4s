@@ -109,6 +109,9 @@ enum RunOutcome derives ReadWriter:
   /** An agent turn reached its run's token budget (`RunBudgets.maxTokens`). */
   case TokenLimitReached
 
+  /** An agent turn's answer, which is in the thread's state, was cut off at the model's output limit. */
+  case Truncated
+
   /** A guardrail blocked the run: its name and reason. */
   case Blocked(guardrail: String, reason: String)
 

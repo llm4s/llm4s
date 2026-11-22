@@ -190,6 +190,16 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAn
     agent.extractFinalResponse(state) shouldBe Right("answer 2")
   }
 
+  it should "show a truncated turn's partial answer, marked as cut off" in {
+    val state = sessionStateWithMessages(
+      Seq(UserMessage("q1"), AssistantMessage("half an ans")),
+      AgentStatus.Truncated("half an ans")
+    )
+    val shown = assistantAgent().extractFinalResponse(state)
+    shown.map(_.startsWith("half an ans")) shouldBe Right(true)
+    shown.map(_.contains("cut off")) shouldBe Right(true)
+  }
+
   it should "return Left for a session with no turn yet" in {
     assistantAgent().extractFinalResponse(emptySessionState()).isLeft shouldBe true
   }

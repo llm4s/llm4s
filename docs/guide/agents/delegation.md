@@ -220,7 +220,7 @@ its parent forgets it.
 
 Every `task` call sends the parent's live `SubagentEvents.TaskStarted` as its child starts, and commits one durable
 `SubagentEvents.TaskEnded` with its result: the child, a status label (`completed`, `blocked:<guardrail>`,
-`step_limit_reached`, `token_limit_reached`, `output_invalid`, `failed`; a call waiting on a suspended child commits none until the child settles), the child's whole usage and its
+`step_limit_reached`, `token_limit_reached`, `truncated`, `output_invalid`, `failed`; a call waiting on a suspended child commits none until the child settles), the child's whole usage and its
 duration. It carries no request, report or reason, so it is the event to count, time and cost subagents by.
 
 A subscription made with `nested = true` also receives every event of each child, as `StreamEvent.Nested(child,

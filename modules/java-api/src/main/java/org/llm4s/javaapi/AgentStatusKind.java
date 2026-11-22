@@ -12,6 +12,13 @@ public enum AgentStatusKind {
   COMPLETED,
 
   /**
+   * The agent's final answer was cut off at the model's output limit: {@link JAgentStatus#partialAnswer()} is
+   * what it wrote, and {@link JAgentStatus#answer()} is empty. The thread stays usable: ask the agent to go on,
+   * or run again with a higher {@code maxTokens}.
+   */
+  TRUNCATED,
+
+  /**
    * A guardrail refused the turn: {@link JAgentStatus#guardrail()} names it and
    * {@link JAgentStatus#reason()} says why. The thread stays usable.
    */

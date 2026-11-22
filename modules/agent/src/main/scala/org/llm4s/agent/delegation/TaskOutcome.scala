@@ -85,6 +85,9 @@ enum TaskRefusal derives ReadWriter:
   /** The child used its token budget without an answer. */
   case TokenLimitReached
 
+  /** The child's answer was cut off at its model's output limit (`AgentStatus.Truncated`). */
+  case Truncated
+
   /** The child's typed answer failed its output schema twice: every problem it was reported with. */
   case OutputInvalid(errors: Vector[String])
 
@@ -96,17 +99,20 @@ enum TaskRefusal derives ReadWriter:
     case Blocked(guardrail, reason) => s"blocked by guardrail '$guardrail': $reason"
     case StepLimitReached           => "reached its step limit without an answer"
     case TokenLimitReached          => "reached its token budget without an answer"
+    case Truncated                  => "its answer was cut off at the model's output limit"
     case OutputInvalid(errors)      => s"its answer did not match its output schema: ${errors.mkString("; ")}"
     case Failed(message)            => s"failed: $message"
 
 object TaskRefusal:
   /**
    * The status label `SubagentEvents.TaskEnded` gives `reason` (design 4.47): `blocked:<guardrail>`,
-   * `step_limit_reached`, `token_limit_reached`, `output_invalid` or `failed` - no reason text, which may hold content.
+   * `step_limit_reached`, `token_limit_reached`, `truncated`, `output_invalid` or `failed` - no reason text, which may
+   * hold content.
    */
   private[agent] def label(reason: TaskRefusal): String = reason match
     case Blocked(guardrail, _) => s"blocked:$guardrail"
     case StepLimitReached      => "step_limit_reached"
     case TokenLimitReached     => "token_limit_reached"
+    case Truncated             => "truncated"
     case OutputInvalid(_)      => "output_invalid"
     case Failed(_)             => "failed"
