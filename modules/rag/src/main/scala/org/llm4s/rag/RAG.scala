@@ -883,7 +883,7 @@ final class RAG private (
    * while the answer arrives, over SSE or a WebSocket.
    *
    * In order, on the calling thread: `onContexts` gets the contexts the answer is generated from, once, before the
-   * model is called, so the citations can be shown first; `onChunk` gets each [[StreamedChunk]] of the answer as the
+   * model is called, so the citations can be shown first; `onChunk` gets each [[org.llm4s.llmconnect.model.StreamedChunk StreamedChunk]] of the answer as the
    * provider sends it (through `LLMClient.streamComplete`); and the method returns the whole [[RAGAnswerResult]],
    * as `queryWithAnswer` would, with the usage the provider reported.
    *
