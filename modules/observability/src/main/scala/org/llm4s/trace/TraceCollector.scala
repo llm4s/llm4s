@@ -346,7 +346,8 @@ class TraceCollectorTracing[F[_]](
             llmPromptTokens,
             llmCompletionTokens,
             totalCostUsd,
-            ts
+            ts,
+            stageDurations
           ) =>
         val baseAttrs: Map[String, SpanValue] = Map(
           "operation"   -> SpanValue.StringValue(operation),
@@ -356,7 +357,10 @@ class TraceCollectorTracing[F[_]](
         val promptAttr     = llmPromptTokens.map(v => "llm_prompt_tokens" -> SpanValue.LongValue(v.toLong))
         val completionAttr = llmCompletionTokens.map(v => "llm_completion_tokens" -> SpanValue.LongValue(v.toLong))
         val costAttr       = totalCostUsd.map(v => "total_cost_usd" -> SpanValue.DoubleValue(v))
-        val attrs          = baseAttrs ++ embeddingAttr ++ promptAttr ++ completionAttr ++ costAttr
+        val stageAttrs = stageDurations.map { case (stage, d) =>
+          s"stage_${stage}_ms" -> SpanValue.LongValue(d.toMillis)
+        }
+        val attrs = baseAttrs ++ embeddingAttr ++ promptAttr ++ completionAttr ++ costAttr ++ stageAttrs
         Span(
           spanId = spanId,
           traceId = traceId,

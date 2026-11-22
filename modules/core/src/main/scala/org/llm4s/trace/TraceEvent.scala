@@ -611,6 +611,8 @@ object TraceEvent {
    * @param llmPromptTokens Optional prompt tokens for LLM operations
    * @param llmCompletionTokens Optional completion tokens for LLM operations
    * @param totalCostUsd Optional accumulated cost in USD
+   * @param stageDurations How long each stage took, by name (a RAG query's `rewrite`, `embedding`, `search`,
+   *                       `rerank`, `answer`); empty when not measured
    */
   final case class RAGOperationCompleted private (
     operation: String,
@@ -619,7 +621,8 @@ object TraceEvent {
     llmPromptTokens: Option[Int],
     llmCompletionTokens: Option[Int],
     totalCostUsd: Option[Double],
-    timestamp: Instant
+    timestamp: Instant,
+    stageDurations: Map[String, FiniteDuration]
   ) extends TraceEvent {
     def withOperation(operation: String): RAGOperationCompleted          = copy(operation = operation)
     def withDuration(duration: FiniteDuration): RAGOperationCompleted    = copy(duration = duration)
@@ -636,6 +639,8 @@ object TraceEvent {
     def withTotalCostUsd(totalCostUsd: Double): RAGOperationCompleted         = copy(totalCostUsd = Some(totalCostUsd))
     def withTotalCostUsd(totalCostUsd: Option[Double]): RAGOperationCompleted = copy(totalCostUsd = totalCostUsd)
     def withTimestamp(timestamp: Instant): RAGOperationCompleted              = copy(timestamp = timestamp)
+    def withStageDurations(stageDurations: Map[String, FiniteDuration]): RAGOperationCompleted =
+      copy(stageDurations = stageDurations)
 
     def eventType: String = "rag_operation_completed"
     def toJson: ujson.Value = {
@@ -649,9 +654,14 @@ object TraceEvent {
       llmPromptTokens.foreach(t => base("llm_prompt_tokens") = t)
       llmCompletionTokens.foreach(t => base("llm_completion_tokens") = t)
       totalCostUsd.foreach(c => base("total_cost_usd") = c)
+      if (stageDurations.nonEmpty) base("stage_durations_ms") = TraceEvent.stageDurationsJson(stageDurations)
       base
     }
   }
+
+  /** Stage durations as a JSON object of milliseconds, by stage name in order. */
+  private[llm4s] def stageDurationsJson(stageDurations: Map[String, FiniteDuration]): ujson.Obj =
+    ujson.Obj.from(stageDurations.toSeq.sortBy(_._1).map { case (k, d) => k -> ujson.Num(d.toMillis.toDouble) })
 
   object RAGOperationCompleted {
     def apply(
@@ -661,7 +671,8 @@ object TraceEvent {
       llmPromptTokens: Option[Int] = None,
       llmCompletionTokens: Option[Int] = None,
       totalCostUsd: Option[Double] = None,
-      timestamp: Instant = Instant.now()
+      timestamp: Instant = Instant.now(),
+      stageDurations: Map[String, FiniteDuration] = Map.empty
     ): RAGOperationCompleted =
       new RAGOperationCompleted(
         operation,
@@ -670,7 +681,8 @@ object TraceEvent {
         llmPromptTokens,
         llmCompletionTokens,
         totalCostUsd,
-        timestamp
+        timestamp,
+        stageDurations
       )
   }
 

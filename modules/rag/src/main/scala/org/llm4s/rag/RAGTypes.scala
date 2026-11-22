@@ -45,12 +45,14 @@ final case class RAGSearchResult(
  * @param question The original question
  * @param contexts The chunks used as context for generation
  * @param usage Optional token usage statistics
+ * @param metrics The query's stage durations, candidate and chunk counts, tokens and cost (#2734); `RAG` always sets it
  */
 final case class RAGAnswerResult(
   answer: String,
   question: String,
   contexts: Seq[RAGSearchResult],
-  usage: Option[TokenUsage] = None
+  usage: Option[TokenUsage] = None,
+  metrics: Option[RAGQueryMetrics] = None
 )
 
 /**

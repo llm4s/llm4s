@@ -269,14 +269,16 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   "ConsoleTracing" should "handle RAGOperationCompleted with all optional fields" in {
     val tracing = new ConsoleTracing()
-    val event = TraceEvent.RAGOperationCompleted(
-      "evaluate",
-      2500.millis,
-      Some(100),
-      Some(200),
-      Some(50),
-      Some(0.003)
-    )
+    val event = TraceEvent
+      .RAGOperationCompleted(
+        "evaluate",
+        2500.millis,
+        Some(100),
+        Some(200),
+        Some(50),
+        Some(0.003)
+      )
+      .withStageDurations(Map("search" -> 40.millis))
     tracing.traceEvent(event).isRight shouldBe true
   }
 

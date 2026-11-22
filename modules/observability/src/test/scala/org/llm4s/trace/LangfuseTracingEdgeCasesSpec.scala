@@ -254,7 +254,9 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracing = makeTracing(mock)
 
     val result = tracing.traceEvent(
-      TraceEvent.RAGOperationCompleted("search", 200.millis, Some(100), Some(200), Some(50), Some(0.003))
+      TraceEvent
+        .RAGOperationCompleted("search", 200.millis, Some(100), Some(200), Some(50), Some(0.003))
+        .withStageDurations(Map("search" -> 40.millis))
     )
 
     result.isRight shouldBe true
@@ -266,6 +268,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     event("body")("output")("llm_prompt_tokens").num.toInt shouldBe 200
     event("body")("output")("llm_completion_tokens").num.toInt shouldBe 50
     event("body")("output")("total_cost_usd").num shouldBe 0.003
+    event("body")("output")("stage_durations_ms")("search").num shouldBe 40
   }
 
   it should "handle RAGOperationCompleted without optional fields" in {
