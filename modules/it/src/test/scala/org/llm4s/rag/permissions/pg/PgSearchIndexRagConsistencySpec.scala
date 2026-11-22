@@ -236,4 +236,21 @@ class PgSearchIndexRagConsistencySpec extends AnyFlatSpec with Matchers with Bef
         .map(_.flatMap(_.metadata.get("docId"))) shouldBe Right(Seq("secret"))
     } finally pipeline.close()
   }
+
+  "Plain query and clear on a RAG with a PgSearchIndex" should "be refused, returning and deleting nothing" in {
+    val url              = requirePg()
+    val (index, vectors) = newIndex(url, "plainquery")
+    val restricted       = collection(index, "plainquery-restricted", Set(user1))
+    val pipeline         = rag(index)
+    try {
+      pipeline.ingestWithPermissions(restricted, "secret", "Merger plans.").isRight shouldBe true
+
+      // The plain search would read this table with no permission filter
+      pipeline.query("merger").left.toOption.get shouldBe a[ConfigurationError]
+      pipeline.clear().left.toOption.get shouldBe a[ConfigurationError]
+      count(url, vectors, "metadata->>'docId' = 'secret'") shouldBe 1L
+
+      pipeline.queryWithPermissions(outsiderAuth, CollectionPattern.All, "merger") shouldBe Right(Seq.empty)
+    } finally pipeline.close()
+  }
 }
