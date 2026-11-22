@@ -7,7 +7,7 @@ import java.util.Optional;
 
 /**
  * One model reply with what came with it, as {@code JLlmClient.completion} returns it: the text, the model
- * that answered, the tool calls it asked for, the tokens it used and its estimated cost.
+ * that answered, the tool calls it asked for, the tokens it used, its estimated cost and the service tier that served it.
  *
  * <pre>{@code
  * JCompletion reply = client.completion("What is 2+2?").get();
@@ -15,6 +15,7 @@ import java.util.Optional;
  * reply.usage().ifPresent(u -> System.out.println(u.promptTokens() + " in, " + u.completionTokens() + " out"));
  * reply.estimatedCost().ifPresent(cost -> System.out.println("$" + cost.toPlainString()));
  * reply.toolCalls().forEach(c -> System.out.println(c.name() + " " + c.argumentsJson()));
+ * reply.servedTier().ifPresent(tier -> System.out.println("served at " + tier));
  * }</pre>
  *
  * <p>A value: two are equal when every field is. {@code toString} prints the full text, as the Scala
@@ -30,6 +31,7 @@ public final class JCompletion {
   private final Optional<JTokenUsage> usage;
   private final Optional<BigDecimal> estimatedCost;
   private final Optional<String> thinking;
+  private final Optional<String> servedTier;
 
   JCompletion(
       String id,
@@ -38,7 +40,8 @@ public final class JCompletion {
       List<JToolCall> toolCalls,
       Optional<JTokenUsage> usage,
       Optional<BigDecimal> estimatedCost,
-      Optional<String> thinking) {
+      Optional<String> thinking,
+      Optional<String> servedTier) {
     this.id = id;
     this.content = content;
     this.model = model;
@@ -46,6 +49,7 @@ public final class JCompletion {
     this.usage = usage;
     this.estimatedCost = estimatedCost;
     this.thinking = thinking;
+    this.servedTier = servedTier;
   }
 
   /** The provider's id for this reply. */
@@ -92,6 +96,17 @@ public final class JCompletion {
     return thinking;
   }
 
+  /**
+   * The service tier the provider reports it served the call at, which may differ from the one asked for with
+   * {@link JCompletionOptions.Builder#serviceTier}: {@code "auto"}, {@code "default"}, {@code "flex"} or
+   * {@code "priority"}, each the lower-case name of a {@link JServiceTier}, or the provider's own name for a tier
+   * those do not cover (OpenAI's {@code "scale"}, Anthropic's {@code "batch"}). Empty when the provider reported
+   * none.
+   */
+  public Optional<String> servedTier() {
+    return servedTier;
+  }
+
   @Override
   public boolean equals(Object other) {
     return other instanceof JCompletion that
@@ -101,16 +116,18 @@ public final class JCompletion {
         && toolCalls.equals(that.toolCalls)
         && usage.equals(that.usage)
         && estimatedCost.equals(that.estimatedCost)
-        && thinking.equals(that.thinking);
+        && thinking.equals(that.thinking)
+        && servedTier.equals(that.servedTier);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(id, content, model, toolCalls, usage, estimatedCost, thinking);
+    return Objects.hash(id, content, model, toolCalls, usage, estimatedCost, thinking, servedTier);
   }
 
   @Override
   public String toString() {
-    return "JCompletion(" + id + ", " + model + ", " + toolCalls.size() + " tool calls: " + content + ")";
+    String tier = servedTier.map(t -> ", " + t + " tier").orElse("");
+    return "JCompletion(" + id + ", " + model + tier + ", " + toolCalls.size() + " tool calls: " + content + ")";
   }
 }

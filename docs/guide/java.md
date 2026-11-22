@@ -426,7 +426,9 @@ counts `cachedTokens()` (input read from the provider's prompt cache, billed at 
 the model reported none - or empty when the provider reported no usage. `estimatedCost()` is a `java.math.BigDecimal` in USD, empty
 when the cost is not known; it is the figure an agent adds to its `usage().totalCost()`. `toolCalls()` lists `JToolCall`s,
 the same type an agent's messages use, with the arguments as JSON text; `thinking()` is the model's reasoning text when
-it reported one. A `JCompletion` is a value with `equals`, `hashCode` and a `toString` that prints the full text.
+it reported one. `servedTier()` is the service tier the provider reports it served the call at - `"auto"`, `"default"`,
+`"flex"` or `"priority"`, a `JServiceTier`'s lower-case name, or the provider's own name for a tier those do not cover,
+such as OpenAI's `"scale"` - and empty when it reported none. A `JCompletion` is a value with `equals`, `hashCode` and a `toString` that prints the full text.
 
 The method is `completion`, a noun, because it returns the reply rather than performs a request for its text; `complete`
 keeps returning a `String`. There is no `completion` overload for core's Scala `CompletionOptions`, so

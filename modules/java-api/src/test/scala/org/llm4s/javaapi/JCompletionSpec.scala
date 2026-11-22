@@ -235,7 +235,34 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     reply(full).hashCode shouldBe reply(full).hashCode
     reply(full) should not be reply(full.withModel("other"))
     reply(full) should not be reply(full.withEstimatedCost(None))
+    reply(full) should not be reply(full.withServedTier(ServiceTier.Flex))
+    reply(full.withServedTier(ServiceTier.Flex)) shouldBe reply(full.withServedTier(ServiceTier.Flex))
+    reply(full.withServedTier(ServiceTier.Flex)).hashCode shouldBe reply(full.withServedTier(ServiceTier.Flex)).hashCode
     reply(full).equals("reply") shouldBe false
+  }
+
+  it should "print the tier that served it, when the provider reported one" in {
+    FacadeInternals
+      .completion(full.withServedTier(ServiceTier.Other("scale")))
+      .toString shouldBe "JCompletion(reply-1, gpt-4o-2024-08-06, scale tier, 2 tool calls: Let me check.)"
+  }
+
+  it should "name the served tier as JServiceTier does, or as the provider wrote one it does not cover (#2751)" in {
+    def served(tier: ServiceTier): String =
+      Llm4s.wrapClient(replying(bare.withServedTier(tier))).completion("q").get().servedTier.get()
+
+    served(ServiceTier.Auto) shouldBe "auto"
+    served(ServiceTier.Default) shouldBe "default"
+    served(ServiceTier.Flex) shouldBe "flex"
+    served(ServiceTier.Priority) shouldBe "priority"
+    served(ServiceTier.Other("scale")) shouldBe "scale"
+    JServiceTier.values.map(_.name.toLowerCase).toSet shouldBe Set("auto", "default", "flex", "priority")
+    Llm4s.wrapClient(replying(bare)).completion("q").get().servedTier.isPresent shouldBe false
+  }
+
+  it should "read the served tier from Java" in {
+    val reply = Llm4s.wrapClient(replying(bare.withServedTier(ServiceTier.Priority))).completion("q").get()
+    CompletionCheck.readBack(reply).asScala.toList.last shouldBe "tier:priority"
   }
 
   it should "print its id, model, tool-call count and full text" in {
