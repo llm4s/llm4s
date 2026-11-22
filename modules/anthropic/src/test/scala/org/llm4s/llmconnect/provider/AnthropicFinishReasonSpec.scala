@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.ContentFilteredError
+import org.llm4s.error.{ ContentFilteredError, NetworkError, RateLimitError, ServiceError }
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
@@ -15,6 +15,9 @@ import scala.collection.mutable.ListBuffer
  * RFC 0009 PR 2 for `AnthropicClient`: `stop_reason` is mapped on `complete`, and on a stream from `message_delta`,
  * where before the client reported `Other("")`. A `refusal` is a `ContentFilteredError` on both paths, with the
  * usage the call was billed.
+ *
+ * RFC 0009 PR 4: a stream is a reply only once `message_stop` came, and an `error` event fails it with the error it
+ * reports. Either way the text already delivered stays delivered.
  */
 class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
 
@@ -108,5 +111,53 @@ class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
     }
     chunks.flatMap(_.content).mkString shouldBe "Hel"
     chunks.flatMap(_.finishReason) shouldBe empty
+  }
+
+  /** [[stream]] up to `upTo` events (all six by default), then `extra`. */
+  private def streamUpTo(upTo: Int, extra: String = ""): String =
+    stream("end_turn").split("\n\n").take(upTo).map(_ + "\n\n").mkString + extra
+
+  private def errorEvent(errorType: String) =
+    s"""event: error\ndata: {"type":"error","error":{"type":"$errorType","message":"Overloaded"}}\n\n"""
+
+  it should "fail a stream that ends without message_stop with a NetworkError, keeping the text delivered" in {
+    // up to message_delta, which states a stop_reason: only message_stop ends the message
+    Seq(4, 5).foreach { upTo =>
+      withClue(s"$upTo events") {
+        val chunks = ListBuffer.empty[StreamedChunk]
+        withServer("/v1/messages")(sendSseResponse(_, streamUpTo(upTo))) { baseUrl =>
+          clientAt(baseUrl).streamComplete(hi, onChunk = chunks += _) match {
+            case Left(e: NetworkError) => e.message should include("message_stop")
+            case other                 => fail(s"expected a NetworkError, got $other")
+          }
+        }
+        chunks.flatMap(_.content).mkString shouldBe "Hel"
+      }
+    }
+  }
+
+  it should "fail on an error event with the error its type stands for, keeping the text delivered" in {
+    val chunks = ListBuffer.empty[StreamedChunk]
+    withServer("/v1/messages")(sendSseResponse(_, streamUpTo(3, errorEvent("overloaded_error")))) { baseUrl =>
+      clientAt(baseUrl).streamComplete(hi, onChunk = chunks += _) match {
+        case Left(e: ServiceError) =>
+          e.httpStatus shouldBe 529
+          e.message should include("Overloaded")
+        case other => fail(s"expected a ServiceError, got $other")
+      }
+    }
+    chunks.flatMap(_.content).mkString shouldBe "Hel"
+    withServer("/v1/messages")(sendSseResponse(_, streamUpTo(1, errorEvent("rate_limit_error")))) { baseUrl =>
+      clientAt(baseUrl).streamComplete(hi, onChunk = _ => ()) match {
+        case Left(e: RateLimitError) => e.message should include("Overloaded") // the provider's message, kept
+        case other                   => fail(s"expected a RateLimitError, got $other")
+      }
+    }
+    withServer("/v1/messages")(sendSseResponse(_, streamUpTo(1, errorEvent("brand_new_error")))) { baseUrl =>
+      clientAt(baseUrl).streamComplete(hi, onChunk = _ => ()) match {
+        case Left(e: ServiceError) => e.httpStatus shouldBe 502
+        case other                 => fail(s"expected a ServiceError, got $other")
+      }
+    }
   }
 }

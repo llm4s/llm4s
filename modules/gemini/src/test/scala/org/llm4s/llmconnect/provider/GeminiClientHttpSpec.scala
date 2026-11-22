@@ -423,7 +423,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   "GeminiClient.streamComplete()" should "parse SSE lines and accumulate into a Completion" in {
     val sseData =
       "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]}\n" +
-        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" world\"}]}}]," +
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" world\"}]},\"finishReason\":\"STOP\"}]," +
         "\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":2,\"totalTokenCount\":7}}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
 
@@ -451,7 +451,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
           StreamingHttpResponse(
             200,
             new ByteArrayInputStream(
-              "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hi\"}]}}]}\n"
+              "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hi\"}]},\"finishReason\":\"STOP\"}]}\n"
                 .getBytes(StandardCharsets.UTF_8)
             )
           )
@@ -479,7 +479,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
           ujson.read(
             """{"groundingChunks":[{"web":{"uri":"https://src/a","title":"A"}},{"web":{"uri":"https://src/b","title":"B"}}],"groundingSupports":[{"segment":{"startIndex":0,"endIndex":5},"groundingChunkIndices":[0]}]}"""
           )
-        ) + "}]}\n"
+        ) + ",\"finishReason\":\"STOP\"}]}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
     val mockHttp    = stub[Llm4sHttpClient]
     (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
@@ -494,7 +494,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "parse token usage from the final SSE chunk" in {
     val sseData =
-      "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Done\"}]}}]," +
+      "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Done\"}]},\"finishReason\":\"STOP\"}]," +
         "\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":2,\"totalTokenCount\":7}}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
 
@@ -595,7 +595,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
     val sseData =
       "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]}\n" +
-        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" world\"}]}}]," +
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" world\"}]},\"finishReason\":\"STOP\"}]," +
         "\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":2,\"totalTokenCount\":7}}\n"
     val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
     val mockHttp    = stub[Llm4sHttpClient]
@@ -731,6 +731,42 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   "A reply that produced text before an abnormal finish" should "be the text, from complete and from a stream" in {
     val (body, sse) = helThen(1)
     completeOf(body).map(_.content) shouldBe Right("Hel")
+    streamOf(sse, _ => ()).map(_.content) shouldBe Right("Hel")
+  }
+
+  // RFC 0009 PR 4: a stream ends on a finishReason, and an error object mid-stream fails it with that error
+  private def helChunk = """data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"}}]}""" + "\n\n"
+
+  "A stream that ends before a finishReason" should "be a NetworkError, the text delivered staying delivered" in {
+    val chunks = ListBuffer.empty[StreamedChunk]
+    streamOf(helChunk, chunks += _) match {
+      case Left(e: org.llm4s.error.NetworkError) => e.message should include("finishReason")
+      case other                                 => fail(s"expected a NetworkError, got $other")
+    }
+    chunks.flatMap(_.content) shouldBe List("Hel")
+  }
+
+  "An error object in a stream" should "fail it with the error its code stands for, unread past it" in {
+    val chunks = ListBuffer.empty[StreamedChunk]
+    val sse = helChunk +
+      """data: {"error":{"code":503,"message":"The model is overloaded.","status":"UNAVAILABLE"}}""" + "\n\n" +
+      """data: {"candidates":[{"content":{"parts":[{"text":"lo"}],"role":"model"},"finishReason":"STOP"}]}""" + "\n\n"
+    streamOf(sse, chunks += _) match {
+      case Left(e: org.llm4s.error.ServiceError) =>
+        e.httpStatus shouldBe 503
+        e.message should include("The model is overloaded.")
+      case other => fail(s"expected a ServiceError, got $other")
+    }
+    chunks.flatMap(_.content) shouldBe List("Hel")
+    val limited     = """data: {"error":{"code":429,"message":"Resource exhausted","status":"RESOURCE_EXHAUSTED"}}"""
+    val rateLimited = streamOf(limited + "\n\n", _ => ()).left.toOption.value
+    rateLimited shouldBe a[org.llm4s.error.RateLimitError]
+    rateLimited.message should include("Resource exhausted")
+  }
+
+  "A data line that is not JSON" should "still be skipped (RFC 0009, open question 5)" in {
+    val sse = "data: not json\n\n" +
+      """data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"},"finishReason":"STOP"}]}""" + "\n\n"
     streamOf(sse, _ => ()).map(_.content) shouldBe Right("Hel")
   }
 

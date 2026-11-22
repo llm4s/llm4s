@@ -124,7 +124,10 @@ class Llm4sJlamaModuleSpec extends AnyWordSpec with Matchers with ProviderModule
           ContractCase.CleanText       -> Applicability.NotApplicable(inProcess),
           ContractCase.TextCutByLimit  -> Applicability.NotApplicable(inProcess),
           ContractCase.ToolCall        -> Applicability.NotApplicable("JlamaClient does not call tools"),
-          ContractCase.ContentFiltered -> Applicability.NotApplicable("a local model has no content filter")
+          ContractCase.ContentFiltered -> Applicability.NotApplicable("a local model has no content filter"),
+          // the engine's generate call returns or throws: there is no connection to drop, and no event to send
+          ContractCase.StreamEndsEarly -> Applicability.NotApplicable("an in-process engine has no stream to cut off"),
+          ContractCase.ErrorEvent -> Applicability.NotApplicable("an in-process engine reports a failure by throwing")
         )
       )(_ => client(new ScriptedEngine()))
     }

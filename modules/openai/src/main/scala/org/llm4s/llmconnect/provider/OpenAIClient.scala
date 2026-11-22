@@ -11,7 +11,13 @@ import com.openai.client.{ OpenAIClient => SdkClient, OpenAIClientImpl }
 import com.openai.core.{ ClientOptions, JsonField, ObjectMappers, RequestOptions, Timeout }
 import com.openai.core.http.{ HttpClient => SdkHttpClient, ProxyAuthenticator, StreamResponse }
 import com.openai.credential.BearerTokenCredential
-import com.openai.errors.{ OpenAIException, OpenAIIoException, OpenAIServiceException, UnauthorizedException }
+import com.openai.errors.{
+  OpenAIException,
+  OpenAIIoException,
+  OpenAIServiceException,
+  SseException,
+  UnauthorizedException
+}
 import com.openai.models.chat.completions.{
   ChatCompletion,
   ChatCompletionAssistantMessageParam,
@@ -30,7 +36,7 @@ import com.openai.models.chat.completions.{
 }
 import com.openai.models.completions.CompletionUsage
 import com.openai.models.{ ResponseFormatJsonObject, ResponseFormatJsonSchema }
-import org.llm4s.error.{ ContentFilteredError, LLMError, UnknownError }
+import org.llm4s.error.{ ContentFilteredError, LLMError, NetworkError, ServiceError, UnknownError }
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
@@ -335,6 +341,8 @@ class OpenAIClient private[provider] (
       // a content-filter finish fails the stream, with the usage reported after it
       attempt
         .flatMap(_ => state.filtered.map(_.withUsage(state.usage)).toLeft(()))
+        // checked here, not left to the SDK, which ends the stream quietly at the end of the body (RFC 0009, rule 1)
+        .filterOrElse(_ => state.finished, OpenAIClient.unfinished(config.endpointUrl.getOrElse(displayName)))
         .flatMap(_ =>
           // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
           // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
@@ -397,8 +405,11 @@ class OpenAIClient private[provider] (
         None
       ) match {
         // the event that stopped the reply is not delivered; the text before it stays delivered
-        case Some(filtered) => state.filtered = Some(filtered)
+        case Some(filtered) =>
+          state.finished = true
+          state.filtered = Some(filtered)
         case None =>
+          if (finishReason.isDefined) state.finished = true
           state.textLength += contentOpt.map(_.length).getOrElse(0)
           emitStreamingChunks(chunkId, contentOpt, calls, finishReason, accumulator, onChunk)
       }
@@ -412,9 +423,10 @@ class OpenAIClient private[provider] (
 
   /** What a native stream has seen so far, beyond what the accumulator holds. */
   final private class StreamState {
-    var textLength: Int                        = 0    // characters of answer text delivered
-    var filtered: Option[ContentFilteredError] = None // a content-filter finish: the reply's end
-    var usage: Option[TokenUsage]              = None // the last usage report
+    var textLength: Int                        = 0     // characters of answer text delivered
+    var filtered: Option[ContentFilteredError] = None  // a content-filter finish: the reply's end
+    var usage: Option[TokenUsage]              = None  // the last usage report
+    var finished: Boolean                      = false // whether a choice stated its finish_reason
   }
 
   /**
@@ -954,6 +966,8 @@ object OpenAIClient {
    * exchange puts the endpoint's reply in one - is redacted the same way, and truncated.
    */
   private def mapSdkError(e: Throwable, provider: String): LLMError = e match {
+    // an `error` event in a stream, after the 200 status: read as OpenAICompatibleClient reads one
+    case sse: SseException => streamError(sse, provider)
     case service: OpenAIServiceException if service.statusCode() == 400 && promptFiltered(service) =>
       // Azure OpenAI refuses a prompt its content filter blocks with a 400 whose code is `content_filter`
       ContentFilteredError.prompt(displayName(ProviderId(provider)), ChatCompletionsFinishReason.ContentFilter)
@@ -972,6 +986,25 @@ object OpenAIClient {
     case io: OpenAIIoException if io.getCause != null => redactMessage(io.getCause.toLLMError, io.getCause)
     case other                                        => redactMessage(other.toLLMError, other)
   }
+
+  /**
+   * The error a stream's `error` event reports. The SDK hands over the event's `error` value (or, should that change,
+   * the whole event); [[OpenAICompatibleClient.streamedError]] maps it, keeping an HTTP failure status the error
+   * states and otherwise making it a 502.
+   */
+  private def streamError(sse: SseException, provider: String): LLMError =
+    Try(ObjectMappers.jsonMapper().writeValueAsString(sse.body())).toOption
+      .flatMap(body => BoundedJson.read(body).toOption)
+      .map(error => error.objOpt.flatMap(_.get("error")).getOrElse(error))
+      .flatMap(OpenAICompatibleClient.streamedError(_, provider))
+      .getOrElse(ServiceError(502, provider, "the stream reported an error"))
+
+  /**
+   * A native stream that ended with no choice stating a `finish_reason`: cut off, so a retry may succeed (RFC 0009,
+   * rule 1). OpenAI and Azure OpenAI send one before `[DONE]`, which the SDK reads and does not pass on.
+   */
+  private[provider] def unfinished(endpoint: String): NetworkError =
+    NetworkError("stream ended without a finish_reason; the reply is incomplete", None, endpoint)
 
   /**
    * Whether a service error's body is `{"error":{"code":"content_filter",...}}`, a prompt the filter blocked. The SDK

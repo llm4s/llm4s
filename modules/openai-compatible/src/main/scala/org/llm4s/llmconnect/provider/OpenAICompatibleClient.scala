@@ -313,30 +313,9 @@ class OpenAICompatibleClient(
     if (BoundedJson.exceedsDepth(text)) throw new IllegalArgumentException(BoundedJson.tooDeep().message)
     else ujson.read(text)
 
-  /**
-   * The failure an event reports in an `error` field, which a server sends once the 200 status is
-   * already out. The field is an object with a `message` or a plain string; an empty one, which some
-   * proxies put on every event, is no failure. A `status_code` or numeric `code` that is an HTTP failure
-   * status keeps its meaning, so a request that can't succeed is not retried: Groq reports a tool call cut by
-   * the token limit this way, with a text `code` and `status_code` 400. Anything else is a 502, retried like a
-   * bad gateway.
-   */
+  /** The failure an event reports in an `error` field; see [[OpenAICompatibleClient.streamedError]]. */
   private def streamedError(json: ujson.Value): Option[LLMError] =
-    json.objOpt
-      .flatMap(_.get("error"))
-      .filter(error => error != ujson.Null && error != ujson.Obj() && error != ujson.Str(""))
-      .flatMap { error =>
-        val message =
-          error.objOpt.flatMap(_.get("message")).flatMap(_.strOpt).orElse(error.strOpt).getOrElse(error.render())
-        val status = error.objOpt.toSeq
-          .flatMap(fields => Seq("status_code", "code").flatMap(fields.get))
-          .flatMap(_.numOpt)
-          .map(_.toInt)
-          .find(code => code >= 400 && code <= 599)
-          .getOrElse(502)
-        val body = ujson.Obj("error" -> ujson.Obj("message" -> Redaction.remoteBody(message))).render()
-        HttpErrorMapper.mapHttpError(status, body, providerName).swap.toOption
-      }
+    json.objOpt.flatMap(_.get("error")).flatMap(OpenAICompatibleClient.streamedError(_, providerName))
 
   /** The replay data on a streamed event's delta, if it has one. */
   private def streamedThinkingDetails(json: ujson.Value): Seq[ujson.Value] =
@@ -757,6 +736,29 @@ class OpenAICompatibleClient(
 }
 
 object OpenAICompatibleClient {
+
+  /**
+   * The failure a stream event reports in its `error` field, `error` being that field's value, which a server sends
+   * once the 200 status is already out. The field is an object with a `message` or a plain string; an empty one,
+   * which some proxies put on every event, is no failure. A `status_code` or numeric `code` that is an HTTP failure
+   * status keeps its meaning, so a request that can't succeed is not retried: Groq reports a tool call cut by the
+   * token limit this way, with a text `code` and `status_code` 400. Anything else is a 502, retried like a bad
+   * gateway. `OpenAIClient` reads the SDK's stream error with it too.
+   */
+  private[provider] def streamedError(error: ujson.Value, providerName: String): Option[LLMError] =
+    Some(error)
+      .filter(error => error != ujson.Null && error != ujson.Obj() && error != ujson.Str(""))
+      .map { error =>
+        val message =
+          error.objOpt.flatMap(_.get("message")).flatMap(_.strOpt).orElse(error.strOpt).getOrElse(error.render())
+        val status = error.objOpt.toSeq
+          .flatMap(fields => Seq("status_code", "code").flatMap(fields.get))
+          .flatMap(_.numOpt)
+          .map(_.toInt)
+          .find(code => code >= 400 && code <= 599)
+          .getOrElse(502)
+        HttpErrorMapper.mapStreamError(status, message, providerName)
+      }
 
   private[provider] val AuthorizationHeaderRefusal: String =
     "an Authorization header cannot be sent with a Dynamic or Exchange credential: the request's Authorization " +

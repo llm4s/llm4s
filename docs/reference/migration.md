@@ -34,7 +34,8 @@ and [the remaining config, model and util types](#config-model-and-util-types-ar
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115),
 [finish reasons are typed](#finish-reasons-are-typed-2613),
-and [every provider's content-filter stop is an error](#every-providers-content-filter-stop-is-an-error-2677).
+[every provider's content-filter stop is an error](#every-providers-content-filter-stop-is-an-error-2677),
+and [a stream that did not finish is an error](#a-stream-that-did-not-finish-is-an-error-2613).
 
 ## Finish reasons are typed (#2613)
 
@@ -100,6 +101,30 @@ possibly empty or cut short, with the provider's reason as `Other`.
 - Match `ContentFilteredError` (`provider`, `reason`, `promptBlocked`) where you read a `content_filter`, `refusal`
   or guardrail reason off a `Completion`. `ReliableClient`'s circuit breaker counts it as neither a success nor a
   failure, and it is not retried.
+
+## A stream that did not finish is an error (#2613)
+
+`streamComplete` returns a `Completion` only when the provider said the reply ended
+([RFC 0009](../rfcs/0009-model-call-contract) PR 4), as the OpenAI-compatible, Bedrock, watsonx and Perplexity
+clients already did. A stream that stops without its provider's end marker - Anthropic's `message_stop`, a
+`finish_reason` on OpenAI and Azure OpenAI, a candidate `finishReason` on Gemini and Vertex AI, `done: true` on
+Ollama - is a `Left(NetworkError)`, which `ReliableClient` and `streamCompleteWithRetry` treat as retryable. These
+clients used to return what had arrived as a finished `Completion`.
+
+An error the provider reports after the 200 status ends the stream with that error, and nothing after it is read:
+
+- Gemini and Vertex AI: a chunk with an `error` object, mapped by its `code` (`503` a `ServiceError`, `429` a
+  `RateLimitError`; any other a `ServiceError` with status 502). These chunks used to be skipped.
+- Ollama: a line `{"error": "..."}`, a `ServiceError` with status 502. It used to be skipped.
+- Anthropic: an `error` event, mapped by its error type (`overloaded_error` a `ServiceError` with status 529,
+  `rate_limit_error` a `RateLimitError`), where it was a `ServiceError` with status 200.
+- OpenAI and Azure OpenAI: an event with an `error` object, mapped as the OpenAI-compatible client maps one (a
+  `ServiceError` with status 502 unless the error states an HTTP failure status), where it was a `ServiceError`
+  with status 200.
+
+Text already passed to `onChunk` stays delivered; the `Left` says the reply is incomplete. Code that kept a cut
+reply as an answer should treat the `Left` as a failed call, or retry it. A Gemini or Vertex AI data line that is
+not JSON is still skipped.
 
 ## Changes since 0.5.1 that no rule automates
 

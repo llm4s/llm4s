@@ -7,6 +7,7 @@ import org.llm4s.testkit.{ Applicability, ContractCase, LocalProviderTestServer,
  * watsonx.ai `/ml/v1/text/chat` and `/ml/v1/text/chat_stream` replies for each RFC 0009 [[ContractCase]], for
  * `assertModelCallContract`: chat-completions bodies, and a stream of `id`/`event: message`/`data:` frames with
  * cumulative usage on each. Hand-written in the documented shape; the client was never run against the live service.
+ * A failure after the 200 status is an `event: error` frame whose `data:` holds IBM's error, as IBM's SDK reads it.
  */
 object WatsonXContractFixtures {
 
@@ -32,6 +33,8 @@ object WatsonXContractFixtures {
           route(LocalProviderTestServer.sendSseResponse(_, stream))
         )
       )
+    def streamOnly(stream: String): Applicability =
+      Applicability.Applies(RecordedReply.streamOnly(route(LocalProviderTestServer.sendSseResponse(_, stream))))
     Map(
       ContractCase.CleanText -> applies(
         reply("""{"role":"assistant","content":"The answer is 4."}""", "stop"),
@@ -51,6 +54,22 @@ object WatsonXContractFixtures {
       ),
       ContractCase.ContentFiltered -> Applicability.NotApplicable(
         "watsonx.ai documents no content-filter finish_reason; its guardrails are not wired into llm4s"
+      ),
+      // text, then the connection closes before a finish_reason
+      ContractCase.StreamEndsEarly -> streamOnly(
+        event("""{"role":"assistant","content":"The answer"}""") + event("""{"content":" is"}""")
+      ),
+      ContractCase.ErrorEvent -> streamOnly(
+        event("""{"role":"assistant","content":"The answer"}""") +
+          "id: 2\nevent: error\ndata: " +
+          ujson
+            .Obj(
+              "errors" -> ujson.Arr(
+                ujson.Obj("code" -> "internal_error", "message" -> ContractCase.ProviderErrorMessage)
+              ),
+              "status_code" -> 500
+            )
+            .render() + "\n\n"
       )
     )
   }

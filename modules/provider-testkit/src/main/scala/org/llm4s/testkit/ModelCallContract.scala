@@ -8,9 +8,8 @@ import com.sun.net.httpserver.HttpExchange
  * `ProviderModuleChecks.assertModelCallContract`, or declares it [[Applicability.NotApplicable]] with a reason, so a
  * gap shows in the spec instead of being missed.
  *
- * Later RFC 0009 PRs add the tool-argument cases (`NoArgumentToolCall`, `ToolCallCutByLimit`, `MalformedArguments`)
- * and the stream-ending cases (`StreamEndsEarly`, `ErrorEvent`); a spec that does not declare a new case fails until
- * it does.
+ * A later RFC 0009 PR adds the tool-argument cases (`NoArgumentToolCall`, `ToolCallCutByLimit`, `MalformedArguments`);
+ * a spec that does not declare a new case fails until it does.
  */
 enum ContractCase:
 
@@ -26,6 +25,30 @@ enum ContractCase:
   /** The provider's content filter stopped the reply: `Left(ContentFilteredError)`, where the provider has a filter. */
   case ContentFiltered
 
+  /**
+   * Stream only: the stream ended without the provider's end marker, after some text: a `Left` that a retry may fix,
+   * a `NetworkError` or a `ServiceError` with status 502. The reply answers `streamComplete` only; build it with
+   * [[RecordedReply.streamOnly]].
+   */
+  case StreamEndsEarly
+
+  /**
+   * Stream only: the provider reported an error in the stream, after the 200 status and some text: a `Left` whose
+   * message carries [[ContractCase.ProviderErrorMessage]], which the reply's error must state. The reply answers
+   * `streamComplete` only; build it with [[RecordedReply.streamOnly]].
+   */
+  case ErrorEvent
+
+  /** Whether only `streamComplete` is run for this case: a non-streaming reply has no end marker or error event. */
+  def streamOnly: Boolean = this match
+    case StreamEndsEarly | ErrorEvent => true
+    case _                            => false
+
+object ContractCase:
+
+  /** The message an [[ContractCase.ErrorEvent]] reply's error states, which the client's `Left` must carry. */
+  val ProviderErrorMessage: String = "The model is overloaded (llm4s contract fixture)"
+
 /**
  * How a provider answers one [[ContractCase]]: its reply to `complete` and its reply to `streamComplete`, each a
  * handler for a [[LocalProviderTestServer]] that writes the bytes the provider sends, captured from the real service
@@ -35,6 +58,17 @@ enum ContractCase:
  * @param stream   answers a streaming request, e.g. `LocalProviderTestServer.sendSseResponse(_, body)`
  */
 final case class RecordedReply(complete: HttpExchange => Unit, stream: HttpExchange => Unit)
+
+object RecordedReply:
+
+  /**
+   * A reply for a stream-only case ([[ContractCase.streamOnly]]), which the check never sends `complete`: its
+   * `complete` handler answers `500`.
+   */
+  def streamOnly(stream: HttpExchange => Unit): RecordedReply =
+    RecordedReply(LocalProviderTestServer.sendJsonResponse(_, 500, notSent), stream)
+
+  private val notSent = """{"error":{"message":"a stream-only contract case sends no complete request"}}"""
 
 /** Whether a [[ContractCase]] applies to a client, and if it does, the provider's reply for it. */
 enum Applicability:

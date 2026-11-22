@@ -5,7 +5,8 @@ import org.llm4s.testkit.{ Applicability, ContractCase, LocalProviderTestServer,
 /**
  * The Messages API's replies for each RFC 0009 [[ContractCase]], for `assertModelCallContract`, in the shape Anthropic
  * documents: a reply's `stop_reason`, and a stream's on `message_delta` before `message_stop`. Hand-written (no live
- * capture yet). `refusal` is the stop reason of a reply Anthropic's safety classifiers stopped.
+ * capture yet). `refusal` is the stop reason of a reply Anthropic's safety classifiers stopped. A stream ends with
+ * `message_stop`, and reports a failure after the 200 status as an `error` event.
  */
 object AnthropicContractFixtures {
 
@@ -44,6 +45,9 @@ object AnthropicContractFixtures {
       )
     )
 
+  private def streamOnly(stream: String): Applicability =
+    Applicability.Applies(RecordedReply.streamOnly(LocalProviderTestServer.sendSseResponse(_, stream)))
+
   /** Every case, as the Messages API answers it. */
   val replies: Map[ContractCase, Applicability] = Map(
     ContractCase.CleanText -> applies(
@@ -75,6 +79,17 @@ object AnthropicContractFixtures {
     ContractCase.ContentFiltered -> applies(
       message("""[{"type":"text","text":"Here is how"}]""", "refusal"),
       sse((start +: textBlock("Here is how")) ++ end("refusal")*)
+    ),
+    // the text block, and no `message_delta` or `message_stop`
+    ContractCase.StreamEndsEarly -> streamOnly(sse((start +: textBlock("The answer", " is"))*)),
+    // Anthropic's documented mid-stream error: an `error` event, after the 200 status
+    ContractCase.ErrorEvent -> streamOnly(
+      sse(
+        start +: textBlock("The answer") :+ ("error" -> (
+          """{"type":"error","error":{"type":"overloaded_error","message":""" +
+            ujson.Str(ContractCase.ProviderErrorMessage).render() + "}}"
+        ))*
+      )
     )
   )
 }

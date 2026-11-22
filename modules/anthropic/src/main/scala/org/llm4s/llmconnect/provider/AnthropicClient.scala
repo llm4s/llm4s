@@ -63,6 +63,7 @@ import org.llm4s.error.{
   AuthenticationError,
   ContentFilteredError,
   LLMError,
+  NetworkError,
   ProcessingError,
   RateLimitError,
   ServiceError,
@@ -367,6 +368,8 @@ curl https://api.anthropic.com/v1/messages \
         // the stop_reason `message_delta` reported, and the characters of answer text streamed
         var stopReason = Option.empty[String]
         var textLength = 0
+        // whether `message_stop` came: a stream without it was cut off, and is no reply (RFC 0009, rule 1)
+        var stopped = false
 
         // Process the stream
         val attempt = Try {
@@ -506,6 +509,7 @@ curl https://api.anthropic.com/v1/messages \
               }
 
               val messageStopOpt = event.messageStop()
+              if (messageStopOpt != null && messageStopOpt.isPresent) stopped = true
               // a refusal ends in an error, not a finish: no chunk says the reply finished
               if (messageStopOpt != null && messageStopOpt.isPresent && !stopReason.contains(AnthropicClient.Refusal)) {
                 val chunk = StreamedChunk(
@@ -527,6 +531,8 @@ curl https://api.anthropic.com/v1/messages \
           }
         }.toEither.left
           .map(AnthropicClient.mapError(_))
+          // an `error` event throws in the SDK, mapped above; a stream that ends with neither is cut off
+          .filterOrElse(_ => stopped, AnthropicClient.unfinished(config.baseUrl))
 
         // Return the accumulated completion; a refusal fails the stream, as it fails `complete`, the text already
         // delivered staying delivered
@@ -1218,6 +1224,8 @@ object AnthropicClient {
       // the service refused the request - a vendor limit (an image count, a request size) among others: typed, with
       // its message, as HttpErrorMapper maps the other providers' responses
       case e: com.anthropic.errors.BadRequestException => ValidationError("request", safe(e.getMessage))
+      // an `error` event in a stream, after the 200 status: the status its error type stands for, and its message
+      case e: com.anthropic.errors.SseException => streamError(e.body())
       case e: com.anthropic.errors.AnthropicServiceException =>
         ServiceError(e.statusCode(), "anthropic", safe(e.getMessage))
       // the SDK wraps every I/O failure - a refused connection, a timeout - in one exception: map it by its
@@ -1230,6 +1238,37 @@ object AnthropicClient {
         }
     }
   }
+
+  /**
+   * The error a stream's `error` event reports (`{"type":"error","error":{"type":"overloaded_error","message":...}}`;
+   * the SDK may hand over the whole event or only its `error` object), mapped as the HTTP status its type stands for
+   * would be, so `overloaded_error` is a retryable 529. An unknown type is a 502, retried like a bad gateway.
+   */
+  private def streamError(body: com.anthropic.core.JsonValue): LLMError = {
+    val error = Try(ObjectMappers.jsonMapper().writeValueAsString(body)).toOption
+      .flatMap(json => BoundedJson.read(json).toOption)
+      .flatMap(_.objOpt)
+      .map(event => event.get("error").flatMap(_.objOpt).getOrElse(event))
+    val message = error.flatMap(_.get("message")).flatMap(_.strOpt).getOrElse("the stream reported an error")
+    val status  = error.flatMap(_.get("type")).flatMap(_.strOpt).flatMap(StreamErrorStatus.get).getOrElse(502)
+    HttpErrorMapper.mapStreamError(status, message, "anthropic")
+  }
+
+  /** The HTTP status each of Anthropic's documented error types stands for. */
+  private val StreamErrorStatus: Map[String, Int] = Map(
+    "invalid_request_error" -> 400,
+    "authentication_error"  -> 401,
+    "permission_error"      -> 403,
+    "not_found_error"       -> 404,
+    "request_too_large"     -> 413,
+    "rate_limit_error"      -> 429,
+    "api_error"             -> 500,
+    "overloaded_error"      -> 529
+  )
+
+  /** A stream that ended without `message_stop`: cut off, so a retry may succeed (RFC 0009, rule 1). */
+  private[provider] def unfinished(baseUrl: String): NetworkError =
+    NetworkError("stream ended without message_stop; the reply is incomplete", None, s"$baseUrl/v1/messages")
 
   /** The SDK's response headers as the multi-valued map `HttpErrorMapper` reads. */
   private def headerMap(headers: com.anthropic.core.http.Headers): Map[String, Seq[String]] =

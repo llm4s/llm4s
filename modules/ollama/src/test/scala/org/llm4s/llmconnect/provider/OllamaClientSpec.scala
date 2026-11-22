@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ NetworkError, ProcessingError, RateLimitError, TimeoutError }
+import org.llm4s.error.{ NetworkError, ProcessingError, RateLimitError, ServiceError, TimeoutError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.OllamaConfig
@@ -392,6 +392,38 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
         assert(org.llm4s.error.LLMError.isRecoverable(e))
       case other => fail(s"expected a NetworkError, got $other")
     }
+  }
+
+  private def streamLines(lines: String, chunks: ListBuffer[StreamedChunk]) = {
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.postStream _)
+      .when(*, *, *, *)
+      .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(lines.getBytes(StandardCharsets.UTF_8)))))
+    mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions(), chunks += _)
+  }
+
+  test("a stream that ends before done: true is a NetworkError, the text delivered staying delivered (RFC 0009)") {
+    val chunks = ListBuffer.empty[StreamedChunk]
+    streamLines("{\"message\":{\"content\":\"Hel\"},\"done\":false}\n", chunks) match {
+      case Left(e: NetworkError) => assert(e.message.contains("done: true"))
+      case other                 => fail(s"expected a NetworkError, got $other")
+    }
+    assert(chunks.flatMap(_.content).mkString == "Hel")
+  }
+
+  test("an error line fails the stream with its message, unread past it (RFC 0009)") {
+    val chunks = ListBuffer.empty[StreamedChunk]
+    val lines =
+      "{\"message\":{\"content\":\"Hel\"},\"done\":false}\n" +
+        "{\"error\":\"model runner has unexpectedly stopped\"}\n" +
+        "{\"message\":{\"content\":\"lo\"},\"done\":true}\n"
+    streamLines(lines, chunks) match {
+      case Left(e: ServiceError) =>
+        assert(e.httpStatus == 502)
+        assert(e.message.contains("model runner has unexpectedly stopped"))
+      case other => fail(s"expected a ServiceError, got $other")
+    }
+    assert(chunks.flatMap(_.content).mkString == "Hel")
   }
 
   test("streamComplete() parses token counts from the done=true line") {
