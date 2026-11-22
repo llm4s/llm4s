@@ -14,8 +14,9 @@ import org.llm4s.model.{ EffortMapping, ModelCapabilities, UnmappedOptions }
  *    Flash-Lite 512-24,576. `Thinking.Off` is `0` (2.5 Pro, which cannot turn thinking off, gets its minimum, reported
  *    `Adjusted`), `Adaptive` is `-1`, and `Budget(n)` is `n` fitted to the range (`Adjusted` when fitted). A 2.5 model
  *    takes no level, so a `reasoning` is `Dropped`.
- *  - '''Gemini 3 and later take `thinkingLevel`''': `MINIMAL` (the Flash models), `LOW`, `MEDIUM`, `HIGH`, and `XHIGH`
- *    (Gemini 4 Hydrogen). `reasoning` is its level, or the nearest the model has (`Adjusted`). No way to turn thinking
+ *  - '''Gemini 3 and later take `thinkingLevel`''': each model its own set of `MINIMAL`, `LOW`, `MEDIUM`, `HIGH` and `XHIGH`
+ *    (see `Levels`; a model not listed gets only `LOW` and `HIGH`). `reasoning` is its level, or the nearest the model
+ *    has (`Adjusted`). No way to turn thinking
  *    off is documented, so `Thinking.Off` is the lowest level (`Adjusted`) and wins over a `reasoning`. `Adaptive` is
  *    `NotNeeded` (the model decides by default) and `Budget(n)` is `Dropped`: `thinkingBudget` is deprecated on these
  *    models, and a request with both is an error.
@@ -36,8 +37,34 @@ private[provider] object GeminiThinking {
     case Unmapped
   }
 
-  private val Generation  = """gemini-(\d+)(?:\.\d+)?(?:-.*)?""".r
-  private val NotThinking = Set("image", "tts", "live", "audio", "embedding")
+  private val Generation = """gemini-(\d+)(?:\.\d+)?(?:-.*)?""".r
+
+  import ReasoningEffort.{ High, Low, Medium, Minimal, XHigh }
+
+  /**
+   * The `thinkingLevel`s each Gemini 3+ model accepts, from Google's tables (the Gemini API's and Vertex AI's thinking
+   * pages, which agree), by model-id prefix, the longest first. A model sent a level it does not accept fails with a
+   * 400, so a model not listed here gets only [[CommonLevels]].
+   */
+  private val Levels: List[(String, Set[ReasoningEffort])] = List(
+    "gemini-3-pro"          -> Set(Low, High),
+    "gemini-3-flash"        -> Set(Minimal, Low, Medium, High),
+    "gemini-3.1-pro"        -> Set(Low, Medium, High),
+    "gemini-3.1-flash-lite" -> Set(Minimal, Low, Medium, High),
+    "gemini-3.5-flash-lite" -> Set(Minimal, Low, Medium, High),
+    "gemini-3.5-flash"      -> Set(Minimal, Low, Medium, High),
+    "gemini-3.6-flash"      -> Set(Minimal, Low, Medium, High),
+    "gemini-3.7-flash"      -> Set(Low, Medium, High),
+    "gemini-3.8-flash"      -> Set(Low, Medium, High),
+    "gemini-4-hydrogen"     -> Set(Low, Medium, High, XHigh),
+    "gemini-4-neon"         -> Set(Low, Medium, High, XHigh),
+    "gemini-4-carbon"       -> Set(Low, Medium, High),
+    "gemini-4-argon"        -> Set(Low, Medium, High)
+  ).sortBy(-_._1.length)
+
+  /** The levels every Gemini 3+ text model Google lists accepts: what a model not in [[Levels]] is sent. */
+  private val CommonLevels: Set[ReasoningEffort] = Set(Low, High)
+  private val NotThinking                        = Set("image", "tts", "live", "audio", "embedding")
 
   /** The family of a model id, matched case-insensitively, a `models/` or router prefix ignored. */
   def family(model: String, caps: Option[ModelCapabilities]): Family = {
@@ -49,9 +76,11 @@ private[provider] object GeminiThinking {
     else
       name match {
         case Generation(major) if major.toInt >= 3 =>
-          val base        = Set[ReasoningEffort](ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High)
-          val withMinimal = if (name.contains("flash")) base + ReasoningEffort.Minimal else base
-          Family.Level(if (name.contains("hydrogen")) withMinimal + ReasoningEffort.XHigh else withMinimal)
+          Family.Level(
+            Levels
+              .collectFirst { case (prefix, levels) if name.startsWith(prefix) => levels }
+              .getOrElse(CommonLevels)
+          )
         case _ => Family.Unmapped
       }
   }

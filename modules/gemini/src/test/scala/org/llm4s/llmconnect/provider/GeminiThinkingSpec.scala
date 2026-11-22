@@ -28,7 +28,18 @@ class GeminiThinkingSpec extends AnyFlatSpec with Matchers {
     GeminiThinking
       .family("gemini-2.5-flash-lite-preview-06-17", None) shouldBe Family.Budget(512, 24576, canTurnOff = true)
     GeminiThinking.family("gemini-3-pro-preview", None) shouldBe
+      Family.Level(Set(ReasoningEffort.Low, ReasoningEffort.High))
+    GeminiThinking.family("gemini-3.1-pro-preview", None) shouldBe
       Family.Level(Set(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High))
+    // a Flash model without MINIMAL, and a Flash-Lite one that a shorter prefix would misread
+    GeminiThinking.family("gemini-3.8-flash", None) shouldBe
+      Family.Level(Set(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High))
+    GeminiThinking.family("gemini-3.5-flash-lite", None) shouldBe
+      Family.Level(Set(ReasoningEffort.Minimal, ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High))
+    GeminiThinking.family("gemini-4-carbon", None) shouldBe
+      Family.Level(Set(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High))
+    // a Gemini 3+ model Google's tables do not list: only the levels every listed one accepts
+    GeminiThinking.family("gemini-5-future", None) shouldBe Family.Level(Set(ReasoningEffort.Low, ReasoningEffort.High))
     GeminiThinking.family("gemini-3-flash-preview", None) shouldBe
       Family.Level(Set(ReasoningEffort.Minimal, ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High))
     GeminiThinking.family("gemini-4-hydrogen", None) shouldBe
@@ -117,6 +128,17 @@ class GeminiThinkingSpec extends AnyFlatSpec with Matchers {
     )
     plan("gemini-3-pro-preview", CompletionOptions().withReasoning(ReasoningEffort.Minimal)).thinkingConfig shouldBe
       level("LOW")
+    // gemini-3-pro-preview takes only LOW and HIGH: MEDIUM is never sent to it
+    plan("gemini-3-pro-preview", CompletionOptions().withReasoning(ReasoningEffort.Medium)) shouldBe Plan(
+      level("LOW"),
+      List(
+        RequestAdjustment.Adjusted(RequestOption.Reasoning, "medium", "low", "gemini-3-pro-preview has no medium level")
+      )
+    )
+  }
+
+  it should "send Thinking.Off to a model without MINIMAL as its lowest level, LOW" in {
+    plan("gemini-3.8-flash", CompletionOptions().withThinking(Thinking.Off)).thinkingConfig shouldBe level("LOW")
   }
 
   it should "send Thinking.Off as the lowest level, reported, over a level also set" in {
