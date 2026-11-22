@@ -294,7 +294,7 @@ class OllamaClient(
                           withText ++ callChunks ++ closing
                         }
                       chunks.foreach { chunk =>
-                        accumulator.addChunk(chunk)
+                        accumulator.addChunk(ToolCallRules.wholeCall(chunk))
                         onChunk(chunk)
                       }
 

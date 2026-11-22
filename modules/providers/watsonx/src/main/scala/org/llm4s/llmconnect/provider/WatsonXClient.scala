@@ -339,7 +339,7 @@ class WatsonXClient(
     var streamError: Option[LLMError] = None
 
     def emit(chunk: StreamedChunk): Unit = {
-      accumulator.addChunk(chunk)
+      accumulator.addChunk(ToolCallRules.wholeCall(chunk))
       onChunk(chunk)
     }
 

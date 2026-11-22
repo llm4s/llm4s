@@ -254,7 +254,7 @@ class GeminiClient(
                                   callsSeen = callsSeen || parsed.calls.nonEmpty
                                   signatures ++= parsed.signatures
                                   chunks.foreach { chunk =>
-                                    accumulator.addChunk(chunk)
+                                    accumulator.addChunk(ToolCallRules.wholeCall(chunk))
                                     onChunk(chunk)
                                   }
                               }

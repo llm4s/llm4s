@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.ProcessingError
-import org.llm4s.llmconnect.model.{ Completion, FinishReason, ToolCall }
+import org.llm4s.llmconnect.model.{ Completion, FinishReason, StreamedChunk, ToolCall }
 import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
 
@@ -92,6 +92,20 @@ private[llm4s] object ToolCallRules {
       "the output limit cut the reply (FinishReason.Length) while it made tool calls " +
         names.map(n => s"'$n'").mkString(", ") + "; none is run"
     )
+
+  /**
+   * A chunk from a provider that streams each tool call whole (Gemini, Vertex AI, Ollama, watsonx), as the
+   * accumulator is to take it: the call's object arguments as their JSON text. The accumulator reads an empty
+   * `ujson.Obj()` as a placeholder, as Anthropic and Bedrock send one before the fragments, so an explicit `{}` from
+   * these providers would otherwise read as no arguments, which rule 2 refuses after any finish but `ToolCalls` or
+   * `Stop`. The caller's `onChunk` still gets the chunk unchanged.
+   */
+  def wholeCall(chunk: StreamedChunk): StreamedChunk =
+    chunk.toolCall match {
+      case Some(call) if call.arguments.objOpt.isDefined =>
+        chunk.withToolCall(ToolCall(call.id, call.name, ujson.Str(call.arguments.render())))
+      case _ => chunk
+    }
 
   private def callsOf(completion: Completion): Seq[ToolCall] =
     if (completion.toolCalls.nonEmpty) completion.toolCalls else completion.message.toolCalls
