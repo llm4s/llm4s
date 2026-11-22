@@ -31,8 +31,9 @@ if [ "${LLM4S_NO_EGRESS:-}" = "1" ]; then
       "--cap-add NET_ADMIN, or allow the sandbox network (networkAllowed = true) (#870)" >&2
     exit 78
   fi
-  # a container without IPv6 has no IPv6 egress to block
-  if [ -s /proc/net/if_inet6 ] && ! no_egress ip6tables; then
+  # a container without IPv6 (no interface listed: procfs reports every file's size as 0, so it is read, not
+  # tested with -s) has no IPv6 egress to block; one with it fails closed like IPv4
+  if grep -q . /proc/net/if_inet6 2>/dev/null && ! no_egress ip6tables; then
     echo "llm4s-entrypoint: LLM4S_NO_EGRESS=1, but the container's IPv6 egress could not be blocked (#870)" >&2
     exit 78
   fi
