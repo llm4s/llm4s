@@ -18,6 +18,7 @@ import org.llm4s.llmconnect.model.{
   Message,
   RequestAdjustment,
   ResponseFormat,
+  ServiceTier,
   StreamedChunk,
   ThinkingBlock,
   TokenUsage,
@@ -68,7 +69,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
       usage,
       provider = None,
       adjustments = Nil,
-      finishReason = None
+      finishReason = None,
+      servedTier = None
     )
 
   /**
@@ -76,7 +78,7 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
    * [[ModelContext.definitions]] renders them): attempt `attempt` of the agent's model step, or 0 for a hook's own
    * call. A completion without usage is charged an estimate (#2084). `provider` is the called provider's id, when known.
    * The event carries the completion's adjustments (RFC 0008), so an agent caller sees what each call did not send,
-   * and its finish reason (RFC 0009), so it sees how each reply ended.
+   * its finish reason (RFC 0009), so it sees how each reply ended, and the tier that served it (#2746).
    */
   private[agent] def recordCall(
     completion: Completion,
@@ -94,7 +96,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
       completion.usage.getOrElse(ModelContext.estimated(completion, request, definitions)),
       provider,
       ModelContext.nonNull(completion.adjustments).toList,
-      Option(completion.finishReason)
+      Option(completion.finishReason),
+      completion.servedTier
     )
 
   /**
@@ -125,7 +128,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
     charged: TokenUsage,
     provider: Option[ProviderId],
     adjustments: List[RequestAdjustment],
-    finishReason: Option[FinishReason]
+    finishReason: Option[FinishReason],
+    servedTier: Option[ServiceTier]
   ): Unit =
     run.usage.add(model, charged, cost)
     // an attempt of the agent's model step, not a hook's own call: what the turn's step count counts
@@ -141,7 +145,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
         cost,
         provider,
         adjustments,
-        finishReason
+        finishReason,
+        servedTier
       )
     )
 

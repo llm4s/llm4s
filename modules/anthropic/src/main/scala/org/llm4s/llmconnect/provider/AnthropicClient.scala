@@ -387,6 +387,8 @@ curl https://api.anthropic.com/v1/messages \
         var stopped = false
         // the input counts reported so far, so promptTokens stays the whole input when a delta repeats only some
         var streamedInput = AnthropicClient.StreamedInput()
+        // the tier `message_start`'s usage names (#2746)
+        var servedTier = Option.empty[ServiceTier]
 
         // Process the stream
         val attempt = Try {
@@ -406,6 +408,7 @@ curl https://api.anthropic.com/v1/messages \
               if (messageStartOpt != null && messageStartOpt.isPresent) {
                 val msgStart = messageStartOpt.get()
                 currentMessageId = Some(msgStart.message().id())
+                servedTier = AnthropicServiceTier.served(msgStart.message().usage())
               }
 
               // Check for content block delta event
@@ -576,6 +579,7 @@ curl https://api.anthropic.com/v1/messages \
                 .withEstimatedCost(cost)
                 .withCitations(citations.toList)
                 .withAdjustments(adjustments ++ answeredCache(transformed.options, c.usage))
+                .withServedTier(servedTier)
             }
         )
 
@@ -865,6 +869,7 @@ curl https://api.anthropic.com/v1/messages \
         usage = Some(tokenUsage),
         estimatedCost = cost,
         citations = AnthropicWebSearch.citations(contentBlocks),
+        servedTier = AnthropicServiceTier.served(usage),
         finishReason = AnthropicClient
           .rawStopReason(response.stopReason())
           .fold(FinishReason.Other(""))(

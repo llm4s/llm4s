@@ -354,6 +354,7 @@ class OpenAIClient private[provider] (
               .withToolCalls(c.message.toolCalls.toList)
               .withEstimatedCost(cost)
               .withAdjustments(adjustments)
+              .withServedTier(state.servedTier)
           }
         )
     }(
@@ -419,6 +420,9 @@ class OpenAIClient private[provider] (
       state.usage = Some(usage)
       accumulator.updateUsage(usage)
     }
+    known(chunk._serviceTier()).flatMap(t => OpenAIServiceTier.served(t.asString())).foreach { tier =>
+      state.servedTier = Some(tier)
+    }
   }
 
   /** What a native stream has seen so far, beyond what the accumulator holds. */
@@ -427,6 +431,7 @@ class OpenAIClient private[provider] (
     var filtered: Option[ContentFilteredError] = None  // a content-filter finish: the reply's end
     var usage: Option[TokenUsage]              = None  // the last usage report
     var finished: Boolean                      = false // whether a choice stated its finish_reason
+    var servedTier: Option[ServiceTier]        = None  // the last service_tier a chunk named
   }
 
   /**
@@ -838,7 +843,8 @@ class OpenAIClient private[provider] (
       usage = usage,
       estimatedCost = cost,
       citations = message.map(extractCitations).getOrElse(List.empty),
-      finishReason = finishReason
+      finishReason = finishReason,
+      servedTier = known(response._serviceTier()).flatMap(t => OpenAIServiceTier.served(t.asString()))
     )
   }
 

@@ -17,9 +17,25 @@ class AnthropicServiceTierSpec extends AnyFlatSpec with Matchers {
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
-  private val reply =
-    """{"id":"m","type":"message","role":"assistant","model":"x","content":[{"type":"text","text":"ok"}],
-      |"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1}}""".stripMargin
+  private def replyServedAt(usageTier: String) =
+    s"""{"id":"m","type":"message","role":"assistant","model":"x","content":[{"type":"text","text":"ok"}],
+      |"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1$usageTier}}""".stripMargin
+
+  private val reply = replyServedAt("")
+
+  /** A recorded stream whose `message_start` usage names `tier`. */
+  private def streamServedAt(tier: String): String =
+    List(
+      "message_start" -> (s"""{"type":"message_start","message":{"id":"m","type":"message","role":"assistant",""" +
+        s""""model":"x","content":[],"stop_reason":null,"stop_sequence":null,""" +
+        s""""usage":{"input_tokens":10,"output_tokens":1,"service_tier":"$tier"}}}"""),
+      "content_block_start" -> """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""",
+      "content_block_delta" -> """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}""",
+      "content_block_stop"  -> """{"type":"content_block_stop","index":0}""",
+      "message_delta" -> ("""{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},""" +
+        """"usage":{"output_tokens":2}}"""),
+      "message_stop" -> """{"type":"message_stop"}"""
+    ).map((event, data) => s"event: $event\ndata: $data\n\n").mkString
 
   /** The request body `complete` sends for `options`, and the completion. */
   private def sent(options: CompletionOptions): (ujson.Value, Completion) = {
@@ -30,7 +46,9 @@ class AnthropicServiceTierSpec extends AnyFlatSpec with Matchers {
   /** The request body `complete`, or `streamComplete`, sends for `options`, and what it returned. */
   private def exchange(
     options: CompletionOptions,
-    stream: Boolean
+    stream: Boolean,
+    response: String = reply,
+    contentType: String = "application/json"
   ): (ujson.Value, org.llm4s.types.Result[Completion]) = {
     val seen   = new AtomicReference[String]()
     val server = HttpServer.create(new InetSocketAddress("localhost", 0), 0)
@@ -38,8 +56,8 @@ class AnthropicServiceTierSpec extends AnyFlatSpec with Matchers {
       "/v1/messages",
       exchange => {
         seen.set(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8))
-        val bytes = reply.getBytes(StandardCharsets.UTF_8)
-        exchange.getResponseHeaders.add("Content-Type", "application/json")
+        val bytes = response.getBytes(StandardCharsets.UTF_8)
+        exchange.getResponseHeaders.add("Content-Type", contentType)
         exchange.sendResponseHeaders(200, bytes.length)
         exchange.getResponseBody.write(bytes)
         exchange.close()
@@ -91,5 +109,26 @@ class AnthropicServiceTierSpec extends AnyFlatSpec with Matchers {
 
   it should "send no tier without one" in {
     sent(CompletionOptions())._1.obj.keySet should not contain "service_tier"
+  }
+
+  it should "send ServiceTier.Other as written" in {
+    sent(CompletionOptions().withServiceTier(ServiceTier.Other("standard_only")))._1("service_tier").str shouldBe
+      "standard_only"
+  }
+
+  "servedTier" should "be the tier usage.service_tier names, batch kept as Other, none when it names none (#2746)" in {
+    def served(usageTier: String) =
+      exchange(CompletionOptions(), stream = false, replyServedAt(usageTier))._2.toOption.get.servedTier
+    served(""","service_tier":"standard"""") shouldBe Some(ServiceTier.Default)
+    served(""","service_tier":"priority"""") shouldBe Some(ServiceTier.Priority)
+    served(""","service_tier":"batch"""") shouldBe Some(ServiceTier.Other("batch"))
+    served(""","service_tier":null""") shouldBe None
+    served("") shouldBe None
+  }
+
+  it should "be read from a stream's message_start" in {
+    val (_, completion) =
+      exchange(CompletionOptions(), stream = true, streamServedAt("priority"), contentType = "text/event-stream")
+    completion.map(c => (c.content, c.servedTier)) shouldBe Right(("ok", Some(ServiceTier.Priority)))
   }
 }
