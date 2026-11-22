@@ -14,6 +14,7 @@ import org.springframework.context.annotation.{ Bean, Configuration }
 
 import java.time.Duration
 import java.util.concurrent.{
+  AbstractExecutorService,
   Callable,
   CountDownLatch,
   ExecutionException,
@@ -67,6 +68,26 @@ object AsyncAndHealthSpec {
     }
 
     def client: JLlmClient = JLlmClientTestFactory.create(llm)
+  }
+
+  /**
+   * Runs tasks on `pool`, but `execute` (and so `submit`) returns only once `started` has counted down.
+   *
+   * The health probe measures its timeout from `submit`; on a loaded runner the pool thread may not pick the
+   * task up within a short timeout, and `cancel(true)` then cancels a task that never runs, so the provider is
+   * never interrupted (#2722). Gating `submit` on the provider having been entered makes the timeout always
+   * cancel a call already in progress.
+   */
+  final class StartAwaitingExecutor(pool: ExecutorService, started: CountDownLatch) extends AbstractExecutorService {
+    override def execute(r: Runnable): Unit = {
+      pool.execute(r)
+      if (!started.await(30, TimeUnit.SECONDS)) throw new IllegalStateException("the task never started")
+    }
+    override def shutdown(): Unit                                = pool.shutdown()
+    override def shutdownNow(): java.util.List[Runnable]         = pool.shutdownNow()
+    override def isShutdown: Boolean                             = pool.isShutdown
+    override def isTerminated: Boolean                           = pool.isTerminated
+    override def awaitTermination(t: Long, u: TimeUnit): Boolean = pool.awaitTermination(t, u)
   }
 
   def ok(text: String): Result[Completion] = Right(Completion("id", Instant.EPOCH, text, "m", AssistantMessage(text)))
@@ -406,7 +427,8 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
 
   it should "be DOWN on timeout, interrupt the provider call, and cache that outcome for the TTL" in {
     val provider = new FakeProvider(p => { p.blockUntilReleasedOrInterrupted(); ok("late") })
-    withPool(pool(1)) { ex =>
+    // the timeout runs from a submit that returns only once the provider call is in progress (#2722)
+    withPool(new StartAwaitingExecutor(pool(1), provider.entered)) { ex =>
       val ind = indicator(provider, probe = true, ex, timeout = Duration.ofMillis(100))
       val h   = ind.health()
       h.getStatus shouldBe Status.DOWN
@@ -415,6 +437,24 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
       ind.health().getStatus shouldBe Status.DOWN
       provider.calls.get shouldBe 1
     }
+  }
+
+  it should "be DOWN on timeout when the probe never started, and the cancelled probe then never calls the provider (#2722)" in {
+    // the only pool thread is busy, so the probe is still queued when its timeout fires: cancel(true) cancels a
+    // task that never runs, rather than leaving it to call the provider once the thread is free
+    val busy     = new FakeProvider(p => { p.blockUntilReleasedOrInterrupted(); ok("busy") })
+    val provider = echo
+    val ex       = pool(1)
+    val running  = new LLM4STemplate(busy.client, ex).completeAsync("q")
+    busy.entered.await(secs, TimeUnit.SECONDS) shouldBe true
+    val h = indicator(provider, probe = true, ex, timeout = Duration.ofMillis(100)).health()
+    h.getStatus shouldBe Status.DOWN
+    h.getDetails.get("probe") shouldBe "timeout"
+    busy.release.countDown()
+    running.get(secs, TimeUnit.SECONDS) shouldBe "busy"
+    ex.shutdown()
+    ex.awaitTermination(secs, TimeUnit.SECONDS) shouldBe true
+    provider.calls.get shouldBe 0
   }
 
   it should "be DOWN when the provider throws a fatal error instead of answering, and never print the settings secrets" in {
