@@ -86,7 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sbt testPerformance` runs only core and agent; MiMa and the config-policy CLIs moved into Quick Checks and the tests.
 - **Added** `llm4s-kotlin-api` publishes from its own workflow (`publish-kotlin.yml`), which a release calls and which can be run by hand for a tag whose Kotlin publish failed: it builds the tag's code with the current upload rules ([release guide](docs/reference/release.md#re-triggering-a-failed-release)).
 - **Added** `Llm4sMigrate_1_0` covers the breaks since 0.6.0: `ThinkingReplacesBudgetTokens` rewrites `ReasoningEffort.None` to `Thinking.Off` and reports `budgetTokens`,
-  `FinishReasonTyped` rewrites the string comparisons of `StreamedChunk.finishReason`, and positional `Completion` and `ModelCapabilities` patterns gain their fields; tested against 0.6.0 [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#migration-rules).
+  `FinishReasonTyped` rewrites the string comparisons of `StreamedChunk.finishReason` and reports a literal in the same expression that no rewrite gets right (0.6.0's raw Bedrock and Gemini values, a content filter's, Gemini's `STOP`), and positional `Completion`, `ModelCallCompleted` and `ModelCapabilities` patterns gain their fields; tested against 0.6.0 [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#migration-rules).
 - **Fixed** `llm4s-reactor` was never published (it was missing from the root aggregate, so 0.6.0 lacks it); `publishedArtifactsCheck` now fails on a published module outside the aggregate.
 
 ## [0.6.0] - 2026-11-21

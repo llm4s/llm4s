@@ -56,7 +56,13 @@ client.complete(conversation, options).map { c =>
 - **Check every comparison against a string literal**: `chunk.finishReason.contains("stop")` still compiles, because
   `Option.contains` widens its argument, and is now always `false`. Write `contains(FinishReason.Stop)`. The
   `FinishReasonTyped` Scalafix rule ([Scalafix](scalafix#migration-rules)) rewrites these comparisons, a reason set
-  from a literal, and any other read to `.map(_.name)`, which keeps its `Option[String]` type.
+  from a literal, and any other read to `.map(_.name)`, which keeps its `Option[String]` type; the cases assume a
+  client that maps its reason, and a Spring AI model gives `FinishReason.Other(raw)` for any value. It reports, for
+  you to fix by hand, a comparison with 0.6.0's raw Bedrock or Gemini value (`end_turn`, `tool_use`, `MAX_TOKENS`,
+  ...), which those clients now map to a case while a Spring AI model still gives `FinishReason.Other(raw)`; with a
+  content filter's value (`content_filter`, `SAFETY`, ...), a `ContentFilteredError` now; and with Gemini's `STOP`,
+  which is `Stop` or `ToolCalls`. Any `"stop"`, `"tool_calls"` or `"length"` in the same comparison is reported with
+  it. A chunk set from a raw Bedrock or Gemini value, as in a test, gets the case that value maps to now.
 - `StreamedChunk(..., finishReason = Some("stop"))` and `withFinishReason("stop")` take a `FinishReason` instead.
 - A positional pattern on `Completion` gains a field: `case Completion(id, _, content, _, _, _, _, _, _, _, _)`.
   The `PositionalPatternsGainFields` Scalafix rule adds it to 0.6.0's ten-field pattern, and both fields since 0.5.1 to
@@ -74,8 +80,8 @@ client.complete(conversation, options).map { c =>
   `tool_calls` from `done`; and Perplexity reports an `incomplete` reply that has a call as `Length`, not `ToolCalls`.
 - An agent's `AgentEvents.ModelCallCompleted` gains `finishReason: Option[FinishReason]` (default `None`), after
   `adjustments`, filled from each call's `Completion` (PR 6). Construction is unchanged; a positional pattern needs a
-  ninth binder, `case ModelCallCompleted(a, m, n, t, u, c, p, adj, _)`, or match on the type and read the fields. An
-  event stored before reads with `None`.
+  ninth binder, `case ModelCallCompleted(a, m, n, t, u, c, p, adj, _)`, which the `PositionalPatternsGainFields`
+  Scalafix rule adds, or match on the type and read the fields. An event stored before reads with `None`.
 
 ## Every provider's content-filter stop is an error (#2677)
 
