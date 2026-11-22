@@ -145,6 +145,19 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     span.attributes("error_type").asString shouldBe Some("RuntimeException")
     span.attributes("error_message").asString shouldBe Some("test error")
     span.attributes("context").asString shouldBe Some("test-context")
+    span.attributes.contains("prompt_tokens") shouldBe false
+  }
+
+  it should "put a failed call's billed usage on its error span (#2676)" in {
+    val event =
+      TraceEvent.ErrorOccurred(new RuntimeException("filtered"), "chat", usage = Some(TokenUsage(7, 4, 11)))
+    collector.traceEvent(event) shouldBe Right(())
+
+    val span = store.getSpans(collector.traceId).loneElement
+    span.attributes("prompt_tokens").asLong shouldBe Some(7L)
+    span.attributes("completion_tokens").asLong shouldBe Some(4L)
+    span.attributes("output_tokens").asLong shouldBe Some(4L)
+    span.attributes("total_tokens").asLong shouldBe Some(11L)
   }
 
   it should "convert TokenUsageRecorded event to span with token attributes" in {

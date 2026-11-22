@@ -11,8 +11,9 @@ import scalafix.v1._
  * requestId)` becomes `case ServiceError(message, status, provider, requestId, _)` (#2266),
  * `case RunEvent.RunFailed(message, usage)` becomes `case RunEvent.RunFailed(message, usage, _)` (#2049), and
  * `case AgentStatus.Suspended(a, q, m, b)` gains `delegated` (#2050). A pattern with 0.6.0's arity gets a `_` for each
- * field added since 0.6.0: `Completion`'s ten fields gain `finishReason` (#2613), and `ModelCapabilities` gains the
- * five thinking and effort fields (#2115). A pattern with any other number of arguments is left alone.
+ * field added since 0.6.0: `Completion`'s ten fields gain `finishReason` (#2613), `ModelCapabilities` gains the
+ * five thinking and effort fields (#2115), and `TraceEvent.ErrorOccurred`'s nine gain `usage` (#2676). A pattern
+ * with any other number of arguments is left alone.
  */
 class PositionalPatternsGainFields extends SemanticRule("PositionalPatternsGainFields") {
 
@@ -80,7 +81,7 @@ object PositionalPatternsGainFields {
     "org/llm4s/trace/TraceEvent.CompletionReceived"                 -> (5  -> 14),
     "org/llm4s/trace/TraceEvent.CustomEvent"                        -> (3  -> 4),
     "org/llm4s/trace/TraceEvent.EmbeddingUsageRecorded"             -> (5  -> 7),
-    "org/llm4s/trace/TraceEvent.ErrorOccurred"                      -> (3  -> 9),
+    "org/llm4s/trace/TraceEvent.ErrorOccurred"                      -> (3  -> 10),
     "org/llm4s/trace/TraceEvent.TokenUsageRecorded"                 -> (4  -> 5),
     "org/llm4s/vectorstore/VectorStoreFactory.Config"               -> (4  -> 5)
   )
@@ -91,7 +92,8 @@ object PositionalPatternsGainFields {
    */
   val arity06: Map[String, (Int, Int)] = Map(
     "org/llm4s/llmconnect/model/Completion"     -> (10 -> 11),
-    "org/llm4s/agent/events/ModelCallCompleted" -> (8  -> 9)
+    "org/llm4s/agent/events/ModelCallCompleted" -> (8  -> 9),
+    "org/llm4s/trace/TraceEvent.ErrorOccurred"  -> (9  -> 10)
   )
 
   /** The number of fields a pattern of `size` arguments on `owner` lacks, if it has 0.5.1's or 0.6.0's arity. */

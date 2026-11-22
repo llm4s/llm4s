@@ -7,6 +7,7 @@ import org.llm4s.agent.events.ModelCallCompleted
 import org.llm4s.error.ContentFilteredError
 import org.llm4s.llmconnect.model.Completion
 import org.llm4s.model.ModelCapabilities
+import org.llm4s.trace.TraceEvent
 
 object PositionalPatternsGainFieldsTest {
   def summary(completion: Completion): String = completion match {
@@ -25,5 +26,10 @@ object PositionalPatternsGainFieldsTest {
   // gained usage since 0.6.0, but its hand-written unapply keeps 0.6.0's four fields: left alone
   def blockedPrompt(error: ContentFilteredError): Boolean = error match {
     case ContentFilteredError(_, _, _, promptBlocked) => promptBlocked
+  }
+
+  def failedModel(event: TraceEvent): Option[String] = event match {
+    case TraceEvent.ErrorOccurred(_, _, _, _, _, model, _, _, _) => model
+    case _ => None
   }
 }

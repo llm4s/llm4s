@@ -245,6 +245,8 @@ object TraceEvent {
    * @param errorType a short, low-cardinality name of the failure (the `LLMError`'s type, e.g. `RateLimitError`);
    *                  `None` takes the exception's class name
    * @param duration  how long the failed call took; the event's `timestamp` is its end
+   * @param usage     the tokens the provider reported, and billed, for the failed call: a content-filtered reply's
+   *                  ([[org.llm4s.error.ContentFilteredError]]'s `usage`, #2676); `None` when it reported none
    */
   final case class ErrorOccurred private (
     error: Throwable,
@@ -255,7 +257,8 @@ object TraceEvent {
     model: Option[String],
     provider: Option[ProviderId],
     errorType: Option[String],
-    duration: Option[FiniteDuration]
+    duration: Option[FiniteDuration],
+    usage: Option[TokenUsage]
   ) extends TraceEvent {
     def withError(error: Throwable): ErrorOccurred                    = copy(error = error)
     def withContext(context: String): ErrorOccurred                   = copy(context = context)
@@ -272,6 +275,8 @@ object TraceEvent {
     def withErrorType(errorType: Option[String]): ErrorOccurred       = copy(errorType = errorType)
     def withDuration(duration: FiniteDuration): ErrorOccurred         = copy(duration = Some(duration))
     def withDuration(duration: Option[FiniteDuration]): ErrorOccurred = copy(duration = duration)
+    def withUsage(usage: TokenUsage): ErrorOccurred                   = copy(usage = Some(usage))
+    def withUsage(usage: Option[TokenUsage]): ErrorOccurred           = copy(usage = usage)
 
     def eventType: String = "error_occurred"
     def toJson: ujson.Value = {
@@ -287,6 +292,11 @@ object TraceEvent {
       model.foreach(m => json("model") = m)
       provider.foreach(p => json("provider") = p.asString)
       duration.foreach(d => json("duration_ms") = d.toMillis.toDouble)
+      usage.foreach { u =>
+        json("prompt_tokens") = u.promptTokens
+        json("completion_tokens") = u.completionTokens
+        u.thinkingTokens.foreach(t => json("thinking_tokens") = t)
+      }
       TraceSpan.annotate(json, span)
     }
   }
@@ -301,9 +311,23 @@ object TraceEvent {
       model: Option[String] = None,
       provider: Option[ProviderId] = None,
       errorType: Option[String] = None,
-      duration: Option[FiniteDuration] = None
+      duration: Option[FiniteDuration] = None,
+      usage: Option[TokenUsage] = None
     ): ErrorOccurred =
-      new ErrorOccurred(error, context, timestamp, span, operation, model, provider, errorType, duration)
+      new ErrorOccurred(error, context, timestamp, span, operation, model, provider, errorType, duration, usage)
+
+    def apply(
+      error: Throwable,
+      context: String,
+      timestamp: Instant,
+      span: Option[TraceSpan],
+      operation: Option[String],
+      model: Option[String],
+      provider: Option[ProviderId],
+      errorType: Option[String],
+      duration: Option[FiniteDuration]
+    ): ErrorOccurred =
+      apply(error, context, timestamp, span, operation, model, provider, errorType, duration, None)
 
     def apply(error: Throwable, context: String, timestamp: Instant, span: Option[TraceSpan]): ErrorOccurred =
       apply(error, context, timestamp, span, None)

@@ -131,6 +131,11 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
           println(s"${RED}Type: ${e.error.getClass.getSimpleName}$RESET")
           println(s"${RED}${content("Message", String.valueOf(e.error.getMessage), Int.MaxValue)}$RESET")
           println(s"${RED}${content("Context", e.context, Int.MaxValue)}$RESET")
+          e.usage.foreach { u =>
+            println(s"${MAGENTA}Prompt Tokens: ${u.promptTokens}$RESET")
+            println(s"${MAGENTA}Output Tokens: ${u.totalOutputTokens}$RESET")
+            println(s"${MAGENTA}Total Tokens: ${u.totalTokens}$RESET")
+          }
           println()
 
         case e: TraceEvent.TokenUsageRecorded =>
