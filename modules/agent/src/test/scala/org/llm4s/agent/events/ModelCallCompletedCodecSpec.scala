@@ -114,7 +114,7 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
   it should "leave out an adjustment it cannot read, an option or a case added later, and keep the rest" in {
     val stored =
       ujson.read(write(ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, Some(0.01), None, adjustments)))
-    stored("adjustments").arr.prepend(ujson.Obj("$type" -> "Dropped", "option" -> "ServiceTier", "reason" -> "later"))
+    stored("adjustments").arr.prepend(ujson.Obj("$type" -> "Dropped", "option" -> "SeedValue", "reason" -> "later"))
     stored("adjustments").arr.append(ujson.Obj("$type" -> "Deferred", "option" -> "TopP", "reason" -> "later"))
     val read = upickle.default.read[ModelCallCompleted](stored)
     read.adjustments shouldBe adjustments

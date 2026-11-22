@@ -69,6 +69,7 @@ import software.amazon.awssdk.services.bedrockruntime.model.{
   ReasoningContentBlock,
   ReasoningTextBlock,
   ServiceQuotaExceededException,
+  ServiceTierType,
   SystemContentBlock,
   ThrottlingException,
   Tool,
@@ -283,7 +284,7 @@ class BedrockClient(
       )
       .map { t =>
         val adjustments = t.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, t.options) ++
-          cachePlan(t.options).adjustments
+          cachePlan(t.options).adjustments ++ BedrockClient.serviceTier(t.options)._2
         (conversation.withMessages(t.messages), t.options, adjustments)
       }
 
@@ -513,6 +514,7 @@ class BedrockClient(
       if (systemTexts.nonEmpty) builder.system(systemBlocks(systemTexts, cache).asJava)
       builder.inferenceConfig(inferenceConfig(options))
       toolConfig(options, cache).foreach(builder.toolConfig)
+      BedrockClient.serviceTier(options)._1.foreach(builder.serviceTier)
       builder.build()
     }
 
@@ -530,6 +532,7 @@ class BedrockClient(
       if (systemTexts.nonEmpty) builder.system(systemBlocks(systemTexts, cache).asJava)
       builder.inferenceConfig(inferenceConfig(options))
       toolConfig(options, cache).foreach(builder.toolConfig)
+      BedrockClient.serviceTier(options)._1.foreach(builder.serviceTier)
       builder.build()
     }
 
@@ -791,6 +794,37 @@ class BedrockClient(
 }
 
 object BedrockClient {
+
+  // ---- service tier ----
+
+  /**
+   * `CompletionOptions.serviceTier` as Converse's `serviceTier.type`: `default`, `flex` or `priority`
+   * (https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ServiceTier.html, and "Service tiers for
+   * inference" in the user guide), and what is reported (#2726). `Auto` is not sent: Bedrock picks no tier on its own,
+   * and a request that names none is served at the standard tier. Which tiers a model offers is on its model card.
+   */
+  private[provider] def serviceTier(
+    options: CompletionOptions
+  ): (Option[software.amazon.awssdk.services.bedrockruntime.model.ServiceTier], List[RequestAdjustment]) = {
+    def tier(t: ServiceTierType) =
+      Some(software.amazon.awssdk.services.bedrockruntime.model.ServiceTier.builder().`type`(t).build())
+    options.serviceTier match {
+      case None                       => (None, Nil)
+      case Some(ServiceTier.Default)  => (tier(ServiceTierType.DEFAULT), Nil)
+      case Some(ServiceTier.Flex)     => (tier(ServiceTierType.FLEX), Nil)
+      case Some(ServiceTier.Priority) => (tier(ServiceTierType.PRIORITY), Nil)
+      case Some(ServiceTier.Auto) =>
+        (
+          None,
+          List(
+            RequestAdjustment.NotNeeded(
+              RequestOption.ServiceTier,
+              "Bedrock serves a request that names no tier at its standard tier"
+            )
+          )
+        )
+    }
+  }
 
   // ---- usage ----
 

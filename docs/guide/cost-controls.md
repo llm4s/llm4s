@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Cost controls
-description: "Cut what LLM calls cost in LLM4S: Thinking and ReasoningEffort mapped per provider, provider-side prompt caching, and what was not sent reported on the completion."
+description: "Cut what LLM calls cost in LLM4S: Thinking and ReasoningEffort per provider, provider-side prompt caching, service tiers, and reports of what was not sent."
 search_title: "Control thinking and reasoning effort in Scala"
 parent: User Guide
 nav_order: 60
@@ -144,3 +144,34 @@ val options = CompletionOptions().withPromptCache(PromptCache.default)
 val first = client.complete(withDocument(questions.head), options)          // writes the cache
 val rest  = questions.tail.map(q => client.complete(withDocument(q), options)) // read it; these may run in parallel
 ```
+
+## Service tiers
+
+Several providers sell the same model at more than one processing tier: a cheaper, slower one that is served when
+there is spare capacity, and a faster one at a higher price. `CompletionOptions.serviceTier` asks for one; the answer
+is the same either way, only its price and its scheduling change.
+
+```scala
+import org.llm4s.llmconnect.model._
+
+// half price on OpenAI and Gemini, for a batch job that can wait and retry
+val cheap = CompletionOptions().withServiceTier(ServiceTier.Flex)
+
+// faster under load, where the account has access to it
+val fast = CompletionOptions().withServiceTier(ServiceTier.Priority)
+```
+
+| | `Auto` | `Default` | `Flex` | `Priority` |
+|---|---|---|---|---|
+| OpenAI | `service_tier: auto` | `default` | `flex` | `priority` |
+| Azure OpenAI | `auto` | `default` | dropped | `priority` |
+| Anthropic | `service_tier: auto` | `standard_only` | dropped | `auto` (Priority Tier where the organization has a commitment; reported `Adjusted`) |
+| Gemini | not needed (standard) | `serviceTier: standard` | `flex` | `priority` |
+| Vertex AI | not needed | not needed | `X-Vertex-AI-LLM-Shared-Request-Type: flex` (`global` endpoint only) | `X-Vertex-AI-LLM-Shared-Request-Type: priority` |
+| Bedrock | not needed | `serviceTier.type: default` | `flex` | `priority` |
+| Others | dropped | dropped | dropped | dropped |
+
+What each tier costs, and which models and accounts may use it, is the provider's. A provider may serve a request at
+another tier than the one asked for (Gemini and Vertex AI serve Priority over its limit at standard), and a Flex
+request may be shed under load: expect, and retry, 429 and 503 replies. `CachingLLMClient` ignores `serviceTier` when
+it matches a cached answer.

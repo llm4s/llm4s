@@ -272,7 +272,8 @@ class WatsonXClient(
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
 
   private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
-    val adjustments = WatsonXClient.reasoningAdjustments(config.model, options)
+    val adjustments =
+      WatsonXClient.reasoningAdjustments(config.model, options) ++ UnmappedOptions.serviceTier("watsonx", options)
     adjustmentLog.record(config.model, adjustments)
     adjustments
   }

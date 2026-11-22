@@ -1,6 +1,6 @@
 package org.llm4s.javaapi
 
-import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, Thinking }
+import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, ServiceTier, Thinking }
 
 import java.util.{ Objects, Optional, OptionalInt }
 
@@ -18,7 +18,7 @@ import java.util.{ Objects, Optional, OptionalInt }
  * }}}
  *
  * A setting left unset keeps core's default: temperature `0.7`, top-p `1.0`, no presence or frequency penalty,
- * and no token limit, reasoning level or thinking mode. A value that may be absent is read as an `Optional`
+ * and no token limit, reasoning level, thinking mode or service tier. A value that may be absent is read as an `Optional`
  * or `OptionalInt`, and set either directly or with one, so an empty `Optional` clears it. No Scala type appears
  * in a signature.
  *
@@ -51,6 +51,10 @@ final class JCompletionOptions private (token: FacadeToken, private[javaapi] val
   def thinking: Optional[JThinking] =
     underlying.thinking.fold(Optional.empty[JThinking]())(t => Optional.of(JCompletionOptions.toJava(t)))
 
+  /** The service tier asked for, or empty to leave it to the provider. */
+  def serviceTier: Optional[JServiceTier] =
+    underlying.serviceTier.fold(Optional.empty[JServiceTier]())(t => Optional.of(JCompletionOptions.toJava(t)))
+
   /** A builder that starts from these options. */
   def toBuilder: JCompletionOptions.Builder = new JCompletionOptions.Builder(FacadeToken.INSTANCE, underlying)
 
@@ -64,7 +68,8 @@ final class JCompletionOptions private (token: FacadeToken, private[javaapi] val
   override def toString: String =
     s"JCompletionOptions(temperature=$temperature, topP=$topP, maxTokens=${text(maxTokens)}, " +
       s"presencePenalty=$presencePenalty, frequencyPenalty=$frequencyPenalty, " +
-      s"reasoning=${reasoning.map[String](_.name).orElse("unset")}, thinking=${thinking.map[String](_.toString).orElse("unset")})"
+      s"reasoning=${reasoning.map[String](_.name).orElse("unset")}, thinking=${thinking.map[String](_.toString).orElse("unset")}, " +
+      s"serviceTier=${serviceTier.map[String](_.name).orElse("unset")})"
 
   private def text(value: OptionalInt): String =
     if (value.isPresent) value.getAsInt.toString else "unset"
@@ -134,6 +139,21 @@ object JCompletionOptions {
         )
       )
 
+    /**
+     * Asks the provider to serve the request at this tier: [[JServiceTier.FLEX]] for a cheaper, slower answer,
+     * [[JServiceTier.PRIORITY]] for a faster one. A provider that cannot send it as asked reports what it did.
+     */
+    def serviceTier(tier: JServiceTier): Builder =
+      next(options.withServiceTier(toCore(Objects.requireNonNull(tier, "serviceTier must not be null"))))
+
+    /** Asks for the value's service tier, or for none when it is empty. */
+    def serviceTier(tier: Optional[JServiceTier]): Builder =
+      next(
+        options.withServiceTier(
+          Option(Objects.requireNonNull(tier, "serviceTier must not be null").orElse(null)).map(toCore)
+        )
+      )
+
     /** The options set so far. */
     def build(): JCompletionOptions = new JCompletionOptions(FacadeToken.INSTANCE, options)
 
@@ -161,6 +181,20 @@ object JCompletionOptions {
     case JReasoningEffort.HIGH    => ReasoningEffort.High
     case JReasoningEffort.XHIGH   => ReasoningEffort.XHigh
     case JReasoningEffort.MAX     => ReasoningEffort.Max
+  }
+
+  private def toCore(tier: JServiceTier): ServiceTier = tier match {
+    case JServiceTier.AUTO     => ServiceTier.Auto
+    case JServiceTier.DEFAULT  => ServiceTier.Default
+    case JServiceTier.FLEX     => ServiceTier.Flex
+    case JServiceTier.PRIORITY => ServiceTier.Priority
+  }
+
+  private def toJava(tier: ServiceTier): JServiceTier = tier match {
+    case ServiceTier.Auto     => JServiceTier.AUTO
+    case ServiceTier.Default  => JServiceTier.DEFAULT
+    case ServiceTier.Flex     => JServiceTier.FLEX
+    case ServiceTier.Priority => JServiceTier.PRIORITY
   }
 
   private def toJava(thinking: Thinking): JThinking = thinking match {

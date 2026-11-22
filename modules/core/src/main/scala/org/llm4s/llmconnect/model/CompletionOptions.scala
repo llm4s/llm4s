@@ -19,6 +19,8 @@ import org.llm4s.toolapi.ToolFunction
  *                 `thinking` wins over `reasoning`; see `withThinking`.
  * @param promptCache Optional provider-side prompt cache (see [[PromptCache]]): changes what a call costs, not what it
  *                    returns. Not [[org.llm4s.llmconnect.caching.CachingLLMClient]], which caches whole answers.
+ * @param serviceTier Optional processing tier (see [[ServiceTier]]): what a call costs and how it is scheduled; `None`
+ *                    sends no tier, so the provider serves the request at its default.
  * @param responseFormat Optional structured output format (e.g. JSON or JSON schema). Support is
  *                        provider- and model-dependent; see capability validation in RequestTransformer.
  *
@@ -54,7 +56,8 @@ final case class CompletionOptions private (
   reasoning: Option[ReasoningEffort],
   thinking: Option[Thinking],
   responseFormat: Option[ResponseFormat],
-  promptCache: Option[PromptCache]
+  promptCache: Option[PromptCache],
+  serviceTier: Option[ServiceTier]
 ) {
 
   /**
@@ -212,6 +215,25 @@ final case class CompletionOptions private (
   def withPromptCache(promptCache: PromptCache): CompletionOptions = copy(promptCache = Some(promptCache))
 
   /**
+   * Asks the provider to serve the request at a processing tier, such as `ServiceTier.Flex` for a cheaper, slower
+   * answer or `ServiceTier.Priority` for a faster one. The answer is the same either way; what the call costs, and how
+   * readily the provider sheds it under load, is not. A provider that cannot send the tier as asked reports it on
+   * [[Completion.adjustments]]; see [[ServiceTier]] for each provider's mapping.
+   *
+   * @param serviceTier the tier; `None` sends none, so the provider serves the request at its default (the default)
+   * @return new CompletionOptions with serviceTier set
+   */
+  def withServiceTier(serviceTier: Option[ServiceTier]): CompletionOptions = copy(serviceTier = serviceTier)
+
+  /**
+   * Asks the provider to serve the request at a processing tier; see the `Option` overload.
+   *
+   * @param serviceTier the tier, such as `ServiceTier.Flex`
+   * @return new CompletionOptions with serviceTier set
+   */
+  def withServiceTier(serviceTier: ServiceTier): CompletionOptions = copy(serviceTier = Some(serviceTier))
+
+  /**
    * Request structured output in the given format.
    *
    * Support is provider- and model-dependent. Capability validation is applied
@@ -237,7 +259,8 @@ object CompletionOptions {
     reasoning: Option[ReasoningEffort] = None,
     thinking: Option[Thinking] = None,
     responseFormat: Option[ResponseFormat] = None,
-    promptCache: Option[PromptCache] = None
+    promptCache: Option[PromptCache] = None,
+    serviceTier: Option[ServiceTier] = None
   ): CompletionOptions =
     new CompletionOptions(
       temperature,
@@ -249,6 +272,7 @@ object CompletionOptions {
       reasoning,
       thinking,
       responseFormat,
-      promptCache
+      promptCache,
+      serviceTier
     )
 }

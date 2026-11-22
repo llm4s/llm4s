@@ -252,8 +252,11 @@ class AnthropicClient(
         val thinkingPlan = AnthropicThinking.plan(config.model, transformed.options, maxTokens, capabilities)
         applyThinking(paramsBuilder, thinkingPlan)
         applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
+        val (serviceTier, tierAdjustments) = AnthropicServiceTier.plan(transformed.options)
+        serviceTier.foreach(paramsBuilder.serviceTier)
         val adjustments =
-          transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options)
+          transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options) ++
+            tierAdjustments
         adjustmentLog.record(config.model, adjustments)
         // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
         AnthropicPromptCache
@@ -348,8 +351,11 @@ curl https://api.anthropic.com/v1/messages \
         val thinkingPlan = AnthropicThinking.plan(config.model, transformed.options, maxTokens, capabilities)
         applyThinking(paramsBuilder, thinkingPlan)
         applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
+        val (serviceTier, tierAdjustments) = AnthropicServiceTier.plan(transformed.options)
+        serviceTier.foreach(paramsBuilder.serviceTier)
         val adjustments =
-          transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options)
+          transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options) ++
+            tierAdjustments
         adjustmentLog.record(config.model, adjustments)
         // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
         AnthropicPromptCache

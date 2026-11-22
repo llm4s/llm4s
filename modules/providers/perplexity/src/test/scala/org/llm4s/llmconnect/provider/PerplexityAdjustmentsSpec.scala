@@ -50,6 +50,11 @@ class PerplexityAdjustmentsSpec extends AnyWordSpec with Matchers:
       )
     }
 
+    "report a service tier Dropped, since the Agent API has none (#2726)" in {
+      kinds(adjustments(CompletionOptions().withServiceTier(ServiceTier.Priority))) shouldBe
+        List(RequestOption.ServiceTier -> "Dropped")
+    }
+
     "report a thinking budget Dropped, and Adaptive NotNeeded since the effort decides" in {
       val budget = Thinking.budget(2048).fold(e => fail(e.message), identity)
       kinds(adjustments(CompletionOptions().withThinking(budget))) shouldBe List(RequestOption.Thinking -> "Dropped")

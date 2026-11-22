@@ -175,6 +175,7 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     classOf[JCompletionOptions],
     classOf[JCompletionOptions.Builder],
     classOf[JReasoningEffort],
+    classOf[JServiceTier],
     classOf[JThinking],
     classOf[JAgent],
     Class.forName("org.llm4s.javaapi.Llm4s"),

@@ -119,9 +119,13 @@ class OllamaClient(
   // what the request does not send goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
 
-  /** What `options` asks for that the request does not send as asked: `think`'s report, and any prompt cache. */
+  /**
+   * What `options` asks for that the request does not send as asked: `think`'s report, any prompt cache, and any
+   * service tier, which Ollama has none of.
+   */
   private def unsent(options: CompletionOptions, think: OllamaThink.Plan): List[RequestAdjustment] = {
-    val adjustments = think.adjustments ++ UnmappedOptions.promptCache(config.model, options)
+    val adjustments = think.adjustments ++ UnmappedOptions.promptCache(config.model, options) ++
+      UnmappedOptions.serviceTier("Ollama", options)
     adjustmentLog.record(config.model, adjustments)
     adjustments
   }

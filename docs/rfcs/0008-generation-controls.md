@@ -298,8 +298,8 @@ it, `promptCache` is not, because provider-side caching does not change the resp
 ### Not changed
 
 `temperature`, `topP` and the penalties stay as they are, so llm4s keeps sending `temperature` by default and no
-governance vote is needed. Service tier is left for later. Both can be added under this RFC's pattern, one field and
-one `RequestOption` case each, without revisiting it. `TraceEvent` does not carry adjustments yet (decision 5
+governance vote is needed. Service tier was left for later, and is added under this RFC's pattern by #2726:
+`CompletionOptions.serviceTier` and `RequestOption.ServiceTier`. `TraceEvent` does not carry adjustments yet (decision 5
 below).
 
 ## Alternatives
@@ -425,7 +425,9 @@ leave out in [#2699](https://github.com/llm4s/llm4s/pull/2699).
 Bedrock `cachePoint` is delivered under [#2726](https://github.com/llm4s/llm4s/issues/2726): `cachePoint` blocks for
 the scopes, the 1-hour TTL where the model takes it, and an `Adjusted` or `Dropped` for what a model cannot take.
 Ollama `think` is delivered under the same issue: `thinking` and `reasoning` as `think`, from the values `/api/show`
-lists for the model. Service tier is still open; until it lands, there is no option for it.
+lists for the model. So is service tier: `CompletionOptions.serviceTier` (`ServiceTier`: `Auto`, `Default`, `Flex`,
+`Priority`) and `RequestOption.ServiceTier`, sent by OpenAI, Azure OpenAI, Anthropic, Gemini, Vertex AI and Bedrock,
+each reporting what it cannot send, and reported `Dropped` by every other provider.
 
 The docs (`docs/guide/cost-controls.md` with the mapping table, precedence rule and warm-up pattern, rows in
 `providers.md`, and the adjustment contract in `writing-a-provider.md`) land with PRs 1, 4 and 6.

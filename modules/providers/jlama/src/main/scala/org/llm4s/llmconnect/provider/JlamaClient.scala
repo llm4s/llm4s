@@ -154,7 +154,8 @@ object JlamaClient:
       dropped(options.presencePenalty != 0.0, RequestOption.PresencePenalty) ++
       dropped(options.frequencyPenalty != 0.0, RequestOption.FrequencyPenalty) ++
       dropped(options.responseFormat.isDefined, RequestOption.ResponseFormat) ++
-      UnmappedOptions.reasoningAndThinking(model, options)
+      UnmappedOptions.reasoningAndThinking(model, options) ++
+      UnmappedOptions.serviceTier("Jlama", options)
 
   /** The provider id: the `provider` of this client's errors and metrics. */
   val ProviderName: String = "jlama"

@@ -53,6 +53,7 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     received.frequencyPenalty shouldBe -0.5
     received.reasoning shouldBe Some(ReasoningEffort.High)
     received.thinking shouldBe Some(Thinking.budget(4096).toOption.get)
+    received.serviceTier shouldBe Some(ServiceTier.Flex)
     received.tools shouldBe empty
     received.responseFormat shouldBe None
     received shouldBe CompletionOptions(
@@ -62,7 +63,8 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
       presencePenalty = 0.5,
       frequencyPenalty = -0.5,
       reasoning = Some(ReasoningEffort.High),
-      thinking = Thinking.budget(4096).toOption
+      thinking = Thinking.budget(4096).toOption,
+      serviceTier = Some(ServiceTier.Flex)
     )
   }
 
@@ -74,7 +76,8 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
       "presencePenalty:0.5",
       "frequencyPenalty:-0.5",
       "reasoning:high",
-      "thinking:JThinking.budget(4096)"
+      "thinking:JThinking.budget(4096)",
+      "serviceTier:FLEX"
     )
   }
 
@@ -88,7 +91,8 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
       "presencePenalty:0.0",
       "frequencyPenalty:0.0",
       "reasoning:none",
-      "thinking:none"
+      "thinking:none",
+      "serviceTier:none"
     )
   }
 
@@ -97,7 +101,8 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     sent(set) shouldBe CompletionOptions(
       maxTokens = Some(256),
       reasoning = Some(ReasoningEffort.Low),
-      thinking = Some(Thinking.Adaptive)
+      thinking = Some(Thinking.Adaptive),
+      serviceTier = Some(ServiceTier.Priority)
     )
     sent(CompletionOptionsCheck.cleared(set)) shouldBe CompletionOptions()
     sent(CompletionOptionsCheck.cleared(CompletionOptionsCheck.everySetting())) shouldBe
@@ -198,11 +203,29 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
   it should "print every setting" in {
     CompletionOptionsCheck.everySetting().toString shouldBe
       "JCompletionOptions(temperature=0.2, topP=0.9, maxTokens=512, presencePenalty=0.5, frequencyPenalty=-0.5, " +
-      "reasoning=HIGH, thinking=JThinking.budget(4096))"
+      "reasoning=HIGH, thinking=JThinking.budget(4096), serviceTier=FLEX)"
     JCompletionOptions.builder().build().toString shouldBe
       "JCompletionOptions(temperature=0.7, topP=1.0, maxTokens=unset, presencePenalty=0.0, frequencyPenalty=0.0, " +
-      "reasoning=unset, thinking=unset)"
-    JCompletionOptions.builder().thinking(JThinking.off()).build().toString should include("thinking=JThinking.off())")
+      "reasoning=unset, thinking=unset, serviceTier=unset)"
+    JCompletionOptions.builder().thinking(JThinking.off()).build().toString should include("thinking=JThinking.off(),")
+  }
+
+  "every service tier" should "map to core's tier of the same name, and back, and refuse null" in {
+    val pairs = List(
+      JServiceTier.AUTO     -> ServiceTier.Auto,
+      JServiceTier.DEFAULT  -> ServiceTier.Default,
+      JServiceTier.FLEX     -> ServiceTier.Flex,
+      JServiceTier.PRIORITY -> ServiceTier.Priority
+    )
+    pairs.map(_._1) shouldBe JServiceTier.values.toList
+    for ((java, core) <- pairs) {
+      val options = JCompletionOptions.builder().serviceTier(java).build()
+      sent(options).serviceTier shouldBe Some(core)
+      options.serviceTier shouldBe Optional.of(java)
+    }
+    val b = JCompletionOptions.builder()
+    intercept[NullPointerException](b.serviceTier(null: JServiceTier))
+    intercept[NullPointerException](b.serviceTier(null: Optional[JServiceTier]))
   }
 
   "JThinking" should "build each mode from Java and read it back" in {

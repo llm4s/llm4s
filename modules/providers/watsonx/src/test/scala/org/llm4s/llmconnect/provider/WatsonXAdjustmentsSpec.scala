@@ -34,6 +34,12 @@ class WatsonXAdjustmentsSpec extends AnyFunSuite with Matchers with EitherValues
 
   private def budget = Thinking.budget(2048).fold(e => fail(e.message), identity)
 
+  test("a service tier is reported Dropped, since the chat API has none (#2726)") {
+    adjustments(config, CompletionOptions().withServiceTier(ServiceTier.Flex)) shouldBe List(
+      RequestAdjustment.Dropped(RequestOption.ServiceTier, "watsonx has no service tier to choose; Flex is not sent")
+    )
+  }
+
   test("a level the chat API takes is sent as asked and reported as nothing") {
     adjustments(gptOss, CompletionOptions().withReasoning(ReasoningEffort.Medium)) shouldBe Nil
     adjustments(gptOss, CompletionOptions()) shouldBe Nil

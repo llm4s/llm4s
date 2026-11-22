@@ -14,9 +14,10 @@ import scalafix.v1._
  * field added since 0.6.0: `Completion`'s ten fields gain `finishReason` (#2613), `ModelCapabilities` gains the
  * five thinking and effort fields (#2115), `TraceEvent.ErrorOccurred`'s nine gain `usage` (#2676), `TokenUsage`'s six
  * gain `longCacheCreationTokens` and `ModelPricing`'s fifteen `cacheCreationInputTokenCostAbove1hr` (#2115),
- * `CompletionOptions`'s nine gain `promptCache` (#2115; its eighth, `budgetTokens`, is now `thinking`, which
- * `ThinkingReplacesBudgetTokens` reports), `TurnState` gains `cut` (#2613) and `RAGConfig` `completionOptions`
- * (#2715) and `documentRegistry` (#2714). A pattern with any other number of arguments is left alone.
+ * `CompletionOptions`'s nine gain `promptCache` (#2115) and `serviceTier` (#2726; its eighth, `budgetTokens`, is now
+ * `thinking`, which `ThinkingReplacesBudgetTokens` reports), `TurnState` gains `cut` (#2613) and `RAGConfig`
+ * `completionOptions` (#2715) and `documentRegistry` (#2714). A pattern with any other number of arguments is left
+ * alone.
  */
 class PositionalPatternsGainFields extends SemanticRule("PositionalPatternsGainFields") {
 
@@ -65,7 +66,7 @@ object PositionalPatternsGainFields {
     "org/llm4s/config/ProvidersConfigModel.NamedProviderConfig"     -> (8  -> 9),
     "org/llm4s/llmconnect/LlmClientOptions"                         -> (2  -> 3),
     "org/llm4s/llmconnect/model/Completion"                         -> (9  -> 11),
-    "org/llm4s/llmconnect/model/CompletionOptions"                  -> (9  -> 10),
+    "org/llm4s/llmconnect/model/CompletionOptions"                  -> (9  -> 11),
     "org/llm4s/llmconnect/model/TokenUsage"                         -> (6  -> 7),
     "org/llm4s/llmconnect/config/AnthropicConfig"                   -> (7  -> 10),
     "org/llm4s/llmconnect/config/AzureConfig"                       -> (7  -> 10),
