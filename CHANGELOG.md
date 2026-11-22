@@ -52,7 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `budget_tokens` and `output_config.effort`, and a `reasoning`-only request to a model that rejects a budget (Opus
   4.7 and later) as adaptive thinking instead of a 400; OpenAI sends the nearest `reasoning_effort` the model accepts;
   each reports what it changed on `Completion.adjustments` ([cost controls](docs/guide/cost-controls.md),
-  [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4, decision 14); `CachingLLMClient` matches a cached answer on an
+  [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4, decision 14); Gemini and Vertex AI send `thinkingConfig`:
+  a fitted `thinkingBudget` on Gemini 2.5 and the nearest `thinkingLevel` on Gemini 3 and later (the Gemini follow-up);
+  `CachingLLMClient` matches a cached answer on an
   explicit list of the options that change it, `thinking` and `reasoning` among them (PR 5, decision 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Added** `CompletionOptions.promptCache` (`PromptCache`: scope `System`, `Tools`, `Conversation`, TTL `Short` or
   `Long`): Anthropic sends `cache_control` breakpoints and reports a prefix too short to cache; OpenAI, Gemini and Vertex
