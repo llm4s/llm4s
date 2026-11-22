@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the dialect's `parseToolCalls` return `Result` (PR 3);
   [migration](docs/reference/migration.md#a-broken-or-cut-tool-call-is-an-error-2613). `ProviderModuleChecks.assertStreams`
   is removed: `assertModelCallContract` replaces it (PR 5).
+- A positional pattern on `TokenUsage` or `ModelPricing` gains a field (`longCacheCreationTokens`,
+  `cacheCreationInputTokenCostAbove1hr`; [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 6);
+  [migration](docs/reference/migration.md#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115).
 
 ### Providers
 

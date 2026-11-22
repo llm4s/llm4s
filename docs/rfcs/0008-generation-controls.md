@@ -329,7 +329,7 @@ below).
 - **Binary:** there is no baseline yet (#1281), so no MiMa filter is needed.
 - **Source:** Parts 1 and 3 are additive, apart from the usual exception for any growth-pattern addition: a
   positional pattern match on a case-class extractor whose arity changes (`TransformationResult`, `Completion`,
-  `ModelCallCompleted`). Part 2 has the same exception for `ModelCapabilities` (PR 3), and breaks code that uses
+  `ModelCallCompleted`, and `TokenUsage` and `ModelPricing` in PR 6). Part 2 has the same exception for `ModelCapabilities` (PR 3), and breaks code that uses
   `budgetTokens`, `withBudgetTokens` or `ReasoningEffort.None` (PR 4); an exhaustive `match` on `ReasoningEffort`
   warns about the three new levels. Part 1 also breaks an
   `OpenAICompatibleDialect` that overrides `addReasoning` (PR 1, decision 13).
@@ -344,7 +344,8 @@ below).
 
 ## Migration
 
-Part 3 needs none. Part 1 needs one change, and only for an `OpenAICompatibleDialect` that overrides
+Part 3 needs none beyond the positional-pattern exception above for `TokenUsage` and
+`ModelPricing`. Part 1 needs one change, and only for an `OpenAICompatibleDialect` that overrides
 `addReasoning`: it returns what it did not send (PR 1, decision 13; `docs/reference/migration.md` has the
 before and after). Part 2 (PR 4):
 
