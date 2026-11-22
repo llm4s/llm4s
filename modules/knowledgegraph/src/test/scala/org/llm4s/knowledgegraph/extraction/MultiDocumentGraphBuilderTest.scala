@@ -4,7 +4,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalamock.scalatest.MockFactory
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model.Completion
+import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation }
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import org.llm4s.error.ProcessingError
 import java.time.Instant
@@ -25,6 +25,30 @@ class MultiDocumentGraphBuilderTest extends AnyFunSuite with Matchers with MockF
     entityTypes = Seq("Person", "Organization"),
     relationshipTypes = Seq("WORKS_FOR")
   )
+
+  // A Person, an Organization and a Location, which the schema does not list, with an edge to each
+  private val replyWithOutOfSchemaNode =
+    """{
+      |  "nodes": [
+      |    {"id": "alice", "label": "Person", "properties": {"name": "Alice"}},
+      |    {"id": "acme", "label": "Organization", "properties": {"name": "Acme"}},
+      |    {"id": "paris", "label": "Location", "properties": {"name": "Paris"}}
+      |  ],
+      |  "edges": [
+      |    {"source": "alice", "target": "acme", "relationship": "WORKS_FOR"},
+      |    {"source": "alice", "target": "paris", "relationship": "WORKS_FOR"}
+      |  ]
+      |}""".stripMargin
+
+  // "Jobs" and "Steve Jobs": not the same name, so only the LLM pass can merge them
+  private val ambiguousReply =
+    """{
+      |  "nodes": [
+      |    {"id": "jobs", "label": "Person", "properties": {"name": "Jobs"}},
+      |    {"id": "steve", "label": "Person", "properties": {"name": "Steve Jobs"}}
+      |  ],
+      |  "edges": []
+      |}""".stripMargin
 
   test("MultiDocumentGraphBuilder should extract single document with schema") {
     val llmClient = mock[LLMClient]
@@ -371,5 +395,155 @@ class MultiDocumentGraphBuilderTest extends AnyFunSuite with Matchers with MockF
     tracked.nodeSources("doc-2__2") shouldBe Set("doc-2")
     // Edge only in doc-2, using namespaced IDs
     tracked.edgeSources(("doc-2__1", "doc-2__2", "WORKS_FOR")) shouldBe Set("doc-2")
+  }
+
+  private def extractWithSchema(schema: ExtractionSchema, reply: String): SourceTrackedGraph = {
+    val llmClient = mock[LLMClient]
+    val config = ExtractionConfig(
+      schema = Some(schema),
+      enableCoreference = false,
+      enableEntityLinking = false
+    )
+    (llmClient.complete _).expects(*, *).returning(Right(makeCompletion(reply)))
+    val result = new MultiDocumentGraphBuilder(llmClient, config).extractDocument("text", DocumentSource("doc-1"))
+    result.fold(e => fail(e.message), identity)
+  }
+
+  test("MultiDocumentGraphBuilder should drop an out-of-schema node and the edges to it when the schema says so") {
+    val strict  = ExtractionSchema.simple(Seq("Person", "Organization"), Seq("WORKS_FOR"), allowOutOfSchema = false)
+    val tracked = extractWithSchema(strict, replyWithOutOfSchemaNode)
+
+    tracked.graph.nodes.keySet shouldBe Set("alice", "acme")
+    tracked.graph.edges shouldBe List(Edge("alice", "acme", "WORKS_FOR"))
+  }
+
+  test("MultiDocumentGraphBuilder should keep an out-of-schema node and its edges when the schema allows it") {
+    val lenient = ExtractionSchema.simple(Seq("Person", "Organization"), Seq("WORKS_FOR"), allowOutOfSchema = true)
+    val tracked = extractWithSchema(lenient, replyWithOutOfSchemaNode)
+
+    tracked.graph.nodes.keySet shouldBe Set("alice", "acme", "paris")
+    tracked.graph.nodes("paris").label shouldBe "Location"
+    tracked.graph.edges should contain theSameElementsAs List(
+      Edge("alice", "acme", "WORKS_FOR"),
+      Edge("alice", "paris", "WORKS_FOR")
+    )
+  }
+
+  test("MultiDocumentGraphBuilder should keep an in-schema edge whose endpoints break its type constraint") {
+    // SchemaValidator reports the wrong source and target types as violations but leaves the edge in the
+    // valid graph, and the builder only logs the violations.
+    val typed = ExtractionSchema(
+      entityTypes = Seq(EntityTypeDefinition("Person"), EntityTypeDefinition("Organization")),
+      relationshipTypes = Seq(
+        RelationshipTypeDefinition("WORKS_FOR", sourceTypes = Seq("Person"), targetTypes = Seq("Organization"))
+      ),
+      allowOutOfSchema = false
+    )
+    val backwards =
+      """{
+        |  "nodes": [
+        |    {"id": "alice", "label": "Person", "properties": {"name": "Alice"}},
+        |    {"id": "acme", "label": "Organization", "properties": {"name": "Acme"}}
+        |  ],
+        |  "edges": [
+        |    {"source": "acme", "target": "alice", "relationship": "WORKS_FOR"}
+        |  ]
+        |}""".stripMargin
+    val tracked = extractWithSchema(typed, backwards)
+
+    tracked.graph.nodes.keySet shouldBe Set("alice", "acme")
+    tracked.graph.edges shouldBe List(Edge("acme", "alice", "WORKS_FOR"))
+  }
+
+  // One Organization named "Acme" per document, under a different id in each
+  private def extractAcmeTwice(enableEntityLinking: Boolean): SourceTrackedGraph = {
+    val llmClient = mock[LLMClient]
+    val config = ExtractionConfig(
+      schema = Some(schema),
+      enableCoreference = false,
+      enableEntityLinking = enableEntityLinking
+    )
+    Seq("acme-1", "acme-2").foreach { id =>
+      val reply =
+        s"""{"nodes": [{"id": "$id", "label": "Organization", "properties": {"name": "Acme"}}], "edges": []}"""
+      (llmClient.complete _).expects(*, *).returning(Right(makeCompletion(reply)))
+    }
+    val documents = Seq(("Acme.", DocumentSource("doc-1")), ("Acme again.", DocumentSource("doc-2")))
+    new MultiDocumentGraphBuilder(llmClient, config).extractDocuments(documents).fold(e => fail(e.message), identity)
+  }
+
+  test("MultiDocumentGraphBuilder should keep same-name entities apart when entity linking is off") {
+    val tracked = extractAcmeTwice(enableEntityLinking = false)
+
+    tracked.graph.nodes.keySet shouldBe Set("doc-1__acme-1", "doc-2__acme-2")
+    tracked.nodeSources("doc-1__acme-1") shouldBe Set("doc-1")
+    tracked.nodeSources("doc-2__acme-2") shouldBe Set("doc-2")
+  }
+
+  test("MultiDocumentGraphBuilder should merge same-name entities into one node listing both documents") {
+    val tracked = extractAcmeTwice(enableEntityLinking = true)
+
+    // The lowest id survives
+    tracked.graph.nodes.keySet shouldBe Set("doc-1__acme-1")
+    tracked.nodeSources shouldBe Map("doc-1__acme-1" -> Set("doc-1", "doc-2"))
+  }
+
+  // The system prompt EntityLinker sends with its disambiguation request
+  private def isDisambiguation(conversation: Conversation): Boolean =
+    conversation.messages.exists(_.content.contains("entity disambiguation assistant"))
+
+  // Registers the one extraction call, answered with ambiguousReply, then returns the builder
+  private def builderExpectingExtraction(
+    llmClient: LLMClient,
+    llmDisambiguation: Boolean
+  ): MultiDocumentGraphBuilder = {
+    val config = ExtractionConfig(
+      schema = Some(schema),
+      enableCoreference = false,
+      enableEntityLinking = true,
+      llmDisambiguation = llmDisambiguation
+    )
+    (llmClient.complete _)
+      .expects(where((c: Conversation, _: CompletionOptions) => !isDisambiguation(c)))
+      .returning(Right(makeCompletion(ambiguousReply)))
+    new MultiDocumentGraphBuilder(llmClient, config)
+  }
+
+  test("MultiDocumentGraphBuilder should ask the LLM about an ambiguous pair when LLM disambiguation is on") {
+    val llmClient = mock[LLMClient]
+    val builder   = builderExpectingExtraction(llmClient, llmDisambiguation = true)
+    (llmClient.complete _)
+      .expects(where { (c: Conversation, _: CompletionOptions) =>
+        isDisambiguation(c) && c.messages.exists(m =>
+          m.content.contains("\"jobs\"") && m.content.contains("\"steve jobs\"")
+        )
+      })
+      .returning(Right(makeCompletion("""{"merges": [{"pair": 1, "merge": true}]}""")))
+      .once()
+
+    val result = builder.extractDocuments(Seq(("Steve Jobs. Jobs founded Apple.", DocumentSource("doc-1"))))
+
+    result should be(a[Right[_, _]])
+    // The LLM said merge: the node with the longer name is kept
+    result.toOption.get.graph.nodes.keySet shouldBe Set("doc-1__steve")
+  }
+
+  test("MultiDocumentGraphBuilder should not ask the LLM about an ambiguous pair when LLM disambiguation is off") {
+    val llmClient = mock[LLMClient]
+    // Only the extraction call is expected: a disambiguation call would fail the test
+    val result = builderExpectingExtraction(llmClient, llmDisambiguation = false)
+      .extractDocuments(Seq(("Steve Jobs. Jobs founded Apple.", DocumentSource("doc-1"))))
+
+    result should be(a[Right[_, _]])
+    result.toOption.get.graph.nodes.keySet shouldBe Set("doc-1__jobs", "doc-1__steve")
+  }
+
+  test("ExtractionConfig() should have no schema, coreference and entity linking on, and LLM disambiguation off") {
+    ExtractionConfig() shouldBe ExtractionConfig(
+      schema = None,
+      enableCoreference = true,
+      enableEntityLinking = true,
+      llmDisambiguation = false
+    )
   }
 }
