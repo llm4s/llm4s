@@ -758,8 +758,10 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       case other => fail(s"expected a ServiceError, got $other")
     }
     chunks.flatMap(_.content) shouldBe List("Hel")
-    val limited = """data: {"error":{"code":429,"message":"Resource exhausted","status":"RESOURCE_EXHAUSTED"}}"""
-    streamOf(limited + "\n\n", _ => ()).left.toOption.value shouldBe a[org.llm4s.error.RateLimitError]
+    val limited     = """data: {"error":{"code":429,"message":"Resource exhausted","status":"RESOURCE_EXHAUSTED"}}"""
+    val rateLimited = streamOf(limited + "\n\n", _ => ()).left.toOption.value
+    rateLimited shouldBe a[org.llm4s.error.RateLimitError]
+    rateLimited.message should include("Resource exhausted")
   }
 
   "A data line that is not JSON" should "still be skipped (RFC 0009, open question 5)" in {

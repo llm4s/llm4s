@@ -162,6 +162,8 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
     }
     chunks.flatMap(_.content).mkString shouldBe "Hel"
     // an HTTP failure status the error states keeps its meaning
-    streamAt(s"""data: {"error":{"message":"slow down","code":429}}\n\n""")._1.left.value shouldBe a[RateLimitError]
+    val limited = streamAt(s"""data: {"error":{"message":"slow down","code":429}}\n\n""")._1.left.value
+    limited shouldBe a[RateLimitError]
+    limited.message should include("slow down")
   }
 }

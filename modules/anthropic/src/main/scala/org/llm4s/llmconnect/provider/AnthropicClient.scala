@@ -1251,11 +1251,7 @@ object AnthropicClient {
       .map(event => event.get("error").flatMap(_.objOpt).getOrElse(event))
     val message = error.flatMap(_.get("message")).flatMap(_.strOpt).getOrElse("the stream reported an error")
     val status  = error.flatMap(_.get("type")).flatMap(_.strOpt).flatMap(StreamErrorStatus.get).getOrElse(502)
-    val details = ujson.Obj("error" -> ujson.Obj("message" -> Redaction.remoteBody(message))).render()
-    HttpErrorMapper
-      .mapHttpError(status, details, "anthropic")
-      .swap
-      .getOrElse(ServiceError(status, "anthropic", message))
+    HttpErrorMapper.mapStreamError(status, message, "anthropic")
   }
 
   /** The HTTP status each of Anthropic's documented error types stands for. */

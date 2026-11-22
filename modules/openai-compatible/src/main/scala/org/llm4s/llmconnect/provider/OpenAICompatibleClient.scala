@@ -748,7 +748,7 @@ object OpenAICompatibleClient {
   private[provider] def streamedError(error: ujson.Value, providerName: String): Option[LLMError] =
     Some(error)
       .filter(error => error != ujson.Null && error != ujson.Obj() && error != ujson.Str(""))
-      .flatMap { error =>
+      .map { error =>
         val message =
           error.objOpt.flatMap(_.get("message")).flatMap(_.strOpt).orElse(error.strOpt).getOrElse(error.render())
         val status = error.objOpt.toSeq
@@ -757,8 +757,7 @@ object OpenAICompatibleClient {
           .map(_.toInt)
           .find(code => code >= 400 && code <= 599)
           .getOrElse(502)
-        val body = ujson.Obj("error" -> ujson.Obj("message" -> Redaction.remoteBody(message))).render()
-        HttpErrorMapper.mapHttpError(status, body, providerName).swap.toOption
+        HttpErrorMapper.mapStreamError(status, message, providerName)
       }
 
   private[provider] val AuthorizationHeaderRefusal: String =

@@ -1,7 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ LLMError, NetworkError, ServiceError }
-import org.llm4s.util.Redaction
+import org.llm4s.error.{ LLMError, NetworkError }
 
 /**
  * How a Gemini or Vertex AI stream ends when it does not finish (RFC 0009, Part 2):
@@ -35,8 +34,7 @@ private[provider] object GeminiStreamEnd {
           .map(_.toInt)
           .filter(code => code >= 400 && code <= 599)
           .getOrElse(502)
-        val body = ujson.Obj("error" -> ujson.Obj("message" -> Redaction.remoteBody(message))).render()
-        HttpErrorMapper.mapHttpError(status, body, provider).swap.getOrElse(ServiceError(status, provider, message))
+        HttpErrorMapper.mapStreamError(status, message, provider)
       }
 
   /** A stream whose candidate stated no `finishReason`: cut off, so a retry may succeed. */

@@ -67,8 +67,9 @@ object GeminiContractFixtures {
     ContractCase.ErrorEvent -> streamOnly(
       sse(
         chunk(text("The answer")),
-        """data: {"error":{"code":503,"message":""" + ujson.Str(ContractCase.ProviderErrorMessage).render() +
-          ""","status":"UNAVAILABLE"}}"""
+        // a quota hit mid-stream: a RateLimitError, which must keep the provider's message
+        """data: {"error":{"code":429,"message":""" + ujson.Str(ContractCase.ProviderErrorMessage).render() +
+          ""","status":"RESOURCE_EXHAUSTED"}}"""
       )
     )
   )

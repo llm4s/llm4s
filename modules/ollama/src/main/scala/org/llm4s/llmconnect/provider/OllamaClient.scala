@@ -440,8 +440,7 @@ object OllamaClient {
       .filter(error => error != ujson.Null && error != ujson.Str(""))
       .map { error =>
         val message = error.strOpt.orElse(error.objOpt.flatMap(_.get("message")).flatMap(_.strOpt))
-        val body    = ujson.Obj("error" -> Redaction.remoteBody(message.getOrElse(error.render()))).render()
-        HttpErrorMapper.mapHttpError(502, body, provider).swap.getOrElse(ServiceError(502, provider, body))
+        HttpErrorMapper.mapStreamError(502, message.getOrElse(error.render()), provider)
       }
 
   /** A stream that ended without `done: true`: cut off, so a retry may succeed (RFC 0009, rule 1). */

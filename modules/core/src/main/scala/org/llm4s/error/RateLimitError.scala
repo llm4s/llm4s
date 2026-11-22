@@ -49,6 +49,10 @@ final case class RateLimitError private (
   private[llm4s] def withHint(sentence: String, entry: TroubleshootingLinks.Entry): RateLimitError =
     copy(message = TroubleshootingLinks.withAction(message, sentence, entry))
 
+  /** This error with the provider's own explanation appended to its message. */
+  private[llm4s] def withDetail(detail: String): RateLimitError =
+    if (detail.trim.isEmpty) this else copy(message = s"$message: $detail")
+
   override val context: Map[String, String] = Map(
     "provider" -> provider
   ) ++ retryAfter.map(d => "retryAfter" -> DurationText(d))

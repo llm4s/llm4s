@@ -148,9 +148,10 @@ class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
     }
     chunks.flatMap(_.content).mkString shouldBe "Hel"
     withServer("/v1/messages")(sendSseResponse(_, streamUpTo(1, errorEvent("rate_limit_error")))) { baseUrl =>
-      clientAt(baseUrl).streamComplete(hi, onChunk = _ => ()).left.map(_.getClass) shouldBe Left(
-        classOf[RateLimitError]
-      )
+      clientAt(baseUrl).streamComplete(hi, onChunk = _ => ()) match {
+        case Left(e: RateLimitError) => e.message should include("Overloaded") // the provider's message, kept
+        case other                   => fail(s"expected a RateLimitError, got $other")
+      }
     }
     withServer("/v1/messages")(sendSseResponse(_, streamUpTo(1, errorEvent("brand_new_error")))) { baseUrl =>
       clientAt(baseUrl).streamComplete(hi, onChunk = _ => ()) match {
