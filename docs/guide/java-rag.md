@@ -129,6 +129,41 @@ replace those instructions with the builder's `systemPrompt`. The model answers 
 chunks; give the builder `completionOptions(JCompletionOptions.builder().temperature(0.3).maxTokens(512).build())`
 for other options.
 
+## Stream an answer
+
+`askStream` answers as `ask` does, but streams the answer to a listener as the model generates it, so a chat UI can
+show the sources first and the text as it arrives. The listener hears `onSources` once, before the model is asked,
+then `onChunk` for each piece of the answer's text, then exactly one of `onComplete` (the whole `JRagAnswer`) or
+`onError`. `askStream` returns at once with a running `JRagAnswerStream`:
+
+```java
+JRagAnswerStream stream = rag.askStream("How long do refunds take?", new JRagStreamListener() {
+    @Override
+    public void onSources(List<JRagSource> sources) {
+        sources.forEach(s -> System.out.println("[" + s.documentId() + "]"));
+    }
+
+    @Override
+    public void onChunk(String text) {
+        System.out.print(text);
+    }
+}).get();
+JRagAnswer answer = stream.await().get();
+```
+
+Only `onChunk` must be implemented, so a lambda is a listener: `rag.askStream(question, System.out::print)`. The
+search and the model call run on a virtual thread of the stream's own, and the listener is called there, one call at
+a time. `await()` blocks until the listener has heard the end and returns the same outcome. `cancel()`, or `close()`
+in a try-with-resources block, interrupts that thread, which is how llm4s providers are cancelled: no further piece is
+delivered and `onError` hears a `CANCELLED` failure. It works as `JLlmClient.stream`'s `CompletionStream` does; see
+[Java threading and cancellation](java-threading-and-cancellation).
+
+What `ask` fails at once - a `null` or blank question, a pipeline without a chat client - `askStream` fails at once,
+and the listener hears nothing. A failure once the call has started reaches `onError`: of the search, with no
+`onSources` before it, or of the model, after the pieces already delivered. A listener that throws stops the call,
+and `onError` hears what it threw. For a Reactor `Flux` of the same events, see
+[Streaming to Reactor](java-reactor#stream-a-rag-answer).
+
 ## Search without a model
 
 `search` returns the chunks `ask` would answer from, without calling a model, so it works on a pipeline built with no
@@ -198,7 +233,7 @@ if (result.isFailure()) {
 
 - `VALIDATION`: a `null` or blank argument, a `topK` below 1, metadata with a `null` key or value, or a path that does
   not exist.
-- `CONFIGURATION`: `ask` on a pipeline built without a chat client.
+- `CONFIGURATION`: `ask` or `askStream` on a pipeline built without a chat client.
 - A failure of the embedding provider or the model has that failure's kind: `AUTHENTICATION`, `RATE_LIMIT`,
   `SERVICE`, `NETWORK`, `TIMEOUT`. A file that cannot be read is `OTHER`.
 - Interrupting the blocked thread is `CANCELLED`, with the thread's interrupt flag still set.
