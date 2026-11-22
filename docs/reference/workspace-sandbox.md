@@ -136,7 +136,7 @@ use `WorkspaceSandboxConfig.fromProfileName`.
 | `defaultCommandTimeout` | FiniteDuration | Default timeout for shell commands (more than zero, at most 1 hour) |
 | `readOnlyPaths` | List[String] | Paths under workspace that are read-only; bind commands too on Linux ([Command confinement](#command-confinement)) |
 | `allowedPaths` | List[String] | If non-empty, only these paths accessible; bind commands too on Linux ([Command confinement](#command-confinement)) |
-| `networkAllowed` | Boolean | Whether commands may open network sockets (default false). Enforced on Linux by the runner's seccomp filter |
+| `networkAllowed` | Boolean | Whether commands may open network sockets (default false). Enforced on Linux by the runner's seccomp filter, and for the whole container by its firewall ([Container egress](#container-egress)) |
 | `allowedCommands` | Set[String] | Executable names `executeCommand` may run; field default `ReadOnlyCommands`; the permissive profile (the default profile) uses `ReadWriteCommands`, which adds write-capable ones (`cp`, `mv`, `rm`, `mkdir`, …). Arguments are checked too: see [Command policy](#command-policy) |
 
 ## Command policy
@@ -759,6 +759,23 @@ every mount. The runner logs at startup whether commands get cgroups and, if not
 before. Off by default. A program that calls `clone3` with `CLONE_INTO_CGROUP` itself can still start a process in
 another cgroup of the container; no allowlisted program does.
 
+## Container egress
+
+With `networkAllowed = false` (the default, and every built-in profile's) the container has no network out
+([#870](https://github.com/llm4s/llm4s/issues/870)), not just its commands: nothing in it, the runner included, can
+open a connection to another host or container. `ContainerisedWorkspace` starts it with
+
+```
+docker run --cap-add NET_ADMIN -e LLM4S_NO_EGRESS=1 ...
+```
+
+and the image's entry point sets the container's firewall (IPv4 and, where the container has it, IPv6): only
+loopback and the replies to connections the container accepted (the runner's published port) may leave. It then
+drops `NET_ADMIN`, as it drops `SYS_ADMIN`, before the runner starts, so neither the runner nor a command can undo
+the firewall. When the firewall cannot be set, the entry point exits (status 78) and the container does not start:
+the sandbox asked for no network. A runner started without `LLM4S_NO_EGRESS=1` (a `docker run` by hand) logs at
+startup that only its commands are kept off the network. With `networkAllowed = true` none of this applies.
+
 To set these fields in a container, pass the whole config; the runner receives it as `WORKSPACE_SANDBOX_CONFIG`:
 
 ```scala
@@ -779,7 +796,7 @@ val workspace = new ContainerisedWorkspace(
 | Resource limits | ✓ limits configurable | |
 | Read-only areas | Config present | Enforced (file operations; commands on Linux, Landlock) |
 | Allowed/blocked paths | Config present | Enforced (file operations; commands on Linux, Landlock) |
-| Network restrictions | Documentation only | Enforced on Linux (seccomp) |
+| Network restrictions | Documentation only | Enforced on Linux (seccomp), and the container's egress blocked ([Container egress](#container-egress)) |
 
 ## Example: Locked-Down Sandbox
 
@@ -799,7 +816,7 @@ Run the containerized runner with locked sandbox:
 
 2. Run the container (replace `TAG` and the host path to your workspace):
    ```bash
-   docker run --rm -e WORKSPACE_SANDBOX_PROFILE=locked -v /path/to/workspace:/workspace -p 8080:8080 llm4s/workspace-runner:TAG
+   docker run --rm -e WORKSPACE_SANDBOX_PROFILE=locked --cap-add NET_ADMIN -e LLM4S_NO_EGRESS=1 -v /path/to/workspace:/workspace -p 8080:8080 llm4s/workspace-runner:TAG
    ```
    On Windows with Docker Desktop, use a path Docker can mount (e.g. `C:\Users\you\workspace` or `//c/Users/you/workspace` depending on your setup).
 
@@ -819,6 +836,11 @@ Run the containerized runner with locked sandbox:
 - **Done** ([#1983](https://github.com/llm4s/llm4s/issues/1983)): on Linux the kernel confines every command, so
   `allowedPaths` and `readOnlyPaths` bind what a command and its children touch, whatever its arguments, and
   `networkAllowed = false` (the default) leaves commands no network. See [Command confinement](#command-confinement).
+- **Done** ([#870](https://github.com/llm4s/llm4s/issues/870)): with `networkAllowed = false` the container itself has
+  no egress ([Container egress](#container-egress)), and the path policy is one value, `WorkspacePathPolicy`, whose
+  checks resolve every `..` and symbolic link before comparing a path with `allowedPaths` and `readOnlyPaths` and
+  return a refusal naming the path, which the runner reports as `PATH_ESCAPE_ATTEMPT`, `PATH_NOT_ALLOWED` or
+  `PATH_READ_ONLY`.
 - **Compare-and-set.** `fileSnapshot(path)` returns what is at a path with the SHA-256 of its bytes (`sha256:<hex>`,
   `absent` or `directory`); `writeFile(..., expectedHash)` and `deleteFile(path, expectedHash)` apply only if the hash
   is still that one (`HASH_MISMATCH` otherwise, changing nothing), under one lock every file operation of the runner
