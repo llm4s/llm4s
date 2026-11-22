@@ -127,6 +127,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -512,6 +513,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -616,6 +618,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -1392,6 +1395,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         if: github.event_name != 'pull_request'
@@ -1459,6 +1463,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: ${{ matrix.java }}
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -1559,6 +1564,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -1610,6 +1616,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -1750,6 +1757,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -1967,6 +1975,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -2152,6 +2161,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -2192,6 +2202,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -2352,6 +2363,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -2421,6 +2433,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -2468,6 +2481,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -2529,6 +2543,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps

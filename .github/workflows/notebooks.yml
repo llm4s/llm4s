@@ -47,6 +47,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       # Keeps setup-java's JDK 21 (the kernel runs on `java` from the PATH); installs only `cs`.
       - uses: coursier/setup-action@d5a17f9aaeb260f9ba336a5b582fb49f79c64ac4 # v3.1.0

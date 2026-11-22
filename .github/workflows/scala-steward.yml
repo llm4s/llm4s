@@ -43,6 +43,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
 
