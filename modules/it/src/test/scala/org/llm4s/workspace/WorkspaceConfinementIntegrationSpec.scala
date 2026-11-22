@@ -273,6 +273,53 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
     }
   }
 
+  /** `docker` with these arguments: its exit status and its output, stdout and stderr together. */
+  private def docker(args: String*): (Int, String) = {
+    val p   = new ProcessBuilder(("docker" +: args)*).redirectErrorStream(true).start()
+    val out = new String(p.getInputStream.readAllBytes(), StandardCharsets.UTF_8).trim
+    (p.waitFor(), out)
+  }
+
+  /** The container's address on its Docker network, which another container reaches it at. */
+  private def addressOf(ws: ContainerisedWorkspace): String = {
+    val (status, out) =
+      docker("inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", ws.containerName)
+    if (status != 0 || out.isEmpty) fail(s"no address for ${ws.containerName}: $out")
+    out
+  }
+
+  /** `curl` run in `from` by `docker exec`, outside the runner's sandbox: only the container's own firewall applies. */
+  private def curlFrom(from: ContainerisedWorkspace, to: ContainerisedWorkspace): (Int, String) =
+    docker("exec", from.containerName, "curl", "-sS", "--max-time", "5", s"http://${addressOf(to)}:8080/")
+
+  "A container whose sandbox allows no network" should "open no connection out, whatever runs in it (#870)" in {
+    val (a, b)        = (live(workspaceA), live(workspaceB))
+    val (status, out) = curlFrom(a, b)
+    withClue(s"curl from A to B: $out") {
+      status should not be 0
+      (out should not).include("LLM4S WebSocket Runner")
+    }
+  }
+
+  it should "still answer a connection made to it, from a container whose sandbox allows the network (#870)" in {
+    val (a, b)        = (live(workspaceA), live(workspaceB))
+    val (status, out) = curlFrom(b, a)
+    withClue(s"curl from B to A: $out") {
+      status shouldBe 0
+      out should include("LLM4S WebSocket Runner")
+    }
+  }
+
+  it should "start the runner without NET_ADMIN, so nothing it runs can undo the firewall (#870)" in {
+    val (status, out) = docker("exec", live(workspaceA).containerName, "grep", "CapBnd", "/proc/1/status")
+    withClue(s"/proc/1/status: $out") {
+      status shouldBe 0
+      val bounding = BigInt(out.split("\\s+").last, 16)
+      bounding.testBit(12) shouldBe false // CAP_NET_ADMIN
+      bounding.testBit(21) shouldBe false // CAP_SYS_ADMIN
+    }
+  }
+
   // last: were the signal not refused, the runner would stop
   it should "not signal the runner's JVM, from Landlock ABI v6 (#2009)" in {
     val ws     = live(workspaceA)
