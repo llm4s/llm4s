@@ -51,6 +51,19 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     noException should be thrownBy tracing.traceError(error)
   }
 
+  it should "print a failed call's billed usage with its error (#2676)" in {
+    val out = new ByteArrayOutputStream()
+    Console.withOut(out) {
+      new ConsoleTracing().traceEvent(
+        TraceEvent.ErrorOccurred(new RuntimeException("filtered"), "chat", usage = Some(TokenUsage(7, 4, 11)))
+      )
+    }
+    val printed = out.toString.replaceAll("\u001b\\[[0-9;]*m", "")
+    printed should include("Prompt Tokens: 7")
+    printed should include("Output Tokens: 4")
+    printed should include("Total Tokens: 11")
+  }
+
   it should "trace errors with nested cause" in {
     val tracing = new ConsoleTracing()
     val cause   = new IllegalArgumentException("Invalid input")
