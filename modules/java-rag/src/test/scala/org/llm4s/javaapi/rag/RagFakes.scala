@@ -7,7 +7,10 @@ import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.rag.{ RAG, RAGConfig }
+import org.llm4s.rag.permissions.*
 import org.llm4s.types.Result
+import org.llm4s.vectorstore.{ MetadataFilter, ScoredRecord }
 
 import scala.collection.mutable.ArrayBuffer
 import java.time.Instant
@@ -83,4 +86,42 @@ object RagFakes {
   def llm(client: LLMClient): JLlmClient = Llm4s.wrapClient(client)
 
   def llm(): JLlmClient = llm(new EchoingLlm())
+
+  /**
+   * A pipeline answering through `model`, built with a `SearchIndex`, so it refuses every plain query (#2716): what
+   * `JRag.builder()` cannot build, for the specs of that refusal.
+   */
+  def withSearchIndex(model: LLMClient): JRag =
+    RAG
+      .buildWithEmbeddings(
+        RAGConfig.default.withSearchIndex(NoIndex).withLLM(model),
+        new EmbeddingClient(new WordEmbeddings())(using ModelRegistryService.fromModels(Nil)),
+        Model
+      )
+      .fold(e => throw new AssertionError(e.message), new JRag(RagFacadeToken.INSTANCE, _))
+
+  /** A search index the refusal never reaches. */
+  object NoIndex extends SearchIndex {
+    def principals: PrincipalStore   = throw new UnsupportedOperationException("not used")
+    def collections: CollectionStore = throw new UnsupportedOperationException("not used")
+    def query(
+      auth: UserAuthorization,
+      collectionPattern: CollectionPattern,
+      queryVector: Array[Float],
+      topK: Int,
+      additionalFilter: Option[MetadataFilter]
+    ): Result[Seq[ScoredRecord]] = Right(Nil)
+    def ingest(
+      collectionPath: CollectionPath,
+      documentId: String,
+      chunks: Seq[ChunkWithEmbedding],
+      metadata: Map[String, String],
+      readableBy: Set[PrincipalId]
+    ): Result[Int] = Right(0)
+    def deleteDocument(collectionPath: CollectionPath, documentId: String): Result[Long] = Right(0L)
+    def clearCollection(collectionPath: CollectionPath): Result[Long]                    = Right(0L)
+    def initializeSchema(): Result[Unit]                                                 = Right(())
+    def dropSchema(): Result[Unit]                                                       = Right(())
+    def close(): Unit                                                                    = ()
+  }
 }

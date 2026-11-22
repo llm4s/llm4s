@@ -43,6 +43,23 @@ final class RagGuideSnippets {
     }
   }
 
+  /** "Stream an answer". */
+  static JRagAnswer stream(JRag rag) {
+    JRagAnswerStream stream = rag.askStream("How long do refunds take?", new JRagStreamListener() {
+        @Override
+        public void onSources(List<JRagSource> sources) {
+            sources.forEach(s -> System.out.println("[" + s.documentId() + "]"));
+        }
+
+        @Override
+        public void onChunk(String text) {
+            System.out.print(text);
+        }
+    }).get();
+    JRagAnswer answer = stream.await().get();
+    return answer;
+  }
+
   /** "Search without a model". */
   static List<JRagSource> search(JRag rag) {
     List<JRagSource> sources = rag.search("refunds", 3).get();

@@ -65,6 +65,9 @@ libraryDependencies += "org.llm4s" %% "llm4s-reactor" % "{{ site.data.project.la
 
 It needs JDK 21, like `llm4s-java-api`.
 
+To stream [RAG answers](java-rag) with `RagStreams`, add `llm4s-java-rag` too: `llm4s-reactor` compiles against it
+but does not bring it, so an application that only streams replies receives no `llm4s-rag`.
+
 ## Stream a reply
 
 Build a client as the [Java guide](java#configure-a-provider) does, then ask for a `Flux`:
@@ -127,11 +130,45 @@ String text = Streams.toFlux(client, "Hello")
     .block();
 ```
 
+## Stream a RAG answer
+
+`RagStreams.toFlux` streams the answer of a [`JRag` pipeline](java-rag) with the sources it is drawn from, for a chat
+UI that shows its citations before the answer arrives. Its `Flux<RagAnswerEvent>` emits one `Sources`, then a `Chunk`
+for each piece of the answer's text, then one `Complete` with the whole `JRagAnswer`, and completes. `RagAnswerEvent`
+is a sealed interface of those three records, so a `switch` over it needs no `default`:
+
+```java
+Flux<RagAnswerEvent> events = RagStreams.toFlux(rag, "How long do refunds take?");
+String answer = events
+    .doOnNext(event -> {
+        switch (event) {
+            case RagAnswerEvent.Sources s -> s.sources().forEach(src -> System.out.println("[" + src.documentId() + "]"));
+            case RagAnswerEvent.Chunk c -> System.out.print(c.text());
+            case RagAnswerEvent.Complete c -> System.out.println();
+        }
+    })
+    .ofType(RagAnswerEvent.Complete.class)
+    .map(c -> c.answer().answer())
+    .blockLast(Duration.ofMinutes(1));
+```
+
+The sources and the text are elements of one `Flux`, rather than a `Mono` of sources beside a `Flux` of text, so one
+subscription makes one search and one model call, and the order is the stream's own. In a WebFlux handler, map each
+event to a `ServerSentEvent` named after its kind.
+
+It behaves as `Streams.toFlux` does. It is cold, it honours backpressure (the answer's thread waits for the subscriber,
+with nothing buffered), and cancelling the subscription interrupts the call. A failure ends it with an `LlmException`
+after the elements already emitted. That includes a failure of the search, with no `Sources` before it, and the refusal
+of a pipeline whose `llm4s-rag` `RAG` was built with a `SearchIndex`, which answers only permission-scoped queries.
+A `null` pipeline or a blank question fails on subscription with kind `VALIDATION`, and a pipeline without a chat
+client with kind `CONFIGURATION`.
+
 ## Other reactive libraries
 
 Only Reactor has a module. RxJava 3 (`FlowAdapters` in `org.reactivestreams`), Mutiny
 (`Multi.createFrom().publisher(...)`) and Kotlin's `Publisher.asFlow()` adapt `JLlmClient.streamAsPublisher`'s JDK
-`Flow.Publisher` themselves, with no llm4s module. Agent event streams are not adapted yet; see
+`Flow.Publisher` themselves, with no llm4s module. For a RAG answer, `JRag.askStream`'s listener is the
+starting point. Agent event streams are not adapted yet; see
 [streaming a turn](agents/streaming#java-and-kotlin).
 
 ## Where next

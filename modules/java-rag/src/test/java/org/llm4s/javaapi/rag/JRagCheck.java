@@ -157,6 +157,11 @@ final class JRagCheck {
     return log;
   }
 
+  /** {@code askStream} with a lambda listener: each piece into {@code pieces}, no other callback. */
+  static JRagAnswerStream streamPieces(JRag rag, String question, List<String> pieces) {
+    return rag.askStream(question, pieces::add).get();
+  }
+
   private static List<String> documentIds(List<JRagSource> sources) {
     List<String> ids = new ArrayList<>();
     for (JRagSource source : sources) {

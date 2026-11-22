@@ -2935,8 +2935,10 @@ lazy val javaRag = (project in file("modules/java-rag"))
 // `Flow.Publisher`. A module of its own so that `llm4s-java-api` stays free of reactor-core. Experimental.
 lazy val reactor = (project in file("modules/reactor"))
   // java-api's test classes: `StreamFixtures`' scripted clients, and `GuideDocs`, which reads docs/guide/java-reactor.md
-  // for `ReactorGuideSpec`.
-  .dependsOn(javaApi % "compile->compile;test->test")
+  // for `ReactorGuideSpec`. `javaRag` is provided (#2727): `RagStreams` streams a `JRag` answer, so an application that
+  // uses it has llm4s-java-rag already, and one that only streams replies gets no llm4s-rag on its classpath. Its test
+  // classes carry `RagFakes`.
+  .dependsOn(javaApi % "compile->compile;test->test", javaRag % "provided;test->test")
   .settings(
     name := "llm4s-reactor",
     commonSettings,

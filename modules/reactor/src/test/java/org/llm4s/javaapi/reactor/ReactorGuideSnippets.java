@@ -7,6 +7,7 @@ import org.llm4s.javaapi.ConversationBuilder;
 import org.llm4s.javaapi.JCompletionOptions;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.LlmException;
+import org.llm4s.javaapi.rag.JRag;
 import org.llm4s.llmconnect.model.Conversation;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -56,5 +57,22 @@ final class ReactorGuideSnippets {
         })
         .block();
     return text;
+  }
+
+  /** "Stream a RAG answer": print the sources and the text, and keep the answer. */
+  static String ragAnswer(JRag rag) {
+    Flux<RagAnswerEvent> events = RagStreams.toFlux(rag, "How long do refunds take?");
+    String answer = events
+        .doOnNext(event -> {
+            switch (event) {
+                case RagAnswerEvent.Sources s -> s.sources().forEach(src -> System.out.println("[" + src.documentId() + "]"));
+                case RagAnswerEvent.Chunk c -> System.out.print(c.text());
+                case RagAnswerEvent.Complete c -> System.out.println();
+            }
+        })
+        .ofType(RagAnswerEvent.Complete.class)
+        .map(c -> c.answer().answer())
+        .blockLast(Duration.ofMinutes(1));
+    return answer;
   }
 }
