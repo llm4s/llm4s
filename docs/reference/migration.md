@@ -101,8 +101,8 @@ Scala source that called one of these by position still compiles: the remaining 
 first and defaults the rest. Code compiled against 0.6.0 must be recompiled. Java and Kotlin do not see Scala's
 defaults, so a call that passed the shorter list passes every argument now: the default of each one it left out is
 the companion's `apply$default$N()`, so a 9-argument `Completion.apply(...)` gains
-``Completion.`apply$default$10`(), Completion.`apply$default$11`()`` in Kotlin
-(`Completion.apply$default$10(), Completion.apply$default$11()` in Java). Building the value with the shorter `apply`
+``Completion.`apply$default$10`(), Completion.`apply$default$11`(), Completion.`apply$default$12`()`` in Kotlin
+(`Completion.apply$default$10()` through `apply$default$12()` in Java). Building the value with the shorter `apply`
 a type keeps for Java (`OpenAIConfig.apply(apiKey, model)` and the other provider configs) and its `with*` setters
 avoids the long list.
 
@@ -215,9 +215,9 @@ client.complete(conversation, options).map { c =>
   which is `Stop` or `ToolCalls`. Any `"stop"`, `"tool_calls"` or `"length"` in the same comparison is reported with
   it. A chunk set from a raw Bedrock or Gemini value, as in a test, gets the case that value maps to now.
 - `StreamedChunk(..., finishReason = Some("stop"))` and `withFinishReason("stop")` take a `FinishReason` instead.
-- A positional pattern on `Completion` gains a field: `case Completion(id, _, content, _, _, _, _, _, _, _, _)`.
-  The `PositionalPatternsGainFields` Scalafix rule adds it to 0.6.0's ten-field pattern, and both fields since 0.5.1 to
-  its nine-field one.
+- A positional pattern on `Completion` gains a field, two with `servedTier` (#2746):
+  `case Completion(id, _, content, _, _, _, _, _, _, _, _, _)`. The `PositionalPatternsGainFields` Scalafix rule adds
+  them to 0.6.0's ten-field pattern, and every field since 0.5.1 to its nine-field one.
 - `Completion(...)` with named arguments keeps compiling and gets `FinishReason.Stop`. A client or fake that builds
   one sets the reason it read; one it did not read is `FinishReason.Other("")`, which tracing leaves out.
 - Every chat client maps it (RFC 0009 PR 2 added Anthropic's `stop_reason`, Gemini's and Vertex AI's `finishReason`
@@ -231,7 +231,7 @@ client.complete(conversation, options).map { c =>
   `tool_calls` from `done`; and Perplexity reports an `incomplete` reply that has a call as `Length`, not `ToolCalls`.
 - An agent's `AgentEvents.ModelCallCompleted` gains `finishReason: Option[FinishReason]` (default `None`), after
   `adjustments`, filled from each call's `Completion` (PR 6). Construction is unchanged; a positional pattern needs a
-  ninth binder, `case ModelCallCompleted(a, m, n, t, u, c, p, adj, _)`, which the `PositionalPatternsGainFields`
+  ninth binder and a tenth for `servedTier` (#2746), `case ModelCallCompleted(a, m, n, t, u, c, p, adj, _, _)`, which the `PositionalPatternsGainFields`
   Scalafix rule adds, or match on the type and read the fields. An event stored before reads with `None`; a reason this version cannot read, a case a later one adds, reads as `FinishReason.Other` with its stored value.
 
 ## Every provider's content-filter stop is an error (#2677)
@@ -334,7 +334,8 @@ defaulted field, so only a positional pattern on them changes:
   `case TokenUsage(p, c, t, _, _, _)` becomes `case TokenUsage(p, c, t, _, _, _, _)`.
 - `ModelPricing` gains `cacheCreationInputTokenCostAbove1hr: Option[Double]` as its last field.
 - `CompletionOptions` gains `promptCache` and then `serviceTier` (#2726) as its last fields:
-  `case CompletionOptions(t, _, _, _, _, _, _, _, _)` gains two `_`.
+  `case CompletionOptions(t, _, _, _, _, _, _, _, _)` gains two `_`. `Completion` and `ModelCallCompleted` gain
+  `servedTier: Option[ServiceTier]` (#2746), the tier that served the call, as theirs.
 - Java and Kotlin see no Scala defaults, so a call to `TokenUsage.apply`, `ModelPricing.apply` or
   `CompletionOptions.apply` from them passes the new arguments too (`Option.empty()`).
 

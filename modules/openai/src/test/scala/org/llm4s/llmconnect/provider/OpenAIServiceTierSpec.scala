@@ -85,4 +85,46 @@ final class OpenAIServiceTierSpec extends AnyFlatSpec with Matchers with EitherV
     ujson.read(ObjectMappers.jsonMapper().writeValueAsString(seen.get()._body())).obj.contains("service_tier") shouldBe
       false
   }
+
+  it should "send ServiceTier.Other as written" in {
+    send(openAI, "openai", ServiceTier.Other("scale"))._1("service_tier").str shouldBe "scale"
+  }
+
+  "servedTier" should "be the tier the reply's service_tier names, another kept as Other (#2746)" in {
+    def served(tier: String): Option[ServiceTier] = {
+      val response =
+        s"""{"id":"c1","created":0,"model":"m","service_tier":"$tier",""" +
+          """"choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}"""
+      OpenAIClient
+        .forTest("gpt-4o", transport(complete = _ => completionOf(response)), openAI)
+        .complete(hello, CompletionOptions())
+        .value
+        .servedTier
+    }
+    served("default") shouldBe Some(ServiceTier.Default)
+    served("flex") shouldBe Some(ServiceTier.Flex)
+    served("priority") shouldBe Some(ServiceTier.Priority)
+    served("auto") shouldBe Some(ServiceTier.Auto)
+    served("scale") shouldBe Some(ServiceTier.Other("scale"))
+    served("") shouldBe None
+    OpenAIClient
+      .forTest("gpt-4o", transport(complete = _ => completionOf(okResponse)), openAI)
+      .complete(hello, CompletionOptions())
+      .value
+      .servedTier shouldBe None
+  }
+
+  it should "be the tier a streamed chunk names" in {
+    val chunks = Seq(
+      """{"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","service_tier":"flex",""" +
+        """"choices":[{"index":0,"delta":{"content":"ok"}}]}""",
+      """{"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","service_tier":"flex",""" +
+        """"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"""
+    ).map(OpenAISdkFixtures.chunk)
+    val completion = OpenAIClient
+      .forTest("gpt-4o", transport(streaming = _ => OpenAISdkFixtures.stream(chunks*)), openAI)
+      .streamComplete(hello, CompletionOptions(), _ => ())
+      .value
+    (completion.content, completion.servedTier) shouldBe ("ok", Some(ServiceTier.Flex))
+  }
 }

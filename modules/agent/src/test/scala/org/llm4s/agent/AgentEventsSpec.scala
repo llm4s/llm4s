@@ -459,6 +459,22 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     stored shouldBe Vector(broken)
   }
 
+  // #2746: the tier that served each call reaches an agent caller on its ModelCallCompleted
+  "ModelCallCompleted's served tier" should "be its completion's, live and as stored" in {
+    def flex   = Scripted(Right(answer("done").withServedTier(ServiceTier.Flex)))
+    val (_, c) = collect(agentWith(flex), "go")
+    c.all.collect { case AgentEvents.ModelCallCompleted(m) => m.servedTier } shouldBe Vector(Some(ServiceTier.Flex))
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    val agent   = Agent.builder("assistant", flex).withRuntime(runtime).build().fold(e => fail(e.message), identity)
+    agent.run(ThreadId("tier"), "go").map(_.answer) shouldBe Right(Some("done"))
+    val stored = replayed(runtime, store, ThreadId("tier")).collect {
+      case EventRecord(_, _, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, payload)) =>
+        upickle.default.read[ModelCallCompleted](ujson.read(payload.render())).servedTier
+    }
+    stored shouldBe Vector(Some(ServiceTier.Flex))
+  }
+
   // RFC 0009 (#2613): how each reply ended reaches an agent caller on the call's ModelCallCompleted
   "ModelCallCompleted's finish reason" should "be its completion's, live and as stored" in {
     def cut    = Scripted(Right(answer("cut sh").withFinishReason(FinishReason.Length)))

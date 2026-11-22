@@ -843,4 +843,58 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       )
     )
   }
+
+  it should "send ServiceTier.Other as written" in {
+    var body: ujson.Value = ujson.Null
+    val mockHttp          = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).onCall {
+      (_: String, _: Map[String, String], sent: String, _: scala.concurrent.duration.FiniteDuration) =>
+        body = ujson.read(sent)
+        Right(httpOk(successBody))
+    }
+    mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions().withServiceTier(ServiceTier.Other("batch")))
+    body("serviceTier").str shouldBe "batch"
+  }
+
+  "servedTier" should "be the tier the x-gemini-service-tier header names, on complete and on a stream (#2746)" in {
+    def served(headers: Map[String, Seq[String]]): Option[ServiceTier] = {
+      val mockHttp = stub[Llm4sHttpClient]
+      (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, successBody, headers)))
+      mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions()).toOption.value.servedTier
+    }
+    served(Map("x-gemini-service-tier" -> Seq("standard"))) shouldBe Some(ServiceTier.Default)
+    served(Map("X-Gemini-Service-Tier" -> Seq("priority"))) shouldBe Some(ServiceTier.Priority)
+    served(Map("x-gemini-service-tier" -> Seq("flex"))) shouldBe Some(ServiceTier.Flex)
+    served(Map("x-gemini-service-tier" -> Seq("batch"))) shouldBe Some(ServiceTier.Other("batch"))
+    served(Map("x-gemini-service-tier" -> Seq(""))) shouldBe None
+    served(Map.empty) shouldBe None
+
+    val sse =
+      """data: {"candidates":[{"content":{"parts":[{"text":"Hi"}],"role":"model"},"finishReason":"STOP"}]}""" + "\n\n"
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.postStream _)
+      .when(*, *, *, *)
+      .returns(
+        Right(
+          StreamingHttpResponse(
+            200,
+            new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)),
+            Map("x-gemini-service-tier" -> Seq("flex"))
+          )
+        )
+      )
+    mkClient(mockHttp)
+      .streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
+      .toOption
+      .value
+      .servedTier shouldBe Some(ServiceTier.Flex)
+  }
+
+  it should "fall back to usageMetadata.trafficType, and be none without either" in {
+    val body =
+      """{"candidates":[{"content":{"parts":[{"text":"Hi"}],"role":"model"},"finishReason":"STOP"}],""" +
+        """"usageMetadata":{"promptTokenCount":1,"trafficType":"ON_DEMAND_PRIORITY"}}"""
+    completeOf(body).toOption.value.servedTier shouldBe Some(ServiceTier.Priority)
+    completeOf(successBody).toOption.value.servedTier shouldBe None
+  }
 }

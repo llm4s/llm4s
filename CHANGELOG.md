@@ -31,7 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is removed: `assertModelCallContract` replaces it (PR 5).
 - A positional pattern on `TokenUsage` or `ModelPricing` gains a field (`longCacheCreationTokens`,
   `cacheCreationInputTokenCostAbove1hr`; [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 6), and one on
-  `CompletionOptions` two (`promptCache`, `serviceTier`, [#2726](https://github.com/llm4s/llm4s/issues/2726));
+  `CompletionOptions` two (`promptCache`, `serviceTier`, [#2726](https://github.com/llm4s/llm4s/issues/2726)), and one
+  on `Completion` or `ModelCallCompleted` `servedTier` ([#2746](https://github.com/llm4s/llm4s/issues/2746));
   [migration](docs/reference/migration.md#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115).
 - An agent turn whose answer was cut off at the output limit ends `AgentStatus.Truncated(partialAnswer)`, not
   `Completed`, and `AgentStatusKind` gains `TRUNCATED`; a `match` on `AgentStatus` needs the case (RFC 0009 open
@@ -80,7 +81,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Kotlin `serviceTier`): OpenAI and Azure send `service_tier`, Anthropic `auto` or `standard_only`, Gemini `serviceTier`,
   Vertex AI its shared-request-type header and Bedrock `serviceTier`; each reports what it cannot send, and every
   other provider reports it `Dropped` ([cost controls](docs/guide/cost-controls.md#service-tiers),
-  [#2726](https://github.com/llm4s/llm4s/issues/2726)).
+  [#2726](https://github.com/llm4s/llm4s/issues/2726)); `Completion.servedTier`, also on `ModelCallCompleted`, reports
+  the tier that served the call, and `ServiceTier.Other(raw)` keeps one the enum does not name
+  ([#2746](https://github.com/llm4s/llm4s/issues/2746)).
 
 ### Java & Kotlin APIs
 
