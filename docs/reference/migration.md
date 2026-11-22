@@ -57,10 +57,11 @@ client.complete(conversation, options).map { c =>
   `FinishReasonTyped` Scalafix rule ([Scalafix](scalafix#migration-rules)) rewrites these comparisons, a reason set
   from a literal, and any other read to `.map(_.name)`, which keeps its `Option[String]` type; the cases assume a
   client that maps its reason, and a Spring AI model gives `FinishReason.Other(raw)` for any value. It reports, for
-  you to fix by hand, a comparison in the same expression with 0.6.0's raw Bedrock or Gemini value (`end_turn`, `tool_use`, `MAX_TOKENS`, ...),
-  which those clients now map to a case while a Spring AI model still gives `FinishReason.Other(raw)`; with a content
-  filter's value (`content_filter`, `SAFETY`, ...), a `ContentFilteredError` now; and with Gemini's `STOP`, which is
-  `Stop` or `ToolCalls`.
+  you to fix by hand, a comparison with 0.6.0's raw Bedrock or Gemini value (`end_turn`, `tool_use`, `MAX_TOKENS`,
+  ...), which those clients now map to a case while a Spring AI model still gives `FinishReason.Other(raw)`; with a
+  content filter's value (`content_filter`, `SAFETY`, ...), a `ContentFilteredError` now; and with Gemini's `STOP`,
+  which is `Stop` or `ToolCalls`. Any `"stop"`, `"tool_calls"` or `"length"` in the same comparison is reported with
+  it. A chunk set from a raw Bedrock or Gemini value, as in a test, gets the case that value maps to now.
 - `StreamedChunk(..., finishReason = Some("stop"))` and `withFinishReason("stop")` take a `FinishReason` instead.
 - A positional pattern on `Completion` gains a field: `case Completion(id, _, content, _, _, _, _, _, _, _, _)`.
   The `PositionalPatternsGainFields` Scalafix rule adds it to 0.6.0's ten-field pattern, and both fields since 0.5.1 to

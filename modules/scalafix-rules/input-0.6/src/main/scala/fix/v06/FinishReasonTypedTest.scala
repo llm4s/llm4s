@@ -37,4 +37,13 @@ object FinishReasonTypedTest {
 
   // a raw value with no case of its own is still Other(raw), whose name is the raw value
   def malformed(chunk: StreamedChunk): Boolean = chunk.finishReason.contains("MALFORMED_FUNCTION_CALL")
+
+  // a chunk built with 0.6.0's raw Bedrock or Gemini value means the state it names
+  def bedrockCut(chunk: StreamedChunk): StreamedChunk = chunk.withFinishReason("max_tokens")
+
+  val bedrockDone = StreamedChunk("3", None, finishReason = Some("end_turn"))
+
+  // a vendor literal outside the comparison the read is part of is not about the reason
+  def unrelated(chunk: StreamedChunk, kind: String): Boolean =
+    chunk.finishReason.getOrElse("") == "x" && kind == "end_turn"
 }

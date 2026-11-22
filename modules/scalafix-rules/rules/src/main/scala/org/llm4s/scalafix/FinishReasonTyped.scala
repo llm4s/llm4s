@@ -18,16 +18,19 @@ import scalafix.v1._
  *
  * `stop`, `tool_calls` and `length` become their cases. A comparison with any other literal, such as
  * `"MALFORMED_FUNCTION_CALL"`, compares `.map(_.name)` instead, as `FinishReason.Other(raw).name` is the raw value; a
- * reason set from one becomes `FinishReason.Other(...)`.
+ * reason set from one becomes `FinishReason.Other(...)`. A reason set from 0.6.0's raw Bedrock or Gemini value
+ * (`end_turn`, `tool_use`, `max_tokens`, `MAX_TOKENS`, ...) becomes the case those clients map it to now.
  *
- * Three kinds of literal are reported instead, as any rewrite could compile and never match:
- *   - a raw value 0.6.0's Bedrock and Gemini chunks carried (`end_turn`, `tool_use`, `max_tokens`, `MAX_TOKENS`, ...),
- *     which RFC 0009 PR 2 maps to a case while a Spring AI model still passes it through as `Other(raw)`;
+ * Three kinds of literal in a comparison are reported instead, as any rewrite could compile and never match:
+ *   - a raw value 0.6.0's Bedrock and Gemini chunks carried, which RFC 0009 PR 2 maps to a case while a Spring AI
+ *     model still passes it through as `Other(raw)`;
  *   - a content filter's (`content_filter`, `refusal`, `SAFETY`, ...), a `ContentFilteredError` now on most clients;
  *   - Gemini's `STOP`, which is `Stop` or `ToolCalls` by whether the reply called a tool.
- * A literal like these in a shape the rule does not read (an `||`, a `getOrElse`) is reported too. A reason set from
- * a `String` that is not a literal is reported: no public function maps a string to its case. A reason copied from one
- * chunk to another is left as it is.
+ * The comparison is left as it is, and each `stop`, `tool_calls` or `length` in it is reported too, as a `String`
+ * that would compile and never match. A reported literal in a shape the rule does not read (an `||`, a `getOrElse`)
+ * is reported the same way, within the comparison the read is part of. Setting a content filter's value or `STOP` is
+ * reported, as is a reason set from a `String` that is not a literal: no public function maps a string to its case.
+ * A reason copied from one chunk to another is left as it is.
  * `import org.llm4s.llmconnect.model.FinishReason` is added where a case is written.
  */
 class FinishReasonTyped extends SemanticRule("FinishReasonTyped") {
@@ -69,6 +72,8 @@ class FinishReasonTyped extends SemanticRule("FinishReasonTyped") {
 
   /** A reason set from a literal (or `Some` of one) as its case; one set from another chunk's is left alone. */
   private def set(arg: Term)(implicit doc: SemanticDocument): (Patch, Boolean) = arg match {
+    // A chunk built with a vendor's value means the state it names: the case that client maps it to now.
+    case lit: Lit.String if Vendor.contains(lit.value) => Patch.replaceTree(lit, Vendor(lit.value)) -> true
     case lit: Lit.String => lint(lit).map(_ -> false).getOrElse(Patch.replaceTree(lit, typed(lit)) -> true)
     case a: Term.Apply if CopyToSetters.isSome(a) =>
       a.argClause.values.head match {
@@ -122,16 +127,18 @@ class FinishReasonTyped extends SemanticRule("FinishReasonTyped") {
       case _                                                                     => None
     }
     literals match {
-      // A literal no rewrite gets right: report it, and leave the read alone.
-      case Some(lits) if lits.exists(l => lint(l).isDefined) => lits.flatMap(lint).asPatch -> false
+      // A literal no rewrite gets right: report it, and each case's literal beside it, and leave the read alone.
+      case Some(lits) if lits.exists(l => lint(l).isDefined) => reportWith(lits) -> false
       // Every literal has a case of its own: compare with the cases.
       case Some(lits) if lits.forall(l => Cases.contains(l.value)) =>
         lits.map(l => Patch.replaceTree(l, typed(l))).asPatch -> lits.nonEmpty
-      // Any other shape: a reported literal in the same expression is reported, not compared by name, which would
-      // never match it; otherwise compare the name, as the string did.
+      // Any other shape: a reported literal in the comparison the read is part of is reported, not compared by
+      // name, which would never match it, and so is each literal of a case beside it, left as a String; otherwise
+      // compare the name, as the string did.
       case _ =>
-        val reported = statementOf(s).collect { case l: Lit.String => l }.flatMap(lint)
-        if (reported.nonEmpty) reported.asPatch -> false else Patch.addRight(s, ".map(_.name)") -> false
+        val inComparison = comparisonOf(s).collect { case l: Lit.String => l }
+        if (inComparison.exists(l => lint(l).isDefined)) reportWith(inComparison) -> false
+        else Patch.addRight(s, ".map(_.name)")                                    -> false
     }
   }
 
@@ -186,10 +193,23 @@ class FinishReasonTyped extends SemanticRule("FinishReasonTyped") {
   private def isRead(s: Term.Select)(implicit doc: SemanticDocument): Boolean =
     s.name.value == "finishReason" && Migration.symbolOf(s.name).exists(_.value == Chunk + "#finishReason.")
 
-  /** The expression `t` is part of, up to the enclosing statement, definition body or case. */
-  private def statementOf(t: Tree): Tree = t.parent match {
-    case Some(_: Template | _: Source | _: Pkg | _: Defn | _: Case | _: Term.Block) | None => t
-    case Some(p)                                                                           => statementOf(p)
+  /**
+   * The comparison a read is part of: the read with the calls made on it (`reason.getOrElse("")`,
+   * `reason.exists(...)`), and an `==`, `!=` or `match` on that. A literal elsewhere in the statement, such as the
+   * other side of an `&&`, is not compared with the reason.
+   */
+  private def comparisonOf(s: Term): Tree = {
+    def calls(t: Term): Term = t.parent match {
+      case Some(p: Term.Select) if p.qual eq t => calls(p)
+      case Some(p: Term.Apply) if p.fun eq t   => calls(p)
+      case _                                   => t
+    }
+    val onRead = calls(s)
+    onRead.parent match {
+      case Some(i: Term.ApplyInfix) if isEquality(i) => i
+      case Some(m: Term.Match) if m.expr eq onRead   => m
+      case _                                         => onRead
+    }
   }
 
   private def within(outer: Tree, inner: Tree): Boolean =
@@ -272,6 +292,21 @@ object FinishReasonTyped {
         )
       }
   }
+
+  /** The reports for `lits`, which have one no rewrite gets right: it, and each case's literal left as a `String`. */
+  private def reportWith(lits: List[Lit.String]): Patch =
+    lits.flatMap(l => lint(l).orElse(if (Cases.contains(l.value)) Some(leftAsString(l)) else None)).asPatch
+
+  /** The report for a case's literal left as a `String` beside a reported one. */
+  private def leftAsString(lit: Lit.String): Patch =
+    Patch.lint(
+      Diagnostic(
+        "finishReasonLeftAsString",
+        s"${lit.syntax} is left as a String, as the same comparison has a value this rule reports: with the reason a " +
+          s"FinishReason, compare with ${Cases(lit.value)}. ${Guide}",
+        lit.pos
+      )
+    )
 
   private def typed(lit: Lit.String): String = Cases.getOrElse(lit.value, s"FinishReason.Other(${lit.syntax})")
 }

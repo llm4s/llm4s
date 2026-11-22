@@ -28,16 +28,23 @@ object FinishReasonTypedLintTest {
 
   def geminiCut(chunk: StreamedChunk): Boolean = chunk.finishReason.contains("MAX_TOKENS") // assert: FinishReasonTyped.finishReasonVendorValue
 
-  def bedrockCut(chunk: StreamedChunk): StreamedChunk = chunk.withFinishReason("max_tokens") // assert: FinishReasonTyped.finishReasonVendorValue
+  // setting a filter's value or Gemini's STOP has no one case either
+  def filteredChunk(chunk: StreamedChunk): StreamedChunk = chunk.withFinishReason("SAFETY") // assert: FinishReasonTyped.finishReasonIsAnError
+
+  def geminiStopChunk(chunk: StreamedChunk): StreamedChunk = chunk.withFinishReason(Some("STOP")) // assert: FinishReasonTyped.finishReasonAmbiguous
 
   // in a shape the rule does not read, a name comparison would never match it either
   def orElse(chunk: StreamedChunk): Boolean = chunk.finishReason.getOrElse("") == "end_turn" // assert: FinishReasonTyped.finishReasonVendorValue
 
-  def either(chunk: StreamedChunk): Boolean = chunk.finishReason.exists(r => r == "stop" || r == "tool_use") // assert: FinishReasonTyped.finishReasonVendorValue
+  // and a case's literal beside it is reported as left a String, which would compile and never match
+  def either(chunk: StreamedChunk): Boolean = chunk.finishReason.exists(r =>
+    r == "stop" || // assert: FinishReasonTyped.finishReasonLeftAsString
+      r == "tool_use" // assert: FinishReasonTyped.finishReasonVendorValue
+  )
 
-  // a match with a vendor literal is reported and left whole, never half rewritten
+  // a match with a vendor literal is reported and left whole, never half rewritten, its other cases with it
   def mixed(chunk: StreamedChunk): Int = chunk.finishReason match {
-    case Some("stop")     => 0
+    case Some("stop")     => 0 // assert: FinishReasonTyped.finishReasonLeftAsString
     case Some("end_turn") => 1 // assert: FinishReasonTyped.finishReasonVendorValue
     case _                => 2
   }
