@@ -91,6 +91,9 @@ object ModelResponse:
 final case class BoundaryResult private (text: String, update: StateUpdate):
   def withText(t: String): BoundaryResult = BoundaryResult(t, update)
 
+  /** This result with `u` in place of its update; [[addUpdate]] combines instead. */
+  def withUpdate(u: StateUpdate): BoundaryResult = BoundaryResult(text, u)
+
   /** This result with `u` applied after its update. */
   def addUpdate(u: StateUpdate): BoundaryResult = BoundaryResult(text, update.combine(u))
 
@@ -145,11 +148,8 @@ final case class ToolCallRequest private (spec: AgentToolSpec[?], call: ToolCall
 object ToolCallRequest:
 
   /** A request whose call touches `resources`, or the tool's `defaultResource` when that is empty. */
-  def apply(spec: AgentToolSpec[?], call: ToolCall, resources: Vector[ToolResource]): ToolCallRequest =
+  def apply(spec: AgentToolSpec[?], call: ToolCall, resources: Vector[ToolResource] = Vector.empty): ToolCallRequest =
     new ToolCallRequest(spec, call, orDefault(spec, resources))
-
-  /** A request whose call touches its tool's `defaultResource`. */
-  def apply(spec: AgentToolSpec[?], call: ToolCall): ToolCallRequest = apply(spec, call, Vector.empty)
 
   private def orDefault(spec: AgentToolSpec[?], resources: Vector[ToolResource]): Vector[ToolResource] =
     if resources.isEmpty then Vector(spec.defaultResource) else resources

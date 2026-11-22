@@ -39,7 +39,48 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [a broken or cut tool call is an error](#a-broken-or-cut-tool-call-is-an-error-2613),
 [`TokenUsage` and `ModelPricing` gain a prompt-cache field](#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115),
 [a cut-off answer ends `Truncated`, not `Completed`](#a-cut-off-answer-ends-truncated-not-completed-2613),
-and [a workspace container has no egress](#a-workspace-container-has-no-egress-870).
+[a workspace container has no egress](#a-workspace-container-has-no-egress-870),
+and [the forwarding `apply` overloads are removed](#the-forwarding-apply-overloads-are-removed-1281).
+
+## The forwarding `apply` overloads are removed (#1281)
+
+A growth-safe type that gained a field kept its previous `apply` as an overload without defaults, so code compiled
+against the older signature still linked. Nothing promises binary compatibility before the MiMa baseline (0.7.0), and
+every overload present then would be frozen for good, so each type now has one `apply`, with defaults. The overloads
+removed:
+
+| Type | Removed `apply` |
+| --- | --- |
+| `NamedProviderConfig` | the 8-argument (no `apiKeyFile`) and 6-argument (no `timeouts`) |
+| `EmbeddingProviderConfig` | the 5-argument (no `apiKeyProvider`) and 4-argument (no `network`) |
+| `LlmClientOptions` | `(metrics, exchangeLogging)` |
+| `Completion` | the 10-argument (no `finishReason`) and 9-argument (no `adjustments`) |
+| `ProviderConfigSpec` | the 8-argument (no `keylessWhen`) |
+| `ProviderFeatures` | `(streaming, toolCalling)` |
+| `TransformationResult` | `(options, messages, requiresFakeStreaming)` |
+| `TraceEvent.CompletionReceived` | `(id, model, toolCalls, content, timestamp)` |
+| `TraceEvent.ErrorOccurred` | the 9-argument (no `usage`) and `(error, context, timestamp, span)` |
+| `TraceEvent.AgentRunEnded` | the 10-argument (no `provider`) |
+| `TraceEvent.EmbeddingUsageRecorded` | `(usage, model, operation, inputCount, timestamp)` |
+| `OpenAICompatibleClient.Settings` | the 8-argument (no `network`) |
+| `AzureConfig` | the 7-argument (no `tokenProvider`) |
+| `Checkpoint` | the 13-argument (no `trace`) and 10-argument (no `origin`, `outcome`, `deleting`) |
+| `Commit` | the 7-argument (no `metadata`) and 6-argument (no `fence`) |
+| `RunOrigin` | the 5-argument (no `trace`) |
+| `RunBudgets` | `(maxSupersteps, timeout, maxConcurrency)` |
+| `RunConfig` | the 9-, 8- and 7-argument (no `traceContext`, `childRetention`, `retention`) |
+| `HarnessProfile` | the 12-argument (no `subagents`) |
+| `ToolCallRequest` | `(spec, call)`: `resources` defaults to none |
+| `TakeRequest` | `(holder, agents, ttl)`: `skip` defaults to none |
+
+Scala source that called one of these by position still compiles: the remaining `apply` takes the same arguments
+first and defaults the rest. Code compiled against 0.6.0 must be recompiled. Java and Kotlin do not see Scala's
+defaults, so a call that passed the shorter list passes every argument now: the default of each one it left out is
+the companion's `apply$default$N()`, so a 9-argument `Completion.apply(...)` gains
+``Completion.`apply$default$10`(), Completion.`apply$default$11`()`` in Kotlin
+(`Completion.apply$default$10(), Completion.apply$default$11()` in Java). Building the value with the shorter `apply`
+a type keeps for Java (`OpenAIConfig.apply(apiKey, model)` and the other provider configs) and its `with*` setters
+avoids the long list.
 
 ## A cut-off answer ends `Truncated`, not `Completed` (#2613)
 
@@ -209,8 +250,7 @@ defaulted field, so only a positional pattern on them changes:
 - Java and Kotlin see no Scala defaults, so a call to `TokenUsage.apply` or `ModelPricing.apply` from them passes
   the new argument too (`Option.empty()`).
 
-The `PositionalPatternsGainFields` Scalafix rule does not add these binders yet; add them by hand, or match on the
-type and read the fields.
+The `PositionalPatternsGainFields` Scalafix rule adds these binders ([Scalafix](scalafix#migration-rules)).
 
 ## Changes since 0.5.1 that no rule automates
 

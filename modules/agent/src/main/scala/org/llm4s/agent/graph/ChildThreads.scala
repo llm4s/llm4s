@@ -56,10 +56,6 @@ object RunOrigin:
     require(depth >= 1, s"depth must be at least 1, was $depth")
     new RunOrigin(parent, call, agent, startedAt, depth, trace)
 
-  /** An origin recording no trace context, as before `trace` existed. */
-  def apply(parent: ThreadId, call: IdempotencyKey, agent: AgentId, startedAt: Instant, depth: Int): RunOrigin =
-    apply(parent, call, agent, startedAt, depth, None)
-
   private given ReadWriter[Instant] = upickle.default.readwriter[String].bimap(_.toString, Instant.parse)
 
   given ReadWriter[RunOrigin] = upickle.default.macroRW

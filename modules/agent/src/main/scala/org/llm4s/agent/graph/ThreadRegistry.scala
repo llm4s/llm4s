@@ -195,9 +195,14 @@ final case class ThreadSummary private (
   metadata: ThreadMetadata,
   updatedAt: Instant
 ):
-  def withStatus(s: ThreadStatus): ThreadSummary     = copy(status = s)
-  def withMetadata(m: ThreadMetadata): ThreadSummary = copy(metadata = m)
-  def withUpdatedAt(at: Instant): ThreadSummary      = copy(updatedAt = at)
+  def withThreadId(t: ThreadId): ThreadSummary         = copy(threadId = t)
+  def withTenantId(t: TenantId): ThreadSummary         = copy(tenantId = Some(t))
+  def withTenantId(t: Option[TenantId]): ThreadSummary = copy(tenantId = t)
+  def withAgent(a: String): ThreadSummary              = copy(agent = a)
+  def withCheckpointId(c: String): ThreadSummary       = copy(checkpointId = c)
+  def withStatus(s: ThreadStatus): ThreadSummary       = copy(status = s)
+  def withMetadata(m: ThreadMetadata): ThreadSummary   = copy(metadata = m)
+  def withUpdatedAt(at: Instant): ThreadSummary        = copy(updatedAt = at)
 
   /** Where a page ending at this thread ended. */
   def cursor: ThreadCursor = ThreadCursor(updatedAt, threadId)

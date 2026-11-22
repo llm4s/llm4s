@@ -133,18 +133,6 @@ object AzureConfig {
       apiKeyProvider = None
     )
 
-  /** The shape before `tokenProvider` (#2274): API-key authentication. */
-  def apply(
-    endpoint: String,
-    apiKey: Secret,
-    model: String,
-    apiVersion: String,
-    contextWindow: Int,
-    reserveCompletion: Int,
-    timeouts: ProviderTimeouts
-  ): AzureConfig =
-    apply(endpoint, apiKey, model, apiVersion, contextWindow, reserveCompletion, timeouts, None)
-
   /**
    * The endpoint, API key and deployment name, every other field at its default: the entry point
    * for Java and Kotlin, which do not see Scala default arguments. The API version is

@@ -1000,28 +1000,6 @@ object OpenAICompatibleClient {
         network
       )
 
-    /** The signature before `network` was added, kept so code compiled against it still links. */
-    def apply(
-      providerName: String,
-      displayName: String,
-      model: String,
-      baseUrl: String,
-      credential: Credential,
-      contextWindow: Int,
-      reserveCompletion: Int,
-      timeouts: ProviderTimeouts
-    ): Settings =
-      new Settings(
-        providerName,
-        displayName,
-        model,
-        baseUrl,
-        credential,
-        contextWindow,
-        reserveCompletion,
-        timeouts,
-        HttpNetworkSettings.default
-      )
   }
 
   /** The settings the generic `openai-compatible` provider derives from its config. */

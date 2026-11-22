@@ -89,17 +89,4 @@ object EmbeddingProviderConfig {
   ): EmbeddingProviderConfig =
     new EmbeddingProviderConfig(baseUrl, model, apiKey, timeouts, network, apiKeyProvider)
 
-  /** The signature before `apiKeyProvider` was added, kept so code compiled against it still links. */
-  def apply(
-    baseUrl: String,
-    model: String,
-    apiKey: Secret,
-    timeouts: ProviderTimeouts,
-    network: HttpNetworkSettings
-  ): EmbeddingProviderConfig =
-    new EmbeddingProviderConfig(baseUrl, model, apiKey, timeouts, network, None)
-
-  /** The signature before `network` was added, kept so code compiled against it still links. */
-  def apply(baseUrl: String, model: String, apiKey: Secret, timeouts: ProviderTimeouts): EmbeddingProviderConfig =
-    new EmbeddingProviderConfig(baseUrl, model, apiKey, timeouts, HttpNetworkSettings.default, None)
 }
