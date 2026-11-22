@@ -330,9 +330,9 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
    * that is not a JSON object a `Left`.
    */
   override def parseToolCalls(toolCalls: ujson.Value): Result[Seq[ToolCall]] =
-    Try(toolCalls.arr.toVector.map(call => (call("id").str, call("function")("name").str, call("function"))))
-      .toEither
-      .left
+    Try(
+      toolCalls.arr.toVector.map(call => (call("id").str, call("function")("name").str, call("function")))
+    ).toEither.left
       .map(e => ToolCallRules.malformed(s"a tool call is not in OpenRouter's shape: ${e.getMessage}"))
       .flatMap(_.foldLeft[Result[Vector[ToolCall]]](Right(Vector.empty)) { case (done, (id, name, function)) =>
         for {

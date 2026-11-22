@@ -585,12 +585,17 @@ class OpenAICompatibleClient(
     val finishReason = ChatCompletionsFinishReason.of(choice).getOrElse(FinishReason.Other(""))
     // a filtered reply's calls are not read: the filter fails the reply (`filteredReply`)
     val rawCalls =
-      message.obj.get("tool_calls").filterNot(_.isNull).filterNot(_ => ChatCompletionsFinishReason.isFiltered(finishReason))
+      message.obj
+        .get("tool_calls")
+        .filterNot(_.isNull)
+        .filterNot(_ => ChatCompletionsFinishReason.isFiltered(finishReason))
     for {
       toolCalls <- rawCalls.map(dialect.parseToolCalls).getOrElse(Right(Seq.empty))
       _ <- rawCalls.toSeq
         .flatMap(OpenAICompatibleDialect.blankArgumentCalls)
-        .foldLeft[Result[Unit]](Right(()))((ok, name) => ok.flatMap(_ => ToolCallRules.blankArguments(name, finishReason)))
+        .foldLeft[Result[Unit]](Right(()))((ok, name) =>
+          ok.flatMap(_ => ToolCallRules.blankArguments(name, finishReason))
+        )
     } yield parsedCompletion(json, choice, message, toolCalls, finishReason)
   }
 
@@ -601,8 +606,8 @@ class OpenAICompatibleClient(
     toolCalls: Seq[ToolCall],
     finishReason: FinishReason
   ): Completion = {
-    val content   = message.obj.get("content").flatMap(dialect.decodeContent)
-    val usage     = json.obj.get("usage").flatMap(parseUsage)
+    val content      = message.obj.get("content").flatMap(dialect.decodeContent)
+    val usage        = json.obj.get("usage").flatMap(parseUsage)
     val thinkingText = dialect.thinking(message).orElse(dialect.thinking(choice)).filter(_.nonEmpty)
     val thinking =
       thinkingText.map(ThinkingBlock.Text(_)).toSeq ++

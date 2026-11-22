@@ -211,7 +211,8 @@ trait OpenAICompatibleDialect:
    * calls do not come here: their argument fragments are passed on verbatim and reassembled,
    * under the same rules, by the stream's accumulator.
    */
-  def parseToolCalls(toolCalls: ujson.Value): Result[Seq[ToolCall]] = OpenAICompatibleDialect.lenientToolCalls(toolCalls)
+  def parseToolCalls(toolCalls: ujson.Value): Result[Seq[ToolCall]] =
+    OpenAICompatibleDialect.lenientToolCalls(toolCalls)
 
 object OpenAICompatibleDialect:
 

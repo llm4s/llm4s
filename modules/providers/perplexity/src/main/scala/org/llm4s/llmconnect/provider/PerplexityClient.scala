@@ -535,7 +535,7 @@ object PerplexityClient {
     case None | Some(ujson.Null)                    => Right(ujson.Obj())
     case Some(obj: ujson.Obj)                       => Right(obj)
     case Some(ujson.Str(text)) if text.trim.isEmpty => Right(ujson.Obj())
-    case Some(ujson.Str(text)) =>
+    case Some(ujson.Str(text))                      =>
       // model output: nested more than 512 levels deep it is refused before it is parsed (#1562)
       BoundedJson.read(text) match {
         case Right(parsed: ujson.Obj) => Right(parsed)

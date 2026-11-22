@@ -95,7 +95,10 @@ object OpenAIContractFixtures {
     ),
     // arguments that are not JSON, in a reply that otherwise ended cleanly
     ContractCase.MalformedArguments -> applies(
-      reply(s"""{"role":"assistant","content":null,"tool_calls":[${callWith("get_weather", "{city: Paris")}]}""", "tool_calls"),
+      reply(
+        s"""{"role":"assistant","content":null,"tool_calls":[${callWith("get_weather", "{city: Paris")}]}""",
+        "tool_calls"
+      ),
       sse(callOpens("get_weather"), argumentDelta("{city: "), argumentDelta("Paris"), event("{}", "tool_calls"))
     ),
     ContractCase.ContentFiltered -> applies(

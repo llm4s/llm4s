@@ -124,7 +124,8 @@ final class StreamingAccumulator private () {
   private def finishedToolCalls(reason: FinishReason): Result[Seq[ToolCall]] = {
     val pending = partialToolCalls.values.toList
     // rule 3 first: a cut call's arguments are often cut JSON too, and the limit is the reason it broke
-    val cut = Option.when(reason == FinishReason.Length && pending.nonEmpty)(ToolCallRules.cutByLimit(pending.map(_.name)))
+    val cut =
+      Option.when(reason == FinishReason.Length && pending.nonEmpty)(ToolCallRules.cutByLimit(pending.map(_.name)))
     val partial = pending.foldLeft[Result[Vector[ToolCall]]](cut.toLeft(Vector.empty)) { (done, p) =>
       val raw = p.argumentsBuilder.toString
       for {
@@ -190,15 +191,15 @@ final class StreamingAccumulator private () {
       )
     } else None
 
-      Completion(
-        id = messageId.getOrElse(""),
-        created = created,
-        content = contentBuilder.toString(),
-        model = "unknown",
-        message = message,
-        usage = usage,
-        finishReason = reason
-      )
+    Completion(
+      id = messageId.getOrElse(""),
+      created = created,
+      content = contentBuilder.toString(),
+      model = "unknown",
+      message = message,
+      usage = usage,
+      finishReason = reason
+    )
   }
 
   /**

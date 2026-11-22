@@ -43,7 +43,9 @@ object AnthropicContractFixtures {
       s"""{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"$name","input":{}}}""") +:
       fragments.map(f =>
         "content_block_delta" ->
-          s"""{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":${ujson.Str(f).render()}}}"""
+          s"""{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":${ujson
+              .Str(f)
+              .render()}}}"""
       ) :+ ("content_block_stop" -> """{"type":"content_block_stop","index":0}""")
 
   private def toolUse(name: String, input: String): String =

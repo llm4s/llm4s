@@ -25,13 +25,17 @@ object WatsonXContractFixtures {
     """{"id":"chatcmpl-tool-1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}"""
 
   private def callWith(name: String, arguments: String): String =
-    s"""{"id":"chatcmpl-tool-1","type":"function","function":{"name":"$name","arguments":${ujson.Str(arguments).render()}}}"""
+    s"""{"id":"chatcmpl-tool-1","type":"function","function":{"name":"$name","arguments":${ujson
+        .Str(arguments)
+        .render()}}}"""
 
   /** A streamed call: its first event names it and carries the first fragment; each later one, a fragment. */
   private def streamedCall(name: String, fragments: String*): String = {
     val first = fragments.headOption.getOrElse("")
     event(
-      s"""{"role":"assistant","tool_calls":[{"index":0,"id":"chatcmpl-tool-1","type":"function","function":{"name":"$name","arguments":${ujson.Str(first).render()}}}]}"""
+      s"""{"role":"assistant","tool_calls":[{"index":0,"id":"chatcmpl-tool-1","type":"function","function":{"name":"$name","arguments":${ujson
+          .Str(first)
+          .render()}}}]}"""
     ) + fragments
       .drop(1)
       .map(f => event(s"""{"tool_calls":[{"index":0,"function":{"arguments":${ujson.Str(f).render()}}}]}"""))

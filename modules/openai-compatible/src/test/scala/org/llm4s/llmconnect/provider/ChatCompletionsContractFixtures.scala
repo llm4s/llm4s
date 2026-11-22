@@ -90,12 +90,25 @@ object ChatCompletionsContractFixtures {
         s"""{"role":"assistant","content":null,"tool_calls":[${callWith("get_weather", """{"city":"Par""")}]}""",
         "length"
       ),
-      sse(callOpens("get_weather"), argumentDelta("""{"city":"""), argumentDelta(""""Par"""), event("{}", "length", usage = true))
+      sse(
+        callOpens("get_weather"),
+        argumentDelta("""{"city":"""),
+        argumentDelta(""""Par"""),
+        event("{}", "length", usage = true)
+      )
     ),
     // arguments that are not JSON, in a reply that otherwise ended cleanly
     ContractCase.MalformedArguments -> applies(
-      reply(s"""{"role":"assistant","content":null,"tool_calls":[${callWith("get_weather", "{city: Paris")}]}""", "tool_calls"),
-      sse(callOpens("get_weather"), argumentDelta("{city: "), argumentDelta("Paris"), event("{}", "tool_calls", usage = true))
+      reply(
+        s"""{"role":"assistant","content":null,"tool_calls":[${callWith("get_weather", "{city: Paris")}]}""",
+        "tool_calls"
+      ),
+      sse(
+        callOpens("get_weather"),
+        argumentDelta("{city: "),
+        argumentDelta("Paris"),
+        event("{}", "tool_calls", usage = true)
+      )
     ),
     ContractCase.ContentFiltered -> applies(
       reply("""{"role":"assistant","content":"Here is how"}""", "content_filter"),

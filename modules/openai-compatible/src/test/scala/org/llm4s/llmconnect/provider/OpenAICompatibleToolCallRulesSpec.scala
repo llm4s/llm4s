@@ -40,7 +40,9 @@ class OpenAICompatibleToolCallRulesSpec extends AnyFlatSpec with Matchers {
       arguments <- Seq("", ""","arguments":""""", ""","arguments":null""")
       finish    <- Seq("tool_calls", "stop")
     } withClue(s"$arguments, $finish: ") {
-      client.parseCompletion(reply(arguments, s""","finish_reason":"$finish"""")).map(_.toolCalls.map(_.arguments)) shouldBe
+      client
+        .parseCompletion(reply(arguments, s""","finish_reason":"$finish""""))
+        .map(_.toolCalls.map(_.arguments)) shouldBe
         Right(Seq(ujson.Obj()))
     }
   }

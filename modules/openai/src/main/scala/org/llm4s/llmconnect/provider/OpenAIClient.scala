@@ -776,7 +776,7 @@ class OpenAIClient private[provider] (
    * ([[extractToolCalls]], `ToolCallRules.checked`).
    */
   private def convertFromOpenAIFormat(response: ChatCompletion): Result[Completion] = {
-    val choice = known(response._choices()).flatMap(_.asScala.headOption)
+    val choice  = known(response._choices()).flatMap(_.asScala.headOption)
     val message = choice.flatMap(c => known(c._message()))
     val finishReason = choice
       .flatMap(c => known(c._finishReason()))

@@ -51,10 +51,11 @@ private[llm4s] object ToolCallRules {
     if (raw.trim.isEmpty) Right(ujson.Obj())
     else
       BoundedJson.read(raw) match {
-        case Right(obj: ujson.Obj)       => Right(obj)
-        case Right(other)                => Left(s"the arguments are ${kind(other)}, not a JSON object")
-        case Left(BoundedJson.TooDeep()) => Left(s"the arguments are nested more than ${BoundedJson.MaxDepth} levels deep")
-        case Left(e)                     => Left(s"the arguments are not valid JSON: ${e.message}")
+        case Right(obj: ujson.Obj) => Right(obj)
+        case Right(other)          => Left(s"the arguments are ${kind(other)}, not a JSON object")
+        case Left(BoundedJson.TooDeep()) =>
+          Left(s"the arguments are nested more than ${BoundedJson.MaxDepth} levels deep")
+        case Left(e) => Left(s"the arguments are not valid JSON: ${e.message}")
       }
 
   /** Rule 1 on parsed arguments: a JSON object, or a `Left` naming the call. */

@@ -91,7 +91,9 @@ private[provider] object GeminiBlocked {
   def malformedCall(finishReason: Option[String], service: String): Option[ProcessingError] =
     finishReason
       .filter(_ == MalformedFunctionCall)
-      .map(reason => ToolCallRules.malformed(s"$service ended the reply $reason: the model's function call was invalid"))
+      .map(reason =>
+        ToolCallRules.malformed(s"$service ended the reply $reason: the model's function call was invalid")
+      )
 
   private val MalformedFunctionCall = "MALFORMED_FUNCTION_CALL"
 

@@ -37,9 +37,9 @@ object PerplexityContractFixtures {
     val cut       = response(s"[${functionCall("call_1", "get_weather", """{"city":"Par""")}]", status = "incomplete")
     val malformed = response(s"[${functionCall("call_1", "get_weather", "{city: Paris")}]")
     Map(
-      ContractCase.CleanText      -> answered("The answer is 4.", "completed", "The answer", " is 4."),
-      ContractCase.TextCutByLimit -> answered("The answer is", "incomplete", "The answer", " is"),
-      ContractCase.ToolCall       -> applies(called, sseBody(created, completedEvent(called))),
+      ContractCase.CleanText          -> answered("The answer is 4.", "completed", "The answer", " is 4."),
+      ContractCase.TextCutByLimit     -> answered("The answer is", "incomplete", "The answer", " is"),
+      ContractCase.ToolCall           -> applies(called, sseBody(created, completedEvent(called))),
       ContractCase.NoArgumentToolCall -> applies(noArgs, sseBody(created, completedEvent(noArgs))),
       ContractCase.ToolCallCutByLimit -> applies(cut, sseBody(created, completedEvent(cut))),
       ContractCase.MalformedArguments -> applies(malformed, sseBody(created, completedEvent(malformed))),

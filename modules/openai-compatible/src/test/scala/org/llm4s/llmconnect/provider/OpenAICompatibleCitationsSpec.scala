@@ -114,7 +114,10 @@ class OpenAICompatibleCitationsSpec extends AnyFlatSpec with Matchers with Eithe
     val badCited  = """{"type":"url_citation"}"""
     val nonObject = """{"type":"url_citation","url_citation":"https://not-an-object.example"}"""
 
-    client.parsedCompletion(annotated(noUrl, emptyUrl, nullUrl, badCited, nonObject, full)).citations.map(_.url) shouldBe
+    client
+      .parsedCompletion(annotated(noUrl, emptyUrl, nullUrl, badCited, nonObject, full))
+      .citations
+      .map(_.url) shouldBe
       List("https://example.com/scala3")
   }
 
