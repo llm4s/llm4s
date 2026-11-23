@@ -76,9 +76,14 @@ class EncryptingLongTermStoreSpec extends AnyFlatSpec with Matchers with EitherV
     val lone  = "half " + 0xd800.toChar + " é 😀 " + 0xdc00.toChar
     val value = ujson.Obj("text" -> lone, "nul" -> "a\u0000b", "n" -> ujson.Arr(1, 1.5, 1e300, ujson.Null))
     put(store, "odd", value).value
-    val read = store.get(ns, "odd").value.value.value
-    read shouldBe value
-    read("text").str.toVector shouldBe lone.toVector
+    val read                          = store.get(ns, "odd").value.value.value
+    def ascii(v: ujson.Value): String = ujson.write(v, escapeUnicode = true)
+    ascii(read) shouldBe ascii(value)
+    read("text").str.toVector.map(_.toInt) shouldBe lone.toVector.map(_.toInt)
+    // the same strings as keys of an object, and the surrogates in every position
+    val keyed = ujson.Obj(lone -> 1, "end" + 0xd800.toChar -> ujson.Arr(0xdc00.toChar.toString), "é😀" -> "é😀")
+    put(store, "keyed", keyed).value
+    ascii(store.get(ns, "keyed").value.value.value) shouldBe ascii(keyed)
   }
 
   it should "not open a value moved to another key, namespace or tenant" in {

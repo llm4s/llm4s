@@ -144,7 +144,34 @@ class EncryptingCheckpointerSpec extends AnyFlatSpec with Matchers with EitherVa
 
   private def stored(raw: Checkpointer, on: ThreadId): Checkpoint = raw.latest(on).value.value.checkpoint
 
-  "EncryptingCheckpointer" should "store no payload in plain, and read back exactly what was committed" in {
+  "EncryptingCheckpointer" should "read back a payload holding an unpaired surrogate as it was committed" in {
+    // built from their code units: a high surrogate inside, at the end and alone, a low one at the start, with
+    // characters past ASCII beside them. A string like these has no UTF-8, and the store keeps it exactly
+    val high = 0xd800.toChar
+    val low  = 0xdc00.toChar
+    Vector(s"half $high tail", s"ends with $high", s"${low}starts é 😀", s"$high", s"$low$high swapped").foreach {
+      text =>
+        val raw   = InMemoryCheckpointer()
+        val store = EncryptingCheckpointer(raw, StaticKeySource(key("k1")))
+        val on    = thread()
+        val token = claimed(store, on)
+        store.commit(on, Commit(token, Some(checkpoint(on, text = text)), Vector.empty, Vector(custom(text)))).value
+
+        // compared escaped, in ASCII, and by code unit: a failure's message must be text a test report can hold
+        def ascii(c: Checkpoint): String  = ujson.write(Checkpoint.toJson(c), escapeUnicode = true)
+        def units(s: String): Vector[Int] = s.toVector.map(_.toInt)
+        val read                          = store.latest(on).value.value.checkpoint
+        ascii(read) shouldBe ascii(checkpoint(on, text = text))
+        units(read.snapshot.state("messages").value("text").str) shouldBe units(text)
+        val payloads = store.eventsAfter(on, 0L, 10).value.map(_.event).collect { case RunEvent.Custom(_, _, payload) =>
+          units(payload("text").str)
+        }
+        payloads shouldBe Vector(units(text))
+        dump(raw, on) should include(PayloadCipher.Marker)
+    }
+  }
+
+  it should "store no payload in plain, and read back exactly what was committed" in {
     val raw   = InMemoryCheckpointer()
     val store = EncryptingCheckpointer(raw, StaticKeySource(key("k1")))
     val on    = thread()

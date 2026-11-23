@@ -199,6 +199,14 @@ in the store but reveals when two inputs are equal, breaks on rotation, and is a
   microseconds fixed, then under a microsecond per kilobyte. A checkpoint of twenty 1 KB values costs about 0.1 ms to
   seal: small beside a database round trip. The JSON pass is not in those figures, and nothing was measured
   end to end through a store.
+- With the JSON pass, measured through the cipher class itself on 2026-11-23 (same laptop; a new cipher, one seal and
+  one open of a state value per iteration, so the subkey derivation, JSON writing and parsing and Base64 are all in;
+  medians of 7 timed runs after warm-up, three JVMs, about +-10% between JVMs): for one string of 100 B, 1 KB, 16 KB
+  and 256 KB, about 5 us, 10 us, 100 us and 1.5 ms; for a list of short chat messages of those sizes, about 5 us,
+  13 us, 180 us and 2.9 ms. JSON, not AES, is most of it: the same measurement before the unpaired-surrogate check
+  below was added gave 5 us, 9 us, 87 us and 1.32 ms, and 5 us, 13 us, 171 us and 2.66 ms. Writing every plaintext as
+  text and parsing it as text instead - the first form of that fix - cost 149 us and 2.2 ms for the single strings
+  (about +60%), and was dropped.
 - Size: 28 bytes of nonce and tag, then Base64 (4/3), per value; a checkpoint grows by about a third.
 - Extra store calls: one `owner` read when the first commit a wrapper sees under a claim holds a payload but no
   checkpoint (the tenant is then remembered for that claim; at most 10,000 threads are remembered); one `entry` read
@@ -287,7 +295,7 @@ a store opened with it offers `wanted`. Over `StoreLimits.default` the wrapper o
 Three precise differences from an unencrypted store. (a) To count a namespace's plaintext bytes the wrapper reads the
 namespace through the `StoreView` on every `Put` - sizes come from each envelope's length, nothing is decrypted - one
 read more than `inner` makes. (b) A value holding an unpaired surrogate has no UTF-8; it is sealed with its non-ASCII
-characters escaped and counted at that size toward its namespace (an unencrypted store counts the surrogate as one
+characters escaped, after one space, and counted at that size toward its namespace (an unencrypted store counts the surrogate as one
 byte). (c) An outcome is recorded sealed, so the largest is about three quarters of the replay cap (its sealed form
 must be within 1 MiB). `maxItemBytes` can be offered up to 786 341.
 
@@ -356,9 +364,15 @@ namespace or tenant, tampered or malformed fails typed; rotation; a missing key;
 unencrypted store's; limits exact, and `inner` never refusing within them, at every size; plaintext refused or read;
 replay and fencing; a value with an unpaired surrogate read back as written.
 
-The shared cipher changed in one way: a value holding an unpaired surrogate is sealed with its non-ASCII characters
-escaped, and every plaintext is parsed as text, so such a value reads back as it was written - as the in-memory and
-PostgreSQL stores keep it. Ciphertexts already stored open as before.
+The shared cipher changed in one way, for checkpoints and queue inputs too. A string holding an unpaired surrogate
+has no UTF-8, and ujson's byte writer refuses it: before, a commit of a state value or custom event with one failed
+with `EncryptionFailed` and wrote nothing, where the same commit to the store unwrapped succeeds and reads back
+exactly. Now each value's strings are scanned for an unpaired surrogate before it is sealed (one pass, the cost
+measured in decision 8). A value with none is written and parsed as bytes, as before. A value with one is written as
+text with every character past ASCII escaped, after a single space - still JSON - and a plaintext that starts with
+that space is parsed as text, because the byte parser cannot hand back the character an escape names. Ciphertexts
+already stored never start with a space and open as before. `EncryptingCheckpointerSpec` checks the checkpoint path
+(state values, task inputs, routes, a custom event) with surrogates in five positions.
 
 ### Left for later
 

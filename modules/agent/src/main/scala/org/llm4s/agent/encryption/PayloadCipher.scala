@@ -89,8 +89,7 @@ final private[encryption] class PayloadCipher private (
                 val cipher = Cipher.getInstance(Transformation)
                 cipher.init(Cipher.DECRYPT_MODE, subkey(key), new GCMParameterSpec(TagBits, bytes, 0, NonceBytes))
                 cipher.updateAAD(associated(keyId, place))
-                // parsed as text: the byte parser cannot hand back the unpaired surrogate an escape names
-                ujson.read(new String(cipher.doFinal(bytes, NonceBytes, bytes.length - NonceBytes), UTF_8))
+                parsed(cipher.doFinal(bytes, NonceBytes, bytes.length - NonceBytes))
               }.toEither.left.map(_ => EncryptionError.DecryptionFailed(owner, field, keyId))
             yield value
           case _ => Left(malformed)
@@ -151,13 +150,38 @@ private[encryption] object PayloadCipher:
   def outcome(key: String, effect: String): Vector[String] = Vector("outcome", key, effect)
 
   /**
-   * `value` as the bytes that are sealed: its compact JSON in UTF-8. A string holding an unpaired surrogate has no
-   * UTF-8, so a value with one is written with every character past ASCII escaped instead, and read back as it was.
+   * `value` as the bytes that are sealed: its compact JSON, written straight to UTF-8. A string holding an unpaired
+   * surrogate has no UTF-8, so a value with one is written as text instead, with every character past ASCII escaped,
+   * after one space: JSON still, and what tells [[parsed]] to read it as text.
    */
   private def plaintext(value: ujson.Value): Array[Byte] =
-    val text = ujson.write(value)
-    if UTF_8.newEncoder().canEncode(text) then text.getBytes(UTF_8)
-    else ujson.write(value, escapeUnicode = true).getBytes(UTF_8)
+    if unpaired(value) then (" " + ujson.write(value, escapeUnicode = true)).getBytes(UTF_8)
+    else ujson.writeToByteArray(value)
+
+  /**
+   * The value an authenticated plaintext holds. It is parsed from its bytes, unless it starts with the space
+   * [[plaintext]] writes before a value with an unpaired surrogate: the byte parser decodes an escape into UTF-8,
+   * which has no such character, so that one is parsed as text.
+   */
+  private def parsed(plain: Array[Byte]): ujson.Value =
+    if plain.nonEmpty && plain(0) == ' ' then ujson.read(new String(plain, UTF_8)) else ujson.read(plain)
+
+  /** Whether a string of `value`, a key included, holds a surrogate that is not half of a pair. */
+  private def unpaired(value: ujson.Value): Boolean = value match
+    case ujson.Str(s) => unpaired(s)
+    case ujson.Arr(a) => a.exists(unpaired)
+    case ujson.Obj(o) => o.keysIterator.exists(unpaired) || o.valuesIterator.exists(unpaired)
+    case _            => false
+
+  private def unpaired(s: String): Boolean =
+    var i     = 0
+    var found = false
+    while !found && i < s.length do
+      val c = s.charAt(i)
+      if Character.isHighSurrogate(c) && i + 1 < s.length && Character.isLowSurrogate(s.charAt(i + 1)) then i += 2
+      else if Character.isSurrogate(c) then found = true
+      else i += 1
+    found
 
   /** The JSON bytes of an envelope around its Base64: `{"llm4s:enc":"1.<key id>.<body>"}`. */
   private def around(keyIdChars: Int): Long = Marker.length + 5L + Format.length + 1L + keyIdChars + 1L + 2L
