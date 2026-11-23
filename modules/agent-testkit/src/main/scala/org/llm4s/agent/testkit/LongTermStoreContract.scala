@@ -307,8 +307,9 @@ trait LongTermStoreContract extends AnyFlatSpecLike with Matchers with EitherVal
   }
 
   it should "refuse a key that is not valid Unicode, writing and recording nothing" in {
-    val s       = store()
-    val refused = s.put(ns, "bad\ud800", ujson.Str("x"), call()).left.value
+    val s = store()
+    // built from the code unit: scalafix's parser rejects an unpaired surrogate escape in a literal
+    val refused = s.put(ns, "bad" + 0xd800.toChar, ujson.Str("x"), call()).left.value
     refused shouldBe a[BackendRefused]
     refused.message should include("not valid Unicode")
     s.list(ns, "", 10).value.items shouldBe empty
