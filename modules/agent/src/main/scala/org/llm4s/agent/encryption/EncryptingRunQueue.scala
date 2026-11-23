@@ -78,6 +78,7 @@ final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKey
       )
     }
 
+  /** Submits `submission` with its input encrypted; a reused submission key is compared against the stored entry in plain. */
   def submit(submission: Submission): Result[Ticket] =
     val thread = cipher(submission.threadId)
     // a recover holds nothing to seal, so it asks for no key
@@ -115,6 +116,7 @@ final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKey
       held.submissionKey == submission.submissionKey &&
       QueuedInput.toJson(held.input) == QueuedInput.toJson(submission.input)
 
+  /** The entry, with its input decrypted. */
   def entry(tenantId: Option[TenantId], entryId: EntryId): Result[QueueEntry] =
     inner.entry(tenantId, entryId).flatMap(opened)
 
@@ -124,15 +126,18 @@ final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKey
   def openEntries(tenantId: Option[TenantId], threadId: ThreadId): Result[Vector[QueueEntry]] =
     inner.openEntries(tenantId, threadId).flatMap(traverse(_)(opened))
 
+  /** Leases the next entry, with its input decrypted; an entry that cannot be decrypted is a `Left` and stays leased until the lease expires. */
   def take(request: TakeRequest): Result[Option[LeasedEntry]] =
     inner.take(request).flatMap {
       case None         => Right(None)
       case Some(leased) => opened(leased.entry).map(entry => Some(leased.copy(entry = entry)))
     }
 
+  /** Passed to the store unchanged: a cancellation carries nothing that is encrypted. */
   def cancel(tenantId: Option[TenantId], target: CancelTarget, reason: CancelReason): Result[Cancellation] =
     inner.cancel(tenantId, target, reason).flatMap(c => traverse(c.entries)(opened).map(Cancellation(_, c.closed)))
 
+  /** Passed to the store unchanged: an attempt record carries nothing that is encrypted. */
   def recordAttempt(lease: Lease, runId: RunId): Result[AttemptStart] =
     inner.recordAttempt(lease, runId).flatMap {
       case AttemptStart.Recorded(entry)      => opened(entry).map(AttemptStart.Recorded(_))
@@ -144,8 +149,13 @@ final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKey
 
   // ---- forwarded as they are: nothing they carry is encrypted ----
 
-  def depth(agents: Set[AgentId]): Result[Map[AgentId, QueueDepth]]          = inner.depth(agents)
-  def renew(lease: Lease, ttl: FiniteDuration): Result[Lease]                = inner.renew(lease, ttl)
+  /** Passed to the store unchanged. */
+  def depth(agents: Set[AgentId]): Result[Map[AgentId, QueueDepth]] = inner.depth(agents)
+
+  /** Passed to the store unchanged. */
+  def renew(lease: Lease, ttl: FiniteDuration): Result[Lease] = inner.renew(lease, ttl)
+
+  /** Passed to the store unchanged. */
   def release(lease: Lease): Result[Unit]                                    = inner.release(lease)
   def reclaim(ticketLifetime: FiniteDuration, limit: Int): Result[Int]       = inner.reclaim(ticketLifetime, limit)
   def openRuns(threads: Vector[ThreadId]): Result[Map[ThreadId, Set[RunId]]] = inner.openRuns(threads)
