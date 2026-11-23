@@ -41,7 +41,8 @@ object UrlPolicy {
    * @param blockedHosts hosts that, with their subdomains, are refused in addition to the defaults
    * @param allowPrivateNetworks whether a host may resolve to a loopback, private or other non-public address. The
    *                             cloud metadata endpoint (`169.254.169.254`, `fd00:ec2::254`, `metadata.google.internal`,
-   *                             `metadata.internal`) stays refused either way.
+   *                             `metadata.internal`, and `169.254.169.254` inside a NAT64, IPv4-mapped or 6to4
+   *                             IPv6 address) stays refused either way.
    * @param allowedSchemes the URL schemes that may be fetched; the loaders speak only `http` and `https`
    * @param resolver how a host name is resolved: `InetAddress.getAllByName` by default
    */
@@ -100,7 +101,7 @@ object UrlPolicy {
          else NetworkSecurity.isBlockedHostname(host))
 
     private def addressBlocked(ip: InetAddress): Boolean =
-      if (allowPrivateNetworks) MetadataAddresses.contains(ip) else NetworkSecurity.isBlockedIP(ip)
+      if (allowPrivateNetworks) isMetadataAddress(ip) else NetworkSecurity.isBlockedIP(ip)
 
     override def toString: String =
       s"UrlPolicy.Standard(allowedHosts=$allowedHosts, blockedHosts=$blockedHosts, " +
@@ -141,6 +142,25 @@ object UrlPolicy {
 
   private val MetadataAddresses: Set[InetAddress] =
     Set(NetworkSecurity.CloudMetadataIP, "fd00:ec2::254").map(InetAddress.getByName)
+
+  /**
+   * A cloud metadata address, also when an IPv6 address carries it: IPv4-mapped `::ffff:0:0/96` and NAT64
+   * `64:ff9b::/96` (RFC 6052) in their last 4 bytes, 6to4 `2002::/16` (RFC 3056) in bytes 2-5. A gateway that
+   * translates such an address reaches the metadata endpoint itself.
+   */
+  private def isMetadataAddress(ip: InetAddress): Boolean = {
+    val b                                     = ip.getAddress
+    def u(i: Int): Int                        = b(i) & 0xff
+    def zeros(from: Int, until: Int): Boolean = (from until until).forall(b(_) == 0)
+    def v4(from: Int): InetAddress = InetAddress.getByAddress(java.util.Arrays.copyOfRange(b, from, from + 4))
+    val embedded =
+      if (b.length != 16) None
+      else if (zeros(0, 10) && u(10) == 0xff && u(11) == 0xff) Some(v4(12))
+      else if (u(0) == 0x00 && u(1) == 0x64 && u(2) == 0xff && u(3) == 0x9b && zeros(4, 12)) Some(v4(12))
+      else if (u(0) == 0x20 && u(1) == 0x02) Some(v4(2))
+      else None
+    MetadataAddresses.contains(ip) || embedded.exists(MetadataAddresses.contains)
+  }
 
   private def normalize(s: String): String = s.trim.toLowerCase(Locale.ROOT)
 

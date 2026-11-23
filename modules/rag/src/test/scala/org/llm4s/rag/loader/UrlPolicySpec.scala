@@ -97,6 +97,11 @@ class UrlPolicySpec extends AnyFlatSpec with Matchers {
     val policy = UrlPolicy.default.withAllowPrivateNetworks(true)
     message(resolve(policy, "http://169.254.169.254/latest")) should include("blocked range")
     message(resolve(policy, "http://[fd00:ec2::254]/latest")) should include("blocked range")
+    // the IPv4 metadata address carried in NAT64, IPv4-mapped and 6to4 IPv6 addresses
+    message(resolve(policy, "http://[64:ff9b::a9fe:a9fe]/latest/meta-data/")) should include("blocked range")
+    message(resolve(policy, "http://[::ffff:169.254.169.254]/latest")) should include("blocked range")
+    message(resolve(policy, "http://[2002:a9fe:a9fe::1]/latest")) should include("blocked range")
+    resolve(policy, "http://[64:ff9b::a00:1]/").isRight shouldBe true // NAT64 to 10.0.0.1: private, allowed
     message(resolve(policy, "http://metadata.google.internal/")) should include("is blocked")
     message(resolve(policy.withResolver(dns("169.254.169.254")), "http://rebound.example.com/")) should include(
       "blocked range"
