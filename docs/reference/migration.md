@@ -51,7 +51,53 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
 [`ProviderRegistry` lookups accept aliases](#providerregistry-lookups-accept-aliases-2812),
-and [`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813).
+[`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
+and [model registry sources, exact lookup and a sealed `RequestTransformer`](#model-registry-sources-exact-lookup-and-a-sealed-requesttransformer-2823).
+
+## Model registry sources, exact lookup and a sealed `RequestTransformer` (#2823)
+
+In `org.llm4s.model` (`llm4s-core`). There is no shim.
+
+**`ModelRegistryConfig`** holds one `source: ModelRegistrySource`, `Resource(path)`, `File(path)` or `Url(url)`;
+`withResourcePath`, `withFilePath` and `withUrl` replace it, so `ModelRegistryConfig.default.withFilePath(p)` now
+loads `p` (it used to fail, the default resource still being set). The `Option` setters and the `resourcePath`,
+`filePath` and `url` fields are gone:
+
+| Before | After |
+|---|---|
+| `ModelRegistryConfig(resourcePath = None, filePath = Some(p), url = None)` | `ModelRegistryConfig(ModelRegistrySource.File(p))` or `ModelRegistryConfig.default.withFilePath(p)` |
+| `config.filePath` | `config.source match { case ModelRegistrySource.File(p) => ... }` |
+
+`llm4s.modelRegistry` takes at most one of `resourcePath`, `filePath` and `url`; more than one is a
+`ConfigurationError` from `Llm4sConfig.modelRegistryConfig()`.
+
+**`lookup` is exact.** `lookup(modelId)` matches an exact id, ignoring case and a `provider/` prefix; it no longer
+falls back to the one id containing `modelId`. For that, call `search(query): List[ModelMetadata]`, which returns
+every id containing the query, and choose. `lookup(provider, modelName)` keeps its unprefixed attempt, now exact.
+
+**`ModelRegistryService`**: `statistics()` is removed (count `listByMode`/`listByProvider` results if you need
+numbers), and `listProviders()` returns `List[String]`, never having failed.
+
+**`ModelMetadata`** loses `inputCostPerToken`, `outputCostPerToken` and their setters: they duplicated `pricing`,
+which `CostEstimator` always read. Use `metadata.pricing.inputCostPerToken` and set prices with `withPricing`.
+`deprecationDate` is an `Option[java.time.LocalDate]`; `fromJson` refuses an entry whose date is not
+`YYYY-MM-DD` (the registry skips it with a warning) where `isDeprecated` read it as not deprecated, and
+`isDeprecatedOn(date)` is new. `ModelMetadata.apply` defaults everything but `modelId` and `provider`:
+
+```scala
+// before
+ModelMetadata("m", "p", ModelMode.Chat, None, None, None, None, ModelCapabilities(), ModelPricing(), Some("2026-01-01"))
+// after
+ModelMetadata("m", "p", deprecationDate = Some(LocalDate.parse("2026-01-01")))
+```
+
+`ModelCapabilities.fromJson` and `ModelPricing.fromJson`, which threw on malformed JSON, are internal: use
+`ModelMetadata.fromJson(id, json)`, which returns a `Result`, and read `.capabilities` or `.pricing`.
+
+**`RequestTransformer` is sealed**: build one with `RequestTransformer.default` or `RequestTransformer.adjusted`,
+and express a rule of your own as `adjusted`'s capability function, whose adjustments are then reported (an
+implementation outside llm4s reported none). `transformOptions` takes `dropUnsupported` explicitly. `disallowedParams`
+is removed: read `capabilities.disallowedParams` from the registry. `withOverrides` is internal.
 
 ## `StreamingAccumulator` takes the model and reports usage one way (#2813)
 

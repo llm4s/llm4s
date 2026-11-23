@@ -9,7 +9,7 @@ import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProvidersConfig }
 import org.llm4s.error.LLMError
 import org.llm4s.http.Llm4sHttpClient
-import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
+import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService, ModelRegistrySource }
 import com.typesafe.config.{ Config, ConfigFactory }
 import pureconfig.ConfigSource
 
@@ -121,16 +121,21 @@ object Llm4sConfig {
     val resourcePath       = modelRegistrySource.at("resourcePath").load[String].toOption.map(_.trim).filter(_.nonEmpty)
     val filePathFromConfig = modelRegistrySource.at("filePath").load[String].toOption.map(_.trim).filter(_.nonEmpty)
     val urlFromConfig      = modelRegistrySource.at("url").load[String].toOption.map(_.trim).filter(_.nonEmpty)
-    val useDefaultResource = resourcePath.isEmpty && filePathFromConfig.isEmpty && urlFromConfig.isEmpty
 
-    Right(
-      ModelRegistryConfig(
-        resourcePath =
-          resourcePath.orElse(if useDefaultResource then Some(ModelRegistryConfig.DefaultResourcePath) else None),
-        filePath = filePathFromConfig,
-        url = urlFromConfig
-      )
-    )
+    List(
+      resourcePath.map(ModelRegistrySource.Resource(_)),
+      filePathFromConfig.map(ModelRegistrySource.File(_)),
+      urlFromConfig.map(ModelRegistrySource.Url(_))
+    ).flatten match {
+      case Nil           => Right(ModelRegistryConfig.default)
+      case source :: Nil => Right(ModelRegistryConfig(source))
+      case _ =>
+        Left(
+          org.llm4s.error.ConfigurationError(
+            "llm4s.modelRegistry sets more than one of resourcePath, filePath and url; set one"
+          )
+        )
+    }
   }
 
   def modelRegistryService(): Result[ModelRegistryService] =

@@ -57,7 +57,6 @@ object CopyToWithSetters_1_0 {
           "llmconnect/config/EmbeddingProviderConfig",
           "llmconnect/config/LocalEmbeddingModels",
           "llmconnect/config/TracingSettings",
-          "model/ModelRegistryConfig",
           "toolapi/ToolExecutionConfig"
         ),
         "core-data-types-are-growth-safe-2356" -> List(
