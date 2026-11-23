@@ -8,7 +8,7 @@ import org.vosk.Recognizer
 import java.io.ByteArrayInputStream
 import scala.util.{ Try, Using }
 import java.nio.file.Files
-import org.llm4s.core.safety.Safety
+import org.llm4s.error.Safety
 import org.llm4s.speech.processing.AudioPreprocessing
 import org.slf4j.LoggerFactory
 import ujson.Value

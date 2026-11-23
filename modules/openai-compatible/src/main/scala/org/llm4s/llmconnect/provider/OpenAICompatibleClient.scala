@@ -28,7 +28,8 @@ import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, UnmappedOptions }
 import org.llm4s.toolapi.ToolRegistry
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.io.{ BufferedReader, InputStream, InputStreamReader }

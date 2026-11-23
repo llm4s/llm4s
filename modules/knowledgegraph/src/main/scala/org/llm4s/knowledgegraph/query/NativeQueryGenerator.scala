@@ -3,7 +3,8 @@ package org.llm4s.knowledgegraph.query
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
 
 import scala.util.Try

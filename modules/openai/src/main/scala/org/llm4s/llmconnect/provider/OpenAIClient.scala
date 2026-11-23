@@ -38,7 +38,7 @@ import com.openai.models.completions.CompletionUsage
 import com.openai.models.{ ResponseFormatJsonObject, ResponseFormatJsonSchema }
 import org.llm4s.error.{ ContentFilteredError, LLMError, NetworkError, ServiceError, UnknownError }
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
-import org.llm4s.error.ThrowableOps._
+import org.llm4s.syntax.toLLMError
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.auth.{
@@ -944,7 +944,7 @@ class OpenAIClient private[provider] (
  * Provides safe construction of OpenAI clients with error handling via Result type.
  */
 object OpenAIClient {
-  import org.llm4s.types.TryOps
+  import org.llm4s.syntax.toResult
 
   /**
    * Registers with `KnownSecrets` the workload-identity ids of an [[OpenAIConfig]] (identity provider, service
@@ -1024,9 +1024,10 @@ object OpenAIClient {
           Try(headerMap(service.headers())).getOrElse(Map.empty)
         )
         .left
-        .getOrElse(redactMessage(service.toLLMError, service))
-    case io: OpenAIIoException if io.getCause != null => redactMessage(io.getCause.toLLMError, io.getCause)
-    case other                                        => redactMessage(other.toLLMError, other)
+        .getOrElse(redactMessage(SdkErrorMapper(service, provider), service))
+    case io: OpenAIIoException if io.getCause != null =>
+      redactMessage(SdkErrorMapper(io.getCause, provider), io.getCause)
+    case other => redactMessage(SdkErrorMapper(other, provider), other)
   }
 
   /**

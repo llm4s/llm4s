@@ -10,7 +10,8 @@ import org.llm4s.error.{
   UnknownError,
   ValidationError
 }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.util.Redaction
 
 import java.io.IOException
@@ -555,7 +556,7 @@ private[llm4s] object HttpFailures {
     t match {
       case e if CancelledError.isCancellation(e) => toLLMError(e, "POST", url, timeout)
       case e: IOException                        => toLLMError(e, "POST", url, timeout)
-      case e                                     => org.llm4s.error.ThrowableOps.RichThrowable(e).toLLMError
+      case e                                     => org.llm4s.error.Safety.fromThrowable(e)
     }
 
   /** Scheme, host, port and path of `url`; never its query string or user info. */

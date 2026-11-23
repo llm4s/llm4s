@@ -2,7 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.agent.Agent
 import org.llm4s.agent.graph.{ RunConfig, ThreadId }
-import org.llm4s.core.safety.Safety
+import org.llm4s.error.Safety
 import org.llm4s.error.{ CancelledError, ProcessingError, ValidationError }
 import org.llm4s.javaapi.services.{ ChatMemoryStore, ChatTurn, MemoryId, SystemMessage, UserMessage, V }
 import org.llm4s.llmconnect.model.{

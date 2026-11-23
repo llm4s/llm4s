@@ -9,7 +9,7 @@ import cats.implicits._
 
 import java.nio.file.{ Files, Path }
 import java.io.IOException
-import org.llm4s.core.safety.Safety
+import org.llm4s.error.Safety
 import scala.util.Try
 import scala.sys.process._
 import ujson.Value

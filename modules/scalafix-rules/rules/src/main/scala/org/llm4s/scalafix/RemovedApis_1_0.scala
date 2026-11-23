@@ -8,7 +8,8 @@ import scalafix.v1._
  * to its migration note: the `org.llm4s.types.typeclass` package and `CompletionChunk`/`ChunkDelta` (#2345),
  * `OpenAIToolHelper` (#2360), `AnsiColors` (#2358), the embeddings sample's settings on `Llm4sConfig` (#2265), and
  * `APIError`, `SystemError` and the `LLMError.processingFailed` / `invalidImageInput` / `apiCallFailed` constructors
- * (#2819).
+ * (#2819), and `ErrorMapper`, `DefaultErrorMapper`, the `AsyncResult` object and `Result.combine` / `fromBoolean` /
+ * `fromBooleanWithValue` / `fromFuture` (#2821).
  */
 class RemovedApis_1_0 extends SemanticRule("RemovedApis_1_0") {
 
@@ -37,6 +38,11 @@ object RemovedApis_1_0 {
   private val errorType = """org/llm4s/error/(APIError|SystemError)[#.]""".r
 
   private val errorShim = """org/llm4s/error/LLMError\.(processingFailed|invalidImageInput|apiCallFailed)\(\)\.""".r
+
+  private val errorMapper = """org/llm4s/core/safety/(ErrorMapper|DefaultErrorMapper)[#.]""".r
+
+  private val resultHelper =
+    """org/llm4s/(AsyncResult\.|Result\.(combine|fromBoolean|fromBooleanWithValue|fromFuture)\((\+\d+)?\)\.)""".r
 
   private val config = "org/llm4s/config/Llm4sConfig."
 
@@ -97,6 +103,21 @@ object RemovedApis_1_0 {
           ("LLMError.processingFailed, invalidImageInput and apiCallFailed are removed; call ProcessingError(...), " +
             "InvalidInputError(...) and ServiceError(httpStatus, provider, details): " +
             Migration.guide10("error-hierarchy-cleanup-2819"))
+      )
+    else if (errorMapper.matches(symbol))
+      Some(
+        "errorMapperRemoved" ->
+          ("ErrorMapper and DefaultErrorMapper are removed; Safety.fromThrowable(t) is the default mapping, which no " +
+            "longer reads a 401 or 429 out of a message: " + Migration.guide10(
+              "result-helpers-and-conversions-move-and-errormapper-is-removed-2821"
+            ))
+      )
+    else if (resultHelper.matches(symbol))
+      Some(
+        "resultHelperRemoved" ->
+          ("Result.combine, fromBoolean, fromBooleanWithValue, fromFuture and the AsyncResult object are removed; use a " +
+            "for comprehension, Either.cond, or future.toResult (import org.llm4s.syntax.toResult): " +
+            Migration.guide10("result-helpers-and-conversions-move-and-errormapper-is-removed-2821"))
       )
     else if (sampleSettings.contains(symbol))
       Some(

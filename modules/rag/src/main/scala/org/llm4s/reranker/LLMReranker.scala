@@ -4,7 +4,8 @@ import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.utils.CodePointBoundary
 import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
 import ujson._
 

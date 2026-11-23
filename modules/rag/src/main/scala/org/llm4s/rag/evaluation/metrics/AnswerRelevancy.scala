@@ -6,7 +6,8 @@ import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.utils.SimilarityUtils
 import org.llm4s.rag.evaluation._
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
 
 import scala.util.Try

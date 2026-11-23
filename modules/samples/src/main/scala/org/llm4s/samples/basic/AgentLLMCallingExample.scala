@@ -1,6 +1,6 @@
 package org.llm4s.samples.basic
 
-import org.llm4s.core.safety.Safety
+import org.llm4s.error.Safety
 import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.config.LangfuseConfigLoader
 import org.llm4s.llmconnect.config.LangfuseConfig

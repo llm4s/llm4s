@@ -1,6 +1,6 @@
 package org.llm4s.error
 
-import org.llm4s.Result
+import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 

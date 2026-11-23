@@ -8,7 +8,8 @@ import org.llm4s.llmconnect.model.{ ContentPart, ThinkingBlock }
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest

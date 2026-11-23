@@ -71,7 +71,6 @@ import org.llm4s.error.{
   UnknownError,
   ValidationError
 }
-import org.llm4s.error.ThrowableOps.*
 import org.llm4s.util.{ BoundedJson, Redaction }
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
 
@@ -1291,7 +1290,7 @@ object AnthropicClient {
       // cause, as OpenAIClient does, so it is a recoverable NetworkError or TimeoutError, not an UnknownError
       case io: com.anthropic.errors.AnthropicIoException if io.getCause != null => mapSdkError(io.getCause)
       case e =>
-        e.toLLMError match {
+        SdkErrorMapper(e, "anthropic") match {
           case unknown: UnknownError => UnknownError(safe(unknown.message), e)
           case other                 => other
         }
@@ -1333,7 +1332,7 @@ object AnthropicClient {
   private def headerMap(headers: com.anthropic.core.http.Headers): Map[String, Seq[String]] =
     headers.names().asScala.map(name => name -> headers.values(name).asScala.toSeq).toMap
 
-  import org.llm4s.types.TryOps
+  import org.llm4s.syntax.toResult
 
   /** A thinking or redacted-thinking block being assembled from a stream. */
   final private[provider] case class StreamedThinking(

@@ -10,7 +10,8 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.media.MediaSource
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, UnmappedOptions }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
 import org.slf4j.LoggerFactory
 
@@ -530,7 +531,7 @@ object OllamaClient {
   /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
   val DefaultStreamTimeout: FiniteDuration = 10.minutes
 
-  import org.llm4s.types.TryOps
+  import org.llm4s.syntax.toResult
 
   private val logger = LoggerFactory.getLogger(getClass)
 

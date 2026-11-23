@@ -1,6 +1,6 @@
 package org.llm4s.toolapi.builtin.http
 
-import org.llm4s.core.safety.NetworkSecurity
+import org.llm4s.security.NetworkSecurity
 
 import java.util.Locale
 import scala.concurrent.duration.*

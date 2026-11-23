@@ -4,7 +4,8 @@ import org.llm4s.agent.graph.{ EffectKey, GraphError, RunContext, StateKey, Stat
 import org.llm4s.agent.graph.tool.{ Glob, LockKey, ToolContext, ToolOutcome }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
 import java.time.Instant

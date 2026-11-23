@@ -25,7 +25,8 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, UserMessage }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 
 import java.time.Clock
 import java.util.concurrent.ConcurrentHashMap

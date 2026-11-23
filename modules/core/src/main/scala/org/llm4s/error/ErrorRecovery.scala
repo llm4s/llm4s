@@ -1,9 +1,8 @@
 package org.llm4s.error
 
 import org.llm4s.annotation.Stable
-import org.llm4s.Result
+import org.llm4s.types.Result
 import org.llm4s.reliability.RetryPolicy
-import org.llm4s.types._
 
 import scala.annotation.tailrec
 import java.time.Instant

@@ -9,7 +9,7 @@ import java.io.{ ByteArrayOutputStream, DataOutputStream }
 import java.nio.file.{ Path, Files }
 import javax.sound.sampled.{ AudioFileFormat, AudioFormat => JAudioFormat, AudioSystem }
 import scala.util.Try
-import org.llm4s.types.TryOps
+import org.llm4s.syntax.toResult
 
 /**
  * Eliminates code duplication in WAV file generation across the speech module.

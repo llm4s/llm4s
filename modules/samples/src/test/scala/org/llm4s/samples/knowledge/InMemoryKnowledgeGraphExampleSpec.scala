@@ -1,7 +1,7 @@
 package org.llm4s.samples.knowledge
 
 import org.llm4s.knowledgegraph.Edge
-import org.llm4s.types.TryOps
+import org.llm4s.syntax.toResult
 import java.nio.file.Paths
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Try

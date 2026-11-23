@@ -86,7 +86,7 @@ object JSONOutputValidationExample extends App {
   // Can safely parse the JSON now
   private def parseFields(response: String): Unit = {
     import scala.util.Try
-    import org.llm4s.types.TryOps
+    import org.llm4s.syntax.toResult
 
     Try {
       val json = ujson.read(response)

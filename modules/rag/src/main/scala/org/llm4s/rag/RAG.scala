@@ -1,7 +1,7 @@
 package org.llm4s.rag
 
 import org.llm4s.chunking.{ ChunkMetadata, ChunkerFactory, DocumentChunk, DocumentChunker }
-import org.llm4s.core.safety.Safety
+import org.llm4s.error.Safety
 import org.llm4s.error.{ ConfigurationError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.security.Secret
 import org.llm4s.knowledgegraph.graphrag.{ GraphRAG, GraphRAGAnswer, GraphRAGMode }
@@ -700,7 +700,7 @@ final class RAG private (
               ("skipped", None)
           }
         }.recover { case ex =>
-          ("failed", Some(("unknown", org.llm4s.error.ThrowableOps.RichThrowable(ex).toLLMError)))
+          ("failed", Some(("unknown", org.llm4s.error.Safety.fromThrowable(ex))))
         }
       }
 
@@ -897,7 +897,7 @@ final class RAG private (
    * @return Future with sync statistics
    */
   def refreshAsync(loader: DocumentLoader)(implicit ec: ExecutionContext): Future[Result[SyncStats]] =
-    Future(refresh(loader)).recover { case ex => Left(org.llm4s.error.ThrowableOps.RichThrowable(ex).toLLMError) }
+    Future(refresh(loader)).recover { case ex => Left(org.llm4s.error.Safety.fromThrowable(ex)) }
 
   private def ingestDocument(doc: Document, sourceId: String = DocumentRegistry.DefaultSourceId): Result[Int] = {
     // Choose chunker based on hints if configured
@@ -1662,7 +1662,7 @@ final class RAG private (
           stored <- hybridSearcher.vectorStore.count(Some(MetadataFilter.Equals("docId", docId)))
           ids = (0 until math.max(stored, 1L).toInt).map(chunkId(docId, _))
           vectors  <- hybridSearcher.vectorStore.getBatch(ids)
-          keywords <- org.llm4s.Result.traverse(ids.toList)(hybridSearcher.keywordIndex.get)
+          keywords <- org.llm4s.types.Result.traverse(ids.toList)(hybridSearcher.keywordIndex.get)
         } yield RAG.StoredVersion(vectors, keywords.flatten)
     }
 

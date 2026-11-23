@@ -4,6 +4,7 @@ rule = RemovedApis_1_0
 package fix.v1
 
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.core.safety.DefaultErrorMapper
 import org.llm4s.error.{ APIError, LLMError, SystemError }
 import org.llm4s.llmconnect.model.CompletionChunk
 import org.llm4s.trace.AnsiColors
@@ -26,4 +27,10 @@ object RemovedApis_1_0Test {
   }
 
   val failed = LLMError.processingFailed("resize", "bad image") // assert: RemovedApis_1_0.errorShimRemoved
+
+  val mapped = DefaultErrorMapper(new RuntimeException("boom")) // assert: RemovedApis_1_0.errorMapperRemoved
+
+  val both = org.llm4s.Result.combine(Right(1), Right("a")) // assert: RemovedApis_1_0.resultHelperRemoved
+
+  val done = org.llm4s.AsyncResult.success(1) // assert: RemovedApis_1_0.resultHelperRemoved
 }

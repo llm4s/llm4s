@@ -39,7 +39,7 @@ private[llm4s] object BoundedJson {
    * Parses `text`, or returns a `Left`: a [[org.llm4s.error.ValidationError ValidationError]] on field `json` naming the limit when
    * `text` is nested more than `maxDepth` levels deep, otherwise a [[org.llm4s.error.ValidationError ValidationError]] on field `json`
    * carrying the parser's own message (why it stopped, and the JSON path where). The parser's exception
-   * is mapped here, never through `DefaultErrorMapper`: a malformed reply is a validation failure, and
+   * is mapped here, never through `Safety.fromThrowable`: a malformed reply is a validation failure, and
    * that mapper used to classify any exception whose message contained `401` or `429` (#1668) - the
    * parser's message is a JSON path such as `$[429]`, so a malformed reply came back as a `RateLimitError`.
    */

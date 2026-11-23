@@ -7,7 +7,8 @@ import org.llm4s.llmconnect.config.XaiConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, RequestOption, Thinking }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.{ EffortMapping, ModelRegistryService }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 
 import scala.util.Try
 

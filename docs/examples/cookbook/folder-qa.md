@@ -36,7 +36,8 @@ import org.llm4s.llmconnect.model.{ AssistantMessage, MessageRole }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.{ RAG, RAGAnswerResult }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Path }

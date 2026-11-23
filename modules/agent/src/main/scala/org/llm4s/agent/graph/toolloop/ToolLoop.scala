@@ -42,7 +42,8 @@ import org.llm4s.agent.graph.tool.{
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import upickle.default.ReadWriter
 

@@ -4,7 +4,8 @@ import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.speech.{ AudioInput, CloudSpeechSupport }
 import org.llm4s.speech.config.STTConfig
 import org.llm4s.speech.stt.{ STTError, STTOptions, SpeechToText, Transcription }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets

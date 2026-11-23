@@ -11,7 +11,8 @@ import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.security.TokenGenerations
 import org.llm4s.model.{ AdjustmentLog, EffortMapping, ModelRegistryService, UnmappedOptions }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.io.{ BufferedReader, InputStreamReader }

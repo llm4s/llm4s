@@ -1,7 +1,7 @@
 package org.llm4s.springai
 
 import org.llm4s.annotation.Experimental
-import org.llm4s.core.safety.DefaultErrorMapper
+import org.llm4s.llmconnect.provider.SdkErrorMapper
 import org.llm4s.error.LLMError
 import org.llm4s.javaapi.LlmException
 import org.llm4s.llmconnect.LLMClient
@@ -77,7 +77,7 @@ object SpringAiLlmClient {
   private def attempt[A](call: => A): Result[A] =
     Try(call).toEither.left.map {
       case e: LlmException => e.error
-      case t               => DefaultErrorMapper(t): LLMError
+      case t               => SdkErrorMapper(t, "spring-ai"): LLMError
     }
 
   /** A streamed reply put together: the text in order, each tool call once, and the last id, model and usage seen. */

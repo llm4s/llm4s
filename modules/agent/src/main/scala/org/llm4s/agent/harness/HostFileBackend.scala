@@ -4,7 +4,8 @@ import org.llm4s.agent.graph.{ GraphError, ReplayGuard, ReplaySupport, StateChec
 import org.llm4s.agent.graph.tool.LockKey
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, LLMError, NonRecoverableError, ProcessingError, ValidationError }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 
 import java.nio.ByteBuffer
 import java.nio.channels.{ FileChannel, FileLock }

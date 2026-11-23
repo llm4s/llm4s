@@ -834,7 +834,8 @@ If the weights come from user input, check them first so a bad value becomes a `
 Letting the constructor do the checking keeps the rules in one place:
 
 ```scala
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.vectorstore.FusionStrategy
 import scala.util.Try
 
@@ -1298,7 +1299,8 @@ When the sizes come from user input, check them first. To get a `Left(Validation
 ```scala
 import org.llm4s.chunking.ChunkingConfig
 import org.llm4s.llmconnect.utils.ChunkingUtils
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import scala.util.Try
 
 val text = "one two three four five six seven eight nine ten"

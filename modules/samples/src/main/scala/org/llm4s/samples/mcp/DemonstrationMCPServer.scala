@@ -7,7 +7,7 @@ import upickle.default.{ read => upickleRead, write => upickleWrite }
 import org.llm4s.mcp._
 import ujson.{ Obj, Str, Arr }
 import scala.util.{ Try, Success, Failure }
-import org.llm4s.types.TryOps
+import org.llm4s.syntax.toResult
 import java.util.UUID
 import scala.collection.mutable
 

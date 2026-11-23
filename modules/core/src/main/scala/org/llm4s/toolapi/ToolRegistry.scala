@@ -76,7 +76,7 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
   /**
    * Executes a tool call synchronously, wrapping any thrown exception.
    *
-   * We use `Try` here (rather than `org.llm4s.core.safety.Safety.safely`) so that tool
+   * We use `Try` here (rather than `org.llm4s.error.Safety.safely`) so that tool
    * execution remains independent of the Safety API and returns `Either` for direct use
    * by retry/timeout logic. Safety is still used elsewhere in the codebase (e.g. tracing,
    * agent entry points).

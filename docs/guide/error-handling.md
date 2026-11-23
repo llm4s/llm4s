@@ -40,12 +40,13 @@ A call either succeeds with a `Right(value)` or fails with a `Left(error)`, wher
 `LLMError`. There is no third outcome: nothing is thrown past you, and a `null` is never returned in
 place of an error.
 
-Two imports come up. The type alias is in `org.llm4s.types`; the helper object (`Result.success`,
-`Result.traverse` and friends, used in [section 8](#8-combining-results)) is `org.llm4s.Result`:
+One import brings both the type alias and its helper object (`Result.success`, `Result.traverse` and
+friends, used in [section 8](#8-combining-results)). The conversions to a `Result` are extension methods
+in `org.llm4s.syntax`, in scope only when you import them:
 
 ```scala
-import org.llm4s.Result                 // the helper object
-import org.llm4s.types.{ Result, TryOps } // the type alias, and Try-to-Result syntax
+import org.llm4s.syntax.toResult // Try(...).toResult; or org.llm4s.syntax.* for all the extensions
+import org.llm4s.types.Result    // the type alias and the helper object
 ```
 
 ## 2. The basic pattern
@@ -109,15 +110,15 @@ is not recoverable, since nothing says a retry can help.
 
 | Error | Recoverable | Where the library raises it |
 |---|---|---|
-| `AuthenticationError` | no | A provider rejects the credentials: HTTP 401 or 403, Anthropic's `UnauthorizedException`, Bedrock's access-denied or missing-credentials exceptions, Gemini's invalid-key 400. Also when Vertex AI or watsonx cannot obtain a token, and from `DefaultErrorMapper` for an exception whose message names HTTP status 401 (`HTTP 401`, `401 Unauthorized`, `status code: 401`). |
+| `AuthenticationError` | no | A provider rejects the credentials: HTTP 401 or 403, Anthropic's `UnauthorizedException`, Bedrock's access-denied or missing-credentials exceptions, Gemini's invalid-key 400. Also when Vertex AI or watsonx cannot obtain a token, and from the OpenAI, Anthropic, Bedrock and Spring AI clients for an SDK exception whose message names HTTP status 401 (`HTTP 401`, `401 Unauthorized`, `status code: 401`). |
 | `ConfigurationError` | no | Configuration is missing or invalid: no provider section, no API key, a provider id that no module on the classpath registers, an embedding model with no known dimensions, or a block a config loader cannot read (providers, embeddings, tracing, metrics, tools, RAG, speech). |
 | `ValidationError` | no | A request or value is rejected: an invalid message or conversation, a model the model registry does not know, a guardrail rejecting input or output (the built-in guardrails reject with one), HTTP 400 (on field `request`), Anthropic's or Bedrock's invalid-request exceptions, or a response body that cannot be parsed. |
 | `ContentFilteredError` | no | The provider's content filter stopped the call: Gemini or Vertex AI blocked the prompt (`promptFeedback.blockReason`) or stopped the reply with a filter `finishReason` (`SAFETY`, `RECITATION`, `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, the image ones and others), even after some text. It carries the `provider`, the `reason` and `promptBlocked`. `ReliableClient`'s circuit breaker counts it as neither a success nor a failure. |
 | `InvalidInputError` | no | Only `llm4s-image`'s image processing (`LocalImageProcessor`, saving an image): an unreadable path, a bad resize or crop, a path traversal. It carries the `field`, the `value` and the `reason`. |
-| `RateLimitError` | yes | A provider's rate limit: HTTP 429, or Anthropic's or Bedrock's throttling exception. Also `ReliableClient`'s own limiter, and `DefaultErrorMapper` for an exception whose message names HTTP status 429 (`HTTP 429`, `429 Too Many Requests`, `status code: 429`). It carries `retryAfter` when the provider says how long to wait. |
+| `RateLimitError` | yes | A provider's rate limit: HTTP 429, or Anthropic's or Bedrock's throttling exception. Also `ReliableClient`'s own limiter, and the OpenAI, Anthropic, Bedrock and Spring AI clients for an SDK exception whose message names HTTP status 429 (`HTTP 429`, `429 Too Many Requests`, `status code: 429`). It carries `retryAfter` when the provider says how long to wait. |
 | `ServiceError` | yes | Any other non-2xx status from a provider (through `HttpErrorMapper` or `Llm4sHttpClient`, and from Bedrock and watsonx), or a call rejected by an open circuit breaker (`ReliableClient` or `ErrorRecovery.CircuitBreaker`, status 503). Also `llm4s-image`'s vision clients (OpenAI, Anthropic, Gemini), for a non-2xx answer or a reply with no text. It carries `httpStatus`; see the note below. |
-| `NetworkError` | yes | A connection fails, a host is unknown or I/O breaks, in llm4s's HTTP client or the Bedrock client; `DefaultErrorMapper`, which the OpenAI and Anthropic clients use for I/O failures, gives one for a socket timeout or a refused connection. Also a URL refused by the SSRF check, and a failed `llm4s-rag` URL, web-crawl or S3 load, including a non-2xx answer to `UrlLoader`. |
-| `TimeoutError` | yes | A connect, request or socket timeout elapses in llm4s's own HTTP client, or a `ReliableClient` deadline passes. The vendor-SDK clients map timeouts themselves: OpenAI and Bedrock report a `NetworkError`, and Anthropic maps its exceptions through `DefaultErrorMapper`. |
+| `NetworkError` | yes | A connection fails, a host is unknown or I/O breaks, in llm4s's HTTP client or the Bedrock client; `Safety.fromThrowable`, which the OpenAI and Anthropic clients use for I/O failures, gives one for a socket timeout or a refused connection. Also a URL refused by the SSRF check, and a failed `llm4s-rag` URL, web-crawl or S3 load, including a non-2xx answer to `UrlLoader`. |
+| `TimeoutError` | yes | A connect, request or socket timeout elapses in llm4s's own HTTP client, or a `ReliableClient` deadline passes. The vendor-SDK clients map timeouts themselves: OpenAI and Bedrock report a `NetworkError`, and Anthropic maps its exceptions as [section 7](#7-turning-exceptions-into-errors) describes. |
 | `ExecutionError` | yes | Only `ErrorRecovery.recoverWithBackoff`, when it runs out of attempts ([section 9](#9-recovering-from-failures)). Tool and MCP failures are other types; see the note below. |
 | `OptimisticLockFailure` | yes | Only `llm4s-memory-postgres`'s `PostgresMemoryStore`, when another writer updated the same memory record first; re-read it and try again. |
 | `CancelledError` | no | The thread was interrupted. Interruption is how llm4s cancels work, and a cancelled call is never retried. |
@@ -126,7 +127,7 @@ is not recoverable, since nothing says a retry can help.
 | `ContextError` | no | Context compression fails: `LLMCompressor`'s LLM call fails, or `ToolOutputCompressor` cannot store an artifact or parse JSON content. |
 | `TokenizerError` | no | `ConversationTokenCounter` has no tokenizer for the requested id. |
 | `SimpleError` | no | The MCP client and its transports (`llm4s-mcp`): connection, session, JSON-RPC and server-process failures. |
-| `UnknownError` | no | An unexpected exception, wrapped: the fallback of `DefaultErrorMapper` (and so of `toResult` and `toLLMError`), an unexpected failure in llm4s's HTTP client, or a tracing backend that fails to start or to export. |
+| `UnknownError` | no | An unexpected exception, wrapped: the fallback of `Safety.fromThrowable` (and so of `toResult` and `toLLMError`), an unexpected failure in llm4s's HTTP client, or a tracing backend that fails to start or to export. |
 
 The table lists the `LLMError` types in `org.llm4s.error`, the package that is the source of truth for this core
 set. Other modules define errors of their own, below.
@@ -156,8 +157,8 @@ non-recoverable error is never retried, and neither is an error that carries no 
 clients use it; Gemini first turns a 400 that reports an invalid API key into an `AuthenticationError`.
 The Anthropic client maps its SDK's exceptions instead: unauthorized (401) to `AuthenticationError`, rate
 limited to `RateLimitError` (with no `retryAfter`), invalid data to a `ValidationError` on field `input`,
-and anything else, including other HTTP statuses, through `DefaultErrorMapper`
-([section 7](#7-turning-exceptions-into-errors)), usually to an `UnknownError`. The Bedrock client maps the
+and anything else by its type ([section 7](#7-turning-exceptions-into-errors)) and then by a 401 or 429 its
+message names, usually to an `UnknownError`. The Bedrock client maps the
 AWS SDK's exceptions: throttling or an exceeded quota to `RateLimitError`, an invalid request to
 `ValidationError`, access denied, a 401 or 403, or missing credentials to `AuthenticationError`, any other
 service status to `ServiceError`, and any other client failure to `NetworkError`.
@@ -263,10 +264,9 @@ The other direction matters just as much, because the JDK and other libraries th
 the boundary so the rest of your code only sees `Result`:
 
 ```scala
-import org.llm4s.Result
 import org.llm4s.error.NotFoundError
-import org.llm4s.error.ThrowableOps._
-import org.llm4s.types.{ OptionOps, TryOps }
+import org.llm4s.syntax.{ toLLMError, toResult }
+import org.llm4s.types.Result
 
 import scala.util.Try
 
@@ -277,16 +277,23 @@ new IllegalStateException("boom").toLLMError               // a Throwable as an 
 Option.empty[String].toResult(NotFoundError("no such key", "model")) // Left(NotFoundError)
 ```
 
-`toResult` and `toLLMError` map an exception through `DefaultErrorMapper`: an interrupt becomes a
-`CancelledError`, a socket timeout or a refused connection a `NetworkError`, an exception whose message
-names HTTP status 401 or 429 an `AuthenticationError` (code `401`, with the redacted message) or a
-`RateLimitError`, and anything else an `UnknownError` that keeps the exception. A message names a status
-only in an HTTP context, at a word boundary - after `HTTP`, `status`, `status code`, `error code` or
-`response code`, before its reason phrase (`401 Unauthorized`, `429 Too Many Requests`), or leading the
-message as `openai-java` and `anthropic-java` write it (`401: <body>`) - so `Index 4012 out of bounds` or
-`port 14290` is an `UnknownError`. A JSON-style `"status": 429` or `http_status=401` counts too. The SDK
-shape has no other HTTP marker, so a message that merely *starts* with `401: ` or `429: ` is classified as
-well. Only the first 4 KiB and the last 1 KiB of a message are scanned. Pass your own `ErrorMapper` for a finer mapping. `Try` (and so
+`toResult`, `toLLMError` and `Result.safely` map an exception with `Safety.fromThrowable`
+(`org.llm4s.error`), by its type alone: an interrupt becomes a `CancelledError`, a socket timeout or a
+refused connection a `NetworkError`, and anything else an `UnknownError` that keeps the exception. The
+message is never read for meaning, so an exception that says `HTTP 401` or `429: unexpected token` is an
+`UnknownError`; for a finer mapping, match on the exception yourself (`Try(...).toEither.left.map { ... }`).
+
+The clients built on a vendor SDK (OpenAI, Anthropic, Bedrock, Spring AI) take one more step for an
+exception their SDK threw, because an SDK often reports an HTTP failure only in its message: a message
+that names HTTP status 401 or 429 becomes an `AuthenticationError` (code `401`, with the redacted message)
+or a `RateLimitError`, carrying the provider's name. A message names a status only in an HTTP context, at
+a word boundary - after `HTTP`, `status`, `status code`, `error code` or `response code`, before its reason
+phrase (`401 Unauthorized`, `429 Too Many Requests`), or leading the message as `openai-java` and
+`anthropic-java` write it (`401: <body>`) - so `Index 4012 out of bounds` or `port 14290` stays an
+`UnknownError`. A JSON-style `"status": 429` or `http_status=401` counts too. Only the first 4 KiB and the
+last 1 KiB of a message are scanned.
+
+`Try` (and so
 `Result.safely`) never captures an `InterruptedException`, which Scala treats as fatal, so let an
 interrupt propagate or map it yourself with `toLLMError`.
 
@@ -305,8 +312,8 @@ NotFoundError("no such key", "model")
 When you have a list of things to do, `Result` has helpers so you do not write the loop:
 
 ```scala
-import org.llm4s.Result
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 
 import scala.util.Try
 
@@ -322,7 +329,6 @@ parseAll(List("1", "x", "y")) // Left(...), the first failure
   in a list of results that have already been computed.
 - `Result.validateAll(items)(check)` runs every check and returns **all** the failures as a
   `Left(List[LLMError])`: use it when you want to report every problem at once.
-- `Result.combine(a, b)` joins two independent results into a tuple.
 
 ## 9. Recovering from failures
 

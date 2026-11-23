@@ -12,7 +12,6 @@ import org.llm4s.error.{
   TimeoutError,
   ValidationError
 }
-import org.llm4s.error.ThrowableOps.*
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.{ BedrockConfig, ProviderConfig }
 import org.llm4s.llmconnect.model.*
@@ -742,7 +741,7 @@ class BedrockClient(
         AuthenticationError("bedrock", safeMessage(e))
       case e: SdkClientException =>
         NetworkError(safeMessage(e), Some(e), endpointLabel)
-      case e => e.toLLMError
+      case e => SdkErrorMapper(e, "bedrock")
     }
 
   /** The async client reports failures wrapped in `CompletionException`. */
@@ -981,7 +980,7 @@ object BedrockClient {
     PartEncoding
       .check(provider, messages, userPart("document"), toolPart("document"))
 
-  import org.llm4s.types.TryOps
+  import org.llm4s.syntax.toResult
 
   /** What the SDK's stream callbacks hand to the thread that is waiting on the stream. */
   private[provider] enum StreamSignal {

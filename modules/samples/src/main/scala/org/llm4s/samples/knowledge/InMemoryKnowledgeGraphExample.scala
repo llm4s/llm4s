@@ -11,7 +11,8 @@ import org.llm4s.knowledgegraph.storage.{
   TraversalConfig
 }
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
 import java.nio.file.{ Files, Path }

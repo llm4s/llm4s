@@ -1,7 +1,8 @@
 package org.llm4s.knowledgegraph.extraction
 
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
 import org.llm4s.util.{ BoundedJson, Redaction }
 import org.slf4j.LoggerFactory

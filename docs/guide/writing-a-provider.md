@@ -42,7 +42,7 @@ Check first whether you need a module at all:
 Three rules hold throughout:
 
 1. **Return `Result[A]`, never throw.** `type Result[+A] = Either[LLMError, A]`. Wrap calls that
-   can throw with `Try(...).toResult` (`import org.llm4s.types.TryOps`).
+   can throw with `Try(...).toResult` (`import org.llm4s.syntax.toResult`).
 2. **Never read the environment.** No `sys.env`, `System.getenv` or `ConfigFactory.load()` in
    provider code. Configuration arrives typed, through the descriptor; environment variables are
    bound in your module's `reference.conf`.

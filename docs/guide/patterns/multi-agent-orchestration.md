@@ -33,7 +33,7 @@ Simple workflows where tasks need to execute in order, each building on previous
 
 ```text
 import org.llm4s.agents._
-import org.llm4s.Result
+import org.llm4s.types.Result
 
 object SequentialDelegation {
   

@@ -1,4 +1,4 @@
-package org.llm4s.core.safety
+package org.llm4s.security
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.NetworkError
@@ -48,7 +48,7 @@ import scala.util.Try
  *
  * @example
  * {{{
- * import org.llm4s.core.safety.NetworkSecurity
+ * import org.llm4s.security.NetworkSecurity
  *
  * // Validate a URL before fetching
  * NetworkSecurity.validateUrl("https://example.com/api") // Right(())

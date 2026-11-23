@@ -26,7 +26,8 @@ import org.llm4s.toolapi.{
   StringSchema,
   ToolFunction
 }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.springframework.ai.chat.messages.{
   AssistantMessage as SpringAssistantMessage,
   Message as SpringMessage,

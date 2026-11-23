@@ -1,4 +1,4 @@
-package org.llm4s.core.safety
+package org.llm4s.security
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers

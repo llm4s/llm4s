@@ -182,7 +182,7 @@ llm4s/
 | `NoConfigFactory`  | `ConfigFactory.load()` | `org.llm4s.config`                   | CRITICAL |
 | `NoSysEnv`         | `sys.env(...)`         | `config/`, `samples/`, `workspace/`  | CRITICAL |
 | `NoSystemGetenv`   | `System.getenv(...)`   | Same as above                        | CRITICAL |
-| `NoKeywordTry`     | `try { ... }`          | `core.safety`                        | HIGH     |
+| `NoKeywordTry`     | `try { ... }`          | A region marked `// scalafix:off`    | HIGH     |
 | `NoInfixOperators` | `list map f`           | Use `list.map(f)`                    | MEDIUM   |
 
 ---

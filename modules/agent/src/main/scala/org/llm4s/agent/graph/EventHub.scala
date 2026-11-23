@@ -3,7 +3,8 @@ package org.llm4s.agent.graph
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.agent.events.SubagentEvents
 import org.llm4s.error.{ CancelledError, LLMError }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.{ Condition, ReentrantLock }
