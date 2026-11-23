@@ -1000,6 +1000,7 @@ Current monitoring limitations in LLM4S:
 
 ## Related Documentation
 
+- [Agent tracing and metrics](agents) - The trace each agent run sends, the agent runtime and run queue metrics, usage, cost and what to alert on
 - [Provider Exchange Logging](provider-exchange-logging) - Capture raw provider requests and responses for debugging
 - [In-Process Tracing Use Cases](enhanced-tracing-use-cases) - Full catalogue of `TraceCollectorTracing` + `InMemoryTraceStore` scenarios
 - [Configuration Guide](../../getting-started/configuration) - Complete configuration reference

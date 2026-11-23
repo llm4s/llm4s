@@ -34,7 +34,7 @@ The LLM4S Agent Framework provides a production-ready foundation for building LL
 - **Human review** - Pause a turn for approvals, questions and breakpoints, and resume it ([human review guide](human-review))
 - **Streaming** - Real-time events for responsive UIs (`agent.stream`, [streaming guide](streaming))
 - **Durable threads** - Keep threads in SQLite or PostgreSQL, recover a run after a crash, share threads between machines ([durable checkpointers](durable-checkpointers), [several machines](multiple-machines))
-- **Graphs** - Typed multi-agent workflows on {% include api.html t="org.llm4s.agent.graph.GraphBuilder" %}: parallel nodes, joins and checkpoints ([recipe](../../examples/cookbook/multi-agent-graph.html))
+- **Graphs** - Your own workflow on {% include api.html t="org.llm4s.agent.graph.GraphBuilder" %}: fan-out, joins, routing, interrupts and checkpoints ([graphs guide](graphs), [recipe](../../examples/cookbook/multi-agent-graph.html))
 
 ## Quick Start
 
@@ -1013,6 +1013,12 @@ another, any instance can follow or cancel any run, and a message for a busy thr
 interrupts the running turn, as the caller chooses.
 
 [Learn more about running on several machines →](multiple-machines)
+
+### [Writing Middleware](middleware)
+
+Add your own cross-cutting concern - logging, redaction, a tool-call policy, context in the prompt - with hooks around each turn, model call and tool call: what each hook may return, state keys, prompt sections, ordering, errors, and replay on a durable thread.
+
+[Learn more about writing middleware →](middleware)
 
 ---
 
