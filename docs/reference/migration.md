@@ -51,7 +51,26 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
 [`ProviderRegistry` lookups accept aliases](#providerregistry-lookups-accept-aliases-2812),
-and [`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813).
+[`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
+and [`LLMClient.validate()` checks the provider](#llmclientvalidate-checks-the-provider-2830).
+
+## `LLMClient.validate()` checks the provider (#2830)
+
+`validate()` returned `Right(())` for every provider client, whatever the key, the endpoint or the model. It now
+sends the provider one cheap request, and a client with no such request says so.
+
+| Before | After |
+|---|---|
+| `client.validate()` is `Right(())` for any provider client | `Right(())` only when the provider accepted a request: a model lookup (`openai`, `anthropic`, `gemini`, `ollama`), a model listing (`openai-compatible`, `deepseek`, `mistral`, `xai`, `requesty`) or a key lookup (`openrouter`) |
+| a wrong key or an unreachable endpoint passes | `Left(AuthenticationError)`, `Left(NetworkError)` and the like, as a completion would fail |
+| `azure`, `vertexai`, `bedrock`, `zai`, `cohere`, `watsonx`, `perplexity`, `jlama`: `Right(())` | `Left(ValidationUnsupportedError)`: nothing was checked |
+| your own `LLMClient` that does not override `validate()`: `Right(())` | `Left(ValidationUnsupportedError)`; override `validate()` to check, or to return `Right(())` in a test double whose code under test calls it |
+| `client.validate().isRight` in a startup check or readiness probe | match `Left(_: ValidationUnsupportedError)` as "cannot check", or the probe fails for the providers in the third row |
+
+`validate()` is now a network call with a timeout of ten seconds: do not call it on every readiness probe without
+caching its result. A provider author's own `OpenAICompatibleDialect` validates with `GET /models` unless it
+overrides `validationPath`; the [provider guide](../guide/writing-a-provider#validate) has the rules, and
+`ProviderModuleChecks.assertValidates` / `assertValidationUnsupported` check them.
 
 ## `StreamingAccumulator` takes the model and reports usage one way (#2813)
 
