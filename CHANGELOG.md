@@ -83,9 +83,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Kotlin `serviceTier`): OpenAI and Azure send `service_tier`, Anthropic `auto` or `standard_only`, Gemini `serviceTier`,
   Vertex AI its shared-request-type header and Bedrock `serviceTier`; each reports what it cannot send, and every
   other provider reports it `Dropped` ([cost controls](docs/guide/cost-controls.md#service-tiers),
-  [#2726](https://github.com/llm4s/llm4s/issues/2726)); `Completion.servedTier`, also on `ModelCallCompleted`, reports
-  the tier that served the call, and `ServiceTier.Other(raw)` keeps one the enum does not name
-  ([#2746](https://github.com/llm4s/llm4s/issues/2746)).
+  [#2726](https://github.com/llm4s/llm4s/issues/2726)); `Completion.servedTier`, also on `ModelCallCompleted` and Java
+  `JCompletion.servedTier()`, reports the tier that served the call, and `ServiceTier.Other(raw)` keeps one the enum
+  does not name ([#2746](https://github.com/llm4s/llm4s/issues/2746), [#2751](https://github.com/llm4s/llm4s/issues/2751)).
 
 ### Java & Kotlin APIs
 
