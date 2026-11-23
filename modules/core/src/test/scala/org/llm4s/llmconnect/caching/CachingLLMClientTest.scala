@@ -252,10 +252,41 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     CacheConfig.create(0.5, 1.hour, 100).isRight shouldBe true
   }
 
-  test("Security: Prompt text excludes sensitive tool outputs") {
+  test("CacheConfig setters check the new value") {
+    val base = CacheConfig.create(0.5, 1.hour).getOrElse(fail())
+    base.withMaxSize(10).map(_.maxSize) shouldBe Right(10)
+    base.withTtl(2.hours).map(_.ttl) shouldBe Right(2.hours)
+    base.withSimilarityThreshold(0.8).map(_.similarityThreshold) shouldBe Right(0.8)
+    base.withMaxSize(-1).isLeft shouldBe true
+    base.withTtl(0.seconds).isLeft shouldBe true
+    base.withSimilarityThreshold(Double.NaN).isLeft shouldBe true
+  }
+
+  test("A tool loop bypasses the cache: step 2 is never served step 1's tool-call completion") {
+    val mockLLM   = new MockLLMClient()
+    val mockEmbed = new MockEmbeddingClient(Map("weather" -> Seq(1.0, 0.0, 0.0)))
+    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, new MockTracing(), new MockClock())
+
+    val step1 = Conversation(Seq(UserMessage("What is the weather?")))
+    val step2 = Conversation(
+      Seq(
+        UserMessage("What is the weather?"),
+        AssistantMessage("Checking...", toolCalls = List(ToolCall("1", "weather", "{\"loc\":\"Paris\"}"))),
+        ToolMessage("Paris: 20C", "1")
+      )
+    )
+
+    client.complete(step1)
+    mockLLM.callCount shouldBe 1
+    client.complete(step2)
+    mockLLM.callCount shouldBe 2
+  }
+
+  test("A conversation with tool turns is neither embedded nor stored") {
     val mockLLM   = new MockLLMClient()
     val mockEmbed = new MockEmbeddingClient(Map.empty)
-    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, new MockTracing(), new MockClock())
+    val tracing   = new MockTracing()
+    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing, new MockClock())
 
     val conversation = Conversation(
       messages = List(
@@ -268,9 +299,28 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     )
 
     client.complete(conversation)
+    client.complete(conversation)
 
-    // Verify embedding input only contains User messages
-    val expectedInput = "user: What is the weather?\nuser: And in London?"
-    mockEmbed.lastInput shouldBe Some(expectedInput)
+    mockLLM.callCount shouldBe 2
+    mockEmbed.lastInput shouldBe None
+    tracing.events shouldBe empty
+  }
+
+  test("Security: Prompt text excludes assistant messages") {
+    val mockLLM   = new MockLLMClient()
+    val mockEmbed = new MockEmbeddingClient(Map.empty)
+    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, new MockTracing(), new MockClock())
+
+    val conversation = Conversation(
+      messages = List(
+        UserMessage("What is the weather?"),
+        AssistantMessage("It is 20C in Paris"),
+        UserMessage("And in London?")
+      )
+    )
+
+    client.complete(conversation)
+
+    mockEmbed.lastInput shouldBe Some("user: What is the weather?\nuser: And in London?")
   }
 }

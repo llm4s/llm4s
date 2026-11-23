@@ -19,6 +19,9 @@ import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
  * pricing is known, a cost; a failed call as one [[org.llm4s.trace.TraceEvent.ErrorOccurred]] naming the `embeddings`
  * operation (#2275).
  *
+ * It is an [[org.llm4s.llmconnect.provider.EmbeddingProvider]] itself, so a decorator over one (such as
+ * [[org.llm4s.llmconnect.caching.CachedEmbeddingClient]]) takes either, and an `EmbeddingClient` can wrap a decorator.
+ *
  * @param providerId the canonical id of the provider, which tracing reports; [[EmbeddingClient.from]] sets it
  */
 @Stable
@@ -27,11 +30,12 @@ class EmbeddingClient(
   tracer: Option[Tracing] = None,
   operation: String = "embedding",
   val providerId: Option[ProviderId] = None
-)(using service: ModelRegistryService) {
+)(using service: ModelRegistryService)
+    extends EmbeddingProvider {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** Text embeddings via the configured HTTP provider. */
-  def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
+  override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
     logger.debug(s"[EmbeddingClient] Embedding with model=${request.model.name}, inputs=${request.input.size}")
     val startedAt = System.nanoTime()
     val result    = provider.embed(request)
@@ -39,7 +43,7 @@ class EmbeddingClient(
   }
 
   /** Multimodal embeddings via the configured HTTP provider. */
-  def embedMultimodal(
+  override def embedMultimodal(
     request: org.llm4s.llmconnect.model.MultimediaEmbeddingRequest
   ): Result[EmbeddingResponse] = {
     logger.debug(
