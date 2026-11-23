@@ -57,7 +57,7 @@ marked *deferred* are the Stage 5 spec's Decision 11 ("deferred, as later issues
 | Thread search | By status and metadata, sorted ([threads](https://docs.langchain.com/langsmith/use-threads)) | Inherits | Thread registry: by tenant, status, agent, metadata and update time, paged; incomplete threads | Parity |
 | Retention | `checkpointer.ttl` (`delete` or `keep_latest`), `store.ttl`, swept every 5 minutes ([TTL](https://docs.langchain.com/langsmith/configure-ttl)) | Inherits | Store-wide sweep on the worker's schedule: by age, checkpoint and event counts; tombstones reclaimed with a defined answer for readers (`ThreadDeleted`); closed entries reclaimed | Parity |
 | Rolling upgrades | Shutdown draining is documented; schema migration behaviour of Agent Server across versions is not ([standalone](https://docs.langchain.com/langsmith/deploy-standalone-server)) | Inherits | Rolling within one schema and checkpoint format; otherwise a full stop, an old instance refusing a newer schema | Expand-then-contract migrations: with the 1.0 compatibility baseline |
-| Encryption at rest | AES keys for checkpoints and JSON fields; custom handlers with per-tenant keys (beta) ([encryption](https://docs.langchain.com/langsmith/custom-encryption)) | Inherits | None in the store (database-level encryption applies) | *Deferred*: checkpoint encryption at rest ([#2449](https://github.com/llm4s/llm4s/issues/2449)) |
+| Encryption at rest | AES keys for checkpoints and JSON fields; custom handlers with per-tenant keys (beta) ([encryption](https://docs.langchain.com/langsmith/custom-encryption)) | Inherits | `EncryptingCheckpointer` and `EncryptingRunQueue` over any store: AES-256-GCM for state, pending writes, custom events, effect outcomes and queued inputs, bound to their thread and place; an `EncryptionKeySource` SPI with per-tenant keys and rotation by key id. Ids, statuses, timestamps, thread metadata and failure messages stay plain ([guide](../guide/agents/durable-checkpointers#encrypting-what-the-store-holds)) | Parity for payloads (experimental, [#2449](https://github.com/llm4s/llm4s/issues/2449)); no shipped KMS key source |
 | External durability engine | No | No | No (the store is the durability layer) | Out of scope for Stage 5; Temporal integration is [#876](https://github.com/llm4s/llm4s/issues/876) |
 
 ## Observability and operations
@@ -97,5 +97,5 @@ marked *deferred* are the Stage 5 spec's Decision 11 ("deferred, as later issues
 On durable execution and scale-out, llm4s matches LangGraph Platform's capabilities with one database and no Redis,
 and is a library you run rather than a server you license. The gaps are the server product (HTTP API, auth,
 protocol endpoints: a separate project), platform conveniences the spec deferred (cron, webhooks, versioned
-assistants, encryption at rest, A2A, AG-UI, async subagents, compensating actions),
+assistants, A2A, AG-UI, async subagents, compensating actions),
 `rollback` on cancel and double texting, and evaluation, which is Stage 6.

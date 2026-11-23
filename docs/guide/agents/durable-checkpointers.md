@@ -865,6 +865,72 @@ Metadata is limited to 32 entries, keys of `A-Z a-z 0-9 _ . : / -` up to 64 char
 (`ThreadMetadata.of` returns a `ValidationError` past them). The SQLite and PostgreSQL stores index every query, so a
 page costs the same however many threads the store holds.
 
+## Encrypting what the store holds
+
+A store keeps what users said and what tools returned in plain. `EncryptingCheckpointer` and `EncryptingRunQueue`
+(`org.llm4s.agent.encryption`, experimental) wrap any store and its run queue so those values are stored encrypted,
+with keys your application holds: AES-256-GCM from the JDK, no schema change, and the same code over the in-memory,
+SQLite and PostgreSQL stores.
+
+```scala
+import org.llm4s.agent.encryption.*
+
+for
+  store <- CheckpointerConfigLoader.open()
+  queue <- store.runQueue
+  key   <- EncryptionKey.fromBase64(KeyId("2026-11"), keyFromYourSecretStore) // 32 random bytes, Base64
+  keys         = StaticKeySource(key)
+  checkpointer = MeteredCheckpointer(EncryptingCheckpointer(store.checkpointer, keys), metrics)
+  agent  <- Agent.builder("assistant", client).withRuntime(new GraphRuntime(checkpointer)).build()
+  worker <- AgentWorker(EncryptingRunQueue(queue, keys), checkpointer, Seq(QueuedAgent(agent)), metrics = metrics)
+yield worker
+```
+
+Wrap **both**: the queue is a separate SPI, and a queued query is the user's input. Every runtime, worker and
+submitter of the service must use the wrappers with the same keys. Put `MeteredCheckpointer` outside, as above: it then
+times commits with their encryption and still counts child tasks, whose events it reads before they are sealed.
+
+- **Encrypted**: a checkpoint's state values, pending task inputs and parked questions; a pending write's updates,
+  route payloads and question; a custom event's payload; an effect record's outcome; a queue entry's `Start` input
+  and `Resume` answers.
+- **Still plain**, because the store orders, fences, lists and prunes by them: every id (thread, run, checkpoint,
+  task, node, interrupt, entry, tenant) and submission key; statuses, outcomes, timestamps, tokens and sequence
+  numbers; the graph's id, version and shape, and the names of state keys; thread metadata (keep content out of it);
+  trace contexts; the built-in events, with a failed run's error message, and a queue entry's failure message or
+  cancel note; and the digests kept beside values, which let someone who can guess a value exactly confirm the guess.
+  The size of each value shows too. Disk or database encryption still has a job.
+- **Bound to its place.** Each value opens only on its thread and in its place (for a checkpoint: its tenant,
+  checkpoint and state key), so one copied elsewhere in the database fails to open. Two things are not bound, because
+  the store numbers them itself: a custom event to its sequence number, and a queued input to its entry id.
+- **Failure is an error, never plaintext.** A missing key, a wrong key, a changed or moved value is a `Left`
+  (`EncryptionError`); a write with no key for its tenant stores nothing.
+
+**Keys.** `EncryptionKeySource` is the SPI: `current(tenant)` answers the key to write with and `key(id)` the key
+that wrote a stored value. `StaticKeySource` holds keys in memory; implement the trait over your KMS for anything
+else, caching what you fetch (both methods are on the commit path). Key material never appears in `toString`, a log
+or an error.
+
+```scala
+val keys = StaticKeySource(december)            // every thread without a key of its own
+  .withTenantKey(TenantId("acme"), acmeKey)     // acme's threads and queue entries
+  .withRetiredKey(november)                     // still read, never written with
+```
+
+- **Per tenant.** A thread is sealed with its tenant's key. `StaticKeySource.tenantsOnly` has no default, so a tenant
+  you gave no key cannot write at all.
+- **Rotation.** Give the new key a new `KeyId` and keep the old one as retired. Every stored value names its key, so
+  old rows stay readable and new writes use the new key. Nothing is re-encrypted in place; drop the old key once
+  [retention](#retention) has pruned what it wrote (a read of a row whose key is gone is `UnknownKey`).
+- **Switching it on over an existing store.** Rows written before are plaintext, and by default reading one is
+  refused (`NotEncrypted`), so that nobody who can write to the database can swap a ciphertext for a plaintext. Pass
+  `EncryptionSettings().withPlaintextReads(true)` to both wrappers while old rows remain - writes are encrypted
+  either way - and remove it once retention has pruned them.
+- **Losing a key loses the data.** There is no recovery without it.
+
+A thread put back to an earlier state of itself by someone who can write to the database still opens: encryption
+binds a value to its place, not to its time. The design is
+`docs/superpowers/specs/2026-11-22-checkpoint-encryption-design.md`.
+
 ## Writing a store
 
 A store implements `Checkpointer`: `claim`, `renew` and `release` for claims; `commit`, `latest`, `history`,
