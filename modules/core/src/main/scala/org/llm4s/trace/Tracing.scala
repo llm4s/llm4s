@@ -8,6 +8,7 @@ import org.llm4s.trace.spi.{ TracingBackend, TracingBackends }
 import org.llm4s.types.Result
 
 import java.util.Locale
+import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
 
 /**
@@ -41,6 +42,12 @@ import scala.util.control.NonFatal
  * } yield ()
  * }}}
  *
+ * == Implementing a backend ==
+ *
+ * `traceEvent(event: TraceEvent)` is the only abstract method: every other method
+ * builds a [[TraceEvent]] and passes it there, and is `final`, so whatever a tracer does to an event - export it,
+ * filter it, transform it - it does to all of them (#2799). A tracer that holds resources overrides [[close]].
+ *
  * == Agent state ==
  *
  * There is no `traceAgentState(AgentState)`. An agent run reports its end with
@@ -60,10 +67,10 @@ import scala.util.control.NonFatal
  * @see [[TracingComposer]] for composition utilities
  */
 @Stable
-trait Tracing {
+trait Tracing extends AutoCloseable {
 
   /**
-   * Handles a structured trace event using this tracing backend.
+   * Handles a structured trace event using this tracing backend: the one method an implementation writes.
    * Implementations should report tracing failures through the returned
    * result rather than throwing exceptions.
    *
@@ -75,83 +82,59 @@ trait Tracing {
   def traceEvent(event: TraceEvent): Result[Unit]
 
   /**
-   * Records a tool call using the supplied tool name, input, and output.
-   *
-   * The ConsoleTracing and LangfuseTracing implementations emit a
-   * [[TraceEvent.ToolExecuted]] event with zero duration and the success
-   * flag set to true. They do not measure the duration or determine whether
-   * the tool execution succeeded.
-   *
-   * Implementations should report tracing failures through the returned
-   * result rather than throwing exceptions.
+   * Records a tool call: a [[TraceEvent.ToolExecuted]] passed to `traceEvent`.
    *
    * @param toolName the name of the tool that was called
    * @param input the input supplied to the tool
-   * @param output the output returned by the tool
-   * @return `Right(())` when the tracing call is handled successfully,
-   *         including when a no-op backend discards it, or `Left(error)`
-   *         if tracing fails. Callers may ignore or log tracing failures.
+   * @param output the output the tool returned, or its error
+   * @param duration how long the call took
+   * @param success whether the call succeeded
    */
-  def traceToolCall(toolName: String, input: String, output: String): Result[Unit]
+  final def traceToolCall(
+    toolName: String,
+    input: String,
+    output: String,
+    duration: FiniteDuration,
+    success: Boolean
+  ): Result[Unit] =
+    this.traceEvent(TraceEvent.ToolExecuted(toolName, input, output, duration, success))
 
   /**
-   * Records an error together with context describing where it occurred.
-   *
-   * The ConsoleTracing and LangfuseTracing implementations emit a
-   * [[TraceEvent.ErrorOccurred]] event containing the supplied error
-   * and context.
-   *
-   * Implementations should report tracing failures through the returned
-   * result rather than throwing exceptions.
+   * Records an error with where it occurred: a [[TraceEvent.ErrorOccurred]] passed to `traceEvent`.
    *
    * @param error the error to record
-   * @param context a description of the operation or circumstances in which
-   *                the error occurred, such as "fetching weather data";
-   *                defaults to an empty string
-   * @return `Right(())` when the tracing call is handled successfully,
-   *         including when a no-op backend discards it, or `Left(error)`
-   *         if tracing fails. Callers may ignore or log tracing failures.
+   * @param context the operation in which the error occurred, such as "fetching weather data"
    */
-  def traceError(error: Throwable, context: String = ""): Result[Unit]
+  final def traceError(error: Throwable, context: String = ""): Result[Unit] =
+    this.traceEvent(TraceEvent.ErrorOccurred(error, context))
 
   /**
-   * Records a completion received from a model.
-   *
-   * The ConsoleTracing and LangfuseTracing implementations emit a
-   * [[TraceEvent.CompletionReceived]] event containing the completion ID,
-   * the supplied model identifier, the number of tool calls in the
-   * assistant message, and the message content.
-   *
-   * Implementations should report tracing failures through the returned
-   * result rather than throwing exceptions.
+   * Records a completion received from a model: a [[TraceEvent.CompletionReceived]] - the completion's id, `model`,
+   * the number of tool calls in its message, the message content and the served tier - passed to `traceEvent`.
    *
    * @param completion the model response whose details are to be traced
    * @param model the model identifier to associate with this completion
-   * @return `Right(())` when the tracing call is handled successfully,
-   *         including when a no-op backend discards it, or `Left(error)`
-   *         if tracing fails. Callers may ignore or log tracing failures.
    */
-  def traceCompletion(completion: Completion, model: String): Result[Unit]
+  final def traceCompletion(completion: Completion, model: String): Result[Unit] =
+    this.traceEvent(
+      TraceEvent.CompletionReceived(
+        id = completion.id,
+        model = model,
+        toolCalls = completion.message.toolCalls.size,
+        content = completion.message.content,
+        servedTier = completion.servedTier
+      )
+    )
 
   /**
-   * Records token usage for a model operation.
-   *
-   * The ConsoleTracing and LangfuseTracing implementations emit a
-   * [[TraceEvent.TokenUsageRecorded]] event containing the supplied usage,
-   * model identifier, and operation label.
-   *
-   * Implementations should report tracing failures through the returned
-   * result rather than throwing exceptions.
+   * Records token usage for a model operation: a [[TraceEvent.TokenUsageRecorded]] passed to `traceEvent`.
    *
    * @param usage the token usage reported for the operation
    * @param model the model identifier to associate with this usage
-   * @param operation a caller-defined label describing the operation,
-   *                  such as "completion"
-   * @return `Right(())` when the tracing call is handled successfully,
-   *         including when a no-op backend discards it, or `Left(error)`
-   *         if tracing fails. Callers may ignore or log tracing failures.
+   * @param operation a caller-defined label describing the operation, such as "completion"
    */
-  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit]
+  final def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
+    this.traceEvent(TraceEvent.TokenUsageRecorded(usage, model, operation))
 
   /**
    * Emits a named `CustomEvent` with no additional data payload.
@@ -235,10 +218,11 @@ trait Tracing {
   }
 
   /**
-   * Shutdown the tracing backend.
-   * Alias for close() to maintain terminology consistency.
+   * Releases what the tracer holds - an exporter's threads and connections - flushing what it has buffered. Does
+   * nothing unless a backend overrides it; a tracer that wraps others closes them. Call it once, when the
+   * application is done tracing.
    */
-  def shutdown(): Unit = {}
+  def close(): Unit = ()
 }
 
 /**
@@ -276,7 +260,7 @@ trait Tracing {
  * }}}
  */
 @Stable
-trait TracingComposer {
+object TracingComposer {
 
   /** Combine multiple tracers into one that sends events to all backends. */
   def combine(tracers: Tracing*): Tracing = new CompositeTracing(tracers.toVector)
@@ -289,12 +273,6 @@ trait TracingComposer {
   def transform(tracer: Tracing)(f: TraceEvent => TraceEvent): Tracing =
     new TransformedTracing(tracer, f)
 }
-
-/**
- * Provides convenient access to tracer composition, event filtering,
- * and event transformation.
- */
-object TracingComposer extends TracingComposer
 
 /**
  * Fans a single event out to multiple [[Tracing]] backends.
@@ -311,63 +289,22 @@ private class CompositeTracing(tracers: Vector[Tracing]) extends Tracing {
     if (errors.size == results.size) Left(errors.head) else Right(())
   }
 
-  def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
-    val event = TraceEvent.ToolExecuted(toolName, input, output, scala.concurrent.duration.Duration.Zero, true)
-    traceEvent(event)
-  }
-
-  def traceError(error: Throwable, context: String): Result[Unit] = {
-    val event = TraceEvent.ErrorOccurred(error, context)
-    traceEvent(event)
-  }
-
-  def traceCompletion(completion: Completion, model: String): Result[Unit] = {
-    val event = TraceEvent.CompletionReceived(
-      id = completion.id,
-      model = model,
-      toolCalls = completion.message.toolCalls.size,
-      content = completion.message.content,
-      servedTier = completion.servedTier
-    )
-    traceEvent(event)
-  }
-
-  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = {
-    val event = TraceEvent.TokenUsageRecorded(usage, model, operation)
-    traceEvent(event)
-  }
-
-  override def shutdown(): Unit = tracers.foreach(_.shutdown())
+  // every tracer is closed, whatever an earlier one's close throws
+  override def close(): Unit = tracers.foreach(t => scala.util.Try(t.close()))
 }
 
 private class FilteredTracing(underlying: Tracing, predicate: TraceEvent => Boolean) extends Tracing {
   def traceEvent(event: TraceEvent): Result[Unit] =
     if (predicate(event)) underlying.traceEvent(event) else Right(())
 
-  def traceToolCall(toolName: String, input: String, output: String): Result[Unit] =
-    underlying.traceToolCall(toolName, input, output)
-  def traceError(error: Throwable, context: String): Result[Unit] = underlying.traceError(error, context)
-  def traceCompletion(completion: Completion, model: String): Result[Unit] =
-    underlying.traceCompletion(completion, model)
-  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
-    underlying.traceTokenUsage(usage, model, operation)
-
-  override def shutdown(): Unit = underlying.shutdown()
+  override def close(): Unit = underlying.close()
 }
 
 private class TransformedTracing(underlying: Tracing, transform: TraceEvent => TraceEvent) extends Tracing {
   def traceEvent(event: TraceEvent): Result[Unit] =
     underlying.traceEvent(transform(event))
 
-  def traceToolCall(toolName: String, input: String, output: String): Result[Unit] =
-    underlying.traceToolCall(toolName, input, output)
-  def traceError(error: Throwable, context: String): Result[Unit] = underlying.traceError(error, context)
-  def traceCompletion(completion: Completion, model: String): Result[Unit] =
-    underlying.traceCompletion(completion, model)
-  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
-    underlying.traceTokenUsage(usage, model, operation)
-
-  override def shutdown(): Unit = underlying.shutdown()
+  override def close(): Unit = underlying.close()
 }
 
 /**
@@ -416,7 +353,7 @@ object TracingMode {
   /**
    * Parses a mode string into a `TracingMode`, case-insensitively.
    *
-   * `"console"` and `"print"` give `Console`; `"noop"` and `"none"` give `NoOp`.
+   * `"console"` gives `Console`; `"none"` and `"noop"` give `NoOp`.
    * `"otel"` is kept as an alias for `Named("opentelemetry")`. Any other non-blank
    * value, `"langfuse"` and `"opentelemetry"` included, becomes [[Named]], lower-cased,
    * for a backend outside core to claim; whether one does is decided when the
@@ -427,9 +364,9 @@ object TracingMode {
    * @return the matching `TracingMode`
    */
   def fromString(mode: String): TracingMode = mode.trim.toLowerCase(Locale.ROOT) match {
-    case "console" | "print" => Console
-    case "noop" | "none"     => NoOp
-    case "otel"              => Named("opentelemetry")
+    case "console"       => Console
+    case "none" | "noop" => NoOp
+    case "otel"          => Named("opentelemetry")
     case "" =>
       logger.warn("Blank tracing mode, falling back to NoOp")
       NoOp

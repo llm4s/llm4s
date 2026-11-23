@@ -92,12 +92,12 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
 
   it should "record a rate-limit metric when it rejects a call" in {
     val errors = mutable.Buffer.empty[(ErrorKind, String)]
-    val metrics = new MetricsCollector {
+    val metrics = new MetricsCollector with ReliabilityRecordings {
       override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit =
         ()
       override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit = ()
       override def recordCost(provider: String, model: String, costUsd: Double): Unit                      = ()
-      override def recordError(kind: ErrorKind, provider: String): Unit = errors += (kind -> provider)
+      override def onError(kind: ErrorKind, provider: String): Unit = errors += (kind -> provider)
     }
     val config = ReliabilityConfig.default
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))

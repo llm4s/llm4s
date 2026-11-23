@@ -282,7 +282,6 @@ The completion cache reports each decision to the `Tracing` you give it. A hit s
 A `Tracing` that records them, and a way to print one:
 
 ```scala
-import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.trace.{ TraceEvent, Tracing }
 import org.llm4s.types.Result
 import scala.collection.mutable.ListBuffer
@@ -291,10 +290,6 @@ def collectingTracing(): (Tracing, () => List[TraceEvent]) = {
   val events = ListBuffer.empty[TraceEvent]
   val tracing = new Tracing {
     override def traceEvent(event: TraceEvent): Result[Unit] = { events.synchronized(events += event); Right(()) }
-    override def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
-    override def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
-    override def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
-    override def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
   }
   (tracing, () => events.synchronized(events.toList))
 }
