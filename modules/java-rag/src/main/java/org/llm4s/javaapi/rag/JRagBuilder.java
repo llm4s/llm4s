@@ -1,9 +1,13 @@
 package org.llm4s.javaapi.rag;
 
+import java.util.List;
+import java.util.function.BiFunction;
 import org.llm4s.javaapi.JCompletionOptions;
 import org.llm4s.javaapi.JEmbeddingClient;
 import org.llm4s.javaapi.JLlmClient;
+import org.llm4s.javaapi.JMessage;
 import org.llm4s.javaapi.LlmResult;
+import org.llm4s.rag.QuestionCondenser;
 
 /**
  * Builds a {@link JRag}: start with {@link JRag#builder()}, give it an embedding client - and a chat client, to
@@ -27,7 +31,7 @@ import org.llm4s.javaapi.LlmResult;
 public final class JRagBuilder {
 
   static final JRagBuilder EMPTY =
-      new JRagBuilder(null, null, JRagStore.inMemory(), null, null, null, null, null);
+      new JRagBuilder(null, null, JRagStore.inMemory(), null, null, null, null, null, null);
 
   private final JEmbeddingClient embeddings;
   private final JLlmClient llm;
@@ -37,6 +41,7 @@ public final class JRagBuilder {
   private final Integer topK;
   private final String systemPrompt;
   private final JCompletionOptions completionOptions;
+  private final QuestionCondenser questionCondenser;
 
   private JRagBuilder(
       JEmbeddingClient embeddings,
@@ -46,7 +51,8 @@ public final class JRagBuilder {
       Integer chunkOverlap,
       Integer topK,
       String systemPrompt,
-      JCompletionOptions completionOptions) {
+      JCompletionOptions completionOptions,
+      QuestionCondenser questionCondenser) {
     this.embeddings = embeddings;
     this.llm = llm;
     this.store = store;
@@ -55,6 +61,7 @@ public final class JRagBuilder {
     this.topK = topK;
     this.systemPrompt = systemPrompt;
     this.completionOptions = completionOptions;
+    this.questionCondenser = questionCondenser;
   }
 
   /**
@@ -62,7 +69,8 @@ public final class JRagBuilder {
    * document and every question as a query, with the client's model.
    */
   public JRagBuilder embeddings(JEmbeddingClient embeddings) {
-    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
+    return new JRagBuilder(
+        embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions, questionCondenser);
   }
 
   /**
@@ -70,12 +78,14 @@ public final class JRagBuilder {
    * of kind {@code CONFIGURATION} and only {@code search} works. {@code null} for none.
    */
   public JRagBuilder llm(JLlmClient llm) {
-    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
+    return new JRagBuilder(
+        embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions, questionCondenser);
   }
 
   /** Where the chunks are kept: {@link JRag#inMemory()}, the default, or {@link JRag#sqlite(java.nio.file.Path)}. */
   public JRagBuilder store(JRagStore store) {
-    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
+    return new JRagBuilder(
+        embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions, questionCondenser);
   }
 
   /**
@@ -84,12 +94,14 @@ public final class JRagBuilder {
    * where they can. The default is 800 and 150.
    */
   public JRagBuilder chunking(int size, int overlap) {
-    return new JRagBuilder(embeddings, llm, store, size, overlap, topK, systemPrompt, completionOptions);
+    return new JRagBuilder(
+        embeddings, llm, store, size, overlap, topK, systemPrompt, completionOptions, questionCondenser);
   }
 
   /** How many chunks a search returns, and a question is answered from, at least 1. The default is 5. */
   public JRagBuilder topK(int topK) {
-    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
+    return new JRagBuilder(
+        embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions, questionCondenser);
   }
 
   /**
@@ -97,7 +109,8 @@ public final class JRagBuilder {
    * alone and to say when they are not enough. {@code null} for the default.
    */
   public JRagBuilder systemPrompt(String systemPrompt) {
-    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
+    return new JRagBuilder(
+        embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions, questionCondenser);
   }
 
   /**
@@ -110,7 +123,39 @@ public final class JRagBuilder {
    */
   public JRagBuilder completionOptions(JCompletionOptions completionOptions) {
     return new JRagBuilder(
-        embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
+        embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions, questionCondenser);
+  }
+
+  /**
+   * Condense a chat's follow-up into a standalone question to search with, by asking {@code client} (#2766): with a
+   * history passed to {@code ask} or {@code askStream}, "how much is the second one?" is searched for as what it
+   * refers to, while the model answers the question asked. It is {@code llm4s-rag}'s built-in condenser: one call to
+   * {@code client} at temperature 0 with the latest 10 user and assistant messages. A failed call fails the
+   * {@code ask} with that failure's kind; a blank reply searches with the question asked. A small, fast model is
+   * usually enough. {@code null} for none, the default, which searches with the question asked. Replaces a condenser
+   * set with {@link #questionCondenser(BiFunction)}.
+   */
+  public JRagBuilder llmQuestionCondenser(JLlmClient client) {
+    return withCondenser(RagBuilds.llmCondenser(client));
+  }
+
+  /**
+   * Condense a chat's follow-up into the standalone question to search with, by a function of the question and the
+   * history, oldest first, called only when the history is not empty. A {@code null} or blank return searches with the
+   * question asked; an exception fails the {@code ask} (kind {@code OTHER}). {@code null} for none. Replaces a
+   * condenser set with {@link #llmQuestionCondenser(JLlmClient)}.
+   *
+   * <pre>{@code
+   * builder.questionCondenser((question, history) -> question + " " + history.get(history.size() - 1).content())
+   * }</pre>
+   */
+  public JRagBuilder questionCondenser(BiFunction<String, List<JMessage>, String> condenser) {
+    return withCondenser(RagBuilds.condenser(condenser));
+  }
+
+  private JRagBuilder withCondenser(QuestionCondenser condenser) {
+    return new JRagBuilder(
+        embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions, condenser);
   }
 
   /**
@@ -119,7 +164,8 @@ public final class JRagBuilder {
    * Sends no request and never throws.
    */
   public LlmResult<JRag> build() {
-    return RagBuilds.build(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
+    return RagBuilds.build(
+        embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions, questionCondenser);
   }
 
   /** The fields set so far. */
@@ -139,6 +185,8 @@ public final class JRagBuilder {
         + (systemPrompt == null ? "default" : "set")
         + ", completionOptions="
         + (completionOptions == null ? "default" : completionOptions)
+        + ", questionCondenser="
+        + (questionCondenser == null ? "none" : "set")
         + ")";
   }
 }

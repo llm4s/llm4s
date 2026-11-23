@@ -1,7 +1,7 @@
 package org.llm4s.javaapi.reactor
 
 import org.llm4s.error.ValidationError
-import org.llm4s.javaapi.{ LlmException, LlmResult }
+import org.llm4s.javaapi.{ JMessage, LlmException, LlmResult }
 import org.llm4s.javaapi.rag.{ JRag, JRagAnswer, JRagAnswerStream, JRagSource, JRagStreamListener }
 import reactor.core.publisher.{ Flux, FluxSink }
 
@@ -51,6 +51,18 @@ object RagStreams {
   /** The answer to `question`, from at most `topK` chunks, at least 1, as a `Flux` of events. */
   def toFlux(rag: JRag, question: String, topK: Int): Flux[RagAnswerEvent] =
     adapt(rag)(_.askStream(question, topK, _))
+
+  /**
+   * The answer to `question`, a turn of a chat, with `history` - the conversation so far, oldest first - sent to the
+   * model as [[org.llm4s.javaapi.rag.JRag#ask JRag.ask(question, history)]] sends it (#2766), as a `Flux` of events.
+   * A `null` history or a `null` or `SYSTEM` message in it fails on subscription with kind `VALIDATION`.
+   */
+  def toFlux(rag: JRag, question: String, history: java.util.List[JMessage]): Flux[RagAnswerEvent] =
+    adapt(rag)(_.askStream(question, history, _))
+
+  /** The answer to `question` with `history`, from at most `topK` chunks, at least 1, as a `Flux` of events. */
+  def toFlux(rag: JRag, question: String, topK: Int, history: java.util.List[JMessage]): Flux[RagAnswerEvent] =
+    adapt(rag)(_.askStream(question, topK, history, _))
 
   private def adapt(rag: JRag)(start: (JRag, JRagStreamListener) => LlmResult[JRagAnswerStream]): Flux[RagAnswerEvent] =
     if (rag == null) Flux.error(new LlmException(ValidationError.required("rag")))

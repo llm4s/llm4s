@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import org.llm4s.javaapi.JEmbeddingClient;
 import org.llm4s.javaapi.JLlmClient;
+import org.llm4s.javaapi.JMessage;
 import org.llm4s.javaapi.Llm4s;
 import org.llm4s.javaapi.LlmException;
 import org.llm4s.javaapi.LlmResult;
@@ -32,6 +33,15 @@ final class RagGuideSnippets {
     int chunks = rag.ingest(docs).get();
     chunks += rag.ingestText("Refunds are paid within 14 days.", "refund-policy", Map.of("team", "billing")).get();
     return chunks;
+  }
+
+  /** "Hold a conversation". */
+  static JRagAnswer converse(JRag rag) {
+    List<JMessage> history = List.of(
+        JMessage.user("How long do refunds take?"),
+        JMessage.assistant("Refunds are paid within 14 days."));
+    JRagAnswer answer = rag.ask("And how do I ask for one?", history).get();
+    return answer;
   }
 
   /** "Ask a question". */

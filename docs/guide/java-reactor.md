@@ -153,7 +153,9 @@ String answer = events
 ```
 
 The sources and the text are elements of one `Flux`, rather than a `Mono` of sources beside a `Flux` of text, so one
-subscription makes one search and one model call, and the order is the stream's own. In a WebFlux handler, map each
+subscription makes one search and one model call, and the order is the stream's own. For a chat, `toFlux(rag,
+question, history)` (and `toFlux(rag, question, topK, history)`) sends the conversation so far, a `List<JMessage>`, as
+[`JRag.ask(question, history)`](java-rag#hold-a-conversation) does. In a WebFlux handler, map each
 event to a `ServerSentEvent` named after its kind.
 
 It behaves as `Streams.toFlux` does. It is cold, it honours backpressure (the answer's thread waits for the subscriber,

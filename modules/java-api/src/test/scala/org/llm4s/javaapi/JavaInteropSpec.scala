@@ -420,6 +420,8 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     // a test double's entry points: a script of replies, or a builder that mixes in failures (#1497)
     classOf[FakeLlmClient] -> Set("replying(String[])", "builder()"),
     classOf[JTool]         -> Set("builder(String,String)", "fromAnnotated(Object)"),
+    // a conversation history handed back to llm4s, such as JRag.ask(question, history) (#2766)
+    classOf[JMessage] -> Set("user(String)", "assistant(String)"),
     Class.forName("org.llm4s.javaapi.Llm4s") -> Set(
       "createDefaultClient()",
       "createClient(ProviderConfig)",
