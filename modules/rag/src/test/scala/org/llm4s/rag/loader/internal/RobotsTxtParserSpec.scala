@@ -27,6 +27,20 @@ class RobotsTxtParserSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
     robots.isAllowed("/admin/users") shouldBe false
   }
 
+  it should "treat a line of only '#' characters as a comment" in {
+    val content =
+      """###
+        |User-agent: *
+        |Disallow: /private/
+        |#
+        |""".stripMargin
+
+    val robots = RobotsTxtParser.parse(content, "LLM4S-Crawler/1.0")
+
+    robots.isAllowed("/private/data") shouldBe false
+    robots.isAllowed("/public") shouldBe true
+  }
+
   it should "parse allow rules" in {
     val content =
       """User-agent: *

@@ -1,16 +1,12 @@
 package org.llm4s.rag.loader
 
-import org.llm4s.core.safety.NetworkSecurity
 import org.llm4s.error.NetworkError
 import org.llm4s.rag.loader.internal._
-import org.llm4s.util.DurationRounding
 
-import java.net.{ HttpURLConnection, URI }
-import scala.annotation.tailrec
+import java.net.URI
 import scala.collection.mutable
 import scala.concurrent.duration.*
-import scala.io.Source
-import scala.util.{ Try, Using }
+import scala.util.Try
 
 /**
  * Load documents by crawling from seed URLs.
@@ -95,6 +91,10 @@ final case class WebCrawlerLoader(
   def withMaxQueueSize(size: Int): WebCrawlerLoader =
     copy(config = config.withMaxQueueSize(size))
 
+  /** Set the policy every seed, crawled link, redirect hop and robots.txt request is checked against */
+  def withUrlPolicy(policy: UrlPolicy): WebCrawlerLoader =
+    copy(config = config.withUrlPolicy(policy))
+
   /**
    * Internal crawling iterator that implements BFS.
    */
@@ -139,7 +139,7 @@ final case class WebCrawlerLoader(
      */
     private def fetchAndProcess(fetchUrl: String, canonicalUrl: String, depth: Int): LoadResult = {
       val robotsRules = if (config.respectRobotsTxt) {
-        Some(RobotsTxtParser.getRules(fetchUrl, config.userAgent, config.timeout))
+        Some(RobotsTxtParser.getRules(fetchUrl, config.userAgent, config.timeout, config.urlPolicy))
       } else {
         None
       }
@@ -200,87 +200,27 @@ final case class WebCrawlerLoader(
     }
 
     /**
-     * Fetch a page via HTTP.
+     * Fetch a page via HTTP. The URL and every redirect hop are checked by `config.urlPolicy`, and the request goes
+     * only to an address it approved.
      */
     private def fetchPage(url: String): Either[NetworkError, (String, String, Map[String, String])] =
-      // SSRF Protection: Validate URL before making request
-      NetworkSecurity.validateUrl(url) match {
-        case Left(error) => Left(NetworkError(error.message, None, "ssrf-protection"))
-        case Right(_)    => fetchPageUnsafe(url)
-      }
-
-    private def fetchPageUnsafe(url: String): Either[NetworkError, (String, String, Map[String, String])] =
-      openConnectionWithRedirects(url, maxRedirects = 5)
-
-    @tailrec
-    private def openConnectionWithRedirects(
-      url: String,
-      maxRedirects: Int
-    ): Either[NetworkError, (String, String, Map[String, String])] = {
-      val connResult = Try {
-        val uri           = new URI(url)
-        val conn          = uri.toURL.openConnection().asInstanceOf[HttpURLConnection]
-        val timeoutMillis = DurationRounding.ceilMillisInt(config.timeout)
-        conn.setConnectTimeout(timeoutMillis)
-        conn.setReadTimeout(timeoutMillis)
-        conn.setRequestProperty("User-Agent", config.userAgent)
-        conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
-        conn.setInstanceFollowRedirects(false)
-        conn
-      }
-
-      connResult match {
-        case scala.util.Failure(error) =>
-          Left(NetworkError(error.getMessage, None, "http"))
-
-        case scala.util.Success(conn) =>
-          val code = conn.getResponseCode
-
-          if (code >= 300 && code < 400) {
-            conn.disconnect()
-            if (maxRedirects <= 0) {
-              Left(NetworkError("Too many redirects", None, "http"))
-            } else {
-              Option(conn.getHeaderField("Location")) match {
-                case None =>
-                  Left(NetworkError(s"HTTP $code redirect without Location header", None, "http"))
-                case Some(location) =>
-                  val resolved = new URI(url).resolve(location).toString
-                  NetworkSecurity.validateUrl(resolved) match {
-                    case Left(err) =>
-                      Left(
-                        NetworkError(s"Redirect blocked by SSRF protection: ${err.message}", None, "ssrf-protection")
-                      )
-                    case Right(_) =>
-                      openConnectionWithRedirects(resolved, maxRedirects - 1)
-                  }
-              }
-            }
-          } else if (code != 200) {
-            conn.disconnect()
-            Left(NetworkError(s"HTTP $code: ${conn.getResponseMessage}", None, "http"))
-          } else {
-            val result = Try {
-              val contentType = Option(conn.getContentType).getOrElse("text/html")
-              val content = Using.resource(Source.fromInputStream(conn.getInputStream, "UTF-8")) {
-                _.mkString
-              }
-
-              val headers = Map(
-                "ETag"          -> Option(conn.getHeaderField("ETag")),
-                "Last-Modified" -> Option(conn.getHeaderField("Last-Modified"))
-              ).collect { case (k, Some(v)) => k -> v }
-
-              (content, contentType, headers)
-            }
-            conn.disconnect()
-            result match {
-              case scala.util.Failure(error) => Left(NetworkError(error.getMessage, None, "http"))
-              case scala.util.Success(value) => Right(value)
-            }
+      PinnedHttpClient
+        .get(
+          url,
+          Seq("User-Agent" -> config.userAgent, "Accept" -> "text/html,application/xhtml+xml,*/*;q=0.8"),
+          config.timeout,
+          config.urlPolicy
+        )
+        .flatMap { resp =>
+          if (resp.status != 200) Left(NetworkError(s"HTTP ${resp.status}: ${resp.reason}", None, "http"))
+          else {
+            val headers = Map(
+              "ETag"          -> resp.header("ETag"),
+              "Last-Modified" -> resp.header("Last-Modified")
+            ).collect { case (k, Some(v)) => k -> v }
+            Right((resp.body, resp.header("Content-Type").getOrElse("text/html"), headers))
           }
-      }
-    }
+        }
 
     /**
      * Queue discovered links for crawling.

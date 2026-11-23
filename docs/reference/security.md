@@ -103,7 +103,7 @@ Limits:
 - `HttpConfig.timeout` bounds the whole call: name resolution, connecting, every redirect hop and reading the body. A server that sends a byte at a time cannot hold the tool past it; the call fails with a `TIMEOUT:` error.
 - Only `GET` and `HEAD` methods are allowed by default (read-only).
 
-**Residual risk:** DNS rebinding attacks (where a hostname resolves to a public IP during validation but a private IP at connection time) are not explicitly mitigated at the Java `HttpURLConnection` level.
+**Residual risk:** DNS rebinding attacks (where a hostname resolves to a public IP during validation but a private IP at connection time) are not explicitly mitigated at the Java `HttpURLConnection` level for the HTTP tool. The RAG loaders (`UrlLoader`, `WebCrawlerLoader` and its robots.txt fetch) are: they ask a `UrlPolicy` for the approved addresses and connect to one of them, with the original `Host` header and, for `https`, SNI and certificate check against the original host ([document loaders](../guide/document-loaders#ssrf-protection), #2724).
 
 ### 5. SQLite Journal Files
 

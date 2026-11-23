@@ -46,7 +46,22 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714),
 [RAG tracing covers every model call and each query's stages](#rag-tracing-covers-every-model-call-and-each-querys-stages-2734),
 [`RAG.ingestChunks` takes `DocumentChunk`s](#ragingestchunks-takes-documentchunks-2732),
-and [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453).
+[the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
+and [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724).
+
+## RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root (#2724)
+
+- **`DirectoryLoader` skips symbolic links that leave its root.** A link whose real path is outside the directory's
+  real path is no longer followed, and only regular files are read (a FIFO or device is skipped). To follow such links
+  as before, `DirectoryLoader(path).withConfineToRoot(false)`.
+- **`UrlLoader`, `CrawlerConfig` and `DirectoryLoader` gain a field** (`urlPolicy`, `urlPolicy`, `confineToRoot`), so a
+  positional pattern on one needs it. Construct them by name or with the `with*` setters.
+- **The crawler's robots.txt fetch is checked.** It follows the same `UrlPolicy` as the pages, so a robots.txt on a
+  refused host is never requested (the page fetch then fails as before), and its redirects are checked hop by hop.
+- **Loopback and intranet hosts can be opted in.** Where you fetched internal pages yourself and passed them in with
+  `TextLoader`, `withUrlPolicy(UrlPolicy.default.withAllowPrivateNetworks(true))` now lets the loaders do it.
+- **No proxy.** The loaders connect to the address the policy approved over their own HTTP/1.1 socket, not through
+  `HttpURLConnection`, so `http.proxyHost` and `https.proxyHost` no longer apply to them.
 
 ## The PostgreSQL checkpoint schema moves to version 6 (#2453)
 

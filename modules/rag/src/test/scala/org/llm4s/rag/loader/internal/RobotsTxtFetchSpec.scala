@@ -1,6 +1,8 @@
 package org.llm4s.rag.loader.internal
 
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
+import org.llm4s.rag.loader.{ LoopbackHttpServer, UrlPolicy }
+import org.llm4s.rag.loader.LoopbackHttpServer.{ fakeDns, redirect, Reply }
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -21,6 +23,9 @@ class RobotsTxtFetchSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
 
   private val agent   = "LLM4S-Crawler/1.0"
   private val timeout = 5.seconds
+
+  /** The test servers listen on loopback, which the default policy refuses. */
+  private val local = LoopbackHttpServer.loopbackPolicy
 
   /** One request as it arrived at [[RobotsServer]]: the path and the `User-Agent` header. */
   final private case class SeenRequest(path: String, userAgent: Option[String])
@@ -60,8 +65,8 @@ class RobotsTxtFetchSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
 
   "RobotsTxtParser.isAllowed" should "apply the Disallow rules served at /robots.txt" in {
     withServer(200, disallowPrivate) { server =>
-      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout) shouldBe false
-      RobotsTxtParser.isAllowed(s"${server.baseUrl}/public", agent, timeout) shouldBe true
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout, local) shouldBe false
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/public", agent, timeout, local) shouldBe true
       server.requests.map(_.path) shouldBe Seq("/robots.txt")
     }
   }
@@ -76,49 +81,51 @@ class RobotsTxtFetchSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
         |""".stripMargin
 
     withServer(200, content) { server =>
-      RobotsTxtParser.isAllowed(s"${server.baseUrl}/public", agent, timeout) shouldBe true
-      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout) shouldBe false
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/public", agent, timeout, local) shouldBe true
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout, local) shouldBe false
       server.requests.map(_.userAgent) shouldBe Seq(Some(agent))
     }
   }
 
   it should "allow every path when /robots.txt answers 404" in {
     withServer(404, "User-agent: *\nDisallow: /\n") { server =>
-      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout) shouldBe true
-      RobotsTxtParser.isAllowed(s"${server.baseUrl}/", agent, timeout) shouldBe true
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout, local) shouldBe true
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/", agent, timeout, local) shouldBe true
       server.requests.map(_.path) shouldBe Seq("/robots.txt")
     }
   }
 
   it should "allow every path when /robots.txt answers 500" in {
     withServer(500, "User-agent: *\nDisallow: /\n") { server =>
-      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout) shouldBe true
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout, local) shouldBe true
       server.requests.map(_.path) shouldBe Seq("/robots.txt")
     }
   }
 
   it should "fetch /robots.txt once per host and serve later checks from the cache" in {
     withServer(200, disallowPrivate) { server =>
-      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout) shouldBe false
-      RobotsTxtParser.isAllowed(s"${server.baseUrl}/public", agent, timeout) shouldBe true
-      RobotsTxtParser.getRules(s"${server.baseUrl}/other", agent, timeout).disallowRules shouldBe Seq("/private/")
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout, local) shouldBe false
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/public", agent, timeout, local) shouldBe true
+      RobotsTxtParser.getRules(s"${server.baseUrl}/other", agent, timeout, local).disallowRules shouldBe Seq(
+        "/private/"
+      )
       server.requests should have size 1
     }
   }
 
   it should "fetch again after the cache is cleared" in {
     withServer(200, disallowPrivate) { server =>
-      RobotsTxtParser.isAllowed(s"${server.baseUrl}/public", agent, timeout) shouldBe true
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/public", agent, timeout, local) shouldBe true
       RobotsTxtParser.clearCache()
-      RobotsTxtParser.isAllowed(s"${server.baseUrl}/public", agent, timeout) shouldBe true
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/public", agent, timeout, local) shouldBe true
       server.requests should have size 2
     }
   }
 
   it should "allow a URL with no host without making a request" in {
     withServer(200, "User-agent: *\nDisallow: /\n") { server =>
-      RobotsTxtParser.isAllowed("not a url", agent, timeout) shouldBe true
-      RobotsTxtParser.isAllowed("/relative/path", agent, timeout) shouldBe true
+      RobotsTxtParser.isAllowed("not a url", agent, timeout, local) shouldBe true
+      RobotsTxtParser.isAllowed("/relative/path", agent, timeout, local) shouldBe true
       server.requests shouldBe empty
     }
   }
@@ -132,7 +139,7 @@ class RobotsTxtFetchSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
         |""".stripMargin
 
     withServer(200, content) { server =>
-      val rules = RobotsTxtParser.getRules(s"${server.baseUrl}/anything", agent, timeout)
+      val rules = RobotsTxtParser.getRules(s"${server.baseUrl}/anything", agent, timeout, local)
       rules.disallowRules shouldBe Seq("/private/")
       rules.allowRules shouldBe Seq("/private/open/")
       rules.crawlDelay shouldBe Some(2.seconds)
@@ -141,19 +148,29 @@ class RobotsTxtFetchSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
 
   it should "be empty when /robots.txt answers 404" in {
     withServer(404, "User-agent: *\nDisallow: /\n") { server =>
-      RobotsTxtParser.getRules(s"${server.baseUrl}/anything", agent, timeout) shouldBe RobotsTxtParser.RobotsTxt.empty
+      RobotsTxtParser.getRules(
+        s"${server.baseUrl}/anything",
+        agent,
+        timeout,
+        local
+      ) shouldBe RobotsTxtParser.RobotsTxt.empty
     }
   }
 
   it should "be empty when /robots.txt answers 500" in {
     withServer(500, "User-agent: *\nDisallow: /\n") { server =>
-      RobotsTxtParser.getRules(s"${server.baseUrl}/anything", agent, timeout) shouldBe RobotsTxtParser.RobotsTxt.empty
+      RobotsTxtParser.getRules(
+        s"${server.baseUrl}/anything",
+        agent,
+        timeout,
+        local
+      ) shouldBe RobotsTxtParser.RobotsTxt.empty
     }
   }
 
   it should "be empty for a URL with no host, without making a request" in {
     withServer(200, "User-agent: *\nDisallow: /\n") { server =>
-      RobotsTxtParser.getRules("not a url", agent, timeout) shouldBe RobotsTxtParser.RobotsTxt.empty
+      RobotsTxtParser.getRules("not a url", agent, timeout, local) shouldBe RobotsTxtParser.RobotsTxt.empty
       server.requests shouldBe empty
     }
   }
@@ -162,5 +179,63 @@ class RobotsTxtFetchSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
     val robots = RobotsTxtParser.RobotsTxt(allowRules = Seq("/a"))
     robots.isAllowed("/a") shouldBe true
     robots.isAllowed("/a/b") shouldBe true
+  }
+
+  "RobotsTxtParser's fetch" should "ask the URL policy first, and not request a refused robots.txt" in {
+    withServer(200, "User-agent: *\nDisallow: /\n") { server =>
+      // 127.0.0.1 is refused by the default policy: the crawler's blind-SSRF probe of an internal robots.txt
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout, UrlPolicy.default) shouldBe true
+      server.requests shouldBe empty
+    }
+  }
+
+  it should "not cache a refusal, so a policy that allows the host still fetches it" in {
+    withServer(200, "User-agent: *\nDisallow: /\n") { server =>
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/x", agent, timeout, UrlPolicy.default) shouldBe true
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/x", agent, timeout, local) shouldBe false
+      server.requests should have size 1
+    }
+  }
+
+  it should "not cache a custom policy's refusal, whatever error it returns" in {
+    withServer(200, "User-agent: *\nDisallow: /\n") { server =>
+      val refuseAll = new UrlPolicy {
+        def resolve(url: java.net.URI) =
+          Left(org.llm4s.error.NetworkError("refused by a custom policy", None, url.toString))
+      }
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/x", agent, timeout, refuseAll) shouldBe true
+      server.requests shouldBe empty
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/x", agent, timeout, local) shouldBe false
+      server.requests should have size 1
+    }
+  }
+
+  it should "follow a redirect the policy allows" in {
+    LoopbackHttpServer.withServer(
+      "/robots.txt"      -> redirect("/real-robots.txt"),
+      "/real-robots.txt" -> Reply(200, "User-agent: *\nDisallow: /private/\n")
+    ) { server =>
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/private/x", agent, timeout, local) shouldBe false
+      server.paths shouldBe Seq("/robots.txt", "/real-robots.txt")
+    }
+  }
+
+  it should "not follow a redirect to a host the policy refuses" in {
+    LoopbackHttpServer.withServer("/robots.txt" -> Reply(200, "User-agent: *\nDisallow: /\n")) { internal =>
+      LoopbackHttpServer.withServer("/robots.txt" -> redirect(s"${internal.url("internal.test")}/robots.txt")) {
+        public =>
+          val policy = local.withResolver(fakeDns("public.test", "internal.test")).withAllowedHosts(Set("public.test"))
+          RobotsTxtParser.isAllowed(s"${public.url("public.test")}/x", agent, timeout, policy) shouldBe true
+          public.paths shouldBe Seq("/robots.txt")
+          internal.requests shouldBe empty
+      }
+    }
+  }
+
+  it should "not follow a redirect to a blocked address under the default rules" in {
+    LoopbackHttpServer.withServer("/robots.txt" -> redirect("http://169.254.169.254/robots.txt")) { server =>
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/x", agent, timeout, local) shouldBe true
+      server.paths shouldBe Seq("/robots.txt")
+    }
   }
 }

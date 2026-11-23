@@ -19,6 +19,8 @@ import scala.concurrent.duration.*
  * @param includeQueryParams Whether to treat URLs with different query params as distinct pages
  * @param sameDomainOnly Whether to restrict crawling to the same domain as seed URLs
  * @param acceptContentTypes Content types to process (others are skipped)
+ * @param urlPolicy Which URLs may be requested - each seed, crawled link, redirect hop and robots.txt - and the
+ *                  addresses the crawler connects to (default: [[UrlPolicy.default]], public addresses only)
  */
 final case class CrawlerConfig(
   maxDepth: Int = 3,
@@ -32,7 +34,8 @@ final case class CrawlerConfig(
   maxQueueSize: Int = 10000,
   includeQueryParams: Boolean = false,
   sameDomainOnly: Boolean = true,
-  acceptContentTypes: Set[String] = Set("text/html", "application/xhtml+xml")
+  acceptContentTypes: Set[String] = Set("text/html", "application/xhtml+xml"),
+  urlPolicy: UrlPolicy = UrlPolicy.default
 ) {
 
   /** Set max crawl depth */
@@ -78,6 +81,10 @@ final case class CrawlerConfig(
   /** Set max queue size */
   def withMaxQueueSize(size: Int): CrawlerConfig =
     copy(maxQueueSize = size)
+
+  /** Set the policy every request is checked against */
+  def withUrlPolicy(policy: UrlPolicy): CrawlerConfig =
+    copy(urlPolicy = policy)
 
   /** Set acceptable content types */
   def withContentTypes(types: Set[String]): CrawlerConfig =
