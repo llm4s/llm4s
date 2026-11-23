@@ -466,7 +466,9 @@ An agent built with `Agent.builder(...).withTracing(tracing)` sends, for each ru
 
 - `graph.*` custom events for the runtime's own events (run, task and checkpoint lifecycle), and
   `agent.*` custom events for the agent's durable events (`agent.model_call_completed`,
-  `agent.tool_executed`, `agent.handed_off`, `agent.guardrail_blocked`), which carry no message content;
+  `agent.tool_executed`, `agent.handed_off`, `agent.guardrail_blocked`), which carry no message content.
+  `graph.task_failed` and `graph.run_failed` carry the error's message: a guardrail block's names only
+  the guardrail (`Guardrail '<name>' blocked`, never its reason), any other error's is sent as it is;
 - a `TokenUsageRecorded` for each model call that reports usage;
 - one `TraceEvent.AgentRunEnded` when the run ends: thread id, run id, the active agent, a status
   (`completed`, `suspended`, `step_limit_reached`, `blocked:<guardrail>`, `cancelled`, `timed_out`,

@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `GuardrailBlocked.message` no longer holds the guardrail's reason: read `reason`;
+  [migration](docs/reference/migration.md#a-guardrail-blocks-message-names-only-the-guardrail-2793).
 - `StreamingAccumulator.create()` is `StreamingAccumulator(model)`; `updateTokens`, `updateTokensWithThinking` and
   `addThinkingDelta` are removed for `updateUsage`; `SSEEvent.retry` is a `FiniteDuration`; `SSEParser.parseStream` and
   `getEvents` are removed; [migration](docs/reference/migration.md#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813).
@@ -149,6 +151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
+- **Fixed** A guardrail's reason, which may quote the text it refused, no longer reaches the durable event log or a trace: `GuardrailBlocked.message`, which `TaskFailed` and `RunFailed` record, names only the guardrail. The guides now say what the checkpoint store still holds
+  ([limits](docs/guide/agents/streaming.md#limits), [migration](docs/reference/migration.md#a-guardrail-blocks-message-names-only-the-guardrail-2793)) [#2793](https://github.com/llm4s/llm4s/issues/2793).
 - **Added** RAG guardrails run inside an agent (experimental): `RAGGuardrail.withTurnContext(guardrail)(turn => Some(RAGContext.fromToolResults(turn, Set("search"))))` is an output guardrail for `GuardrailMiddleware` that checks each final answer against the turn's retrieval-tool results,
   its judge calls counted in the run's usage; `GuardrailConfig.outputGuardrailsWithContext` does it for a preset ([guide](docs/guide/agents/guardrails.md#rag-guardrails)) [#2781](https://github.com/llm4s/llm4s/issues/2781).
 - **Changed** `llm4s-agent` is tiered: every public top-level type is `@Stable` (the agent, graph, event, middleware and guardrail APIs) or `@Experimental` (harness, run queue and worker, encryption, subagent definition, permissions, the checkpointer SPI, the RAG guardrails, `assistant`), `sbt stabilityTierCheck` covers the module, and its Stable case classes are growth-safe. So are the enum cases with fields of every frozen module: the check now fails for one that is neither a wrapper over a growth-safe class nor listed as closed with its reason ([#2781](https://github.com/llm4s/llm4s/issues/2781))
