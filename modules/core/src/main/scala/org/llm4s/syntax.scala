@@ -15,7 +15,7 @@ import scala.util.Try
  * import org.llm4s.syntax.toResult   // or one, by name
  *
  * Try("42".toInt).toResult                         // Result[Int]
- * sys.props.get("user.home").toResult(ConfigurationError("no home"))
+ * headers.get("x-request-id").toResult(NotFoundError("no request id", "x-request-id"))
  * new IllegalStateException("boom").toLLMError     // LLMError
  * result.recover { case _: RateLimitError => "fallback" }.tap(println)
  * }}}
@@ -28,7 +28,7 @@ object syntax {
 
   extension [A](t: Try[A]) {
 
-    /** The `Try`'s value as a `Right`, or its exception as a `Left`, mapped by [[Safety.fromThrowable]]. */
+    /** The `Try`'s value as a `Right`, or its exception as a `Left`, mapped by [[org.llm4s.error.Safety.fromThrowable Safety.fromThrowable]]. */
     def toResult: Result[A] = Safety.fromTry(t)
   }
 
@@ -45,7 +45,7 @@ object syntax {
   extension [A](future: Future[A]) {
 
     /**
-     * The future's value as a `Right`, or its failure as a `Left`, mapped by [[Safety.fromThrowable]]: the returned
+     * The future's value as a `Right`, or its failure as a `Left`, mapped by [[org.llm4s.error.Safety.fromThrowable Safety.fromThrowable]]: the returned
      * future never fails because the original did. This is the one `Future` to `AsyncResult` conversion.
      */
     def toResult(using ExecutionContext): Future[Result[A]] =
@@ -54,7 +54,7 @@ object syntax {
 
   extension (t: Throwable) {
 
-    /** This exception as an [[LLMError]]: [[Safety.fromThrowable]]. */
+    /** This exception as an [[org.llm4s.error.LLMError LLMError]]: [[org.llm4s.error.Safety.fromThrowable Safety.fromThrowable]]. */
     def toLLMError: LLMError = Safety.fromThrowable(t)
   }
 
