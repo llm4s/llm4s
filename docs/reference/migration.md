@@ -52,6 +52,7 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
 [`ProviderRegistry` lookups accept aliases](#providerregistry-lookups-accept-aliases-2812),
 [`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
+[context trimming fails when nothing fits, and externalizes only into a store](#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817),
 and [a guardrail block's message names only the guardrail](#a-guardrail-blocks-message-names-only-the-guardrail-2793).
 
 ## A guardrail block's message names only the guardrail (#2793)
@@ -67,6 +68,32 @@ events, a run queue entry's failure, logs and traces record.
 
 `AgentStatus.Blocked`, `RunOutcome.Blocked` and `TaskRefusal.Blocked` are unchanged and still carry the reason. Events
 already stored keep the message they were written with.
+
+## Context trimming fails when nothing fits, and externalizes only into a store (#2817)
+
+In `org.llm4s.context` (`llm4s-core`). No signature changes; behaviour you may rely on changed.
+
+**`TokenWindow.trimToBudget`** pins every leading `SystemMessage` (the system prompt and all `[HISTORY_SUMMARY]`
+digests, where it pinned only a digest in first position), and drops older history in whole turns: an assistant
+message with tool calls goes with its tool results, so the window never starts at an orphaned `ToolMessage`. It now
+returns `Left(ContextError)` when the pinned messages exceed the budget, or when not even the newest turn fits beside
+them, where it returned `Right` with an empty or pinned-only conversation. `ContextManager.manageContext` returns that
+`Left` from its last step; raise the budget, or trim the system prompt. To leave room for the turns,
+`ContextManager` now caps the history digests at half the budget left after headroom (and at
+`summaryTokenTarget`, as before).
+
+**Externalization needs a store.** With `artifactStore = None` (the default of `DeterministicCompressor.compressToCap`
+and of `ContextManager`), tool output over 8 KB used to become an `[EXTERNALIZED: key ...]` pointer into a store
+created and discarded on each call. Now nothing is externalized: the output is compressed inline. Pass
+`Some(store)` to keep externalizing and be able to `retrieve` the content.
+
+**Binary content** is a `data:...;base64,` URI, a run of 256 or more base64 characters, or text that is mostly
+control characters; mentioning the word "base64" no longer counts. It is never cut: over 2 KB it is externalized
+whole when there is a store, and otherwise left as it is. The `[BINARY CONTENT - n bytes - externalized: id]`
+placeholder, which stored nothing, is gone.
+
+**User messages** are no longer rewritten by `CompressionRule.compressRepetitiveContent` or
+`removeRedundantPhrases`, as `DeterministicCompressor`'s Scaladoc always promised.
 
 ## `StreamingAccumulator` takes the model and reports usage one way (#2813)
 
