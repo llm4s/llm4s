@@ -1011,6 +1011,10 @@ required: without one, `Tracing.fromSettings` returns a `ConfigurationError` nam
 `Tracing.create` logs it and traces nothing. Without the module, `TRACING_MODE=langfuse` gives
 an error naming the `llm4s-observability` artifact.
 
+Traces are private to your Langfuse project. `llm4s.tracing.langfuse.public = true` (no variable
+is bound to it) sends them public instead: readable, messages included, by anyone holding a
+trace's URL.
+
 Get keys from [Langfuse](https://langfuse.com):
 
 1. Sign up at langfuse.com
@@ -1128,7 +1132,7 @@ val result = for {
   tracer   <- Tracing.fromSettings(settings)
   _        <- tracer.traceEvent(TraceEvent.AgentInitialized("query", Vector("tool1")))
   _        <- tracer.traceTokenUsage(usage, "gpt-4o", "completion")
-  _         = tracer.shutdown() // always shut down to flush pending spans
+  _         = tracer.close() // always shut down to flush pending spans
 } yield ()
 ```
 

@@ -8,11 +8,13 @@ import scala.concurrent.duration.FiniteDuration
  * Minimal algebra for collecting metrics about LLM operations.
  *
  * The core metrics model tracks request latency, request outcome, token usage,
- * estimated cost, retry attempts, circuit-breaker transitions, generic errors,
- * and image generation usage. Modules above core declare metrics of their own as
- * [[Metric]]s and record them through the generic [[increment]], [[observe]] and
- * [[set]], so core names none of their concepts. Concrete implementations decide
- * where these observations are stored or exported.
+ * estimated cost and image generation usage. Everything else is a [[Metric]] its
+ * owner declares and records through the generic [[increment]], [[observe]] and
+ * [[set]]: `ReliableClient`'s retries, circuit-breaker transitions and errors
+ * (`org.llm4s.reliability.ReliabilityMetrics`), and the metrics of modules above
+ * core, so core names none of their concepts. A backend that implements the three
+ * generic methods exports them all. Concrete implementations decide where these
+ * observations are stored or exported.
  *
  * Implementations should be safe: failures must not propagate to callers.
  * All methods should catch and log errors internally without throwing.
@@ -93,48 +95,6 @@ trait MetricsCollector {
   ): Unit
 
   /**
-   * Record a retry attempt for reliability tracking.
-   *
-   * The first retry after the original request fails should use
-   * `attemptNumber = 1`.
-   *
-   * @param provider Provider name
-   * @param attemptNumber Which retry attempt (1 = first retry, 2 = second, etc.)
-   */
-  def recordRetryAttempt(
-    provider: String,
-    attemptNumber: Int
-  ): Unit = () // Default no-op
-
-  /**
-   * Record circuit breaker state transition.
-   *
-   * Expected states are stable labels such as "open", "closed", and
-   * "half-open".
-   *
-   * @param provider Provider name
-   * @param newState New circuit breaker state ("open", "closed", "half-open")
-   */
-  def recordCircuitBreakerTransition(
-    provider: String,
-    newState: String
-  ): Unit = () // Default no-op
-
-  /**
-   * Record a generic error for metrics (when full request tracking not applicable).
-   *
-   * Use this for failures that occur outside a complete request timing scope,
-   * such as configuration, validation, or setup failures.
-   *
-   * @param errorKind Type of error
-   * @param provider Provider name
-   */
-  def recordError(
-    errorKind: ErrorKind,
-    provider: String
-  ): Unit = () // Default no-op
-
-  /**
    * Record an image generation operation.
    *
    * The `outcome` dimension has the same meaning as in [[observeRequest]].
@@ -175,8 +135,9 @@ trait MetricsCollector {
   /**
    * Add `amount` to counter `metric`, with `labelValues` for its label names, in order.
    *
-   * The generic entry point for metrics a module above core declares (see [[Metric]]): the agent runtime's run, claim,
-   * queue and child-task metrics come through here, so a backend exports them with no dependency on that module. A
+   * The generic entry point for declared metrics (see [[Metric]]): `ReliableClient`'s retry, circuit-breaker and
+   * error counters and the agent runtime's run, claim, queue and child-task metrics come through here, so a backend
+   * exports them with no method of its own and no dependency on the module that declares them. A
    * backend drops a recording whose number of values is not the metric's number of labels, or whose `amount` is
    * negative or not finite, logging it, and records a null or blank value as `unknown` and values past
    * [[MetricsCollector.MaxLabelValues]] distinct ones per label as `other`.
@@ -240,21 +201,6 @@ object MetricsCollector {
       model: String,
       costUsd: Double
     ): Unit = safeForEach(_.recordCost(provider, model, costUsd))
-
-    override def recordRetryAttempt(
-      provider: String,
-      attemptNumber: Int
-    ): Unit = safeForEach(_.recordRetryAttempt(provider, attemptNumber))
-
-    override def recordCircuitBreakerTransition(
-      provider: String,
-      newState: String
-    ): Unit = safeForEach(_.recordCircuitBreakerTransition(provider, newState))
-
-    override def recordError(
-      errorKind: ErrorKind,
-      provider: String
-    ): Unit = safeForEach(_.recordError(errorKind, provider))
 
     override def observeImageGeneration(
       provider: String,

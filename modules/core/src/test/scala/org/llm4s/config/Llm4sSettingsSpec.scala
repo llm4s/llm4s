@@ -115,9 +115,17 @@ class Llm4sSettingsSpec extends AnyWordSpec with Matchers with EitherValues:
     "keep every module's reference.conf beneath the given config" in {
       val s = settings("")
       s.tracing().value.mode shouldBe TracingMode.Console
-      s.modelRegistryConfig().value.resourcePath shouldBe defined
+      s.modelRegistryConfig().value shouldBe org.llm4s.model.ModelRegistryConfig.default
       s.httpNetwork().isRight shouldBe true
       s.exchangeLogging().isRight shouldBe true
+    }
+
+    "read one model registry source, and refuse two" in {
+      settings("""llm4s.modelRegistry.filePath = "/tmp/models.json"""").modelRegistryConfig().value.source shouldBe
+        org.llm4s.model.ModelRegistrySource.File("/tmp/models.json")
+      settings(
+        """llm4s.modelRegistry { filePath = "/tmp/models.json", url = "https://example.invalid/m.json" }"""
+      ).modelRegistryConfig().isLeft shouldBe true
     }
 
     "read the tracing block of the given config" in {
@@ -152,9 +160,8 @@ class Llm4sSettingsSpec extends AnyWordSpec with Matchers with EitherValues:
     "report a modelRegistry key that is not a string, instead of quietly using the bundled registry (#2804)" in {
       settings("llm4s.modelRegistry.filePath = [1, 2]").modelRegistryConfig().left.value shouldBe a[ConfigurationError]
       settings("llm4s.modelRegistry.url = { a = 1 }").modelRegistryService().left.value shouldBe a[ConfigurationError]
-      val read = settings("""llm4s.modelRegistry.filePath = " /tmp/models.json " """).modelRegistryConfig().value
-      read.filePath shouldBe Some("/tmp/models.json")
-      read.resourcePath shouldBe None
+      settings("""llm4s.modelRegistry.filePath = " /tmp/models.json " """).modelRegistryConfig().value.source shouldBe
+        org.llm4s.model.ModelRegistrySource.File("/tmp/models.json")
     }
 
     "route a section built in code by llm4s.http, as it routes a configured one (#2804)" in {

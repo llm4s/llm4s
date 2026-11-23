@@ -10,7 +10,7 @@ import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.trace.TraceEvent
 import org.llm4s.types.Result
-import org.scalatest.EitherValues
+import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -27,7 +27,7 @@ import scala.concurrent.duration._
  * with only the imports the guide shows for it; the assertions here pin what the surrounding prose claims. The stand-ins at the bottom replace the
  * real provider clients, which the guide's snippets receive as `baseClient` and `embeddingClient`.
  */
-class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
+class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with OptionValues {
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
@@ -43,7 +43,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
   "the embedding cache (section 3)" should {
     "serve repeated texts from the cache and batch the misses into one call" in {
       val base  = new FakeEmbeddingClient
-      val stats = CachingGuideSnippets.embeddingCache(base)
+      val stats = CachingGuideSnippets.embeddingCache(base).value.value
 
       base.calls.get shouldBe 2 // one call for [hello, world], one for [again]
       base.requests.map(_.input) shouldBe List(Seq("hello", "world"), Seq("again"))
@@ -56,7 +56,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
 
     "cache a query apart from a document with the same text" in {
       val base  = new FakeEmbeddingClient
-      val stats = CachingGuideSnippets.queryCache(base)
+      val stats = CachingGuideSnippets.queryCache(base).value.value
 
       base.calls.get shouldBe 2
       base.requests.map(_.purpose) shouldBe List(InputPurpose.Query, InputPurpose.Document)
@@ -69,7 +69,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       val seen = ListBuffer.empty[(String, String, InputPurpose)]
       val cached = new CachedEmbeddingClient(
         new FakeEmbeddingClient,
-        new InMemoryEmbeddingCache[Seq[Double]](),
+        InMemoryEmbeddingCache.create().value,
         (text, model, purpose) => {
           seen += ((text, model, purpose)); CacheKeyGenerator.embeddingKey(text, model, purpose)
         }
@@ -84,7 +84,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
 
     "keep a query for model m apart from a document for a model named m#query" in {
       val base   = new FakeEmbeddingClient
-      val cached = new CachedEmbeddingClient(base, new InMemoryEmbeddingCache[Seq[Double]]())
+      val cached = new CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
       cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig("m", 3), InputPurpose.Query))
       cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig("m#query", 3)))
       base.calls.get shouldBe 2
@@ -99,7 +99,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       val base    = new FakeEmbeddingClient
       val snippet = new CachingGuideSnippets.TenantKey(base)
       base.calls.get shouldBe 1
-      snippet.cached.cacheStats.size shouldBe 1
+      snippet.cached.value.cacheStats.value.size shouldBe 1
     }
 
     "keep tenants apart even when a tenant or a text contains a colon" in {
@@ -114,51 +114,50 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
     }
 
     "expire an entry strictly after its TTL, counting the expired read as a miss" in {
-      var nowMillis = 0L
-      val cache = new InMemoryEmbeddingCache[Seq[Double]](maxSize = 10, ttl = Some(10.seconds), clock = () => nowMillis)
+      val clock = new MovableClock
+      val start = clock.now
+      val cache = InMemoryEmbeddingCache.create(maxSize = 10, ttl = Some(10.seconds), clock = clock).value
       cache.put("k", Seq(1.0))
 
-      nowMillis = 10000L // exactly the TTL: still valid
-      cache.get("k") shouldBe Some(Seq(1.0))
-      nowMillis = 10001L // past it: gone, and removed
-      cache.get("k") shouldBe None
-      cache.stats().size shouldBe 0
-      cache.stats().hits shouldBe 1
-      cache.stats().misses shouldBe 1
+      clock.now = start.plusMillis(10000L) // exactly the TTL: still valid
+      cache.get("k") shouldBe Right(Some(Seq(1.0)))
+      clock.now = start.plusMillis(10001L) // past it: gone, and removed
+      cache.get("k") shouldBe Right(None)
+      cache.stats() shouldBe Some(CacheStats(size = 0, hits = 1L, misses = 1L))
     }
 
     "evict the least recently used entry, and a read counts as a use" in {
-      val cache = new InMemoryEmbeddingCache[Seq[Double]](maxSize = 2, ttl = None)
+      val cache = InMemoryEmbeddingCache.create(maxSize = 2, ttl = None).value
       cache.put("a", Seq(1.0))
       cache.put("b", Seq(2.0))
       cache.get("a") // a is now the most recently used
       cache.put("c", Seq(3.0))
 
-      cache.get("a") shouldBe defined
-      cache.get("b") shouldBe None
-      cache.get("c") shouldBe defined
+      cache.get("a").value shouldBe defined
+      cache.get("b").value shouldBe None
+      cache.get("c").value shouldBe defined
     }
 
     "forget everything, statistics included, on clearCache" in {
       val base   = new FakeEmbeddingClient
-      val cached = new CachedEmbeddingClient(base, new InMemoryEmbeddingCache[Seq[Double]]())
+      val cached = new CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
       cached.embed(EmbeddingRequest(Seq("x"), ModelA))
-      cached.clearCache()
+      cached.clearCache() shouldBe Right(())
 
-      cached.cacheStats.size shouldBe 0
-      cached.cacheStats.totalRequests shouldBe 0
+      cached.cacheStats.value.size shouldBe 0
+      cached.cacheStats.value.totalRequests shouldBe 0
       cached.embed(EmbeddingRequest(Seq("x"), ModelA))
       base.calls.get shouldBe 2
     }
 
     "send a text repeated inside one request once, while the statistics count every lookup" in {
       val base   = new FakeEmbeddingClient
-      val cached = new CachedEmbeddingClient(base, new InMemoryEmbeddingCache[Seq[Double]]())
+      val cached = new CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
       cached.embed(EmbeddingRequest(Seq("a", "a", "b"), ModelA)).value.embeddings should have size 3
 
       base.requests.map(_.input) shouldBe List(Seq("a", "b"))
-      cached.cacheStats.size shouldBe 2
-      cached.cacheStats.misses shouldBe 3
+      cached.cacheStats.value.size shouldBe 2
+      cached.cacheStats.value.misses shouldBe 3
     }
 
     "work with a backend of your own" in {
@@ -167,12 +166,20 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       cached.embed(EmbeddingRequest(Seq("x"), ModelA))
       cached.embed(EmbeddingRequest(Seq("x"), ModelA))
       base.calls.get shouldBe 1
-      cached.cacheStats.hits shouldBe 1
+      cached.cacheStats.value.hits shouldBe 1
+    }
+
+    "wrap in an EmbeddingClient where one is required" in {
+      val base   = new FakeEmbeddingClient
+      val client = CachingGuideSnippets.asEmbeddingClient(base).value
+      client.embed(EmbeddingRequest(Seq("x"), ModelA))
+      client.embed(EmbeddingRequest(Seq("x"), ModelA))
+      base.calls.get shouldBe 1
     }
 
     "not cache a failure" in {
       val base   = new FakeEmbeddingClient
-      val cached = new CachedEmbeddingClient(base, new InMemoryEmbeddingCache[Seq[Double]]())
+      val cached = new CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
       base.failing = true
       cached.embed(EmbeddingRequest(Seq("x"), ModelA)).isLeft shouldBe true
       base.failing = false
@@ -328,10 +335,8 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       seen() shouldBe empty
     }
 
-    "match on user and system messages only: assistant and tool turns are not compared" in {
-      // Deliberate: tool arguments and results never reach the embedding request. The consequence is that
-      // two conversations differing only in those turns are the same cache key. This embedder would tell
-      // the prompts apart if the assistant or tool text were part of them.
+    "bypass the cache for a conversation with tool turns, so a tool loop is never served a stale step" in {
+      // Only user and system text is embedded, so these two would be the same cache key; tool turns bypass.
       val embedder = new FakeEmbeddingClient(
         Map(
           "thinking" -> Seq(1.0, 0.0, 0.0),
@@ -347,6 +352,15 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
         Conversation(Seq(UserMessage("what is 2+2"), AssistantMessage("other"), ToolMessage("beta", "call-1")))
       client.complete(first)
       client.complete(second)
+      llm.calls.get shouldBe 2
+      embedder.calls.get shouldBe 0
+    }
+
+    "match on user and system messages only: assistant text is not compared" in {
+      val embedder = new FakeEmbeddingClient(Map("thinking" -> Seq(1.0, 0.0, 0.0), "other" -> Seq(0.0, 1.0, 0.0)))
+      val (client, llm, _, _, _) = fixture(embedder = embedder)
+      client.complete(Conversation(Seq(UserMessage("what is 2+2"), AssistantMessage("thinking"), UserMessage("and?"))))
+      client.complete(Conversation(Seq(UserMessage("what is 2+2"), AssistantMessage("other"), UserMessage("and?"))))
       llm.calls.get shouldBe 1
     }
 

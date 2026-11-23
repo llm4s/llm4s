@@ -1,5 +1,6 @@
 package org.llm4s.metrics
 
+import org.llm4s.reliability.ReliabilityMetrics
 import io.micrometer.core.instrument.config.MeterFilter
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.micrometer.core.instrument.{ Meter, MeterRegistry, Timer }
@@ -256,41 +257,36 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
 
   // --- retries, circuit breaker, generic errors -------------------------------------------------
 
-  "recordRetryAttempt" should "count retries per provider, whatever the attempt number" in {
+  "ReliabilityMetrics.Retries" should "count retries per provider" in {
     val (registry, metrics) = fresh()
-    metrics.recordRetryAttempt("openai", 1)
-    metrics.recordRetryAttempt("openai", 2)
-    metrics.recordRetryAttempt("openai", 3)
-    metrics.recordRetryAttempt("anthropic", 1)
+    metrics.increment(ReliabilityMetrics.Retries, Seq("openai"))
+    metrics.increment(ReliabilityMetrics.Retries, Seq("openai"))
+    metrics.increment(ReliabilityMetrics.Retries, Seq("openai"))
+    metrics.increment(ReliabilityMetrics.Retries, Seq("anthropic"))
     counter(registry, Names.Retries, "provider" -> "openai") shouldBe Some(3.0)
     counter(registry, Names.Retries, "provider" -> "anthropic") shouldBe Some(1.0)
     tagKeys(registry, Names.Retries) shouldBe Set("provider")
   }
 
-  "recordCircuitBreakerTransition" should "count each documented state" in {
+  "ReliabilityMetrics.CircuitBreakerTransitions" should "count each state" in {
     val (registry, metrics) = fresh()
-    Seq("open", "closed", "half-open").foreach(metrics.recordCircuitBreakerTransition("openai", _))
+    Seq("open", "closed", "half-open").foreach(s =>
+      metrics.increment(ReliabilityMetrics.CircuitBreakerTransitions, Seq("openai", s))
+    )
     Seq("open", "closed", "half-open").foreach { s =>
       counter(registry, Names.CircuitBreakerTransitions, "provider" -> "openai", "state" -> s) shouldBe Some(1.0)
     }
   }
 
-  it should "read a state case-insensitively and ignore surrounding spaces" in {
-    val (registry, metrics) = fresh()
-    metrics.recordCircuitBreakerTransition("openai", " HALF-OPEN ")
-    counter(registry, Names.CircuitBreakerTransitions, "state" -> "half-open") shouldBe Some(1.0)
+  it should "name its meters as ReliabilityMetrics declares them" in {
+    Names.Retries shouldBe "llm4s.retries"
+    Names.CircuitBreakerTransitions shouldBe "llm4s.circuit.breaker.transitions"
+    Names.ReliabilityErrors shouldBe "llm4s.reliability.errors"
   }
 
-  it should "record an unknown or null state as `other`" in {
+  "ReliabilityMetrics.Errors" should "count a failure outside a timed request under error_type, on its own meter" in {
     val (registry, metrics) = fresh()
-    metrics.recordCircuitBreakerTransition("openai", "exploded")
-    metrics.recordCircuitBreakerTransition("openai", null)
-    counter(registry, Names.CircuitBreakerTransitions, "state" -> "other") shouldBe Some(2.0)
-  }
-
-  "recordError" should "count a failure outside a timed request under error_type, on its own meter" in {
-    val (registry, metrics) = fresh()
-    metrics.recordError(ErrorKind.Validation, "openai")
+    metrics.increment(ReliabilityMetrics.Errors, Seq("openai", ReliabilityMetrics.errorTypeLabel(ErrorKind.Validation)))
     counter(registry, Names.ReliabilityErrors, "provider" -> "openai", "error_type" -> "validation") shouldBe Some(
       1.0
     )
@@ -300,7 +296,9 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
 
   it should "not feed llm4s.errors, which counts only failed requests and image generations, as in the Prometheus module" in {
     val (registry, metrics) = fresh()
-    allKinds.foreach { case (kind, _) => metrics.recordError(kind, "openai") }
+    allKinds.foreach { case (kind, _) =>
+      metrics.increment(ReliabilityMetrics.Errors, Seq("openai", ReliabilityMetrics.errorTypeLabel(kind)))
+    }
     meters(registry, Names.Errors) shouldBe 0
     allKinds.foreach { case (_, label) =>
       counter(registry, Names.ReliabilityErrors, "error_type" -> label) shouldBe Some(1.0)
@@ -397,9 +395,9 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
       metrics.observeRequest("openai", "gpt-4o", Outcome.Error(ErrorKind.Timeout), 1.second)
       metrics.addTokens("openai", "gpt-4o", 1L, 1L)
       metrics.recordCost("openai", "gpt-4o", 1.0)
-      metrics.recordRetryAttempt("openai", 1)
-      metrics.recordCircuitBreakerTransition("openai", "open")
-      metrics.recordError(ErrorKind.Network, "openai")
+      metrics.increment(ReliabilityMetrics.Retries, Seq("openai"))
+      metrics.increment(ReliabilityMetrics.CircuitBreakerTransitions, Seq("openai", "open"))
+      metrics.increment(ReliabilityMetrics.Errors, Seq("openai", ReliabilityMetrics.errorTypeLabel(ErrorKind.Network)))
       metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 1.second, 1)
       metrics.recordImageGenerationCost("openai", "dall-e-3", 1.0, 1)
     }
@@ -414,15 +412,12 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
     registry.getMeters.size() shouldBe 0
   }
 
-  it should "stay within a fixed set of meters however many distinct states and operations it is given" in {
+  it should "stay within a fixed set of meters however many distinct operations it is given" in {
     val (registry, metrics) = fresh()
     (1 to 1000).foreach { i =>
-      metrics.recordCircuitBreakerTransition("openai", s"state-$i")
       metrics.observeImageGeneration("openai", "dall-e-3", s"operation-$i", Outcome.Success, 1.millis, 1)
     }
-    Seq("open", "closed", "half-open").foreach(metrics.recordCircuitBreakerTransition("openai", _))
-    meters(registry, Names.CircuitBreakerTransitions) shouldBe 4 // open, closed, half-open, other
-    meters(registry, Names.ImageGenerations) shouldBe 1          // all `other`
+    meters(registry, Names.ImageGenerations) shouldBe 1 // all `other`
     meters(registry, Names.ImageGenerationDuration) shouldBe 1
   }
 
@@ -439,9 +434,9 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
 
     val (registry2, metrics2) = fresh()
     val providerCap           = MicrometerMetrics.MaxProviderValues
-    (1 to providerCap + 10).foreach(i => metrics2.recordRetryAttempt(s"provider-$i", 1))
-    meters(registry2, Names.Retries) shouldBe providerCap + 1
-    counter(registry2, Names.Retries, "provider" -> "other") shouldBe Some(10.0)
+    (1 to providerCap + 10).foreach(i => metrics2.recordCost(s"provider-$i", "gpt-4o", 1.0))
+    meters(registry2, Names.CostUsd) shouldBe providerCap + 1
+    counter(registry2, Names.CostUsd, "provider" -> "other") shouldBe Some(10.0)
   }
 
   it should "count caps per collector, so two collectors do not share their budget" in {
@@ -575,7 +570,7 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
 
     provider.calls.get shouldBe 3
     counter(registry, Names.Requests, "status" -> "error_service_error") shouldBe Some(3.0)
-    // Before #1817 recordError fed this counter too, so it read 4.0 for three failed attempts.
+    // Before #1817 ReliableClient's own errors fed this counter too, so it read 4.0 for three failed attempts.
     counter(registry, Names.Errors, "provider" -> "probe", "error_type" -> "service_error") shouldBe Some(3.0)
     counter(registry, Names.ReliabilityErrors, "provider" -> "probe", "error_type" -> "service_error") shouldBe Some(
       1.0

@@ -33,9 +33,9 @@ class CachedEmbeddingClientPurposeSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  private def setup(): (PurposeEchoProvider, InMemoryEmbeddingCache[Seq[Double]], CachedEmbeddingClient) = {
+  private def setup(): (PurposeEchoProvider, InMemoryEmbeddingCache, CachedEmbeddingClient) = {
     val provider = new PurposeEchoProvider
-    val cache    = new InMemoryEmbeddingCache[Seq[Double]]()
+    val cache    = InMemoryEmbeddingCache.create().toOption.get
     (provider, cache, new CachedEmbeddingClient(new EmbeddingClient(provider), cache))
   }
 
@@ -80,7 +80,9 @@ class CachedEmbeddingClientPurposeSpec extends AnyFlatSpec with Matchers {
 
     client.embed(EmbeddingRequest(Seq("hello"), model))
 
-    cache.get(CacheKeyGenerator.embeddingKey("hello", model.name, InputPurpose.Document)) shouldBe Some(Seq(0.0, 1.0))
+    cache.get(CacheKeyGenerator.embeddingKey("hello", model.name, InputPurpose.Document)) shouldBe Right(
+      Some(Seq(0.0, 1.0))
+    )
   }
 
   it should "key a query by the text, the model name and the query purpose" in {
@@ -88,8 +90,10 @@ class CachedEmbeddingClientPurposeSpec extends AnyFlatSpec with Matchers {
 
     client.embed(EmbeddingRequest(Seq("hello"), model, InputPurpose.Query))
 
-    cache.get(CacheKeyGenerator.embeddingKey("hello", model.name, InputPurpose.Query)) shouldBe Some(Seq(1.0, 1.0))
-    cache.get(CacheKeyGenerator.embeddingKey("hello", model.name, InputPurpose.Document)) shouldBe None
+    cache.get(CacheKeyGenerator.embeddingKey("hello", model.name, InputPurpose.Query)) shouldBe Right(
+      Some(Seq(1.0, 1.0))
+    )
+    cache.get(CacheKeyGenerator.embeddingKey("hello", model.name, InputPurpose.Document)) shouldBe Right(None)
   }
 
   it should "keep a query for model m apart from a document for a model named m#query" in {
@@ -104,7 +108,7 @@ class CachedEmbeddingClientPurposeSpec extends AnyFlatSpec with Matchers {
 
   it should "hand a custom key generator the text, the model name and the purpose" in {
     val seen  = ListBuffer.empty[(String, String, InputPurpose)]
-    val cache = new InMemoryEmbeddingCache[Seq[Double]]()
+    val cache = InMemoryEmbeddingCache.create().toOption.get
     val client = new CachedEmbeddingClient(
       new EmbeddingClient(new PurposeEchoProvider),
       cache,

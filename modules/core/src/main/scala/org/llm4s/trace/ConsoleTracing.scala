@@ -2,7 +2,6 @@ package org.llm4s.trace
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ ConfigurationError, UnknownError }
-import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
 import org.llm4s.types.Result
 import scala.util.Try
 
@@ -240,32 +239,6 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
           println()
       }
     }.toEither.left.map(error => UnknownError(error.getMessage, error))
-
-  def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
-    val event = TraceEvent.ToolExecuted(toolName, input, output, scala.concurrent.duration.Duration.Zero, true)
-    traceEvent(event)
-  }
-
-  def traceError(error: Throwable, context: String): Result[Unit] = {
-    val event = TraceEvent.ErrorOccurred(error, context)
-    traceEvent(event)
-  }
-
-  def traceCompletion(completion: Completion, model: String): Result[Unit] = {
-    val event = TraceEvent.CompletionReceived(
-      id = completion.id,
-      model = model,
-      toolCalls = completion.message.toolCalls.size,
-      content = completion.message.content,
-      servedTier = completion.servedTier
-    )
-    traceEvent(event)
-  }
-
-  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = {
-    val event = TraceEvent.TokenUsageRecorded(usage, model, operation)
-    traceEvent(event)
-  }
 }
 
 object ConsoleTracing {

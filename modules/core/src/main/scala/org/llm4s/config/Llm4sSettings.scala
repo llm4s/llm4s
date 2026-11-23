@@ -13,7 +13,7 @@ import org.llm4s.llmconnect.config.{
   TracingSettings
 }
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
+import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService, ModelRegistrySource }
 import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.types.Result
 import pureconfig.ConfigSource
@@ -52,22 +52,24 @@ final class Llm4sSettings private[llm4s] (source: ConfigSource) {
    * The `llm4s.modelRegistry` block: where the model registry is read from. With none of `resourcePath`,
    * `filePath` and `url` set, it is the registry bundled with llm4s.
    *
-   * @return the settings, or a [[org.llm4s.error.ConfigurationError]] when the configuration cannot be read or
-   *         one of the three keys is set to something that is not a string
+   * @return the settings, or a [[org.llm4s.error.ConfigurationError]] when the configuration cannot be read,
+   *         one of the three keys is set to something that is not a string, or more than one of them is set
    */
   def modelRegistryConfig(): Result[ModelRegistryConfig] =
     for
       resourcePath <- optionalString("llm4s.modelRegistry.resourcePath")
       filePath     <- optionalString("llm4s.modelRegistry.filePath")
       url          <- optionalString("llm4s.modelRegistry.url")
-    yield
-      val useDefaultResource = resourcePath.isEmpty && filePath.isEmpty && url.isEmpty
-      ModelRegistryConfig(
-        resourcePath =
-          resourcePath.orElse(if useDefaultResource then Some(ModelRegistryConfig.DefaultResourcePath) else None),
-        filePath = filePath,
-        url = url
-      )
+      config <- List(
+        resourcePath.map(ModelRegistrySource.Resource(_)),
+        filePath.map(ModelRegistrySource.File(_)),
+        url.map(ModelRegistrySource.Url(_))
+      ).flatten match
+        case Nil           => Right(ModelRegistryConfig.default)
+        case source :: Nil => Right(ModelRegistryConfig(source))
+        case _ =>
+          Left(ConfigurationError("llm4s.modelRegistry sets more than one of resourcePath, filePath and url; set one"))
+    yield config
 
   /**
    * The string at `path`, `None` when the key is absent or blank. A configuration that cannot be read, or a

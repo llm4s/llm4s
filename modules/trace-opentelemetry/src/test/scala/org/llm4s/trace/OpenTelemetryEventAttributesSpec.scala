@@ -46,17 +46,17 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
     val exporter = new Collecting
     val tracing  = OpenTelemetryTracing.exportingTo("event-attributes-spec", exporter, captureContent)
     try body(tracing, () => exporter.spans.asScala.toVector)
-    finally tracing.shutdown()
+    finally tracing.close()
 
   private def mapped(event: TraceEvent, captureContent: Boolean = false): (String, Attributes) =
     val tracing = OpenTelemetryTracing.exportingTo("event-attributes-spec", new Collecting, captureContent)
     try tracing.mapEventToAttributes(event)
-    finally tracing.shutdown()
+    finally tracing.close()
 
   private def kind(event: TraceEvent): SpanKind =
     val tracing = OpenTelemetryTracing.exportingTo("event-attributes-spec", new Collecting)
     try tracing.getSpanKind(event)
-    finally tracing.shutdown()
+    finally tracing.close()
 
   private def str(a: Attributes, key: String): String              = a.get(AttributeKey.stringKey(key))
   private def long(a: Attributes, key: String): java.lang.Long     = a.get(AttributeKey.longKey(key))
@@ -466,7 +466,13 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
         model = "gpt-4o",
         message = AssistantMessage("4")
       )
-      tracing.traceToolCall("search", "{}", "[]") shouldBe Right(())
+      tracing.traceToolCall(
+        "search",
+        "{}",
+        "[]",
+        scala.concurrent.duration.Duration.Zero,
+        success = true
+      ) shouldBe Right(())
       tracing.traceError(new IllegalStateException("boom"), "loading config") shouldBe Right(())
       tracing.traceCompletion(completion, "gpt-4o") shouldBe Right(())
       tracing.traceTokenUsage(TokenUsage(12, 7, 19), "gpt-4o", "summarise") shouldBe Right(())

@@ -40,7 +40,9 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     noException should be thrownBy tracing.traceToolCall(
       "calculator",
       """{"operation": "add", "a": 1, "b": 2}""",
-      "3"
+      "3",
+      scala.concurrent.duration.Duration.Zero,
+      success = true
     )
   }
 
@@ -204,7 +206,13 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val longInput = "{" + "\"key\":\"value\"," * 100 + "}"
 
     // Should not throw even with very long input
-    noException should be thrownBy tracing.traceToolCall("tool", longInput, "result")
+    noException should be thrownBy tracing.traceToolCall(
+      "tool",
+      longInput,
+      "result",
+      scala.concurrent.duration.Duration.Zero,
+      success = true
+    )
   }
 
   it should "handle truncation of long content in completions" in {
@@ -226,7 +234,13 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val tracing    = new ConsoleTracing()
     val longOutput = "Result: " + "x" * 500
 
-    noException should be thrownBy tracing.traceToolCall("tool", "{}", longOutput)
+    noException should be thrownBy tracing.traceToolCall(
+      "tool",
+      "{}",
+      longOutput,
+      scala.concurrent.duration.Duration.Zero,
+      success = true
+    )
   }
 
   // ==========================================================================
@@ -282,7 +296,9 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "show traceToolCall as a successful ToolExecuted with no duration" in {
-    val output = printed(new ConsoleTracing().traceToolCall("echo", "{}", "ok"))
+    val output = printed(
+      new ConsoleTracing().traceToolCall("echo", "{}", "ok", scala.concurrent.duration.Duration.Zero, success = true)
+    )
 
     output should include("--- TOOL EXECUTED ---")
     output should include("Success: true")
@@ -292,7 +308,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
   it should "truncate tool input at 100 characters and completion content at 200" in {
     val output = printed {
       val tracing = new ConsoleTracing(captureContent = true)
-      tracing.traceToolCall("tool", "i" * 150, "o" * 150)
+      tracing.traceToolCall("tool", "i" * 150, "o" * 150, scala.concurrent.duration.Duration.Zero, success = true)
       tracing.traceEvent(TraceEvent.CompletionReceived("c-1", "m", 0, "c" * 250))
     }
 

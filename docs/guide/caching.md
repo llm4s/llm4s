@@ -29,9 +29,9 @@ Both caches live in `llm4s-core`, package `org.llm4s.llmconnect.caching`. With t
 |---|---|---|
 | Class | `CachedEmbeddingClient` with an `EmbeddingCache`, by default `InMemoryEmbeddingCache` | `CachingLLMClient`, which wraps any `LLMClient` |
 | A hit needs | the same text, the same model name and the same `InputPurpose` (document or query) | an embedding at least `similarityThreshold` similar, the same `CompletionOptions` on every field that changes the answer, and an entry no older than the TTL |
-| Configured with | `InMemoryEmbeddingCache(maxSize = 10000, ttl = None)` | `CacheConfig.create(similarityThreshold, ttl, maxSize = 1000)` |
+| Configured with | `InMemoryEmbeddingCache.create(maxSize = 10000, ttl = None)` | `CacheConfig.create(similarityThreshold, ttl, maxSize = 1000)` |
 | Eviction | least recently used, plus the optional TTL | least recently used, plus the TTL |
-| Seeing what happened | `cacheStats` | `TraceEvent.CacheHit` and `TraceEvent.CacheMiss` sent to your `Tracing` |
+| Seeing what happened | `cacheStats`, when the backend keeps statistics | `TraceEvent.CacheHit` and `TraceEvent.CacheMiss` sent to your `Tracing` |
 
 There is no configuration-file key for either cache. You construct them in code, and the examples below do exactly that.
 
@@ -47,7 +47,7 @@ There is no configuration-file key for either cache. You construct them in code,
 
 ## 3. Caching embeddings
 
-Wrap an `EmbeddingClient` in a `CachedEmbeddingClient` and call `embed` on the wrapper:
+Wrap an `EmbeddingClient` in a `CachedEmbeddingClient` and call `embed` on the wrapper. `InMemoryEmbeddingCache.create` checks its arguments, so it returns a `Result`:
 
 ```scala
 import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
@@ -55,13 +55,14 @@ import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.EmbeddingRequest
 import scala.concurrent.duration._
 
-val cache  = new InMemoryEmbeddingCache[Seq[Double]](maxSize = 10000, ttl = Some(1.hour))
-val cached = new CachedEmbeddingClient(base, cache)
-val model  = EmbeddingModelConfig("text-embedding-3-small", 1536)
+val model = EmbeddingModelConfig("text-embedding-3-small", 1536)
 
-cached.embed(EmbeddingRequest(Seq("hello", "world"), model)) // two misses, sent as one batched call
-cached.embed(EmbeddingRequest(Seq("hello", "again"), model)) // "hello" is served from the cache
-cached.cacheStats
+for {
+  cache <- InMemoryEmbeddingCache.create(maxSize = 10000, ttl = Some(1.hour))
+  cached = new CachedEmbeddingClient(base, cache)
+  _ <- cached.embed(EmbeddingRequest(Seq("hello", "world"), model)) // two misses, sent as one batched call
+  _ <- cached.embed(EmbeddingRequest(Seq("hello", "again"), model)) // "hello" is served from the cache
+} yield cached.cacheStats
 ```
 
 Here `base` is the `EmbeddingClient` you would use without a cache. A request without a purpose embeds documents (`InputPurpose.Document`), which is what indexing wants. To cache repeated search queries, say so on the request, so that the query is embedded as one and cached apart from a document with the same text:
@@ -71,12 +72,15 @@ import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCa
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
 
-val queries = new CachedEmbeddingClient(base, new InMemoryEmbeddingCache[Seq[Double]]())
-val model   = EmbeddingModelConfig("text-embedding-3-small", 1536)
+val model = EmbeddingModelConfig("text-embedding-3-small", 1536)
 
-queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a miss
-queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a hit
-queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model))                     // a miss: a document
+for {
+  cache <- InMemoryEmbeddingCache.create()
+  queries = new CachedEmbeddingClient(base, cache)
+  _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a miss
+  _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a hit
+  _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model))                     // a miss: a document
+} yield queries.cacheStats
 ```
 
 The wrapper:
@@ -84,17 +88,27 @@ The wrapper:
 - looks every input text up first, and sends only the texts it does not have to the base client, in **one** batched request, then returns the vectors in the original input order;
 - sends a text that is repeated inside one request once;
 - never caches a failure: an error from the base client is returned as it is, and the next call tries again;
-- is **not** an `EmbeddingClient`. It has the same `embed` method, but it cannot be passed where an `EmbeddingClient` is required, so call it directly.
+- keeps the base client's response (its `usage`, `metadata` and `dim`) with the cached vectors merged in, so `usage` counts only the texts that were sent. A request answered wholly from the cache has no `usage`;
+- is an `EmbeddingProvider`, like `EmbeddingClient` itself. Where an `EmbeddingClient` is required, wrap it in one:
 
-`cacheStats` returns `CacheStats(size, hits, misses, totalRequests, hitRatePercent)`. Every looked-up text counts, so the two calls above give 3 misses and 1 hit (25%), and a text repeated inside one request counts once per occurrence. With the default `InMemoryEmbeddingCache`, `clearCache()` empties the cache and resets the statistics. With a custom `EmbeddingCache`, it delegates to that backend's `clear()` implementation; the trait default does nothing, and a backend may clear entries without resetting statistics.
+```scala
+import org.llm4s.llmconnect.EmbeddingClient
+import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
+
+// A CachedEmbeddingClient is an EmbeddingProvider; wrap it where an EmbeddingClient is required.
+InMemoryEmbeddingCache.create().map(cache => new EmbeddingClient(new CachedEmbeddingClient(base, cache)))
+```
+
+`cacheStats` returns `Some(CacheStats(size, hits, misses))` for a backend that keeps statistics (`InMemoryEmbeddingCache` does), and `None` for one that does not; `totalRequests` and `hitRatePercent` are computed from `hits` and `misses`. Every looked-up text counts, so the two calls above give 3 misses and 1 hit (25%), and a text repeated inside one request counts once per occurrence. `clearCache()` calls the backend's `clear()` and returns its `Result`: `InMemoryEmbeddingCache` empties itself and resets its statistics.
 
 ### The in-memory cache
 
-`InMemoryEmbeddingCache(maxSize = 10000, ttl = None)`:
+`InMemoryEmbeddingCache.create(maxSize = 10000, ttl = None, clock = Clock.systemUTC())`, which refuses a `maxSize` or a `ttl` that is not positive:
 
 - **Size.** At more than `maxSize` entries the least recently used one is evicted. Reading an entry counts as using it.
 - **TTL.** With `ttl = Some(d)` an entry is expired once it is *older* than `d`. An entry exactly `d` old is still valid. Expiry is lazy: an expired entry is removed when it is read, and that read counts as a miss.
 - **Threads.** It is safe to share between threads.
+- **Time.** The TTL is measured with the `java.time.Clock` you pass; tests pass a fixed, movable one.
 
 ### What the key contains
 
@@ -113,38 +127,36 @@ import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
 def tenantKey(tenant: String)(text: String, model: String, purpose: InputPurpose): String =
   CacheKeyGenerator.sha256(tenant, model, purpose.toString, text)
 
-val cache  = new InMemoryEmbeddingCache[Seq[Double]]()
-val cached = new CachedEmbeddingClient(base, cache, tenantKey("tenant-a"))
+val cached =
+  InMemoryEmbeddingCache.create().map(cache => new CachedEmbeddingClient(base, cache, tenantKey("tenant-a")))
 
-cached.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("text-embedding-3-small", 1536)))
+cached.flatMap(_.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("text-embedding-3-small", 1536))))
 ```
 
 ### Your own storage
 
-`EmbeddingCache[A]` is a small trait: `get`, `put`, `stats`, and an optional `clear`. Implement it to keep vectors somewhere else (a shared map, Redis, a database). Expiry and eviction are then your backend's job:
+`EmbeddingCache` is a small trait: `get`, `put` and `clear`, each returning a `Result` so that a backend that can fail (Redis, a database) says so instead of throwing, and an optional `stats`. Implement it to keep vectors somewhere else. Expiry and eviction are then your backend's job. `CachedEmbeddingClient` logs a failed `get` and treats it as a miss, and logs a failed `put` and leaves the text uncached: the base client still answers.
 
 ```scala
 import org.llm4s.llmconnect.caching.{ CacheStats, EmbeddingCache }
+import org.llm4s.types.Result
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /** A backend of your own: any store that can get and put a vector by key. */
-class MapEmbeddingCache extends EmbeddingCache[Seq[Double]] {
+class MapEmbeddingCache extends EmbeddingCache {
   private val store  = new ConcurrentHashMap[String, Seq[Double]]()
-  private val hits   = new AtomicInteger(0)
-  private val misses = new AtomicInteger(0)
+  private val hits   = new AtomicLong(0)
+  private val misses = new AtomicLong(0)
 
-  def get(key: String): Option[Seq[Double]] = {
+  def get(key: String): Result[Option[Seq[Double]]] = {
     val found = Option(store.get(key))
     if (found.isDefined) hits.incrementAndGet() else misses.incrementAndGet()
-    found
+    Right(found)
   }
-  def put(key: String, embedding: Seq[Double]): Unit = { store.put(key, embedding); () }
-  override def clear(): Unit                         = store.clear()
-  def stats(): CacheStats = {
-    val (h, m) = (hits.get().toLong, misses.get().toLong)
-    CacheStats(store.size(), h, m, h + m, if (h + m == 0) 0.0 else 100.0 * h / (h + m))
-  }
+  def put(key: String, embedding: Seq[Double]): Result[Unit] = { store.put(key, embedding); Right(()) }
+  def clear(): Result[Unit]                                  = { store.clear(); Right(()) }
+  override def stats(): Option[CacheStats] = Some(CacheStats(store.size(), hits.get(), misses.get()))
 }
 ```
 
@@ -175,7 +187,7 @@ CacheConfig.create(
 | `ttl` | `FiniteDuration`, positive | an entry older than this is ignored |
 | `maxSize` | `Int`, positive, default `1000` | the number of entries kept; beyond it the least recently used is evicted |
 
-`create` reports every violated constraint at once, in the message of the `ValidationError` it returns. There is no public constructor: `CacheConfig(...)` without `create` does not compile.
+`create` reports every violated constraint at once, in the message of the `ValidationError` it returns. There is no public constructor: `CacheConfig(...)` without `create` does not compile. To change one field, use `withSimilarityThreshold`, `withTtl` or `withMaxSize`, which check the new value and return a `Result` too.
 
 ### The caching client
 
@@ -212,14 +224,9 @@ On each `complete(conversation, options)`:
 
 ### What is, and is not, compared
 
-Only user and system messages are embedded. Assistant messages and tool messages are left out on purpose, so that tool arguments and tool results never reach the embedding provider. The consequence is that **two conversations that differ only in their assistant or tool turns look identical to the cache**:
+Only user and system messages are embedded. Assistant messages are left out, so two conversations that differ only in their assistant turns look identical to the cache.
 
-```text
-[user: "what is 2+2", assistant: "thinking", tool: "4"]
-[user: "what is 2+2", assistant: "other",    tool: "5"]   -> served the first one's answer
-```
-
-For a multi-turn agent run this can return an answer that does not match the tool results in front of it. Cache the single-shot, self-contained calls, not the steps of an agent loop.
+A conversation with a **tool turn** (an assistant message with tool calls, or a tool message) **bypasses the cache**: it is neither looked up nor stored, and its text never reaches the embedding provider. Otherwise every step of a tool loop, whose user and system text does not change, would be served the first step's tool-call completion. A conversation with an image or a document bypasses it too, since the prompt is embedded as text.
 
 ### Choosing the threshold
 
@@ -251,6 +258,7 @@ new CachingLLMClient(
 ### What is never cached
 
 - **Streaming.** `streamComplete` goes straight to the base client and neither reads nor fills the cache.
+- **Tool turns and media.** A conversation with a tool call, a tool result, an image or a document goes straight to the base client.
 - **Failures.** If the base client returns an error, the error is returned and nothing is stored.
 - **When the embedding call fails.** If embedding the prompt fails or returns nothing, the request goes to the base client uncached. The only trace of it is a warning in the log: no trace event is emitted, so a cache whose embedding service is down looks like a cache that always misses.
 
@@ -274,7 +282,6 @@ The completion cache reports each decision to the `Tracing` you give it. A hit s
 A `Tracing` that records them, and a way to print one:
 
 ```scala
-import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.trace.{ TraceEvent, Tracing }
 import org.llm4s.types.Result
 import scala.collection.mutable.ListBuffer
@@ -283,10 +290,6 @@ def collectingTracing(): (Tracing, () => List[TraceEvent]) = {
   val events = ListBuffer.empty[TraceEvent]
   val tracing = new Tracing {
     override def traceEvent(event: TraceEvent): Result[Unit] = { events.synchronized(events += event); Right(()) }
-    override def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
-    override def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
-    override def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
-    override def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
   }
   (tracing, () => events.synchronized(events.toList))
 }

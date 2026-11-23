@@ -41,7 +41,7 @@ class EmbeddingCacheExampleSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "report the hits and misses of the cache itself" in {
-    val stats = EmbeddingCacheExample.run(StubProvider, model).toOption.get.stats
+    val stats = EmbeddingCacheExample.run(StubProvider, model).toOption.get.stats.get
 
     stats.hits shouldBe 2   // "hello world" on calls 2 and 3
     stats.misses shouldBe 2 // "hello world" on call 1, "something new" on call 3

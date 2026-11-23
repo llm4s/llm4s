@@ -2,40 +2,44 @@ package org.llm4s.model
 
 import org.llm4s.annotation.Stable
 
+/** Where the model registry's metadata JSON is read from: exactly one place. */
+@Stable
+enum ModelRegistrySource:
+
+  /** A classpath resource; [[ModelRegistryConfig.DefaultResourcePath]] also gets llm4s's curated overrides. */
+  case Resource(path: String)
+
+  /** A file on the filesystem. */
+  case File(path: String)
+
+  /** An HTTP(S) or other `java.net.URL`, fetched synchronously. */
+  case Url(url: String)
+
 /**
  * Configuration controlling how the model registry data is loaded.
  *
- * @param resourcePath Optional classpath resource path to load model metadata from; defaults to the bundled LiteLLM metadata file.
- * @param filePath     Optional filesystem path to a model metadata JSON file, overrides `resourcePath` when set.
- * @param url          Optional HTTP URL to fetch model metadata from, overrides both `resourcePath` and `filePath` when set.
+ * @param source where the metadata is read from; by default the bundled LiteLLM resource
  *
  * Build one with [[ModelRegistryConfig.apply]] (or start from [[ModelRegistryConfig.default]]) and change it with the
- * `with*` setters, each of which takes the value or an `Option`; the constructor and `copy` are private, so a new field
- * never breaks callers.
+ * `with*` setters; each replaces the source, so a config always names exactly one. The constructor and `copy` are
+ * private, so a new field never breaks callers.
  */
 @Stable
-final case class ModelRegistryConfig private (
-  resourcePath: Option[String],
-  filePath: Option[String],
-  url: Option[String]
-):
-  /** Sets the classpath resource to load model metadata from. */
-  def withResourcePath(resourcePath: String): ModelRegistryConfig = copy(resourcePath = Some(resourcePath))
+final case class ModelRegistryConfig private (source: ModelRegistrySource):
 
-  /** Sets, or with `None` clears, the classpath resource to load model metadata from. */
-  def withResourcePath(resourcePath: Option[String]): ModelRegistryConfig = copy(resourcePath = resourcePath)
+  /** Sets where the metadata is read from. */
+  def withSource(source: ModelRegistrySource): ModelRegistryConfig = copy(source = source)
 
-  /** Sets the filesystem path to load model metadata from; it overrides `resourcePath`. */
-  def withFilePath(filePath: String): ModelRegistryConfig = copy(filePath = Some(filePath))
+  /** Reads the metadata from a classpath resource. */
+  def withResourcePath(resourcePath: String): ModelRegistryConfig = withSource(
+    ModelRegistrySource.Resource(resourcePath)
+  )
 
-  /** Sets, or with `None` clears, the filesystem path to load model metadata from. */
-  def withFilePath(filePath: Option[String]): ModelRegistryConfig = copy(filePath = filePath)
+  /** Reads the metadata from a file. */
+  def withFilePath(filePath: String): ModelRegistryConfig = withSource(ModelRegistrySource.File(filePath))
 
-  /** Sets the HTTP URL to fetch model metadata from; it overrides `resourcePath` and `filePath`. */
-  def withUrl(url: String): ModelRegistryConfig = copy(url = Some(url))
-
-  /** Sets, or with `None` clears, the HTTP URL to fetch model metadata from. */
-  def withUrl(url: Option[String]): ModelRegistryConfig = copy(url = url)
+  /** Fetches the metadata from a URL. */
+  def withUrl(url: String): ModelRegistryConfig = withSource(ModelRegistrySource.Url(url))
 
 /** Companion object providing defaults for `ModelRegistryConfig`. */
 object ModelRegistryConfig:
@@ -43,16 +47,10 @@ object ModelRegistryConfig:
   /**
    * Creates a [[ModelRegistryConfig]]; with no arguments, it loads the bundled classpath resource.
    *
-   * @param resourcePath classpath resource path; defaults to [[DefaultResourcePath]]
-   * @param filePath     filesystem path; overrides `resourcePath` when set
-   * @param url          HTTP URL; overrides both `resourcePath` and `filePath` when set
+   * @param source where the metadata is read from; defaults to the resource at [[DefaultResourcePath]]
    */
-  def apply(
-    resourcePath: Option[String] = Some(DefaultResourcePath),
-    filePath: Option[String] = None,
-    url: Option[String] = None
-  ): ModelRegistryConfig =
-    new ModelRegistryConfig(resourcePath, filePath, url)
+  def apply(source: ModelRegistrySource = ModelRegistrySource.Resource(DefaultResourcePath)): ModelRegistryConfig =
+    new ModelRegistryConfig(source)
 
   /** Classpath resource path to the bundled LiteLLM model metadata JSON file. */
   val DefaultResourcePath = "/modeldata/litellm_model_metadata.json"
@@ -61,8 +59,7 @@ object ModelRegistryConfig:
    * Curated llm4s corrections layered on top of the vendored LiteLLM snapshot
    * (see [[DefaultResourcePath]]). The snapshot is a verbatim upstream copy and
    * occasionally drops or mis-shapes entries llm4s relies on (e.g. a chat model
-   * regressing to an `embedding` row, or a canonical alias being removed so a
-   * substring fallback resolves to a third-party-hosted variant). Entries here
+   * regressing to an `embedding` row, or a canonical alias being removed). Entries here
    * take precedence over the snapshot and survive future refreshes of it.
    *
    * Only applied when loading the embedded default resource; explicit
