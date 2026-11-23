@@ -1,14 +1,19 @@
 package org.llm4s.context
 
 import org.llm4s.annotation.Stable
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ ContextError, ValidationError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.{ Result, TokenBudget }
 import org.slf4j.LoggerFactory
 
 /**
  * Manages conversation token windows by trimming conversations to fit within token budgets.
- * Always preserves system messages and applies configurable headroom for safety.
+ *
+ * Trimming pins the conversation's leading system messages (its system prompt and any `[HISTORY_SUMMARY]`
+ * digests), then keeps the newest turns that fit, dropping older ones whole: an assistant message with tool calls
+ * is kept or dropped with the tool results that follow it, so the window never starts at a result whose call is
+ * gone. A system message after the first non-system one is history like any other. Headroom is applied to the
+ * budget for safety.
  */
 @Stable
 object TokenWindow {
@@ -17,13 +22,14 @@ object TokenWindow {
 
   /**
    * Trim a conversation to fit within the specified token budget.
-   * Always preserves system messages and applies headroom for safety.
+   * Pins the leading system and digest messages, drops older turns whole, and applies headroom for safety.
    *
    * @param conversation The conversation to trim
    * @param tokenCounter Token counter for the specific model
    * @param budget Maximum token budget
    * @param headroomPercent Safety margin (default 8%)
-   * @return Trimmed conversation that fits within budget
+   * @return Trimmed conversation that fits within budget, or a [[org.llm4s.error.ContextError]] when the pinned
+   *         messages alone do not fit, or nothing but them would
    */
   def trimToBudget(
     conversation: Conversation,
@@ -121,73 +127,82 @@ object TokenWindow {
   ): Result[ConversationWindow] = {
     val allMessages = conversation.messages
 
-    // Check if first message is a [HISTORY_SUMMARY] digest to pin
-    val (pinnedDigest, regularMessages) = allMessages.headOption match {
-      case Some(firstMsg) if isHistoryDigestMessage(firstMsg) =>
-        logger.debug("Detected [HISTORY_SUMMARY] message to pin")
-        (Some(firstMsg), allMessages.tail)
-      case _ =>
-        (None, allMessages)
+    // The leading system messages - the system prompt and the [HISTORY_SUMMARY] digests - are pinned.
+    val (pinned, regularMessages) = allMessages.span {
+      case _: SystemMessage => true
+      case _                => false
     }
+    val pinnedTokens = pinned.map(tokenCounter.countMessage).sum
 
-    // Calculate remaining budget after reserving tokens for pinned digest
-    val remainingBudget = pinnedDigest match {
-      case Some(digest) =>
-        val digestTokens = tokenCounter.countMessage(digest)
-        val remaining    = effectiveBudget - digestTokens
-        logger.debug(s"Reserved $digestTokens tokens for pinned digest, remaining budget: $remaining")
-        Math.max(0, remaining) // Ensure non-negative
-      case None =>
-        effectiveBudget
-    }
+    val recentMessages =
+      findRecentTurnsThatFit(
+        turns(regularMessages).reverse,
+        tokenCounter,
+        effectiveBudget - pinnedTokens
+      ).reverse.flatten
 
-    // Pack remaining messages newest-first into remaining budget
-    val recentMessages = findRecentMessagesThatFit(regularMessages.reverse, tokenCounter, remainingBudget).reverse
-
-    // Reconstruct conversation with pinned digest first (if present) + recent messages
-    val finalMessages     = pinnedDigest.toSeq ++ recentMessages
-    val finalConversation = Conversation(finalMessages)
-    val removedCount      = allMessages.length - finalMessages.length
-
-    logger.info(
-      s"Trimmed to ${finalMessages.length} messages (removed $removedCount messages)${pinnedDigest.map(_ => ", digest pinned").getOrElse("")}"
-    )
-
-    Right(
-      ConversationWindow.trimmed(
-        finalConversation,
-        getUsageInfo(finalConversation, tokenCounter, originalBudget),
-        removedCount
+    if (pinnedTokens > effectiveBudget)
+      Left(ContextError.tokenBudgetExceeded(pinnedTokens, effectiveBudget))
+    else if (regularMessages.nonEmpty && recentMessages.isEmpty)
+      Left(
+        ContextError.invalidTrimming(
+          s"the newest turn does not fit beside the ${pinned.size} pinned message(s) in $effectiveBudget tokens"
+        )
       )
-    )
+    else {
+      val finalMessages     = pinned ++ recentMessages
+      val finalConversation = Conversation(finalMessages)
+      val removedCount      = allMessages.length - finalMessages.length
+
+      logger.info(
+        s"Trimmed to ${finalMessages.length} messages (removed $removedCount messages, ${pinned.size} pinned)"
+      )
+
+      Right(
+        ConversationWindow.trimmed(
+          finalConversation,
+          getUsageInfo(finalConversation, tokenCounter, originalBudget),
+          removedCount
+        )
+      )
+    }
   }
 
-  // A digest is a SystemMessage HistoryCompressor wrote, starting with the marker; a message of
-  // another type, or one that only mentions the marker, is never pinned (#2505).
-  private def isHistoryDigestMessage(message: Message): Boolean = HistorySummaryMarker.isDigest(message)
+  /**
+   * `messages` in the units trimming keeps or drops whole: an assistant message with tool calls together with the
+   * tool results that follow it, and every other message on its own.
+   */
+  private def turns(messages: Seq[Message]): Seq[Seq[Message]] =
+    messages.foldLeft(Vector.empty[Vector[Message]]) {
+      case (acc, tool: ToolMessage) if acc.lastOption.exists(_.headOption.exists(opensToolCalls)) =>
+        acc.init :+ (acc.last :+ tool)
+      case (acc, message) => acc :+ Vector(message)
+    }
 
-  private def findRecentMessagesThatFit(
-    messages: Seq[Message],
+  private def opensToolCalls(message: Message): Boolean = message match {
+    case a: AssistantMessage => a.toolCalls.nonEmpty
+    case _                   => false
+  }
+
+  private def findRecentTurnsThatFit(
+    turnsNewestFirst: Seq[Seq[Message]],
     tokenCounter: ConversationTokenCounter,
-    availableBudget: TokenBudget
-  ): Seq[Message] = {
+    availableBudget: Int
+  ): Seq[Seq[Message]] = {
     @scala.annotation.tailrec
-    def loop(remaining: Seq[Message], accumulated: Seq[Message], tokensUsed: Int): Seq[Message] =
+    def loop(remaining: Seq[Seq[Message]], accumulated: Vector[Seq[Message]], tokensUsed: Int): Seq[Seq[Message]] =
       remaining match {
-        case Nil => accumulated
-        case msg +: tail =>
-          val msgTokens = tokenCounter.countMessage(msg)
-          val newTotal  = tokensUsed + msgTokens
-
-          if (newTotal <= availableBudget) {
-            loop(tail, accumulated :+ msg, newTotal)
-          } else {
-            logger.debug(s"Stopping at ${accumulated.length} messages, next would exceed available budget")
+        case Seq() => accumulated
+        case turn +: tail =>
+          val newTotal = tokensUsed + turn.map(tokenCounter.countMessage).sum
+          if (newTotal <= availableBudget) loop(tail, accumulated :+ turn, newTotal)
+          else {
+            logger.debug(s"Stopping at ${accumulated.length} turns, the next would exceed the available budget")
             accumulated
           }
       }
 
-    loop(messages, Seq.empty, 0)
+    loop(turnsNewestFirst, Vector.empty, 0)
   }
 }
 
