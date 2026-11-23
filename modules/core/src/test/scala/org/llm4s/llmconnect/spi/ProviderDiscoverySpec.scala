@@ -60,7 +60,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
     "find a provider module that llm4s-core knows nothing about" in {
       val registry = ProviderRegistry.discover(loaderFor("good"))
 
-      registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
+      registry.resolve(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
       // The point of the SPI: the new provider arrives without displacing anything.
       registry.ids should contain allElementsOf classpathIds
 
@@ -84,7 +84,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
     "keep every working provider when one service entry is broken" in {
       val registry = ProviderRegistry.discover(loaderFor("mixed"))
 
-      registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
+      registry.resolve(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
       registry.ids should contain allElementsOf classpathIds
       registry.report.hasFailures shouldBe true
     }
@@ -100,7 +100,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
       detail should include("java.lang.AbstractMethodError")
 
       // The module behind the broken one, and the classpath's providers, are unaffected.
-      registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
+      registry.resolve(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
       registry.ids should contain allElementsOf classpathIds
     }
 
@@ -128,14 +128,14 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
       // llm4s-ollama's shape, and the reason discovery asks for both lists.
       val registry = ProviderRegistry.discover(loaderFor("both-halves"))
 
-      registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
+      registry.resolve(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
       registry.resolveEmbedding(ProviderId("fixtureembed")) shouldBe Right(FixtureEmbeddings)
     }
 
     "keep the working half of a module whose embedding half throws" in {
       val registry = ProviderRegistry.discover(loaderFor("half-broken"))
 
-      registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
+      registry.resolve(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
 
       val detail = registry.report.failures.map(_.detail).mkString
       detail should include("embedding providers")
@@ -173,7 +173,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
 
       val registry = ProviderRegistry.discover(loaderFor("good")).withProvider(replacement)
 
-      registry.get(ProviderId("fixturecloud")) shouldBe Right(replacement)
+      registry.resolve(ProviderId("fixturecloud")) shouldBe Right(replacement)
       registry.ids.count(_ == "fixturecloud") shouldBe 1
       // Overriding must not discard the diagnostics from the scan.
       registry.report.discovered shouldBe true
@@ -221,7 +221,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
     "say nothing about discovery when the registry was built explicitly" in {
       val message = ProviderRegistry
         .of()
-        .get(ProviderId("moonbeam"))
+        .resolve(ProviderId("moonbeam"))
         .left
         .toOption
         .getOrElse(fail("expected an unresolved-provider error"))

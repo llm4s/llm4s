@@ -8,6 +8,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.{ ConfigurationError, LLMError }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.metrics.MetricsCollector
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import pureconfig.{ ConfigObjectSource, ConfigSource }
 
 import java.util.{ LinkedHashMap => JLinkedHashMap, List => JList, Map => JMap, Optional }
@@ -71,7 +72,7 @@ private[llm4s] object FrameworkConfig {
         case None =>
           List(s"$prefix.provider is not set: name the provider of section '$section' (${known(registry.ids)})")
         case Some(raw) =>
-          registry.resolve(registry.canonicalId(raw), Some(s"$prefix.provider")).left.map(_.message).left.toSeq.toList
+          registry.resolve(ProviderId(raw), Some(s"$prefix.provider")).left.map(_.message).left.toSeq.toList
       }
       val model =
         value(s"$prefix.model").fold(List(s"$prefix.model is not set: name the model of section '$section'"))(_ => Nil)
@@ -88,7 +89,7 @@ private[llm4s] object FrameworkConfig {
       spec.split("/", 2).toList match {
         case provider :: model :: Nil if provider.trim.nonEmpty && model.trim.nonEmpty =>
           registry
-            .resolveEmbedding(registry.canonicalEmbeddingId(provider.trim), Some("llm4s.embeddings.model"))
+            .resolveEmbedding(ProviderId(provider), Some("llm4s.embeddings.model"))
             .left
             .map(_.message)
             .left

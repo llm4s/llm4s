@@ -10,6 +10,7 @@ import org.llm4s.llmconnect.spi.{
   ProviderRegistry
 }
 import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import pureconfig.error.ConvertFailure
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
@@ -179,7 +180,7 @@ private[config] object EmbeddingsConfigLoader {
    * look identical from here otherwise.
    */
   private def resolve(selection: Selection, registry: ProviderRegistry): Result[EmbeddingProviderDescriptor] =
-    registry.resolveEmbedding(registry.canonicalEmbeddingId(selection.provider), selection.origin)
+    registry.resolveEmbedding(ProviderId(selection.provider), selection.origin)
 
   /**
    * Reads `llm4s.embeddings.<id>`, treating an absent section as an empty one.

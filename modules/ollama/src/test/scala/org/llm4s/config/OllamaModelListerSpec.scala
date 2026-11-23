@@ -91,7 +91,7 @@ class OllamaModelListerSpec extends AnyFunSuite with Matchers:
   }
 
   test("the registered Ollama provider exposes its model lister") {
-    val result = ProviderRegistry.default.get(ProviderId("ollama"))
+    val result = ProviderRegistry.default.resolve(ProviderId("ollama"))
 
     result match
       case Right(descriptor) =>
