@@ -4,7 +4,7 @@
 > termflow 1.0 README headline.
 
 This document is a handover spec for the chat-client demo described in
-[ROADMAP §3.3](ROADMAP.md). It targets an implementer working in the
+ROADMAP §3.3 (a document that no longer exists). It targets an implementer working in the
 `llm4s/llm4s` repository against a 1.0-RC of `org.llm4s::termflow`.
 
 ## 1. Context

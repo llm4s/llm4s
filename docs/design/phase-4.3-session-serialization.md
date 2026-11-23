@@ -251,4 +251,4 @@ for {
 ## Related Documentation
 
 - [Phase 4.1: Reasoning Modes](phase-4.1-reasoning-modes.md)
-- [CLAUDE.md - Working with Multi-Turn Conversations](../../CLAUDE.md#working-with-multi-turn-conversations)
+- [CLAUDE.md - Working with Multi-Turn Conversations](https://github.com/llm4s/llm4s/blob/main/CLAUDE.md)

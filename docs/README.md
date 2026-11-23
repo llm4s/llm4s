@@ -39,9 +39,9 @@ Other features are documented via examples and design documents.
 | MCP Integration | 3 |
 | Other | 10+ |
 
-### 🚀 [Advanced Topics](https://llm4s.org/advanced/)
+### Design records
 
-Links to design documents for production features. See [design/](design/) for detailed technical docs.
+The design documents of the agent framework and its features are in [design/](design/). They are not published on llm4s.org.
 
 ### 📚 [API Reference](https://llm4s.org/api/)
 
