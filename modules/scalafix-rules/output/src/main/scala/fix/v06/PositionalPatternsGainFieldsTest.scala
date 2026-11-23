@@ -63,6 +63,6 @@ object PositionalPatternsGainFieldsTest {
 
   // gained completionOptions since 0.6.0 (#2715)
   def topK(config: RAGConfig): Int = config match {
-    case RAGConfig(_, _, _, _, _, _, topK, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => topK
+    case RAGConfig(_, _, _, _, _, _, topK, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => topK
   }
 }

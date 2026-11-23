@@ -17,7 +17,7 @@ import scalafix.v1._
  * `longCacheCreationTokens` and `ModelPricing`'s fifteen `cacheCreationInputTokenCostAbove1hr` (#2115),
  * `CompletionOptions`'s nine gain `promptCache` (#2115) and `serviceTier` (#2726; its eighth, `budgetTokens`, is now
  * `thinking`, which `ThinkingReplacesBudgetTokens` reports), `TurnState` gains `cut` (#2613) and `RAGConfig`
- * `completionOptions` (#2715) and `documentRegistry` (#2714). A pattern with any other number of arguments is left
+ * `completionOptions` (#2715), `documentRegistry` (#2714) and `questionCondenser` (#2733). A pattern with any other number of arguments is left
  * alone.
  */
 class PositionalPatternsGainFields extends SemanticRule("PositionalPatternsGainFields") {
@@ -85,7 +85,7 @@ object PositionalPatternsGainFields {
     "org/llm4s/llmconnect/spi/ProviderFeatures"                     -> (2  -> 3),
     "org/llm4s/model/ModelCapabilities"                             -> (18 -> 23),
     "org/llm4s/model/ModelPricing"                                  -> (15 -> 16),
-    "org/llm4s/rag/RAGConfig"                                       -> (25 -> 27),
+    "org/llm4s/rag/RAGConfig"                                       -> (25 -> 28),
     "org/llm4s/model/TransformationResult"                          -> (3  -> 4),
     "org/llm4s/reranker/RerankProviderConfig"                       -> (3  -> 4),
     "org/llm4s/toolapi/SafeParameterExtractor"                      -> (1  -> 2),
