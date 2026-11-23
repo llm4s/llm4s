@@ -198,11 +198,16 @@ object RobotsTxtParser {
     timeout: FiniteDuration,
     policy: UrlPolicy
   ): Option[Seq[RobotsGroup]] =
-    Try(new URI(parsed.scheme, null, parsed.host, parsed.port, "/robots.txt", null, null).toString).toOption
-      .map(url => PinnedHttpClient.get(url, Seq("User-Agent" -> userAgent), timeout, policy)) match {
-      case Some(Left(err)) if err.endpoint == "ssrf-protection" => None
-      case Some(Right(resp)) if resp.status == 200              => Some(parseAll(resp.body))
-      case _                                                    => Some(Seq.empty)
+    Try(new URI(parsed.scheme, null, parsed.host, parsed.port, "/robots.txt", null, null)).toOption match {
+      case None => Some(Seq.empty)
+      // Asked first, so a custom policy's refusal is recognised whatever error it returns.
+      case Some(uri) if policy.resolve(uri).isLeft => None
+      case Some(uri) =>
+        PinnedHttpClient.get(uri.toString, Seq("User-Agent" -> userAgent), timeout, policy) match {
+          case Left(err) if err.endpoint == "ssrf-protection" => None
+          case Right(resp) if resp.status == 200              => Some(Try(parseAll(resp.body)).getOrElse(Seq.empty))
+          case _                                              => Some(Seq.empty)
+        }
     }
 
   private def parseUrl(url: String): Option[ParsedUrl] =
@@ -242,7 +247,7 @@ object RobotsTxtParser {
     }
 
     content.linesIterator.foreach { line =>
-      val trimmed = line.split('#').head.trim
+      val trimmed = line.takeWhile(_ != '#').trim
 
       if (trimmed.isEmpty) {
         if (userAgents.nonEmpty) {

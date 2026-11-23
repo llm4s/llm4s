@@ -197,6 +197,19 @@ class RobotsTxtFetchSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
     }
   }
 
+  it should "not cache a custom policy's refusal, whatever error it returns" in {
+    withServer(200, "User-agent: *\nDisallow: /\n") { server =>
+      val refuseAll = new UrlPolicy {
+        def resolve(url: java.net.URI) =
+          Left(org.llm4s.error.NetworkError("refused by a custom policy", None, url.toString))
+      }
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/x", agent, timeout, refuseAll) shouldBe true
+      server.requests shouldBe empty
+      RobotsTxtParser.isAllowed(s"${server.baseUrl}/x", agent, timeout, local) shouldBe false
+      server.requests should have size 1
+    }
+  }
+
   it should "follow a redirect the policy allows" in {
     LoopbackHttpServer.withServer(
       "/robots.txt"      -> redirect("/real-robots.txt"),
