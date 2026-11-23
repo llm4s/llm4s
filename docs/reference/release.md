@@ -89,9 +89,9 @@ quarter ([Support Policy](support-policy#release-cadence)).
 
 **0.7.0, the baseline release, in addition:**
 
-- [ ] Annotate `llm4s-agent`'s public types (its stable core `@Stable`, the rest of the runtime `@Experimental`),
-      add it to `stabilityTierModules` in `build.sbt` ([Tiers in the Code](api-stability#tiers-in-the-code)), and
-      decide the Beta parts inside frozen modules ([The Baseline](api-stability#the-baseline)).
+- [ ] Review `llm4s-agent`'s tiers one last time (`sbt stabilityTierCheck` covers it since
+      [#2778](https://github.com/llm4s/llm4s/issues/2778): what is `@Stable` here is what 1.0 promises), and decide the
+      Beta parts inside frozen modules ([The Baseline](api-stability#the-baseline)).
 - [ ] Run `scripts/mima-dry-run.sh` on the commit to tag ([Release readiness](#release-readiness-a-mima-dry-run)).
 - [ ] After the release is on Central, set `mimaBaselineVersion = Some("0.7.0")` in a follow-up pull request
       ([Setting and bumping the baseline](api-stability#setting-and-bumping-the-baseline)), and change the pages that

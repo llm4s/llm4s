@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.rag
 
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.guardrails.GuardrailAction
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -18,7 +19,7 @@ import org.llm4s.util.Redaction
  * @param relevantChunkCount Number of chunks meeting the threshold
  * @param explanation Brief explanation of the evaluation
  */
-final case class ContextRelevanceResult(
+final private[guardrails] case class ContextRelevanceResult(
   overallScore: Double,
   chunkScores: Seq[Double],
   relevantChunkCount: Int,
@@ -77,6 +78,7 @@ final case class ContextRelevanceResult(
  * @param minRelevantRatio Minimum ratio of relevant chunks required (default: 0.5)
  * @param onFail Action to take when relevance is insufficient (default: Block)
  */
+@Experimental
 class ContextRelevanceGuardrail(
   val llmClient: LLMClient,
   val threshold: Double = 0.5,
@@ -316,6 +318,7 @@ class ContextRelevanceGuardrail(
   }
 }
 
+@Experimental
 object ContextRelevanceGuardrail {
 
   /**

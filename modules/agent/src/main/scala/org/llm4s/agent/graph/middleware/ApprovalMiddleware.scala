@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.graph.tool.{ ToolContext, ToolOutcome }
 
 /**
@@ -7,6 +8,7 @@ import org.llm4s.agent.graph.tool.{ ToolContext, ToolOutcome }
  * let the call through; a call that is already approved always passes. A tool's own approval
  * request is unaffected.
  */
+@Stable
 final class ApprovalMiddleware(
   requires: ToolCallRequest => Option[String],
   val id: MiddlewareId = MiddlewareId("approval")

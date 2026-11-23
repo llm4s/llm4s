@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.annotation.Stable
+
 /**
  * A node of an agent's loop that a static breakpoint can hold: see [[AgentBuilder.withInterruptBefore]]
  * and [[AgentBuilder.withInterruptAfter]]. Each task the breakpoint holds is an interrupt of its own,
@@ -11,6 +13,7 @@ package org.llm4s.agent
  * at `<id>/asked/<middleware>/afterAgent`. A breakpoint after a node holds these too, so nothing the step
  * does escapes it; a breakpoint before one does not, since the reviewer has just seen the step.
  */
+@Stable
 enum AgentNode:
   /**
    * Each model call (`<id>/model`). Held before, the model is not called yet; held after, the model's

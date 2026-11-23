@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.guardrails.{ GuardrailAction, InputGuardrail, OutputGuardrail }
 import org.llm4s.agent.guardrails.patterns.PIIPatterns
 import org.llm4s.agent.guardrails.patterns.PIIPatterns.{ PIIMatch, PIIType }
@@ -42,6 +43,7 @@ import org.slf4j.LoggerFactory
  * @param piiTypes The types of PII to detect (default: SSN, CreditCard, Email, Phone)
  * @param onFail Action to take when PII is detected (default: Block)
  */
+@Stable
 class PIIDetector(
   val piiTypes: Seq[PIIType] = PIIType.default,
   val onFail: GuardrailAction = GuardrailAction.Block

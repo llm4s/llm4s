@@ -28,9 +28,9 @@ in the generated [Compatibility Matrix](compatibility-matrix).
 The Frozen modules are `llm4s-core`, `llm4s-agent`, `llm4s-openai`, `llm4s-openai-compatible`,
 `llm4s-anthropic`, `llm4s-gemini` and `llm4s-ollama`; everything else is Beta or Experimental, or is not
 published. [1.0 Scope](v1-scope) is the source of truth for the list. A Frozen module can hold Experimental parts:
-`llm4s-agent` has a small stable core (building and running an agent, its result and status, handoffs, the guardrail
-middleware) over an Experimental runtime (graph, harness, service, delegation, encryption) that may change in a 1.x
-minor release. Each public type's tier is its `@Stable` or `@Experimental` annotation, shown in the
+in `llm4s-agent` the agent, graph, event, middleware and guardrail APIs are `@Stable`, and the harness, the run queue
+and worker, encryption, subagent definition, permissions, the checkpointer SPI and the RAG guardrails are
+`@Experimental`, so they may change in a 1.x minor release. Each public type's tier is its `@Stable` or `@Experimental` annotation, shown in the
 [Scaladoc](/scaladoc/).
 
 ---

@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
@@ -31,12 +32,19 @@ import org.llm4s.types.Result
  * @param preserveContext when `false`, the target is sent only the user's last question before the
  *   transfer and the transfer onwards; the stored history is unchanged either way
  */
-final case class Handoff(
+@Stable
+final case class Handoff private (
   id: String,
   target: Option[AgentBuilder],
-  transferReason: Option[String] = None,
-  preserveContext: Boolean = true
+  transferReason: Option[String],
+  preserveContext: Boolean
 ):
+  def withId(value: String): Handoff                     = copy(id = value)
+  def withTarget(value: AgentBuilder): Handoff           = copy(target = Some(value))
+  def withTarget(value: Option[AgentBuilder]): Handoff   = copy(target = value)
+  def withTransferReason(value: String): Handoff         = copy(transferReason = Some(value))
+  def withTransferReason(value: Option[String]): Handoff = copy(transferReason = value)
+  def withPreserveContext(value: Boolean): Handoff       = copy(preserveContext = value)
 
   /** The handoff tool's name: `handoff_to_<id>`, stable across processes. */
   def handoffId: String = s"${Handoff.ToolPrefix}$id"
@@ -48,6 +56,14 @@ final case class Handoff(
       .getOrElse(s"Handoff to $id")
 
 object Handoff:
+
+  def apply(
+    id: String,
+    target: Option[AgentBuilder],
+    transferReason: Option[String] = None,
+    preserveContext: Boolean = true
+  ): Handoff =
+    new Handoff(id, target, transferReason, preserveContext)
 
   private[agent] val ToolPrefix = "handoff_to_"
 

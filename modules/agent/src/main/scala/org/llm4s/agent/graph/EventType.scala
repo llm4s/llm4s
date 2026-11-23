@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.slf4j.LoggerFactory
 import upickle.default.ReadWriter
 
@@ -21,6 +22,7 @@ import scala.util.Try
  * `unapply` is `None` for another name or version, for a kernel event, and for a payload that does
  * not decode (logged at DEBUG), so a listener never throws on an event it does not know.
  */
+@Stable
 final class EventType[A] private (val name: String, val version: Int, codec: ReadWriter[A]):
 
   def encode(value: A): ujson.Value = upickle.default.writeJs(value)(using codec)

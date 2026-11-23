@@ -596,7 +596,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     waiting.await(5, TimeUnit.SECONDS) shouldBe true // `late` read 1 and 2, and waits for the commit lock
     // the hub is free: another subscription's live event and a hand-over on another thread go through
     val other = ThreadId("other")
-    locks.withThreadLock(other)(hub.durable(other, Vector(record(1).copy(threadId = other.value))))
+    locks.withThreadLock(other)(hub.durable(other, Vector(record(1).withThreadId(other.value))))
     hub.live(thread, live(0))
     la.cancel()
     la.ended(5.seconds) shouldBe true

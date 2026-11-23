@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.toolloop
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.{ AgentId, AgentNode }
 import org.llm4s.agent.delegation.{
   ChildRef,
@@ -50,6 +51,7 @@ import scala.concurrent.duration.{ Duration, DurationLong, FiniteDuration }
 import scala.util.{ Failure, Success, Try }
 
 /** Who asked for an approval: the tool itself, or a middleware's tool wrapper. All resume at the same approval node. */
+@Stable
 enum ApprovalSource derives ReadWriter:
   case Tool
   case Middleware(id: MiddlewareId)
@@ -60,6 +62,7 @@ enum ApprovalSource derives ReadWriter:
  * `answered` carries the answers middleware questions of the call were given before it asked, so its
  * chain runs again with them once it is approved.
  */
+@Stable
 final case class ApprovalRequest private (
   assistantMessageId: String,
   call: ToolCall,
@@ -92,6 +95,7 @@ object ApprovalRequest:
   ): ApprovalRequest = new ApprovalRequest(assistantMessageId, call, reason, source, idempotencyKey, answered)
 
 /** A reviewer's answer. `Edit` runs the call with new arguments, recording them in the assistant message first. */
+@Stable
 enum ApprovalDecision derives ReadWriter:
   case Approve
   case Edit(arguments: ujson.Value)
@@ -103,7 +107,16 @@ enum ApprovalDecision derives ReadWriter:
  * the call rather than derived again where it runs, because `recover` runs the call at a new
  * checkpoint: every run of the call reads the same key from here.
  */
-final case class ToolTask(assistantMessageId: String, call: ToolCall, idempotencyKey: IdempotencyKey) derives ReadWriter
+@Stable
+final case class ToolTask private (assistantMessageId: String, call: ToolCall, idempotencyKey: IdempotencyKey)
+    derives ReadWriter:
+  def withAssistantMessageId(value: String): ToolTask     = copy(assistantMessageId = value)
+  def withCall(value: ToolCall): ToolTask                 = copy(call = value)
+  def withIdempotencyKey(value: IdempotencyKey): ToolTask = copy(idempotencyKey = value)
+
+object ToolTask:
+  def apply(assistantMessageId: String, call: ToolCall, idempotencyKey: IdempotencyKey): ToolTask =
+    new ToolTask(assistantMessageId, call, idempotencyKey)
 
 /**
  * One batch's lock schedule (`AgentToolSpec.withLocks`), stored in [[ToolLoop.queue]]: the locks each call
@@ -111,7 +124,7 @@ final case class ToolTask(assistantMessageId: String, call: ToolCall, idempotenc
  * calls still to run, in call order. The batch keeps the order its schedule gives, whatever the lock
  * functions say by the time a later round, a resume or a recover runs.
  */
-final case class LockSchedule(
+final private[agent] case class LockSchedule(
   locks: Map[String, Vector[String]],
   waiting: Vector[ToolTask],
   refused: Set[String] = Set.empty
@@ -125,7 +138,7 @@ final case class LockSchedule(
   /** Whether the schedule says anything a run must keep to: a call holds a lock, or was refused. */
   def needsRecording: Boolean = locks.values.exists(_.nonEmpty) || refused.nonEmpty
 
-object LockSchedule:
+private[agent] object LockSchedule:
   val empty: LockSchedule = LockSchedule(Map.empty, Vector.empty)
 
   /**
@@ -143,6 +156,7 @@ object LockSchedule:
  * [[ToolLoop.questions]], read its question as the tool's type with [[ToolLoop.question]], and
  * answer it with [[ToolLoop.answer]].
  */
+@Stable
 final case class ToolQuestionRequest private (
   assistantMessageId: String,
   call: ToolCall,
@@ -181,6 +195,7 @@ object ToolQuestionRequest:
     new ToolQuestionRequest(assistantMessageId, call, question, idempotencyKey, approved, answered, phase)
 
 /** The hook a middleware asked its question from. */
+@Stable
 enum MiddlewareHook derives ReadWriter:
   case BeforeAgent, WrapModelCall, WrapToolCall, AfterAgent
 
@@ -188,6 +203,7 @@ enum MiddlewareHook derives ReadWriter:
  * The answer a middleware question was given: kept while the hook's stack runs again, so that the
  * middleware - `middleware` of agent `agent`'s stack - finds it with `AgentMiddleware.Asking.answered`.
  */
+@Stable
 final case class GivenAnswer private (
   agent: AgentId,
   middleware: MiddlewareId,
@@ -213,6 +229,7 @@ object GivenAnswer:
  * `call` and whether it was `approved` (`WrapToolCall`); and the answers other questions of the same
  * hook run were `answered` with.
  */
+@Stable
 final case class MiddlewareQuestionRequest private (
   agent: AgentId,
   middleware: MiddlewareId,
@@ -261,6 +278,7 @@ object MiddlewareQuestionRequest:
  * nodes that continue those steps; or any other a run's `RunConfig` names), the `phase`, and - for a tool
  * call held before it runs - the `call`. Answer it with `org.llm4s.agent.graph.Breakpoint.proceed`.
  */
+@Stable
 final case class BreakpointRequest private (node: NodeId, phase: BreakpointPhase, call: Option[ToolCall]):
   def withNode(n: NodeId): BreakpointRequest           = BreakpointRequest(n, phase, call)
   def withPhase(p: BreakpointPhase): BreakpointRequest = BreakpointRequest(node, p, call)
@@ -275,7 +293,7 @@ object BreakpointRequest:
  * The result the loop wrote for one call, waiting for the batch barrier: the parts the call's
  * `ToolMessage` will carry, or, for an error, its message as one text part.
  */
-final case class ToolResult(
+final private[agent] case class ToolResult(
   assistantMessageId: String,
   toolCallId: String,
   parts: Vector[ContentPart],
@@ -283,12 +301,14 @@ final case class ToolResult(
 ) derives ReadWriter
 
 /** One invocation of an agent's model: the task's [[org.llm4s.agent.graph.RunContext RunContext]], the agent, and this attempt's number (from 1). */
+@Stable
 final class ModelCall private[toolloop] (val context: RunContext, val agent: AgentId, val attempt: Int):
   def textDelta(text: String): Unit = AgentEvents.TextDelta.progress(context, events.TextDelta(attempt, text))
   def thinkingDelta(text: String): Unit =
     AgentEvents.ThinkingDelta.progress(context, events.ThinkingDelta(attempt, text))
 
 /** The model call: the conversation so far, and the tools on offer, to the model's completion. */
+@Stable
 trait ModelStep:
   def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion]
 
@@ -443,6 +463,7 @@ object ModelStep:
  *    the transfer's assistant message onwards; the history itself is untouched. A non-root agent
  *    with no recorded transfer to it fails the call rather than being sent the full history.
  */
+@Stable
 final class ToolLoop private (
   val graph: CompiledGraph[AgentInput, TurnOutput],
   approval: ResumeRef[ApprovalRequest, ApprovalDecision],
@@ -596,7 +617,7 @@ object ToolLoop:
    *
    * Version 2 (#1913): a result carries `parts`; version 1's `content` string migrates to one text part.
    */
-  val results: StateKey[Vector[ToolResult], ToolResult] =
+  private[agent] val results: StateKey[Vector[ToolResult], ToolResult] =
     StateKey[Vector[ToolResult], ToolResult]("tool-results", Vector.empty) { (recorded, result) =>
       if recorded.exists(r => r.assistantMessageId == result.assistantMessageId && r.toolCallId == result.toolCallId)
       then Left(ValidationError("tool-results", s"tool call '${result.toolCallId}' already has a result"))
@@ -628,7 +649,8 @@ object ToolLoop:
    * with, and the calls still to run. Removed when the batch is collected; each update replaces it.
    * Registered only for an agent with a tool that declares locks.
    */
-  val queue: StateKey[LockSchedule, LockSchedule] = StateKey.replace[LockSchedule]("tool-queue", LockSchedule.empty)
+  private[agent] val queue: StateKey[LockSchedule, LockSchedule] =
+    StateKey.replace[LockSchedule]("tool-queue", LockSchedule.empty)
 
   /**
    * The loop for a family of `agents`, a new thread starting with `root`. Refuses an empty family,
@@ -927,7 +949,7 @@ object ToolLoop:
    */
   private def withUsage(context: RunContext)(result: NodeResult): NodeResult = result match
     case NodeResult.Continue(command) =>
-      NodeResult.Continue(command.copy(update = command.update.combine(usageOf(context)).combine(countedOf(context))))
+      NodeResult.Continue(command.withUpdate(command.update.combine(usageOf(context)).combine(countedOf(context))))
     // a suspended call may run again when answered, reattaching a child it ran: the children counted here are recorded,
     // so the child runner does not count them again
     case NodeResult.Suspend(update, question, resumeAt) =>
@@ -1345,7 +1367,7 @@ object ToolLoop:
           )
           pipeline.approved(task, request.call.withArguments(arguments), state, context, request.answered) match
             case NodeResult.Continue(command) =>
-              NodeResult.Continue(command.copy(update = edit.combine(command.update)))
+              NodeResult.Continue(command.withUpdate(edit.combine(command.update)))
             case NodeResult.Suspend(update, q, resume) => NodeResult.Suspend(edit.combine(update), q, resume)
             case failed                                => failed
 
@@ -1390,7 +1412,10 @@ object ToolLoop:
           .update(messages, MessageUpdate.Append(stored))
           .update(
             LoopKeys.turn,
-            turn.copy(steps = turn.steps + 1, priorValues = prior, cut = completion.finishReason == FinishReason.Length)
+            turn
+              .withSteps(turn.steps + 1)
+              .withPriorValues(prior)
+              .withCut(completion.finishReason == FinishReason.Length)
           )
       val calls = assistant.toolCalls.toVector
       def toolMessage(call: ToolCall, content: String) =
@@ -1454,7 +1479,7 @@ object ToolLoop:
       )
       restored(turn.priorValues, harness.byId, state).map(
         _.combine(rolledBack)
-          .combine(StateUpdate.update(LoopKeys.turn, turn.copy(priorValues = Map.empty)))
+          .combine(StateUpdate.update(LoopKeys.turn, turn.withPriorValues(Map.empty)))
           .combine(usageOf(context))
       )
 
@@ -1468,7 +1493,7 @@ object ToolLoop:
       def ended(turn: TurnState, outcome: TurnOutcome): Result[NodeResult] =
         Right(
           NodeResult.Continue(
-            Command.empty.update(LoopKeys.turn, turn.copy(outcome = Some(outcome), priorValues = Map.empty))
+            Command.empty.update(LoopKeys.turn, turn.withOutcome(Some(outcome)).withPriorValues(Map.empty))
           )
         )
       val outcome = state.get(LoopKeys.turn).flatMap { turn =>
@@ -1497,7 +1522,7 @@ object ToolLoop:
       def limitReached: NodeResult =
         NodeResult.Continue(
           Command(usageOf(context), Nil)
-            .update(LoopKeys.turn, turn.copy(outcome = Some(TurnOutcome.TokenLimitReached), priorValues = Map.empty))
+            .update(LoopKeys.turn, turn.withOutcome(Some(TurnOutcome.TokenLimitReached)).withPriorValues(Map.empty))
         )
       val prepared = for
         history  <- state.get(messages)
@@ -1623,7 +1648,7 @@ object ToolLoop:
             .fold(NodeResult.Fail(_), boundary(error, _, context, GuardrailPhase.Output))
         // an answer cut off at the output limit is not a final answer (RFC 0009, open question 6)
         val outcome = if turn.cut then TurnOutcome.Truncated else TurnOutcome.Completed
-        val ended   = turn.copy(outcome = Some(outcome), priorValues = Map.empty, cut = false)
+        val ended   = turn.withOutcome(Some(outcome)).withPriorValues(Map.empty).withCut(false)
         def completed(update: StateUpdate) =
           Command(update.combine(usageOf(context)), Nil).update(LoopKeys.turn, ended)
         threaded(boundaryOwners, assistant.content, context, answers, state)(_.afterAgent(_, _, _)) match
@@ -1683,7 +1708,7 @@ object ToolLoop:
         }
         // what the batch's tools left in the keys they may write, now committed: an output Block restores a key only
         // while it still holds what the turn left there
-        val left = turn.copy(priorValues = written(turn.priorValues, batchWrites(assistant.toolCalls.toVector), state))
+        val left = turn.withPriorValues(written(turn.priorValues, batchWrites(assistant.toolCalls.toVector), state))
         toolMessages
           .foldLeft(Command.empty)((command, m) => command.update(messages, MessageUpdate.Append(m)))
           .remove(results)
@@ -2286,7 +2311,7 @@ object ToolLoop:
       result match
         case NodeResult.Continue(command) =>
           pending.fold(Right(()))(settleTimedOut(_, callId, context)) match
-            case Right(_) => NodeResult.Continue(command.copy(update = command.update.combine(record(None))))
+            case Right(_) => NodeResult.Continue(command.withUpdate(command.update.combine(record(None))))
             case Left(error) =>
               NodeResult.Fail(GraphError.ToolFailed(ToolName(name), ToolCallId(callId), error))
         case NodeResult.Suspend(update, question, resumeAt) =>

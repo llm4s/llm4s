@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.Message
 
 /**
@@ -20,17 +21,38 @@ import org.llm4s.llmconnect.model.Message
  *                       conversation coherent, and can send more than the limits allow.
  * @param pruningStrategy Strategy for pruning the history before those turns when a limit is exceeded
  */
-case class ContextWindowConfig(
-  maxTokens: Option[Int] = None,
-  maxMessages: Option[Int] = None,
-  preserveSystemMessage: Boolean = true,
-  minRecentTurns: Int = 1,
-  pruningStrategy: PruningStrategy = PruningStrategy.OldestFirst
-)
+@Stable
+final case class ContextWindowConfig private (
+  maxTokens: Option[Int],
+  maxMessages: Option[Int],
+  preserveSystemMessage: Boolean,
+  minRecentTurns: Int,
+  pruningStrategy: PruningStrategy
+) {
+  def withMaxTokens(value: Int): ContextWindowConfig                   = copy(maxTokens = Some(value))
+  def withMaxTokens(value: Option[Int]): ContextWindowConfig           = copy(maxTokens = value)
+  def withMaxMessages(value: Int): ContextWindowConfig                 = copy(maxMessages = Some(value))
+  def withMaxMessages(value: Option[Int]): ContextWindowConfig         = copy(maxMessages = value)
+  def withPreserveSystemMessage(value: Boolean): ContextWindowConfig   = copy(preserveSystemMessage = value)
+  def withMinRecentTurns(value: Int): ContextWindowConfig              = copy(minRecentTurns = value)
+  def withPruningStrategy(value: PruningStrategy): ContextWindowConfig = copy(pruningStrategy = value)
+}
+
+object ContextWindowConfig {
+  def apply(
+    maxTokens: Option[Int] = None,
+    maxMessages: Option[Int] = None,
+    preserveSystemMessage: Boolean = true,
+    minRecentTurns: Int = 1,
+    pruningStrategy: PruningStrategy = PruningStrategy.OldestFirst
+  ): ContextWindowConfig =
+    new ContextWindowConfig(maxTokens, maxMessages, preserveSystemMessage, minRecentTurns, pruningStrategy)
+}
 
 /**
  * Strategies for pruning conversation history when context limits are exceeded.
  */
+@Stable
 sealed trait PruningStrategy
 
 object PruningStrategy {
@@ -91,12 +113,19 @@ object PruningStrategy {
    * @param costSensitivity How aggressively to optimize for cost (0.0-1.0, default: 0.5)
    *                        0.0 = maximize quality, 1.0 = minimize cost
    */
-  case class AdaptiveWindowing(
+  final case class AdaptiveWindowing private (
     contextWindowSize: Int,
-    inputCostPerToken: Option[Double] = None,
-    outputCostPerToken: Option[Double] = None,
-    costSensitivity: Double = 0.5
+    inputCostPerToken: Option[Double],
+    outputCostPerToken: Option[Double],
+    costSensitivity: Double
   ) extends PruningStrategy {
+    def withContextWindowSize(value: Int): AdaptiveWindowing             = copy(contextWindowSize = value)
+    def withInputCostPerToken(value: Double): AdaptiveWindowing          = copy(inputCostPerToken = Some(value))
+    def withInputCostPerToken(value: Option[Double]): AdaptiveWindowing  = copy(inputCostPerToken = value)
+    def withOutputCostPerToken(value: Double): AdaptiveWindowing         = copy(outputCostPerToken = Some(value))
+    def withOutputCostPerToken(value: Option[Double]): AdaptiveWindowing = copy(outputCostPerToken = value)
+    def withCostSensitivity(value: Double): AdaptiveWindowing            = copy(costSensitivity = value)
+
     require(contextWindowSize > 0, "Context window size must be positive")
     require(costSensitivity >= 0.0 && costSensitivity <= 1.0, "Cost sensitivity must be between 0.0 and 1.0")
 
@@ -146,4 +175,15 @@ object PruningStrategy {
 
     override def toString: String = explanation
   }
+
+  object AdaptiveWindowing {
+    def apply(
+      contextWindowSize: Int,
+      inputCostPerToken: Option[Double] = None,
+      outputCostPerToken: Option[Double] = None,
+      costSensitivity: Double = 0.5
+    ): AdaptiveWindowing =
+      new AdaptiveWindowing(contextWindowSize, inputCostPerToken, outputCostPerToken, costSensitivity)
+  }
+
 }

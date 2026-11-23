@@ -240,7 +240,7 @@ class GraphEvolutionSpec extends AnyFlatSpec with Matchers with EitherValues wit
     }
     problems(graph().restore(s)) shouldBe List("static join 'pair', over stored nodes, was removed")
     val changed =
-      s.copy(shape = s.shape.map(sh => sh.copy(staticJoins = Vector(GraphShape.StaticJoin("pair", Vector("a"), "b")))))
+      s.withShape(s.shape.map(sh => sh.withStaticJoins(Vector(GraphShape.StaticJoin("pair", Vector("a"), "b")))))
     problems(g.restore(changed)) shouldBe List("static join 'pair' changed: a -> b, then a, worker -> b")
   }
 
@@ -322,22 +322,22 @@ class GraphEvolutionSpec extends AnyFlatSpec with Matchers with EitherValues wit
   }
 
   "A snapshot written before shapes were recorded" should "restore into its own shape" in {
-    graph().restore(inFlight.copy(shape = None)).value
-    graph().restore(atRest.copy(shape = None)).value
+    graph().restore(inFlight.withShape(None)).value
+    graph().restore(atRest.withShape(None)).value
   }
 
   it should "restore into the graph with keys added, at rest and in flight" in {
     val g = graph(Variant(addKey = true, manyKeys = 3))
-    drive(g, g.restore(inFlight.copy(shape = None)).value).completed._2 shouldBe Vector("start:go", "a", "b:extra=7")
-    g.restore(atRest.copy(shape = None)).value
+    drive(g, g.restore(inFlight.withShape(None)).value).completed._2 shouldBe Vector("start:go", "a", "b:extra=7")
+    g.restore(atRest.withShape(None)).value
   }
 
   it should "be refused when the graph changed by more than added keys" in {
     val legacy = "the snapshot was written before graph shapes were recorded, " +
       "and this graph differs from its graph by more than added keys"
-    problems(graph(Variant(addLoose = true)).restore(inFlight.copy(shape = None))) shouldBe List(legacy)
-    problems(graph(Variant(dropNotes = true)).restore(inFlight.copy(shape = None))) shouldBe List(legacy)
-    (problems(graph(Variant(version = "v2")).restore(atRest.copy(shape = None))) should contain).allOf(
+    problems(graph(Variant(addLoose = true)).restore(inFlight.withShape(None))) shouldBe List(legacy)
+    problems(graph(Variant(dropNotes = true)).restore(inFlight.withShape(None))) shouldBe List(legacy)
+    (problems(graph(Variant(version = "v2")).restore(atRest.withShape(None))) should contain).allOf(
       legacy,
       "snapshot is of version 'v1', this graph is version 'v2'; a snapshot without a shape restores only into its own version"
     )
@@ -345,8 +345,8 @@ class GraphEvolutionSpec extends AnyFlatSpec with Matchers with EitherValues wit
 
   it should "search at most 16 keys the snapshot holds no value for" in {
     // `notes` holds no value in flight either
-    graph(Variant(manyKeys = 15)).restore(inFlight.copy(shape = None)).value
-    problems(graph(Variant(manyKeys = 16)).restore(inFlight.copy(shape = None))).loneElement should include(
+    graph(Variant(manyKeys = 15)).restore(inFlight.withShape(None)).value
+    problems(graph(Variant(manyKeys = 16)).restore(inFlight.withShape(None))).loneElement should include(
       "more than added keys"
     )
   }
@@ -358,7 +358,7 @@ class GraphEvolutionSpec extends AnyFlatSpec with Matchers with EitherValues wit
       override def latest(threadId: ThreadId) =
         store
           .latest(threadId)
-          .map(_.map(s => s.copy(checkpoint = s.checkpoint.withSnapshot(s.checkpoint.snapshot.copy(shape = None)))))
+          .map(_.map(s => s.copy(checkpoint = s.checkpoint.withSnapshot(s.checkpoint.snapshot.withShape(None)))))
     }
     GraphRuntime(store).start(thread, graph(), "go").awaited.value.completed
     GraphRuntime(legacy).start(thread, graph(Variant(addKey = true)), "again").awaited.value.completed

@@ -1090,7 +1090,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       store.unhang()
       eventually(store.released.contains(token))
       underlying.claim(thread, ClaimRequest(RunId("other"), None, 1.minute)).left.value should matchPattern {
-        case GraphError.ThreadBusy("t", _, GraphError.BusyHolder.Run(holder)) if holder == RunId("second") =>
+        case e: GraphError.ThreadBusy if e.threadId == "t" && e.holder == GraphError.BusyHolder.Run(RunId("second")) =>
       }
       next.gate.countDown()
       await(successor).completed

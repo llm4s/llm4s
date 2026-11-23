@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
 
 import scala.concurrent.duration.FiniteDuration
@@ -9,6 +10,7 @@ import scala.concurrent.duration.FiniteDuration
  * [[org.llm4s.error.NonRecoverableError NonRecoverableError]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
  * continues that run - and [[GraphError.ThreadBusy]], which a retry may get past once the thread is free.
  */
+@Stable
 sealed trait GraphError extends LLMError
 
 object GraphError:
@@ -213,12 +215,21 @@ object GraphError:
    * The checkpointer refused or failed a commit; the run stops at its last durable checkpoint.
    * `runError` is the run's own failure when the commit failed while recording it.
    */
-  final case class CheckpointWriteFailed(threadId: String, cause: LLMError, runError: Option[LLMError] = None)
+  final case class CheckpointWriteFailed private (threadId: String, cause: LLMError, runError: Option[LLMError])
       extends GraphError
       with NonRecoverableError:
+    def withThreadId(value: String): CheckpointWriteFailed           = copy(threadId = value)
+    def withCause(value: LLMError): CheckpointWriteFailed            = copy(cause = value)
+    def withRunError(value: LLMError): CheckpointWriteFailed         = copy(runError = Some(value))
+    def withRunError(value: Option[LLMError]): CheckpointWriteFailed = copy(runError = value)
+
     override val message: String =
       s"Checkpoint write for thread '$threadId' failed: ${cause.message}" +
         runError.fold("")(e => s" (while recording the run's failure: ${e.message})")
+
+  object CheckpointWriteFailed:
+    def apply(threadId: String, cause: LLMError, runError: Option[LLMError] = None): CheckpointWriteFailed =
+      new CheckpointWriteFailed(threadId, cause, runError)
 
   /** A resume was refused: no answers, an interrupt that is not parked, or an answer that does not decode. */
   final case class InvalidResume(graphId: String, problems: List[String]) extends GraphError with NonRecoverableError:
@@ -291,12 +302,17 @@ object GraphError:
    * [[BusyHolder.Lapsed]] when it is the call's own claim that lapsed, with no other run known to hold
    * the thread. A caller of another tenant is refused with [[TenantMismatch]] instead, and learns nothing.
    */
-  final case class ThreadBusy(
+  final case class ThreadBusy private (
     threadId: String,
     latestCheckpoint: Option[String],
-    holder: BusyHolder = BusyHolder.Unnamed
+    holder: BusyHolder
   ) extends GraphError
       with RecoverableError:
+    def withThreadId(value: String): ThreadBusy                 = copy(threadId = value)
+    def withLatestCheckpoint(value: String): ThreadBusy         = copy(latestCheckpoint = Some(value))
+    def withLatestCheckpoint(value: Option[String]): ThreadBusy = copy(latestCheckpoint = value)
+    def withHolder(value: BusyHolder): ThreadBusy               = copy(holder = value)
+
     override val message: String =
       val at = latestCheckpoint.getOrElse("<none>")
       holder match
@@ -304,6 +320,10 @@ object GraphError:
         case BusyHolder.Unnamed    => s"Thread '$threadId' is held by another run (now at $at); retry"
         case BusyHolder.Lapsed =>
           s"Thread '$threadId': this call's claim on it lapsed before its write was known to land, and no other run is known to hold it; a write already sent may still land (now at $at); retry"
+
+  object ThreadBusy:
+    def apply(threadId: String, latestCheckpoint: Option[String], holder: BusyHolder = BusyHolder.Unnamed): ThreadBusy =
+      new ThreadBusy(threadId, latestCheckpoint, holder)
 
   /**
    * A commit, renewal or release presented a fencing token that is not the thread's current claim:

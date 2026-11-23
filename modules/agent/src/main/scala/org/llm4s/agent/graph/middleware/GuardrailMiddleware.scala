@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.guardrails.{ Guardrail, InputGuardrail, OutputGuardrail }
 import org.llm4s.error.LLMError
 import org.llm4s.types.Result
@@ -16,6 +17,7 @@ import org.llm4s.types.Result
  * and its output guardrails on every final answer, whichever agent is active after a handoff. On a
  * handoff target it applies only while that agent is active, inside the root's.
  */
+@Stable
 final class GuardrailMiddleware(
   input: Seq[InputGuardrail],
   output: Seq[OutputGuardrail],

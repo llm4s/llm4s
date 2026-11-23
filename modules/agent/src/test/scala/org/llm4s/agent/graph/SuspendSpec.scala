@@ -202,19 +202,19 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
       case GraphError.RestoreRejected(_, found) => found
       case other                                => fail(other.toString)
     }
-    problems(snapshot.copy(parked = Vector(parked.copy(resumeNode = "worker")))) should
+    problems(snapshot.withParked(Vector(parked.withResumeNode("worker")))) should
       contain("interrupt 1.1 resumes at 'worker', not a resume node")
-    problems(snapshot.copy(parked = Vector(parked.copy(question = VersionedJson(1, ujson.Arr()))))).head should
+    problems(snapshot.withParked(Vector(parked.withQuestion(VersionedJson(1, ujson.Arr()))))).head should
       startWith("interrupt 1.1 question does not decode")
-    problems(snapshot.copy(parked = Vector(parked.copy(originNode = "gone")))) shouldBe
+    problems(snapshot.withParked(Vector(parked.withOriginNode("gone")))) shouldBe
       List("interrupt 1.1 continues unknown node 'gone'")
-    problems(snapshot.copy(parked = Vector(parked.copy(fanOutTask = None)))) should
+    problems(snapshot.withParked(Vector(parked.withFanOutTask(None)))) should
       contain("interrupt 1.1 has half a join slot")
-    problems(snapshot.copy(parked = Vector(parked, parked))) shouldBe List("interrupt 1.1 is parked more than once")
+    problems(snapshot.withParked(Vector(parked, parked))) shouldBe List("interrupt 1.1 is parked more than once")
     // without the parked continuation, the join waits for an arrival nothing will make
-    problems(snapshot.copy(parked = Vector.empty)) shouldBe
+    problems(snapshot.withParked(Vector.empty)) shouldBe
       List("dynamic join 'workers' (fan-out 0.0) waits for 1.1, which are not pending")
-    problems(snapshot.copy(dynamicJoins = Vector.empty)) should
+    problems(snapshot.withDynamicJoins(Vector.empty)) should
       contain("interrupt 1.1 belongs to no open activation of dynamic join 'workers'")
   }
 
@@ -226,12 +226,12 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
     val task     = snapshot.frontier.head
     task.originTask shouldBe Some("1.1")
     def problems(changed: GraphSnapshot.PendingTask) =
-      f.graph.restore(snapshot.copy(frontier = Vector(changed))).left.value match {
+      f.graph.restore(snapshot.withFrontier(Vector(changed))).left.value match {
         case GraphError.RestoreRejected(_, found) => found
         case other                                => fail(other.toString)
       }
-    problems(task.copy(originNode = None)) should contain(s"pending task ${task.taskId} has half an origin")
-    problems(task.copy(originNode = Some("gone"))) should contain(
+    problems(task.withOriginNode(None)) should contain(s"pending task ${task.taskId} has half an origin")
+    problems(task.withOriginNode(Some("gone"))) should contain(
       s"pending task ${task.taskId} continues unknown node 'gone'"
     )
     drive(f.graph, f.graph.restore(snapshot).value).completed._2 shouldBe Vector("A,b!")

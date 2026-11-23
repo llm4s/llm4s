@@ -32,6 +32,7 @@ final case class TaskStarted(child: ChildRef) derives ReadWriter
 @Experimental
 final case class TaskEnded(child: ChildRef, status: String, usage: UsageSummary, duration: FiniteDuration)
 
+@Experimental
 object TaskEnded:
   given ReadWriter[TaskEnded] =
     import DurationJson.millisRW

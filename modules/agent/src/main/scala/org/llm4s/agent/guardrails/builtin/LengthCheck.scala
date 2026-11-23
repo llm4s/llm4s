@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
@@ -13,6 +14,7 @@ import org.llm4s.types.Result
  * @param min Minimum length (inclusive)
  * @param max Maximum length (inclusive)
  */
+@Stable
 class LengthCheck(min: Int, max: Int) extends InputGuardrail with OutputGuardrail {
   require(min >= 0, "Minimum length must be non-negative")
   require(max >= min, "Maximum length must be >= minimum length")

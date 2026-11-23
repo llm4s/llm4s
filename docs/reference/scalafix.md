@@ -84,6 +84,7 @@ nested inside another pattern. These 0.5 rules change names, not types; the `Sec
 | `AgentStatusGainsTruncated` | Since 0.6.0, lint only: a `match` (or partial function) on `AgentStatus` with no catch-all, which needs a case for `AgentStatus.Truncated`, the status of an answer cut off at the model's output limit ([note](migration#a-cut-off-answer-ends-truncated-not-completed-2613)) |
 | `FinishReasonTyped` | Since 0.6.0: `chunk.finishReason.contains("stop")`, `== Some("length")`, `exists(_ == "tool_calls")` and `case Some("stop")` to the `FinishReason` cases; `withFinishReason("stop")` and `StreamedChunk(..., finishReason = Some("stop"))` likewise (0.6.0's raw Bedrock or Gemini value, such as `"end_turn"`, to the case it maps to now, another literal to `FinishReason.Other(...)`); any other read to `chunk.finishReason.map(_.name)`, which keeps its type. The cases assume a client that maps its reason; a Spring AI model gives `Other(raw)` for any value. Lints a reason set from a non-literal `String` or a filter's value, and, in the comparison a read is part of, a literal no rewrite gets right (and any `stop`, `tool_calls` or `length` beside it, left as a `String`): 0.6.0's raw Bedrock and Gemini values (`end_turn`, `tool_use`, `max_tokens`, `MAX_TOKENS`, ...), which now map to a case while a Spring AI model still gives `Other(raw)`; a content filter's (`content_filter`, `SAFETY`, ...), a `ContentFilteredError` now; and Gemini's `STOP`, `Stop` or `ToolCalls` |
 | `CompressionRuleTransform` | Since 0.6.0: `CompressionRule`'s field `apply` to `transform`: `rule.apply(messages)` to `rule.transform(messages)`, `withApply(f)` to `withTransform(f)`, and the named argument `CompressionRule(name, apply = f)` to `transform = f` ([note](migration#compressionrules-apply-field-is-transform-1281)) |
+| `AgentCopyToWithSetters` | Since 0.6.0: `.copy(field = value)` to `.withField(value)` on the 36 `llm4s-agent` types made growth-safe by [#2778](https://github.com/llm4s/llm4s/issues/2778) (`ContextWindowConfig`, `Handoff`, the `AgentEvents` payloads, `EventRecord`, `GraphSnapshot`, `Command` and others); a positional `copy` and `new X(...)` are reported |
 
 A key passed by position (`OpenAIConfig("sk-...", "gpt-4o")`), and the other credentials that became `Secret`s
 (Langfuse, search-tool and store keys), still need a hand edit. The breaks that change behaviour or add cases have no
@@ -93,8 +94,8 @@ rule: see [Changes since 0.5.1 that no rule automates](migration#changes-since-0
 `FromValuesKeyFirst` cannot tell 0.6.x code, where the key is already a `Secret` and `created` an `Instant`, from
 0.5.x code (Scalafix sees no types from Scala 3 dependencies), and would rewrite it again: `config.apiKey.reveal` to
 `config.apiKey.reveal.reveal`. Code on 0.6.x runs the rules for the breaks since 0.6.0 by name instead:
-`ThinkingReplacesBudgetTokens`, `FinishReasonTyped`, `CompressionRuleTransform`, `AgentStatusGainsTruncated` and
-`PositionalPatternsGainFields`.
+`ThinkingReplacesBudgetTokens`, `FinishReasonTyped`, `CompressionRuleTransform`, `AgentCopyToWithSetters`,
+`AgentStatusGainsTruncated` and `PositionalPatternsGainFields`.
 
 The rules are compiled with scalac 2.13, the only compiler `scalafix-core` is published for; they read the SemanticDB of Scala 3 sources. Scalafix's
 Scala 3 support resolves the symbol at each name, which every rule here relies on, but has no synthetics or inferred

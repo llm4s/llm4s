@@ -44,6 +44,7 @@ final class Glob private (val pattern: String):
   override def hashCode: Int    = pattern.hashCode
   override def toString: String = s"Glob($pattern)"
 
+@Experimental
 object Glob:
   def apply(pattern: String): Glob = new Glob(pattern)
 

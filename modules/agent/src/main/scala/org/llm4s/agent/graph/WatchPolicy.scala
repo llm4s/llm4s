@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
@@ -33,6 +34,7 @@ import scala.concurrent.duration.*
  * read a polled store in a busy loop: `apply` and the `with*` setters throw
  * `IllegalArgumentException` otherwise, and [[WatchPolicy.of]] returns a `ValidationError`.
  */
+@Stable
 final case class WatchPolicy private (enabled: Boolean, pollInterval: FiniteDuration):
   def withEnabled(e: Boolean): WatchPolicy             = WatchPolicy(e, pollInterval)
   def withPollInterval(i: FiniteDuration): WatchPolicy = WatchPolicy(enabled, i)

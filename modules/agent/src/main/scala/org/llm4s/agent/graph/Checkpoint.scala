@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
@@ -7,6 +8,7 @@ import java.time.Instant
 import scala.util.Try
 
 /** Whether a thread's latest checkpoint is mid-execution or finished its run. */
+@Stable
 enum CheckpointStatus derives ReadWriter:
   /** Work is scheduled, or the run stopped before completing; continue with `recover`. */
   case Running
@@ -37,6 +39,7 @@ enum CheckpointStatus derives ReadWriter:
  * Persist with [[Checkpoint.toJson]] and read with [[Checkpoint.fromJson]], which migrates older
  * `formatVersion`s and refuses newer ones.
  */
+@Stable
 final case class Checkpoint private (
   formatVersion: Int,
   id: String,
@@ -232,7 +235,8 @@ object Checkpoint:
  * A completed (or suspended) task's result, recorded against the checkpoint whose frontier it ran in, before the
  * superstep commits. On recovery the task is not run again: its command is decoded from here.
  */
-final case class PendingWrite(
+@Stable
+final case class PendingWrite private (
   checkpointId: String,
   taskId: String,
   nodeId: String,
@@ -247,23 +251,48 @@ final case class PendingWrite(
    * recorded before the field reads with `None`, and its digest is computed from the write as stored.
    */
   resultDigest: Option[String] = None
-) derives ReadWriter
+) derives ReadWriter:
+  def withCheckpointId(value: String): PendingWrite                  = copy(checkpointId = value)
+  def withTaskId(value: String): PendingWrite                        = copy(taskId = value)
+  def withNodeId(value: String): PendingWrite                        = copy(nodeId = value)
+  def withOperations(value: Vector[EncodedOperation]): PendingWrite  = copy(operations = value)
+  def withRoutes(value: Vector[EncodedRoute]): PendingWrite          = copy(routes = value)
+  def withSuspension(value: EncodedSuspension): PendingWrite         = copy(suspension = Some(value))
+  def withSuspension(value: Option[EncodedSuspension]): PendingWrite = copy(suspension = value)
+  def withResultDigest(value: String): PendingWrite                  = copy(resultDigest = Some(value))
+  def withResultDigest(value: Option[String]): PendingWrite          = copy(resultDigest = value)
+
+object PendingWrite:
+  def apply(
+    checkpointId: String,
+    taskId: String,
+    nodeId: String,
+    operations: Vector[EncodedOperation],
+    routes: Vector[EncodedRoute],
+    suspension: Option[EncodedSuspension] = None,
+    resultDigest: Option[String] = None
+  ): PendingWrite =
+    new PendingWrite(checkpointId, taskId, nodeId, operations, routes, suspension, resultDigest)
 
 /** A suspended task's parked continuation: where it resumes and the question, as data. */
+@Stable
 final case class EncodedSuspension(resumeNode: String, question: VersionedJson) derives ReadWriter
 
 /** A state operation as data: updates are encoded with the key's update codec. */
+@Stable
 enum EncodedOperation derives ReadWriter:
   case Update(keyId: String, update: VersionedJson)
   case Remove(keyId: String)
 
 /** A route as data: payloads are encoded with the target node's input codec. */
+@Stable
 enum EncodedRoute derives ReadWriter:
   case Goto(nodeId: String)
   case Send(nodeId: String, payload: VersionedJson)
   case FanOut(joinId: String, nodeId: String, payloads: Vector[VersionedJson])
 
 /** A thread's latest checkpoint with the pending writes recorded against it. */
+@Stable
 final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[PendingWrite])
 
 /**
@@ -271,9 +300,17 @@ final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[
  * (#2642): that checkpoint's [[Checkpoint!.tenantId Checkpoint.tenantId]], and the parent its
  * [[Checkpoint!.origin Checkpoint.origin]] names - `None` for a top-level thread.
  */
-final case class ThreadOwner(tenantId: Option[String], parent: Option[ThreadId])
+@Stable
+final case class ThreadOwner private (tenantId: Option[String], parent: Option[ThreadId]):
+  def withTenantId(value: String): ThreadOwner         = copy(tenantId = Some(value))
+  def withTenantId(value: Option[String]): ThreadOwner = copy(tenantId = value)
+  def withParent(value: ThreadId): ThreadOwner         = copy(parent = Some(value))
+  def withParent(value: Option[ThreadId]): ThreadOwner = copy(parent = value)
 
 object ThreadOwner:
+
+  def apply(tenantId: Option[String], parent: Option[ThreadId]): ThreadOwner =
+    new ThreadOwner(tenantId, parent)
 
   /** The owner `checkpoint` records. */
   def of(checkpoint: Checkpoint): ThreadOwner = ThreadOwner(checkpoint.tenantId, checkpoint.origin.map(_.parent))
@@ -312,6 +349,7 @@ object ThreadOwner:
  *    commit; `None` leaves it as it is. A thread keeps its metadata across commits until another replaces it, and
  *    loses it only with the thread ([[Checkpointer.deleteThread]]).
  */
+@Stable
 final case class Commit private (
   token: FencingToken,
   checkpoint: Option[Checkpoint],

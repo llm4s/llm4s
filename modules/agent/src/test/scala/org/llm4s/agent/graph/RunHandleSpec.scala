@@ -398,8 +398,9 @@ class RunHandleSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Ei
   "Admission" should "refuse a claim whose commit throws, releasing the thread" in {
     val runtime = GraphRuntime(throwingStore(1))
     runtime.start(thread, instant, "x").left.value match {
-      case GraphError.CheckpointWriteFailed("t", cause, None) => cause.message should include("store exploded")
-      case other                                              => fail(s"expected CheckpointWriteFailed, got $other")
+      case e: GraphError.CheckpointWriteFailed if e.threadId == "t" && e.runError.isEmpty =>
+        e.cause.message should include("store exploded")
+      case other => fail(s"expected CheckpointWriteFailed, got $other")
     }
     await(runtime.start(thread, instant, "y").value).completed._2 shouldBe "y" // the store works now
   }
@@ -535,7 +536,9 @@ class RunHandleSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Ei
     }
     val runtime = GraphRuntime(store)
     runtime.start(thread, instant, "x").left.value match {
-      case GraphError.CheckpointWriteFailed("t", _: GraphError.InvalidCommit, None) => succeed
+      case e: GraphError.CheckpointWriteFailed
+          if e.threadId == "t" && e.cause.isInstanceOf[GraphError.InvalidCommit] && e.runError.isEmpty =>
+        succeed
       case other => fail(s"expected CheckpointWriteFailed(InvalidCommit), got $other")
     }
     // released; the claim itself was stored, so the thread is refused for its state

@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
@@ -27,6 +28,7 @@ import scala.util.Try
  *
  * @param schema Optional JSON schema to validate against (minimal subset)
  */
+@Stable
 class JSONValidator(schema: Option[ujson.Value] = None) extends OutputGuardrail {
 
   override def validate(value: String): Result[String] =

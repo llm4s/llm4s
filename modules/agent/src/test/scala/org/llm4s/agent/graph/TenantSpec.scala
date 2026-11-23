@@ -400,7 +400,8 @@ class TenantSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eithe
     runtime.start(thread, f.graph, "y").left.value shouldBe GraphError.TenantMismatch("t", None)
     // the first admission is this runtime's own, so its run is named although the thread has no checkpoint yet
     runtime.start(thread, f.graph, "y", tenant("a")).left.value should matchPattern {
-      case GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Run(_)) =>
+      case e: GraphError.ThreadBusy
+          if e.threadId == "t" && e.latestCheckpoint.isEmpty && e.holder.isInstanceOf[GraphError.BusyHolder.Run] =>
     }
 
     release.countDown()

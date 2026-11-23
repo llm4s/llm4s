@@ -207,7 +207,8 @@ class RunClaimSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val held  = Held()
     store.onClaim = () => Some(Left(ProcessingError("store", "down")))
     GraphRuntime(store).start(thread, held.graph, "x").left.value should matchPattern {
-      case GraphError.CheckpointWriteFailed("t", _: ProcessingError, None) =>
+      case e: GraphError.CheckpointWriteFailed
+          if e.threadId == "t" && e.cause.isInstanceOf[ProcessingError] && e.runError.isEmpty =>
     }
     store.onClaim = () => throw new IllegalStateException("driver")
     GraphRuntime(store).start(thread, held.graph, "x").left.value shouldBe a[GraphError.CheckpointWriteFailed]
@@ -421,7 +422,9 @@ class RunClaimSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val runtime = GraphRuntime(store, claims = slow)
     await(runtime.start(thread, held.graph, "x", run("first")).value).completed
     runtime.start(thread, held.graph, "y", run("second")).left.value should matchPattern {
-      case GraphError.ThreadBusy("t", Some(_), GraphError.BusyHolder.Run(holder)) if holder == RunId("first") =>
+      case e: GraphError.ThreadBusy
+          if e.threadId == "t" && e.latestCheckpoint.isDefined &&
+            e.holder == GraphError.BusyHolder.Run(RunId("first")) =>
     }
     store.onRelease = () => throw new IllegalStateException("driver")
     clock.advance(slow.ttl)
@@ -529,7 +532,7 @@ class RunClaimSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       .withRunId("s")
       .withStatus(CheckpointStatus.Completed)
       .withCreatedAt(start.plusSeconds(1))
-      .withSnapshot(checkpoint.snapshot.copy(superstep = 1))
+      .withSnapshot(checkpoint.snapshot.withSuperstep(1))
       .withTenantId("acme")
       .withFencingToken(FencingToken(5L))
     (changed.formatVersion, changed.id, changed.parent, changed.threadId, changed.runId, changed.status) shouldBe

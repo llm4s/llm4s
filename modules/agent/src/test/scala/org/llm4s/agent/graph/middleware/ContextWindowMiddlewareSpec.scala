@@ -467,7 +467,7 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       st  <- strategies
       cfg <- Seq(ContextWindowConfig(maxMessages = Some(2)), ContextWindowConfig(maxTokens = Some(800)))
     } withClue(s"$st $cfg") {
-      ContextPruning.prune(msgs, cfg.copy(minRecentTurns = 3, pruningStrategy = st), sized) shouldBe msgs.takeRight(6)
+      ContextPruning.prune(msgs, cfg.withMinRecentTurns(3).withPruningStrategy(st), sized) shouldBe msgs.takeRight(6)
     }
   }
 

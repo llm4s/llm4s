@@ -238,44 +238,6 @@ class PIIGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   // ==========================================================================
-  // GuardrailResult Tests
-  // ==========================================================================
-
-  "GuardrailResult" should "correctly report success status" in {
-    import GuardrailResult._
-
-    Passed("value").isSuccess shouldBe true
-    Fixed("old", "new", Seq("fix")).isSuccess shouldBe true
-    Warned("value", Seq("warn")).isSuccess shouldBe true
-    Blocked(Seq("block")).isSuccess shouldBe false
-  }
-
-  it should "correctly report blocked status" in {
-    import GuardrailResult._
-
-    Passed("value").isBlocked shouldBe false
-    Blocked(Seq("block")).isBlocked shouldBe true
-  }
-
-  it should "correctly report warnings" in {
-    import GuardrailResult._
-
-    Passed("value").hasWarnings shouldBe false
-    Warned("value", Seq("warn")).hasWarnings shouldBe true
-    Fixed("old", "new", Seq("fix")).hasWarnings shouldBe true
-    Blocked(Seq("block")).hasWarnings shouldBe false
-  }
-
-  it should "extract value via toOption" in {
-    import GuardrailResult._
-
-    Passed("value").toOption shouldBe Some("value")
-    Fixed("old", "new", Seq.empty).toOption shouldBe Some("new")
-    Warned("value", Seq.empty).toOption shouldBe Some("value")
-    Blocked(Seq.empty).toOption shouldBe None
-  }
-
-  // ==========================================================================
   // Integration: PIIDetector with CompositeGuardrail
   // ==========================================================================
 

@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.{ ContextPruning, ContextWindowConfig }
 import org.llm4s.llmconnect.model.{ Message, MessageRole }
 import org.llm4s.types.Result
@@ -13,6 +14,7 @@ import org.llm4s.types.Result
  * the pruned history starts with a user message, so a send may exceed the budget when the current
  * turn alone is larger.
  */
+@Stable
 final class ContextWindowMiddleware(
   config: ContextWindowConfig,
   tokenCounter: Message => Int = ContextPruning.defaultTokenCounter,

@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.model.UsageSummary
@@ -13,6 +14,7 @@ import java.time.Instant
  * The three events that begin a run record the run's `tenantId` and `principal` (as supplied in its
  * [[RunConfig]]); the log reads events written before they existed as having neither.
  */
+@Stable
 enum RunEvent:
   case RunStarted(tenantId: Option[String], principal: Option[String])
 
@@ -91,14 +93,35 @@ enum RunEvent:
   case Custom(name: String, version: Int, payload: ujson.Value)
 
 /** A durable event before its commit assigns it a sequence number. */
-final case class EventDraft(
+@Stable
+final case class EventDraft private (
   runId: String,
   checkpointId: Option[String],
   taskId: Option[String],
   nodeId: Option[String],
   timestamp: Instant,
   event: RunEvent
-)
+):
+  def withRunId(value: String): EventDraft                = copy(runId = value)
+  def withCheckpointId(value: String): EventDraft         = copy(checkpointId = Some(value))
+  def withCheckpointId(value: Option[String]): EventDraft = copy(checkpointId = value)
+  def withTaskId(value: String): EventDraft               = copy(taskId = Some(value))
+  def withTaskId(value: Option[String]): EventDraft       = copy(taskId = value)
+  def withNodeId(value: String): EventDraft               = copy(nodeId = Some(value))
+  def withNodeId(value: Option[String]): EventDraft       = copy(nodeId = value)
+  def withTimestamp(value: Instant): EventDraft           = copy(timestamp = value)
+  def withEvent(value: RunEvent): EventDraft              = copy(event = value)
+
+object EventDraft:
+  def apply(
+    runId: String,
+    checkpointId: Option[String],
+    taskId: Option[String],
+    nodeId: Option[String],
+    timestamp: Instant,
+    event: RunEvent
+  ): EventDraft =
+    new EventDraft(runId, checkpointId, taskId, nodeId, timestamp, event)
 
 /**
  * A committed durable event. `seq` is per thread, allocated in the commit that stored the event,
@@ -110,7 +133,8 @@ final case class EventDraft(
  * store issues each claim a token above every earlier one. A record written before tokens were
  * recorded reads as `FencingToken(0)`, which no store issues.
  */
-final case class EventRecord(
+@Stable
+final case class EventRecord private (
   threadId: String,
   seq: Long,
   runId: String,
@@ -120,9 +144,35 @@ final case class EventRecord(
   nodeId: Option[String],
   timestamp: Instant,
   event: RunEvent
-)
+):
+  def withThreadId(value: String): EventRecord             = copy(threadId = value)
+  def withSeq(value: Long): EventRecord                    = copy(seq = value)
+  def withRunId(value: String): EventRecord                = copy(runId = value)
+  def withToken(value: FencingToken): EventRecord          = copy(token = value)
+  def withCheckpointId(value: String): EventRecord         = copy(checkpointId = Some(value))
+  def withCheckpointId(value: Option[String]): EventRecord = copy(checkpointId = value)
+  def withTaskId(value: String): EventRecord               = copy(taskId = Some(value))
+  def withTaskId(value: Option[String]): EventRecord       = copy(taskId = value)
+  def withNodeId(value: String): EventRecord               = copy(nodeId = Some(value))
+  def withNodeId(value: Option[String]): EventRecord       = copy(nodeId = value)
+  def withTimestamp(value: Instant): EventRecord           = copy(timestamp = value)
+  def withEvent(value: RunEvent): EventRecord              = copy(event = value)
 
 object EventRecord:
+
+  def apply(
+    threadId: String,
+    seq: Long,
+    runId: String,
+    token: FencingToken,
+    checkpointId: Option[String],
+    taskId: Option[String],
+    nodeId: Option[String],
+    timestamp: Instant,
+    event: RunEvent
+  ): EventRecord =
+    new EventRecord(threadId, seq, runId, token, checkpointId, taskId, nodeId, timestamp, event)
+
   private given ReadWriter[Instant] = upickle.default.readwriter[String].bimap(_.toString, Instant.parse)
 
   private val identified = Set("RunStarted", "RunRecovered", "RunResumed")
@@ -177,6 +227,7 @@ object EventRecord:
  * a snapshot taken when the node emitted it, and one value may be shared by every subscriber: a
  * listener must not mutate it, and copies it (`ujson.copy`) to change it.
  */
+@Stable
 enum StreamEvent:
   /** A committed durable event, in ascending `seq` order. */
   case Durable(record: EventRecord)
@@ -224,6 +275,7 @@ enum StreamEvent:
   case Disconnected(lastSeq: Long, reason: DisconnectReason)
 
 /** Why a subscription ended with [[StreamEvent.Disconnected]]. */
+@Stable
 enum DisconnectReason:
   /** A durable event did not fit in the subscriber's queue: the listener fell too far behind. */
   case Lagging
@@ -267,6 +319,7 @@ enum DisconnectReason:
  * latter it reads from the store as they land ([[WatchPolicy]]). Live progress events reach it only
  * from runs of its own runtime, because they are never stored.
  */
+@Stable
 trait Subscription:
   /**
    * Stops the subscription's dispatcher. A listener call already running is interrupted and

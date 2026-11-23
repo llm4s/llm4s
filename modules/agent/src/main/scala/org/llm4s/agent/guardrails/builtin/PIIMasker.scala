@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.agent.guardrails.patterns.PIIPatterns
 import org.llm4s.agent.guardrails.patterns.PIIPatterns.PIIType
@@ -33,6 +34,7 @@ import org.llm4s.types.Result
  *
  * @param piiTypes The types of PII to mask (default: SSN, CreditCard, Email, Phone)
  */
+@Stable
 class PIIMasker(
   val piiTypes: Seq[PIIType] = PIIType.default
 ) extends InputGuardrail

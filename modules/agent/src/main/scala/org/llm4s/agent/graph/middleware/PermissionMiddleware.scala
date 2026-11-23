@@ -25,6 +25,7 @@ final case class PermissionRule(operation: Operation, target: Glob, decision: Pe
   def overlaps(resource: ToolResource): Boolean =
     resource.operation == operation && target.overlaps(Glob(resource.target))
 
+@Experimental
 object PermissionRule:
   def allow(operation: Operation, pattern: String): PermissionRule =
     PermissionRule(operation, Glob(pattern), PermissionDecision.Allow)
@@ -93,5 +94,6 @@ final class PermissionMiddleware(rules: Seq[PermissionRule], val id: MiddlewareI
         else
           ToolOutcome.NeedsApproval(s"Permission required: ${asked.map(PermissionMiddleware.describe).mkString(", ")}")
 
+@Experimental
 object PermissionMiddleware:
   private def describe(resource: ToolResource): String = s"${resource.operation.label} ${resource.target}"
