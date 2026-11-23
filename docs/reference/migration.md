@@ -69,7 +69,6 @@ New, with nothing to migrate: `RAG.chunk(text)` (the pipeline's own chunker and 
 `ingestChunksWithPermissions(collectionPath, documentId, chunks, metadata, readableBy)` and
 `ingestBytesWithPermissions(collectionPath, content, filename, documentId, metadata, readableBy)`.
 
-
 ## RAG tracing covers every model call and each query's stages (#2734)
 
 - **`RAGAnswerResult` gains `metrics: Option[RAGQueryMetrics]`** (stage durations, candidates retrieved, chunks
