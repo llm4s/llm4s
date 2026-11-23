@@ -129,6 +129,29 @@ replace those instructions with the builder's `systemPrompt`. The model answers 
 chunks; give the builder `completionOptions(JCompletionOptions.builder().temperature(0.3).maxTokens(512).build())`
 for other options.
 
+## Hold a conversation
+
+For a chat, pass the conversation so far, oldest first, as the history: the model sees it before the chunks and the
+question, so it can answer a follow-up. Build the messages with `JMessage.user` and `JMessage.assistant`:
+
+```java
+List<JMessage> history = List.of(
+    JMessage.user("How long do refunds take?"),
+    JMessage.assistant("Refunds are paid within 14 days."));
+JRagAnswer answer = rag.ask("And how do I ask for one?", history).get();
+```
+
+`ask(question, topK, history)`, `askStream(question, history, listener)` and
+`askStream(question, topK, history, listener)` take it too. A `null` history, a `null` message in it, or a `SYSTEM`
+message (the pipeline sends its own instructions) is a failed result of kind `VALIDATION`.
+
+A follow-up such as "and the second one?" finds poor chunks on its own. Give the builder a question condenser and,
+when there is a history, the search uses a standalone question built from it, while the model still answers the
+question asked. `llmQuestionCondenser(client)` asks a model to rewrite the question (a small, fast one is usually
+enough), with the latest 10 user and assistant messages; a failed call fails the `ask` with that failure's kind, and a
+blank reply searches with the question asked. `questionCondenser((question, history) -> ...)` takes your own function;
+a `null` or blank return searches with the question asked.
+
 ## Stream an answer
 
 `askStream` answers as `ask` does, but streams the answer to a listener as the model generates it, so a chat UI can

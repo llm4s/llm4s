@@ -61,7 +61,7 @@ class JavaRagGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
 
     "all be in RagGuideSnippets.java, so javac compiles each one" in {
       val blocks = blocksIn("java")
-      blocks should have size 8
+      blocks should have size 9
       blocks.foreach { block =>
         withClue(s"This block of $GuideFile is not in RagGuideSnippets.java:\n$block\n") {
           snippets should include(squash(block))
@@ -86,6 +86,14 @@ class JavaRagGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
         lines(1) should endWith("): Refunds are paid within 14 days.")
         lines.drop(1).exists(_.startsWith("  shipping.txt (")) shouldBe true
         RagGuideSnippets.search(rag).asScala.map(_.documentId).head shouldBe "refund-policy"
+      } finally rag.close()
+    }
+
+    "answer a follow-up with the conversation so far" in withDocs { docs =>
+      val rag = pipeline()
+      try {
+        RagGuideSnippets.ingest(rag, docs)
+        RagGuideSnippets.converse(rag).question shouldBe "And how do I ask for one?"
       } finally rag.close()
     }
 

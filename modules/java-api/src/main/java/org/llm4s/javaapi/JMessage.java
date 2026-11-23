@@ -21,8 +21,8 @@ import java.util.Optional;
  * }</pre>
  *
  * <p>A value: two are equal when every field is. {@code toString} prints the full text, as the Scala
- * {@code Message} does. Not {@code Serializable}. Built only by this package - its constructor is
- * package-private, so fields can be added without breaking a caller (#1666).
+ * {@code Message} does. Not {@code Serializable}. Its constructor is package-private, so fields can be added
+ * without breaking a caller (#1666): build one with {@link #user(String)} or {@link #assistant(String)}.
  */
 public final class JMessage {
 
@@ -43,6 +43,36 @@ public final class JMessage {
     this.toolCalls = toolCalls;
     this.toolCallId = toolCallId;
     this.thinking = thinking;
+  }
+
+  /**
+   * A user message holding {@code content}, for a conversation history passed back to llm4s (such as
+   * {@code JRag.ask(question, history)}).
+   *
+   * @throws NullPointerException if {@code content} is {@code null}
+   */
+  public static JMessage user(String content) {
+    return new JMessage(
+        JMessageRole.USER,
+        Objects.requireNonNull(content, "user content must not be null"),
+        List.of(),
+        Optional.empty(),
+        Optional.empty());
+  }
+
+  /**
+   * An assistant message holding {@code content}, with no tool calls, for a conversation history passed back to
+   * llm4s (such as {@code JRag.ask(question, history)}).
+   *
+   * @throws NullPointerException if {@code content} is {@code null}
+   */
+  public static JMessage assistant(String content) {
+    return new JMessage(
+        JMessageRole.ASSISTANT,
+        Objects.requireNonNull(content, "assistant content must not be null"),
+        List.of(),
+        Optional.empty(),
+        Optional.empty());
   }
 
   /** Who wrote it. */

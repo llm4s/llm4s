@@ -1,11 +1,11 @@
 package org.llm4s.javaapi.reactor
 
 import org.llm4s.error.RateLimitError
-import org.llm4s.javaapi.{ LlmErrorKind, LlmException }
+import org.llm4s.javaapi.{ FacadeInternals, JMessage, LlmErrorKind, LlmException }
 import org.llm4s.javaapi.StreamFixtures.*
 import org.llm4s.javaapi.rag.{ JRag, RagFakes }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model.{ Completion, StreamedChunk }
+import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk, SystemMessage }
 import org.llm4s.types.Result
 import org.reactivestreams.Subscription
 import org.scalatest.flatspec.AnyFlatSpec
@@ -73,6 +73,30 @@ class RagStreamsSpec extends AnyFlatSpec with Matchers {
         .expectComplete()
         .verify(Deadline): Unit
     }
+
+  it should "send the history to the model, with and without topK, and refuse a SYSTEM message (#2766)" in {
+    val sent = new CopyOnWriteArrayList[Conversation]()
+    val model = new LLMClient {
+      def complete(c: Conversation, o: CompletionOptions): Result[Completion] = { sent.add(c); Right(completion("x")) }
+      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+        complete(c, o)
+      def getContextWindow(): Int     = 4096
+      def getReserveCompletion(): Int = 256
+    }
+    val history = java.util.List.of(JMessage.user("Which animal?"), JMessage.assistant("The cat."))
+    withPipeline(model) { rag =>
+      RagStreams.toFlux(rag, Question, history).map(describe).collectList().block(Deadline).asScala.last shouldBe
+        "complete:x"
+      RagStreams.toFlux(rag, Question, 1, history).map(describe).collectList().block(Deadline).asScala.head shouldBe
+        "sources:cats"
+      sent.asScala.toList.map(_.messages.map(_.content).slice(1, 3)) shouldBe
+        List.fill(2)(Seq("Which animal?", "The cat."))
+      expectFailure(
+        RagStreams.toFlux(rag, Question, java.util.List.of(FacadeInternals.message(SystemMessage("x")))),
+        LlmErrorKind.VALIDATION
+      )
+    }
+  }
 
   it should "be cold: each subscription makes its own search and model call" in {
     val calls = new AtomicInteger(0)

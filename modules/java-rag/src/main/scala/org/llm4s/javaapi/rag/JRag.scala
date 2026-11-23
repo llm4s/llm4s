@@ -1,7 +1,8 @@
 package org.llm4s.javaapi.rag
 
 import org.llm4s.error.{ ConfigurationError, ValidationError }
-import org.llm4s.javaapi.{ FacadeInternals, LlmResult }
+import org.llm4s.javaapi.{ FacadeInternals, JMessage, JMessageRole, LlmResult }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Message, ToolCall, ToolMessage, UserMessage }
 import org.llm4s.rag.{ RAG, RAGAnswerResult, RAGSearchResult }
 import org.llm4s.types.Result
 
@@ -93,18 +94,47 @@ final class JRag private[rag] (token: RagFacadeToken, rag: RAG) extends AutoClos
    * A pipeline built without a chat client (`llm`) returns a failed result of kind `CONFIGURATION`; a `null` or blank
    * question one of kind `VALIDATION`. A failure of the embedding provider or the model has the kind of that failure.
    */
-  def ask(question: String): LlmResult[JRagAnswer] = asking(question, None)
+  def ask(question: String): LlmResult[JRagAnswer] = asking(question, None, java.util.List.of())
 
   /** Answers `question` as `ask(question)` does, from at most `topK` chunks, at least 1, instead of the builder's. */
-  def ask(question: String, topK: Int): LlmResult[JRagAnswer] = asking(question, Some(topK))
+  def ask(question: String, topK: Int): LlmResult[JRagAnswer] = asking(question, Some(topK), java.util.List.of())
 
-  private def asking(question: String, topK: Option[Int]): LlmResult[JRagAnswer] =
+  /**
+   * Answers `question`, a turn of a chat, as `ask(question)` does, with `history` - the conversation so far, oldest
+   * first - sent to the model before the chunks and the question (#2766), so it can answer "and the second one?".
+   * Build the messages with `JMessage.user` and `JMessage.assistant`, or pass back a `JAgentResult`'s. With a
+   * question condenser on the builder (`questionCondenser`) and a non-empty history, the search uses the standalone
+   * question it builds; the model still answers `question`.
+   *
+   * {{{
+   * List<JMessage> history = List.of(
+   *     JMessage.user("Which plans do you sell?"),
+   *     JMessage.assistant("Basic and Pro."));
+   * JRagAnswer answer = rag.ask("How much is the second one?", history).get();
+   * }}}
+   *
+   * A `null` history, a `null` message in it or a `SYSTEM` message (the pipeline sends its own system prompt) is a
+   * failed result of kind `VALIDATION`, before any search or model call.
+   */
+  def ask(question: String, history: java.util.List[JMessage]): LlmResult[JRagAnswer] =
+    asking(question, None, history)
+
+  /** Answers `question` with `history` as `ask(question, history)` does, from at most `topK` chunks, at least 1. */
+  def ask(question: String, topK: Int, history: java.util.List[JMessage]): LlmResult[JRagAnswer] =
+    asking(question, Some(topK), history)
+
+  private def asking(
+    question: String,
+    topK: Option[Int],
+    history: java.util.List[JMessage]
+  ): LlmResult[JRagAnswer] =
     RagBuilds.guarded("JRag.ask") {
       for {
         q      <- JRag.nonBlank("question", question)
         k      <- JRag.topKOf(topK)
+        h      <- JRag.historyOf(history)
         _      <- Either.cond(rag.config.llmClient.isDefined, (), JRag.NoChatClient)
-        answer <- rag.queryWithAnswer(q, k)
+        answer <- rag.queryWithAnswer(q, k, history = h)
       } yield JRag.answer(answer)
     }
 
@@ -128,26 +158,49 @@ final class JRag private[rag] (token: RagFacadeToken, rag: RAG) extends AutoClos
    * started, of the embedding provider, the search or the model, reaches [[JRagStreamListener.onError]].
    */
   def askStream(question: String, listener: JRagStreamListener): LlmResult[JRagAnswerStream] =
-    askingStream(question, None, listener)
+    askingStream(question, None, java.util.List.of(), listener)
 
   /** Streams the answer to `question` as `askStream(question, listener)` does, from at most `topK` chunks, at least 1. */
   def askStream(question: String, topK: Int, listener: JRagStreamListener): LlmResult[JRagAnswerStream] =
-    askingStream(question, Some(topK), listener)
+    askingStream(question, Some(topK), java.util.List.of(), listener)
+
+  /**
+   * Streams the answer to `question`, a turn of a chat, as `askStream(question, listener)` does, with `history` sent
+   * to the model as `ask(question, history)` sends it. A `null` history, a `null` message or a `SYSTEM` message in it
+   * is a failed result of kind `VALIDATION`, and the listener hears nothing.
+   */
+  def askStream(
+    question: String,
+    history: java.util.List[JMessage],
+    listener: JRagStreamListener
+  ): LlmResult[JRagAnswerStream] =
+    askingStream(question, None, history, listener)
+
+  /** Streams the answer to `question` with `history`, as `askStream(question, history, listener)`, from `topK` chunks. */
+  def askStream(
+    question: String,
+    topK: Int,
+    history: java.util.List[JMessage],
+    listener: JRagStreamListener
+  ): LlmResult[JRagAnswerStream] =
+    askingStream(question, Some(topK), history, listener)
 
   private def askingStream(
     question: String,
     topK: Option[Int],
+    history: java.util.List[JMessage],
     listener: JRagStreamListener
   ): LlmResult[JRagAnswerStream] =
     RagBuilds.guarded("JRag.askStream") {
       for {
         q <- JRag.nonBlank("question", question)
         k <- JRag.topKOf(topK)
+        h <- JRag.historyOf(history)
         l <- Option(listener).toRight(ValidationError.required("listener"))
         _ <- Either.cond(rag.config.llmClient.isDefined, (), JRag.NoChatClient)
       } yield new JRagAnswerStream(
         RagFacadeToken.INSTANCE,
-        (onSources, onChunk) => rag.queryWithAnswerStreaming(q, k)(onSources, onChunk),
+        (onSources, onChunk) => rag.queryWithAnswerStreaming(q, k, history = h)(onSources, onChunk),
         l,
         JRagAnswerStream.CancelWaitMillis
       )
@@ -215,6 +268,44 @@ object JRag {
       case Some(k) if k < 1 => Left(ValidationError.invalid("topK", s"must be at least 1, got $k"))
       case other            => Right(other)
     }
+
+  /**
+   * `history` as llm4s messages, copied first so a list another thread changes cannot make the check and the call
+   * disagree. A `SYSTEM` message is refused here, as `RAG` refuses one, so the failure names the Java argument.
+   */
+  private[rag] def historyOf(history: java.util.List[JMessage]): Result[Seq[Message]] =
+    if (history == null) Left(ValidationError.required("history"))
+    else
+      history.asScala.toVector.zipWithIndex.foldLeft[Result[Vector[Message]]](Right(Vector.empty)) {
+        case (acc, (m, i)) => acc.flatMap(ms => messageOf(m, i).map(ms :+ _))
+      }
+
+  private def messageOf(message: JMessage, index: Int): Result[Message] =
+    if (message == null) Left(ValidationError.invalid(s"history[$index]", "must not be null"))
+    else
+      message.role match {
+        case JMessageRole.USER => Right(UserMessage(message.content))
+        case JMessageRole.ASSISTANT =>
+          message.toolCalls.asScala.toVector
+            .foldLeft[Result[Vector[ToolCall]]](Right(Vector.empty)) { (acc, call) =>
+              acc.flatMap(calls =>
+                scala.util
+                  .Try(ujson.read(call.argumentsJson))
+                  .toOption
+                  .toRight(ValidationError.invalid(s"history[$index]", s"tool call ${call.id} has invalid JSON"))
+                  .map(args => calls :+ ToolCall(call.id, call.name, args))
+              )
+            }
+            .map(calls => AssistantMessage(contentOpt = Option(message.content).filter(_.nonEmpty), toolCalls = calls))
+        case JMessageRole.TOOL => Right(ToolMessage(message.content, message.toolCallId.orElse("")))
+        case JMessageRole.SYSTEM =>
+          Left(
+            ValidationError.invalid(
+              s"history[$index]",
+              "must not be a SYSTEM message: the pipeline sends its own system prompt (the builder's systemPrompt)"
+            )
+          )
+      }
 
   /** `metadata` copied, so a map another thread changes cannot make the check and the chunks disagree. */
   private def metadataOf(metadata: java.util.Map[String, String]): Result[Map[String, String]] =

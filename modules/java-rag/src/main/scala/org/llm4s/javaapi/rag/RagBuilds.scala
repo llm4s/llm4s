@@ -4,11 +4,13 @@ import org.llm4s.chunking.ChunkerFactory
 import org.llm4s.core.safety.Safety
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.javaapi.{ FacadeInternals, JCompletionOptions, JEmbeddingClient, JLlmClient, LlmResult }
+import org.llm4s.javaapi.{ FacadeInternals, JCompletionOptions, JEmbeddingClient, JLlmClient, JMessage, LlmResult }
 import org.llm4s.llmconnect.EmbeddingClient
-import org.llm4s.rag.{ RAG, RAGConfig }
+import org.llm4s.rag.{ QuestionCondenser, RAG, RAGConfig }
 import org.llm4s.types.Result
 
+import java.util.function.BiFunction
+import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
 /**
@@ -30,7 +32,8 @@ private[rag] object RagBuilds {
     chunkOverlap: java.lang.Integer,
     topK: java.lang.Integer,
     systemPrompt: String,
-    completionOptions: JCompletionOptions
+    completionOptions: JCompletionOptions,
+    questionCondenser: QuestionCondenser
   ): LlmResult[JRag] =
     guarded("JRag.build") {
       for {
@@ -38,12 +41,37 @@ private[rag] object RagBuilds {
         where  <- storeOf(store)
         chunks <- chunking(Option(chunkSize).map(_.intValue), Option(chunkOverlap).map(_.intValue))
         k      <- Option(topK).map(_.intValue).fold(Right(None))(k => positive("topK", k).map(Some(_)))
-        config = settings(chunks, k, Option(llm), Option(systemPrompt), Option(completionOptions), where)
+        config = settings(
+          chunks,
+          k,
+          Option(llm),
+          Option(systemPrompt),
+          Option(completionOptions),
+          Option(questionCondenser),
+          where
+        )
         registry <- Llm4sConfig.modelRegistryService()
         provider = new JEmbeddingProvider(client)
         rag <- RAG.buildWithEmbeddings(config, new EmbeddingClient(provider)(using registry), provider.model)
       } yield new JRag(RagFacadeToken.INSTANCE, rag)
     }
+
+  /** `llm4s-rag`'s built-in condenser over `client`; `null` for none. */
+  def llmCondenser(client: JLlmClient): QuestionCondenser =
+    Option(client).map(c => QuestionCondenser.llm(c.underlying)).orNull
+
+  /**
+   * `condense` as a condenser, given the history as Java messages; `null` for none. A `null` or blank return is the
+   * question asked, and an exception a failure.
+   */
+  def condenser(condense: BiFunction[String, java.util.List[JMessage], String]): QuestionCondenser =
+    Option(condense).map { f =>
+      QuestionCondenser { (question, history) =>
+        Safety
+          .safely(f.apply(question, java.util.List.copyOf(history.map(FacadeInternals.message).asJava)))
+          .map(standalone => Option(standalone).filter(_.trim.nonEmpty).getOrElse(question))
+      }
+    }.orNull
 
   /** `call`, whose exceptions and interrupts become failed results, as Java callers read them. */
   def guarded[A](operation: String)(call: => Result[A]): LlmResult[A] =
@@ -81,6 +109,7 @@ private[rag] object RagBuilds {
     llm: Option[JLlmClient],
     systemPrompt: Option[String],
     completionOptions: Option[JCompletionOptions],
+    questionCondenser: Option[QuestionCondenser],
     sqlite: Option[String]
   ): RAGConfig = {
     val steps: Seq[RAGConfig => RAGConfig] = Seq(
@@ -89,6 +118,7 @@ private[rag] object RagBuilds {
       c => llm.fold(c)(l => c.withLLM(l.underlying)),
       c => systemPrompt.fold(c)(c.withSystemPrompt),
       c => completionOptions.fold(c)(o => c.withCompletionOptions(o.underlying)),
+      c => questionCondenser.fold(c)(c.withQuestionCondenser),
       c => sqlite.fold(c)(c.withSQLite)
     )
     steps.foldLeft(RAGConfig.default)((config, step) => step(config))

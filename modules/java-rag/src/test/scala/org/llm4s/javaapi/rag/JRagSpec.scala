@@ -226,9 +226,9 @@ class JRagSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     JRag.sqlite(Path.of("a.db")) should not be JRag.sqlite(Path.of("b.db"))
     JRag.sqlite(Path.of("a.db")).toString shouldBe "JRagStore(sqlite a.db)"
     JRag.builder().toString shouldBe
-      "JRagBuilder(embeddings=null, llm=none, store=JRagStore(in memory), chunking=default, topK=default, systemPrompt=default, completionOptions=default)"
+      "JRagBuilder(embeddings=null, llm=none, store=JRagStore(in memory), chunking=default, topK=default, systemPrompt=default, completionOptions=default, questionCondenser=none)"
     JRag.builder().llm(llm()).chunking(400, 50).topK(3).systemPrompt("Be brief.").toString should endWith(
-      "llm=set, store=JRagStore(in memory), chunking=400/50, topK=3, systemPrompt=set, completionOptions=default)"
+      "llm=set, store=JRagStore(in memory), chunking=400/50, topK=3, systemPrompt=set, completionOptions=default, questionCondenser=none)"
     )
   }
 
