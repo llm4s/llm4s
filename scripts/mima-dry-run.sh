@@ -21,6 +21,8 @@
 #      two extra classes, one @Stable and one @Experimental, remove them from the sources, and check that MiMa now
 #      fails, naming the @Stable class and not the @Experimental one. This shows the check can fail, and that a type
 #      the code marks @Experimental is outside the freeze without a hand-written ProblemFilters.exclude.
+#      Only core is published at the probe version; the modules it depends on are the ones step 1 published. A
+#      failure that is not MiMa's - the probe baseline not resolving - is reported as that, never as the control.
 #
 # It proves the wiring: coordinates, the Scala 3 `_3` suffix, resolution, and the exclusion. It does not prove that
 # any API is compatible with anything: there is no 0.5.0 baseline yet. It is a manual script, not a CI job: it
@@ -193,6 +195,13 @@ ThisBuild / publishTo := Some("dryrun".at("file://$REPO"))
 ThisBuild / resolvers += "dryrun".at("file://$REPO")
 EOF
 }
+# The file that gives one project a version of its own, in the project's base directory. sbt applies a project
+# directory's .sbt files after the project's plugin settings; a `<project> / version` line in the root dryrun.sbt is
+# applied before them, and sbt-ci-release's `version := (ThisBuild / version).value` on every project replaces it.
+PROBE_SBT="mima-probe.sbt"
+write_probe_sbt() { # PROJECT_DIR VERSION
+  echo "version := \"$2\"" > "$TREE/$1/$PROBE_SBT"
+}
 
 # run_sbt LOG ARGS...: sbt in the scratch clone; the output goes to LOG; the status is returned
 run_sbt() {
@@ -295,18 +304,31 @@ final case class MimaDryRunExperimentalProbe(value: Int = 2)
 object MimaDryRunExperimentalProbe
 EOF
   set_baseline "$PROBE_VERSION" "$PROBE_VERSION"
-  write_dryrun_sbt "$PROBE_VERSION"
+  # Only the probed module is published again, so only it takes the probe version: its POM then names the modules it
+  # depends on (llm4s-media, for core) at $DRY_VERSION, which step 1 published. With the whole build at the probe
+  # version the POM named them at a version nothing was published at, and the baseline did not resolve (#2794).
+  write_dryrun_sbt "$DRY_VERSION"
+  write_probe_sbt "$NEG_DIR" "$PROBE_VERSION"
   if ! run_sbt neg-publish "$NEG_ID/publish"; then show_tail neg-publish; die "could not publish the probe baseline" 1; fi
   [ -f "$(jar_of "$NEG_ARTIFACT" "$PROBE_VERSION")" ] || fail "the probe baseline of $NEG_ARTIFACT was not published"
   rm -f "$PROBE_DIR/Probes.scala"; rmdir "$PROBE_DIR"
+  NEG_COORD="org.llm4s:${NEG_ARTIFACT}_3:$PROBE_VERSION"
   NEG_STATUS=0
   run_sbt neg-mima "show $NEG_ID/mimaExcludeAnnotations" "show $NEG_ID/mimaFindBinaryIssues" "$NEG_ID/mimaReportBinaryIssues" || NEG_STATUS=$?
   if [ "$NEG_STATUS" = "0" ]; then
     fail "negative control: MiMa passed although a published class is gone: the check cannot fail"
+  elif ! grep -F -q "Map($NEG_COORD -> " "$WORK/neg-mima.log"; then
+    # sbt failed before MiMa compared anything: a failure here says nothing about whether the check can fail
+    show_tail neg-mima
+    if grep -E -q "ResolveException|Error downloading|[Uu]nresolved dependenc" "$WORK/neg-mima.log"; then
+      fail "negative control: sbt could not resolve the probe baseline $NEG_COORD or a module its POM names, so MiMa compared nothing"
+    else
+      fail "negative control: sbt failed before MiMa compared the probe baseline $NEG_COORD: mimaFindBinaryIssues has no entry for it"
+    fi
   elif ! grep -q "MimaDryRunStableProbe" "$WORK/neg-mima.log"; then
     show_tail neg-mima; fail "negative control: MiMa failed, but not by naming the removed @Stable class"
   else
-    echo "MiMa failed as it must: the removed @Stable class is reported"
+    echo "MiMa failed as it must, compared with $NEG_COORD: the removed @Stable class is reported"
     if grep -q "MimaDryRunExperimentalProbe" "$WORK/neg-mima.log"; then
       fail "@Experimental is not excluded: MiMa reports the removed @Experimental class, so every @Experimental change in a frozen module would need a hand-written ProblemFilters.exclude (build.sbt: mimaFrozen should add mimaExcludeAnnotations += \"$EXCLUDED_ANNOTATION\")"
     else

@@ -81,7 +81,8 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
     Row("TimeoutError", TimeoutError("slow", 5.seconds, "complete"), recoverable = true, retried = true),
     Row("TokenizerError", TokenizerError.notFound("tok"), recoverable = false, retried = false),
     Row("UnknownError", UnknownError("weird", new RuntimeException("x")), recoverable = false, retried = false),
-    Row("ValidationError", ValidationError("field", "reason"), recoverable = false, retried = false)
+    Row("ValidationError", ValidationError("field", "reason"), recoverable = false, retried = false),
+    Row("ValidationUnsupportedError", ValidationUnsupportedError("BedrockClient"), recoverable = false, retried = false)
   )
 
   /**

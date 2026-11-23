@@ -89,6 +89,7 @@ private[javaapi] object LlmErrorKinds {
     classOf[ConfigurationError]          -> LlmErrorKind.CONFIGURATION,
     classOf[CancelledError]              -> LlmErrorKind.CANCELLED,
     classOf[ContextError]                -> LlmErrorKind.OTHER,
+    classOf[ValidationUnsupportedError]  -> LlmErrorKind.OTHER,
     classOf[ExecutionError]              -> LlmErrorKind.OTHER,
     classOf[NotFoundError]               -> LlmErrorKind.OTHER,
     classOf[OptimisticLockFailure]       -> LlmErrorKind.OTHER,

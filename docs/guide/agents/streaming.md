@@ -142,6 +142,12 @@ removes the blocked turn from the thread. If the log held the content, a Block w
 redact the log. Replaying a run therefore shows its structure (which model calls, which tools, how
 long, with what usage), and a blocked answer is in no stored event.
 
+A guardrail's reason can quote what it refused, so it follows the same rule: the events of a blocked
+run (`agent.guardrail_blocked`, `graph.task_failed`, `graph.run_failed`) name the guardrail and
+nothing else - the failure message is `Guardrail '<name>' blocked` - and so does a trace of the run.
+The reason is on `AgentStatus.Blocked`, for the caller. The rule is about events, not checkpoints:
+see [Limits](#limits) for what the checkpoint store holds.
+
 ## Attempts
 
 `attempt` counts the calls of the innermost model function within one task, from 1. A model
@@ -458,9 +464,23 @@ stable carried in the payload, such as the tool call's `IdempotencyKey`, never b
 
 ## Limits
 
-- **Kernel failure messages.** `TaskFailed` and `RunFailed` store an error message. If a guardrail's
-  or tool's error quotes content (a guardrail reason that echoes the user's text), that text reaches
-  the log through the kernel event, not through an `agent.*` event.
+- **Kernel failure messages.** `TaskFailed` and `RunFailed` store an error message. A guardrail
+  block's names only the guardrail. Any other error's message is stored as it is: if a provider's
+  error, a middleware's `Left` or a custom node's `Block` quotes content, that text reaches the log
+  through the kernel event, not through an `agent.*` event. The events that begin a run
+  (`graph.run_started` and those of a `recover` or `resume`) also record the run's `tenantId` and
+  `principal`: identifiers, not message content, but personal data if you put a person's name there.
+- **Checkpoints hold content.** The content rule is about events. A blocked run's closing checkpoint
+  records `RunOutcome.Blocked(guardrail, reason)`, so that the turn's status can be rebuilt from the
+  thread (a parent agent reads a delegated child's refusal this way), and outcomes are stored in
+  plain even under `EncryptingCheckpointer`. A guardrail whose reason must not be stored should not
+  quote its input.
+- **A `beforeAgent` hook does not keep the submitted query out of the store.** The run's first
+  checkpoint holds the query as it was submitted, and the hook runs after that checkpoint is
+  committed: what the hook returns is what joins the conversation, but the original stays in
+  checkpoint history until it is pruned (an input guardrail's Block removes it, with the turn). To
+  keep text out of the store, redact it before `agent.run`; to protect what is stored, wrap the store
+  in `EncryptingCheckpointer` (see [durable checkpointers](durable-checkpointers)).
 - **Live events are not replayed**, and a late `subscribe` misses earlier ones. A subscription
   receives every live event sent after `subscribe` returns, so `GraphRuntime.subscribe` followed by
   `start` sees all of the run's - unless more arrive than its `capacity` holds, while it replays or
