@@ -132,7 +132,8 @@ class AgentThinkingSpec extends AnyFlatSpec with Matchers {
     val turn = org.llm4s.llmconnect.provider.ThinkingReplay
       .bind(origin, AssistantMessage(None, Seq(call), thinking), history, CompletionOptions())
     val conversation = history ++ Seq(turn, ToolMessage("sunny", call.id))
-    val pruned       = ContextPruning.prune(conversation, ContextWindowConfig(maxMessages = Some(3)), _ => 1)
+    val pruned =
+      ContextPruning.prune(conversation, ContextWindowConfig(maxMessages = Some(3), minRecentTurns = 1), _ => 1)
     pruned should contain(turn)
     pruned.size should be < conversation.size
 

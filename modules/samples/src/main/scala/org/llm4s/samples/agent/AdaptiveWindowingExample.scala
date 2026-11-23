@@ -54,8 +54,7 @@ object AdaptiveWindowingExample {
         contextWindowSize = 128_000,         // GPT-4o context
         inputCostPerToken = Some(0.0000025), // $2.50 per 1M input tokens
         outputCostPerToken = Some(0.000010), // $10 per 1M output tokens
-        preserveMinTurns = 3,
-        costSensitivity = 0.5 // Balanced: value quality ~= value cost savings
+        costSensitivity = 0.5                // Balanced: value quality ~= value cost savings
       )
 
       _ = logger.info("Strategy: {}", strategy.explanation)
@@ -123,7 +122,7 @@ object AdaptiveWindowingExample {
       config = ContextWindowConfig(
         pruningStrategy = strategy,
         preserveSystemMessage = true,
-        minRecentTurns = 2 // Minimum 2 turns (cost savings)
+        minRecentTurns = 2 // Only the last 2 turns are kept past the window (cost savings)
       )
 
       agent <- Agent
@@ -178,7 +177,7 @@ object AdaptiveWindowingExample {
       config = ContextWindowConfig(
         pruningStrategy = strategy,
         preserveSystemMessage = true,
-        minRecentTurns = 5 // Keep more context
+        minRecentTurns = 5 // The last 5 turns are kept whole even past the window
       )
 
       agent <- Agent

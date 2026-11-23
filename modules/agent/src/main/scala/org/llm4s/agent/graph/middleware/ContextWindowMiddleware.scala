@@ -8,10 +8,11 @@ import org.llm4s.types.Result
  * Prunes the messages each model call is sent to `config`, leaving the stored history whole. The
  * system prompt, which reaches the model call first, is kept out of pruning and stays first; it
  * is not counted against `maxMessages` or `maxTokens`. A tool call is never sent without its
- * results, nor a result without its call; the current turn (from the latest user message) is
- * never pruned - the strategy runs on the history before it, with the budget the turn leaves - and
- * the pruned history starts with a user message, so a send may exceed the budget when the current
- * turn alone is larger.
+ * results, nor a result without its call; the last `config.minRecentTurns` turns (at least the
+ * current one, from the latest user message) are never pruned - the strategy runs on the history
+ * before them, with what they leave of both limits - and the pruned history starts with a user
+ * message, so a send exceeds a limit only when those turns alone do. [[ContextWindowConfig]] has the
+ * order in which these hold.
  */
 final class ContextWindowMiddleware(
   config: ContextWindowConfig,

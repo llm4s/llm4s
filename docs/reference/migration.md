@@ -47,7 +47,32 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [RAG tracing covers every model call and each query's stages](#rag-tracing-covers-every-model-call-and-each-querys-stages-2734),
 [`RAG.ingestChunks` takes `DocumentChunk`s](#ragingestchunks-takes-documentchunks-2732),
 [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
-and [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724).
+[RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
+and [context pruning keeps `minRecentTurns` and both limits](#context-pruning-keeps-minrecentturns-and-both-limits-2728-2729).
+
+## Context pruning keeps `minRecentTurns` and both limits (#2728, #2729)
+
+`ContextWindowMiddleware` now does what `ContextWindowConfig` says. What it sends can change for a config that
+relied on the old behaviour:
+
+- **The last `minRecentTurns` turns are always sent whole** (default 3), under every strategy, even when they alone
+  exceed `maxTokens` or `maxMessages`. Before, only the current turn was. Where the limit must hold for all but the
+  current turn, set `minRecentTurns = 1`. `JContextWindow.lastMessages` and Kotlin's `contextWindow(lastMessages)`
+  do so and are unchanged.
+- **`PruningStrategy.AdaptiveWindowing.preserveMinTurns` is removed.** Set `ContextWindowConfig.minRecentTurns`
+  instead; it counts whole turns, where `preserveMinTurns` counted two messages a turn. A positional
+  `costSensitivity` moves up one place.
+- **`maxTokens` and `maxMessages` both apply when both are set.** Before, only `maxTokens` decided whether to prune
+  and only `maxMessages` how much to keep. Set only the one you mean if you relied on that.
+- **`MiddleOut` honours `maxTokens`**: it keeps the start and the end that fit, where with no `maxMessages` it kept
+  half the messages whatever their size.
+- **`AdaptiveWindowing` honours `maxMessages`, and the lower of its window and `maxTokens`.** Before, `maxTokens`
+  only decided whether to prune and `maxMessages` was ignored.
+- **`RecentTurnsOnly(n)` prunes on its own**: with no limit set it sends the last `n` turns, where before it did
+  nothing until `maxTokens` or `maxMessages` was exceeded. With a limit set it keeps fewer than `n` turns when `n` do
+  not fit, and `minRecentTurns` turns when that is more than `n`.
+- **A `Custom` function is given the history before the last `minRecentTurns` turns**, not before the current
+  turn. Its result is still not measured against the limits.
 
 ## RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root (#2724)
 

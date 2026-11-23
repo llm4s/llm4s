@@ -20,7 +20,14 @@ As conversations grow, token counts increase, leading to:
 
 LLM4S provides context window management via `ContextWindowConfig` and `ContextWindowMiddleware`, with multiple pruning strategies to keep conversations within budget while preserving important context. The middleware trims what is sent to the model on each call; the thread keeps its full history.
 
-Two rules hold for every strategy: the current turn (the latest user message onward) is never pruned, so the request always starts with a user message and may exceed the budget; and a tool call is never separated from its result. The agent's system prompt is outside the budget.
+These rules hold for every strategy:
+
+- **The last `minRecentTurns` turns are never pruned** (default 3, and never fewer than the current turn). A turn is a user message and everything up to the next one: the assistant's replies, its tool calls and their results. These turns are sent whole even when they alone exceed the limits, so a request may be over budget; lower `minRecentTurns` (to 1 for the current turn only) when the limit matters more than the recent turns.
+- **`maxTokens` and `maxMessages` are both limits** when both are set: pruning happens when either is exceeded, and what is kept of the history before the protected turns fits what those turns leave of both.
+- **A tool call is never separated from its result**, and the request always starts with a user message.
+- The agent's system prompt is outside the budget.
+
+`AdaptiveWindowing`'s window is one more token limit (the lower of it and `maxTokens` applies), and `RecentTurnsOnly(n)` prunes to `n` turns with no other limit set - fewer when a limit asks for fewer, never fewer than `minRecentTurns`. A `Custom` function is called when a limit is exceeded and is given the history before the protected turns; what it returns is not checked against the limits.
 
 ## Configuration Basics
 
@@ -30,9 +37,9 @@ import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 
 val contextConfig = ContextWindowConfig(
   maxTokens = Some(4096),              // Keep max 4K tokens
-  maxMessages = Some(20),              // OR max 20 messages
+  maxMessages = Some(20),              // AND max 20 messages
   preserveSystemMessage = true,        // Always keep system prompt
-  minRecentTurns = 3,                  // Keep last 3 user/assistant pairs
+  minRecentTurns = 3,                  // Always keep the last 3 turns whole, even past the limits
   pruningStrategy = PruningStrategy.OldestFirst  // How to prune
 )
 
@@ -70,7 +77,8 @@ val config = ContextWindowConfig(
   pruningStrategy = PruningStrategy.OldestFirst
 )
 
-// Conversation with 30 messages →  last 15 messages kept
+// Conversation with 30 messages →  at most the last 15 kept, starting on a user message
+// (more only if the last minRecentTurns turns alone are longer)
 // System message is always preserved
 ```
 
@@ -86,7 +94,7 @@ val config = ContextWindowConfig(
 
 ### 2. MiddleOut (For complex reasoning)
 
-**How it works:** Keeps the start (system + initial setup) and end (recent exchanges), removes middle messages.
+**How it works:** Keeps the start (system + initial setup) and end (recent exchanges), removes middle messages. The protected recent turns come first; the rest of the budget - messages, tokens or both - is shared between the start of the older history and its end.
 
 **Best for:**
 - ✅ Complex problem-solving requiring both initial context and recent progress
@@ -149,7 +157,8 @@ val config = ContextWindowConfig(
   pruningStrategy = PruningStrategy.RecentTurnsOnly(5)
 )
 
-// Keeps exactly the last 5 user/assistant turn pairs
+// Keeps the last 5 turns, the current one included; needs no maxTokens or maxMessages
+// (with one set, fewer turns are kept when 5 do not fit, down to minRecentTurns)
 // A "turn" = [User message] → [Assistant response] + optional [Tool messages]
 
 // Turn 1: User asks → Assistant responds (+ tool calls)
@@ -266,11 +275,11 @@ val strategy = PruningStrategy.AdaptiveWindowing(
   contextWindowSize = 128_000,           // gpt-4o context
   inputCostPerToken = Some(0.000005),    // $5 per 1M input tokens
   outputCostPerToken = Some(0.000015),   // $15 per 1M output tokens
-  preserveMinTurns = 3,
   costSensitivity = 0.5  // Balanced (0=quality, 1=cost)
 )
 
 val config = ContextWindowConfig(
+  minRecentTurns = 3,                    // kept whole even past the window
   pruningStrategy = strategy
 )
 

@@ -41,6 +41,6 @@ object JContextWindow {
     new JContextWindow(
       FacadeToken.INSTANCE,
       if (messages < 1) Left(ValidationError.invalid("messages", s"must be at least 1, was $messages"))
-      else Right(ContextWindowConfig(maxMessages = Some(messages)))
+      else Right(ContextWindowConfig(maxMessages = Some(messages), minRecentTurns = 1))
     )
 }

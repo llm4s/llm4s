@@ -1008,9 +1008,10 @@ val agent = Agent.builder("assistant", client)
   .build()
 ```
 
-The current turn (the latest user message onward) is never pruned, a tool call is never separated
-from its result, and the request always starts with a user message - so a request may exceed the
-budget. The system prompt is outside the budget.
+The last `minRecentTurns` turns (default 3, at least the current one) are never pruned, a tool call
+is never separated from its result, and the request always starts with a user message - so a request
+may exceed the budget. `maxTokens` and `maxMessages` are both limits when both are set. The system
+prompt is outside the budget.
 
 **Pruning Strategies:**
 

@@ -57,14 +57,16 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   private def texts(ms: Seq[Message]): Seq[String] = ms.map(_.content)
 
   "ContextWindowMiddleware" should "trim what the model sees under OldestFirst, keeping the system prompt first" in {
-    val (sent, stored) = turn(new ContextWindowMiddleware(ContextWindowConfig(maxMessages = Some(3))))
+    val (sent, stored) =
+      turn(new ContextWindowMiddleware(ContextWindowConfig(minRecentTurns = 1, maxMessages = Some(3))))
     texts(sent) shouldBe Seq("be brief", "q3", "a3", "q4")
     sent.head shouldBe a[SystemMessage]
     stored shouldBe 8 // seven in, one answer
   }
 
   it should "trim under MiddleOut" in {
-    val cfg            = ContextWindowConfig(maxMessages = Some(4), pruningStrategy = PruningStrategy.MiddleOut)
+    val cfg =
+      ContextWindowConfig(minRecentTurns = 1, maxMessages = Some(4), pruningStrategy = PruningStrategy.MiddleOut)
     val (sent, stored) = turn(new ContextWindowMiddleware(cfg))
     // the current turn (q4) takes one of the four; the earlier six keep one from the start and two from the end
     texts(sent) shouldBe Seq("be brief", "q1", "q3", "a3", "q4")
@@ -72,35 +74,45 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   }
 
   it should "trim under RecentTurnsOnly" in {
-    val cfg = ContextWindowConfig(maxMessages = Some(1), pruningStrategy = PruningStrategy.RecentTurnsOnly(1))
+    val cfg = ContextWindowConfig(
+      minRecentTurns = 1,
+      maxMessages = Some(1),
+      pruningStrategy = PruningStrategy.RecentTurnsOnly(1)
+    )
     val (sent, stored) = turn(new ContextWindowMiddleware(cfg))
     texts(sent) shouldBe Seq("be brief", "q4")
     stored shouldBe 8
   }
 
   it should "trim under AdaptiveWindowing" in {
-    val strategy       = PruningStrategy.AdaptiveWindowing(contextWindowSize = 1000, preserveMinTurns = 2)
-    val (sent, stored) = turn(new ContextWindowMiddleware(ContextWindowConfig(pruningStrategy = strategy), sized))
-    // window 1000 holds two 400-token messages; preserveMinTurns = 2 floors it at four, a3 first is cut to start on a user
+    val strategy       = PruningStrategy.AdaptiveWindowing(contextWindowSize = 1000)
+    val cfg            = ContextWindowConfig(minRecentTurns = 2, pruningStrategy = strategy)
+    val (sent, stored) = turn(new ContextWindowMiddleware(cfg, sized))
+    // window 1000 holds two 400-token messages; minRecentTurns = 2 keeps the last two turns whole, past it
     texts(sent) shouldBe Seq("be brief", "q3", "a3", "q4")
     sent.head shouldBe a[SystemMessage]
     stored shouldBe 8
   }
 
   it should "trim under a Custom strategy" in {
-    val cfg = ContextWindowConfig(maxMessages = Some(1), pruningStrategy = PruningStrategy.Custom(_.takeRight(3)))
+    val cfg = ContextWindowConfig(
+      minRecentTurns = 1,
+      maxMessages = Some(1),
+      pruningStrategy = PruningStrategy.Custom(_.takeRight(3))
+    )
     val (sent, stored) = turn(new ContextWindowMiddleware(cfg))
     texts(sent) shouldBe Seq("be brief", "q3", "a3", "q4")
     stored shouldBe 8
   }
 
   it should "send everything when within the limits" in {
-    val (sent, _) = turn(new ContextWindowMiddleware(ContextWindowConfig(maxMessages = Some(50))))
+    val (sent, _) = turn(new ContextWindowMiddleware(ContextWindowConfig(minRecentTurns = 1, maxMessages = Some(50))))
     sent.length shouldBe 8
   }
 
   it should "work with no system prompt" in {
-    val (sent, _) = turn(new ContextWindowMiddleware(ContextWindowConfig(maxMessages = Some(2))), system = None)
+    val (sent, _) =
+      turn(new ContextWindowMiddleware(ContextWindowConfig(minRecentTurns = 1, maxMessages = Some(2))), system = None)
     texts(sent) shouldBe Seq("q4") // a3 would lead the history: it starts on a user message
   }
 
@@ -121,7 +133,7 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
 
   "ContextPruning.prune" should "never cut between a tool call and its result (every cut point)" in {
     (1 to toolHistory.length).foreach { n =>
-      val cfg    = ContextWindowConfig(maxMessages = Some(n))
+      val cfg    = ContextWindowConfig(minRecentTurns = 1, maxMessages = Some(n))
       val pruned = ContextPruning.prune(toolHistory, cfg, sized)
       Message.validateConversation(pruned.toList) shouldBe Right(())
       val ids = pruned.collect { case t: ToolMessage => t.toolCallId }.toSet
@@ -130,7 +142,8 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   }
 
   it should "drop results whose call was pruned" in {
-    val pruned = ContextPruning.prune(toolHistory, ContextWindowConfig(maxMessages = Some(4)), sized)
+    val pruned =
+      ContextPruning.prune(toolHistory, ContextWindowConfig(minRecentTurns = 1, maxMessages = Some(4)), sized)
     texts(pruned) shouldBe Seq("sys", "q2") // "done" would lead the history, so it goes too
   }
 
@@ -140,7 +153,7 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   }
 
   it should "give a ContextWindowMiddleware request that passes validateConversation" in {
-    val mw   = new ContextWindowMiddleware(ContextWindowConfig(maxMessages = Some(4)))
+    val mw   = new ContextWindowMiddleware(ContextWindowConfig(minRecentTurns = 1, maxMessages = Some(4)))
     var sent = Vector.empty[Message]
     val result = mw.wrapModelCall(ModelRequest(toolHistory.toVector, ToolSet.of().value), testModelContext()) { req =>
       sent = req.messages
@@ -233,7 +246,7 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     ContextPruning
       .prune(
         Seq(UserMessage("q1"), AssistantMessage("a1"), UserMessage(page)),
-        ContextWindowConfig(maxTokens = Some(8_000)),
+        ContextWindowConfig(minRecentTurns = 1, maxTokens = Some(8_000)),
         ContextPruning.defaultTokenCounter
       )
       .last shouldBe UserMessage(page)
@@ -247,14 +260,14 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       AssistantMessage("a1")
     )
     val current = UserMessage("q2")
-    val cfg     = ContextWindowConfig(maxTokens = Some(8_000))
+    val cfg     = ContextWindowConfig(minRecentTurns = 1, maxTokens = Some(8_000))
     val sent    = ContextPruning.prune(old :+ current, cfg, ContextPruning.defaultTokenCounter)
     sent.collect { case t: ToolMessage => t } shouldBe empty
     sent.last shouldBe current
   }
 
   it should "leave a conversation under the limit untouched" in {
-    val cfg = ContextWindowConfig(maxTokens = Some(1000))
+    val cfg = ContextWindowConfig(minRecentTurns = 1, maxTokens = Some(1000))
     ContextPruning.prune(history, cfg, ContextPruning.defaultTokenCounter) shouldBe history
   }
 
@@ -272,24 +285,28 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   )
 
   it should "keep the whole current turn under a tiny window" in {
-    val pruned = ContextPruning.prune(midTurn, ContextWindowConfig(maxMessages = Some(1)), sized)
+    val pruned = ContextPruning.prune(midTurn, ContextWindowConfig(minRecentTurns = 1, maxMessages = Some(1)), sized)
     texts(pruned) shouldBe Seq("sys", "q2", "", "r1", "r2")
     Message.validateConversation(pruned.toList) shouldBe Right(())
   }
 
   it should "keep all of [user, assistant call, result] under maxMessages = 1" in {
     val three  = Seq(UserMessage("q"), AssistantMessage(None, Seq(call("1"))), toolResult("1"))
-    val pruned = ContextPruning.prune(three, ContextWindowConfig(maxMessages = Some(1)), sized)
+    val pruned = ContextPruning.prune(three, ContextWindowConfig(minRecentTurns = 1, maxMessages = Some(1)), sized)
     pruned shouldBe three
     val more = UserMessage("old") +: AssistantMessage("older") +: three
-    ContextPruning.prune(more, ContextWindowConfig(maxMessages = Some(1)), sized) shouldBe three
+    ContextPruning.prune(more, ContextWindowConfig(minRecentTurns = 1, maxMessages = Some(1)), sized) shouldBe three
   }
 
   it should "start with a user message at every cut point of a history ending in a tool exchange" in {
     (1 to midTurn.length).foreach { n =>
       Seq(PruningStrategy.OldestFirst, PruningStrategy.MiddleOut, PruningStrategy.RecentTurnsOnly(1)).foreach { st =>
         val pruned =
-          ContextPruning.prune(midTurn, ContextWindowConfig(maxMessages = Some(n), pruningStrategy = st), sized)
+          ContextPruning.prune(
+            midTurn,
+            ContextWindowConfig(minRecentTurns = 1, maxMessages = Some(n), pruningStrategy = st),
+            sized
+          )
         val body = pruned.dropWhile(_.role == MessageRole.System)
         body.head shouldBe a[UserMessage]
         body.lastIndexWhere(_.isInstanceOf[UserMessage]) should be >= 0
@@ -302,13 +319,13 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   it should "drop leading non-user messages the strategy leaves" in {
     val msgs =
       Seq(UserMessage("q1"), AssistantMessage("a1"), UserMessage("q2"), AssistantMessage("a2"), UserMessage("q3"))
-    val pruned = ContextPruning.prune(msgs, ContextWindowConfig(maxMessages = Some(4)), sized)
+    val pruned = ContextPruning.prune(msgs, ContextWindowConfig(minRecentTurns = 1, maxMessages = Some(4)), sized)
     texts(pruned) shouldBe Seq("q2", "a2", "q3")
   }
 
   "ContextWindowMiddleware" should "not count the system prompt against maxTokens" in {
     // a budget of 1200 fits three 400-token messages; counting the system message would make it two
-    val cfg            = ContextWindowConfig(maxTokens = Some(1200))
+    val cfg            = ContextWindowConfig(minRecentTurns = 1, maxTokens = Some(1200))
     val (sent, stored) = turn(new ContextWindowMiddleware(cfg, sized))
     texts(sent) shouldBe Seq("be brief", "q3", "a3", "q4")
     stored shouldBe 8
@@ -321,7 +338,10 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
 
   "ContextPruning.prune with AdaptiveWindowing" should "prune a small model's history, keeping the system message" in {
     val msgs = SystemMessage("You are helpful") +: convo(5)
-    val cfg  = ContextWindowConfig(pruningStrategy = PruningStrategy.AdaptiveWindowing(contextWindowSize = 8_000))
+    val cfg = ContextWindowConfig(
+      minRecentTurns = 1,
+      pruningStrategy = PruningStrategy.AdaptiveWindowing(contextWindowSize = 8_000)
+    )
     ContextPruning.prune(msgs, cfg, ContextPruning.defaultTokenCounter) shouldBe msgs // well under 4,800 tokens
     val heavy = ContextPruning.prune(msgs, cfg, _ => 1000)
     heavy.head shouldBe msgs.head
@@ -331,34 +351,39 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
 
   it should "run the adaptive path when no limits are set" in {
     val msgs = SystemMessage("System prompt") +: convo(3)
-    val cfg  = ContextWindowConfig(pruningStrategy = PruningStrategy.AdaptiveWindowing(contextWindowSize = 50_000))
+    val cfg = ContextWindowConfig(
+      minRecentTurns = 1,
+      pruningStrategy = PruningStrategy.AdaptiveWindowing(contextWindowSize = 50_000)
+    )
     ContextPruning.prune(msgs, cfg, sized) should not be empty
   }
 
   it should "respect preserveSystemMessage" in {
     val msgs     = SystemMessage("Critical") +: convo(5)
-    val strategy = PruningStrategy.AdaptiveWindowing(contextWindowSize = 1000, preserveMinTurns = 1)
-    val keep     = ContextPruning.prune(msgs, ContextWindowConfig(pruningStrategy = strategy), sized)
+    val strategy = PruningStrategy.AdaptiveWindowing(contextWindowSize = 1000)
+    val keep = ContextPruning.prune(msgs, ContextWindowConfig(minRecentTurns = 1, pruningStrategy = strategy), sized)
     keep.head shouldBe msgs.head
     val drop = ContextPruning.prune(
       msgs,
-      ContextWindowConfig(pruningStrategy = strategy, preserveSystemMessage = false),
+      ContextWindowConfig(minRecentTurns = 1, pruningStrategy = strategy, preserveSystemMessage = false),
       sized
     )
     drop.head shouldBe a[UserMessage]
   }
 
-  it should "keep at least preserveMinTurns turns" in {
+  it should "keep at least minRecentTurns turns" in {
     val msgs = convo(20)
     val cfg = ContextWindowConfig(
-      pruningStrategy = PruningStrategy.AdaptiveWindowing(contextWindowSize = 4_000, preserveMinTurns = 5)
+      minRecentTurns = 5,
+      pruningStrategy = PruningStrategy.AdaptiveWindowing(contextWindowSize = 4_000)
     )
-    ContextPruning.prune(msgs, cfg, sized).length should be >= 10
+    ContextPruning.prune(msgs, cfg, sized) shouldBe msgs.takeRight(10)
   }
 
   it should "prune an expensive-input model at least as hard as a cheap-input one" in {
     val msgs = convo(25)
     def cfg(in: Double, out: Double) = ContextWindowConfig(
+      minRecentTurns = 1,
       pruningStrategy = PruningStrategy.AdaptiveWindowing(
         contextWindowSize = 100_000,
         inputCostPerToken = Some(in),
@@ -376,6 +401,7 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   "ContextPruning.prune with Custom" should "apply the custom function" in {
     val msgs = Seq(UserMessage("keep this"), UserMessage("remove this"), UserMessage("keep this too"))
     val cfg = ContextWindowConfig(
+      minRecentTurns = 1,
       maxMessages = Some(1),
       pruningStrategy = PruningStrategy.Custom(_.filter(_.content.contains("keep")))
     )
@@ -400,7 +426,11 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       case other               => other
     })
     val pruned =
-      ContextPruning.prune(msgs, ContextWindowConfig(maxMessages = Some(1), pruningStrategy = copying), sized)
+      ContextPruning.prune(
+        msgs,
+        ContextWindowConfig(minRecentTurns = 1, maxMessages = Some(1), pruningStrategy = copying),
+        sized
+      )
 
     Message.validateConversation(pruned.toList) shouldBe Right(())
     val callIds = pruned.collect { case a: AssistantMessage => a.toolCalls.map(_.id) }.flatten

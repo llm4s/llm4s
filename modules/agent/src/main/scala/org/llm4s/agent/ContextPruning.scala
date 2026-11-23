@@ -8,57 +8,132 @@ import org.llm4s.llmconnect.model._
 private[agent] object ContextPruning {
 
   /**
-   * The messages to send under `config`: `messages` unchanged when within the limits, otherwise
-   * the current turn - from the latest `UserMessage` to the end - kept whole, after the earlier
-   * history pruned by the configured strategy. The strategy, a `Custom` one included, sees only
-   * that earlier history, with the budget the current turn leaves (`maxMessages` and `maxTokens`
-   * less the turn's size, and `AdaptiveWindowing`'s window and minimum turns likewise); what it
-   * returns is then repaired so the result is a valid conversation: no tool call is separated from
-   * its results ([[keepToolPairs]]), and (after any leading system messages) the result starts with
-   * a `UserMessage`. The result may therefore exceed the configured budget when the current turn
-   * alone is larger.
+   * The messages to send under `config`: `messages` unchanged when within every limit, otherwise
+   * pruned. See [[ContextWindowConfig]] for what is guaranteed; in order of precedence:
+   *
+   *  1. The result is a valid conversation: no tool call is separated from its results
+   *     ([[keepToolPairs]]), and (after any leading system messages) it starts with a `UserMessage`.
+   *  1. The protected turns - the last `minRecentTurns` user turns, never fewer than the current one -
+   *     are kept whole, whatever the limits.
+   *  1. Everything else kept fits what the protected turns leave of every limit: `maxTokens`,
+   *     `maxMessages` and, under `AdaptiveWindowing`, its window. Preserved system messages are kept
+   *     first and count against it.
+   *  1. The strategy chooses what to keep within that. It sees only the history before the protected
+   *     turns. A `Custom` function's result is repaired (1) but not measured against the limits.
+   *
+   * So the result exceeds a limit only when the protected turns (and preserved system messages) do
+   * alone, or a `Custom` function returns more.
    */
   def prune(messages: Seq[Message], config: ContextWindowConfig, tokenCounter: Message => Int): Seq[Message] = {
-    val needsPruning = (config.maxTokens, config.maxMessages) match {
-      case (Some(maxTokens), _) =>
-        messages.map(tokenCounter).sum > maxTokens
-      case (None, Some(maxMessages)) =>
-        messages.length > maxMessages
-      case (None, None) =>
-        // When no explicit limits are set, AdaptiveWindowing computes its own limit
-        config.pruningStrategy match {
-          case adaptive: PruningStrategy.AdaptiveWindowing =>
-            messages.map(tokenCounter).sum > adaptive.calculateOptimalWindow
-          case _ => false
-        }
+    val tokenLimit = config.pruningStrategy match {
+      case adaptive: PruningStrategy.AdaptiveWindowing =>
+        Some(config.maxTokens.fold(adaptive.calculateOptimalWindow)(math.min(_, adaptive.calculateOptimalWindow)))
+      case _ => config.maxTokens
     }
+    val floorTurns = math.max(1, config.minRecentTurns)
+    val all        = messages.toIndexedSeq
+    val userAt     = all.indices.filter(i => all(i).role == MessageRole.User)
+    // RecentTurnsOnly's turn count is a limit of its own, as AdaptiveWindowing's window is
+    val turnLimit = config.pruningStrategy match {
+      case PruningStrategy.RecentTurnsOnly(turns) => Some(math.max(turns, floorTurns))
+      case _                                      => None
+    }
+
+    val needsPruning =
+      config.maxMessages.exists(messages.length > _) ||
+        turnLimit.exists(userAt.length > _) ||
+        tokenLimit.exists(messages.map(tokenCounter).sum > _)
 
     if (!needsPruning) {
       messages
     } else {
-      // the current turn is never pruned: the strategy runs on what precedes it, by position
-      val lastUser        = messages.lastIndexWhere(_.role == MessageRole.User)
-      val (earlier, turn) = if (lastUser < 0) (messages, Seq.empty) else messages.splitAt(lastUser)
-      val turnTokens      = turn.map(tokenCounter).sum
-      val earlierConfig = config.copy(
-        maxTokens = config.maxTokens.map(t => math.max(0, t - turnTokens)),
-        maxMessages = config.maxMessages.map(m => math.max(0, m - turn.length))
+      // the protected turns are never pruned: the strategy runs on what precedes them, by position
+      val protectedFrom     = if (userAt.isEmpty) all.length else userAt(math.max(0, userAt.length - floorTurns))
+      val (earlier, recent) = all.splitAt(protectedFrom)
+      val budget = Budget(
+        tokens = tokenLimit.map(t => math.max(0, t - recent.map(tokenCounter).sum)),
+        messages = config.maxMessages.map(m => math.max(0, m - recent.length))
       )
+      val (pinned, prunable) =
+        if (config.preserveSystemMessage) earlier.partition(_.role == MessageRole.System) else (Seq.empty, earlier)
+      val room = new Room(budget, tokenCounter)
+      pinned.foreach(room.charge)
+
       val pruned = config.pruningStrategy match {
-        case PruningStrategy.OldestFirst =>
-          pruneOldestFirst(earlier, earlierConfig, tokenCounter)
+        case PruningStrategy.OldestFirst | _: PruningStrategy.AdaptiveWindowing =>
+          pinned ++ newestWithin(prunable, room)
         case PruningStrategy.MiddleOut =>
-          pruneMiddleOut(earlier, earlierConfig, tokenCounter)
+          pinned ++ endsWithin(prunable, room)
         case PruningStrategy.RecentTurnsOnly(turns) =>
-          pruneRecentTurnsOnly(earlier, math.max(0, turns - (if (turn.isEmpty) 0 else 1)), earlierConfig)
+          val starts = prunable.indices.filter(i => prunable(i).role == MessageRole.User)
+          val wanted = math.max(0, turns - math.min(floorTurns, userAt.length))
+          val from =
+            if (wanted == 0) prunable.length else if (starts.length > wanted) starts(starts.length - wanted) else 0
+          pinned ++ newestWithin(prunable.drop(from), room)
         case PruningStrategy.Custom(fn) =>
           fn(earlier)
-        case adaptive: PruningStrategy.AdaptiveWindowing =>
-          pruneWithAdaptiveWindowing(earlier, adaptive, earlierConfig, tokenCounter, turnTokens, turn.length)
       }
-      val (leadingSystem, others) = (keepToolPairs(pruned) ++ turn).span(_.role == MessageRole.System)
+      val (leadingSystem, others) = (keepToolPairs(pruned) ++ recent).span(_.role == MessageRole.System)
       leadingSystem ++ others.dropWhile(_.role != MessageRole.User)
     }
+  }
+
+  /** What may still be kept of the history before the protected turns; `None` is no limit. */
+  final private case class Budget(tokens: Option[Int], messages: Option[Int])
+
+  /** The room left in a [[Budget]] as messages are kept. Tokens are counted only under a token limit. */
+  final private class Room(budget: Budget, tokenCounter: Message => Int) {
+    private var tokensLeft   = budget.tokens.map(_.toLong)
+    private var messagesLeft = budget.messages
+
+    /** Counts a message that is kept whether or not it fits. */
+    def charge(message: Message): Unit = {
+      tokensLeft = tokensLeft.map(_ - tokenCounter(message))
+      messagesLeft = messagesLeft.map(_ - 1)
+    }
+
+    /** Counts `message` if it fits every limit; false, counting nothing, if it does not. */
+    def take(message: Message): Boolean =
+      if (messagesLeft.exists(_ < 1)) false
+      else {
+        val cost = if (tokensLeft.isDefined) tokenCounter(message).toLong else 0L
+        if (tokensLeft.exists(_ < cost)) false
+        else {
+          tokensLeft = tokensLeft.map(_ - cost)
+          messagesLeft = messagesLeft.map(_ - 1)
+          true
+        }
+      }
+  }
+
+  /** The longest run of the newest `messages` that fits `room`. */
+  private def newestWithin(messages: Seq[Message], room: Room): Seq[Message] = {
+    val indexed = messages.toIndexedSeq
+    var from    = indexed.length
+    while (from > 0 && room.take(indexed(from - 1))) from -= 1
+    indexed.drop(from)
+  }
+
+  /**
+   * The start and the end of `messages` that fit `room`, taken in turn from the end and the start,
+   * the end first; once the next message of one end does not fit, the other end takes what is left.
+   */
+  private def endsWithin(messages: Seq[Message], room: Room): Seq[Message] = {
+    val indexed  = messages.toIndexedSeq
+    var head     = 0
+    var tail     = indexed.length
+    var headOpen = true
+    var tailOpen = true
+    var fromTail = true
+    while (head < tail && (headOpen || tailOpen)) {
+      if (tailOpen && (fromTail || !headOpen)) {
+        if (room.take(indexed(tail - 1))) tail -= 1 else tailOpen = false
+      } else {
+        if (room.take(indexed(head))) head += 1 else headOpen = false
+      }
+      fromTail = !fromTail
+    }
+    indexed.take(head) ++ indexed.drop(tail)
   }
 
   /**
@@ -158,134 +233,6 @@ private[agent] object ContextPruning {
       case u: UserMessage => (words(u.content) * 1.3).toInt + u.parts.map(ContentPart.estimatedTokens).sum
       case t: ToolMessage => (words(t.content) * 1.3).toInt + t.parts.map(ContentPart.estimatedTokens).sum
       case other          => (words(other.content) * 1.3).toInt
-    }
-  }
-
-  private def pruneOldestFirst(
-    messages: Seq[Message],
-    config: ContextWindowConfig,
-    tokenCounter: Message => Int
-  ): Seq[Message] = {
-    // Separate system message if needed
-    val (systemMsgs, otherMsgs) = messages.partition(_.role == MessageRole.System)
-
-    // Calculate how many messages to keep
-    val targetCount = config.maxMessages match {
-      case Some(max) => math.max(1, max - systemMsgs.length)
-      case None      =>
-        // Token-based: iteratively count from the end
-        val maxTokens    = config.maxTokens.getOrElse(Int.MaxValue)
-        val systemTokens = systemMsgs.map(tokenCounter).sum
-        var count        = 0
-        var tokens       = 0
-        otherMsgs.reverse.takeWhile { msg =>
-          val msgTokens = tokenCounter(msg)
-          if (tokens + msgTokens + systemTokens <= maxTokens) {
-            tokens += msgTokens
-            count += 1
-            true
-          } else {
-            false
-          }
-        }
-        math.max(1, count)
-    }
-
-    // Keep system messages + recent messages up to limit
-    val toKeep = if (config.preserveSystemMessage) {
-      systemMsgs ++ otherMsgs.takeRight(targetCount)
-    } else {
-      messages.takeRight(targetCount)
-    }
-
-    toKeep
-  }
-
-  private def pruneMiddleOut(
-    messages: Seq[Message],
-    config: ContextWindowConfig,
-    tokenCounter: Message => Int
-  ): Seq[Message] = {
-    // Note: tokenCounter is unused for MiddleOut strategy as it's purely message-count based
-    val _           = tokenCounter // Suppress unused warning
-    val targetCount = config.maxMessages.getOrElse(messages.length / 2)
-    val keepStart   = targetCount / 2
-    val keepEnd     = targetCount - keepStart
-
-    val (systemMsgs, otherMsgs) = messages.partition(_.role == MessageRole.System)
-
-    if (config.preserveSystemMessage) {
-      systemMsgs ++ otherMsgs.take(keepStart) ++ otherMsgs.takeRight(keepEnd)
-    } else {
-      messages.take(keepStart) ++ messages.takeRight(keepEnd)
-    }
-  }
-
-  private def pruneRecentTurnsOnly(
-    messages: Seq[Message],
-    turns: Int,
-    config: ContextWindowConfig
-  ): Seq[Message] = {
-    // A turn is a user message + assistant response (+ optional tool messages)
-    // Keep the last N complete turns
-    val (systemMsgs, otherMsgs) = messages.partition(_.role == MessageRole.System)
-
-    // Group messages into turns (simplified: every user message starts a turn)
-    val turnStarts = otherMsgs.zipWithIndex
-      .filter(_._1.role == MessageRole.User)
-      .map(_._2)
-
-    val keepFromIndex = if (turns <= 0) {
-      otherMsgs.length
-    } else if (turnStarts.length > turns) {
-      turnStarts(turnStarts.length - turns)
-    } else {
-      0
-    }
-
-    if (config.preserveSystemMessage) {
-      systemMsgs ++ otherMsgs.drop(keepFromIndex)
-    } else {
-      otherMsgs.drop(keepFromIndex)
-    }
-  }
-
-  /**
-   * Prune using adaptive windowing strategy.
-   * Automatically calculates optimal window size based on model context and pricing.
-   */
-  private def pruneWithAdaptiveWindowing(
-    messages: Seq[Message],
-    strategy: PruningStrategy.AdaptiveWindowing,
-    config: ContextWindowConfig,
-    tokenCounter: Message => Int,
-    reservedTokens: Int,
-    reservedMessages: Int
-  ): Seq[Message] = {
-    // Calculate optimal window using adaptive strategy, less what the current turn already takes
-    val optimalTokens = math.max(0, strategy.calculateOptimalWindow - reservedTokens)
-
-    // Create a modified config with calculated token limit and preserve other settings
-    val adaptiveConfig = config.copy(
-      maxTokens = Some(optimalTokens),
-      maxMessages = None // Use token-based limit, not message count
-    )
-
-    // Apply OldestFirst strategy with the calculated window
-    val pruned = pruneOldestFirst(messages, adaptiveConfig, tokenCounter)
-
-    // Enforce strategy.preserveMinTurns as a floor: always keep at least that
-    // many recent turns (user+assistant pairs) regardless of the token limit.
-    val (systemMsgs, otherMsgs) = messages.partition(_.role == MessageRole.System)
-    val minOtherCount    = math.min(math.max(0, strategy.preserveMinTurns * 2 - reservedMessages), otherMsgs.length)
-    val prunedOtherCount = pruned.count(_.role != MessageRole.System)
-
-    if (prunedOtherCount >= minOtherCount) {
-      pruned
-    } else if (config.preserveSystemMessage) {
-      systemMsgs ++ otherMsgs.takeRight(minOtherCount)
-    } else {
-      messages.takeRight(minOtherCount)
     }
   }
 

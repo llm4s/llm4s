@@ -55,6 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stored ids (#2732); [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
 - `DirectoryLoader` skips symbolic links that leave its root, and a positional pattern on `UrlLoader`, `CrawlerConfig`
   or `DirectoryLoader` gains a field (#2724); [migration](docs/reference/migration.md#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724).
+- Context pruning keeps the last `ContextWindowConfig.minRecentTurns` turns (default 3) past the limits, where it kept only the
+  current turn, and `PruningStrategy.AdaptiveWindowing.preserveMinTurns` is removed for it: see
+  [the migration guide](docs/reference/migration.md#context-pruning-keeps-minrecentturns-and-both-limits-2728-2729)
+  [#2728](https://github.com/llm4s/llm4s/issues/2728).
 
 ### Providers
 
@@ -135,6 +139,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** a turn whose final answer ended `FinishReason.Length` ends `AgentStatus.Truncated(partialAnswer)` (no `answer`;
   `RunOutcome.Truncated`, `TaskRefusal.Truncated`, traced `truncated`; Java `AgentStatusKind.TRUNCATED` and `JAgentStatus.partialAnswer()`),
   with the `AgentStatusGainsTruncated` Scalafix lint ([migration](docs/reference/migration.md#a-cut-off-answer-ends-truncated-not-completed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) open question 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
+- **Fixed** `ContextWindowConfig.minRecentTurns` is honoured by every pruning strategy: the last `minRecentTurns` turns are sent whole, with their
+  tool calls and results, even past the limits; `AdaptiveWindowing.preserveMinTurns` is removed for it, and `RecentTurnsOnly(n)` prunes with no other limit set
+  ([guide](docs/guide/context-window-pruning.md)) [#2728](https://github.com/llm4s/llm4s/issues/2728).
+- **Fixed** `maxTokens` and `maxMessages` are both limits when both are set, under every strategy: pruning happens when either is exceeded and what is kept
+  fits both; `MiddleOut` now honours `maxTokens`, and `AdaptiveWindowing` `maxMessages` and a lower `maxTokens` [#2729](https://github.com/llm4s/llm4s/issues/2729).
 
 ### Agent harness
 
