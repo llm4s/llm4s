@@ -18,9 +18,11 @@ import org.llm4s.llmconnect.model.{
   CompletionOptions,
   FinishReason,
   Message,
+  ServiceTier,
   TokenUsage,
   ToolMessage
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
 
@@ -236,6 +238,7 @@ class OpenTelemetryTracing private[trace] (
         e.options.foreach(requestParameters(builder, _))
         e.serverAddress.foreach(a => builder.put(TraceAttributes.ServerAddress, a))
         if (e.streamed) builder.put(TraceAttributes.Streamed, true)
+        e.servedTier.foreach(servedTier(builder, e.provider, _))
         if (captureContent) {
           if (e.input.nonEmpty) builder.put(TraceAttributes.InputMessages, inputMessages(e.input))
           builder.put(TraceAttributes.OutputMessages, outputMessage(e.content, e.finishReasons.headOption))
@@ -484,6 +487,22 @@ class OpenTelemetryTracing private[trace] (
     builder.put(TraceAttributes.FrequencyPenalty, o.frequencyPenalty): Unit
   }
 
+  /**
+   * The tier that served the call (#2750): always `llm4s.service_tier`, and `openai.response.service_tier`, the GenAI
+   * conventions' OpenAI attribute, when the provider is OpenAI or Azure OpenAI; the conventions keep `openai.*` off
+   * other providers' spans. An `Other` tier is written as the provider wrote it.
+   */
+  private def servedTier(
+    builder: io.opentelemetry.api.common.AttributesBuilder,
+    provider: Option[ProviderId],
+    tier: ServiceTier
+  ): Unit = {
+    val name = TraceEvent.serviceTierName(tier)
+    builder.put(TraceAttributes.ServiceTier, name)
+    if (provider.exists(p => TraceAttributes.OpenAIProviders.contains(p.asString)))
+      builder.put(TraceAttributes.OpenAIResponseServiceTier, name): Unit
+  }
+
   /** `gen_ai.input.messages`: the request's messages, as the conventions' JSON, their text redacted. */
   private def inputMessages(messages: Seq[Message]): String =
     ujson
@@ -531,7 +550,8 @@ class OpenTelemetryTracing private[trace] (
       id = completion.id,
       model = model,
       toolCalls = completion.message.toolCalls.size,
-      content = completion.message.content
+      content = completion.message.content,
+      servedTier = completion.servedTier
     )
     traceEvent(event)
   }
@@ -572,6 +592,13 @@ private[trace] object TraceAttributes {
   val InputMessages    = AttributeKey.stringKey("gen_ai.input.messages")
   val OutputMessages   = AttributeKey.stringKey("gen_ai.output.messages")
   val Streamed         = AttributeKey.booleanKey("llm4s.model_call.streamed")
+  val ServiceTier      = AttributeKey.stringKey("llm4s.service_tier")
+
+  /** The GenAI conventions' `openai.response.service_tier`: the tier an OpenAI response reports serving it at. */
+  val OpenAIResponseServiceTier = AttributeKey.stringKey("openai.response.service_tier")
+
+  /** The llm4s provider ids whose spans carry the conventions' `openai.*` attributes. */
+  val OpenAIProviders: Set[String] = Set("openai", "azure")
 
   /** The most characters of one piece of message content a span records, with `captureContent`. */
   val ContentLimit = 1000
