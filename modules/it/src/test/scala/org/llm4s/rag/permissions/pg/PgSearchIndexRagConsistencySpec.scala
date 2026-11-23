@@ -1,5 +1,6 @@
 package org.llm4s.rag.permissions.pg
 
+import org.llm4s.chunking.{ ChunkMetadata, DocumentChunk }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Docker
@@ -131,7 +132,7 @@ class PgSearchIndexRagConsistencySpec extends AnyFlatSpec with Matchers with Bef
     val pipeline         = rag(index)
     try {
       pipeline.ingestText("Plain text.", "doc-1").left.toOption.get shouldBe a[ConfigurationError]
-      pipeline.ingestChunks("doc-1", Seq("Plain text.")).isLeft shouldBe true
+      pipeline.ingestChunks("doc-1", DocumentChunk.fromTexts(Seq("Plain text."))).isLeft shouldBe true
       count(url, vectors, "collection_id IS NULL") shouldBe 0L
     } finally pipeline.close()
   }
@@ -251,6 +252,31 @@ class PgSearchIndexRagConsistencySpec extends AnyFlatSpec with Matchers with Bef
       count(url, vectors, "metadata->>'docId' = 'secret'") shouldBe 1L
 
       pipeline.queryWithPermissions(outsiderAuth, CollectionPattern.All, "merger") shouldBe Right(Seq.empty)
+    } finally pipeline.close()
+  }
+
+  "ingestChunksWithPermissions on a PgSearchIndex" should "return the ids a query reports and keep each chunk's metadata" in {
+    val url        = requirePg()
+    val (index, _) = newIndex(url, "prechunked")
+    val open       = collection(index, "prechunked-open")
+    val pipeline   = rag(index)
+    try {
+      val chunks = Seq(
+        DocumentChunk("Widgets are assembled first.", 0, ChunkMetadata(headings = Seq("Guide", "Widgets"))),
+        DocumentChunk("val w = Widget()", 1, ChunkMetadata.empty.asCodeBlock(Some("scala")))
+      )
+      val indexed =
+        pipeline.ingestChunksWithPermissions(open, "doc-1", chunks).fold(e => fail(e.formatted), identity)
+      indexed.map(_.index) shouldBe Seq(0, 1)
+      indexed.map(_.id).zipWithIndex.foreach { case (id, i) => id should endWith(s"-doc-1-chunk-$i") }
+
+      val results = pipeline
+        .queryWithPermissions(UserAuthorization.Admin, CollectionPattern.All, "widgets")
+        .fold(e => fail(e.formatted), identity)
+      results.map(_.id).toSet shouldBe indexed.map(_.id).toSet
+      indexed.zip(chunks).foreach { case (stored, chunk) =>
+        ChunkMetadata.fromRecordMetadata(results.find(_.id == stored.id).get.metadata) shouldBe chunk.metadata
+      }
     } finally pipeline.close()
   }
 }

@@ -11,6 +11,10 @@ import org.llm4s.model.UnmappedOptions
  * (https://developers.openai.com/api/reference/resources/chat, "service_tier"). Azure OpenAI takes `auto`, `default`
  * and `priority` on chat completions (https://learn.microsoft.com/azure/foundry/openai/concepts/priority-processing),
  * so `Flex` is not sent there. Requesty, and any other endpoint reached through an `OpenAIConfig`, is sent no tier.
+ * `ServiceTier.Other` is sent as written.
+ *
+ * The reply's `service_tier` names the tier that served the request (`default`, `flex`, `priority`, or another such as
+ * `scale`), read by [[served]] onto `Completion.servedTier` (#2746).
  */
 private[provider] object OpenAIServiceTier {
 
@@ -29,9 +33,20 @@ private[provider] object OpenAIServiceTier {
     }
 
   private def value(tier: ServiceTier): ChatCompletionCreateParams.ServiceTier = tier match {
-    case ServiceTier.Auto     => ChatCompletionCreateParams.ServiceTier.AUTO
-    case ServiceTier.Default  => ChatCompletionCreateParams.ServiceTier.DEFAULT
-    case ServiceTier.Flex     => ChatCompletionCreateParams.ServiceTier.FLEX
-    case ServiceTier.Priority => ChatCompletionCreateParams.ServiceTier.PRIORITY
+    case ServiceTier.Auto       => ChatCompletionCreateParams.ServiceTier.AUTO
+    case ServiceTier.Default    => ChatCompletionCreateParams.ServiceTier.DEFAULT
+    case ServiceTier.Flex       => ChatCompletionCreateParams.ServiceTier.FLEX
+    case ServiceTier.Priority   => ChatCompletionCreateParams.ServiceTier.PRIORITY
+    case ServiceTier.Other(raw) => ChatCompletionCreateParams.ServiceTier.of(raw)
+  }
+
+  /** The tier a reply's `service_tier` names, `None` when it is empty. */
+  def served(raw: String): Option[ServiceTier] = raw match {
+    case ""         => None
+    case "auto"     => Some(ServiceTier.Auto)
+    case "default"  => Some(ServiceTier.Default)
+    case "flex"     => Some(ServiceTier.Flex)
+    case "priority" => Some(ServiceTier.Priority)
+    case other      => Some(ServiceTier.Other(other))
   }
 }

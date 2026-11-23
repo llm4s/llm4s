@@ -95,7 +95,7 @@ class RAGWithSearchIndexBugSpec extends AnyFlatSpec with Matchers with BeforeAnd
 
     result.isRight shouldBe true
     val (count, results) = result.toOption.get
-    count shouldBe 1
+    count shouldBe results.map(_.record.id)
     results.size shouldBe 1
     results.head.record.content shouldBe Some("Test content")
   }

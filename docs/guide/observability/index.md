@@ -178,9 +178,17 @@ val traced     = TracingLLMClient(client, tracing, providerConfig) // request mo
 val embeddings = EmbeddingClient.from("openai", embeddingConfig).map(_.withTracing(tracing))
 ```
 
+A `RAG` built `withTracing(tracing)` traces every model call it makes the same way, with the call's usage also
+recorded as a `TokenUsageRecorded` tagged with its operation: `rag.answer` (the answer), `rag.rerank` (the LLM
+reranker) and `rag.rewrite` (an `LLMQueryRewriter`). Each `query`, `queryWithAnswer`, their permission and streaming
+variants ends with one `RAGOperationCompleted` (`query` or `answer`) carrying the total duration, the stage durations
+(`rewrite`, `embedding`, `search`, `rerank`, `answer`), the embedding and answer tokens and the answer's estimated cost.
+The same numbers are on every `RAGAnswerResult` as `metrics` (`RAGQueryMetrics`), with or without a tracer, along with
+the candidates retrieved and the chunks kept.
+
 | Span | Kind | Attributes |
 |------|------|------------|
-| `chat <model>` (a completion, plain or streamed) | `CLIENT` | `gen_ai.operation.name` = `chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.request.temperature`, `gen_ai.request.top_p`, `gen_ai.request.max_tokens` (when set), `gen_ai.request.presence_penalty`, `gen_ai.request.frequency_penalty`, `server.address`, `llm4s.model_call.tool_calls`, `llm4s.model_call.streamed`; with `captureContent`, `gen_ai.input.messages` and `gen_ai.output.messages` |
+| `chat <model>` (a completion, plain or streamed) | `CLIENT` | `gen_ai.operation.name` = `chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.request.temperature`, `gen_ai.request.top_p`, `gen_ai.request.max_tokens` (when set), `gen_ai.request.presence_penalty`, `gen_ai.request.frequency_penalty`, `server.address`, `llm4s.model_call.tool_calls`, `llm4s.model_call.streamed`, `llm4s.service_tier` (the tier the provider reports serving it at, when it reports one) and, for OpenAI and Azure OpenAI, `openai.response.service_tier`; with `captureContent`, `gen_ai.input.messages` and `gen_ai.output.messages` |
 | `embeddings <model>` | `CLIENT` | `gen_ai.operation.name` = `embeddings`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `operation` (the client's label), `input_count` |
 | `chat <model>` / `embeddings <model>` of a failed call | `CLIENT`, status `ERROR` (the error message, redacted) | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `error.type` (the `LLMError`'s type, e.g. `RateLimitError`) |
 | `chat <model>` (an agent's model call) | `CLIENT` | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.agent.name`, `gen_ai.conversation.id`, `gen_ai.usage.*`, `llm4s.model_call.attempt`, `llm4s.model_call.tool_calls`, `cost.usd` |

@@ -239,11 +239,15 @@ class PostgresCheckpointerSpec
     store.close()
   }
 
-  /** The schema as a version-4 build left it: no stop requests on queue entries (design 4.57). */
+  /**
+   * The schema as a version-4 build left it: no long-term store (version 6, #2453) and no stop requests on queue
+   * entries (design 4.57).
+   */
   private def asVersionFour(config: PostgresCheckpointerConfig): Unit = {
     val q = s""""${config.schema}""""
     PgCheckpointerDb.execute(
-      s"""ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN stop_json;
+      s"""DROP TABLE $q.checkpoint_store_items, $q.checkpoint_store_applied, $q.checkpoint_store_fences;
+         |ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN stop_json;
          |UPDATE $q.checkpoint_schema SET version = 4""".stripMargin
     )
   }
@@ -274,11 +278,15 @@ class PostgresCheckpointerSpec
     reopened.close()
   }
 
-  /** The schema as a version-3 build left it: no run queue and no run ids on history rows (design 4.55). */
+  /**
+   * The schema as a version-3 build left it: no long-term store (version 6, #2453), no run queue and no run ids on
+   * history rows (design 4.55).
+   */
   private def asVersionThree(config: PostgresCheckpointerConfig): Unit = {
     val q = s""""${config.schema}""""
     PgCheckpointerDb.execute(
-      s"""DROP TABLE $q.checkpoint_queue_attempts, $q.checkpoint_queue_entries;
+      s"""DROP TABLE $q.checkpoint_store_items, $q.checkpoint_store_applied, $q.checkpoint_store_fences;
+         |DROP TABLE $q.checkpoint_queue_attempts, $q.checkpoint_queue_entries;
          |DROP SEQUENCE $q.checkpoint_queue_entry_ids, $q.checkpoint_queue_lease_tokens;
          |DROP INDEX $q.checkpoint_history_run;
          |ALTER TABLE $q.checkpoint_history DROP COLUMN run_id;

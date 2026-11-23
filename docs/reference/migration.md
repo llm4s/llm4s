@@ -43,7 +43,10 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [a RAG with a `SearchIndex` ingests only with permissions](#a-rag-with-a-searchindex-ingests-only-with-permissions-2716),
 [the forwarding `apply` overloads are removed](#the-forwarding-apply-overloads-are-removed-1281),
 [`CompressionRule`'s `apply` field is `transform`](#compressionrules-apply-field-is-transform-1281),
-[`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714)
+[`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714),
+[RAG tracing covers every model call and each query's stages](#rag-tracing-covers-every-model-call-and-each-querys-stages-2734),
+[`RAG.ingestChunks` takes `DocumentChunk`s](#ragingestchunks-takes-documentchunks-2732),
+[the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
 and [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724).
 
 ## RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root (#2724)
@@ -59,6 +62,53 @@ and [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#r
   `TextLoader`, `withUrlPolicy(UrlPolicy.default.withAllowPrivateNetworks(true))` now lets the loaders do it.
 - **No proxy.** The loaders connect to the address the policy approved over their own HTTP/1.1 socket, not through
   `HttpURLConnection`, so `http.proxyHost` and `https.proxyHost` no longer apply to them.
+
+## The PostgreSQL checkpoint schema moves to version 6 (#2453)
+
+`PostgresCheckpointer` gains a long-term store, `longTermStore(limits)`
+([guide](../guide/agents/durable-checkpointers#long-term-memory-on-the-same-database)). Nothing in source changes
+unless you use it.
+
+- **The schema moves on, with no way back.** Opening a store brings its PostgreSQL schema from version 5 to 6: three
+  tables are added (`checkpoint_store_items`, `checkpoint_store_applied`, `checkpoint_store_fences`) and none is
+  changed. An older build refuses the new schema, so upgrade every process sharing a database together. The role
+  that first opens it needs `CREATE` on the schema, once.
+- **`deleteThread` and the sweep touch the new tables**, in their own transactions: a deleted thread's applied keys,
+  and a reclaimed thread's fence. They never remove an item.
+- **A custom `LongTermStore`** has a contract to pass: mix `LongTermStoreContract` (`llm4s-agent-testkit`) into a
+  spec. `InMemoryLongTermStore`'s behaviour is unchanged.
+
+## `RAG.ingestChunks` takes `DocumentChunk`s (#2732)
+
+`RAG.ingestChunks` dropped each chunk's metadata and returned only a count, so an application that keeps its own
+view of what was indexed had to re-chunk the text and rebuild the ids. Now:
+
+- **`ingestChunks(documentId, chunks: Seq[DocumentChunk], metadata)`** replaces the `Seq[String]` form (the two
+  cannot both exist: they erase to the same JVM signature). Each chunk's `ChunkMetadata` is stored in its record's
+  metadata under `chunk.`-prefixed keys (`ChunkMetadata.toRecordMetadata`), so search results carry it and
+  `ChunkMetadata.fromRecordMetadata(result.metadata)` reads it back. Plain texts become chunks with
+  `DocumentChunk.fromTexts(texts)`. The indices must run `0, 1, 2, ...` in order, or the call is a
+  `ValidationError` and writes nothing.
+- **It returns `Result[Seq[IndexedChunk]]`**, each chunk's stored `id`, `index` and `content`, not `Result[Int]`:
+  `.map(_.size)` for the count.
+- **`SearchIndex.ingest` returns the stored ids**, `Result[Seq[String]]` one per chunk in order, not a count. A
+  `SearchIndex` of your own returns the ids its `query` reports for those chunks.
+- Every ingest path (`ingestText`, files, loaders, `ingestWithPermissions`) now stores the chunker's `ChunkMetadata`
+  in the record metadata too: a `chunk.`-prefixed key is new in a search result's `metadata`.
+
+New, with nothing to migrate: `RAG.chunk(text)` (the pipeline's own chunker and config),
+`ingestChunksWithPermissions(collectionPath, documentId, chunks, metadata, readableBy)` and
+`ingestBytesWithPermissions(collectionPath, content, filename, documentId, metadata, readableBy)`.
+
+## RAG tracing covers every model call and each query's stages (#2734)
+
+- **`RAGAnswerResult` gains `metrics: Option[RAGQueryMetrics]`** (stage durations, candidates retrieved, chunks
+  used, tokens, cost), and **`TraceEvent.RAGOperationCompleted` gains `stageDurations`**, so a positional pattern on
+  either needs one more field. Match by name or read the fields.
+- **A `RAG` built `withTracing` traces its own model calls.** If you wrapped the client you passed to `withLLM` in
+  `TracingLLMClient` to see the answer calls, remove the wrapper or each call is traced twice.
+- **A `QueryTransformer` of your own** can override `withTracing(tracing)` to trace its LLM calls; the default returns
+  it unchanged.
 
 ## `DocumentRegistry` is source-scoped (#2714)
 
@@ -116,8 +166,8 @@ Scala source that called one of these by position still compiles: the remaining 
 first and defaults the rest. Code compiled against 0.6.0 must be recompiled. Java and Kotlin do not see Scala's
 defaults, so a call that passed the shorter list passes every argument now: the default of each one it left out is
 the companion's `apply$default$N()`, so a 9-argument `Completion.apply(...)` gains
-``Completion.`apply$default$10`(), Completion.`apply$default$11`()`` in Kotlin
-(`Completion.apply$default$10(), Completion.apply$default$11()` in Java). Building the value with the shorter `apply`
+``Completion.`apply$default$10`(), Completion.`apply$default$11`(), Completion.`apply$default$12`()`` in Kotlin
+(`Completion.apply$default$10()` through `apply$default$12()` in Java). Building the value with the shorter `apply`
 a type keeps for Java (`OpenAIConfig.apply(apiKey, model)` and the other provider configs) and its `with*` setters
 avoids the long list.
 
@@ -156,7 +206,8 @@ case now either works or fails:
   `RAG` with a `SearchIndex`, before reading the loader or clearing anything, and so does `build` when the config
   also names document loaders (`withDocuments`). They used to write chunks with no collection (`collection_id NULL`
   in a `PgSearchIndex`'s table), which `queryWithPermissions` never returns. Ingest with
-  `ingestWithPermissions(collectionPath, documentId, content, ...)`. Plain ingest is not routed to a default
+  `ingestWithPermissions(collectionPath, documentId, content, ...)`, `ingestChunksWithPermissions` or
+  `ingestBytesWithPermissions`. Plain ingest is not routed to a default
   collection: `PgSchemaManager`'s default collection is public, so a document ingested without naming its readers
   would become readable by every principal. Rows a plain ingest wrote before can be moved to that collection,
   if that is what you want, with `PgSchemaManager.migrateExistingVectors`, or deleted with `deleteDocument`.
@@ -230,9 +281,9 @@ client.complete(conversation, options).map { c =>
   which is `Stop` or `ToolCalls`. Any `"stop"`, `"tool_calls"` or `"length"` in the same comparison is reported with
   it. A chunk set from a raw Bedrock or Gemini value, as in a test, gets the case that value maps to now.
 - `StreamedChunk(..., finishReason = Some("stop"))` and `withFinishReason("stop")` take a `FinishReason` instead.
-- A positional pattern on `Completion` gains a field: `case Completion(id, _, content, _, _, _, _, _, _, _, _)`.
-  The `PositionalPatternsGainFields` Scalafix rule adds it to 0.6.0's ten-field pattern, and both fields since 0.5.1 to
-  its nine-field one.
+- A positional pattern on `Completion` gains a field, two with `servedTier` (#2746):
+  `case Completion(id, _, content, _, _, _, _, _, _, _, _, _)`. The `PositionalPatternsGainFields` Scalafix rule adds
+  them to 0.6.0's ten-field pattern, and every field since 0.5.1 to its nine-field one.
 - `Completion(...)` with named arguments keeps compiling and gets `FinishReason.Stop`. A client or fake that builds
   one sets the reason it read; one it did not read is `FinishReason.Other("")`, which tracing leaves out.
 - Every chat client maps it (RFC 0009 PR 2 added Anthropic's `stop_reason`, Gemini's and Vertex AI's `finishReason`
@@ -246,7 +297,7 @@ client.complete(conversation, options).map { c =>
   `tool_calls` from `done`; and Perplexity reports an `incomplete` reply that has a call as `Length`, not `ToolCalls`.
 - An agent's `AgentEvents.ModelCallCompleted` gains `finishReason: Option[FinishReason]` (default `None`), after
   `adjustments`, filled from each call's `Completion` (PR 6). Construction is unchanged; a positional pattern needs a
-  ninth binder, `case ModelCallCompleted(a, m, n, t, u, c, p, adj, _)`, which the `PositionalPatternsGainFields`
+  ninth binder and a tenth for `servedTier` (#2746), `case ModelCallCompleted(a, m, n, t, u, c, p, adj, _, _)`, which the `PositionalPatternsGainFields`
   Scalafix rule adds, or match on the type and read the fields. An event stored before reads with `None`; a reason this version cannot read, a case a later one adds, reads as `FinishReason.Other` with its stored value.
 
 ## Every provider's content-filter stop is an error (#2677)
@@ -349,7 +400,10 @@ defaulted field, so only a positional pattern on them changes:
   `case TokenUsage(p, c, t, _, _, _)` becomes `case TokenUsage(p, c, t, _, _, _, _)`.
 - `ModelPricing` gains `cacheCreationInputTokenCostAbove1hr: Option[Double]` as its last field.
 - `CompletionOptions` gains `promptCache` and then `serviceTier` (#2726) as its last fields:
-  `case CompletionOptions(t, _, _, _, _, _, _, _, _)` gains two `_`.
+  `case CompletionOptions(t, _, _, _, _, _, _, _, _)` gains two `_`. `Completion` and `ModelCallCompleted` gain
+  `servedTier: Option[ServiceTier]` (#2746), the tier that served the call, as theirs, and so does
+  `TraceEvent.CompletionReceived` (#2750): `case TraceEvent.CompletionReceived(...)` with 0.6.0's fourteen binders
+  gains a `_`.
 - Java and Kotlin see no Scala defaults, so a call to `TokenUsage.apply`, `ModelPricing.apply` or
   `CompletionOptions.apply` from them passes the new arguments too (`Option.empty()`).
 

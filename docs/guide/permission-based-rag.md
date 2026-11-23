@@ -426,7 +426,28 @@ rag.ingestWithPermissions(
 )
 ```
 
-On a `RAG` with a `SearchIndex`, `ingestWithPermissions` is the only way to ingest. The plain `ingest*`, `sync` and
+### Pre-chunked documents and raw bytes
+
+To know exactly which chunks were indexed (for a chunk browser or citations), chunk once and hand the chunks in.
+`rag.chunk(text)` splits with the pipeline's own chunker; any `DocumentChunk`s with indices `0, 1, 2, ...` will do.
+Each chunk's `ChunkMetadata` (headings, offsets, code-block flag, language, source file) is stored in its record's
+metadata, and the call returns the ids the `SearchIndex` stored the chunks under, the ids search results carry:
+
+```scala
+val chunks = rag.chunk(text)
+val indexed: Result[Seq[IndexedChunk]] = rag.ingestChunksWithPermissions(
+  collectionPath = CollectionPath.unsafe("public-docs"),
+  documentId = "doc-2",
+  chunks = chunks,
+  metadata = Map("source" -> "wiki")
+)
+// later: ChunkMetadata.fromRecordMetadata(searchResult.metadata)
+```
+
+`ingestBytesWithPermissions(collectionPath, bytes, filename, documentId, metadata, readableBy)` extracts a PDF, DOCX
+or other file first, as `ingestBytes` does.
+
+On a `RAG` with a `SearchIndex`, the `ingest*WithPermissions` methods are the only way to ingest. The plain `ingest*`, `sync` and
 `refresh` methods return a `ConfigurationError`: what they wrote would belong to no collection, so no permission
 query could return it.
 
@@ -825,7 +846,7 @@ trait SearchIndex {
     chunks: Seq[ChunkWithEmbedding],
     metadata: Map[String, String] = Map.empty,
     readableBy: Set[PrincipalId] = Set.empty
-  ): Result[Int]
+  ): Result[Seq[String]]  // the stored ids, one per chunk
 
   def deleteDocument(collectionPath: CollectionPath, documentId: String): Result[Long]
   def deleteDocumentFromAllCollections(documentId: String): Result[Long]
@@ -861,6 +882,23 @@ class RAG {
     collectionPath: CollectionPath,
     documentId: String,
     content: String,
+    metadata: Map[String, String] = Map.empty,
+    readableBy: Set[PrincipalId] = Set.empty
+  ): Result[Int]
+
+  def ingestChunksWithPermissions(
+    collectionPath: CollectionPath,
+    documentId: String,
+    chunks: Seq[DocumentChunk],
+    metadata: Map[String, String] = Map.empty,
+    readableBy: Set[PrincipalId] = Set.empty
+  ): Result[Seq[IndexedChunk]]
+
+  def ingestBytesWithPermissions(
+    collectionPath: CollectionPath,
+    content: Array[Byte],
+    filename: String,
+    documentId: String,
     metadata: Map[String, String] = Map.empty,
     readableBy: Set[PrincipalId] = Set.empty
   ): Result[Int]

@@ -228,6 +228,20 @@ object RunPosition:
     fencingToken: Option[FencingToken] = None
   ): RunPosition = new RunPosition(threadId, runId, checkpointId, taskId, nodeId, superstep, fencingToken)
 
+object RunContext:
+
+  /**
+   * A context on `threadId` outside any runtime, for code that calls a harness target directly
+   * (`llm4s-agent-testkit`'s `LongTermStoreContract`): its effect records are kept in memory, it carries no
+   * claim (so a [[ReplayGuard]] passes the target token `0`), and its events go nowhere.
+   */
+  private[agent] def outsideRuntime(threadId: ThreadId, config: RunConfig = RunConfig()): RunContext =
+    new RunContext(
+      config,
+      RunPosition(threadId, config.runId, "", TaskId("task"), NodeId("node"), 0),
+      NodeEventSink.none
+    )
+
 /**
  * What a running task knows: the run's [[RunConfig]], its own [[RunPosition]], and its event channels.
  *

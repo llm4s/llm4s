@@ -330,7 +330,10 @@ class BedrockClient(
         }
       }
       .onMessageStop(e => queue.put(StreamSignal.Stop(e.stopReasonAsString())))
-      .onMetadata(e => Option(e.usage()).foreach(u => queue.put(StreamSignal.Usage(BedrockClient.tokenUsage(u)))))
+      .onMetadata { e =>
+        Option(e.usage()).foreach(u => queue.put(StreamSignal.Usage(BedrockClient.tokenUsage(u))))
+        BedrockClient.servedTier(e.serviceTier()).foreach(t => queue.put(StreamSignal.Tier(t)))
+      }
       .build()
 
     val handler = ConverseStreamResponseHandler
@@ -361,6 +364,7 @@ class BedrockClient(
     var filtered   = Option.empty[ContentFilteredError] // a guardrail or filter stop: the stream fails with it
     var textLength = 0                                  // characters of answer text delivered
     var usage      = Option.empty[TokenUsage]           // the usage the metadata event reported
+    var servedTier = Option.empty[ServiceTier]          // the tier the metadata event reported (#2746)
 
     // The stream timeout bounds the whole call, so it is a deadline rather than a per-event wait.
     val deadline = streamTimeout.map(t => (t, System.nanoTime() + t.toNanos))
@@ -425,6 +429,9 @@ class BedrockClient(
               usage = Some(reported)
               accumulator.updateUsage(reported)
               drain()
+            case StreamSignal.Tier(tier) =>
+              servedTier = Some(tier)
+              drain()
             case StreamSignal.Finished(Some(error))      => Left(mapException(error))
             case StreamSignal.Finished(None) if !stopped =>
               // The connection ended cleanly but the model never said it was done: what was
@@ -440,6 +447,7 @@ class BedrockClient(
                   .withMessage(message)
                   .withToolCalls(c.message.toolCalls.toList)
                   .withEstimatedCost(c.usage.flatMap(u => CostEstimator.estimate(config.model, u)))
+                  .withServedTier(servedTier)
               }
           }
       }
@@ -699,7 +707,8 @@ class BedrockClient(
           toolCalls = toolCalls,
           usage = usage,
           estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model, u)),
-          finishReason = stopReason.fold(FinishReason.Other(""))(BedrockClient.finishReason)
+          finishReason = stopReason.fold(FinishReason.Other(""))(BedrockClient.finishReason),
+          servedTier = BedrockClient.servedTier(response.serviceTier())
         )
       }
     }
@@ -802,6 +811,7 @@ object BedrockClient {
    * (https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ServiceTier.html, and "Service tiers for
    * inference" in the user guide), and what is reported (#2726). `Auto` is not sent: Bedrock picks no tier on its own,
    * and a request that names none is served at the standard tier. Which tiers a model offers is on its model card.
+   * `ServiceTier.Other` is sent as written.
    */
   private[provider] def serviceTier(
     options: CompletionOptions
@@ -813,6 +823,8 @@ object BedrockClient {
       case Some(ServiceTier.Default)  => (tier(ServiceTierType.DEFAULT), Nil)
       case Some(ServiceTier.Flex)     => (tier(ServiceTierType.FLEX), Nil)
       case Some(ServiceTier.Priority) => (tier(ServiceTierType.PRIORITY), Nil)
+      case Some(ServiceTier.Other(raw)) =>
+        (Some(software.amazon.awssdk.services.bedrockruntime.model.ServiceTier.builder().`type`(raw).build()), Nil)
       case Some(ServiceTier.Auto) =>
         (
           None,
@@ -825,6 +837,20 @@ object BedrockClient {
         )
     }
   }
+
+  /**
+   * The tier a Converse response or `ConverseStream` metadata event names in `serviceTier.type` (#2746): `default`,
+   * `flex` or `priority`, or another kept as `ServiceTier.Other`. `None` when it names none.
+   */
+  private[provider] def servedTier(
+    tier: software.amazon.awssdk.services.bedrockruntime.model.ServiceTier
+  ): Option[ServiceTier] =
+    Option(tier).flatMap(t => Option(t.typeAsString())).filter(_.nonEmpty).map {
+      case "default"  => ServiceTier.Default
+      case "flex"     => ServiceTier.Flex
+      case "priority" => ServiceTier.Priority
+      case raw        => ServiceTier.Other(raw)
+    }
 
   // ---- usage ----
 
@@ -967,6 +993,7 @@ object BedrockClient {
     case ToolArgs(index: Int, fragment: String)
     case Stop(reason: String)
     case Usage(usage: TokenUsage)
+    case Tier(tier: ServiceTier)
     case Finished(error: Option[Throwable])
   }
 

@@ -64,5 +64,61 @@ class BedrockServiceTierSpec extends AnyWordSpec with Matchers {
         None
       )
     }
+
+    "send ServiceTier.Other as written" in {
+      val bodies = new ConcurrentLinkedQueue[ujson.Value]()
+      withServer("/") { ex =>
+        bodies.add(read(ex))
+        sendJsonResponse(ex, 200, converseResponse("Hi"))
+      } { url =>
+        val client = new BedrockClient(config(url))
+        client.complete(conversation, CompletionOptions().withServiceTier(ServiceTier.Other("reserved")))
+        client.close()
+      }
+      bodies.asScala.toList.map(_.obj.get("serviceTier")) shouldBe List(Some(ujson.Obj("type" -> "reserved")))
+    }
+  }
+
+  "the served tier" should {
+
+    "be the serviceTier.type of a Converse response and of a stream's metadata event (#2746)" in {
+      def served(tier: String) = {
+        val json = ujson.read(converseResponse("Hi"))
+        json("serviceTier") = ujson.Obj("type" -> tier)
+        json.render()
+      }
+      val replies = new ConcurrentLinkedQueue[String](
+        java.util.List.of(served("default"), served("flex"), served("priority"), served("reserved"))
+      )
+      val streamed = Seq(
+        eventFrame("messageStart", """{"role":"assistant"}"""),
+        textDelta("Hi"),
+        eventFrame("contentBlockStop", """{"contentBlockIndex":0}"""),
+        eventFrame("messageStop", """{"stopReason":"end_turn"}"""),
+        eventFrame(
+          "metadata",
+          """{"usage":{"inputTokens":10,"outputTokens":5,"totalTokens":15},"metrics":{"latencyMs":42},""" +
+            """"serviceTier":{"type":"priority"}}"""
+        )
+      )
+      withServer("/") { ex =>
+        read(ex)
+        if (isStreamRequest(ex)) sendEventStream(ex, streamed)
+        else sendJsonResponse(ex, 200, Option(replies.poll()).getOrElse(converseResponse("Hi")))
+      } { url =>
+        val client = new BedrockClient(config(url))
+        def tier() = client.complete(conversation, CompletionOptions()).toOption.value.servedTier
+        List.fill(5)(tier()) shouldBe List(
+          Some(ServiceTier.Default),
+          Some(ServiceTier.Flex),
+          Some(ServiceTier.Priority),
+          Some(ServiceTier.Other("reserved")),
+          None
+        )
+        client.streamComplete(conversation, CompletionOptions(), _ => ()).toOption.value.servedTier shouldBe
+          Some(ServiceTier.Priority)
+        client.close()
+      }
+    }
   }
 }

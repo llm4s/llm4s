@@ -17,7 +17,7 @@ import scala.util.Try
 /**
  * An [[org.llm4s.llmconnect.LLMClient]] that traces each of its calls (#2275): a completion - plain or streamed - as one
  * [[TraceEvent.CompletionReceived]] carrying the call's provider, request model, server address, options, duration,
- * finish reasons, usage and messages, and a failed call as one [[TraceEvent.ErrorOccurred]] naming the operation
+ * finish reasons, usage, messages and served tier, and a failed call as one [[TraceEvent.ErrorOccurred]] naming the operation
  * (`chat`), model, provider and error type, with the usage a [[org.llm4s.error.ContentFilteredError]] was billed
  * (#2676). A backend that follows the OpenTelemetry GenAI conventions turns each into the call's `chat <model>` span;
  * backends record message content only when told to.
@@ -97,7 +97,8 @@ final class TracingLLMClient private (
           finishReasons = finishReason.orElse(Option(completion.finishReason)).map(_.name).filter(_.nonEmpty).toSeq,
           usage = completion.usage,
           options = Some(options),
-          input = conversation.messages
+          input = conversation.messages,
+          servedTier = completion.servedTier
         )
       case Left(error) =>
         TraceEvent.ErrorOccurred(

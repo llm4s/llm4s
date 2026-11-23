@@ -410,3 +410,66 @@ private[postgres] object Sql:
 
   def deleteQueueEntries(t: Tables): String =
     s"DELETE FROM ${t.queueEntries} WHERE entry_id = ANY(?::text[]::bigint[])"
+
+  // ---- the long-term store (schema 6, #2453) ----
+
+  /**
+   * Makes the token bound second the newest of the scope bound first, returning it - or no row, changing nothing, if
+   * the scope has a newer one. The scope's row stays locked for the rest of the transaction, so calls on one scope
+   * (one thread) run one at a time.
+   */
+  def storeFence(t: Tables): String =
+    s"""INSERT INTO ${t.storeFences} AS f (scope, token) VALUES (?, ?)
+       |ON CONFLICT (scope) DO UPDATE SET token = excluded.token WHERE f.token <= excluded.token
+       |RETURNING f.token""".stripMargin
+
+  def storeFenceOf(t: Tables): String = s"SELECT token FROM ${t.storeFences} WHERE scope = ?"
+
+  /**
+   * The transaction-scoped advisory lock, keyed by the name bound, a `modify` holds on its namespace from before it
+   * reads the namespace until it commits: what makes it serialisable within the namespace.
+   */
+  val lockStoreNamespace: String = "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"
+
+  def storeApplied(t: Tables): String = s"SELECT outcome_json FROM ${t.storeApplied} WHERE effect_key = ?"
+
+  def recordStoreApplied(t: Tables): String =
+    s"""INSERT INTO ${t.storeApplied} (effect_key, scope, outcome_json) VALUES (?, ?, ?)
+       |ON CONFLICT (effect_key) DO UPDATE SET scope = excluded.scope, outcome_json = excluded.outcome_json""".stripMargin
+
+  def forgetStoreApplied(t: Tables): String = s"DELETE FROM ${t.storeApplied} WHERE effect_key = ?"
+
+  /** The applied keys of a deleted thread's scope, which nothing can replay; and its fence, once its row is gone. */
+  def deleteStoreApplied(t: Tables): String = s"DELETE FROM ${t.storeApplied} WHERE scope = ?"
+  def deleteStoreFence(t: Tables): String   = s"DELETE FROM ${t.storeFences} WHERE scope = ?"
+
+  private val storeColumns = "item_key, value_json, updated_at"
+
+  def storeItem(t: Tables): String =
+    s"SELECT $storeColumns FROM ${t.storeItems} WHERE namespace_id = ? AND item_key = ?"
+
+  /** A namespace's items whose key starts with the prefix bound second, in key order, at most the limit bound third. */
+  def storeItemsWithPrefix(t: Tables): String =
+    s"""SELECT $storeColumns FROM ${t.storeItems}
+       |WHERE namespace_id = ? AND starts_with(item_key, ?) ORDER BY item_key LIMIT ?""".stripMargin
+
+  /** A page of a namespace in key order, past the key bound second: what `search` reads and matches. */
+  def storeItemsFirst(t: Tables): String =
+    s"SELECT $storeColumns FROM ${t.storeItems} WHERE namespace_id = ? ORDER BY item_key LIMIT ?"
+  def storeItemsAfter(t: Tables): String =
+    s"SELECT $storeColumns FROM ${t.storeItems} WHERE namespace_id = ? AND item_key > ? ORDER BY item_key LIMIT ?"
+
+  /** A namespace's item count and bytes, and (bound first) the bytes of the item about to be replaced, 0 for none. */
+  def storeTotals(t: Tables): String =
+    s"""SELECT COUNT(*), COALESCE(SUM(item_bytes), 0), COUNT(*) FILTER (WHERE item_key = ?),
+       |  COALESCE(SUM(item_bytes) FILTER (WHERE item_key = ?), 0)
+       |FROM ${t.storeItems} WHERE namespace_id = ?""".stripMargin
+
+  def putStoreItem(t: Tables): String =
+    s"""INSERT INTO ${t.storeItems} (namespace_id, item_key, tenant_key, namespace, value_json, item_bytes, updated_at)
+       |VALUES (?, ?, ?, ?, ?, ?, ?)
+       |ON CONFLICT (namespace_id, item_key) DO UPDATE SET
+       |  value_json = excluded.value_json, item_bytes = excluded.item_bytes, updated_at = excluded.updated_at""".stripMargin
+
+  def removeStoreItem(t: Tables): String =
+    s"DELETE FROM ${t.storeItems} WHERE namespace_id = ? AND item_key = ?"

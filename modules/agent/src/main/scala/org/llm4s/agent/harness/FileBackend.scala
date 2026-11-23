@@ -297,7 +297,7 @@ object BackendRefused:
     case other                                   => ToolOutcome.Fatal(other)
 
 /** Shared text rules: UTF-8 only, and how content splits into lines. */
-private[harness] object Text:
+private[llm4s] object Text:
 
   /** Why `content` is not text a backend accepts, if it is not. */
   def binaryReason(content: String): Option[String] =

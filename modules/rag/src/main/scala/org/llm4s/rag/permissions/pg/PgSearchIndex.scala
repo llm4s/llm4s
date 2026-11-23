@@ -260,7 +260,7 @@ final class PgSearchIndex private (
     chunks: Seq[ChunkWithEmbedding],
     metadata: Map[String, String],
     readableBy: Set[PrincipalId]
-  ): Result[Int] =
+  ): Result[Seq[String]] =
     for {
       // Verify collection exists and is a leaf
       collectionOpt <- _collections.get(collectionPath)
@@ -289,7 +289,7 @@ final class PgSearchIndex private (
     chunks: Seq[ChunkWithEmbedding],
     metadata: Map[String, String],
     readableBy: Set[PrincipalId]
-  ): Result[Int] = Try {
+  ): Result[Seq[String]] = Try {
     withConnection { conn =>
       Using.resource(new AutoCloseable {
         private val original = conn.getAutoCommit
@@ -317,7 +317,7 @@ final class PgSearchIndex private (
               chunks.foreach { chunk =>
                 // Include collectionId in chunk ID to prevent cross-collection overwrites
                 // when the same documentId is ingested into multiple collections
-                val chunkId = s"coll-$collectionId-$documentId-chunk-${chunk.chunkIndex}"
+                val chunkId = PgSearchIndex.chunkId(collectionId, documentId, chunk.chunkIndex)
                 val chunkMetadata =
                   metadata ++ chunk.metadata + ("docId" -> documentId) + ("chunkIndex" -> chunk.chunkIndex.toString)
 
@@ -333,7 +333,7 @@ final class PgSearchIndex private (
               stmt.executeBatch()
             }
 
-            chunks.size
+            chunks.map(chunk => PgSearchIndex.chunkId(collectionId, documentId, chunk.chunkIndex))
           }.flatMap(v => Try(conn.commit()).map(_ => v))
 
         attempt.recoverWith { case e: Exception =>
@@ -532,6 +532,13 @@ object PgSearchIndex {
    * this expression, so the two must stay identical for the index to be used.
    */
   private[pg] val ContentTsVector = s"to_tsvector('$TextSearchConfig', coalesce(content, ''))"
+
+  /**
+   * The id a chunk is stored under. It includes the collection id, so the same document id ingested into two
+   * collections does not overwrite the other's chunks.
+   */
+  private[pg] def chunkId(collectionId: Int, documentId: String, chunkIndex: Int): String =
+    s"coll-$collectionId-$documentId-chunk-$chunkIndex"
 
   /**
    * Create a new PgSearchIndex with the given configuration.
