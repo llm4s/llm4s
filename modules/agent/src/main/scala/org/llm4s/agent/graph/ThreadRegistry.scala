@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Experimental
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
@@ -20,10 +20,11 @@ import java.time.Instant
  *    would continue it. [[Checkpointer.incompleteThreads]] lists these, oldest first.
  *  - `Suspended`, `Completed`, `Failed`: no live claim holds the thread, and its latest checkpoint has that status.
  */
-@Experimental
+@Stable
 enum ThreadStatus:
   case Idle, Running, Suspended, Failed, Completed, Deleted
 
+@Stable
 object ThreadStatus:
 
   /**
@@ -50,7 +51,7 @@ object ThreadStatus:
  * `A-Z a-z 0-9 _ . : / -`, and each value at most [[ThreadMetadata.MaxValueLength]] characters, none of them a control
  * character.
  */
-@Experimental
+@Stable
 final case class ThreadMetadata private (entries: Map[String, String]):
 
   /** Whether this holds every entry of `filter`: the metadata equality [[ThreadQuery]] filters by. */
@@ -61,6 +62,7 @@ final case class ThreadMetadata private (entries: Map[String, String]):
   /** As a JSON object, key by key: how a store keeps it. */
   def toJson: ujson.Obj = ujson.Obj.from(entries.toSeq.sortBy(_._1).map((k, v) => k -> ujson.Str(v)))
 
+@Stable
 object ThreadMetadata:
   val MaxEntries: Int     = 32
   val MaxKeyLength: Int   = 64
@@ -113,7 +115,7 @@ object ThreadMetadata:
  * starts after ([[ThreadQuery.after]], [[Checkpointer.incompleteThreads]]). It names a position, not a thread, so it
  * stays valid when that thread changes or is deleted.
  */
-@Experimental
+@Stable
 final case class ThreadCursor(updatedAt: Instant, threadId: ThreadId)
 
 /**
@@ -126,7 +128,7 @@ final case class ThreadCursor(updatedAt: Instant, threadId: ThreadId)
  *  - `metadata`: only threads whose metadata holds every one of these entries ([[ThreadMetadata.matches]]);
  *  - `updatedSince`: only threads the store changed at or after this instant, by its clock.
  */
-@Experimental
+@Stable
 final case class ThreadQuery private (
   tenantId: Option[TenantId],
   status: Option[ThreadStatus],
@@ -154,6 +156,7 @@ final case class ThreadQuery private (
     thread.tenantId == tenantId && status.forall(_ == thread.status) && agent.forall(_ == thread.agent) &&
       thread.metadata.matches(metadata) && updatedSince.forall(at => !thread.updatedAt.isBefore(at))
 
+@Stable
 object ThreadQuery:
 
   /** The most threads one page holds, so every call stays within the store's bound. */
@@ -185,7 +188,7 @@ object ThreadQuery:
  * [[ThreadStatus]], its latest checkpoint's id, its metadata, and `updatedAt` - when the store last committed a
  * checkpoint or metadata to it, by the store's clock (never a producer's timestamp).
  */
-@Experimental
+@Stable
 final case class ThreadSummary private (
   threadId: ThreadId,
   tenantId: Option[TenantId],
@@ -207,6 +210,7 @@ final case class ThreadSummary private (
   /** Where a page ending at this thread ended. */
   def cursor: ThreadCursor = ThreadCursor(updatedAt, threadId)
 
+@Stable
 object ThreadSummary:
   def apply(
     threadId: ThreadId,
@@ -222,9 +226,10 @@ object ThreadSummary:
  * A page of the thread registry and where the next one starts: `next` is the last thread's cursor when more threads
  * match, and `None` on the last page.
  */
-@Experimental
+@Stable
 final case class ThreadPage(threads: Vector[ThreadSummary], next: Option[ThreadCursor])
 
+@Stable
 object ThreadPage:
 
   /**

@@ -1,5 +1,7 @@
 package org.llm4s.agent.guardrails
 
+import org.llm4s.annotation.Stable
+
 /**
  * Actions to take when a guardrail detects a violation.
  *
@@ -18,6 +20,7 @@ package org.llm4s.agent.guardrails
  * val lengthGuard = LengthCheck(1, 10000, onFail = GuardrailAction.Warn)
  * }}}
  */
+@Stable
 sealed trait GuardrailAction
 
 object GuardrailAction {
@@ -54,81 +57,4 @@ object GuardrailAction {
    * Default action for security-sensitive guardrails.
    */
   val default: GuardrailAction = Block
-}
-
-/**
- * Result of a guardrail check with action handling.
- *
- * Extends the basic Result type with information about what action
- * was taken and any warnings that were logged.
- */
-sealed trait GuardrailResult[+A]
-
-object GuardrailResult {
-
-  /**
-   * Validation passed without any issues.
-   */
-  final case class Passed[A](value: A) extends GuardrailResult[A]
-
-  /**
-   * Violation was automatically fixed.
-   *
-   * @param original The original value before fix
-   * @param fixed The fixed value
-   * @param violations Description of what was fixed
-   */
-  final case class Fixed[A](
-    original: A,
-    fixed: A,
-    violations: Seq[String]
-  ) extends GuardrailResult[A]
-
-  /**
-   * Violation was detected but processing continues (warn mode).
-   *
-   * @param value The original value (unchanged)
-   * @param violations Description of the violations
-   */
-  final case class Warned[A](
-    value: A,
-    violations: Seq[String]
-  ) extends GuardrailResult[A]
-
-  /**
-   * Validation failed and processing should stop.
-   *
-   * @param violations Description of the violations that caused the block
-   */
-  final case class Blocked(violations: Seq[String]) extends GuardrailResult[Nothing]
-
-  /**
-   * Get the value if available (Passed, Fixed, or Warned).
-   */
-  implicit class GuardrailResultOps[A](private val result: GuardrailResult[A]) extends AnyVal {
-    def toOption: Option[A] = result match {
-      case Passed(v)      => Some(v)
-      case Fixed(_, v, _) => Some(v)
-      case Warned(v, _)   => Some(v)
-      case Blocked(_)     => None
-    }
-
-    def getOrElse[B >: A](default: => B): B = toOption.getOrElse(default)
-
-    def isSuccess: Boolean = result match {
-      case Blocked(_) => false
-      case _          => true
-    }
-
-    def isBlocked: Boolean = result match {
-      case Blocked(_) => true
-      case _          => false
-    }
-
-    def hasWarnings: Boolean = result match {
-      case Warned(_, _)    => true
-      case Fixed(_, _, vs) => vs.nonEmpty
-      case _               => false
-    }
-  }
 }

@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Experimental
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
@@ -18,7 +18,7 @@ import scala.concurrent.duration.FiniteDuration
  * `apply` and the `with*` setters throw `IllegalArgumentException` for a non-positive `tombstoneAge` or a `batchSize`
  * outside 1 to [[SweepPolicy.MaxBatchSize]]; [[SweepPolicy.of]] returns a `ValidationError`.
  */
-@Experimental
+@Stable
 final case class SweepPolicy private (
   retention: RetentionPolicy,
   tombstoneAge: Option[FiniteDuration],
@@ -29,6 +29,7 @@ final case class SweepPolicy private (
   def withTombstoneAge(age: Option[FiniteDuration]): SweepPolicy = SweepPolicy(retention, age, batchSize)
   def withBatchSize(n: Int): SweepPolicy                         = SweepPolicy(retention, tombstoneAge, n)
 
+@Stable
 object SweepPolicy:
 
   /** The threads one call visits unless a policy says otherwise. */
@@ -80,10 +81,11 @@ object SweepPolicy:
  * store's transactions and locks, so it may read another store, such as a run queue in the same database; it is
  * called with at most [[SweepPolicy.batchSize]] threads.
  */
-@Experimental
+@Stable
 trait SweepGuard:
   def retained(threads: Vector[ThreadId]): Result[Map[ThreadId, Set[RunId]]]
 
+@Stable
 object SweepGuard:
 
   /** Nothing is protected. */
@@ -97,13 +99,14 @@ object SweepGuard:
  * (`reclaimed`), and the cursor of the next page - the last thread visited - when more threads follow, `None` once
  * the sweep has visited the whole store.
  */
-@Experimental
+@Stable
 final case class SweepPage private (examined: Int, reclaimed: Int, next: Option[ThreadId]):
   def withExamined(n: Int): SweepPage          = SweepPage(n, reclaimed, next)
   def withReclaimed(n: Int): SweepPage         = SweepPage(examined, n, next)
   def withNext(t: ThreadId): SweepPage         = SweepPage(examined, reclaimed, Some(t))
   def withNext(t: Option[ThreadId]): SweepPage = SweepPage(examined, reclaimed, t)
 
+@Stable
 object SweepPage:
   def apply(examined: Int, reclaimed: Int, next: Option[ThreadId]): SweepPage =
     new SweepPage(examined, reclaimed, next)

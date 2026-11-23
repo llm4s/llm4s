@@ -433,7 +433,7 @@ class GraphRuntimeSpec
       def checkpoint(threadId: ThreadId, checkpointId: String)            = store.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)              = store.prune(threadId, policy)
     }
-    GraphRuntime(tampered(_.copy(nodeId = "summarize")))
+    GraphRuntime(tampered(_.withNodeId("summarize")))
       .recover(thread, f.graph, RunConfig().withRunId(RunId("run-2")))
       .awaited
       .left
@@ -441,7 +441,7 @@ class GraphRuntimeSpec
       .message should
       include("names node 'summarize', not 'worker'")
     val logWrite = EncodedOperation.Update("log", VersionedJson(1, ujson.Str("forged")))
-    GraphRuntime(tampered(w => w.copy(operations = w.operations :+ logWrite)))
+    GraphRuntime(tampered(w => w.withOperations(w.operations :+ logWrite)))
       .recover(thread, f.graph, RunConfig().withRunId(RunId("run-3")))
       .awaited
       .left
@@ -477,7 +477,7 @@ class GraphRuntimeSpec
     // the listener has tampered with everything it was handed
     tamperer.caughtUp(store)
     def customs =
-      store.eventsAfter(thread, 0L, 100).value.collect { case EventRecord(_, _, _, _, _, _, _, _, c: RunEvent.Custom) =>
+      store.eventsAfter(thread, 0L, 100).value.map(_.event).collect { case c: RunEvent.Custom =>
         c.payload
       }
     customs shouldBe Vector(ujson.Obj("item" -> "a"))
@@ -497,9 +497,9 @@ class GraphRuntimeSpec
         .value
         .failed
       error match {
-        case GraphError.CheckpointWriteFailed(_, cause, Some(runError)) =>
-          cause.message should include("simulated crash")
-          runError shouldBe a[GraphError.NodeFailed]
+        case e: GraphError.CheckpointWriteFailed if e.runError.isDefined =>
+          e.cause.message should include("simulated crash")
+          e.runError.foreach(_ shouldBe a[GraphError.NodeFailed])
         case other => fail(s"$durability: $other")
       }
     }

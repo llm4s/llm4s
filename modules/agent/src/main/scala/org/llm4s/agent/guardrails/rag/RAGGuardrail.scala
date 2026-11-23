@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.rag
 
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.types.Result
 
@@ -13,6 +14,7 @@ import org.llm4s.types.Result
  * @param retrievedChunks The chunks retrieved from the vector store
  * @param sources Optional source identifiers for each chunk (file paths, URLs, etc.)
  */
+@Experimental
 final case class RAGContext(
   query: String,
   retrievedChunks: Seq[String],
@@ -36,6 +38,7 @@ final case class RAGContext(
   def hasCompleteSources: Boolean = sources.size >= retrievedChunks.size
 }
 
+@Experimental
 object RAGContext {
 
   /**
@@ -82,6 +85,7 @@ object RAGContext {
  * @see ContextRelevanceGuardrail for chunk relevance checks
  * @see SourceAttributionGuardrail for citation verification
  */
+@Experimental
 trait RAGGuardrail extends OutputGuardrail {
 
   /**
@@ -116,6 +120,7 @@ trait RAGGuardrail extends OutputGuardrail {
 /**
  * Companion object with utilities for RAG guardrails.
  */
+@Experimental
 object RAGGuardrail {
 
   /**

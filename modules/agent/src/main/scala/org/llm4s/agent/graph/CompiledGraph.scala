@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.types.{ Result, TryOps }
 
@@ -39,6 +40,7 @@ import scala.util.Try
  * only for arrivals that parked continuations can make keeps the run suspended; a join waiting for
  * an arrival nothing can make fails the run with [[GraphError.UnsatisfiedJoin]].
  */
+@Stable
 final class CompiledGraph[I, O] private[graph] (
   val id: String,
   val version: String,
@@ -708,7 +710,7 @@ final class CompiledGraph[I, O] private[graph] (
         // a task a breakpoint holds before it runs did nothing: recovery holds it again, or runs it
         case TaskResult.Held =>
           throw new IllegalStateException(s"task ${task.id.value} is held at a breakpoint and has no pending write")
-    }.toResult.map(write => write.copy(resultDigest = Some(CompiledGraph.writeDigest(write))))
+    }.toResult.map(write => write.withResultDigest(Some(CompiledGraph.writeDigest(write))))
 
   /** A route as data, its payloads encoded with the target node's input codec. */
   private def encodeRoute(route: Route): EncodedRoute = route match
@@ -1185,7 +1187,7 @@ private[graph] object CompiledGraph:
    * that does not hash is never the same work as another.
    */
   def writeDigest(write: PendingWrite): String =
-    Try(KeyDigest.canonical(upickle.default.writeJs(write.copy(checkpointId = "", resultDigest = None))))
+    Try(KeyDigest.canonical(upickle.default.writeJs(write.withCheckpointId("").withResultDigest(None))))
       .fold(
         _ => s"unencodable:${java.util.UUID.randomUUID()}",
         canonical => KeyDigest.of(Seq("llm4s-result-v1", canonical))

@@ -20,7 +20,7 @@ import scala.util.{ Failure, Success, Try }
  * `CancelledError`, restoring the interrupt flag at once, which each enclosing wrapper sees as its
  * `next`'s result. The innermost function is not guarded; its caller guards it.
  */
-final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
+final private[agent] class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
   import MiddlewareStack.{ Hooked, ToolChainResult, WriteCheck }
 
   /** Every middleware's contributed tools, in stack order. */
@@ -130,7 +130,7 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
           case None => GraphError.MiddlewareFailed(m.id.value, thrown)
         ToolOutcome.Fatal(error)
 
-object MiddlewareStack:
+private[agent] object MiddlewareStack:
 
   /** What a boundary hook's stack returned: the threaded text, and each middleware's update in the order the hooks ran. */
   final private[graph] case class Hooked(text: String, updates: Vector[(MiddlewareId, StateUpdate)]):

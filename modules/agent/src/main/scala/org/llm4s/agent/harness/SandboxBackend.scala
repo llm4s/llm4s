@@ -13,6 +13,7 @@ import scala.concurrent.duration.FiniteDuration
 @Experimental
 final case class ExecResult private (exitCode: Int, stdout: String, stderr: String, truncated: Boolean)
 
+@Experimental
 object ExecResult:
   def apply(exitCode: Int, stdout: String, stderr: String, truncated: Boolean = false): ExecResult =
     new ExecResult(exitCode, stdout, stderr, truncated)
@@ -127,6 +128,7 @@ final class SandboxBackend private (
     val (err, cutErr) = Text.cutEncoded(result.stderr, maxOutputBytes.toLong)
     ExecResult(result.exitCode, out, err, result.truncated || cutOut || cutErr)
 
+@Experimental
 object SandboxBackend:
 
   /** 32 KiB: the default bound on each stream. */

@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.LLMError
 import upickle.default.ReadWriter
 
@@ -8,6 +9,7 @@ import upickle.default.ReadWriter
  * join activations and any parked continuations. Advance it with [[CompiledGraph.step]]; answer
  * its interrupts with [[CompiledGraph.resume]]; persist it with [[CompiledGraph.snapshot]].
  */
+@Stable
 final class Execution private[graph] (
   private[graph] val owner: GraphOwner,
   val superstep: Int,
@@ -179,6 +181,7 @@ final private[graph] case class DynamicActivation(
   def isComplete: Boolean = expected.forall(arrived.contains)
 
 /** The outcome of a run. */
+@Stable
 enum RunResult[+O]:
   case Completed[+O](state: ThreadState, output: O, supersteps: Int) extends RunResult[O]
 
@@ -194,6 +197,7 @@ enum RunResult[+O]:
   case Failed(state: ThreadState, error: LLMError) extends RunResult[Nothing]
 
 /** The outcome of one superstep. */
+@Stable
 enum Step[+O]:
   case Next(execution: Execution)     extends Step[Nothing]
   case Done[+O](result: RunResult[O]) extends Step[O]
@@ -208,7 +212,8 @@ enum Step[+O]:
  * [[CompiledGraph.restore]] compares with its own; `None` on a snapshot written before shapes were recorded (#1934),
  * which is matched by `fingerprint` alone.
  */
-final case class GraphSnapshot(
+@Stable
+final case class GraphSnapshot private (
   graphId: String,
   graphVersion: String,
   fingerprint: String,
@@ -221,6 +226,18 @@ final case class GraphSnapshot(
   paused: Boolean,
   shape: Option[GraphShape] = None
 ) derives ReadWriter:
+  def withGraphId(value: String): GraphSnapshot                                   = copy(graphId = value)
+  def withGraphVersion(value: String): GraphSnapshot                              = copy(graphVersion = value)
+  def withFingerprint(value: String): GraphSnapshot                               = copy(fingerprint = value)
+  def withSuperstep(value: Int): GraphSnapshot                                    = copy(superstep = value)
+  def withState(value: Map[String, VersionedJson]): GraphSnapshot                 = copy(state = value)
+  def withFrontier(value: Vector[GraphSnapshot.PendingTask]): GraphSnapshot       = copy(frontier = value)
+  def withStaticJoins(value: Vector[GraphSnapshot.StaticArrivals]): GraphSnapshot = copy(staticJoins = value)
+  def withDynamicJoins(value: Vector[GraphSnapshot.Activation]): GraphSnapshot    = copy(dynamicJoins = value)
+  def withParked(value: Vector[GraphSnapshot.ParkedContinuation]): GraphSnapshot  = copy(parked = value)
+  def withPaused(value: Boolean): GraphSnapshot                                   = copy(paused = value)
+  def withShape(value: GraphShape): GraphSnapshot                                 = copy(shape = Some(value))
+  def withShape(value: Option[GraphShape]): GraphSnapshot                         = copy(shape = value)
 
   /**
    * The tasks that can still run from this snapshot, by id: the frontier's, and the tasks the
@@ -235,12 +252,40 @@ final case class GraphSnapshot(
       .toSet ++ parked.map(p => p.originTask -> p.originLineage)
 
 object GraphSnapshot:
+
+  def apply(
+    graphId: String,
+    graphVersion: String,
+    fingerprint: String,
+    superstep: Int,
+    state: Map[String, VersionedJson],
+    frontier: Vector[GraphSnapshot.PendingTask],
+    staticJoins: Vector[GraphSnapshot.StaticArrivals],
+    dynamicJoins: Vector[GraphSnapshot.Activation],
+    parked: Vector[GraphSnapshot.ParkedContinuation],
+    paused: Boolean,
+    shape: Option[GraphShape] = None
+  ): GraphSnapshot =
+    new GraphSnapshot(
+      graphId,
+      graphVersion,
+      fingerprint,
+      superstep,
+      state,
+      frontier,
+      staticJoins,
+      dynamicJoins,
+      parked,
+      paused,
+      shape
+    )
+
   /**
    * A ready task. `passedBefore` marks the continuation of a task an `interruptBefore` breakpoint held;
    * `replay` holds the routes of a task an `interruptAfter` breakpoint held, whose continuation runs
    * nothing (its `input` is then JSON `null`).
    */
-  final case class PendingTask(
+  final case class PendingTask private (
     taskId: String,
     nodeId: String,
     input: VersionedJson,
@@ -256,19 +301,80 @@ object GraphSnapshot:
     originLineage: Option[String] = None,
     /** A resume continuation's digest of its question and answer (design §4.24); computed from `input` if absent. */
     resumeDigest: Option[String] = None
-  ) derives ReadWriter
+  ) derives ReadWriter:
+    def withTaskId(value: String): PendingTask                       = copy(taskId = value)
+    def withNodeId(value: String): PendingTask                       = copy(nodeId = value)
+    def withInput(value: VersionedJson): PendingTask                 = copy(input = value)
+    def withJoinId(value: String): PendingTask                       = copy(joinId = Some(value))
+    def withJoinId(value: Option[String]): PendingTask               = copy(joinId = value)
+    def withFanOutTask(value: String): PendingTask                   = copy(fanOutTask = Some(value))
+    def withFanOutTask(value: Option[String]): PendingTask           = copy(fanOutTask = value)
+    def withOriginTask(value: String): PendingTask                   = copy(originTask = Some(value))
+    def withOriginTask(value: Option[String]): PendingTask           = copy(originTask = value)
+    def withOriginNode(value: String): PendingTask                   = copy(originNode = Some(value))
+    def withOriginNode(value: Option[String]): PendingTask           = copy(originNode = value)
+    def withPassedBefore(value: Boolean): PendingTask                = copy(passedBefore = value)
+    def withReplay(value: Vector[EncodedRoute]): PendingTask         = copy(replay = Some(value))
+    def withReplay(value: Option[Vector[EncodedRoute]]): PendingTask = copy(replay = value)
+    def withLineage(value: String): PendingTask                      = copy(lineage = value)
+    def withOriginLineage(value: String): PendingTask                = copy(originLineage = Some(value))
+    def withOriginLineage(value: Option[String]): PendingTask        = copy(originLineage = value)
+    def withResumeDigest(value: String): PendingTask                 = copy(resumeDigest = Some(value))
+    def withResumeDigest(value: Option[String]): PendingTask         = copy(resumeDigest = value)
+
+  object PendingTask:
+    def apply(
+      taskId: String,
+      nodeId: String,
+      input: VersionedJson,
+      joinId: Option[String],
+      fanOutTask: Option[String],
+      originTask: Option[String],
+      originNode: Option[String],
+      passedBefore: Boolean = false,
+      replay: Option[Vector[EncodedRoute]] = None,
+      lineage: String = "",
+      originLineage: Option[String] = None,
+      resumeDigest: Option[String] = None
+    ): PendingTask =
+      new PendingTask(
+        taskId,
+        nodeId,
+        input,
+        joinId,
+        fanOutTask,
+        originTask,
+        originNode,
+        passedBefore,
+        replay,
+        lineage,
+        originLineage,
+        resumeDigest
+      )
 
   final case class StaticArrivals(joinId: String, arrived: Vector[String]) derives ReadWriter
 
-  final case class Activation(joinId: String, fanOutTask: String, expected: Vector[String], arrived: Vector[String])
-      derives ReadWriter
+  final case class Activation private (
+    joinId: String,
+    fanOutTask: String,
+    expected: Vector[String],
+    arrived: Vector[String]
+  ) derives ReadWriter:
+    def withJoinId(value: String): Activation           = copy(joinId = value)
+    def withFanOutTask(value: String): Activation       = copy(fanOutTask = value)
+    def withExpected(value: Vector[String]): Activation = copy(expected = value)
+    def withArrived(value: Vector[String]): Activation  = copy(arrived = value)
+
+  object Activation:
+    def apply(joinId: String, fanOutTask: String, expected: Vector[String], arrived: Vector[String]): Activation =
+      new Activation(joinId, fanOutTask, expected, arrived)
 
   /**
    * A parked continuation. For a task a static breakpoint holds, `breakpoint` is its phase and
    * `resumeNode` the held task's node: before it runs, `question` is the task's input; after it ran,
    * `question` is JSON `null` and `heldRoutes` are the routes it returned.
    */
-  final case class ParkedContinuation(
+  final case class ParkedContinuation private (
     interruptId: String,
     resumeNode: String,
     question: VersionedJson,
@@ -284,7 +390,54 @@ object GraphSnapshot:
     questionDigest: Option[String] = None,
     /** A task held before it ran: its resume digest, if it is a resume continuation. */
     resumeDigest: Option[String] = None
-  ) derives ReadWriter
+  ) derives ReadWriter:
+    def withInterruptId(value: String): ParkedContinuation                 = copy(interruptId = value)
+    def withResumeNode(value: String): ParkedContinuation                  = copy(resumeNode = value)
+    def withQuestion(value: VersionedJson): ParkedContinuation             = copy(question = value)
+    def withOriginTask(value: String): ParkedContinuation                  = copy(originTask = value)
+    def withOriginNode(value: String): ParkedContinuation                  = copy(originNode = value)
+    def withJoinId(value: String): ParkedContinuation                      = copy(joinId = Some(value))
+    def withJoinId(value: Option[String]): ParkedContinuation              = copy(joinId = value)
+    def withFanOutTask(value: String): ParkedContinuation                  = copy(fanOutTask = Some(value))
+    def withFanOutTask(value: Option[String]): ParkedContinuation          = copy(fanOutTask = value)
+    def withBreakpoint(value: BreakpointPhase): ParkedContinuation         = copy(breakpoint = Some(value))
+    def withBreakpoint(value: Option[BreakpointPhase]): ParkedContinuation = copy(breakpoint = value)
+    def withHeldRoutes(value: Vector[EncodedRoute]): ParkedContinuation    = copy(heldRoutes = value)
+    def withOriginLineage(value: String): ParkedContinuation               = copy(originLineage = value)
+    def withQuestionDigest(value: String): ParkedContinuation              = copy(questionDigest = Some(value))
+    def withQuestionDigest(value: Option[String]): ParkedContinuation      = copy(questionDigest = value)
+    def withResumeDigest(value: String): ParkedContinuation                = copy(resumeDigest = Some(value))
+    def withResumeDigest(value: Option[String]): ParkedContinuation        = copy(resumeDigest = value)
+
+  object ParkedContinuation:
+    def apply(
+      interruptId: String,
+      resumeNode: String,
+      question: VersionedJson,
+      originTask: String,
+      originNode: String,
+      joinId: Option[String],
+      fanOutTask: Option[String],
+      breakpoint: Option[BreakpointPhase] = None,
+      heldRoutes: Vector[EncodedRoute] = Vector.empty,
+      originLineage: String = "",
+      questionDigest: Option[String] = None,
+      resumeDigest: Option[String] = None
+    ): ParkedContinuation =
+      new ParkedContinuation(
+        interruptId,
+        resumeNode,
+        question,
+        originTask,
+        originNode,
+        joinId,
+        fanOutTask,
+        breakpoint,
+        heldRoutes,
+        originLineage,
+        questionDigest,
+        resumeDigest
+      )
 
 /** A result decoded from a pending write, with the digest its successors' lineage is computed from. */
 final private[graph] case class ReusedWrite(result: TaskResult, digest: String)

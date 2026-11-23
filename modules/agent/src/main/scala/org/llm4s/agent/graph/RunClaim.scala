@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
@@ -29,6 +30,7 @@ import scala.concurrent.duration.*
  * can expire the claim early, and another run can take the thread over while this one still runs: it
  * then stops at its next refused renewal or commit, and fencing keeps every write safe.
  */
+@Stable
 final case class RunClaim private (
   threadId: ThreadId,
   holder: RunId,
@@ -66,6 +68,7 @@ object RunClaim:
  * `IllegalArgumentException` for a non-positive `ttl`; [[ClaimRequest.of]] returns it as a
  * `ValidationError`.
  */
+@Stable
 final case class ClaimRequest private (holder: RunId, tenantId: Option[TenantId], ttl: FiniteDuration):
   def withHolder(h: RunId): ClaimRequest              = ClaimRequest(h, tenantId, ttl)
   def withTenantId(t: TenantId): ClaimRequest         = ClaimRequest(holder, Some(t), ttl)
@@ -114,6 +117,7 @@ object ClaimRequest:
  * `apply` and the `with*` setters throw `IllegalArgumentException` otherwise, and [[ClaimPolicy.of]]
  * returns a `ValidationError`.
  */
+@Stable
 final case class ClaimPolicy private (ttl: FiniteDuration, renewEvery: FiniteDuration, label: Option[String]):
   def withTtl(t: FiniteDuration): ClaimPolicy        = ClaimPolicy(t, renewEvery, label)
   def withRenewEvery(r: FiniteDuration): ClaimPolicy = ClaimPolicy(ttl, r, label)

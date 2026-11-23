@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.types.{ Result, TryOps }
 
@@ -123,6 +124,7 @@ import scala.util.Try
  * has replaced it: expiry only lets another run take the thread over. `CheckpointerContract` in
  * `llm4s-agent-testkit` is the executable form of this contract; a store should pass it.
  */
+@Stable
 trait Checkpointer:
 
   /**
@@ -411,6 +413,7 @@ object Checkpointer:
  * call holds across I/O or a wait, so each returns at once - [[awaitEventsAfter]] within its `timeout` - and it
  * needs no timeout of its own to meet the contract's bound.
  */
+@Stable
 final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Checkpointer:
 
   /** For callers that cannot use default arguments (Java, Kotlin): claims expire by the system clock. */
@@ -495,6 +498,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
    * entries learn of their thread's deletion in [[deleteThread]], under the lock the delete is made under, and
    * [[prune]] keeps the newest checkpoint of every run an open entry of it recorded.
    */
+  @Experimental
   val runQueue: org.llm4s.agent.service.InMemoryRunQueue =
     new org.llm4s.agent.service.InMemoryRunQueue(
       clock,

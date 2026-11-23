@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.delegation.{ DelegatedQuestion, DelegatedRequest }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
@@ -20,6 +21,7 @@ import scala.util.control.Exception.ultimately
  * A running agent turn, from [[Agent.start]]: cancel it, or await its [[AgentResult]]. The turn runs
  * on its own thread, owned by the runtime, whether or not anyone awaits it.
  */
+@Stable
 final class AgentRun private[agent] (
   handle: RunHandle[TurnOutput],
   loop: ToolLoop,

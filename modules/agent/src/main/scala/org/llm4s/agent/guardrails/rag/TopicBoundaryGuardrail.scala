@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.rag
 
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.agent.guardrails.{ GuardrailAction, InputGuardrail }
 import org.llm4s.error.ValidationError
@@ -21,7 +22,7 @@ import scala.util.Try
  * @param detectedTopic The actual topic detected in the query
  * @param explanation Brief explanation of the evaluation
  */
-final case class TopicBoundaryResult(
+final private[guardrails] case class TopicBoundaryResult(
   isOnTopic: Boolean,
   relevanceScore: Double,
   matchedTopics: Seq[String],
@@ -69,6 +70,7 @@ final case class TopicBoundaryResult(
  * @param threshold Minimum relevance score to be considered on-topic (default: 0.5)
  * @param onFail Action to take when query is off-topic (default: Block)
  */
+@Experimental
 class TopicBoundaryGuardrail(
   val llmClient: LLMClient,
   val allowedTopics: Seq[String],
@@ -255,6 +257,7 @@ class TopicBoundaryGuardrail(
   }
 }
 
+@Experimental
 object TopicBoundaryGuardrail {
 
   /**

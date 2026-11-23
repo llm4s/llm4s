@@ -264,7 +264,7 @@ class EncryptingCheckpointerSpec extends AnyFlatSpec with Matchers with EitherVa
 
     val state = kept.snapshot.state
     val swapped =
-      kept.withSnapshot(kept.snapshot.copy(state = Map("messages" -> state("notes"), "notes" -> state("messages"))))
+      kept.withSnapshot(kept.snapshot.withState(Map("messages" -> state("notes"), "notes" -> state("messages"))))
     EncryptingCheckpointer(planted(swapped), keys).latest(on).left.value shouldBe a[EncryptionError.DecryptionFailed]
   }
 
@@ -279,7 +279,7 @@ class EncryptingCheckpointerSpec extends AnyFlatSpec with Matchers with EitherVa
 
     def withMessages(envelope: String): Checkpointer = {
       val state = kept.snapshot.state.updated("messages", VersionedJson(1, ujson.Obj(PayloadCipher.Marker -> envelope)))
-      EncryptingCheckpointer(planted(kept.withSnapshot(kept.snapshot.copy(state = state))), keys)
+      EncryptingCheckpointer(planted(kept.withSnapshot(kept.snapshot.withState(state))), keys)
     }
 
     // the last character of the tag, changed
@@ -408,7 +408,7 @@ class EncryptingCheckpointerSpec extends AnyFlatSpec with Matchers with EitherVa
     val on        = thread()
     val token     = claimed(store, on)
     val lookalike = ujson.Obj(PayloadCipher.Marker -> "1.k1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-    val draft     = custom().copy(event = RunEvent.Custom("app.note", 1, lookalike))
+    val draft     = custom().withEvent(RunEvent.Custom("app.note", 1, lookalike))
     store.commit(on, Commit(token, Some(checkpoint(on)), events = Vector(draft))).value
     store.eventsAfter(on, 0L, 10).value.map(_.event) shouldBe Vector(draft.event)
   }

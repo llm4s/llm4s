@@ -447,7 +447,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
         Commit(
           token,
           Some(checkpoint(thread, "c1", None, token).withCreatedAt(hourAgo)),
-          events = Vector(event("old").copy(timestamp = hourAgo))
+          events = Vector(event("old").withTimestamp(hourAgo))
         )
       )
       .value: Unit
@@ -470,7 +470,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
         Commit(
           token,
           Some(checkpoint(thread, "c2", Some("c1"), token).withCreatedAt(start.minusSeconds(86400))),
-          events = Vector(event("new").copy(timestamp = start.minusSeconds(86400)))
+          events = Vector(event("new").withTimestamp(start.minusSeconds(86400)))
         )
       )
       .value: Unit
@@ -850,8 +850,8 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       ) Thread.sleep(5)
 
       second.recover(thread, workers.graph).left.value match {
-        case GraphError.ThreadBusy(_, _, holder) => holder shouldBe GraphError.BusyHolder.Run(RunId("first"))
-        case other                               => fail(s"not ThreadBusy: $other")
+        case busy: GraphError.ThreadBusy => busy.holder shouldBe GraphError.BusyHolder.Run(RunId("first"))
+        case other                       => fail(s"not ThreadBusy: $other")
       }
       clock.advance(claims.ttl)
       second.recover(thread, workers.graph, RunConfig().withRunId(RunId("second"))).value.await().value match {
@@ -1008,7 +1008,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
         Commit(
           token,
           Some(checkpoint(thread, id, parent, token)),
-          events = Vector(event(id).copy(checkpointId = Some(id)))
+          events = Vector(event(id).withCheckpointId(Some(id)))
         )
       ) match
         case Left(e)  => failure.add(e.message): Unit

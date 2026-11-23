@@ -52,6 +52,7 @@ final case class DelegationConfig private (
       case Nil      => Right(this)
       case problems => Left(ValidationError("delegation", problems))
 
+@Experimental
 object DelegationConfig:
   def apply(
     maxConcurrentChildren: Int = 4,

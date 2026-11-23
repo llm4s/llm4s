@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import upickle.default.ReadWriter
 
 import java.nio.charset.StandardCharsets
@@ -13,7 +14,8 @@ import scala.util.Try
  * in declaration order, which is the order joins released in one superstep schedule their targets.
  * [[CompiledGraph.restore]] says which differences keep a snapshot restorable.
  */
-final case class GraphShape(
+@Stable
+final case class GraphShape private (
   entry: String,
   nodes: Vector[String],
   edges: Map[String, Vector[String]],
@@ -21,9 +23,28 @@ final case class GraphShape(
   dynamicJoins: Map[String, String],
   resumes: Vector[String],
   keys: Vector[String]
-) derives ReadWriter
+) derives ReadWriter:
+  def withEntry(value: String): GraphShape                              = copy(entry = value)
+  def withNodes(value: Vector[String]): GraphShape                      = copy(nodes = value)
+  def withEdges(value: Map[String, Vector[String]]): GraphShape         = copy(edges = value)
+  def withStaticJoins(value: Vector[GraphShape.StaticJoin]): GraphShape = copy(staticJoins = value)
+  def withDynamicJoins(value: Map[String, String]): GraphShape          = copy(dynamicJoins = value)
+  def withResumes(value: Vector[String]): GraphShape                    = copy(resumes = value)
+  def withKeys(value: Vector[String]): GraphShape                       = copy(keys = value)
 
 object GraphShape:
+
+  def apply(
+    entry: String,
+    nodes: Vector[String],
+    edges: Map[String, Vector[String]],
+    staticJoins: Vector[GraphShape.StaticJoin],
+    dynamicJoins: Map[String, String],
+    resumes: Vector[String],
+    keys: Vector[String]
+  ): GraphShape =
+    new GraphShape(entry, nodes, edges, staticJoins, dynamicJoins, resumes, keys)
+
   /** A static join: its target runs once every one of `sources` (sorted) has completed. */
   final case class StaticJoin(id: String, sources: Vector[String], target: String) derives ReadWriter
 

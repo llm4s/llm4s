@@ -275,17 +275,13 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     val saved = g.snapshot(parked).value
     saved.parked.head.questionDigest shouldBe defined
     val question = saved.parked.head.question
-    g.restore(saved.copy(parked = saved.parked.map(_.copy(questionDigest = None))))
-      .value
-      .parked
-      .head
-      .questionDigest shouldBe
+    g.restore(saved.withParked(saved.parked.map(_.withQuestionDigest(None)))).value.parked.head.questionDigest shouldBe
       Some(CompiledGraph.questionDigest(Some(question)))
     val resumed = g.resume(parked, Map(InterruptId("0.0") -> review.answer("yes"))).value
     val pending = g.snapshot(resumed).value
     pending.frontier.head.resumeDigest shouldBe resumed.frontier.head.resumeDigest
     pending.frontier.head.resumeDigest shouldBe defined
-    g.restore(pending.copy(frontier = pending.frontier.map(_.copy(resumeDigest = None))))
+    g.restore(pending.withFrontier(pending.frontier.map(_.withResumeDigest(None))))
       .value
       .frontier
       .head
@@ -352,13 +348,13 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     def problem(write: PendingWrite) = graph.decodeWrite(write).left.value.message
     val base                         = PendingWrite("cp", "0.0", "start", Vector.empty, Vector.empty)
 
-    problem(base.copy(operations = Vector(EncodedOperation.Remove("ghost")))) should include(
+    problem(base.withOperations(Vector(EncodedOperation.Remove("ghost")))) should include(
       "unknown state key 'ghost'"
     )
-    problem(base.copy(routes = Vector(EncodedRoute.Goto("ghost")))) should include("unknown node 'ghost'")
-    problem(base.copy(routes = Vector(EncodedRoute.FanOut("ghost", "start", Vector.empty)))) should
+    problem(base.withRoutes(Vector(EncodedRoute.Goto("ghost")))) should include("unknown node 'ghost'")
+    problem(base.withRoutes(Vector(EncodedRoute.FanOut("ghost", "start", Vector.empty)))) should
       include("unknown dynamic join 'ghost'")
-    problem(base.copy(routes = Vector(EncodedRoute.Send("start", VersionedJson(1, ujson.Arr(1)))))) should
+    problem(base.withRoutes(Vector(EncodedRoute.Send("start", VersionedJson(1, ujson.Arr(1)))))) should
       include("input for 'start' does not decode")
   }
 

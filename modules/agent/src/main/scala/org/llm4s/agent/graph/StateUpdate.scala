@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.types.Result
 
 /**
@@ -10,6 +11,7 @@ import org.llm4s.types.Result
  * an operation-valued key both operations apply. Updates from different tasks in one superstep
  * are never combined; the scheduler applies them task by task in frontier order.
  */
+@Stable
 final class StateUpdate private[graph] (private[graph] val operations: Vector[StateOperation]):
 
   /** Appends an update operation for `key`. */

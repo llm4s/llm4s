@@ -46,6 +46,7 @@ final case class Inheritance private (
   def withBudget(b: TaskBudget): Inheritance  = copy(budget = b)
   def withDelegate(may: Boolean): Inheritance = copy(delegate = may)
 
+@Experimental
 object Inheritance:
   def apply(
     tools: ToolGrant = ToolGrant.None,
@@ -122,6 +123,7 @@ final case class TaskBudget private (
     ).flatten
     if set.isEmpty then "TaskBudget(the parent's)" else set.mkString("TaskBudget(", ", ", ")")
 
+@Experimental
 object TaskBudget:
   def apply(
     maxSteps: Option[Int] = None,

@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.error.{ LLMError, ValidationError }
 import org.llm4s.types.Result
@@ -18,6 +19,7 @@ import scala.annotation.tailrec
  * @param mode How to combine validation results
  * @tparam A The type of value to validate
  */
+@Stable
 class CompositeGuardrail[A](
   guardrails: Seq[Guardrail[A]],
   mode: ValidationMode = ValidationMode.All

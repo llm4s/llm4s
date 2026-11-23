@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.agent.delegation.{ ChildRef, DelegatedAnswers, DelegatedRequest, DelegationPlan }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.toolloop.{ AgentInput, SettledTurn, ToolLoop, TurnOutput }
@@ -37,6 +38,7 @@ import org.slf4j.LoggerFactory
  * thread's state shows it (`recover` then reports `NothingToRecover`). If the lease merely lapsed, with
  * no successor, `recover` continues the interrupted turn.
  */
+@Stable
 final class Agent private[agent] (
   val id: AgentId,
   val loop: ToolLoop,
@@ -46,12 +48,15 @@ final class Agent private[agent] (
   interruptAfter: Set[NodeId] = Set.empty,
   retention: Option[RetentionPolicy] = None,
   childRetention: Option[Int] = None,
+  delegationPlan: DelegationPlan = DelegationPlan.empty
+):
+
   /**
    * What this agent's subagents run with (design 4.45): for each, its tools (own or granted), middleware, ancestors'
    * permission rules, model, budget and whether it may delegate. Empty for an agent without subagents.
    */
-  val delegation: DelegationPlan = DelegationPlan.empty
-):
+  @Experimental
+  def delegation: DelegationPlan = delegationPlan
 
   /**
    * `config` with the agent's static breakpoints ([[AgentBuilder.withInterruptBefore]],

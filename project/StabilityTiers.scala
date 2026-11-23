@@ -404,6 +404,151 @@ object StabilityTiers {
    * cannot leave its entry behind.
    */
   val GrowthExempted: Seq[GrowthExempt] = Seq(
+    GrowthExempt("org.llm4s.agent.PruningStrategy.Custom", "a strategy case holding only its pruning function"),
+    GrowthExempt("org.llm4s.agent.PruningStrategy.RecentTurnsOnly", "a strategy case holding only its turn count"),
+    GrowthExempt("org.llm4s.agent.delegation.DelegatedRequest", "exactly a child run and the interrupt it waits on"),
+    GrowthExempt("org.llm4s.agent.graph.EncodedSuspension", "exactly the node to resume and its encoded question"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.Cancelled",
+      "an error case holding only its thread id and last checkpoint"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.CheckpointConflict",
+      "an error case holding only its thread id, expected and actual"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.CheckpointNotFound",
+      "an error case holding only its thread id and checkpoint id"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.ChildThread",
+      "an error case holding only its thread id and parent"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.ClaimLost",
+      "an error case holding only its thread id, token and current"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.CommitTimedOut",
+      "an error case holding only its thread id and after"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.DeadlineExceeded",
+      "an error case holding only its thread id and last checkpoint"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.EffectReplayRefused",
+      "an error case holding only its operation and reason"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.GraphError.ForeignExecution", "an error case holding only its graph id"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.IncompleteRun",
+      "an error case holding only its thread id and checkpoint id"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.InvalidCommit",
+      "an error case holding only its thread id and reason"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.InvalidGraph",
+      "an error case holding only its graph id and problems"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.InvalidResume",
+      "an error case holding only its graph id and problems"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.InvalidRoute",
+      "an error case holding only its node id, task id and reason"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.MiddlewareFailed",
+      "an error case holding only its middleware and cause"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.NodeFailed",
+      "an error case holding only its node id, task id and cause"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.GraphError.NotSuspended", "an error case holding only its thread id"),
+    GrowthExempt("org.llm4s.agent.graph.GraphError.NothingToRecover", "an error case holding only its thread id"),
+    GrowthExempt("org.llm4s.agent.graph.GraphError.OutputInvalid", "an error case holding only its errors"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.PendingInterrupts",
+      "an error case holding only its thread id and interrupts"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.ReplayUnavailable",
+      "an error case holding only its thread id and earliest seq"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.RestoreRejected",
+      "an error case holding only its graph id and problems"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.GraphError.RunCrashed", "an error case holding only its thread id and cause"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.StaleClaim",
+      "an error case holding only its thread id, token and current"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.StateUpdateFailed",
+      "an error case holding only its key id and cause"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.GraphError.SuperstepLimitExceeded", "an error case holding only its limit"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.TenantMismatch",
+      "an error case holding only its thread id and requested"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.ThreadDeleted",
+      "an error case holding only its thread id, after seq and first seq"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.GraphError.ThreadDeleting", "an error case holding only its thread id"),
+    GrowthExempt("org.llm4s.agent.graph.GraphError.ThreadExists", "an error case holding only its thread id"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.UndeclaredWrite",
+      "an error case holding only its node id, task id and key id"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.GraphError.UnknownStateKey", "an error case holding only its key id"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.UnsatisfiedJoin",
+      "an error case holding only its join id and missing"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.UnsupportedCheckpointFormat",
+      "an error case holding only its found and supported"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphError.UnsupportedStoreSchema",
+      "an error case holding only its store, found and supported"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.GraphShape.StaticJoin", "exactly a static join's id, sources and target"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.GraphSnapshot.StaticArrivals",
+      "exactly a static join and the sources that have arrived at it"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.Resumed", "exactly a question and its answer"),
+    GrowthExempt("org.llm4s.agent.graph.StoredCheckpoint", "exactly a checkpoint and the writes pending on it"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.ThreadCursor",
+      "a keyset cursor: exactly the two columns the thread registry orders by"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.ThreadPage", "exactly a page's threads and the cursor after them"),
+    GrowthExempt("org.llm4s.agent.graph.VersionedJson", "exactly a schema version and the JSON at that version"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.middleware.GuardrailBlocked",
+      "an error case holding only the guardrail's name and its reason"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.tool.ToolQuestion", "exactly the question's codec and the answer's"),
+    GrowthExempt("org.llm4s.agent.graph.tool.ToolResource", "exactly an operation and its target"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.toolloop.PriorValue",
+      "exactly a key's value before the turn and the fingerprint of what the turn last wrote"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.toolloop.StoredMessage", "exactly a message and its id"),
+    GrowthExempt(
+      "org.llm4s.agent.guardrails.patterns.PIIPatterns.PIIMatch",
+      "exactly the PII type, the matched text and its span"
+    ),
     GrowthExempt("org.llm4s.context.tokens.Token", "a single token id"),
     GrowthExempt(
       "org.llm4s.context.tokens.TokenizerAccuracy.Approximate",

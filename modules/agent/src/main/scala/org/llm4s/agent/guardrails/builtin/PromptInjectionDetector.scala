@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.guardrails.{ GuardrailAction, InputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
@@ -49,6 +50,7 @@ import scala.util.matching.Regex
  * @param sensitivity Detection sensitivity level
  * @param onFail Action to take when injection is detected (default: Block)
  */
+@Stable
 class PromptInjectionDetector(
   val patterns: Seq[InjectionPattern] = InjectionPattern.default,
   val sensitivity: InjectionSensitivity = InjectionSensitivity.High,
@@ -120,6 +122,7 @@ class PromptInjectionDetector(
  *
  * Higher sensitivity catches more attacks but may have more false positives.
  */
+@Stable
 sealed trait InjectionSensitivity {
   def name: String
   def threshold: Int // Minimum severity to trigger (1-3)
@@ -159,6 +162,7 @@ object InjectionSensitivity {
 /**
  * Categories of prompt injection attacks.
  */
+@Stable
 sealed trait InjectionCategory {
   def name: String
 }
@@ -182,23 +186,32 @@ object InjectionCategory {
  * @param category Type of injection attack
  * @param severity Severity level (1=low, 2=medium, 3=high)
  */
-final case class InjectionPattern(
+@Stable
+final case class InjectionPattern private (
   name: String,
   regex: Regex,
   category: InjectionCategory,
   severity: Int
-)
+) {
+  def withName(value: String): InjectionPattern                = copy(name = value)
+  def withRegex(value: Regex): InjectionPattern                = copy(regex = value)
+  def withCategory(value: InjectionCategory): InjectionPattern = copy(category = value)
+  def withSeverity(value: Int): InjectionPattern               = copy(severity = value)
+}
 
 /**
  * Match result from injection detection.
  */
-final case class InjectionMatch(
+final private[builtin] case class InjectionMatch(
   name: String,
   category: InjectionCategory,
   severity: Int
 )
 
 object InjectionPattern {
+
+  def apply(name: String, regex: Regex, category: InjectionCategory, severity: Int): InjectionPattern =
+    new InjectionPattern(name, regex, category, severity)
 
   import InjectionCategory._
 

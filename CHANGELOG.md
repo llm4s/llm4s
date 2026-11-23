@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- 36 `llm4s-agent` case classes (`ContextWindowConfig`, `Handoff`, the `AgentEvents` payloads, `EventRecord`, `GraphSnapshot`, `Command` and others) have a private constructor and `copy`: use `X(...)` and the `with*` setters. `GuardrailResult` is removed, and `MiddlewareStack`, `ToolLoop.results`/`queue` and nine other internal types are no longer public;
+  [migration](docs/reference/migration.md#llm4s-agent-types-are-tiered-and-growth-safe-2778).
 - `CompletionOptions.budgetTokens` and `withBudgetTokens`, and `ReasoningEffort.None`, are removed: use `thinking`
   (`Thinking.budget(n)`, `Thinking.Off`); Java's `budgetTokens` and `JReasoningEffort.NONE` likewise give way to
   `JThinking`. On OpenAI, `Thinking.Off` asks for the lowest effort where `None` sent none (RFC 0008, PR 4);
@@ -131,6 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
+- **Changed** `llm4s-agent` is tiered: every public top-level type is `@Stable` (the agent, graph, event, middleware and guardrail APIs) or `@Experimental` (harness, run queue and worker, encryption, subagent definition, permissions, the checkpointer SPI, the RAG guardrails, `assistant`), `sbt stabilityTierCheck` covers the module, and its Stable case classes are growth-safe
+  ([tiers](docs/reference/api-stability.md#tiers-in-the-code), [migration](docs/reference/migration.md#llm4s-agent-types-are-tiered-and-growth-safe-2778)) [#2778](https://github.com/llm4s/llm4s/issues/2778).
 - **Fixed** context pruning (`ContextWindowMiddleware`): `ContextWindowConfig.minRecentTurns`, which nothing read, keeps the last N turns whole under every strategy (default 1, the current turn), and `maxTokens` and `maxMessages` set together are both limits, as is `AdaptiveWindowing`'s window; `MiddleOut` fits `maxTokens`
   ([guide](docs/guide/context-window-pruning.md)) [#2728](https://github.com/llm4s/llm4s/issues/2728), [#2729](https://github.com/llm4s/llm4s/issues/2729).
 - **Added** checkpoint encryption at rest (`org.llm4s.agent.encryption`, experimental): `EncryptingCheckpointer`, `EncryptingRunQueue` and `EncryptingLongTermStore` wrap any store, its queue and its long-term store, sealing state, pending writes, custom events, effect outcomes, queued inputs and long-term items (`/memories/` files included) with AES-256-GCM under keys from an `EncryptionKeySource` (`StaticKeySource`: per-tenant keys, rotation by key id)

@@ -7,7 +7,8 @@ import scalafix.v1._
  * docs/reference/migration.md), in one run: [[CopyToWithSetters_1_0]], [[CredentialsToSecret]],
  * [[FromValuesKeyFirst]], [[CompletionCreatedToInstant]], [[PositionalPatternsGainFields]], [[DuplicateApisRemoved]],
  * the [[RemovedApis_1_0]] lints, and for the breaks since 0.6.0 [[ThinkingReplacesBudgetTokens]],
- * [[FinishReasonTyped]], [[CompressionRuleTransform]] and the [[AgentStatusGainsTruncated]] lint. It grows as the 1.0 breaks land (#1281).
+ * [[FinishReasonTyped]], [[CompressionRuleTransform]], [[AgentCopyToWithSetters]] and the [[AgentStatusGainsTruncated]]
+ * lint. It grows as the 1.0 breaks land (#1281).
  *
  * It assumes code compiled against 0.5.x: `CredentialsToSecret`, `CompletionCreatedToInstant` and
  * `FromValuesKeyFirst` would rewrite 0.6.x code a second time. Code on 0.6.x runs the rules for the breaks since 0.6.0
@@ -29,6 +30,7 @@ class Llm4sMigrate_1_0 extends SemanticRule("Llm4sMigrate_1_0") {
     new ThinkingReplacesBudgetTokens,
     new FinishReasonTyped,
     new CompressionRuleTransform,
+    new AgentCopyToWithSetters,
     new AgentStatusGainsTruncated
   )
 

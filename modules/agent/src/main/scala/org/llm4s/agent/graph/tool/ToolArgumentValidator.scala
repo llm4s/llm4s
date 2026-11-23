@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph.tool
 
+import org.llm4s.annotation.Stable
+
 /**
  * Checks raw tool-call arguments against the JSON Schema a tool sent to the provider.
  *
@@ -13,6 +15,7 @@ package org.llm4s.agent.graph.tool
  * is not an object), is reported by [[unsupported]] so a tool set can refuse it when it is built,
  * rather than silently skip the constraint on every call.
  */
+@Stable
 trait ToolArgumentValidator {
 
   /**

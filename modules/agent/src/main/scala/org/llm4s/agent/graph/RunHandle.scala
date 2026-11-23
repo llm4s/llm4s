@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.CancelledError
 import org.llm4s.types.Result
 
@@ -12,6 +13,7 @@ import scala.util.Using
 import scala.util.control.Exception.allCatch
 
 /** Where a run is; see [[RunHandle.status]]. */
+@Stable
 enum RunStatus:
   case Running, Completed, Suspended, Failed
 
@@ -20,6 +22,7 @@ enum RunStatus:
  * Its thread was claimed before the handle was returned, and the run executes on a virtual thread
  * owned by the runtime, named `llm4s-run-<threadId>`, which holds the thread until it exits.
  */
+@Stable
 trait RunHandle[O]:
   def threadId: ThreadId
   def runId: RunId

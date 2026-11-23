@@ -896,10 +896,10 @@ class DelegationSpec
     val sent = client.calls.size
 
     val delegated = Vector(
-      ref.copy(toolCallId = Some(ToolCallId("c1")), depth = 1),
-      ref.copy(toolCallId = Some(ToolCallId("c1"))),
-      ref.copy(depth = 1),
-      ref.copy(agent = org.llm4s.agent.AgentId.unsafe("other"))
+      ref.withToolCallId(Some(ToolCallId("c1"))).withDepth(1),
+      ref.withToolCallId(Some(ToolCallId("c1"))),
+      ref.withDepth(1),
+      ref.withAgent(org.llm4s.agent.AgentId.unsafe("other"))
     )
     delegated.foreach { child =>
       bound.resume(child, Map(approve(InterruptId("any")))).left.value shouldBe a[ValidationError]
