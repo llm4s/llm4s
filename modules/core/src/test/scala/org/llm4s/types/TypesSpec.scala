@@ -21,21 +21,6 @@ import scala.util.{ Failure, Success, Try }
 class TypesSpec extends AnyFlatSpec with Matchers {
 
   // ==========================================================================
-  // FilePath Tests
-  // ==========================================================================
-
-  "FilePath" should "extract extension" in {
-    FilePath("/path/to/file.txt").extension shouldBe Some("txt")
-    FilePath("/path/to/file.scala").extension shouldBe Some("scala")
-    FilePath("/path/to/file").extension shouldBe None
-    FilePath("/path/to/.hidden").extension shouldBe Some("hidden")
-  }
-
-  it should "convert to string via toString" in {
-    FilePath("/path/to/file.txt").toString shouldBe "/path/to/file.txt"
-  }
-
-  // ==========================================================================
   // HeadroomPercent Tests
   // ==========================================================================
 

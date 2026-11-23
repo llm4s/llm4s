@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `AssistantError`, `SessionId`, `FilePath` and `DirectoryPath` move from `llm4s-core` to `llm4s-agent`, packages
+  unchanged; `AssistantError` is an `LLMError` and formats as one;
+  [migration](docs/reference/migration.md#assistanterror-and-the-assistants-newtypes-live-in-llm4s-agent-2820).
 - `APIError` and `SystemError` are removed (a provider's error response is a `ServiceError`), with the
   `LLMError.processingFailed` / `invalidImageInput` / `apiCallFailed` shims, `LLMError.correlationId` and `show`,
   `RecoverableError.maxRetries` and the factories nothing called; `OptimisticLockFailure.memoryId` is `recordId`;
@@ -131,6 +134,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
+- **Changed** `AssistantError` and the newtypes `SessionId`, `FilePath` and `DirectoryPath`, which only the interactive
+  assistant uses, live in `llm4s-agent` (same packages). `AssistantError` is an `LLMError` (non-recoverable) and each
+  case has an explicit fixed-arity `unapply`
+  ([migration](docs/reference/migration.md#assistanterror-and-the-assistants-newtypes-live-in-llm4s-agent-2820)) [#2820](https://github.com/llm4s/llm4s/issues/2820).
 - **Removed** from `org.llm4s.error`: `APIError` (`llm4s-image`'s vision clients return a `ServiceError` with the status, and
   the HTTP client's own error when the call got no answer), `SystemError`, the `LLMError` shims, `correlationId`, `show`,
   `maxRetries` and the factories nothing called. **Changed**: every error has an explicit fixed-arity `unapply`, and

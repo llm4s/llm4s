@@ -905,7 +905,10 @@ object StabilityTiers {
       "org.llm4s.toolapi.ToolParameterError.TypeMismatch",
       "an error case naming only the parameter, its expected type and the type received"
     ),
-    GrowthExempt("org.llm4s.trace.TracingMode.Named", "a TracingMode case holding only the backend name")
+    GrowthExempt("org.llm4s.trace.TracingMode.Named", "a TracingMode case holding only the backend name"),
+    GrowthExempt("org.llm4s.types.DirectoryPath", "a newtype over one String"),
+    GrowthExempt("org.llm4s.types.FilePath", "a newtype over one String"),
+    GrowthExempt("org.llm4s.types.SessionId", "a newtype over one String")
   )
 
   private val PackageLine = "^package\\s+([\\w.]+)$".r

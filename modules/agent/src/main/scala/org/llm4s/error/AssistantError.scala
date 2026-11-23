@@ -4,32 +4,21 @@ import org.llm4s.annotation.Stable
 import org.llm4s.types.{ SessionId, FilePath }
 
 /**
- * Assistant-specific error types with rich context and formatting.
+ * The errors of the interactive assistant (`org.llm4s.assistant`): console I/O, session files and commands.
+ *
+ * An `AssistantError` is an [[LLMError]], so an assistant operation's `Either[AssistantError, A]` is a
+ * `Result[A]`. None is retried by the library: each is a [[NonRecoverableError]].
  *
  * == Growth safety ==
  * Each case is a `final case class` with a private constructor and `copy`:
  * build one with its companion `apply` (or a smart constructor below) and
  * change a field with its `with*` setter (an `Option` field's setter takes the
  * value or an `Option`), so a field can be added later without breaking binary
- * compatibility.
+ * compatibility. Each case's `unapply` is explicit, with a fixed arity: `message`, then the fields in
+ * constructor order.
  */
 @Stable
-sealed abstract class AssistantError extends Product with Serializable {
-
-  /** Human-readable error message */
-  def message: String
-
-  /** Additional context information */
-  def context: Map[String, String] = Map.empty
-
-  /** Converts to a formatted error message with context */
-  def formatted: String = {
-    val contextStr = if (context.nonEmpty) {
-      s" [${context.map { case (k, v) => s"$k: $v" }.mkString(", ")}]"
-    } else ""
-    s"${getClass.getSimpleName}: $message$contextStr"
-  }
-}
+sealed abstract class AssistantError extends LLMError with NonRecoverableError
 
 object AssistantError {
 
@@ -53,6 +42,10 @@ object AssistantError {
   object IOError {
     def apply(message: String, operation: String, cause: Option[Throwable] = None): IOError =
       new IOError(message, operation, cause)
+
+    /** Extracts the message, the operation and the cause; it always matches. */
+    def unapply(error: IOError): Some[(String, String, Option[Throwable])] =
+      Some((error.message, error.operation, error.cause))
   }
 
   final case class EOFError private (
@@ -72,6 +65,9 @@ object AssistantError {
   object EOFError {
     def apply(message: String, operation: String = "read"): EOFError =
       new EOFError(message, operation)
+
+    /** Extracts the message and the operation; it always matches. */
+    def unapply(error: EOFError): Some[(String, String)] = Some((error.message, error.operation))
   }
 
   final case class DisplayError private (
@@ -93,6 +89,10 @@ object AssistantError {
   object DisplayError {
     def apply(message: String, displayType: String, cause: Option[Throwable] = None): DisplayError =
       new DisplayError(message, displayType, cause)
+
+    /** Extracts the message, the display type and the cause; it always matches. */
+    def unapply(error: DisplayError): Some[(String, String, Option[Throwable])] =
+      Some((error.message, error.displayType, error.cause))
   }
 
   // Session management errors
@@ -128,6 +128,12 @@ object AssistantError {
       llmCause: Option[LLMError] = None
     ): SessionError =
       new SessionError(message, sessionId, operation, cause, llmCause)
+
+    /** Extracts the message, the session id, the operation, the cause and the LLM cause; it always matches. */
+    def unapply(
+      error: SessionError
+    ): Some[(String, SessionId, String, Option[Throwable], Option[LLMError])] =
+      Some((error.message, error.sessionId, error.operation, error.cause, error.llmCause))
   }
 
   final case class FileError private (
@@ -152,6 +158,10 @@ object AssistantError {
   object FileError {
     def apply(message: String, path: FilePath, operation: String, cause: Option[Throwable] = None): FileError =
       new FileError(message, path, operation, cause)
+
+    /** Extracts the message, the path, the operation and the cause; it always matches. */
+    def unapply(error: FileError): Some[(String, FilePath, String, Option[Throwable])] =
+      Some((error.message, error.path, error.operation, error.cause))
   }
 
   final case class SerializationError private (
@@ -181,6 +191,10 @@ object AssistantError {
       cause: Option[Throwable] = None
     ): SerializationError =
       new SerializationError(message, dataType, operation, cause)
+
+    /** Extracts the message, the data type, the operation and the cause; it always matches. */
+    def unapply(error: SerializationError): Some[(String, String, String, Option[Throwable])] =
+      Some((error.message, error.dataType, error.operation, error.cause))
   }
 
   // Command parsing errors
@@ -211,6 +225,10 @@ object AssistantError {
       cause: Option[Throwable] = None
     ): CommandParseError =
       new CommandParseError(message, command, parseOperation, cause)
+
+    /** Extracts the message, the command, the parse operation and the cause; it always matches. */
+    def unapply(error: CommandParseError): Some[(String, String, String, Option[Throwable])] =
+      Some((error.message, error.command, error.parseOperation, error.cause))
   }
 
   // Smart constructors with rich context
@@ -245,7 +263,4 @@ object AssistantError {
 
   def unknownCommand(command: String): AssistantError =
     CommandParseError(s"Unknown command: $command. Type /help for available commands.", command, "parse-command")
-
-  // No need for LLMError wrapper - just use the core LLMError directly in Either types
-  // The calling code can use Either[LLMError, T] when dealing with core LLM operations
 }

@@ -52,7 +52,28 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
 [`ProviderRegistry` lookups accept aliases](#providerregistry-lookups-accept-aliases-2812),
 [`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
-and the [error hierarchy cleanup](#error-hierarchy-cleanup-2819).
+the [error hierarchy cleanup](#error-hierarchy-cleanup-2819),
+and [`AssistantError` and the assistant's newtypes live in `llm4s-agent`](#assistanterror-and-the-assistants-newtypes-live-in-llm4s-agent-2820).
+
+## `AssistantError` and the assistant's newtypes live in `llm4s-agent` (#2820)
+
+`org.llm4s.error.AssistantError` and `org.llm4s.types.SessionId`, `FilePath` and `DirectoryPath` are used only by the
+interactive assistant (`org.llm4s.assistant`), so they moved with it to `llm4s-agent`. Their packages are unchanged:
+code that depends on `llm4s-agent` compiles as it is, and code that used them with `llm4s-core` alone adds
+`llm4s-agent`. The three newtypes are no longer members of the `org.llm4s.types` package object, so their binary
+names lose `package$` (`org.llm4s.types.SessionId`); recompile.
+
+`AssistantError` is now an `LLMError`, a `NonRecoverableError`, so an `Either[AssistantError, A]` is a `Result[A]`
+and an assistant failure can be returned where an `LLMError` is expected. Two things follow:
+
+| Before | After |
+|---|---|
+| `error.formatted` is `SessionError: msg [component: session-manager, sessionId: s1]` | `LLMError`'s format: `SessionError: msg[component=session-manager,sessionId=s1]` |
+| a match on `LLMError` could not see an `AssistantError` | `case e: AssistantError` matches; `LLMError.isRecoverable(e)` is `false` |
+
+Each case's extractor is now written out, with the arity it had: patterns such as
+`case AssistantError.FileError(message, path, operation, cause)` compile unchanged, and a field added later will be
+read by name.
 
 ## Error hierarchy cleanup (#2819)
 

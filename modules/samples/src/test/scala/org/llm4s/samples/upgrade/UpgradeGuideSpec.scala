@@ -159,7 +159,7 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     )
     removed.filter(name => Try(Class.forName(name)).isSuccess) shouldBe empty
     // The newtypes that stayed resolve under the same naming, so the check above is not vacuous.
-    Try(Class.forName("org.llm4s.types.package$SessionId")).isSuccess shouldBe true
+    Try(Class.forName("org.llm4s.types.package$TraceId")).isSuccess shouldBe true
 
     AgentId.of("assistant").isRight shouldBe true
   }

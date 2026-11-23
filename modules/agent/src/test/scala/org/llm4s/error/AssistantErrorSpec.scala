@@ -287,8 +287,8 @@ class AssistantErrorSpec extends AnyFlatSpec with Matchers {
 
     formatted should include("SessionError")
     formatted should include("Load failed")
-    formatted should include("component: session-manager")
-    formatted should include("sessionId: test")
+    formatted should include("component=session-manager")
+    formatted should include("sessionId=test")
   }
 
   it should "format without context when empty" in {
@@ -320,5 +320,41 @@ class AssistantErrorSpec extends AnyFlatSpec with Matchers {
 
     error shouldBe a[Product]
     error shouldBe a[Serializable]
+  }
+
+  it should "be an LLMError that is not recoverable, so an assistant failure is a Result's Left" in {
+    val error: AssistantError                       = AssistantError.sessionNotFound(SessionId("s1"))
+    val result: org.llm4s.types.Result[Unit]        = Left(error)
+    val asAssistant: Either[AssistantError, String] = Left(error)
+    val widened: org.llm4s.types.Result[String]     = asAssistant
+
+    result.left.map(_.message) shouldBe Left("Session not found: s1")
+    widened shouldBe Left(error)
+    error shouldBe a[NonRecoverableError]
+    LLMError.isRecoverable(error) shouldBe false
+    error.formatted shouldBe "SessionError: Session not found: s1[component=session-manager,sessionId=s1,operation=load]"
+  }
+
+  it should "bind message then the fields in constructor order in each extractor" in {
+    val cause = new RuntimeException("boom")
+    (AssistantError.IOError("m", "read", Some(cause)): AssistantError) match {
+      case AssistantError.IOError(message, operation, c) => (message, operation, c) shouldBe ("m", "read", Some(cause))
+      case other                                         => fail(s"unexpected $other")
+    }
+    AssistantError.EOFError("m") match {
+      case AssistantError.EOFError(message, operation) => (message, operation) shouldBe ("m", "read")
+    }
+    AssistantError.SessionError("m", SessionId("s"), "load") match {
+      case AssistantError.SessionError(message, id, operation, c, llm) =>
+        (message, id, operation, c, llm) shouldBe ("m", SessionId("s"), "load", None, None)
+    }
+    AssistantError.FileError("m", FilePath("/f"), "read") match {
+      case AssistantError.FileError(message, path, operation, c) =>
+        (message, path, operation, c) shouldBe ("m", FilePath("/f"), "read", None)
+    }
+    AssistantError.CommandParseError("m", "/x", "parse-command") match {
+      case AssistantError.CommandParseError(message, command, op, c) =>
+        (message, command, op, c) shouldBe ("m", "/x", "parse-command", None)
+    }
   }
 }

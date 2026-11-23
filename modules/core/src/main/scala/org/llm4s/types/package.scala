@@ -4,7 +4,6 @@ import org.llm4s.annotation.Stable
 import org.llm4s.core.safety.{ DefaultErrorMapper, ErrorMapper, Safety }
 import org.llm4s.types.TryOps
 import org.llm4s.types.{ AsyncResult, Result }
-import upickle.default.{ readwriter, ReadWriter => RW }
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.Try
@@ -21,46 +20,10 @@ package object types {
   type AsyncResult[+A] = Future[Result[A]]
 
   /**
-   * Type-safe wrapper for session IDs
-   */
-  final case class SessionId(value: String) extends AnyVal {
-    override def toString: String = value
-  }
-
-  object SessionId {
-    implicit val rw: RW[SessionId] =
-      readwriter[String].bimap[SessionId](_.value, SessionId.apply)
-  }
-
-  /**
    * Type-safe wrapper for trace IDs for distributed tracing
    */
   final case class TraceId(value: String) extends AnyVal {
     override def toString: String = value
-  }
-
-  /** Type-safe wrapper for file paths */
-  final case class FilePath(value: String) extends AnyVal {
-    override def toString: String = value
-    def extension: Option[String] = {
-      val lastDot = value.lastIndexOf('.')
-      if (lastDot >= 0) Some(value.substring(lastDot + 1)) else None
-    }
-  }
-
-  object FilePath {
-    implicit val rw: RW[FilePath] =
-      readwriter[String].bimap[FilePath](_.value, FilePath.apply)
-  }
-
-  /** Type-safe wrapper for directory paths */
-  final case class DirectoryPath(value: String) extends AnyVal {
-    override def toString: String = value
-  }
-
-  object DirectoryPath {
-    implicit val rw: RW[DirectoryPath] =
-      readwriter[String].bimap[DirectoryPath](_.value, DirectoryPath.apply)
   }
 
   // Context Management Types (for conversation context handling)
