@@ -52,62 +52,33 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
 [`ProviderRegistry` lookups accept aliases](#providerregistry-lookups-accept-aliases-2812),
 [`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
-the [error hierarchy cleanup](#error-hierarchy-cleanup-2819),
-and [`AssistantError` and the assistant's newtypes live in `llm4s-agent`](#assistanterror-and-the-assistants-newtypes-live-in-llm4s-agent-2820).
+and [context trimming fails when nothing fits, and externalizes only into a store](#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817).
 
-## `AssistantError` and the assistant's newtypes live in `llm4s-agent` (#2820)
+## Context trimming fails when nothing fits, and externalizes only into a store (#2817)
 
-`org.llm4s.error.AssistantError` and `org.llm4s.types.SessionId`, `FilePath` and `DirectoryPath` are used only by the
-interactive assistant (`org.llm4s.assistant`), so they moved with it to `llm4s-agent`. Their packages are unchanged:
-code that depends on `llm4s-agent` compiles as it is, and code that used them with `llm4s-core` alone adds
-`llm4s-agent`. The three newtypes are no longer members of the `org.llm4s.types` package object, so their binary
-names lose `package$` (`org.llm4s.types.SessionId`); recompile.
+In `org.llm4s.context` (`llm4s-core`). No signature changes; behaviour you may rely on changed.
 
-`AssistantError` is now an `LLMError`, a `NonRecoverableError`, so an `Either[AssistantError, A]` is a `Result[A]`
-and an assistant failure can be returned where an `LLMError` is expected. Two things follow:
+**`TokenWindow.trimToBudget`** pins every leading `SystemMessage` (the system prompt and all `[HISTORY_SUMMARY]`
+digests, where it pinned only a digest in first position), and drops older history in whole turns: an assistant
+message with tool calls goes with its tool results, so the window never starts at an orphaned `ToolMessage`. It now
+returns `Left(ContextError)` when the pinned messages exceed the budget, or when not even the newest turn fits beside
+them, where it returned `Right` with an empty or pinned-only conversation. `ContextManager.manageContext` returns that
+`Left` from its last step; raise the budget, or trim the system prompt. To leave room for the turns,
+`ContextManager` now caps the history digests at half the budget left after headroom (and at
+`summaryTokenTarget`, as before).
 
-| Before | After |
-|---|---|
-| `error.formatted` is `SessionError: msg [component: session-manager, sessionId: s1]` | `LLMError`'s format: `SessionError: msg[component=session-manager,sessionId=s1]` |
-| a match on `LLMError` could not see an `AssistantError` | `case e: AssistantError` matches; `LLMError.isRecoverable(e)` is `false` |
+**Externalization needs a store.** With `artifactStore = None` (the default of `DeterministicCompressor.compressToCap`
+and of `ContextManager`), tool output over 8 KB used to become an `[EXTERNALIZED: key ...]` pointer into a store
+created and discarded on each call. Now nothing is externalized: the output is compressed inline. Pass
+`Some(store)` to keep externalizing and be able to `retrieve` the content.
 
-Each case's extractor is now written out, with the arity it had: patterns such as
-`case AssistantError.FileError(message, path, operation, cause)` compile unchanged, and a field added later will be
-read by name.
+**Binary content** is a `data:...;base64,` URI, a run of 256 or more base64 characters, or text that is mostly
+control characters; mentioning the word "base64" no longer counts. It is never cut: over 2 KB it is externalized
+whole when there is a store, and otherwise left as it is. The `[BINARY CONTENT - n bytes - externalized: id]`
+placeholder, which stored nothing, is gone.
 
-## Error hierarchy cleanup (#2819)
-
-`org.llm4s.error` loses the types, constructors and members nothing in the library used. The `RemovedApis_1_0`
-Scalafix rule reports each use of `APIError`, `SystemError` and the three `LLMError` constructors.
-
-| Before | After |
-|---|---|
-| `APIError(provider, message, Some(status))` | `ServiceError(status, provider, message)`; read `httpStatus`, an `Int`, where you read `statusCode` |
-| `APIError(provider, message)` | the error that fits: a `ServiceError` with the status, a `NetworkError`, or an error of your own |
-| `SystemError(message, cause)` | an error of your own: `final case class MyError(message: String) extends LLMError with RecoverableError` |
-| `LLMError.processingFailed(operation, message, cause)` | `ProcessingError(operation, message, cause)` |
-| `LLMError.invalidImageInput(field, value, reason)` | `InvalidInputError(field, value, reason)` |
-| `LLMError.apiCallFailed(provider, message, Some(status))` | `ServiceError(status, provider, message)` |
-| `LLMError.show(error)` | `error.formatted` |
-| `error.correlationId` | read your own MDC key; `formatted` no longer appends `[correlationId=...]` |
-| `error.maxRetries` (`RecoverableError`) | your retry policy's own limit: nothing read it |
-| `AuthenticationError.unauthorized(p)`, `invalidApiKey(p)` | `AuthenticationError(p, "Unauthorized access", "401")`, `AuthenticationError(p, "Invalid API key", "INVALID_KEY")` |
-| `TokenizerError.notFound(id)` | `TokenizerError.notAvailable(id)` |
-| `ExecutionError(...).withExitCode(1)` | `ExecutionError(message, operation, exitCode = Some(1))` |
-| `OptimisticLockFailure#memoryId`, context key `memoryId` | `recordId` |
-| `case SimpleError(message, _)` | `case SimpleError(message)` |
-| `ProcessingError(operation, message = "...")` (named argument) | `details = "..."`; also on `audioResample`, `audioConversion`, `audioTrimming` and `audioValidation` |
-| `ContextError.tokenBudgetExceeded`, `invalidTrimming`, `conversationTooLarge`, `emptyResult`, `semanticBlockingFailed`, `summarizationFailed`, `compressionFailed`, `contextPipelineFailed`, `toolCompressionFailed`, `externalizationFailed`, `tokenEstimationFailed` | removed: nothing raised them. Define an error of your own |
-
-`llm4s-image`'s vision clients (`OpenAIVisionClient`, `AnthropicVisionClient`, `GeminiVisionClient`) returned an
-`APIError`. A non-2xx answer, or a 200 with no usable text, is now a `ServiceError` carrying the status, so a 4xx is
-no longer retried by `RetryPolicy`; a call that got no answer is the HTTP client's own `NetworkError` or
-`TimeoutError`, where the OpenAI and Anthropic clients wrapped it; and a request that cannot be serialized is a
-`ProcessingError`.
-
-Every error now has an explicit `unapply` of fixed arity: `message`, then its fields in constructor order. No
-pattern changes but `SimpleError`'s. A field added later is read by name, as `RateLimitError.origin` and
-`ContentFilteredError.usage` already are.
+**User messages** are no longer rewritten by `CompressionRule.compressRepetitiveContent` or
+`removeRedundantPhrases`, as `DeterministicCompressor`'s Scaladoc always promised.
 
 ## `StreamingAccumulator` takes the model and reports usage one way (#2813)
 

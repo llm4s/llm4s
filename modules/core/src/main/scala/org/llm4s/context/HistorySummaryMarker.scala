@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.model.{ Message, SystemMessage }
 /**
  * The `[HISTORY_SUMMARY]` marker [[HistoryCompressor]] writes at the start of a digest message's
  * content, and the one place that recognises and builds it. `HistoryCompressor`, `LLMCompressor`
- * and `TokenWindow` each need to tell a digest message apart from every other kind; they share
+ * each need to tell a digest message apart from every other kind; they share
  * this check instead of each writing their own, so a digest is recognised the same way everywhere.
  * A digest is a [[SystemMessage]] whose content starts with the marker - never a message of
  * another type whose text merely mentions it.

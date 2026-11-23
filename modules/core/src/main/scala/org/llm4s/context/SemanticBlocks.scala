@@ -168,9 +168,9 @@ final case class SemanticBlock private (
         val userContent = messages.headOption.map(_.content.take(50)).getOrElse("No content")
         s"Q&A pair: '$userContent...'"
       case SemanticBlockType.StandaloneAssistant =>
-        s"Assistant message: '${messages.head.content.take(50)}...'"
+        s"Assistant message: '${messages.headOption.map(_.content.take(50)).getOrElse("No content")}...'"
       case SemanticBlockType.StandaloneTool =>
-        s"Tool interaction: ${messages.head.getClass.getSimpleName}"
+        s"Tool interaction: ${messages.headOption.map(_.getClass.getSimpleName).getOrElse("no messages")}"
       case SemanticBlockType.Other =>
         s"Other block: ${messages.length} messages"
     }
