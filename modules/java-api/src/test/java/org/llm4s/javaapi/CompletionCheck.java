@@ -65,6 +65,8 @@ final class CompletionCheck {
     });
     log.add("cost:" + cost.map(BigDecimal::toPlainString).orElse("unknown"));
     log.add("thinking:" + thinking.orElse("none"));
+    Optional<String> servedTier = reply.servedTier();
+    servedTier.ifPresent(tier -> log.add("tier:" + tier));
     return log;
   }
 

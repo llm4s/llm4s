@@ -46,6 +46,62 @@ final case class ChunkMetadata(
 
 object ChunkMetadata {
   val empty: ChunkMetadata = ChunkMetadata()
+
+  /** The record metadata key of [[ChunkMetadata.sourceFile]]. */
+  val SourceFileKey: String = "chunk.sourceFile"
+
+  /** The record metadata key of [[ChunkMetadata.startOffset]]. */
+  val StartOffsetKey: String = "chunk.startOffset"
+
+  /** The record metadata key of [[ChunkMetadata.endOffset]]. */
+  val EndOffsetKey: String = "chunk.endOffset"
+
+  /**
+   * The prefix of the record metadata keys of [[ChunkMetadata.headings]]: one key per heading, `chunk.heading.0` for
+   * the outermost, then `chunk.heading.1`, and so on, so each value is a plain heading that a metadata filter matches.
+   */
+  val HeadingKeyPrefix: String = "chunk.heading."
+
+  /** The record metadata key of [[ChunkMetadata.isCodeBlock]], present (as `"true"`) only for a code block. */
+  val IsCodeBlockKey: String = "chunk.isCodeBlock"
+
+  /** The record metadata key of [[ChunkMetadata.language]]. */
+  val LanguageKey: String = "chunk.language"
+
+  /**
+   * The chunk metadata as the string entries `RAG` stores in each chunk's record metadata: only the fields that are
+   * set, under the `chunk.`-prefixed keys of this object, so they never collide with a document's own metadata.
+   * [[fromRecordMetadata]] reads them back.
+   */
+  def toRecordMetadata(metadata: ChunkMetadata): Map[String, String] =
+    metadata.sourceFile.map(SourceFileKey -> _).toMap ++
+      metadata.startOffset.map(o => StartOffsetKey -> o.toString) ++
+      metadata.endOffset.map(o => EndOffsetKey -> o.toString) ++
+      metadata.headings.zipWithIndex.map { case (heading, i) =>
+        s"$HeadingKeyPrefix$i" -> heading
+      } ++
+      (if (metadata.isCodeBlock) Map(IsCodeBlockKey -> "true") else Map.empty) ++
+      metadata.language.map(LanguageKey -> _)
+
+  /**
+   * The chunk metadata [[toRecordMetadata]] stored in a record's metadata, for example a search result's. A key that
+   * is absent, or a value that does not parse, leaves that field at its default; other keys are ignored.
+   */
+  def fromRecordMetadata(metadata: Map[String, String]): ChunkMetadata =
+    ChunkMetadata(
+      sourceFile = metadata.get(SourceFileKey),
+      startOffset = metadata.get(StartOffsetKey).flatMap(_.toIntOption),
+      endOffset = metadata.get(EndOffsetKey).flatMap(_.toIntOption),
+      headings = metadata.toSeq
+        .flatMap { case (key, heading) =>
+          if (key.startsWith(HeadingKeyPrefix)) key.drop(HeadingKeyPrefix.length).toIntOption.map(_ -> heading)
+          else None
+        }
+        .sortBy(_._1)
+        .map(_._2),
+      isCodeBlock = metadata.get(IsCodeBlockKey).contains("true"),
+      language = metadata.get(LanguageKey)
+    )
 }
 
 /**
@@ -75,6 +131,16 @@ final case class DocumentChunk(
    * Check if this chunk is non-empty.
    */
   def nonEmpty: Boolean = content.nonEmpty
+}
+
+object DocumentChunk {
+
+  /**
+   * Chunks with no metadata from texts already split, indexed `0, 1, 2, ...` in order: what `RAG.ingestChunks` takes
+   * for text that carries no chunk metadata.
+   */
+  def fromTexts(texts: Seq[String]): Seq[DocumentChunk] =
+    texts.zipWithIndex.map { case (content, index) => DocumentChunk(content, index) }
 }
 
 /**

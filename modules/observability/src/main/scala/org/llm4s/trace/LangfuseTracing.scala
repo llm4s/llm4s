@@ -607,6 +607,7 @@ class LangfuseTracing(
         e.llmPromptTokens.foreach(t => outputObj("llm_prompt_tokens") = t)
         e.llmCompletionTokens.foreach(t => outputObj("llm_completion_tokens") = t)
         e.totalCostUsd.foreach(c => outputObj("total_cost_usd") = c)
+        if (e.stageDurations.nonEmpty) outputObj("stage_durations_ms") = TraceEvent.stageDurationsJson(e.stageDurations)
 
         val metadataObj = ujson.Obj(
           "operation"   -> e.operation,

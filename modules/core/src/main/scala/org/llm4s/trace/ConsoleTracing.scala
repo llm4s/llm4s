@@ -233,6 +233,9 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
           e.llmPromptTokens.foreach(t => println(s"${CYAN}LLM Prompt Tokens: $t$RESET"))
           e.llmCompletionTokens.foreach(t => println(s"${CYAN}LLM Completion Tokens: $t$RESET"))
           e.totalCostUsd.foreach(c => println(s"${CYAN}Total Cost (USD): $$${f"$c%.6f"}$RESET"))
+          e.stageDurations.toSeq.sortBy(_._1).foreach { case (stage, d) =>
+            println(s"${CYAN}Stage $stage: ${d.toMillis}ms$RESET")
+          }
           println()
       }
     }.toEither.left.map(error => UnknownError(error.getMessage, error))

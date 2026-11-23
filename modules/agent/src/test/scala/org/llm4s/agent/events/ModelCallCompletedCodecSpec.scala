@@ -1,6 +1,6 @@
 package org.llm4s.agent.events
 
-import org.llm4s.llmconnect.model.{ FinishReason, RequestAdjustment, RequestOption }
+import org.llm4s.llmconnect.model.{ FinishReason, RequestAdjustment, RequestOption, ServiceTier }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -198,4 +198,18 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
     read[ModelCallCompleted](stored).finishReason shouldBe None
     stored("finishReason") = ujson.Null
     read[ModelCallCompleted](stored).finishReason shouldBe None
+  }
+
+  it should "round-trip a served tier, and read one it cannot read as Other with its raw value (#2746)" in {
+    List(ServiceTier.Priority, ServiceTier.Other("batch")).foreach { tier =>
+      val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, None, servedTier = Some(tier))
+      read[ModelCallCompleted](write(event)) shouldBe event
+    }
+    val stored = ujson.read(write(ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, Some(0.01))))
+    stored.obj.contains("servedTier") shouldBe false
+    read[ModelCallCompleted](stored).servedTier shouldBe None
+    stored("servedTier") = ujson.Str("Scale")
+    val event = read[ModelCallCompleted](stored)
+    event.servedTier shouldBe Some(ServiceTier.Other("Scale"))
+    event.usage shouldBe usage
   }

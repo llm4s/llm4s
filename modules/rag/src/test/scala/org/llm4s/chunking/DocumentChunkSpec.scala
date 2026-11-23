@@ -346,4 +346,37 @@ class ChunkingConfigSpec extends AnyFlatSpec with Matchers {
     config.preserveCodeBlocks shouldBe false
     config.preserveHeadings shouldBe false
   }
+
+  "ChunkMetadata.toRecordMetadata" should "write only the fields that are set, under chunk.-prefixed keys" in {
+    ChunkMetadata.toRecordMetadata(ChunkMetadata.empty) shouldBe Map.empty
+    ChunkMetadata.toRecordMetadata(
+      ChunkMetadata(Some("a.md"), Some(1), Some(9), Seq("H1", "H \"2\""), isCodeBlock = true, Some("scala"))
+    ) shouldBe Map(
+      "chunk.sourceFile"  -> "a.md",
+      "chunk.startOffset" -> "1",
+      "chunk.endOffset"   -> "9",
+      "chunk.heading.0"   -> "H1",
+      "chunk.heading.1"   -> "H \"2\"",
+      "chunk.isCodeBlock" -> "true",
+      "chunk.language"    -> "scala"
+    )
+  }
+
+  "ChunkMetadata.fromRecordMetadata" should "read back what toRecordMetadata wrote, ignoring other keys" in {
+    val headings = (0 to 11).map(i => s"H$i")
+    val meta     = ChunkMetadata(Some("a.md"), Some(1), Some(9), headings, isCodeBlock = true, Some("scala"))
+    ChunkMetadata.fromRecordMetadata(ChunkMetadata.toRecordMetadata(meta) + ("docId" -> "d")) shouldBe meta
+    ChunkMetadata.fromRecordMetadata(Map("docId" -> "d")) shouldBe ChunkMetadata.empty
+  }
+
+  it should "leave a field that does not parse at its default" in {
+    ChunkMetadata.fromRecordMetadata(
+      Map("chunk.startOffset" -> "x", "chunk.heading.first" -> "H", "chunk.isCodeBlock" -> "yes")
+    ) shouldBe ChunkMetadata.empty
+  }
+
+  "DocumentChunk.fromTexts" should "index the texts 0, 1, 2, ... with no metadata" in {
+    DocumentChunk.fromTexts(Seq("a", "b")) shouldBe Seq(DocumentChunk("a", 0), DocumentChunk("b", 1))
+    DocumentChunk.fromTexts(Seq.empty) shouldBe empty
+  }
 }

@@ -29,6 +29,6 @@ object PositionalPatternsGainFieldsTest {
   }
 
   def summary(completion: Completion): String = completion match {
-    case Completion(id, _, content, _, _, _, _, _, _, _, _) => s"$id $content"
+    case Completion(id, _, content, _, _, _, _, _, _, _, _, _) => s"$id $content"
   }
 }

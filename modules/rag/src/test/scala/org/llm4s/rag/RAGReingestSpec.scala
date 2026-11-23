@@ -1,6 +1,6 @@
 package org.llm4s.rag
 
-import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig }
+import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig, DocumentChunk }
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
@@ -186,10 +186,12 @@ class RAGReingestSpec extends AnyFlatSpec with Matchers {
 
   it should "replace through ingestChunks as well" in {
     val rag = build()
-    rag.ingestChunks("doc-a", Seq("one", "two", "three", "four")).fold(e => fail(e.message), identity)
+    rag
+      .ingestChunks("doc-a", DocumentChunk.fromTexts(Seq("one", "two", "three", "four")))
+      .fold(e => fail(e.message), identity)
     storedChunks(rag) shouldBe 4L
 
-    rag.ingestChunks("doc-a", Seq("only")).fold(e => fail(e.message), identity)
+    rag.ingestChunks("doc-a", DocumentChunk.fromTexts(Seq("only"))).fold(e => fail(e.message), identity)
 
     indexedIds(rag) shouldBe Set("doc-a-chunk-0")
   }

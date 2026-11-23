@@ -15,8 +15,22 @@ class ServiceTierSpec extends AnyFlatSpec with Matchers {
   }
 
   "ServiceTier" should "round-trip through JSON, as RequestOption.ServiceTier does" in {
-    ServiceTier.values.foreach(tier => read[ServiceTier](write(tier)) shouldBe tier)
+    List(ServiceTier.Auto, ServiceTier.Default, ServiceTier.Flex, ServiceTier.Priority, ServiceTier.Other("scale"))
+      .foreach(tier => read[ServiceTier](write(tier)) shouldBe tier)
     read[RequestOption](write(RequestOption.ServiceTier)) shouldBe RequestOption.ServiceTier
+  }
+
+  "Completion.servedTier" should "be unset by default, and set and cleared by its setters (#2746)" in {
+    val completion = Completion(
+      id = "c",
+      created = java.time.Instant.EPOCH,
+      content = "",
+      model = "m",
+      message = AssistantMessage(contentOpt = None)
+    )
+    completion.servedTier shouldBe None
+    completion.withServedTier(ServiceTier.Priority).servedTier shouldBe Some(ServiceTier.Priority)
+    completion.withServedTier(ServiceTier.Other("batch")).withServedTier(None) shouldBe completion
   }
 
   "UnmappedOptions.serviceTier" should "report a set tier as dropped, and nothing without one" in {

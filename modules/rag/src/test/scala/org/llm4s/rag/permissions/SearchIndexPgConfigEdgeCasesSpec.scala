@@ -88,7 +88,7 @@ class SearchIndexPgConfigEdgeCasesSpec extends AnyFlatSpec with Matchers {
         chunks: Seq[ChunkWithEmbedding],
         metadata: Map[String, String],
         readableBy: Set[PrincipalId]
-      ): org.llm4s.types.Result[Int] = Right(0)
+      ): org.llm4s.types.Result[Seq[String]] = Right(Seq.empty)
       def deleteDocument(collectionPath: CollectionPath, documentId: String): org.llm4s.types.Result[Long] =
         Right(0L)
       def clearCollection(collectionPath: CollectionPath): org.llm4s.types.Result[Long] = Right(0L)

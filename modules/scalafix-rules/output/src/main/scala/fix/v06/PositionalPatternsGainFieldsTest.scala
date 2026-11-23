@@ -13,7 +13,7 @@ import org.llm4s.trace.TraceEvent
 
 object PositionalPatternsGainFieldsTest {
   def summary(completion: Completion): String = completion match {
-    case Completion(id, _, content, _, _, _, _, _, _, _, _) => s"$id $content"
+    case Completion(id, _, content, _, _, _, _, _, _, _, _, _) => s"$id $content"
   }
 
   def vision(capabilities: ModelCapabilities): Boolean = capabilities match {
@@ -22,7 +22,7 @@ object PositionalPatternsGainFieldsTest {
 
   // gained finishReason since 0.6.0 (RFC 0009 PR 6, #2687)
   def model(event: ModelCallCompleted): String = event match {
-    case ModelCallCompleted(_, model, _, _, _, _, _, _, _) => model
+    case ModelCallCompleted(_, model, _, _, _, _, _, _, _, _) => model
   }
 
   // gained usage since 0.6.0, but its hand-written unapply keeps 0.6.0's four fields: left alone

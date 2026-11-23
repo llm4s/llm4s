@@ -1,5 +1,6 @@
 package org.llm4s.rag.transform
 
+import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
 
 /**
@@ -46,6 +47,12 @@ trait QueryTransformer {
    * Human-readable name for this transformer (used in logging/tracing).
    */
   def name: String
+
+  /**
+   * This transformer with its LLM calls traced to `tracing`, as a `RAG` configured with `withTracing` uses it. The
+   * default returns it unchanged; [[LLMQueryRewriter]] traces its calls, tagged `rag.rewrite`.
+   */
+  def withTracing(tracing: Tracing): QueryTransformer = this
 }
 
 object QueryTransformer {

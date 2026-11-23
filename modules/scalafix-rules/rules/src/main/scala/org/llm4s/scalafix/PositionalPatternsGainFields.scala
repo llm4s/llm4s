@@ -11,9 +11,10 @@ import scalafix.v1._
  * requestId)` becomes `case ServiceError(message, status, provider, requestId, _)` (#2266),
  * `case RunEvent.RunFailed(message, usage)` becomes `case RunEvent.RunFailed(message, usage, _)` (#2049), and
  * `case AgentStatus.Suspended(a, q, m, b)` gains `delegated` (#2050). A pattern with 0.6.0's arity gets a `_` for each
- * field added since 0.6.0: `Completion`'s ten fields gain `finishReason` (#2613), `ModelCapabilities` gains the
- * five thinking and effort fields (#2115), `TraceEvent.ErrorOccurred`'s nine gain `usage` (#2676), `TokenUsage`'s six
- * gain `longCacheCreationTokens` and `ModelPricing`'s fifteen `cacheCreationInputTokenCostAbove1hr` (#2115),
+ * field added since 0.6.0: `Completion`'s ten fields gain `finishReason` (#2613) and `servedTier` (#2746),
+ * `ModelCapabilities` gains the five thinking and effort fields (#2115), `TraceEvent.ErrorOccurred`'s nine gain `usage`
+ * (#2676), `TokenUsage`'s six gain `longCacheCreationTokens` and `ModelPricing`'s fifteen
+ * `cacheCreationInputTokenCostAbove1hr` (#2115),
  * `CompletionOptions`'s nine gain `promptCache` (#2115) and `serviceTier` (#2726; its eighth, `budgetTokens`, is now
  * `thinking`, which `ThinkingReplacesBudgetTokens` reports), `TurnState` gains `cut` (#2613) and `RAGConfig`
  * `completionOptions` (#2715) and `documentRegistry` (#2714). A pattern with any other number of arguments is left
@@ -51,7 +52,7 @@ object PositionalPatternsGainFields {
   val arity: Map[String, (Int, Int)] = Map(
     "org/llm4s/error/ServiceError"                                  -> (4  -> 5),
     "org/llm4s/agent/AgentStatus.Suspended"                         -> (4  -> 5),
-    "org/llm4s/agent/events/ModelCallCompleted"                     -> (6  -> 9),
+    "org/llm4s/agent/events/ModelCallCompleted"                     -> (6  -> 10),
     "org/llm4s/agent/events/ToolExecuted"                           -> (5  -> 6),
     "org/llm4s/agent/graph/Checkpoint"                              -> (10 -> 11),
     "org/llm4s/agent/graph/Commit"                                  -> (6  -> 8),
@@ -65,7 +66,7 @@ object PositionalPatternsGainFields {
     "org/llm4s/agent/harness/HarnessProfile"                        -> (12 -> 13),
     "org/llm4s/config/ProvidersConfigModel.NamedProviderConfig"     -> (8  -> 9),
     "org/llm4s/llmconnect/LlmClientOptions"                         -> (2  -> 3),
-    "org/llm4s/llmconnect/model/Completion"                         -> (9  -> 11),
+    "org/llm4s/llmconnect/model/Completion"                         -> (9  -> 12),
     "org/llm4s/llmconnect/model/CompletionOptions"                  -> (9  -> 11),
     "org/llm4s/llmconnect/model/TokenUsage"                         -> (6  -> 7),
     "org/llm4s/llmconnect/config/AnthropicConfig"                   -> (7  -> 10),
@@ -103,8 +104,8 @@ object PositionalPatternsGainFields {
    * 0.6.0 does not have 0.5.1's arity, so the two maps never both match.
    */
   val arity06: Map[String, (Int, Int)] = Map(
-    "org/llm4s/llmconnect/model/Completion"     -> (10 -> 11),
-    "org/llm4s/agent/events/ModelCallCompleted" -> (8  -> 9),
+    "org/llm4s/llmconnect/model/Completion"     -> (10 -> 12),
+    "org/llm4s/agent/events/ModelCallCompleted" -> (8  -> 10),
     "org/llm4s/trace/TraceEvent.ErrorOccurred"  -> (9  -> 10)
   )
 

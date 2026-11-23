@@ -1,6 +1,6 @@
 package org.llm4s.agent.events
 
-import org.llm4s.llmconnect.model.{ FinishReason, RequestAdjustment, TokenUsage }
+import org.llm4s.llmconnect.model.{ FinishReason, RequestAdjustment, ServiceTier, TokenUsage }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.DurationJson
 import org.slf4j.LoggerFactory
@@ -35,31 +35,35 @@ private given ReadWriter[List[RequestAdjustment]] =
         })
     )
 
-// A finish reason this version cannot read - a case added later (RFC 0009) - reads as FinishReason.Other with the raw
-// value it was stored as, so nothing of it is lost and the event, and the usage it carries, still reads: a case with
-// no fields is stored as its name, one with fields under its `$type` tag. A value with no raw string in it is None.
-// Written as FinishReason's own codec writes it.
-private given ReadWriter[Option[FinishReason]] =
+// A finish reason or service tier this version cannot read - a case added later (RFC 0009, #2746) - reads as the
+// enum's Other with the raw value it was stored as, so nothing of it is lost and the event, and the usage it carries,
+// still reads: a case with no fields is stored as its name, one with fields under its `$type` tag. A value with no raw
+// string in it is None. Written as the enum's own codec writes it.
+private def lenient[A: ReadWriter](what: String, other: String => A): ReadWriter[Option[A]] =
   upickle.default
     .readwriter[ujson.Value]
-    .bimap[Option[FinishReason]](
-      _.fold(ujson.Null: ujson.Value)(upickle.default.writeJs[FinishReason](_)),
+    .bimap[Option[A]](
+      _.fold(ujson.Null: ujson.Value)(upickle.default.writeJs[A](_)),
       {
         case ujson.Null => None
         case json =>
-          Try(upickle.default.read[FinishReason](json)).fold(
+          Try(upickle.default.read[A](json)).fold(
             e =>
               val raw = json match
                 case ujson.Str(name) => Some(name)
                 case obj: ujson.Obj  => obj.value.get("$type").collect { case ujson.Str(tag) => tag }
                 case _               => None
-              logger.debug(s"Read a finish reason this version cannot read as Other($raw): ${e.getMessage}")
-              raw.map(FinishReason.Other(_))
+              logger.debug(s"Read a $what this version cannot read as Other($raw): ${e.getMessage}")
+              raw.map(other)
             ,
             Some(_)
           )
       }
     )
+
+private given finishReasonRW: ReadWriter[Option[FinishReason]] = lenient("finish reason", FinishReason.Other(_))
+
+private given servedTierRW: ReadWriter[Option[ServiceTier]] = lenient("service tier", ServiceTier.Other(_))
 
 /** A model call's token usage, as plain numbers. */
 final case class CallUsage(promptTokens: Int, completionTokens: Int, totalTokens: Int, thinkingTokens: Option[Int])
@@ -83,7 +87,10 @@ object CallUsage:
  * or a case added later, is left out rather than failing the event. `finishReason` is the completion's
  * (`Completion.finishReason`): why the model's turn ended (RFC 0009, #2613), `Length` when the reply was cut at an
  * output limit. `None` for usage recorded without a call, and in an event stored before the field existed; a reason
- * this version cannot read, a case added later, is `FinishReason.Other` with the value it was stored as.
+ * this version cannot read, a case added later, is `FinishReason.Other` with the value it was stored as. `servedTier` is
+ * the completion's (`Completion.servedTier`): the tier the provider reports serving the call at (#2746), `None` when it
+ * reported none, for usage recorded without a call, and in an event stored before the field existed; a tier this
+ * version cannot read is `ServiceTier.Other`, as a finish reason is.
  */
 final case class ModelCallCompleted(
   agent: String,
@@ -94,7 +101,8 @@ final case class ModelCallCompleted(
   estimatedCost: Option[Double],
   provider: Option[ProviderId] = None,
   adjustments: List[RequestAdjustment] = List.empty,
-  finishReason: Option[FinishReason] = None
+  finishReason: Option[FinishReason] = None,
+  servedTier: Option[ServiceTier] = None
 ) derives ReadWriter
 
 /** How a tool call ended for the loop. */

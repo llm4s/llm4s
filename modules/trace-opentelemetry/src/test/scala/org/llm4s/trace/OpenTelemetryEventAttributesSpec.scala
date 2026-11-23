@@ -252,9 +252,12 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
         llmPromptTokens = Some(120),
         llmCompletionTokens = Some(45),
         totalCostUsd = Some(0.004),
-        timestamp = at
+        timestamp = at,
+        stageDurations = Map("search" -> 40.millis, "rerank" -> 110.millis)
       )
       val (name, attributes) = mapped(event)
+      long(attributes, "stage_search_ms") shouldBe 40L
+      long(attributes, "stage_rerank_ms") shouldBe 110L
       name shouldBe "RAG search"
       str(attributes, "event.type") shouldBe "rag-operation"
       str(attributes, "operation") shouldBe "search"

@@ -1,6 +1,7 @@
 package org.llm4s.rag
 
-import org.llm4s.error.ConfigurationError
+import org.llm4s.chunking.{ ChunkMetadata, DocumentChunk }
+import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -222,7 +223,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
                 id = chunkId(collId, docId, chunk),
                 embedding = chunk.embedding,
                 content = Some(chunk.content),
-                metadata = metadata + ("docId" -> docId)
+                metadata = metadata ++ chunk.metadata + ("docId" -> docId)
               ),
               1.0 - (idx * 0.1)
             )
@@ -249,7 +250,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
                 chunkId(collId, docId, chunk),
                 chunk.content,
                 hits.toDouble,
-                metadata + ("docId" -> docId)
+                metadata ++ chunk.metadata + ("docId" -> docId)
               )
             }
             .filter(_.score > 0)
@@ -265,14 +266,14 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
       chunkSeq: Seq[ChunkWithEmbedding],
       metadata: Map[String, String],
       readableBy: Set[PrincipalId]
-    ): Result[Int] =
+    ): Result[Seq[String]] =
       collectionMap.get(collectionPath) match {
         case None => Left(ConfigurationError(s"Collection not found: ${collectionPath.value}"))
         case Some(coll) if !coll.isLeaf =>
           Left(ConfigurationError(s"Collection ${collectionPath.value} is not a leaf"))
         case Some(coll) =>
           chunkSeq.foreach(chunk => chunks += ((coll.id, documentId, chunk, metadata, readableBy)))
-          Right(chunkSeq.size)
+          Right(chunkSeq.map(chunk => chunkId(coll.id, documentId, chunk)))
       }
 
     def deleteDocument(collectionPath: CollectionPath, documentId: String): Result[Long] = {
@@ -414,6 +415,129 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
     } finally rag.close()
   }
 
+  "RAG.ingestChunksWithPermissions" should "index the given chunks, return the index's ids and keep each chunk's metadata" in {
+    val (rag, index) = createRAGWithPermissions()
+    try {
+      val path = CollectionPath.create("docs").toOption.get
+      index.collections.create(CollectionConfig.publicLeaf(path))
+      val chunks = Seq(
+        DocumentChunk("Intro to widgets.", 0, ChunkMetadata(headings = Seq("Guide", "Intro"))),
+        DocumentChunk("val w = Widget()", 1, ChunkMetadata.empty.asCodeBlock(Some("scala")).withOffsets(17, 33))
+      )
+
+      val indexed = rag.ingestChunksWithPermissions(path, "doc-1", chunks, Map("source" -> "wiki")).toOption.get
+
+      indexed shouldBe Seq(
+        IndexedChunk("coll-1-doc-1-chunk-0", 0, "Intro to widgets."),
+        IndexedChunk("coll-1-doc-1-chunk-1", 1, "val w = Widget()")
+      )
+      val results = rag.queryWithPermissions(UserAuthorization.Admin, CollectionPattern.All, "widgets").toOption.get
+      results.map(_.id).toSet shouldBe indexed.map(_.id).toSet
+      val code = results.find(_.id == "coll-1-doc-1-chunk-1").get
+      code.metadata("source") shouldBe "wiki"
+      ChunkMetadata.fromRecordMetadata(code.metadata) shouldBe chunks(1).metadata
+      ChunkMetadata.fromRecordMetadata(results.find(_.id == "coll-1-doc-1-chunk-0").get.metadata) shouldBe
+        chunks.head.metadata
+    } finally rag.close()
+  }
+
+  it should "reject chunks whose indices do not run 0, 1, 2, ... before writing anything" in {
+    val (rag, index) = createRAGWithPermissions()
+    try {
+      val path = CollectionPath.create("docs").toOption.get
+      index.collections.create(CollectionConfig.publicLeaf(path))
+      val result = rag.ingestChunksWithPermissions(path, "doc-1", Seq(DocumentChunk("a", 0), DocumentChunk("b", 2)))
+      result.left.toOption.get shouldBe a[ValidationError]
+      result.left.toOption.get.message should include("position 1 has index 2")
+      rag.queryWithPermissions(UserAuthorization.Admin, CollectionPattern.All, "a b").toOption.get shouldBe empty
+    } finally rag.close()
+  }
+
+  it should "return error without SearchIndex" in {
+    val rag = RAG.buildWithClient(RAGConfig.default, new EmbeddingClient(new MockEmbeddingProvider())).toOption.get
+    try {
+      val path = CollectionPath.create("docs").toOption.get
+      rag.ingestChunksWithPermissions(path, "doc-1", DocumentChunk.fromTexts(Seq("a"))).left.toOption.get shouldBe
+        a[ConfigurationError]
+    } finally rag.close()
+  }
+
+  it should "index no chunks without calling the embedding model" in {
+    val (rag, index) = createRAGWithPermissions()
+    try {
+      val path = CollectionPath.create("docs").toOption.get
+      index.collections.create(CollectionConfig.publicLeaf(path))
+      rag.ingestChunksWithPermissions(path, "doc-1", Seq.empty) shouldBe Right(Seq.empty)
+    } finally rag.close()
+  }
+
+  it should "fail when the SearchIndex returns a different number of ids than chunks" in {
+    val index = new MockSearchIndex() {
+      override def ingest(
+        collectionPath: CollectionPath,
+        documentId: String,
+        chunkSeq: Seq[ChunkWithEmbedding],
+        metadata: Map[String, String],
+        readableBy: Set[PrincipalId]
+      ): Result[Seq[String]] = Right(Seq("only-one"))
+    }
+    val rag =
+      RAG
+        .buildWithClient(RAGConfig.default.withSearchIndex(index), new EmbeddingClient(new MockEmbeddingProvider()))
+        .toOption
+        .get
+    try {
+      val path   = CollectionPath.create("docs").toOption.get
+      val result = rag.ingestChunksWithPermissions(path, "doc-1", DocumentChunk.fromTexts(Seq("a", "b")))
+      result.left.toOption.get.message should include("returned 1 chunk ids for the 2 chunks of doc-1")
+    } finally rag.close()
+  }
+
+  "RAG.ingestWithPermissions" should "index the chunks RAG.chunk returns" in {
+    val (rag, index) = createRAGWithPermissions()
+    try {
+      val path = CollectionPath.create("docs").toOption.get
+      index.collections.create(CollectionConfig.publicLeaf(path))
+      val text  = "First sentence here. " * 200
+      val count = rag.ingestWithPermissions(path, "doc-1", text).toOption.get
+      count shouldBe rag.chunk(text).size
+      count should be > 1
+    } finally rag.close()
+  }
+
+  "RAG.ingestBytesWithPermissions" should "extract the bytes and ingest the text into the collection" in {
+    val (rag, index) = createRAGWithPermissions()
+    try {
+      val path = CollectionPath.create("docs").toOption.get
+      index.collections.create(CollectionConfig.publicLeaf(path))
+      val count = rag
+        .ingestBytesWithPermissions(
+          path,
+          "Bytes about gadgets.".getBytes("UTF-8"),
+          "notes.txt",
+          "doc-b",
+          Map("k" -> "v")
+        )
+        .toOption
+        .get
+      count shouldBe 1
+      val result =
+        rag.queryWithPermissions(UserAuthorization.Admin, CollectionPattern.All, "gadgets").toOption.get.head
+      result.content should include("gadgets")
+      result.metadata("k") shouldBe "v"
+      (result.metadata should contain).key("format")
+    } finally rag.close()
+  }
+
+  it should "return error without SearchIndex" in {
+    val rag = RAG.buildWithClient(RAGConfig.default, new EmbeddingClient(new MockEmbeddingProvider())).toOption.get
+    try {
+      val path = CollectionPath.create("docs").toOption.get
+      rag.ingestBytesWithPermissions(path, "x".getBytes("UTF-8"), "a.txt", "doc-1").left.toOption.get shouldBe
+        a[ConfigurationError]
+    } finally rag.close()
+  }
+
   // ==========================================================================
   // Permission-Aware Deletion Tests
   // ==========================================================================
@@ -497,7 +621,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
     val (rag, _) = createRAGWithPermissions()
     try {
       isPlainIngestRefusal(rag.ingestText("Some text.", "doc-1")) shouldBe true
-      isPlainIngestRefusal(rag.ingestChunks("doc-1", Seq("Some text."))) shouldBe true
+      isPlainIngestRefusal(rag.ingestChunks("doc-1", DocumentChunk.fromTexts(Seq("Some text.")))) shouldBe true
       isPlainIngestRefusal(rag.ingestBytes("Some text.".getBytes, "a.txt", "doc-1")) shouldBe true
       isPlainIngestRefusal(
         rag.ingestBytesMultiple(Iterator(("Some text.".getBytes, "a.txt", "doc-1", Map.empty[String, String])))

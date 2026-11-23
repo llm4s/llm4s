@@ -31,7 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is removed: `assertModelCallContract` replaces it (PR 5).
 - A positional pattern on `TokenUsage` or `ModelPricing` gains a field (`longCacheCreationTokens`,
   `cacheCreationInputTokenCostAbove1hr`; [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 6), and one on
-  `CompletionOptions` two (`promptCache`, `serviceTier`, [#2726](https://github.com/llm4s/llm4s/issues/2726));
+  `CompletionOptions` two (`promptCache`, `serviceTier`, [#2726](https://github.com/llm4s/llm4s/issues/2726)), and one
+  on `Completion` or `ModelCallCompleted` `servedTier` ([#2746](https://github.com/llm4s/llm4s/issues/2746));
   [migration](docs/reference/migration.md#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115).
 - An agent turn whose answer was cut off at the output limit ends `AgentStatus.Truncated(partialAnswer)`, not
   `Completed`, and `AgentStatusKind` gains `TRUNCATED`; a `match` on `AgentStatus` needs the case (RFC 0009 open
@@ -47,12 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [migration](docs/reference/migration.md#a-rag-with-a-searchindex-ingests-only-with-permissions-2716).
 - A `DocumentRegistry` of your own implements `register(docId, version, sourceId)` and `documentIds(sourceId)`
   (#2714); [migration](docs/reference/migration.md#documentregistry-is-source-scoped-2714).
+- A positional pattern on `RAGAnswerResult` or `TraceEvent.RAGOperationCompleted` gains a field (`metrics`,
+  `stageDurations`) (#2734); [migration](docs/reference/migration.md#rag-tracing-covers-every-model-call-and-each-querys-stages-2734).
+- `RAG.ingestChunks` takes `Seq[DocumentChunk]` and returns `Seq[IndexedChunk]`, and `SearchIndex.ingest` returns the
+  stored ids (#2732); [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
 
 ### Providers
 
 - **Fixed** watsonx, Perplexity and Jlama leaving options out without reporting them: each now puts on
   `Completion.adjustments` what it does not send as asked (`reasoning` and `thinking`; Perplexity and Jlama also the
   penalties, Jlama also `top_p` and `responseFormat`), on `complete` and streams; watsonx's per-process warnings give way to the reports ([RFC 0008](docs/rfcs/0008-generation-controls.md) decision 15) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+- **Fixed** Anthropic under-pricing cached requests: `TokenUsage.promptTokens` is now the whole input, cache reads and
+  writes included, on `complete` and streams, as every other provider reports it [#2745](https://github.com/llm4s/llm4s/issues/2745).
 - **Added** `ModelCapabilities` reads the thinking and effort metadata: `supportsAdaptiveThinking`, `supportsOutputConfig`,
   `supportedReasoningEfforts`, `supportsThinkingOff`, and `supportsBudgetThinking`, which the overrides file's new patch
   entries set to `false` for Claude Opus 4.7/4.8 and Fable 5 ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
@@ -78,7 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Kotlin `serviceTier`): OpenAI and Azure send `service_tier`, Anthropic `auto` or `standard_only`, Gemini `serviceTier`,
   Vertex AI its shared-request-type header and Bedrock `serviceTier`; each reports what it cannot send, and every
   other provider reports it `Dropped` ([cost controls](docs/guide/cost-controls.md#service-tiers),
-  [#2726](https://github.com/llm4s/llm4s/issues/2726)).
+  [#2726](https://github.com/llm4s/llm4s/issues/2726)); `Completion.servedTier`, also on `ModelCallCompleted` and Java
+  `JCompletion.servedTier()`, reports the tier that served the call, and `ServiceTier.Other(raw)` keeps one the enum
+  does not name ([#2746](https://github.com/llm4s/llm4s/issues/2746), [#2751](https://github.com/llm4s/llm4s/issues/2751)).
 
 ### Java & Kotlin APIs
 
@@ -140,6 +149,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Embeddings & RAG
 
+- **Fixed** `RAGConfig.withTracing` traces the answer, LLM-rerank and `LLMQueryRewriter` calls, tagged `rag.answer`,
+  `rag.rerank`, `rag.rewrite`, and each query's `RAGOperationCompleted` with stage durations; **Added**
+  `RAGAnswerResult.metrics` (`RAGQueryMetrics`) [#2734](https://github.com/llm4s/llm4s/issues/2734).
 - **Added** `RAGConfig.withCompletionOptions`: the options `queryWithAnswer` and `queryWithPermissionsAndAnswer` generate
   the answer with, which each call can override (`options = ...`); the default is still temperature 0.0. Java:
   `JRagBuilder.completionOptions` [#2715](https://github.com/llm4s/llm4s/issues/2715).
@@ -156,6 +168,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SQLiteDocumentRegistry`, so `sync` survives a restart; `sync(loader, sourceId)` deletes only its own source's
   documents [#2714](https://github.com/llm4s/llm4s/issues/2714);
   [migration](docs/reference/migration.md#documentregistry-is-source-scoped-2714).
+- **Added** pre-chunked ingest that keeps each chunk's `ChunkMetadata` in its stored record: `RAG.ingestChunks` and
+  `ingestChunksWithPermissions` take `DocumentChunk`s and return the stored ids, with `RAG.chunk` and
+  `ingestBytesWithPermissions` [#2732](https://github.com/llm4s/llm4s/issues/2732);
+  [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
 
 ### Build & tooling
 
