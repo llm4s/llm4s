@@ -230,6 +230,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Fixed** `scripts/mima-dry-run.sh`'s negative control resolves its probe baseline again: only `llm4s-core` takes the probe version, so its POM names `llm4s-media` at a version that was published;
+  a control that fails before MiMa compares anything is reported as that, and `scripts/test-mima-dry-run.sh` models dependency resolution [#2794](https://github.com/llm4s/llm4s/issues/2794).
 - **Changed** a growth-prone type that gains a field adds no forwarding `apply` overload before the MiMa baseline (0.7.0), so the baseline freezes one `apply` per type
   (CLAUDE.md, "Growth-prone data types"); `TakeRequest`, `Submission`, `ThreadSummary`, `BoundaryResult`, `Todo`, `Checkpoint`, `AgentToolSpec` and `LoopAgent` gain their missing `with*` setters,
   `CompressionRule.apply` is renamed `transform`, and `OllamaConfig.apply` gains defaults and `timeouts` [#1281](https://github.com/llm4s/llm4s/issues/1281).

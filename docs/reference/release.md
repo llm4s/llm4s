@@ -384,7 +384,10 @@ touched), sets `mimaBaselineVersion` there, publishes every module to a temporar
   with a second throwaway version, at which the build is published a second time; one it gives `None` must
   have no baseline at all while the others are checked. `--list-frozen` prints each module's baseline;
 - runs a **negative control**: a baseline with two extra classes, one `@Stable` and one `@Experimental`, that
-  the code then lacks. MiMa must fail on the `@Stable` one and must not report the `@Experimental` one.
+  the code then lacks. MiMa must fail on the `@Stable` one and must not report the `@Experimental` one. Only
+  `llm4s-core` is published at the probe version, so its POM names the modules it depends on (`llm4s-media`) at the
+  version step 1 published. A failure that is not MiMa's - the probe baseline not resolving - fails the dry run as
+  that, never as a control that worked.
 
 It took about three minutes on a laptop with warm caches (between 156 s and 184 s over three runs; an independent run took 175 s). It proves the wiring: the coordinates, the
 `_3` suffix, resolution, that the check can fail, and that `@Experimental` types are outside the freeze. It does
