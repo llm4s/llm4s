@@ -5,7 +5,7 @@ import org.llm4s.agent.graph.middleware.{ MiddlewareId, PromptSection }
 import org.llm4s.agent.graph.tool.ToolArgumentValidator
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model.ResponseFormat
+import org.llm4s.llmconnect.model.{ OutputCorrection, ResponseFormat }
 import org.llm4s.toolapi.SchemaDefinition
 import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
@@ -113,9 +113,7 @@ object OutputFormat:
       .map(problem => ValidationError("output", truncate(problem)))
 
   /** The corrective request's user message: the answer's problems, and the request to answer again. */
-  private[toolloop] def correction(problems: Vector[String]): String =
-    s"Your answer did not match the required JSON Schema:\n${problems.map("- " + _).mkString("\n")}\n" +
-      "Reply again with only a JSON value that matches the schema."
+  private[toolloop] def correction(problems: Vector[String]): String = OutputCorrection.message(problems)
 
   /** The invalid answer as it is sent back to the model: cut to [[MaxEchoedAnswerChars]]. */
   private[toolloop] def echoed(answer: String): String = answer.take(MaxEchoedAnswerChars)

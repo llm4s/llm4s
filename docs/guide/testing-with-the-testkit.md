@@ -388,12 +388,70 @@ When the answer should not depend on how many calls came before, use `responding
 
 ```scala
 val client = ScriptedLLMClient.respondingTo {
-  case c if c.messages.lastOption.exists(_.content.contains("Oslo"))  => Reply.text("cold")
-  case c if c.messages.lastOption.exists(_.content.contains("Cairo")) => Reply.text("hot")
+  case LastUser(text) if text.contains("Oslo")  => Reply.text("cold")
+  case LastUser(text) if text.contains("Cairo") => Reply.text("hot")
 }
 
 client.complete(Conversation(Seq(UserMessage("Weather in Cairo?"))), options).map(_.content) shouldBe Right("hot")
 client.complete(Conversation(Seq(UserMessage("Weather in Oslo?"))), options).map(_.content) shouldBe Right("cold")
+```
+
+`LastUser` is one of the extractors the kit has for these rules. Each matches the `Conversation` of a call and says where in a turn the call is:
+
+```scala
+import org.llm4s.testkit.{ AfterCorrection, AfterToolResult, EndsWithUser, LastUser }
+```
+
+| Extractor | Matches | Extracts |
+|---|---|---|
+| `EndsWithUser(text)` | The last message is a user message: the first model call of a turn. | Its text. |
+| `LastUser(text)` | The conversation has a user message, whatever follows it: every call of a turn. | The text of the latest one, which is also `conversation.lastUserText` and `RecordedCall.lastUserText`. |
+| `AfterToolResult(tool, content)` | The last message is a tool result: the model call after a tool ran. | The tool's name and the result's text. |
+| `AfterToolResults(results)` | The same, when the model called several tools at once. | Every result that ends the conversation, as `(tool, content)` in order. |
+| `AfterCorrection()` | The last message is the agent's request to correct a structured answer. | Nothing: write the parentheses. |
+
+With them the agent of [An agent with a tool, end to end](#an-agent-with-a-tool-end-to-end) is scripted by what it sends, not by the order of its calls:
+
+```scala
+val client = ScriptedLLMClient.respondingTo {
+  case EndsWithUser(s"What should I pack for $city today?") =>
+    Reply.toolCall("get_temperature", s"""{"city": "$city"}""")
+  case AfterToolResult("get_temperature", result) if result.contains("21") =>
+    Reply.text("Pack light layers.")
+}
+
+packingAdvice(client, "Oslo") shouldBe Right("Pack light layers.")
+client.callCount shouldBe 2
+```
+
+A tool result carries the id of its call, not the tool's name. `AfterToolResult` reads the name from the call with that id in the assistant message right before the results, and does not match when that call is not there, rather than guess. When the model called several tools at once the conversation ends with one result for each: `AfterToolResult` extracts the last of them, and `AfterToolResults` all of them.
+
+An agent built with `withOutput` asks the model once more when its answer does not match the schema. `AfterCorrection()` matches that request, so a test can script the invalid answer and the corrected one. The request is a user message too, so its rule goes before one for `EndsWithUser`:
+
+```scala
+val temperatureSchema: ObjectSchema[Temperature] = ObjectSchema[Temperature](
+  "A temperature reading",
+  Seq(
+    PropertyDefinition("city", StringSchema("City name")),
+    PropertyDefinition("celsius", NumberSchema("Degrees Celsius"))
+  )
+)
+```
+
+```scala
+val client = ScriptedLLMClient.respondingTo {
+  case AfterCorrection() => Reply.text("""{"city": "Oslo", "celsius": 21}""")
+  case EndsWithUser(_)   => Reply.text("""{"city": "Oslo", "celsius": "mild"}""")
+}
+
+val reading = for {
+  agent   <- Agent.builder("weather-reader", client).withOutput(temperatureSchema).build()
+  run     <- agent.run("How warm is Oslo?")
+  reading <- run.decodeOutput[Temperature]
+} yield reading
+
+reading shouldBe Right(Temperature("Oslo", 21.0))
+client.callCount shouldBe 2
 ```
 
 `ScriptedLLMClient.always(reply)` gives every call the same reply.

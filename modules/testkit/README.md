@@ -21,6 +21,7 @@ It depends on `llm4s-core` only, registers no provider, and has no test framewor
 |---|---|
 | `ScriptedLLMClient` | The fake `LLMClient`. `sequence(replies*)` answers call N with reply N, `respondingTo { case conversation => reply }` chooses from the conversation, `always(reply)` repeats one. |
 | `Reply` | What one call returns: `Reply.text`, `Reply.toolCall(name, argumentsJson)`, `Reply.toolCalls` or `Reply.failure(error)`, adjusted with `withModel`, `withUsage`, `withContent`, `withToolCall`. |
+| `EndsWithUser`, `LastUser`, `AfterToolResult`, `AfterToolResults`, `AfterCorrection` | Extractors for `respondingTo` rules: the call that starts a turn, any call of it, the call after a tool ran, and the retry of a structured answer. `conversation.lastUserText` is the text `LastUser` extracts. |
 | `RecordedCall` | One request received: the `conversation`, the `options`, and whether it was `streamed`. |
 | `UnscriptedCallError` | The `LLMError` of a call the script has no reply for: the `callNumber`, the `reason` and the `lastMessage`. |
 

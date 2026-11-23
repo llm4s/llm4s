@@ -223,6 +223,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `Llm4sMigrate_1_0` covers the breaks since 0.6.0: `ThinkingReplacesBudgetTokens` rewrites `ReasoningEffort.None` to `Thinking.Off` and reports `budgetTokens`,
   `AgentStatusGainsTruncated` reports a `match` on `AgentStatus` with no catch-all, `FinishReasonTyped` rewrites the string comparisons of `StreamedChunk.finishReason` and reports a literal in the same expression that no rewrite gets right (0.6.0's raw Bedrock and Gemini values, a content filter's, Gemini's `STOP`), and positional `Completion`, `ModelCallCompleted`, `ModelCapabilities`, `TokenUsage`, `ModelPricing`, `CompletionOptions`, `TurnState` and `RAGConfig` patterns gain their fields; tested against 0.6.0 [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#migration-rules).
 - **Fixed** `llm4s-reactor` was never published (it was missing from the root aggregate, so 0.6.0 lacks it); `publishedArtifactsCheck` now fails on a published module outside the aggregate.
+- **Added** `llm4s-testkit` has extractors for `ScriptedLLMClient.respondingTo` rules - `EndsWithUser`, `LastUser`, `AfterToolResult`, `AfterToolResults`, `AfterCorrection()` -
+  and `conversation.lastUserText` [#2730](https://github.com/llm4s/llm4s/issues/2730); [Testing with the Testkit](docs/guide/testing-with-the-testkit.md#choose-the-reply-from-the-conversation).
 
 ## [0.6.0] - 2026-11-21
 
