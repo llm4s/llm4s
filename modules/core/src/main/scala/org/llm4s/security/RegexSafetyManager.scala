@@ -1,6 +1,8 @@
 package org.llm4s.security
 
 import org.llm4s.annotation.Stable
+import org.llm4s.error.ValidationError
+import org.llm4s.types.Result
 
 import java.util.regex.{ Matcher, Pattern, PatternSyntaxException }
 import scala.util.Try
@@ -14,7 +16,7 @@ import scala.util.control.NonFatal
  *   1. A cheap pre-screen ([[safeCompile]]) rejects null/empty/oversized
  *      patterns and a set of well-known catastrophic-backtracking shapes before
  *      they are ever compiled.
- *   2. A hard execution bound ([[safeFind]]/[[safeMatches]]) caps the number of
+ *   2. A hard execution bound ([[safeFind]]) caps the number of
  *      character accesses the backtracking engine may perform for a single
  *      match. Catastrophic backtracking explores an exponential number of paths,
  *      each of which reads characters, so a step ceiling deterministically
@@ -25,10 +27,14 @@ import scala.util.control.NonFatal
  * matching helpers is safe regardless of how it was constructed. The shape
  * blocklist is only a fast early-reject and must not be relied on for safety.
  *
+ * Every refusal is a `Left` of [[org.llm4s.error.ValidationError]], for the field `pattern` or `input`; nothing
+ * here throws.
+ *
  * NOTE: kept intentionally in sync with
  * `org.llm4s.runner.WorkspaceRegexSafetyManager`, which duplicates this logic
- * because the workspace runner module cannot depend on `core`. Changes to the
- * heuristics or bounds here should be mirrored there.
+ * because the workspace runner module cannot depend on `core` (and so returns
+ * `Either[String, _]`, not `Result`). Changes to the heuristics or bounds here
+ * should be mirrored there.
  */
 @Stable
 object RegexSafetyManager {
@@ -44,66 +50,57 @@ object RegexSafetyManager {
    */
   private val DefaultMaxMatchSteps = 10000000L
 
-  private val DefaultCaseInsensitiveFlags = Pattern.CASE_INSENSITIVE
-
-  // Common catastrophic-backtracking shapes (cheap early-reject only).
+  // Common catastrophic-backtracking shapes (cheap early-reject only). A quantified alternation, `(x|y)+`, is not
+  // one of them (#2825): `(foo|bar)+` is an ordinary pattern, and only alternatives that overlap are refused, by
+  // `hasOverlappingAlternationWithQuantifier`.
   private val DangerousPatternShapes = List(
     "\\(\\([^)]*[+*][^)]*\\)[+*][^)]*\\)[+*]", // ((x+)+)+ or ((x*)*)*
-    "\\([^)]*[+*][^)]*\\)[+*]",                // (x+)+, (x*)*, (x+)*
-    "\\([^)]*\\|[^)]*\\)[+*]"                  // (x|y)*, (x|y)+
+    "\\([^)]*[+*][^)]*\\)[+*]"                 // (x+)+, (x*)*, (x+)*
   ).map(_.r)
 
-  /** Raised when a match exceeds its step budget (likely catastrophic backtracking). */
-  final class RegexComplexityException(message: String) extends RuntimeException(message)
+  /** Raised when a match exceeds its step budget (likely catastrophic backtracking); caught in `guardMatch`. */
+  final private class RegexComplexityException(message: String) extends RuntimeException(message)
 
   /**
    * Compiles a user-supplied pattern after the pre-screen, without throwing.
    *
-   * Returns `Left` with a message when the pattern is null, empty or blank, is longer than 1000 characters,
-   * matches one of the known catastrophic-backtracking shapes (nested quantifiers, or a quantified alternation
-   * whose alternatives overlap), or is not valid regex syntax. The pre-screen is only an early reject: bound
-   * matching with [[safeFind]] or [[safeMatches]].
+   * Returns a `Left` when the pattern is null, empty or blank, is longer than 1000 characters, matches one of the
+   * known catastrophic-backtracking shapes (nested quantifiers such as `(a+)+`, or a quantified alternation whose
+   * alternatives overlap, such as `(a|ab)*`), or is not valid regex syntax. A quantified alternation whose
+   * alternatives do not overlap, such as `(foo|bar)+`, compiles. The pre-screen is only an early reject: bound
+   * matching with [[safeFind]].
    *
    * @param pattern the regular expression to compile
    * @param flags `java.util.regex.Pattern` flags, such as `Pattern.CASE_INSENSITIVE`; 0 by default
-   * @return the compiled `Pattern`, or `Left` with the reason it was rejected
+   * @return the compiled `Pattern`, or a [[org.llm4s.error.ValidationError]] for the field `pattern` whose message
+   *         holds the reason it was rejected
    */
-  def safeCompile(pattern: String, flags: Int = 0): Either[String, Pattern] =
+  def safeCompile(pattern: String, flags: Int = 0): Result[Pattern] =
     for {
       _ <- validatePattern(pattern)
       p <- compileSafely(pattern, flags)
     } yield p
 
   /**
-   * Tells whether the pattern is found anywhere in the input (`Matcher.find`), within a step budget.
+   * Tells whether the pattern is found anywhere in the input (`Matcher.find`), within a budget of 10000000
+   * character accesses.
    *
-   * Returns `Left` with a message when the input is null or longer than 100000 characters, when matching reads
-   * more than `maxSteps` characters (likely catastrophic backtracking), when the pattern recurses too deeply for
-   * the input, or when matching fails for another non-fatal reason. See [[safeMatches]] for whole-input matching.
+   * Returns a `Left` when the input is null or longer than 100000 characters, when matching exceeds the budget
+   * (likely catastrophic backtracking), when the pattern recurses too deeply for the input, or when matching fails
+   * for another non-fatal reason.
    *
    * @param pattern the compiled pattern, e.g. from [[safeCompile]]
    * @param input the text to search
-   * @param maxSteps the most character accesses one match may make; 10000000 by default
-   * @return `Right(true)` if a match is found, `Right(false)` if not, or `Left` with the reason matching stopped
+   * @return `Right(true)` if a match is found, `Right(false)` if not, or a [[org.llm4s.error.ValidationError]]
+   *         whose message holds the reason matching stopped: for the field `input` when the input was refused, for
+   *         `pattern` when the match was
    */
-  def safeFind(pattern: Pattern, input: String, maxSteps: Long = DefaultMaxMatchSteps): Either[String, Boolean] =
-    withInputValidation(input).flatMap(_ => guardMatch(boundedMatcher(pattern, input, maxSteps).find()))
+  def safeFind(pattern: Pattern, input: String): Result[Boolean] =
+    safeFind(pattern, input, DefaultMaxMatchSteps)
 
-  /**
-   * Tells whether the pattern matches the whole input (`Matcher.matches`), within a step budget.
-   *
-   * It is [[safeFind]] for the whole input: `find` succeeds on a match anywhere in the input, `matches` only
-   * when the pattern matches all of it. The same `Left` cases apply: a null or over-long input (more than 100000
-   * characters), an exceeded step budget, too deep a recursion, or another non-fatal failure.
-   *
-   * @param pattern the compiled pattern, e.g. from [[safeCompile]]
-   * @param input the text to match
-   * @param maxSteps the most character accesses one match may make; 10000000 by default
-   * @return `Right(true)` if the whole input matches, `Right(false)` if not, or `Left` with the reason matching
-   *         stopped
-   */
-  def safeMatches(pattern: Pattern, input: String, maxSteps: Long = DefaultMaxMatchSteps): Either[String, Boolean] =
-    withInputValidation(input).flatMap(_ => guardMatch(boundedMatcher(pattern, input, maxSteps).matches()))
+  /** [[safeFind]] with a step budget of the caller's, for tests of the bound. */
+  private[llm4s] def safeFind(pattern: Pattern, input: String, maxSteps: Long): Result[Boolean] =
+    withInputValidation(input).flatMap(_ => guardMatch(boundedMatcher(pattern, input, maxSteps).find()))
 
   /**
    * Compiles text as a literal pattern: it is quoted with `Pattern.quote`, so regex metacharacters in it match
@@ -119,38 +116,30 @@ object RegexSafetyManager {
   def compileLiteral(pattern: String, flags: Int = 0): Pattern =
     Pattern.compile(Pattern.quote(pattern), flags)
 
-  /**
-   * Compiles text as a literal pattern that ignores case (`Pattern.CASE_INSENSITIVE`).
-   *
-   * Like [[compileLiteral]], it quotes the text and does not apply the checks of [[safeCompile]].
-   *
-   * @param pattern the text to match literally
-   * @return a case-insensitive `Pattern` that matches `pattern` as plain text
-   */
-  def compileLiteralCaseInsensitive(pattern: String): Pattern =
-    compileLiteral(pattern, DefaultCaseInsensitiveFlags)
+  private def refusedPattern[A](reason: String): Result[A] = Left(ValidationError("pattern", reason))
+  private def refusedInput[A](reason: String): Result[A]   = Left(ValidationError("input", reason))
 
-  private def validatePattern(pattern: String): Either[String, Unit] =
-    if (pattern == null) Left("Pattern cannot be null")
-    else if (pattern.trim.isEmpty) Left("Pattern cannot be empty")
+  private def validatePattern(pattern: String): Result[Unit] =
+    if (pattern == null) refusedPattern("Pattern cannot be null")
+    else if (pattern.trim.isEmpty) refusedPattern("Pattern cannot be empty")
     else if (pattern.length > MaxPatternLength)
-      Left(s"Pattern too long: ${pattern.length} > $MaxPatternLength")
+      refusedPattern(s"Pattern too long: ${pattern.length} > $MaxPatternLength")
     else if (DangerousPatternShapes.exists(_.findFirstIn(pattern).isDefined))
-      Left("Regex pattern contains nested quantifiers/overlap and may cause ReDoS")
+      refusedPattern("Regex pattern contains nested quantifiers and may cause ReDoS")
     else if (hasOverlappingAlternationWithQuantifier(pattern))
-      Left("Regex pattern contains quantified overlapping alternation and may cause ReDoS")
+      refusedPattern("Regex pattern contains quantified overlapping alternation and may cause ReDoS")
     else Right(())
 
-  private def withInputValidation(input: String): Either[String, Unit] =
-    if (input == null) Left("Input cannot be null")
+  private def withInputValidation(input: String): Result[Unit] =
+    if (input == null) refusedInput("Input cannot be null")
     else if (input.length > MaxInputLength)
-      Left(s"Input too large: ${input.length} > $MaxInputLength")
+      refusedInput(s"Input too large: ${input.length} > $MaxInputLength")
     else Right(())
 
-  private def compileSafely(pattern: String, flags: Int): Either[String, Pattern] =
+  private def compileSafely(pattern: String, flags: Int): Result[Pattern] =
     Try(Pattern.compile(pattern, flags)).toEither.left.map {
-      case e: PatternSyntaxException => s"Invalid regex syntax: ${e.getMessage}"
-      case e                         => s"Regex compilation failed: ${e.getMessage}"
+      case e: PatternSyntaxException => ValidationError("pattern", s"Invalid regex syntax: ${e.getMessage}")
+      case e                         => ValidationError("pattern", s"Regex compilation failed: ${e.getMessage}")
     }
 
   private def boundedMatcher(pattern: Pattern, input: String, maxSteps: Long): Matcher =
@@ -161,71 +150,28 @@ object RegexSafetyManager {
   // the handler runs the matcher's frames have unwound, so continuing on this thread is safe. Every other
   // fatal error (out of memory, `InterruptedException`, linkage errors) still propagates.
   // scalafix:off DisableSyntax.NoKeywordCatch
-  private def guardMatch(matchOp: => Boolean): Either[String, Boolean] =
+  private def guardMatch(matchOp: => Boolean): Result[Boolean] =
     try Right(matchOp)
     catch {
-      case _: RegexComplexityException => Left("Regex matching aborted: exceeded complexity budget (possible ReDoS)")
+      case _: RegexComplexityException =>
+        refusedPattern("Regex matching aborted: exceeded complexity budget (possible ReDoS)")
       case _: StackOverflowError =>
-        Left("Regex matching aborted: pattern recursed too deeply for the input (stack overflow)")
-      case NonFatal(e) => Left(s"Regex matching failed: ${e.getMessage}")
+        refusedPattern("Regex matching aborted: pattern recursed too deeply for the input (stack overflow)")
+      case NonFatal(e) => refusedPattern(s"Regex matching failed: ${e.getMessage}")
     }
   // scalafix:on DisableSyntax.NoKeywordCatch
 
   private def hasOverlappingAlternationWithQuantifier(pattern: String): Boolean = {
     val quantifiedAlt = "\\(([^)]*\\|[^)]*)\\)([+*])".r
     quantifiedAlt.findAllMatchIn(pattern).exists { m =>
-      val alternatives = m.group(1).split("\\|").map(_.trim).filter(_.nonEmpty)
+      // without the `?:` or `?<name>` that opens a non-capturing or named group, which is not part of an alternative
+      val body         = m.group(1).replaceFirst("^\\?(?::|<[A-Za-z][A-Za-z0-9]*>)", "")
+      val alternatives = body.split("\\|").map(_.trim).filter(_.nonEmpty)
       alternatives.combinations(2).exists {
         case Array(a, b) => a.startsWith(b) || b.startsWith(a)
         case _           => false
       }
     }
-  }
-
-  /**
-   * Replaces every occurrence of a literal text in the input.
-   *
-   * Both `literalPattern` and `replacement` are taken literally: the pattern is compiled with [[compileLiteral]]
-   * and the replacement goes through `Matcher.quoteReplacement`, so `$` and `\` in it have no special meaning.
-   *
-   * @param input the text to search
-   * @param literalPattern the text to find, matched literally
-   * @param replacement the text to put in its place, inserted literally
-   * @param caseInsensitive whether `literalPattern` matches regardless of case (`Pattern.CASE_INSENSITIVE`)
-   * @return the input with every occurrence replaced
-   */
-  def replaceAllLiteral(
-    input: String,
-    literalPattern: String,
-    replacement: String,
-    caseInsensitive: Boolean
-  ): String = {
-    val flags   = if (caseInsensitive) Pattern.CASE_INSENSITIVE else 0
-    val pattern = compileLiteral(literalPattern, flags)
-    pattern.matcher(input).replaceAll(Matcher.quoteReplacement(replacement))
-  }
-
-  /**
-   * Replaces the first occurrence of a literal text in the input.
-   *
-   * It is [[replaceAllLiteral]] for the first occurrence only: `literalPattern` and `replacement` are both taken
-   * literally, the replacement through `Matcher.quoteReplacement`.
-   *
-   * @param input the text to search
-   * @param literalPattern the text to find, matched literally
-   * @param replacement the text to put in its place, inserted literally
-   * @param caseInsensitive whether `literalPattern` matches regardless of case (`Pattern.CASE_INSENSITIVE`)
-   * @return the input with its first occurrence replaced, or the input unchanged if there is none
-   */
-  def replaceFirstLiteral(
-    input: String,
-    literalPattern: String,
-    replacement: String,
-    caseInsensitive: Boolean
-  ): String = {
-    val flags   = if (caseInsensitive) Pattern.CASE_INSENSITIVE else 0
-    val pattern = compileLiteral(literalPattern, flags)
-    pattern.matcher(input).replaceFirst(Matcher.quoteReplacement(replacement))
   }
 
   /**

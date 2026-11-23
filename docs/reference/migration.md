@@ -50,7 +50,30 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
-and [`SecretPatterns` is in `llm4s-agent`](#secretpatterns-is-in-llm4s-agent-2824).
+[`SecretPatterns` is in `llm4s-agent`](#secretpatterns-is-in-llm4s-agent-2824),
+and [`RegexSafetyManager` returns `Result`](#regexsafetymanager-returns-result-2825).
+
+## `RegexSafetyManager` returns `Result` (#2825)
+
+`RegexSafetyManager.safeCompile` and `safeFind` (`org.llm4s.security`) return `Result`, not `Either[String, _]`: a
+refusal is a `ValidationError` for the field `pattern` or `input`, and the text that was the `Left` is in its
+`message` after `Invalid pattern: ` or `Invalid input: `.
+
+```scala
+RegexSafetyManager.safeCompile(userPattern) match
+  case Right(pattern) => RegexSafetyManager.safeFind(pattern, text) // Result[Boolean]
+  case Left(error)    => refuse(error.message)                      // was: case Left(reason) => refuse(reason)
+```
+
+- **`safeFind` takes no `maxSteps`.** The budget is the documented 10000000 character accesses.
+- **Removed, with no caller in llm4s:** `safeMatches` (anchor the pattern with `^...$` and use `safeFind`),
+  `compileLiteralCaseInsensitive` (`compileLiteral(text, Pattern.CASE_INSENSITIVE)`), `replaceAllLiteral` and
+  `replaceFirstLiteral` (`String.replace`, or `compileLiteral(text).matcher(input).replaceFirst(Matcher.quoteReplacement(r))`),
+  and the `RegexComplexityException` class, which never escaped the object.
+- **A quantified alternation compiles.** `safeCompile`, and so `RegexValidator("...")` and a `FileBackend`'s `grep`,
+  refused every `(x|y)+` and `(x|y)*`, such as `(foo|bar)+` and `^(GET|POST)+$`. They now refuse only one whose
+  alternatives overlap, such as `(a|ab)*`, as documented. A pattern your application relied on being refused may
+  now run, within the step budget.
 
 ## `SecretPatterns` is in `llm4s-agent` (#2824)
 
