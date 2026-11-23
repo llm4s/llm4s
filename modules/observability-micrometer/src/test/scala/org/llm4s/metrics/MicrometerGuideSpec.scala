@@ -1,5 +1,6 @@
 package org.llm4s.metrics
 
+import org.llm4s.reliability.ReliabilityMetrics
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.micrometer.prometheusmetrics.{ PrometheusConfig, PrometheusMeterRegistry }
@@ -117,9 +118,9 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
     metrics.observeRequest("openai", "gpt-4o", Outcome.Error(ErrorKind.Timeout), 1.second)
     metrics.addTokens("openai", "gpt-4o", 1L, 1L)
     metrics.recordCost("openai", "gpt-4o", 0.1)
-    metrics.recordRetryAttempt("openai", 1)
-    metrics.recordCircuitBreakerTransition("openai", "open")
-    metrics.recordError(ErrorKind.Timeout, "openai")
+    metrics.increment(ReliabilityMetrics.Retries, Seq("openai"))
+    metrics.increment(ReliabilityMetrics.CircuitBreakerTransitions, Seq("openai", "open"))
+    metrics.increment(ReliabilityMetrics.Errors, Seq("openai", ReliabilityMetrics.errorTypeLabel(ErrorKind.Timeout)))
     metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 1.second, 1)
     metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Error(ErrorKind.Network), 1.second, 1)
     metrics.recordImageGenerationCost("openai", "dall-e-3", 0.1, 1)

@@ -388,6 +388,8 @@ object TraceEvent {
    *                 that started it, a continued run's the context it continued - and when the run started
    * @param provider the canonical id of the provider of the run's model calls (the first call's, when they used
    *                 several), when its client reported one; OpenTelemetry's `gen_ai.provider.name`
+   * @param userId   who the run was for, as the application names them: the agent's tracing sets it to the run's
+   *                 `RunConfig.principal`. `None` when the run has none; a backend then names no user (#2828)
    */
   final case class AgentRunEnded private (
     threadId: String,
@@ -400,7 +402,8 @@ object TraceEvent {
     parentThreadId: Option[String],
     parentRunId: Option[String],
     override val span: Option[TraceSpan],
-    provider: Option[ProviderId]
+    provider: Option[ProviderId],
+    userId: Option[String]
   ) extends TraceEvent {
     def withThreadId(threadId: String): AgentRunEnded                     = copy(threadId = threadId)
     def withRunId(runId: String): AgentRunEnded                           = copy(runId = runId)
@@ -417,6 +420,8 @@ object TraceEvent {
     def withSpan(span: Option[TraceSpan]): AgentRunEnded                  = copy(span = span)
     def withProvider(provider: ProviderId): AgentRunEnded                 = copy(provider = Some(provider))
     def withProvider(provider: Option[ProviderId]): AgentRunEnded         = copy(provider = provider)
+    def withUserId(userId: String): AgentRunEnded                         = copy(userId = Some(userId))
+    def withUserId(userId: Option[String]): AgentRunEnded                 = copy(userId = userId)
 
     def eventType: String = "agent_run_ended"
     def toJson: ujson.Value = {
@@ -435,6 +440,7 @@ object TraceEvent {
       parentThreadId.foreach(id => json("parent_thread_id") = id)
       parentRunId.foreach(id => json("parent_run_id") = id)
       provider.foreach(p => json("provider") = p.asString)
+      userId.foreach(id => json("user_id") = id)
       TraceSpan.annotate(json, span)
     }
   }
@@ -451,7 +457,8 @@ object TraceEvent {
       parentThreadId: Option[String] = None,
       parentRunId: Option[String] = None,
       span: Option[TraceSpan] = None,
-      provider: Option[ProviderId] = None
+      provider: Option[ProviderId] = None,
+      userId: Option[String] = None
     ): AgentRunEnded =
       new AgentRunEnded(
         threadId,
@@ -464,7 +471,8 @@ object TraceEvent {
         parentThreadId,
         parentRunId,
         span,
-        provider
+        provider,
+        userId
       )
   }
 

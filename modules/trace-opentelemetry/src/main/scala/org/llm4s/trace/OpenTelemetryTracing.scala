@@ -14,12 +14,10 @@ import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.config.OpenTelemetryConfig
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
-  Completion,
   CompletionOptions,
   FinishReason,
   Message,
   ServiceTier,
-  TokenUsage,
   ToolMessage
 }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -118,7 +116,7 @@ class OpenTelemetryTracing private[trace] (
   /** Why the SDK could not start, if it could not; `OpenTelemetryTracingBackend` reports it. */
   private[trace] def initializationFailure: Option[Throwable] = initializationResult.left.toOption
 
-  override def shutdown(): Unit =
+  override def close(): Unit =
     initializationResult.foreach { case (sdk, _) =>
       val provider = sdk.getSdkTracerProvider
       provider.shutdown().join(10, TimeUnit.SECONDS)
@@ -534,32 +532,6 @@ class OpenTelemetryTracing private[trace] (
   }
 
   private def textPart(text: String): ujson.Value = ujson.Obj("type" -> "text", "content" -> content(text))
-
-  override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
-    val event = TraceEvent.ToolExecuted(toolName, input, output, scala.concurrent.duration.Duration.Zero, true)
-    traceEvent(event)
-  }
-
-  override def traceError(error: Throwable, context: String): Result[Unit] = {
-    val event = TraceEvent.ErrorOccurred(error, context)
-    traceEvent(event)
-  }
-
-  override def traceCompletion(completion: Completion, model: String): Result[Unit] = {
-    val event = TraceEvent.CompletionReceived(
-      id = completion.id,
-      model = model,
-      toolCalls = completion.message.toolCalls.size,
-      content = completion.message.content,
-      servedTier = completion.servedTier
-    )
-    traceEvent(event)
-  }
-
-  override def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = {
-    val event = TraceEvent.TokenUsageRecorded(usage, model, operation)
-    traceEvent(event)
-  }
 }
 
 private[trace] object TraceAttributes {

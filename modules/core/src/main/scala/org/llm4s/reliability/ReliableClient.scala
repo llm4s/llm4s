@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference 
  *   retry starts once it has passed. It does not interrupt an attempt: a call hung inside the underlying client
  *   is bounded by that client's own timeout, not by the deadline
  * - Local token-bucket rate limiting ([[RateLimitConfig]]), checked before every attempt
- * - Metrics tracking for retry attempts and circuit breaker state
+ * - Metrics for retry attempts, circuit breaker transitions and the errors it ends on ([[ReliabilityMetrics]])
  *
  * Thread-safety: Uses AtomicInteger/AtomicReference for circuit breaker state management
  * to ensure correct behavior under concurrent access.
@@ -74,7 +74,7 @@ final class ReliableClient(
         () =>
           if (bucket.tryAcquire()) operation()
           else {
-            collector.foreach(_.recordError(ErrorKind.RateLimit, providerName))
+            collector.foreach(ReliabilityMetrics.failed(_, providerName, ErrorKind.RateLimit))
             Left(RateLimitError.local(providerName))
           }
     }
@@ -151,7 +151,7 @@ final class ReliableClient(
     // permit, and hands it back with its outcome.
     val isProbe = checkCircuitBreaker() match {
       case Left(error) =>
-        collector.foreach(_.recordError(ErrorKind.ServiceError, providerName))
+        collector.foreach(ReliabilityMetrics.failed(_, providerName, ErrorKind.ServiceError))
         return Left(error)
       case Right(probe) => probe
     }
@@ -248,7 +248,7 @@ final class ReliableClient(
         case Left(error) =>
           (if (canRetry()) decideRetry(attemptNumber, error) else RetryDecision.DoNotRetry) match {
             case RetryDecision.Retry(delay) =>
-              collector.foreach(_.recordRetryAttempt(providerName, attemptNumber))
+              collector.foreach(ReliabilityMetrics.retried(_, providerName))
 
               // Recompute remaining time after operation to avoid a stale value
               val remainingAfterDelay = (deadlineMs - nowMillis()) - delay.toMillis
@@ -310,7 +310,7 @@ final class ReliableClient(
         (if (canRetry()) decideRetry(attemptNumber, error) else RetryDecision.DoNotRetry) match {
           case RetryDecision.Retry(delay) =>
             // Record retry attempt
-            collector.foreach(_.recordRetryAttempt(providerName, attemptNumber))
+            collector.foreach(ReliabilityMetrics.retried(_, providerName))
 
             try
               sleep(delay)
@@ -390,7 +390,7 @@ final class ReliableClient(
     lastError match {
       case Some(e) if isLocalThrottle(e) => Left(e)
       case _ =>
-        collector.foreach(_.recordError(ErrorKind.Timeout, providerName))
+        collector.foreach(ReliabilityMetrics.failed(_, providerName, ErrorKind.Timeout))
         Left(
           TimeoutError(
             message = lastError match {
@@ -418,7 +418,7 @@ final class ReliableClient(
     error match {
       case _: CancelledError                                                  => ()
       case rle: RateLimitError if rle.origin == RateLimitOrigin.LocalThrottle => ()
-      case _ => collector.foreach(_.recordError(ErrorKind.fromLLMError(error), providerName))
+      case _ => collector.foreach(ReliabilityMetrics.failed(_, providerName, ErrorKind.fromLLMError(error)))
     }
 
   /**
@@ -440,7 +440,7 @@ final class ReliableClient(
         else if (!probePermit.compareAndSet(false, true)) Left(CircuitOpenError.probing(providerName))
         else if (circuitState.compareAndSet(CircuitState.Open, CircuitState.HalfOpen)) {
           successCount.set(0)
-          collector.foreach(_.recordCircuitBreakerTransition(providerName, "half-open"))
+          collector.foreach(ReliabilityMetrics.transitioned(_, providerName, CircuitState.HalfOpen))
           Right(true)
         } else {
           // The circuit moved while the permit was being taken: hand it back and read the state again
@@ -475,7 +475,7 @@ final class ReliableClient(
         ) {
           failureCount.set(0)
           successCount.set(0)
-          collector.foreach(_.recordCircuitBreakerTransition(providerName, "closed"))
+          collector.foreach(ReliabilityMetrics.transitioned(_, providerName, CircuitState.Closed))
         }
 
       case _ => ()
@@ -502,7 +502,7 @@ final class ReliableClient(
         if (newFailureCount >= config.circuitBreaker.failureThreshold) {
           // Open circuit
           if (circuitState.compareAndSet(CircuitState.Closed, CircuitState.Open)) {
-            collector.foreach(_.recordCircuitBreakerTransition(providerName, "open"))
+            collector.foreach(ReliabilityMetrics.transitioned(_, providerName, CircuitState.Open))
           }
         }
 
@@ -510,7 +510,7 @@ final class ReliableClient(
         // Single failure in half-open → back to open
         if (circuitState.compareAndSet(CircuitState.HalfOpen, CircuitState.Open)) {
           successCount.set(0)
-          collector.foreach(_.recordCircuitBreakerTransition(providerName, "open"))
+          collector.foreach(ReliabilityMetrics.transitioned(_, providerName, CircuitState.Open))
         }
 
       case CircuitState.Open =>

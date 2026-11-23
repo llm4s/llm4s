@@ -57,7 +57,13 @@ object BasicLLMCallingWithTrace {
 
             // Trace tool calls if present
             completion.message.toolCalls.foreach { tc =>
-              tracer.traceToolCall(tc.name, tc.arguments.render(), "(tool output not available in this example)")
+              tracer.traceToolCall(
+                tc.name,
+                tc.arguments.render(),
+                "(tool output not available in this example)",
+                scala.concurrent.duration.Duration.Zero,
+                success = true
+              )
             }
 
           case Left(error) =>

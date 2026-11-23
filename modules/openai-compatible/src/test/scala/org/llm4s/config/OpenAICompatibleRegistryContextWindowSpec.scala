@@ -329,8 +329,6 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
       mode = ModelMode.Chat,
       maxInputTokens = maxInput,
       maxOutputTokens = Some(4096),
-      inputCostPerToken = None,
-      outputCostPerToken = None,
       capabilities = ModelCapabilities(),
       pricing = ModelPricing(),
       deprecationDate = None

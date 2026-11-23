@@ -12,8 +12,6 @@ object Fixtures {
       mode = ModelMode.Chat,
       maxInputTokens = Some(8192),
       maxOutputTokens = Some(1024),
-      inputCostPerToken = None,
-      outputCostPerToken = None,
       capabilities = capabilities,
       pricing = ModelPricing(),
       deprecationDate = None

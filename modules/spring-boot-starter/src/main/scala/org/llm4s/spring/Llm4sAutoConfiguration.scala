@@ -119,7 +119,7 @@ class Llm4sAutoConfiguration {
    * `llm4s-observability-otel`'s `opentelemetry`. A mode no backend serves fails startup. A bean of type `Tracing`
    * replaces it.
    */
-  @Bean(destroyMethod = "shutdown")
+  @Bean(destroyMethod = "close")
   @ConditionalOnMissingBean
   @ConditionalOnProperty(prefix = "llm4s.tracing", name = Array("mode"))
   def llm4sTracing(environment: ConfigurableEnvironment): Tracing =

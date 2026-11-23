@@ -97,7 +97,7 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
     val storedContent    = ujson.read(messages)(0)("parts")(0)("content").str
 
     storedContent shouldBe longContent.take(1000)
-    capturing.shutdown()
+    capturing.close()
   }
 
   it should "initialize without errors" in {
@@ -113,7 +113,7 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
     val result = otel.traceEvent(TraceEvent.CustomEvent("TestEvent", ujson.Obj()))
     result shouldBe Right(())
 
-    otel.shutdown()
+    otel.close()
   }
 
   it should "be loaded correctly via Tracing.create when configured" in {
@@ -127,6 +127,6 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
     tracingInstance shouldBe a[OpenTelemetryTracing]
 
     // Cleanup
-    tracingInstance.shutdown()
+    tracingInstance.close()
   }
 }

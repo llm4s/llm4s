@@ -354,17 +354,20 @@ reliableClient.resetCircuitBreaker()
 Track reliability metrics with any MetricsCollector:
 
 ```scala
-import org.llm4s.metrics.{ MetricsCollector, Outcome }
+import org.llm4s.metrics.{ Metric, MetricsCollector, Outcome }
+import org.llm4s.reliability.{ ReliabilityConfig, ReliabilityMetrics, ReliableClient }
 import scala.concurrent.duration.FiniteDuration
 
 class MyMetricsCollector extends MetricsCollector {
-  override def recordRetryAttempt(provider: String, attemptNumber: Int): Unit = {
-    println(s"$provider: Retry attempt #$attemptNumber")
-  }
-
-  override def recordCircuitBreakerTransition(provider: String, newState: String): Unit = {
-    println(s"$provider: Circuit breaker → $newState")
-  }
+  // ReliableClient records its retries, circuit-breaker transitions and errors as ReliabilityMetrics
+  override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit =
+    (metric, labelValues) match {
+      case (ReliabilityMetrics.Retries, Seq(provider)) =>
+        println(s"$provider: Retry")
+      case (ReliabilityMetrics.CircuitBreakerTransitions, Seq(provider, newState)) =>
+        println(s"$provider: Circuit breaker → $newState")
+      case _ => ()
+    }
 
   // The three methods without a default: per-call latency, tokens and cost
   override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit = ()
@@ -376,13 +379,17 @@ val metrics = new MyMetricsCollector
 val client  = new ReliableClient(baseClient, "openai", ReliabilityConfig.default, Some(metrics))
 ```
 
-`recordRetryAttempt`, `recordCircuitBreakerTransition` and `recordError` default to no-ops;
+`ReliableClient` records three counters, declared in `ReliabilityMetrics` and recorded through the collector's generic
+`increment`: `Retries` (label `provider`), `CircuitBreakerTransitions` (`provider`, `state`: `open`, `closed` or
+`half-open`) and `Errors` (`provider`, `error_type`). A backend that implements `increment` exports them with no
+further code: `PrometheusMetrics` as `llm4s_retries_total`, `llm4s_circuit_breaker_transitions_total` and
+`llm4s_reliability_errors_total`, `MicrometerMetrics` under the same names. `increment` defaults to a no-op;
 `observeRequest`, `addTokens` and `recordCost` must be implemented. To also get per-call
 latency and token metrics from the provider client, pass the same collector to
 `LLMConnect.getClient(providerConfig, metrics)`. Both layers then report a failed call: the
-provider client once per attempt (`observeRequest`) and `ReliableClient` once for the final failure (`recordError`).
-`MicrometerMetrics` keeps the two apart (`llm4s.errors` and `llm4s.reliability.errors`), so neither counts a failure
-twice; a collector of your own should do the same.
+provider client once per attempt (`observeRequest`) and `ReliableClient` once for the final failure
+(`ReliabilityMetrics.Errors`). Both backends keep the two apart (`llm4s_errors_total` and
+`llm4s_reliability_errors_total`), so neither counts a failure twice; a collector of your own should do the same.
 
 ## Error Handling
 
@@ -426,7 +433,8 @@ Only customize if you have specific requirements.
 ### 2. Monitor Circuit Breaker State
 
 ```scala
-import org.llm4s.metrics.{ MetricsCollector, Outcome }
+import org.llm4s.metrics.{ Metric, MetricsCollector, Outcome }
+import org.llm4s.reliability.ReliabilityMetrics
 import org.slf4j.LoggerFactory
 import scala.concurrent.duration.FiniteDuration
 
@@ -437,10 +445,13 @@ trait Alerting { def sendAlert(message: String): Unit }
 class ProductionMetrics(alerting: Alerting) extends MetricsCollector {
   private val logger = LoggerFactory.getLogger(getClass)
 
-  override def recordCircuitBreakerTransition(provider: String, newState: String): Unit = {
-    logger.warn(s"Circuit breaker for $provider transitioned to $newState")
-    alerting.sendAlert(s"Circuit breaker: $provider → $newState")
-  }
+  override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit =
+    (metric, labelValues) match {
+      case (ReliabilityMetrics.CircuitBreakerTransitions, Seq(provider, newState)) =>
+        logger.warn(s"Circuit breaker for $provider transitioned to $newState")
+        alerting.sendAlert(s"Circuit breaker: $provider → $newState")
+      case _ => ()
+    }
 
   override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit = ()
   override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit = ()
@@ -564,7 +575,8 @@ yield completion
 ### Pattern 5: Circuit Breaker Monitoring
 
 ```scala
-import org.llm4s.metrics.{ MetricsCollector, Outcome }
+import org.llm4s.metrics.{ Metric, MetricsCollector, Outcome }
+import org.llm4s.reliability.ReliabilityMetrics
 import org.slf4j.LoggerFactory
 import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
@@ -579,7 +591,13 @@ class ProductionMetrics(alerting: Alerting) extends MetricsCollector {
   private val logger            = LoggerFactory.getLogger(getClass)
   private val circuitOpenAlerts = mutable.Set[String]()
   
-  override def recordCircuitBreakerTransition(provider: String, newState: String): Unit = {
+  override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit =
+    (metric, labelValues) match {
+      case (ReliabilityMetrics.CircuitBreakerTransitions, Seq(provider, newState)) => transitioned(provider, newState)
+      case _                                                                       => ()
+    }
+
+  private def transitioned(provider: String, newState: String): Unit = {
     newState match {
       case "open" =>
         if (!circuitOpenAlerts.contains(provider)) {
@@ -842,7 +860,8 @@ import org.llm4s.reliability.{ CircuitBreakerConfig, ReliableClient, Reliability
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage, CompletionOptions }
-import org.llm4s.metrics.{ MetricsCollector, Outcome, ErrorKind }
+import org.llm4s.metrics.{ Metric, MetricsCollector, Outcome }
+import org.llm4s.reliability.ReliabilityMetrics
 import org.llm4s.config.Llm4sConfig
 import scala.concurrent.duration._
 
@@ -908,9 +927,18 @@ object ProductionExample {
   class ProductionMetrics extends MetricsCollector {
     private var retryCount = 0
     
-    override def recordRetryAttempt(provider: String, attemptNumber: Int): Unit = {
+    // what ReliableClient records, by metric
+    override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit =
+      (metric, labelValues) match {
+        case (ReliabilityMetrics.Retries, Seq(provider))                             => retried(provider)
+        case (ReliabilityMetrics.CircuitBreakerTransitions, Seq(provider, newState)) => transitioned(provider, newState)
+        case (ReliabilityMetrics.Errors, Seq(provider, errorType)) => println(s"❌ Error: $errorType for $provider")
+        case _                                                     => ()
+      }
+
+    private def retried(provider: String): Unit = {
       retryCount += 1
-      println(s"Retry #$attemptNumber for $provider (total retries: $retryCount)")
+      println(s"Retry for $provider (total retries: $retryCount)")
       
       // Alert if retry rate is high
       if (retryCount > 100) {
@@ -918,7 +946,7 @@ object ProductionExample {
       }
     }
 
-    override def recordCircuitBreakerTransition(provider: String, newState: String): Unit = {
+    private def transitioned(provider: String, newState: String): Unit = {
       println(s"Circuit breaker: $provider → $newState")
       
       newState match {
@@ -932,10 +960,6 @@ object ProductionExample {
           
         case _ => // half-open
       }
-    }
-
-    override def recordError(errorKind: ErrorKind, provider: String): Unit = {
-      println(s"❌ Error: $errorKind for $provider")
     }
 
     override def observeRequest(
