@@ -8,6 +8,8 @@ nav_order: 2
 
 # Migration Guide
 
+This page is the canonical record of every breaking change since 0.4.1. To find the notes that apply to the release
+you are on, start from [Migrating from 0.x to 1.0](../migrations/0x-to-1x), which has an entry point per release.
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
 by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the source breaks are
 [Multimodal content parts](#multimodal-content-parts-1913) and
@@ -434,7 +436,8 @@ The `PositionalPatternsGainFields` Scalafix rule adds these binders ([Scalafix](
 
 ## Changes since 0.5.1 that no rule automates
 
-The Scalafix rule `Llm4sMigrate_1_0` ([Scalafix](scalafix#migration-rules)) rewrites the mechanical source breaks
+The Scalafix rule `Llm4sMigrate_1_0` ([Scalafix](scalafix#migration-rules); published at 1.0; before that only as
+source in this repository) rewrites the mechanical source breaks
 below: `.copy` on the newly growth-safe types, `String` API keys of the provider configs, the `fromValues` argument
 order, `Completion.created`, positional patterns on types that gained fields, the `ServiceErrorOps` import and
 `loadTextEmbeddingModel`, and since 0.6.0 `ReasoningEffort.None` and the string comparisons of
@@ -841,14 +844,14 @@ In a checkout of this repository `sbt "configPolicy/runMain org.llm4s.configpoli
 Nothing to change: `llm4s-secrets-vault` is a new, experimental module over `llm4s-core` alone, and no other module
 depends on it. To read a provider's API key from HashiCorp Vault without Vault Agent or a CSI driver, add it and set
 `VaultApiKeyProvider(VaultSettings(...))` with `withApiKeyProvider`; see
-[Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation). `apiKeyFile` is unchanged.
+[Secrets and key rotation](../guide/production-deployment#secrets-and-key-rotation). `apiKeyFile` is unchanged.
 
 ## `llm4s-secrets-aws`, a new module (#2479)
 
 Nothing to change: `llm4s-secrets-aws` is a new, experimental module over `llm4s-core` alone, and no other module
 depends on it. To read a provider's API key from AWS Secrets Manager without the Secrets Store CSI driver or External
 Secrets Operator, add it and set `AwsSecretsManagerApiKeyProvider(AwsSecretsManagerSettings(...))` with
-`withApiKeyProvider`; see [Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation). `apiKeyFile`
+`withApiKeyProvider`; see [Secrets and key rotation](../guide/production-deployment#secrets-and-key-rotation). `apiKeyFile`
 is unchanged.
 
 ## `llm4s-repl`, a new module (#2342)

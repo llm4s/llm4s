@@ -3,13 +3,16 @@
 ## Supported versions
 
 Security fixes are made on the `main` branch and shipped in the **latest published release** of LLM4S (see
-[Releases](https://github.com/llm4s/llm4s/releases)). Older releases are not patched, so please upgrade to the latest
-release before reporting, and say in your report which version you tested. The current lines and their status are in the
+[Releases](https://github.com/llm4s/llm4s/releases)). Before 1.0, older releases are not patched, so please upgrade to
+the latest release before reporting, and say in your report which version you tested. From 1.0, the previous 1.x minor
+also gets security fixes for three months after its successor is released, and 0.7.x gets critical security fixes for
+three months after 1.0; other 0.x releases are unsupported once 1.0 ships. A security patch takes the next release
+slot ahead of any planned release. The current lines and their status are in the
 [support policy](docs/reference/support-policy.md).
 
 How a fix may change the API follows the [compatibility policy](docs/reference/compatibility-policy.md):
 
-- **Before the compatibility baseline (0.5.x now)**, any release may break source or binary compatibility, so a
+- **Before the compatibility baseline (0.7.0)**, any release may break source or binary compatibility, so a
   security fix may too. The break is listed under the CHANGELOG's *Breaking changes* with a migration note.
 - **After the baseline**, a fix to a Frozen module ships in a patch release without a binary-breaking change wherever
   that is possible. If closing the vulnerability needs a breaking change, it ships in the next minor (before 1.0) or

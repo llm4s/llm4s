@@ -51,7 +51,7 @@ git checkout -b my-first-contribution
 # make the change
 sbt scalafmtAll   # format
 sbt core/test     # verify
-git commit -m "[TEST] Add tests for XYZ"
+git commit -s -m "[TEST] Add tests for XYZ"
 git push origin my-first-contribution
 # Open PR against main
 ```
@@ -137,8 +137,8 @@ and `scripts/check-workflow-security.sh` (Quick Checks) holds a pull request to 
    ```bash
    sbt scalafixAll        # Run scalafix checks (enforced in CI/compile)
    sbt scalafmtAll        # Format code
-   sbt +compile           # Compile all versions
-   sbt +test              # Run all tests
+   sbt compile            # Compile (Scala 3 only)
+   sbt test               # Run all tests
    sbt buildAll           # Full pipeline check
    ```
 
@@ -208,7 +208,7 @@ its `reference.conf`, and `apiKeyEnv` names that variable in the error.
 
 See [AGENTS.md](AGENTS.md#testing-guidelines) for details:
 
-- Place tests in `modules/core/src/test/scala/org/llm4s/`
+- Place tests in the module's own `src/test/scala/org/llm4s/`, mirroring the source package
 - Name tests with `Spec` suffix
 - Use ScalaTest's FlatSpec style
 - Test both happy path and error cases
@@ -442,11 +442,9 @@ Keep `openaiCompatible`'s coverage at or above its floor in `build.sbt`
 See [AGENTS.md](AGENTS.md#build-test-and-development-commands) for complete list:
 
 ```bash
-sbt compile           # Compile active Scala version
-sbt +compile          # Compile all versions
+sbt compile           # Compile (the build is Scala 3 only)
 sbt test              # Run tests
-sbt +test             # Run tests all versions
-sbt buildAll          # Full pipeline (compile + test all versions)
+sbt buildAll          # Full pipeline (clean, compile, test)
 sbt scalafixAll       # Run Scalafix rules
 sbt scalafmtAll       # Format code
 ```

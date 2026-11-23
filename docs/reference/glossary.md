@@ -144,8 +144,10 @@ signature.
   question and give them to the model with it. See the [Vector Store guide](/guide/vector-store).
 
 **ReasoningEffort** (`org.llm4s.llmconnect.model.ReasoningEffort`)
-: How much a reasoning model should think before answering (`None`, `Low`, `Medium`, `High`), set with
-  `CompletionOptions.withReasoning`. A model without reasoning ignores it.
+: How much a reasoning model should think before answering (`Minimal`, `Low`, `Medium`, `High`, `XHigh`, `Max`),
+  set with `CompletionOptions.withReasoning`. Whether it thinks at all, or within a token budget, is `Thinking`
+  (`Thinking.Off`, `Thinking.Adaptive`, `Thinking.budget(n)`), set with `CompletionOptions.withThinking`. A provider
+  that cannot send either reports it on `Completion.adjustments`.
 
 **ReliableClient** (`org.llm4s.reliability.ReliableClient`)
 : A wrapper that adds retries with backoff, a circuit breaker, a deadline and local rate limiting to any `LLMClient`.

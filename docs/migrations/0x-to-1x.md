@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Migrating from 0.x to 1.0
-description: "Breaking changes across the LLM4S 0.x series to apply on the way to 1.0, such as the ProviderKind change and removed throwing APIs."
+description: "The upgrade path to LLM4S 1.0 from any 0.x release: which migration notes apply to your starting version, release by release."
 search_title: "Migrate LLM4S from 0.x to 1.0"
 parent: Migrations
 nav_order: 10
@@ -10,7 +10,9 @@ nav_order: 10
 # Migrating from 0.x to 1.0
 {: .no_toc }
 
-This guide consolidates all breaking changes introduced across the 0.x series and will be updated when v1.0 ships. If you are upgrading from a specific 0.x release, work through each section that applies to your starting version.
+The upgrade path to 1.0 from any 0.x release. Find the release you are on, then work through its section and every
+section above it. The notes themselves are in the [Migration Guide](../reference/migration), the canonical record of
+every breaking change; this page says which of them apply to you.
 {: .fs-6 .fw-300 }
 
 ## Table of contents
@@ -21,144 +23,75 @@ This guide consolidates all breaking changes introduced across the 0.x series an
 
 ---
 
-## Overview
+## The road to 1.0
 
-The 0.x series established the core abstractions and steadily hardened the API surface. Three categories of breaking changes occurred:
+The releases left are few: **0.7.0** sets the binary-compatibility baseline (MiMa) for the seven frozen modules,
+`llm4s-agent` included, and **1.0** follows it. Until 0.7.0 any release may break source or binary compatibility, each
+break listed under the CHANGELOG's *Breaking changes* with a note in the [Migration Guide](../reference/migration). What
+the baseline and 1.0 then promise is in the [Compatibility and Deprecation Policy](../reference/compatibility-policy).
 
-| Version | Change type | Summary |
-|---|---|---|
-| 0.1.13 | Module restructure | Modules moved into `modules/` subdirectory; `DBx` and legacy codegen removed |
-| 0.1.14 | Module removal | `DBx` module removed; use the RAG module instead |
-| 0.3.0 | API removal | All throwing APIs removed; `Safe` variants required |
-| 0.3.2 | Type rename | `LLMProvider` replaced by `ProviderKind` |
-
----
-
-## `LLMProvider` replaced by `ProviderKind` (0.3.2)
-
-> **Superseded.** `ProviderKind` has itself been replaced, by the opaque type `ProviderId`, as
-> part of slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)). Coming from 0.2.x or
-> earlier, follow the steps below and then apply
-> [`ProviderKind` becomes `ProviderId`](../reference/migration); coming from 0.3.2 or later,
-> go straight there.
-
-The `LLMProvider` sealed trait was removed and replaced with `ProviderKind`. Any exhaustive pattern match on `LLMProvider` fails to compile with a missing-case error.
-
-### Before (0.x)
-
-```scala
-import org.llm4s.llmconnect.provider.LLMProvider
-
-config.provider match {
-  case LLMProvider.OpenAI     => ...
-  case LLMProvider.Anthropic  => ...
-  case LLMProvider.Azure      => ...
-  case LLMProvider.Ollama     => ...
-  case LLMProvider.Gemini     => ...
-}
-```
-
-### After (0.3.2+)
-
-```scala
-import org.llm4s.types.ProviderModelTypes.ProviderKind
-
-config.provider match {
-  case ProviderKind.OpenAI     => ...
-  case ProviderKind.Anthropic  => ...
-  case ProviderKind.Azure      => ...
-  case ProviderKind.Ollama     => ...
-  case ProviderKind.Gemini     => ...
-}
-```
-
-### Migration steps
-
-1. Replace imports of `org.llm4s.llmconnect.provider.LLMProvider` with `org.llm4s.types.ProviderModelTypes.ProviderKind`.
-2. Replace all `LLMProvider.*` cases with their `ProviderKind.*` equivalents (e.g. `LLMProvider.OpenAI` → `ProviderKind.OpenAI`). The `config.provider` accessor name is unchanged — only its type changed from `LLMProvider` to `ProviderKind`.
-3. Recompile — exhaustive pattern-match warnings will surface any remaining gaps.
+**Scalafix.** The mechanical source breaks since 0.4.1 have Scalafix rules
+([Scalafix: migration rules](../reference/scalafix#migration-rules)). They are first published at 1.0, as
+`org.llm4s::llm4s-scalafix`; until then they exist only as source in this repository, and each note says what to
+change by hand.
 
 ---
 
-## Throwing APIs removed (0.3.0)
+## From 0.6.0
 
-In 0.2.x the following methods returned values directly but threw `IllegalStateException` on failure. They were deprecated in 0.2.x and **removed in 0.3.0**.
+The breaking changes since 0.6.0, in the CHANGELOG's `[Unreleased]` section:
 
-For the full before/after table and code examples see the dedicated guide:
-[Migrating from v0.2.9 to v0.3.0](v0.2.9-to-v0.3.0)
-
-Quick reference — replace every occurrence of the left-hand form with the right:
-
-| Removed (throws) | Replacement (returns `Result[T]`) |
-|---|---|
-| `DateTimeTool.tool` | `DateTimeTool.toolSafe` |
-| `CalculatorTool.tool` | `CalculatorTool.toolSafe` |
-| `UUIDTool.tool` | `UUIDTool.toolSafe` |
-| `JSONTool.tool` | `JSONTool.toolSafe` |
-| `BuiltinTools.core` | `BuiltinTools.coreSafe` |
-| `BuiltinTools.safe(cfg)` | `BuiltinTools.withHttpSafe(cfg)` |
-| `BuiltinTools.withFiles(...)` | `BuiltinTools.withFilesSafe(...)` |
-| `BuiltinTools.development(...)` | `BuiltinTools.developmentSafe(...)` |
-| `agent.initialize(query, tools)` | `agent.initializeSafe(query, tools)` |
-| `builder.build()` | `builder.buildSafe()` |
-
----
-
-## `DBx` module removed (0.1.14)
-
-The `DBx` module (PostgreSQL / vector-store scaffolding) was removed. Its functionality is superseded by the `rag` module.
-
-### Migration steps
-
-1. Remove `"org.llm4s" %% "llm4s-dbx" % version` from your `build.sbt`.
-2. Add `"org.llm4s" %% "llm4s-core" % version` if not already present (the RAG pipeline lives in `core`).
-3. Replace `DBx`-based vector operations with `RAGConfig` / `PgSearchIndex`.
-
-```scala
-// Before
-import org.llm4s.dbx.VectorStore
-val store = VectorStore.postgres(connectionString)
-
-// After
-import org.llm4s.rag.RAGConfig
-val config = RAGConfig.default.withPgVector(connectionString)
-```
+- Generation and model calls:
+  [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](../reference/migration#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115),
+  [finish reasons are typed](../reference/migration#finish-reasons-are-typed-2613),
+  [every provider's content-filter stop is an error](../reference/migration#every-providers-content-filter-stop-is-an-error-2677),
+  [a stream that did not finish is an error](../reference/migration#a-stream-that-did-not-finish-is-an-error-2613),
+  [a broken or cut tool call is an error](../reference/migration#a-broken-or-cut-tool-call-is-an-error-2613),
+  [`TokenUsage` and `ModelPricing` gain a prompt-cache field](../reference/migration#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115),
+  [the forwarding `apply` overloads are removed](../reference/migration#the-forwarding-apply-overloads-are-removed-1281).
+- Agents:
+  [a cut-off answer ends `Truncated`, not `Completed`](../reference/migration#a-cut-off-answer-ends-truncated-not-completed-2613),
+  [`CompressionRule`'s `apply` field is `transform`](../reference/migration#compressionrules-apply-field-is-transform-1281),
+  [context pruning enforces both limits and `minRecentTurns`](../reference/migration#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
+  [the PostgreSQL checkpoint schema moves to version 6](../reference/migration#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
+  [a workspace container has no egress](../reference/migration#a-workspace-container-has-no-egress-870).
+- RAG:
+  [a RAG with a `SearchIndex` ingests only with permissions](../reference/migration#a-rag-with-a-searchindex-ingests-only-with-permissions-2716),
+  [`DocumentRegistry` is source-scoped](../reference/migration#documentregistry-is-source-scoped-2714),
+  [RAG tracing covers every model call and each query's stages](../reference/migration#rag-tracing-covers-every-model-call-and-each-querys-stages-2734),
+  [`RAG.ingestChunks` takes `DocumentChunk`s](../reference/migration#ragingestchunks-takes-documentchunks-2732),
+  [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](../reference/migration#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724).
 
 ---
 
-## Module layout change (0.1.13)
+## From 0.5.1 to 0.6.0
 
-All SBT modules moved from the repo root into the `modules/` subdirectory:
-
-| Before | After |
-|---|---|
-| `core/` | `modules/core/` |
-| `samples/` | `modules/samples/` |
-| `workspace/` | `modules/workspace/` |
-
-If you reference source paths directly (e.g. in IDE imports or custom scripts) update them accordingly. SBT artifact coordinates (`groupId`, `artifactId`) did **not** change *in 0.1.13*. They did change in 0.4.0 — see [Artifact coordinate rename (v0.4.0)](../reference/migration#artifact-coordinate-rename-v040).
-
----
-
-## Environment variable renames
-
-No environment variable was renamed in 0.x, but one set stopped being read. The unified `EMBEDDING_MODEL` format (`provider/model-name`) was *added* in 0.2.8 as the recommended form, and is still bound by llm4s-core's `reference.conf`.
-
-Since 0.3.2 ([#903](https://github.com/llm4s/llm4s/pull/903)) llm4s no longer reads `LLM_MODEL`. Chat providers are configured as named sections under `llm4s.providers` in your `application.conf`. Each provider module binds its vendor's API-key variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...) to a shared `llm4s.credentials.<provider>.apiKey`, which a section without its own `apiKey` uses ([#1132](https://github.com/llm4s/llm4s/issues/1132)); other variables, such as `OLLAMA_BASE_URL`, are read only where a section binds them with `${?VAR}`. See [From `LLM_MODEL` to named provider sections](../reference/migration#from-llm_model-to-named-provider-sections).
+The opening of the [Migration Guide](../reference/migration) lists every 0.6.0 break with its note: chiefly the
+growth-safe types (build with `apply`, change with `with*`, no public `copy`), `Secret` credentials, the `fromValues`
+argument order, `Completion.created` as an `Instant`, content-free console tracing and the OpenTelemetry GenAI span
+names, and `llm4s-java-api` and the Spring Boot starter no longer bringing the provider modules. The behaviour changes
+that no rewrite covers are collected in
+[Changes since 0.5.1 that no rule automates](../reference/migration#changes-since-051-that-no-rule-automates); the
+subagent and production-adapter changes in [Subagents and isolation](../reference/migration#subagents-and-isolation-phase-4)
+and [Production adapters](../reference/migration#production-adapters-stage-5).
 
 ---
 
-## Build dependency changes
+## From 0.5.0 to 0.5.1
 
-| Version | Change |
-|---|---|
-| 0.1.11 | Ollama provider added — no new dependency required (pure HTTP) |
-| 0.2.0 | Cats `Validated` used internally — already a transitive dependency |
-| 0.2.6 | PostgreSQL integration tests require a running Postgres with `pgvector` |
+Two source breaks:
+[multimodal content parts](../reference/migration#multimodal-content-parts-1913) (`UserMessage`/`ToolMessage` carry
+`parts`) and [harness profile and middleware placement](../reference/migration#harness-profile-and-middleware-placement-1915).
 
 ---
 
-## Agent event stream replaced (#1329)
+## From 0.4.1 to 0.5.0
+
+The modularisation release: `llm4s-core` splits into per-concern artifacts, the agent runtime is rewritten and API
+keys are read from each vendor's variable. Follow [Upgrading from 0.4.1 to 0.5.0](0-4-1-to-0-5-0), one page grouped by
+what you use. Two of its changes are detailed here.
+
+### Agent event stream replaced (#1329)
 
 The `AgentEvent` hierarchy and `runWithEvents` are replaced by `Agent.stream` and the `AgentEvents`
 vocabulary; `TraceEvent.AgentStateUpdated` is replaced by `TraceEvent.AgentRunEnded`.
@@ -183,38 +116,56 @@ loses live events and gets a `StreamEvent.LiveGap` with their count; it no longe
 
 See the [streaming guide](../guide/agents/streaming).
 
----
-
-## Provider and embedding configs gain `timeouts` (#712)
+### Provider and embedding configs gain `timeouts` (#712)
 
 The provider config case classes (`OpenAIConfig`, `AzureConfig`, `AnthropicConfig`, `GeminiConfig`,
 `VertexAIConfig`, `OllamaConfig`, `DeepSeekConfig`, `ZaiConfig`, `MistralConfig`, `CohereConfig`,
-`OpenAICompatibleConfig`, `BedrockConfig`, `WatsonXConfig`) and `EmbeddingProviderConfig` take a trailing
-`timeouts: ProviderTimeouts`, defaulting to `ProviderTimeouts.default` (each client's own defaults). There is
-no overload with the old arity.
-
-| Caller | Change |
-|---|---|
-| Scala source, `new X(...)` or `X(...)` | none - the default fills `timeouts`; recompile |
-| Scala binaries compiled against the old constructor | recompile (the old signature is gone: `NoSuchMethodError`) |
-| Kotlin | pass `ProviderTimeouts.default()` last, e.g. `EmbeddingProviderConfig(baseUrl, model, apiKey, ProviderTimeouts.default())` |
-| Java | pass the default timeouts last; `default` is a Java keyword, so build them with `ProviderTimeouts.apply(scala.Option.empty(), scala.Option.empty())` |
-| Pattern match `case X(a, b, c) =>` | add the field, or match `X(a, b, c, _)` |
-
-To set timeouts from code, use `withTimeouts(ProviderTimeouts(...))`; from config, the section's
-`timeouts { request = 3m, stream = 15m }` block (see
+`OpenAICompatibleConfig`, `BedrockConfig`, `WatsonXConfig`) and `EmbeddingProviderConfig` take
+`timeouts: ProviderTimeouts`, defaulting to `ProviderTimeouts.default` (each client's own defaults). In 0.6.0 these
+types became growth-safe: build them with `apply` and set the field with `withTimeouts(ProviderTimeouts(...))`; from
+config, use the section's `timeouts { request = 3m, stream = 15m }` block (see
 [Timeouts](../getting-started/configuration#timeouts)).
 
 ---
 
-## Towards v1.0
+## From 0.4.0 or earlier
 
-> **Note:** v1.0 has not shipped yet. This section will be completed when the 1.0 release is cut.
+- **Artifact coordinates.** 0.4.0 renamed every artifact to `llm4s-*`:
+  [Artifact coordinate rename (v0.4.0)](../reference/migration#artifact-coordinate-rename-v040).
+- **`LLM_MODEL` is not read** (since 0.3.2): chat providers are named sections under `llm4s.providers`, and each
+  provider module binds its vendor's API-key variable to `llm4s.credentials.<provider>.apiKey`. See
+  [From `LLM_MODEL` to named provider sections](../reference/migration#from-llm_model-to-named-provider-sections).
+- Then the 0.4.1 to 0.5.0 page above, and every section after it.
 
-Expected areas of change before 1.0:
+### `LLMProvider` replaced by `ProviderKind` (0.3.2)
 
-- Decide on cross-module artifact split (`llm4s-core` vs `llm4s-agent` vs `llm4s-rag`)
-- Remove all remaining `0.x`-deprecated symbols
-- Enforce MiMa binary-compatibility checks against the 1.0 baseline (see [issue #924](https://github.com/llm4s/llm4s/issues/924))
+The `LLMProvider` sealed trait was replaced by `ProviderKind` in 0.3.2, and `ProviderKind` itself by the opaque type
+`ProviderId` in 0.5.0 ([#1131](https://github.com/llm4s/llm4s/issues/1131)). Coming from any release before 0.5.0, go
+straight to [`ProviderKind` becomes `ProviderId`](../reference/migration#providerkind--providerid): a `match` on the
+provider becomes a comparison with a `ProviderId`.
 
-Follow the [CHANGELOG](../../CHANGELOG.md) and [GitHub releases](https://github.com/llm4s/llm4s/releases) for announcements.
+### Throwing APIs removed (0.3.0)
+
+The methods that returned values directly and threw `IllegalStateException` on failure were removed in 0.3.0 in favour
+of their `Result`-returning variants: [Migrating from v0.2.9 to v0.3.0](v0.2.9-to-v0.3.0). Names have moved on since
+(the built-in tools are in `llm4s-agent-tools`, and the agent API was rewritten in 0.5.0), so apply that page and then
+the 0.4.1 to 0.5.0 page.
+
+### `DBx` module removed (0.1.14)
+
+The `DBx` module (PostgreSQL and vector-store scaffolding) was removed. Its replacement is `llm4s-rag`, with
+`PgVectorStore` and `PgSearchIndex`; see
+[Slice 1: `llm4s-rag`](../reference/migration#slice-1-llm4s-rag-and-llm4s-knowledgegraph).
+
+### Module layout change (0.1.13)
+
+The sbt modules moved from the repository root into `modules/` (`core/` to `modules/core/`, and so on). Artifact
+coordinates did not change in 0.1.13; they changed in 0.4.0, above.
+
+---
+
+## When 1.0 ships
+
+The 1.0 release adds its own section here, with the one-line Scalafix command. Follow the
+[CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md) and the
+[GitHub releases](https://github.com/llm4s/llm4s/releases) for announcements.

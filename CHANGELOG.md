@@ -55,7 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stored ids (#2732); [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
 - `DirectoryLoader` skips symbolic links that leave its root, and a positional pattern on `UrlLoader`, `CrawlerConfig`
   or `DirectoryLoader` gains a field (#2724); [migration](docs/reference/migration.md#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724).
-
+- Opening a `PostgresCheckpointer` moves its schema from version 5 to 6, which an older build refuses: upgrade every
+  process sharing the database together (#2453); [migration](docs/reference/migration.md#the-postgresql-checkpoint-schema-moves-to-version-6-2453).
+- A `ContainerisedWorkspace` with `networkAllowed = false` (the default) has no egress, and needs this release's image
+  and a Docker host that grants `NET_ADMIN` (#870); [migration](docs/reference/migration.md#a-workspace-container-has-no-egress-870).
 - `ContextWindowConfig.minRecentTurns` is honoured and defaults to 1, not 3; `PruningStrategy.AdaptiveWindowing.preserveMinTurns`
   is removed in its favour, and `maxTokens` and `maxMessages` set together are both enforced
   ([#2728](https://github.com/llm4s/llm4s/issues/2728), [#2729](https://github.com/llm4s/llm4s/issues/2729));
@@ -678,8 +681,7 @@ growth-safe (private constructors and `with*` setters), which breaks `copy` and 
 
 - **Fixed** (security) HTTP tool domain matching (`HttpConfig.isDomainAllowed`) ignores a leading `www.` and trailing dots
   on both sides, so `www.example.com` and `example.com.` are blocked (or allowed) with `example.com` [#2496](https://github.com/llm4s/llm4s/issues/2496), [#2581](https://github.com/llm4s/llm4s/issues/2581).
-- **Added** typed tools to `llm4s-schema-derivation` (Experimental): `Tool.of[Args, R](name, description)(args =>
-  Either[String, R])` builds the existing `ToolFunction` from a function over a case class, with the parameter schema
+- **Added** typed tools to `llm4s-schema-derivation` (Experimental): `Tool.of[Args, R](name, description)(f)`, `f` an `Args => Either[String, R]`, builds the existing `ToolFunction` from a function over a case class, with the parameter schema
   derived from `Args` and argument errors reported as `SafeParameterExtractor`'s `ToolParameterError`s; no change to
   core's tool API. A derived `Long` is now described through `NumberSchema(isInteger = true)`, whose JSON is the same
   `integer` [#1473](https://github.com/llm4s/llm4s/issues/1473); [guide](docs/guide/derived-schemas.md#typed-tools),
@@ -708,7 +710,7 @@ growth-safe (private constructors and `with*` setters), which breaks `copy` and 
   [#1514](https://github.com/llm4s/llm4s/issues/1514).
 - **Added** optional jitter to tool retries: `ToolRetryPolicy(jitter = ...)` / `.withJitter`, a fraction from 0.0 (the
   default, exact delays as before) to 1.0 ("full jitter") of each backoff that is randomised, so concurrent retries do
-  not hit a backend together [#1708](https://github.com/llm4s/llm4s/issues/1708); [guide](docs/reliability-guide.md).
+  not hit a backend together [#1708](https://github.com/llm4s/llm4s/issues/1708); [guide](docs/guide/reliability.md).
 - **Added** `llm4s-prompt` (Experimental): `prompt"..."`/`system"..."` interpolators that render each value through a
   `Promptable` checked at compile time (`derives Promptable`) and fence `Untrusted` input; `PromptTemplate` ([#2325](https://github.com/llm4s/llm4s/issues/2325), [guide](docs/guide/prompts.md)).
 - **Added** `llm4s-tapir` (Experimental): `EndpointTools.registry` turns tapir endpoints into tools whose schemas derive
@@ -752,7 +754,7 @@ growth-safe (private constructors and `with*` setters), which breaks `copy` and 
 - **Added** [Enterprise Evaluation](docs/reference/enterprise-evaluation.md): intake-questionnaire answers linked to
   their evidence, a paste-ready answer set and a dated known-gaps list the cited-issues check keeps current ([#2317](https://github.com/llm4s/llm4s/issues/2317)).
 - **Added** [Legal and IP FAQ](docs/reference/legal-faq.md): licence, copyright, DCO, patents, third-party licences, provider terms and the cryptography llm4s uses (for export review), with what the project has not decided ([#2309](https://github.com/llm4s/llm4s/issues/2309)).
-- **Changed** the reliability guide (`docs/reliability-guide.md`) and the vector store guide
+- **Changed** the reliability guide (`docs/guide/reliability.md`) and the vector store guide
   (`docs/guide/vector-store.md`) to compile: their `???` placeholders are real code (a `ScriptedLLMClient` from
   `llm4s-testkit` where a test needs a client, `Result` for-comprehensions where a store or searcher is built), and
   both pages are in `DocSnippets.pages`, so `sbt samples/Test/compile` fails when one of their snippets stops compiling.

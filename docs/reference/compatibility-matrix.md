@@ -61,8 +61,9 @@ Spring Boot releases from the CI workflow, Kotlin from the Kotlin API's Gradle b
 extension's Maven build.
 
 - **Scala**: {{ site.data["tested-versions"].scala }}, Scala 3 only.
-- **Scala 2.13**: call-only, via the TASTy reader ([Using LLM4S from Scala 2.13](../getting-started/scala-2-13)); CI
-  runs its probes on 2.13.16 and the latest 2.13 on every change to the frozen modules.
+- **Scala 2.13**: call-only, via the TASTy reader, best effort: CI runs its probes on 2.13.16 and the latest 2.13 on
+  every change to the frozen modules, but it is not a supported configuration and there are no 2.13 artifacts
+  ([the TASTy reader guide](../getting-started/scala-2-13)).
 - **Minimum JDK**: {{ site.data["tested-versions"].jdk_minimum }}. CI runs {{ site.data["tested-versions"].jdk_ci | join: ", " }}.
 
 | Stack | Versions | Where | Note |

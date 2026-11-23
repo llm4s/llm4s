@@ -10,8 +10,7 @@ nav_order: 26
 # Support Policy
 
 Which releases of LLM4S get fixes, which platforms they run on, and how you find out when that changes. This page
-states what the project does today and marks what is still to be decided. It does not make a commitment that the
-maintainers have not made. The compatibility promise (what an upgrade may break) is in the
+states what the project does today, before 1.0, and what it will do from 1.0. The compatibility promise (what an upgrade may break) is in the
 [Compatibility and Deprecation Policy](compatibility-policy); this page covers the support lifecycle.
 
 LLM4S is maintained by volunteers ([MAINTAINERS.md](https://github.com/llm4s/llm4s/blob/main/MAINTAINERS.md)), so
@@ -36,14 +35,20 @@ published releases is on [GitHub](https://github.com/llm4s/llm4s/releases).
 
 ## Supported lines
 
-**Today (pre-baseline, 0.5.x):** only the latest published release gets fixes, bug fixes and security fixes alike.
+**Today, before 1.0:** only the latest published release gets fixes, bug fixes and security fixes alike.
 Older releases are not patched. Any release may break compatibility, each break listed in the CHANGELOG with a
 migration note. This is also stated in [SECURITY.md](https://github.com/llm4s/llm4s/blob/main/SECURITY.md#supported-versions).
 
-**After 1.0 (planned):** the project intends to patch more than the latest release once a binary-compatibility
-baseline exists ([#1281](https://github.com/llm4s/llm4s/issues/1281)). The number of supported lines, any
-long-term-support line and its window are **to be decided by the maintainers before 1.0**. Until they are published
-here, assume "latest release only".
+**From 1.0:**
+
+| Line | Gets |
+|---|---|
+| The latest 1.x minor | Bug fixes and security fixes |
+| The previous 1.x minor | Security fixes only, for three months after its successor is released |
+| 0.7.x | Critical security fixes only, for three months after 1.0 is released, to cover the migration |
+| Every other 0.x release | Nothing: unsupported once 1.0 ships |
+
+There is no long-term-support line before a 2.0 exists.
 
 ---
 
@@ -51,7 +56,8 @@ here, assume "latest release only".
 
 Releases are cut from a tag by CI ([Release Process](release)). There is no fixed schedule: releases happen when the
 maintainers have a set of changes ready, and the date of each is in the table above and on the GitHub Releases page.
-A target rhythm for minor and patch releases is **to be decided before 1.0**.
+Minor releases come at most about once a quarter. Maven Central's upload limits allow roughly one release a month, and
+a security patch takes that slot ahead of a planned release.
 
 ---
 
@@ -61,12 +67,13 @@ What is built and tested today is stated once, in [Scala and JDK support](v1-sco
 generated into the [Compatibility Matrix](compatibility-matrix). In short:
 
 - **Scala:** Scala 3 only ({{ site.data["tested-versions"].scala }}). Scala 2.13 support is deferred to after 1.0.
+  Calling LLM4S from Scala 2.13 through the TASTy reader is best effort: CI probes it, but it is not a supported configuration and there are no 2.13 artifacts ([the TASTy reader guide](../getting-started/scala-2-13)).
 - **JDK:** the minimum is JDK {{ site.data["tested-versions"].jdk_minimum }} for every artifact, and CI runs JDK {{ site.data["tested-versions"].jdk_ci | join: ", " }}.
 
-The Scala 3 minor series and the minimum JDK are raised only in a **minor** release, never in a patch release, and each
-raise is announced in the CHANGELOG under *Changed* with a migration note
-([rule](compatibility-policy#supported-platforms)). How long an older Scala or JDK line stays supported after a newer
-one is adopted is **to be decided before 1.0**.
+The Scala 3 minor series and the minimum JDK are raised only in a **minor** release, never in a patch release. Each
+raise is announced one minor release ahead, in that release's CHANGELOG and notes, which is the end-of-support notice
+for the older Scala or JDK; the raise itself is listed under *Changed* with a migration note
+([rule](compatibility-policy#supported-platforms)).
 
 ---
 
@@ -82,8 +89,10 @@ Beta or Experimental module may change its API in a minor release ([1.0 Scope](v
 ## End of support
 
 Today a release stops getting fixes when a newer one is published, and nothing more is announced: the table above shows
-it as superseded. How an end of support will be announced once longer-lived lines exist (the table above, the CHANGELOG,
-the GitHub Release, Discord), and how far ahead, is **to be decided before 1.0**.
+it as superseded. From 1.0, a line's end of support follows from [Supported lines](#supported-lines): the previous minor's
+security window ends three months after its successor ships, and 0.7.x's three months after 1.0. Each end date is
+shown in the table above and stated in the release notes of the release that starts the window. A Scala or JDK floor
+is raised only after a notice one minor release ahead ([Platform support](#platform-support)).
 
 ---
 

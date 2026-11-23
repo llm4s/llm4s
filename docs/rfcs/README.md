@@ -2,20 +2,23 @@
 layout: page
 title: RFCs
 parent: Reference
-nav_order: 21
+nav_order: 7
 has_children: true
 permalink: /rfcs/
 ---
 
 # RFCs: proposing a change to the public API
 
-Once the MiMa baseline is set ([#1281](https://github.com/llm4s/llm4s/issues/1281)), a breaking change to a
-Frozen module needs a deprecation cycle ([Compatibility and Deprecation Policy](../reference/compatibility-policy)).
-An RFC is where such a change is proposed, in the open, before it is built: one Markdown file in this directory,
+From 1.0, a breaking change to a Frozen module needs a deprecation cycle and a major release
+([Compatibility and Deprecation Policy](../reference/compatibility-policy)). Before 1.0, APIs are still being fixed and
+improved: a break ships with a migration note (and, from the 0.7.0 baseline, a MiMa filter), and an RFC is optional.
+An RFC is where a change is proposed, in the open, before it is built: one Markdown file in this directory,
 reviewed as a pull request. The process is deliberately small. [GOVERNANCE.md](https://github.com/llm4s/llm4s/blob/main/GOVERNANCE.md)
 already says who decides; this page says where the proposal lives and what it covers.
 
 ## When an RFC is required
+
+From 1.0, for:
 
 - Any change to the public API of a **Frozen** module ([API Stability](../reference/api-stability)): a new, changed
   or removed public type or member, whether or not MiMa would flag it.
@@ -27,6 +30,8 @@ already says who decides; this page says where the proposal lives and what it co
 
 ## When it is not
 
+- Anything before 1.0. Write one anyway for a change that is large or contested, or that sets a pattern later
+  changes will follow; RFC 0008 and RFC 0009 are examples.
 - Bug fixes that keep the documented behaviour, and documentation.
 - Internals: anything `private`, `private[llm4s]` or in a non-public package.
 - **Beta** and **Experimental** APIs. Their changes need only a migration note in the CHANGELOG. Write an RFC anyway
@@ -59,7 +64,7 @@ An accepted RFC can be amended by a later pull request; a change of direction is
 | 0004 | A frozen module's public signatures expose no third-party type and no wildcard-importable implicit | Accepted (recorded retroactively) | [#1133](https://github.com/llm4s/llm4s/issues/1133) pass 8; enforced by `stabilityTierCheck` ([#2357](https://github.com/llm4s/llm4s/issues/2357)) |
 | 0005 | Providers are `ProviderDescriptor`s discovered through `META-INF/services`; core ships none | Accepted (recorded retroactively) | [#1131](https://github.com/llm4s/llm4s/issues/1131), [#1132](https://github.com/llm4s/llm4s/issues/1132); [guide](../guide/writing-a-provider) |
 | 0006 | Tracing backends are `TracingBackend`s selected by `TracingMode.Named`; core reads no backend's keys | Accepted (recorded retroactively) | [#1233](https://github.com/llm4s/llm4s/issues/1233), [#1133](https://github.com/llm4s/llm4s/issues/1133) |
-| 0007 | Typed agent runtime: one execution model for the agent harness | Proposed (design document) | [#1266](https://github.com/llm4s/llm4s/issues/1266); [design](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime-design.md) |
+| 0007 | Typed agent runtime: one execution model for the agent harness | Implemented (0.5.0 to 0.6.0; recorded retroactively) | [#1266](https://github.com/llm4s/llm4s/issues/1266); [design](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime-design.md) |
 | [0008](0008-generation-controls) | Generation controls and reported adjustments: `thinking`, `promptCache`, `Completion.adjustments` | Implemented (release after 0.6.0; follow-ups open) | [#2115](https://github.com/llm4s/llm4s/issues/2115); PRs [#2532](https://github.com/llm4s/llm4s/pull/2532), [#2617](https://github.com/llm4s/llm4s/pull/2617), [#2666](https://github.com/llm4s/llm4s/pull/2666), [#2706](https://github.com/llm4s/llm4s/pull/2706), [#2699](https://github.com/llm4s/llm4s/pull/2699), [#2710](https://github.com/llm4s/llm4s/pull/2710) |
 | [0009](0009-model-call-contract) | The model call contract: a `FinishReason` on every `Completion`, stream endings, tool-call arguments | Implemented (release after 0.6.0) | [#2613](https://github.com/llm4s/llm4s/issues/2613); PRs [#2681](https://github.com/llm4s/llm4s/pull/2681), [#2688](https://github.com/llm4s/llm4s/pull/2688), [#2700](https://github.com/llm4s/llm4s/pull/2700), [#2691](https://github.com/llm4s/llm4s/pull/2691), [#2702](https://github.com/llm4s/llm4s/pull/2702), [#2687](https://github.com/llm4s/llm4s/pull/2687) |
 

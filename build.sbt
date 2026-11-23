@@ -172,7 +172,7 @@ addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 // MiMa compares a module with the artifact of the same name in a previous release. The releases so far set no
 // baseline: 0.4.1 is a single `llm4s-core` of the pre-modularisation code (#1126 moved every package this check
 // would cover), and 0.5.0 and 0.5.1, the first releases with the split coordinates, were published without one.
-// #1281 sets it at a pre-1.0 release, version to be decided, once the designs are final, for the frozen modules
+// #1281 sets it at 0.7.0, once the designs are final, for the frozen modules (`llm4s-agent` included)
 // only. Until then `mimaBaselineVersion` is `None`, `mimaPreviousArtifacts` is empty and
 // `sbt mimaReportBinaryIssues` checks nothing; see docs/reference/api-stability.md.
 val mimaBaselineVersion: Option[String] = None
@@ -388,7 +388,8 @@ lazy val itTierCheck = taskKey[Unit](
 // The tier of a frozen module's public types lives in the code (`@Stable` / `@Experimental`,
 // `org.llm4s.annotation`), not only in docs/reference/v1-scope.md where it drifts. See
 // project/StabilityTiers.scala. The modules are the ones that call `mimaFrozen`, minus
-// `llm4s-agent`, whose tier waits on the typed graph runtime (#1266, open question in #1281).
+// `llm4s-agent`, which joins the check once its stable core is annotated (#1266); its MiMa baseline is 0.7.0 like the
+// other frozen modules (#1281).
 lazy val stabilityTierCheck = taskKey[Unit](
   "Fail the build if a top-level public type of a frozen module is not marked @Stable or @Experimental, or a " +
     "@Stable signature names an @Experimental or deny-listed third-party type, or a @Stable case class has a " +

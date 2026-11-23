@@ -27,7 +27,11 @@ in the generated [Compatibility Matrix](compatibility-matrix).
 
 The Frozen modules are `llm4s-core`, `llm4s-agent`, `llm4s-openai`, `llm4s-openai-compatible`,
 `llm4s-anthropic`, `llm4s-gemini` and `llm4s-ollama`; everything else is Beta or Experimental, or is not
-published. [1.0 Scope](v1-scope) is the source of truth for the list.
+published. [1.0 Scope](v1-scope) is the source of truth for the list. A Frozen module can hold Experimental parts:
+`llm4s-agent` has a small stable core (building and running an agent, its result and status, handoffs, the guardrail
+middleware) over an Experimental runtime (graph, harness, service, delegation, encryption) that may change in a 1.x
+minor release. Each public type's tier is its `@Stable` or `@Experimental` annotation, shown in the
+[Scaladoc](/scaladoc/).
 
 ---
 
@@ -38,16 +42,14 @@ version number:
 
 | Release | Frozen modules |
 |---|---|
-| **Before the baseline** (0.5.x now) | Still stabilising: any release, patch included, may break source or binary compatibility. Each break is listed under the CHANGELOG's *Breaking changes* with a migration note, and ships with no `@deprecated` shim. |
-| **Patch, after the baseline** (0.x.y to 0.x.z) | No binary-breaking change. |
-| **Minor, after the baseline** (0.x to 0.y) | A binary-breaking change is allowed and is listed in the CHANGELOG with a migration note. |
-| **1.0.0 and later** | Semantic versioning: a breaking change needs a new major version. |
+| **Before the baseline** (up to 0.7.0) | Still stabilising: any release, patch included, may break source or binary compatibility. Each break is listed under the CHANGELOG's *Breaking changes* with a migration note, and ships with no `@deprecated` shim. |
+| **From the baseline to 1.0** (0.7.0 to 1.0.0) | A patch release makes no binary-breaking change. A minor release may still break a frozen API: each break has a narrow MiMa filter, a line under the CHANGELOG's *Breaking changes* and a migration note, and ships with no shim and no `@deprecated` member. |
+| **1.0.0 and later** | Semantic versioning: a breaking change needs a new major version, after a deprecation ([Deprecating and removing](#deprecating-and-removing)). |
 
-Binary compatibility will be checked by MiMa against a baseline set at a pre-1.0 release, version to be
-decided, once the designs are final; 0.5.0, 0.5.1 and 0.6.0 set none. The baseline is per module, so a frozen module can
-take a later one than the others. Until the baseline is set the check passes without
-checking anything; see
-[The Baseline](api-stability#the-baseline).
+1.0 is the compatibility promise. The 0.7.0 baseline is not: it makes every break visible, because MiMa reports it
+and it needs a reviewed filter, but between 0.7.0 and 1.0 an API that is wrong is still fixed outright. The release
+sequence is 0.6.0, then 0.7.0 (the baseline for all seven frozen modules), then 1.0; 0.5.0, 0.5.1 and 0.6.0 set no
+baseline, and until 0.7.0 the check passes without checking anything. See [The Baseline](api-stability#the-baseline).
 
 Every published module has the same version, from one tag, so a provider module's version number
 follows the release it ships in. The [modularisation programme](https://github.com/llm4s/llm4s/issues/1126)
@@ -68,9 +70,8 @@ For a Frozen module:
 - **The error model.** The `LLMError` types and their fields. The *text* of an error message is not part
   of the promise, and neither is a log line.
 - **Configuration.** The documented `application.conf` keys and the environment variables bound to them.
-  A renamed key keeps working as a deprecated alias that logs a warning naming the key to rename it to
-  (`deprecatedAliases` on the provider's config spec); which release removes the alias is stated in the
-  CHANGELOG when the key is renamed.
+  Before 1.0 a key is renamed outright, with a migration note. From 1.0 a renamed key keeps its old name as an
+  alias for the rest of the major version, with a warning that names the key to rename it to.
 
 What it does **not** cover:
 
@@ -92,31 +93,34 @@ These are the rules the codebase follows so a minor release does not break anyon
 
 - **Add a field to a data type** (`CompletionOptions`, `Completion`, `ModelCapabilities`, and the other
   growth-prone types, which are `final case class X private (...)` with a public companion `apply`):
-  add it to the constructor and, with a default, to `apply`; keep the previous `apply` as an overload
-  *without* defaults that forwards to the new one; add a `withX` setter. Never re-expose `copy`.
+  add it to the constructor and, with a default, to `apply`; add a `withX` setter. From the baseline on, also keep
+  the previous `apply` as an overload *without* defaults that forwards to the new one; before it, each type has one
+  `apply`. Never re-expose `copy`.
 - **Add a member to a trait that others implement** (the SPI traits, `LLMClient`, `TracingBackend`):
   give it a default implementation. An abstract one breaks every implementer.
-- **Add a parameter to a method:** add an overload and deprecate the old one; do not change the
-  signature in place.
+- **Add a parameter to a method:** from 1.0 on, add an overload and deprecate the old one; do not change the
+  signature in place. Before 1.0, change the signature, with a migration note (and, from the baseline on, a MiMa
+  filter); see [Deprecating and removing](#deprecating-and-removing).
 - **Express a duration** as a `FiniteDuration` and a point in time as an `Instant`, never a raw number
   with its unit in the name; a wire format keeps its units and converts at the boundary.
 - **Keep a helper only llm4s modules use `private[llm4s]`.** Public is a promise.
 
-A change that cannot avoid breaking binary compatibility needs the steps in
-[Adding a Binary-Incompatible Change](api-stability#adding-a-binary-incompatible-change): a
-`@deprecated` version of the old API where possible, a narrow `ProblemFilters.exclude` entry that says
-why, and a CHANGELOG entry. Before 1.0 that is a minor-release change; after it, a major one.
+A change that cannot avoid breaking binary compatibility follows
+[Adding a Binary-Incompatible Change](api-stability#adding-a-binary-incompatible-change). Between the baseline and 1.0
+it is a minor-release change: a narrow `ProblemFilters.exclude` entry that says why, a CHANGELOG *Breaking changes*
+line and a migration note, with no `@deprecated` shim. From 1.0 it is a major-release change, after a deprecation.
 
 ---
 
 ## Deprecating and removing
 
-**Until the MiMa baseline is set**, nothing is frozen: a Frozen-at-1.0 API that is wrong is fixed
-outright, with a CHANGELOG entry and a migration note, not kept for compatibility. A Frozen module gains no speculative public types and no
-`@deprecated` members: an API that should not be frozen is deleted, with a migration note, not deprecated.
-The [migration guide](migration) records each such removal.
+**Before 1.0**, nothing is frozen: a Frozen-at-1.0 API that is wrong is fixed outright, with a CHANGELOG entry
+and a migration note, not kept for compatibility. A Frozen module gains no speculative public types and no
+`@deprecated` members: an API that should not be frozen is deleted, with a migration note, not deprecated. From the
+0.7.0 baseline each such break also needs a MiMa filter, so it is visible and reviewed. The
+[migration guide](migration) records each one.
 
-**After the baseline:**
+**From 1.0:**
 
 1. **Deprecate** with `@deprecated("use <replacement>", since = "<version>")`. The message names the
    replacement and the `since` names the release that introduced the deprecation, so a compiler warning
@@ -134,7 +138,9 @@ The [migration guide](migration) records each such removal.
 Which releases get fixes, and for how long, is in the [Support Policy](support-policy).
 
 1.0 targets **Scala 3 only (3.7.1)**; Scala 2.13 support is deferred to after 1.0 and, if it happens,
-will target the frozen spine rather than the full tree. The minimum JDK is 21 and CI runs only JDK 21; see [Scala and JDK support](v1-scope#scala-and-jdk-support).
+will target the frozen spine rather than the full tree. Calling LLM4S from Scala 2.13 through the TASTy reader is
+best effort: CI probes it, but it is not a supported configuration and there are no 2.13 artifacts
+([the TASTy reader guide](../getting-started/scala-2-13)). The minimum JDK is 21 and CI runs only JDK 21; see [Scala and JDK support](v1-scope#scala-and-jdk-support).
 `llm4s-provider-testkit` in particular needs it: its interruption checks and `LocalProviderTestServer` run on virtual threads
 ([#1582](https://github.com/llm4s/llm4s/issues/1582)), and so does `llm4s-agent-testkit`, whose
 contract cases run on virtual threads. Every artifact is compiled to JDK 21 bytecode, and none has a lower floor
