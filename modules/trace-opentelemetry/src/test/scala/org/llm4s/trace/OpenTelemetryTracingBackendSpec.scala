@@ -42,17 +42,17 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
     "be what Tracing.fromSettings and Tracing.create build for opentelemetry" in {
       val checked = Tracing.fromSettings(settings).value
       checked shouldBe an[OpenTelemetryTracing]
-      checked.shutdown()
+      checked.close()
 
       val created = Tracing.create(settings)
       created shouldBe an[OpenTelemetryTracing]
-      created.shutdown()
+      created.close()
     }
 
     "be registrable explicitly, for a shaded jar whose services files did not survive" in {
       val tracing = Tracing.fromSettings(settings, TracingBackends.of(new OpenTelemetryTracingBackend)).value
       tracing shouldBe an[OpenTelemetryTracing]
-      tracing.shutdown()
+      tracing.close()
     }
   }
 
@@ -80,7 +80,7 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
       attributes.get(io.opentelemetry.api.common.AttributeKey.longKey("gen_ai.usage.output_tokens")) shouldBe 5L
 
       tracing.traceEvent(event) shouldBe Right(())
-      tracing.shutdown()
+      tracing.close()
     }
 
     "carry a child run's parent ids on its invoke_agent span" in {
@@ -100,7 +100,7 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
       attributes.get(key("gen_ai.conversation.id")) shouldBe "parent/~task/researcher/abc"
       attributes.get(key("llm4s.parent.thread_id")) shouldBe "parent"
       attributes.get(key("llm4s.parent.run_id")) shouldBe "parent-run"
-      tracing.shutdown()
+      tracing.close()
     }
 
     "map a tool execution to an execute_tool span" in {
@@ -111,7 +111,7 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
       name shouldBe "execute_tool search"
       attributes.get(key("gen_ai.operation.name")) shouldBe "execute_tool"
       attributes.get(key("gen_ai.tool.name")) shouldBe "search"
-      tracing.shutdown()
+      tracing.close()
     }
 
     "map an agent's tool_executed event to an execute_tool span" in {
@@ -130,7 +130,7 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
       attributes.get(key("gen_ai.tool.call.id")) shouldBe "call-1"
       attributes.get(key("gen_ai.agent.name")) shouldBe "assistant"
       attributes.get(key("gen_ai.conversation.id")) shouldBe "thread-1"
-      tracing.shutdown()
+      tracing.close()
     }
   }
 

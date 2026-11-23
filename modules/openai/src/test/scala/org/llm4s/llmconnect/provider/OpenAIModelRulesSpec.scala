@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.model.{ CompletionOptions, SystemMessage, UserMessage }
-import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
+import org.llm4s.model.{ ModelCapabilities, ModelRegistryService, RequestTransformer, TransformationResult }
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -274,7 +274,10 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val disallowed = transformer(service).disallowedParams("o1")
+        val disallowed = OpenAIModelRules
+          .adjust("o1", service.lookup("o1").map(_.capabilities).getOrElse(ModelCapabilities()))
+          .disallowedParams
+          .getOrElse(Set.empty)
 
         disallowed should contain("top_p")
         disallowed should contain("presence_penalty")
@@ -287,7 +290,10 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val disallowed = transformer(service).disallowedParams("gpt-4o")
+        val disallowed = OpenAIModelRules
+          .adjust("gpt-4o", service.lookup("gpt-4o").map(_.capabilities).getOrElse(ModelCapabilities()))
+          .disallowedParams
+          .getOrElse(Set.empty)
 
         disallowed shouldBe empty
   }

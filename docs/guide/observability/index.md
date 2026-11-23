@@ -466,13 +466,16 @@ An agent built with `Agent.builder(...).withTracing(tracing)` sends, for each ru
 
 - `graph.*` custom events for the runtime's own events (run, task and checkpoint lifecycle), and
   `agent.*` custom events for the agent's durable events (`agent.model_call_completed`,
-  `agent.tool_executed`, `agent.handed_off`, `agent.guardrail_blocked`), which carry no message content;
+  `agent.tool_executed`, `agent.handed_off`, `agent.guardrail_blocked`), which carry no message content.
+  `graph.task_failed` and `graph.run_failed` carry the error's message: a guardrail block's names only
+  the guardrail (`Guardrail '<name>' blocked`, never its reason), any other error's is sent as it is;
 - a `TokenUsageRecorded` for each model call that reports usage;
 - one `TraceEvent.AgentRunEnded` when the run ends: thread id, run id, the active agent, a status
   (`completed`, `suspended`, `step_limit_reached`, `blocked:<guardrail>`, `cancelled`, `timed_out`,
   `failed`), this turn's messages (from its user message on; empty when blocked, cancelled, timed
-  out or failed) and the run's own `UsageSummary` - the model calls this run made, summed from its
-  `agent.model_call_completed` events, not the thread's total, so per-run figures add up.
+  out or failed), the run's own `UsageSummary` - the model calls this run made, summed from its
+  `agent.model_call_completed` events, not the thread's total, so per-run figures add up - and
+  `userId`, the run's `RunConfig.principal` (`None` when the run names none).
 
 A run that crashes without a terminal event is traced as `ErrorOccurred`, with a WARN, and has no
 `AgentRunEnded`; it is traced as soon as the run's last event has been, with no fixed delay.
@@ -496,7 +499,7 @@ no context continues the trace its work started in, which the thread's checkpoin
 
 | Backend | What `AgentRunEnded` shows |
 |---------|----------------------------|
-| Langfuse | One trace per top-level run (trace id = the run's 32-hex trace id, the OpenTelemetry one; `run_id` in its metadata), grouped in a session per thread (session id = thread id); input is the first user message, output the last assistant message; metadata holds the agent, status and usage. The run is an `invoke_agent <agent>` observation over its model calls (generations `chat <model>`), tool calls (spans `execute_tool <tool>`), other events and one span per message; a subagent's run creates no trace and nests under the `execute_tool task` that started it |
+| Langfuse | One trace per top-level run (trace id = the run's 32-hex trace id, the OpenTelemetry one; `run_id` in its metadata), grouped in a session per thread (session id = thread id); input is the first user message, output the last assistant message; metadata holds the agent, status and usage; `userId` is the run's `userId`, and is not sent for a run without one; `public` is `false` unless `llm4s.tracing.langfuse.public = true`. The run is an `invoke_agent <agent>` observation over its model calls (generations `chat <model>`), tool calls (spans `execute_tool <tool>`), other events and one span per message; a subagent's run creates no trace and nests under the `execute_tool task` that started it |
 | OpenTelemetry | An `INTERNAL` span `invoke_agent <agent>` with `gen_ai.operation.name`, `gen_ai.agent.name`, `gen_ai.conversation.id`, thread, run, status (`ERROR` when failed, cancelled or timed out), message count, `gen_ai.usage.*` totals and, for a subagent's run, `llm4s.parent.thread_id` / `llm4s.parent.run_id`; it is the parent of the run's `chat <model>` (`CLIENT`, per-call `gen_ai.usage.*`) and `execute_tool <tool>` (`INTERNAL`) spans and its other events, and a subagent's `invoke_agent` is under its `execute_tool task`. No attribute carries message content |
 | `TraceCollector` | A `SpanKind.AgentCall` span with the same attributes, token totals as `input_tokens`/`output_tokens`, and no cost; like every event of the run it is stored in the run's own trace, with its span id, parent and start |
 | Console | A multi-line "Agent Run Ended" block: agent, status, thread, run, message count, token totals |
@@ -520,6 +523,19 @@ Both keys are required. With either missing, `Tracing.fromSettings` returns a
 `ConfigurationError` naming what is unset - e.g. `llm4s.tracing.langfuse.publicKey
 (LANGFUSE_PUBLIC_KEY)` - and `Tracing.create` logs that error and falls back to `NoOpTracing`.
 Without `llm4s-observability` on the classpath, the error names the artifact to add instead.
+**Traces are private.** Every trace is created with `public: false`, so only members of your Langfuse project can
+open it. Langfuse serves a *public* trace to anyone holding its URL, without signing in, and an agent run's trace
+holds the turn's messages; to share traces by link all the same, set it in `application.conf`:
+
+```hocon
+llm4s.tracing.langfuse.public = true
+```
+
+Only `true` turns it on. A trace's user is the run's `RunConfig.principal`
+(`agent.run(query, RunConfig().withPrincipal(Principal("user-42")))`), which Langfuse's per-user views and costs
+group by; a run without a principal sends no `userId`. Send an id you are content for Langfuse to hold - an opaque
+one, not an email address.
+
 To read the Langfuse settings whatever `TRACING_MODE` selects (for example to combine Langfuse with
 another tracer), use `LangfuseConfigLoader.default()` from `org.llm4s.config`.
 
@@ -560,13 +576,27 @@ tracing.traceRAGOperation(
 )
 ```
 
+`traceEvent(event: TraceEvent)` is the only method a tracer implements. Every other one - `traceError`,
+`traceCompletion`, `traceTokenUsage`, `traceToolCall(name, input, output, duration, success)`, `traceCost` and the
+rest - is `final`: it builds a `TraceEvent` and passes it to `traceEvent`, so a `TracingComposer.filter` or
+`transform` sees everything traced through it.
+
+```scala
+val recording = new Tracing {
+  def traceEvent(event: TraceEvent): Result[Unit] = { events.add(event); Right(()) }
+}
+```
+
+`Tracing` is `AutoCloseable`. `close()` does nothing unless a backend holds resources: OpenTelemetry's flushes and
+stops its exporter, and a composed tracer closes the ones it wraps. Close the tracer once, when the application stops.
+
 ---
 
 ## Metrics
 
 Tracing records what happened inside one request. Metrics count what happens across all of them: requests, tokens, cost, errors and latency, per provider and model. They are cheap enough to alert on, and they answer "is a provider failing right now?" faster than a trace search.
 
-The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, plus calls for retries, circuit-breaker transitions, errors and image generation, and the generic `increment`, `observe` and `set` through which other modules record metrics of their own ([below](#agent-runtime-metrics)). Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`. If your application already has a Micrometer `MeterRegistry` (Spring Boot Actuator, Quarkus), use `llm4s-observability-micrometer` instead: its `MicrometerMetrics` records the same series into that registry, and the Spring Boot starter wires it with no code. See [Micrometer metrics](micrometer).
+The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, plus calls for image generation, and the generic `increment`, `observe` and `set` through which `ReliableClient` records its retries, circuit-breaker transitions and errors (`ReliabilityMetrics`) and other modules record metrics of their own ([below](#agent-runtime-metrics)). Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`. If your application already has a Micrometer `MeterRegistry` (Spring Boot Actuator, Quarkus), use `llm4s-observability-micrometer` instead: its `MicrometerMetrics` records the same series into that registry, and the Spring Boot starter wires it with no code. See [Micrometer metrics](micrometer).
 
 ### Add the module
 
@@ -667,6 +697,9 @@ val endpoint: Option[PrometheusEndpoint] =
 | `llm4s_image_generation_duration_seconds` | histogram | `provider`, `model`, `operation` |
 | `llm4s_image_generation_cost_usd_total` | counter | `provider`, `model` |
 | `llm4s_image_generation_errors_total` | counter | `provider`, `model`, `operation`, `error_type` |
+| `llm4s_retries_total` | counter | `provider`; a `ReliableClient` retry |
+| `llm4s_circuit_breaker_transitions_total` | counter | `provider`, `state` (`open`, `closed` or `half-open`) |
+| `llm4s_reliability_errors_total` | counter | `provider`, `error_type`; what a `ReliableClient` call ended on |
 
 After one successful call and one rate-limited call to `gpt-4o`, the chat series on `/metrics` look like this (comment lines left out; the second call took 90 seconds):
 
@@ -780,7 +813,7 @@ tenant id is ever a label, and no metric carries message content. Every backend 
 
 ### Limits
 
-- **Retries, circuit-breaker transitions and `ReliableClient`'s error events have no series of their own.** `ReliableClient` takes its own `collector` argument and reports those three kinds of event to it, but `PrometheusMetrics` does not implement them. The request series still see every attempt: `ReliableClient` calls the wrapped client once per attempt, and a metrics-enabled client records each of those calls, so a call that fails twice and then succeeds adds three requests - two `error_*`, one `success` - and three latency observations. Request and error rates are per attempt, not per logical call.
+- **Request and error rates are per attempt, not per logical call.** `ReliableClient` takes its own `collector` argument and reports its retries, circuit-breaker transitions and the errors its calls end on as `llm4s_retries_total`, `llm4s_circuit_breaker_transitions_total` and `llm4s_reliability_errors_total`; pass it the same collector as the client it wraps. The request series see every attempt as well: `ReliableClient` calls the wrapped client once per attempt, and a metrics-enabled client records each of those calls, so a call that fails twice and then succeeds adds three requests - two `error_*`, one `success` - three latency observations and two retries. `llm4s_errors_total` counts the failed attempts, `llm4s_reliability_errors_total` only the final failure.
 - **The latency buckets are fixed** (0.1 to 120 seconds); there is no way to configure them.
 - **Counters live in the process.** A restart starts them from zero, which is what `rate()` and `increase()` expect.
 - **The endpoint has no authentication and no TLS**: llm4s starts it with only a port and a registry. Keep it off the public network and let your network policy decide who can scrape it.
@@ -792,34 +825,67 @@ tenant id is ever a label, and no metric carries message content. Every backend 
 
 ### Startup Validation
 
-Use `client.validate()` during application startup to fail fast on misconfiguration:
+`client.validate()` sends the provider one cheap request, with the client's credentials, and no completion: it uses
+no tokens. `Right(())` means the provider accepted that request. A client never returns it without having checked.
+
+| Provider | The request | A wrong key | A model that does not exist |
+|---|---|---|---|
+| `openai` | `GET /models/<model>` | `AuthenticationError` | `ServiceError` 404 |
+| `anthropic` | `GET /v1/models/<model>` | `AuthenticationError` | `ServiceError` 404 |
+| `gemini` | `GET /models/<model>` | `AuthenticationError` | `ServiceError` 404 |
+| `ollama` | `POST /api/show` | no key | `ServiceError` 404, with the `ollama pull` hint |
+| `openai-compatible`, `deepseek`, `mistral`, `xai`, `requesty` | `GET /models` | `AuthenticationError` | not checked |
+| `openrouter` | `GET /key` | `AuthenticationError` | not checked |
+| `azure`, `vertexai`, `bedrock`, `zai`, `cohere`, `watsonx`, `perplexity`, `jlama` | none | `Left(ValidationUnsupportedError)` | |
+
+A provider in the last row has no cheap authenticated request, so its client returns
+`Left(ValidationUnsupportedError)`: nothing was checked, and the client may well work. So does a client that does not
+implement the check, such as a test double. An endpoint that does not answer is a `NetworkError` or `TimeoutError`
+(the request waits ten seconds at most). Wrappers (`ReliableClient`, `CachingLLMClient`, a traced client) return what
+the client they wrap returns.
+
+Use it at startup to fail fast on misconfiguration, treating "cannot check" as its own case:
 
 ```scala
+import org.llm4s.error.ValidationUnsupportedError
+
 val clientResult = for {
   config   <- Llm4sConfig.defaultProvider()
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
   client   <- LLMConnect.getClient(config)
-  _        <- client.validate()
+  _ <- client.validate() match {
+    case Left(_: ValidationUnsupportedError) => Right(()) // this provider has no validation request
+    case checked                             => checked
+  }
 } yield client
 
 clientResult match {
   case Left(error) =>
-    logger.error(s"LLM client validation failed: $error")
+    logger.error(s"LLM client validation failed: ${error.formatted}")
     System.exit(1)
   case Right(client) =>
     logger.info("LLM client ready")
 }
 ```
 
+To check a provider in the last row, or that a model answers, send a small completion once at startup, or run
+[`llm4s-doctor` with `--live`](../../getting-started/installation#checking-your-setup-the-doctor), which does that
+and says what to change.
+
 ### Readiness Probes
 
-For Kubernetes deployments, include LLM connectivity in readiness checks:
+For Kubernetes deployments, include LLM connectivity in readiness checks. `validate()` is a network call, so cache
+its result for a few seconds rather than calling the provider on every probe:
 
 ```scala
 // Integrate with your framework's health check mechanism
 def isLLMReady(): Boolean =
-  client.validate().isRight
+  client.validate() match {
+    case Right(())                           => true
+    case Left(_: ValidationUnsupportedError) => true // nothing to check with: do not fail the pod for it
+    case Left(_)                             => false
+  }
 ```
 
 ### Liveness vs Readiness

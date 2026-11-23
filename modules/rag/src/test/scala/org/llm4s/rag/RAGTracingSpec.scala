@@ -76,15 +76,10 @@ class RAGTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   private class Recording extends Tracing {
-    val events: mutable.Buffer[TraceEvent]                                           = mutable.Buffer.empty
-    val usages: mutable.Buffer[(String, String, Int)]                                = mutable.Buffer.empty
-    def traceEvent(event: TraceEvent): Result[Unit]                                  = { events += event; Right(()) }
-    def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())
-    def traceError(error: Throwable, context: String): Result[Unit]                  = Right(())
-    def traceCompletion(completion: Completion, model: String): Result[Unit]         = Right(())
-    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = {
-      usages += ((operation, model, usage.totalTokens)); Right(())
-    }
+    val events: mutable.Buffer[TraceEvent]          = mutable.Buffer.empty
+    def traceEvent(event: TraceEvent): Result[Unit] = { events += event; Right(()) }
+    def usages: Seq[(String, String, Int)] =
+      events.collect { case e: TraceEvent.TokenUsageRecorded => (e.operation, e.model, e.usage.totalTokens) }.toSeq
     def ragEvents: Seq[TraceEvent.RAGOperationCompleted] =
       events.collect { case e: TraceEvent.RAGOperationCompleted => e }.toSeq
     def completions: Int = events.count(_.isInstanceOf[TraceEvent.CompletionReceived])

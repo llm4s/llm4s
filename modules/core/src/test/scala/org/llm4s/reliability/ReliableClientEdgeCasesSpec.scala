@@ -57,7 +57,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     override def close(): Unit               = ()
   }
 
-  class TestMetricsCollector extends MetricsCollector {
+  class TestMetricsCollector extends MetricsCollector with ReliabilityRecordings {
     val retryAttempts             = new AtomicInteger(0)
     val circuitBreakerTransitions = scala.collection.mutable.ListBuffer[String]()
     val recordedErrors            = scala.collection.mutable.ListBuffer[ErrorKind]()
@@ -72,15 +72,15 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit = ()
     override def recordCost(provider: String, model: String, costUsd: Double): Unit                      = ()
 
-    override def recordRetryAttempt(provider: String, attemptNumber: Int): Unit =
+    override def onRetry(provider: String): Unit =
       retryAttempts.incrementAndGet()
 
-    override def recordCircuitBreakerTransition(provider: String, newState: String): Unit =
+    override def onTransition(provider: String, newState: String): Unit =
       circuitBreakerTransitions.synchronized {
         circuitBreakerTransitions += newState
       }
 
-    override def recordError(errorKind: ErrorKind, provider: String): Unit =
+    override def onError(errorKind: ErrorKind, provider: String): Unit =
       recordedErrors.synchronized {
         recordedErrors += errorKind
       }

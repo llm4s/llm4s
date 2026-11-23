@@ -367,6 +367,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] = Right(answer)
     override def getContextWindow(): Int     = 1000
     override def getReserveCompletion(): Int = 100
+    override def validate(): Result[Unit]    = Right(())
     override def close(): Unit               = closed = true
   }
 }

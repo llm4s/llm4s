@@ -36,8 +36,8 @@ object ModelMetadataExample extends App:
           logger.info("Mode: {}", metadata.mode.name)
           logger.info("Context Window: {} tokens", metadata.contextWindow.getOrElse("unknown"))
           logger.info("Max Output: {} tokens", metadata.maxOutputTokens.getOrElse("unknown"))
-          logger.info("Input Cost: {} per token", metadata.inputCostPerToken.getOrElse("unknown"))
-          logger.info("Output Cost: {} per token", metadata.outputCostPerToken.getOrElse("unknown"))
+          logger.info("Input Cost: {} per token", metadata.pricing.inputCostPerToken.getOrElse("unknown"))
+          logger.info("Output Cost: {} per token", metadata.pricing.outputCostPerToken.getOrElse("unknown"))
           logger.info("Description: {}", metadata.description)
         case Left(error) =>
           logger.error("Error: {}", error)
@@ -125,8 +125,6 @@ object ModelMetadataExample extends App:
         mode = ModelMode.Chat,
         maxInputTokens = Some(32000),
         maxOutputTokens = Some(8000),
-        inputCostPerToken = Some(1e-6),
-        outputCostPerToken = Some(3e-6),
         capabilities = org.llm4s.model.ModelCapabilities(
           supportsFunctionCalling = Some(true),
           supportsVision = Some(false),
@@ -150,32 +148,18 @@ object ModelMetadataExample extends App:
           logger.error("  Error retrieving: {}", error)
       }
 
-      // Example 7: Get registry statistics
-      logger.info("Example 7: Registry statistics")
+      // Example 7: Search model ids (discovery; lookup is exact)
+      logger.info("Example 7: Searching model ids for 'sonnet'")
       logger.info("-" * 80)
-      service.statistics() match
-        case Right(stats) =>
-          logger.info("Total models: {}", stats("totalModels"))
-          logger.info("Embedded models: {}", stats("embeddedModels"))
-          logger.info("Custom models: {}", stats("customModels"))
-          logger.info("Providers: {}", stats("providers"))
-          logger.info("Chat models: {}", stats("chatModels"))
-          logger.info("Embedding models: {}", stats("embeddingModels"))
-          logger.info("Image generation models: {}", stats("imageGenerationModels"))
-          logger.info("Deprecated models: {}", stats("deprecatedModels"))
-        case Left(error) =>
-          logger.error("Failed to get registry statistics: {}", error)
+      service.search("sonnet").take(5).foreach(m => logger.info("  - {}", m.modelId))
 
       // Example 8: List all providers
       logger.info("Example 8: Available providers")
       logger.info("-" * 80)
 
-      service.listProviders() match
-        case Right(providers) =>
-          logger.info("Found {} providers:", providers.size)
-          providers.foreach(p => logger.info("  - {}", p))
-        case Left(error) =>
-          logger.error("Error listing providers: {}", error)
+      val providers = service.listProviders()
+      logger.info("Found {} providers:", providers.size)
+      providers.foreach(p => logger.info("  - {}", p))
 
       // Example 9: Build a registry snapshot from JSON
       logger.info("Example 9: Building a registry snapshot from JSON")

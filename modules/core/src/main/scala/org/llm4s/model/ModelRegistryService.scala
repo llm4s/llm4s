@@ -30,12 +30,8 @@ trait ModelRegistryService:
    */
   def findByCapability(capability: String): Result[List[ModelMetadata]]
 
-  /**
-   * Lists distinct provider names in sorted order, preserving their stored spelling.
-   *
-   * @return `Right` with the names, or an empty list for an empty registry; no validation error is returned
-   */
-  def listProviders(): Result[List[String]]
+  /** Lists distinct provider names in sorted order, preserving their stored spelling; empty for an empty registry. */
+  def listProviders(): List[String]
 
   /**
    * Finds models with exactly the given [[ModelMode]]. Result order is unspecified.
@@ -54,39 +50,33 @@ trait ModelRegistryService:
   def listByProvider(provider: String): Result[List[ModelMetadata]]
 
   /**
-   * Returns snapshot counts under these keys: `totalModels`, `embeddedModels`, `customModels`, `providers`,
-   * `chatModels`, `embeddingModels`, `imageGenerationModels` and `deprecatedModels`.
+   * Looks up a model by its id, after trimming `modelId`. Matching tries, in order: an exact registry key, a
+   * case-insensitive key, and a case-insensitive key with the first `provider/` prefix removed from the query.
+   * It never returns a model whose id merely contains `modelId`: use [[search]] for that.
    *
-   * All values are integers. `embeddedModels` equals `totalModels` and `customModels` is zero, even for a
-   * registry loaded from an explicit source; these counts do not track the provenance of individual entries.
-   * `providers` counts distinct stored provider names, and `deprecatedModels` uses [[ModelMetadata.isDeprecated]].
-   *
-   * @return `Right` with the counts, including zero counts for an empty registry
-   */
-  def statistics(): Result[Map[String, Any]]
-
-  /**
-   * Looks up a model after trimming `modelId`. Matching tries, in order: an exact registry key, a
-   * case-insensitive key, a case-insensitive key with the first `provider/` prefix removed from the query,
-   * and a unique case-insensitive substring match using the full trimmed query.
-   *
-   * @param modelId a registry identifier or a substring identifying a single model
-   * @return the model, or a [[org.llm4s.error.ValidationError]] on `modelId` when no key matches or the
-   *         substring matches multiple keys (an "Ambiguous model identifier" error)
+   * @param modelId a registry identifier, optionally `provider/`-prefixed
+   * @return the model, or a [[org.llm4s.error.ValidationError]] on `modelId` when no key matches
    */
   def lookup(modelId: String): Result[ModelMetadata]
 
   /**
-   * Tries [[lookup(modelId:String)* lookup]] with `provider/modelName`, then with `modelName` alone.
-   * If both fail, tries a model whose stored provider and `modelId` equal the two arguments ignoring case,
-   * without trimming those arguments. The unprefixed fallback can resolve a model from another provider.
+   * Tries [[lookup(modelId:String)* lookup]] with `provider/modelName`, then with `modelName` alone, then a model
+   * whose stored provider and `modelId` equal the two arguments ignoring case. The unprefixed attempt is an exact
+   * id match, so it can resolve the same model id listed under another provider (an `azure` deployment of an
+   * `openai` model, say), but never a different model.
    *
    * @param provider the provider to try first
    * @param modelName the model identifier to resolve
    * @return the first successful match, or a [[org.llm4s.error.ValidationError]] on `modelId` saying
-   *         "Model not found" if all attempts fail, including ambiguous earlier attempts
+   *         "Model not found" if all attempts fail
    */
   def lookup(provider: String, modelName: String): Result[ModelMetadata]
+
+  /**
+   * The models whose id contains `query`, ignoring case and surrounding whitespace, sorted by id; empty when none
+   * does. For discovery (a picker, a "did you mean"), never for resolving the model a request is sent to.
+   */
+  def search(query: String): List[ModelMetadata]
 
 final private[model] class DefaultModelRegistryService(
   private val metadata: Map[String, ModelMetadata]
@@ -97,8 +87,8 @@ final private[model] class DefaultModelRegistryService(
     if models.nonEmpty then Right(models)
     else Left(ValidationError(s"No models found with capability: $capability", "capability"))
 
-  override def listProviders(): Result[List[String]] =
-    Right(metadata.values.map(_.provider).toSet.toList.sorted)
+  override def listProviders(): List[String] =
+    metadata.values.map(_.provider).toSet.toList.sorted
 
   override def listByMode(mode: ModelMode): Result[List[ModelMetadata]] =
     val models = metadata.values.filter(_.mode == mode).toList
@@ -109,20 +99,6 @@ final private[model] class DefaultModelRegistryService(
     val models = metadata.values.filter(_.provider.equalsIgnoreCase(provider)).toList
     if models.nonEmpty then Right(models)
     else Left(ValidationError(s"No models found for provider: $provider", "provider"))
-
-  override def statistics(): Result[Map[String, Any]] =
-    Right(
-      Map(
-        "totalModels"           -> metadata.size,
-        "embeddedModels"        -> metadata.size,
-        "customModels"          -> 0,
-        "providers"             -> metadata.values.map(_.provider).toSet.size,
-        "chatModels"            -> metadata.values.count(_.mode == ModelMode.Chat),
-        "embeddingModels"       -> metadata.values.count(_.mode == ModelMode.Embedding),
-        "imageGenerationModels" -> metadata.values.count(_.mode == ModelMode.ImageGeneration),
-        "deprecatedModels"      -> metadata.values.count(_.isDeprecated)
-      )
-    )
 
   // The snapshot never changes, so an id that is not an exact key resolves the same way every time: a client asks
   // for its one model on every reply, and an unknown one would otherwise rescan the registry each time (#2632).
@@ -154,6 +130,10 @@ final private[model] class DefaultModelRegistryService(
         )
     }
 
+  override def search(query: String): List[ModelMetadata] =
+    val needle = query.trim.toLowerCase
+    metadata.collect { case (id, model) if id.toLowerCase.contains(needle) => model }.toList.sortBy(_.modelId)
+
 object ModelRegistryService:
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -182,30 +162,23 @@ object ModelRegistryService:
     fromConfig(ModelRegistryConfig.default)
 
   /**
-   * Loads exactly one metadata source from [[ModelRegistryConfig]]. Source strings are trimmed and blank
-   * strings count as absent. A file or URL does not implicitly replace a configured resource: clear the other
-   * source fields explicitly. The default classpath resource receives curated overrides as in [[fromResource]].
+   * Loads the registry from the config's [[ModelRegistrySource]]. The location is trimmed; a blank one is an error.
+   * The default classpath resource receives curated overrides as in [[fromResource]].
    *
    * @param config the resource, file or URL source
-   * @return the registry, or a [[org.llm4s.error.ConfigurationError]] if zero or multiple sources remain,
-   *         or the selected source cannot be loaded or parsed
+   * @return the registry, or a [[org.llm4s.error.ConfigurationError]] if the location is blank or the source
+   *         cannot be loaded or parsed
    */
   def fromConfig(config: ModelRegistryConfig): Result[ModelRegistryService] =
-    val resourcePath = config.resourcePath.map(_.trim).filter(_.nonEmpty)
-    val filePath     = config.filePath.map(_.trim).filter(_.nonEmpty)
-    val url          = config.url.map(_.trim).filter(_.nonEmpty)
+    def located(location: String)(load: String => Result[ModelRegistryService]) =
+      val trimmed = location.trim
+      if trimmed.isEmpty then Left(ConfigurationError("ModelRegistryConfig's metadata source is blank"))
+      else load(trimmed)
 
-    (resourcePath, filePath, url) match
-      case (Some(resourcePath), None, None) =>
-        fromResource(resourcePath)
-      case (None, Some(filePath), None) =>
-        fromFile(filePath)
-      case (None, None, Some(url)) =>
-        fromUrl(url)
-      case (None, None, None) =>
-        Left(ConfigurationError("ModelRegistryConfig must define one metadata source"))
-      case _ =>
-        Left(ConfigurationError("ModelRegistryConfig must define exactly one of resourcePath, filePath, or url"))
+    config.source match
+      case ModelRegistrySource.Resource(path) => located(path)(fromResource)
+      case ModelRegistrySource.File(path)     => located(path)(fromFile)
+      case ModelRegistrySource.Url(url)       => located(url)(fromUrl)
 
   /**
    * Builds a snapshot directly from [[ModelMetadata]] values, keyed by `modelId`, without reading external data
@@ -367,19 +340,7 @@ private object DefaultModelRegistryService:
               if normalized.contains("/") then normalized.split("/", 2).last
               else normalized
 
-            metadata.find(_._1.equalsIgnoreCase(withoutProvider)) match
-              case Some((_, modelMetadata)) => Right(modelMetadata)
-              case None =>
-                val fuzzyMatches = metadata.filter { case (id, _) =>
-                  id.toLowerCase.contains(normalized.toLowerCase)
-                }
-
-                if fuzzyMatches.size == 1 then Right(fuzzyMatches.head._2)
-                else if fuzzyMatches.size > 1 then
-                  Left(
-                    ValidationError(
-                      s"Ambiguous model identifier '$normalized'. Matches: ${fuzzyMatches.keys.take(5).mkString(", ")}",
-                      "modelId"
-                    )
-                  )
-                else Left(ValidationError(s"Model not found: $normalized", "modelId"))
+            metadata
+              .find(_._1.equalsIgnoreCase(withoutProvider))
+              .map(_._2)
+              .toRight(ValidationError(s"Model not found: $normalized", "modelId"))

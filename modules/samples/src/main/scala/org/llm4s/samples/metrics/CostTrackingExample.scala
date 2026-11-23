@@ -191,8 +191,7 @@ object CostTrackingExample {
     outputPerMillion: Double
   ): Result[ModelRegistryService] =
     for {
-      providers <- base.listProviders()
-      known <- providers.foldLeft[Result[List[ModelMetadata]]](Right(Nil)) { (accumulated, name) =>
+      known <- base.listProviders().foldLeft[Result[List[ModelMetadata]]](Right(Nil)) { (accumulated, name) =>
         for {
           models <- accumulated
           more   <- base.listByProvider(name)
@@ -205,8 +204,6 @@ object CostTrackingExample {
         mode = ModelMode.Chat,
         maxInputTokens = None,
         maxOutputTokens = None,
-        inputCostPerToken = None,
-        outputCostPerToken = None,
         capabilities = ModelCapabilities(),
         pricing = ModelPricing(
           inputCostPerToken = Some(inputPerMillion / 1.0e6),

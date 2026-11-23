@@ -27,8 +27,8 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
     metadata.mode shouldBe ModelMode.Chat
     metadata.maxInputTokens shouldBe Some(128000)
     metadata.maxOutputTokens shouldBe Some(16384)
-    metadata.inputCostPerToken shouldBe Some(2.5e-6)
-    metadata.outputCostPerToken shouldBe Some(1e-5)
+    metadata.pricing.inputCostPerToken shouldBe Some(2.5e-6)
+    metadata.pricing.outputCostPerToken shouldBe Some(1e-5)
   }
 
   it should "handle missing optional fields" in {
@@ -55,8 +55,6 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = Some(100000),
       maxOutputTokens = Some(4096),
-      inputCostPerToken = None,
-      outputCostPerToken = None,
       capabilities = ModelCapabilities(),
       pricing = ModelPricing(),
       deprecationDate = None
@@ -72,8 +70,6 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = None,
       maxOutputTokens = Some(4096),
-      inputCostPerToken = None,
-      outputCostPerToken = None,
       capabilities = ModelCapabilities(),
       pricing = ModelPricing(),
       deprecationDate = None
@@ -95,8 +91,6 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = Some(100000),
       maxOutputTokens = Some(4096),
-      inputCostPerToken = None,
-      outputCostPerToken = None,
       capabilities = capabilities,
       pricing = ModelPricing(),
       deprecationDate = None
@@ -111,8 +105,8 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "detect deprecated models" in {
-    val pastDate   = java.time.LocalDate.now().minusDays(1).toString
-    val futureDate = java.time.LocalDate.now().plusDays(1).toString
+    val pastDate   = java.time.LocalDate.now().minusDays(1)
+    val futureDate = java.time.LocalDate.now().plusDays(1)
 
     val deprecatedModel = ModelMetadata(
       modelId = "deprecated-model",
@@ -120,8 +114,6 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
-      inputCostPerToken = None,
-      outputCostPerToken = None,
       capabilities = ModelCapabilities(),
       pricing = ModelPricing(),
       deprecationDate = Some(pastDate)
@@ -133,8 +125,6 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
-      inputCostPerToken = None,
-      outputCostPerToken = None,
       capabilities = ModelCapabilities(),
       pricing = ModelPricing(),
       deprecationDate = Some(futureDate)
@@ -151,8 +141,6 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = Some(128000),
       maxOutputTokens = Some(16384),
-      inputCostPerToken = Some(2.5e-6),
-      outputCostPerToken = Some(1e-5),
       capabilities = ModelCapabilities(
         supportsFunctionCalling = Some(true),
         supportsVision = Some(true)

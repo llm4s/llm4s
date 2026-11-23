@@ -68,7 +68,7 @@ Each row is something a module does only when you use it. "Configured by" is whe
 |---|---|---|
 | `console` tracing | On (`llm4s.tracing.mode = "console"`) | None unless `llm4s.tracing.console.captureContent = true`; then the query, model output (truncated to 200 characters), tool input and output (100 each), custom event data and error messages |
 | `noop` tracing | Off | None |
-| `langfuse` tracing | Off | The agent's query, completion content, tool input and output, and a finished run's messages |
+| `langfuse` tracing | Off | The agent's query, completion content, tool input and output, and a finished run's messages; the run's `RunConfig.principal` as the trace's `userId`, when the run has one. Traces are sent `public: false` - readable only by members of your Langfuse project - unless `llm4s.tracing.langfuse.public = true`, which lets anyone holding a trace's URL read it without signing in |
 | `opentelemetry` tracing | Off | None unless `llm4s.tracing.opentelemetry.captureContent = true` (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`); then the query, prompts and completions (`gen_ai.input.messages` / `gen_ai.output.messages`) and tool input and output, secrets redacted and each truncated to 1000 characters. Custom event data is always recorded (an agent's carries no content) |
 | Provider exchange logging | Off | Request and response bodies. The file sink redacts credentials by pattern, not personal data; a sink you write gets the bodies untouched. See [Provider Exchange Logging](observability/provider-exchange-logging) |
 | SLF4J logs from the OpenAI-compatible, Gemini and Vertex AI clients | At `DEBUG` only | Request and response bodies, truncated, with credentials redacted by pattern |

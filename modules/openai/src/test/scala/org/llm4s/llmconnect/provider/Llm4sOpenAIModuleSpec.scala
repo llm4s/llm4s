@@ -237,6 +237,48 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       }
     }
 
+    "validate OpenAI by its model, Requesty by its listing, and say Azure has no such request (#2830)" in {
+      def openAIError(exchange: com.sun.net.httpserver.HttpExchange, status: Int, message: String): Unit =
+        LocalProviderTestServer.sendJsonResponse(
+          exchange,
+          status,
+          ujson.Obj("error" -> ujson.Obj("message" -> message, "type" -> "invalid_request_error")).render()
+        )
+      def requestyClientAt(baseUrl: String): LLMClient = {
+        val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", Secret("rq-key"), baseUrl).toOption.get
+        RequestyProvider.buildClient(config, LlmClientOptions.default).toOption.get
+      }
+      val found  = """{"id":"gpt-4o","object":"model","created":1,"owned_by":"openai"}"""
+      val listed = s"""{"object":"list","data":[$found]}"""
+      assertValidates(LocalProviderTestServer.sendJsonResponse(_, 200, found), openAIError)(openAIClientAt)
+      assertValidates(LocalProviderTestServer.sendJsonResponse(_, 200, listed), openAIError)(requestyClientAt)
+
+      /** The requests `client` sends from `validate()`, as `METHOD path`, with the bearer each carried. */
+      def requests(body: String)(client: String => LLMClient): Seq[(String, String)] = {
+        val seen = new java.util.concurrent.ConcurrentLinkedQueue[(String, String)]()
+        LocalProviderTestServer.withServer("/") { exchange =>
+          seen.add(
+            s"${exchange.getRequestMethod} ${exchange.getRequestURI.getPath}" ->
+              Option(exchange.getRequestHeaders.getFirst("Authorization")).getOrElse("")
+          )
+          LocalProviderTestServer.sendJsonResponse(exchange, 200, body)
+        } { baseUrl =>
+          val built = client(baseUrl)
+          built.validate() shouldBe Right(())
+          built.close()
+        }
+        seen.toArray(Array.empty[(String, String)]).toSeq
+      }
+      requests(found)(openAIClientAt) shouldBe Seq("GET /models/gpt-4o" -> "Bearer sk-test")
+      requests(listed)(requestyClientAt) shouldBe Seq("GET /models" -> "Bearer rq-key")
+
+      val azure = AzureConfig
+        .fromValues("my-deploy", Secret("azure-key"), "http://localhost:1", AzureConfig.DEFAULT_API_VERSION)
+        .toOption
+        .get
+      assertValidationUnsupported(AzureProvider.buildClient(azure, LlmClientOptions.default).toOption.get)
+    }
+
     "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
       assertModelCallContract(OpenAIContractFixtures.replies)(openAIClientAt)
       assertModelCallContract(OpenAIContractFixtures.replies) { baseUrl =>

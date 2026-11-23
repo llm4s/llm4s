@@ -36,7 +36,14 @@ import com.openai.models.chat.completions.{
 }
 import com.openai.models.completions.CompletionUsage
 import com.openai.models.{ ResponseFormatJsonObject, ResponseFormatJsonSchema }
-import org.llm4s.error.{ ContentFilteredError, LLMError, NetworkError, ServiceError, UnknownError }
+import org.llm4s.error.{
+  ContentFilteredError,
+  LLMError,
+  NetworkError,
+  ServiceError,
+  UnknownError,
+  ValidationUnsupportedError
+}
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
@@ -75,12 +82,18 @@ import scala.jdk.OptionConverters._
 import scala.util.{ Try, Using }
 
 /**
- * The two calls [[OpenAIClient]] makes. The model travels in `params`; for Azure it is the
+ * The calls [[OpenAIClient]] makes. The model travels in `params`; for Azure it is the
  * deployment name, which the SDK puts in the request path.
  */
 private[provider] trait OpenAIClientTransport {
   def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion
   def createChatCompletionStream(params: ChatCompletionCreateParams): StreamResponse[ChatCompletionChunk]
+
+  /** `GET /models/<model>`, for `validate()`: returns when the service has `model`, and throws as a completion does. */
+  def retrieveModel(model: String): Unit
+
+  /** `GET /models`, for `validate()`: returns when the service lists its models, and throws as a completion does. */
+  def listModels(): Unit
 
   /** Releases the transport's connections and threads. */
   def close(): Unit = ()
@@ -512,6 +525,24 @@ class OpenAIClient private[provider] (
   override def getContextWindow(): Int = config.contextWindow
 
   override def getReserveCompletion(): Int = config.reserveCompletion
+
+  /**
+   * One request through the SDK client, with the credential a completion is sent with:
+   *
+   *  - '''OpenAI''': `GET /models/<model>`. `Right(())` means the endpoint answered, took the key and has the model;
+   *    an unknown model is the `ServiceError` 404 a completion gets.
+   *  - '''Requesty''': `GET /models`, the router's listing. `Right(())` means the endpoint answered and took the
+   *    key; the model is not looked for.
+   *  - '''Azure OpenAI''': `Left(ValidationUnsupportedError)`. `model` is a deployment name, and the deployment
+   *    listing is a management-plane request this client's key does not authorise.
+   */
+  override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
+    config match {
+      case _: AzureConfig                     => Left(ValidationUnsupportedError(clientDescription))
+      case _ if provider == OpenAIProvider.id => call("model lookup")(transport.retrieveModel(model))
+      case _                                  => call("model listing")(transport.listModels())
+    }
+  }
 
   /**
    * Whether this client's model is an OpenAI reasoning model, decided once: the registry
@@ -1163,6 +1194,10 @@ private[provider] object OpenAIClientTransport {
   ): Option[RequestOptions] =
     timeout.map(t => RequestOptions.builder().timeout(java.time.Duration.ofNanos(t.toNanos)).build())
 
+  /** `validate()`'s request waits ten seconds at most. */
+  private val ValidationOptions: RequestOptions =
+    RequestOptions.builder().timeout(java.time.Duration.ofSeconds(10)).build()
+
   /**
    * A transport over an `openai-java` client, closing it with the transport.
    *
@@ -1182,6 +1217,10 @@ private[provider] object OpenAIClientTransport {
         streamOpts.fold(client.chat().completions().createStreaming(params))(o =>
           client.chat().completions().createStreaming(params, o)
         )
+
+      override def retrieveModel(model: String): Unit = client.models().retrieve(model, ValidationOptions): Unit
+
+      override def listModels(): Unit = client.models().list(ValidationOptions): Unit
 
       override def close(): Unit = client.close()
     }
@@ -1467,7 +1506,9 @@ private[provider] object OpenAIClientTransport {
           refresh()
           underlying.createChatCompletionStream(params)
         }
-        override def close(): Unit = underlying.close()
+        override def retrieveModel(model: String): Unit = { refresh(); underlying.retrieveModel(model) }
+        override def listModels(): Unit                 = { refresh(); underlying.listModels() }
+        override def close(): Unit                      = underlying.close()
       }
   }
 
@@ -1508,7 +1549,9 @@ private[provider] object OpenAIClientTransport {
           params: ChatCompletionCreateParams
         ): StreamResponse[ChatCompletionChunk] =
           rejected(underlying.createChatCompletionStream(params))
-        override def close(): Unit = underlying.close()
+        override def retrieveModel(model: String): Unit = rejected(underlying.retrieveModel(model))
+        override def listModels(): Unit                 = rejected(underlying.listModels())
+        override def close(): Unit                      = underlying.close()
       }
   }
 

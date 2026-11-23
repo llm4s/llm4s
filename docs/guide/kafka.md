@@ -90,6 +90,7 @@ A record's outcome is a value, never an exception, except in one case:
 ```scala
 import cats.effect.IO
 import fs2.kafka.ConsumerRecord
+import org.llm4s.error.CircuitOpenError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.reliability.RetryPolicy
 import org.llm4s.samples.kafka.{ DeadLetter, EnrichedTicket, Ticket, TicketLabels, TicketPipeline }
@@ -106,7 +107,7 @@ def enrich(client: LLMClient, record: ConsumerRecord[String, String], retryPolic
     case Right(ticket) =>
       IO.interruptible(client.completeStructuredOf[TicketLabels](TicketPipeline.conversation(ticket))).flatMap {
         case Right(labels)                                 => IO.pure(Outcome.Enriched(EnrichedTicket(ticket.id, ticket.text, labels)))
-        case Left(error) if retryPolicy.isRetryable(error) =>
+        case Left(error) if retryPolicy.isRetryable(error) || error.isInstanceOf[CircuitOpenError] =>
           IO.raiseError(new TransientFailure(error, record.topic, record.partition, record.offset))
         case Left(error) => IO.pure(deadLetter("llm", error.message))
       }
@@ -122,6 +123,8 @@ def enrich(client: LLMClient, record: ConsumerRecord[String, String], retryPolic
   run out, the record is fine and the provider is not: the pipeline stops with `TransientFailure` instead of
   dead-lettering, because during an outage every record would follow it into the dead-letter topic. Its offset is
   not committed, so a restart (by your supervisor, or a `Stream.retry` around the pipeline) reads it again.
+  The same goes for a `CircuitOpenError`, the client's answer while its circuit is open: it is not retried at once
+  (`isRetryable` is `false` for it), but the record is not at fault, so it is not dead-lettered either.
 
 `retryPolicy.isRetryable` is the same rule `ReliableClient` uses, so the two cannot disagree about which errors are
 transient. `IO.interruptible` runs the blocking call on cats-effect's blocking pool, and cancelling the fiber

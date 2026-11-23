@@ -26,8 +26,10 @@ class TracingSpec extends AnyFlatSpec with Matchers {
   it should "parse console mode" in {
     TracingMode.fromString("console") shouldBe TracingMode.Console
     TracingMode.fromString("CONSOLE") shouldBe TracingMode.Console
-    TracingMode.fromString("print") shouldBe TracingMode.Console
-    TracingMode.fromString("PRINT") shouldBe TracingMode.Console
+  }
+
+  it should "not read the undocumented print as console (#2799)" in {
+    TracingMode.fromString("print") shouldBe TracingMode.Named("print")
   }
 
   it should "parse noop mode" in {
@@ -71,7 +73,13 @@ class TracingSpec extends AnyFlatSpec with Matchers {
 
     tracing.traceEvent(TraceEvent.CustomEvent("test", ujson.Obj())) shouldBe Right(())
     tracing.traceEvent(agentStateEvent()) shouldBe Right(())
-    tracing.traceToolCall("tool", "input", "output") shouldBe Right(())
+    tracing.traceToolCall(
+      "tool",
+      "input",
+      "output",
+      scala.concurrent.duration.Duration.Zero,
+      success = true
+    ) shouldBe Right(())
     tracing.traceError(new RuntimeException("test")) shouldBe Right(())
     tracing.traceCompletion(createTestCompletion(), "gpt-4") shouldBe Right(())
     tracing.traceTokenUsage(TokenUsage(100, 50, 150), "gpt-4", "completion") shouldBe Right(())
@@ -93,7 +101,9 @@ class TracingSpec extends AnyFlatSpec with Matchers {
 
     // These will print to console but should return success
     tracing.traceEvent(TraceEvent.CustomEvent("test", ujson.Obj())).isRight shouldBe true
-    tracing.traceToolCall("tool", "input", "output").isRight shouldBe true
+    tracing
+      .traceToolCall("tool", "input", "output", scala.concurrent.duration.Duration.Zero, success = true)
+      .isRight shouldBe true
     tracing.traceError(new RuntimeException("test"), "context").isRight shouldBe true
   }
 
@@ -228,7 +238,9 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val tracer   = new TestTracing(events)
     val filtered = TracingComposer.filter(tracer)(_ => true)
 
-    filtered.traceToolCall("tool", "in", "out") shouldBe Right(())
+    filtered.traceToolCall("tool", "in", "out", scala.concurrent.duration.Duration.Zero, success = true) shouldBe Right(
+      ()
+    )
     filtered.traceError(new Exception("e"), "ctx") shouldBe Right(())
   }
 
@@ -330,41 +342,12 @@ class TracingSpec extends AnyFlatSpec with Matchers {
       Right(())
     }
 
-    def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
-      events += TraceEvent.ToolExecuted(toolName, input, output, 0.millis, true)
-      Right(())
-    }
-
-    def traceError(error: Throwable, context: String): Result[Unit] = {
-      events += TraceEvent.ErrorOccurred(error, context)
-      Right(())
-    }
-
-    def traceCompletion(completion: Completion, model: String): Result[Unit] = {
-      events += TraceEvent.CompletionReceived(
-        completion.id,
-        model,
-        completion.message.toolCalls.size,
-        completion.message.content
-      )
-      Right(())
-    }
-
-    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = {
-      events += TraceEvent.TokenUsageRecorded(usage, model, operation)
-      Right(())
-    }
   }
 
   /** Test tracer that always fails */
   private class FailingTracing extends Tracing {
     import org.llm4s.error.SimpleError
 
-    def traceEvent(event: TraceEvent): Result[Unit]                                  = Left(SimpleError("Always fails"))
-    def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Left(SimpleError("Always fails"))
-    def traceError(error: Throwable, context: String): Result[Unit]                  = Left(SimpleError("Always fails"))
-    def traceCompletion(completion: Completion, model: String): Result[Unit]         = Left(SimpleError("Always fails"))
-    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
-      Left(SimpleError("Always fails"))
+    def traceEvent(event: TraceEvent): Result[Unit] = Left(SimpleError("Always fails"))
   }
 }

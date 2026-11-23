@@ -92,12 +92,12 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
 
   it should "record a rate-limit metric when it rejects a call" in {
     val errors = mutable.Buffer.empty[(ErrorKind, String)]
-    val metrics = new MetricsCollector {
+    val metrics = new MetricsCollector with ReliabilityRecordings {
       override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit =
         ()
       override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit = ()
       override def recordCost(provider: String, model: String, costUsd: Double): Unit                      = ()
-      override def recordError(kind: ErrorKind, provider: String): Unit = errors += (kind -> provider)
+      override def onError(kind: ErrorKind, provider: String): Unit = errors += (kind -> provider)
     }
     val config = ReliabilityConfig.default
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
@@ -114,7 +114,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     val underlying = new CountingClient(ok)
     val config = ReliabilityConfig.default
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
-      .disabled
+      .withEnabled(false)
     val client = new ReliableClient(underlying, "test-provider", config)
 
     (1 to 3).foreach(_ => client.complete(conversation).isRight shouldBe true)
@@ -162,7 +162,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     val config = ReliabilityConfig.default
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 600, burstCapacity = 1))
       .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
-      .withoutDeadline
+      .withDeadline(None)
     val waits = scala.collection.mutable.Buffer.empty[Duration]
     val client = new ReliableClient(
       underlying,
@@ -185,7 +185,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     val config = ReliabilityConfig.default
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
       .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
-      .withoutDeadline
+      .withDeadline(None)
     val client = new ReliableClient(underlying, "test-provider", config)
 
     client.complete(conversation).isRight shouldBe true
@@ -233,7 +233,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     val underlying = new CountingClient(timingOut)
     val config = ReliabilityConfig.default
       .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
-      .withoutDeadline
+      .withDeadline(None)
     val client = new ReliableClient(
       underlying,
       "test-provider",
@@ -251,7 +251,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1))
 
   it should "report an interrupted wait for a local token as a cancellation, out of the circuit, keeping the interrupt" in {
-    val (result, interrupted, state) = interruptedWhileWaitingForToken(waitsForToken.withoutDeadline)
+    val (result, interrupted, state) = interruptedWhileWaitingForToken(waitsForToken.withDeadline(None))
     result.left.toOption.get shouldBe a[org.llm4s.error.CancelledError]
     interrupted shouldBe true
     state shouldBe CircuitState.Closed
@@ -286,7 +286,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "count a provider failure whose retry is then throttled locally" in {
-    circuitAfterProviderFailure(providerFailsThenThrottled(0).withoutDeadline) shouldBe CircuitState.Open
+    circuitAfterProviderFailure(providerFailsThenThrottled(0).withDeadline(None)) shouldBe CircuitState.Open
   }
 
   it should "count it when the deadline then cuts off the wait for a token" in {
@@ -297,7 +297,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
   it should "count it when the wait for a token is then interrupted" in {
     // The provider backoff (1ms) sleeps; the ~1s wait for a token is interrupted
     val state = circuitAfterProviderFailure(
-      providerFailsThenThrottled(60).withoutDeadline,
+      providerFailsThenThrottled(60).withDeadline(None),
       sleep = delay => if (delay > 100.millis) throw new InterruptedException("cancelled"),
       cancelled = true
     )

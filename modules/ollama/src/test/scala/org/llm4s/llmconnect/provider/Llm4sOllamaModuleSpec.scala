@@ -114,6 +114,30 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
       assertContentParts("ollama", sendJsonResponse(_, 200, done))(ContentPartCase.UserImageInline)(clientAt)
     }
 
+    "validate by asking the server for its model, and say when the model is not pulled (#2830)" in {
+      assertValidates(
+        sendJsonResponse(_, 200, """{"capabilities":["completion"]}"""),
+        (exchange, status, message) => sendJsonResponse(exchange, status, ujson.Obj("error" -> message).render())
+      )(clientAt)
+
+      val seen = new java.util.concurrent.ConcurrentLinkedQueue[(String, String)]()
+      withServer("/") { exchange =>
+        val body = new String(exchange.getRequestBody.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+        seen.add(s"${exchange.getRequestMethod} ${exchange.getRequestURI.getPath}" -> body)
+        sendJsonResponse(exchange, 404, """{"error":"model 'missing' not found"}""")
+      } { baseUrl =>
+        val client = clientAt(baseUrl)
+        client.validate() match
+          case Left(error: org.llm4s.error.ServiceError) =>
+            error.httpStatus shouldBe 404
+            error.formatted should include("ollama pull")
+          case other => fail(s"expected the 404 a completion gets, got $other")
+        client.close()
+      }
+      seen.toArray(Array.empty[(String, String)]).toSeq.map(_._1) shouldBe Seq("POST /api/show")
+      seen.peek()._2 should include("\"model\"")
+    }
+
     "return CancelledError when a call is interrupted" in {
       withServer("/")(holdOpen)(baseUrl => assertCancelsWhenInterrupted(clientAt(baseUrl)))
     }

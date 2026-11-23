@@ -3,7 +3,6 @@ package org.llm4s.model
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.core.read.ListAppender
-import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
   Citation,
@@ -19,7 +18,6 @@ import org.llm4s.llmconnect.model.{
 }
 import org.llm4s.llmconnect.model.RequestAdjustment.{ Adjusted, Dropped, NotNeeded }
 import org.llm4s.toolapi.{ Schema, ToolBuilder }
-import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -121,45 +119,15 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
     )
   }
 
-  test("a transformer that does not override adjustOptions still transforms, reporting nothing") {
-    val custom = new RequestTransformer {
-      def transformOptions(
-        modelId: String,
-        options: CompletionOptions,
-        dropUnsupported: Boolean
-      ): Result[CompletionOptions] = Right(options.withTemperature(1.0))
-      def transformMessages(modelId: String, messages: Seq[Message]): Seq[Message] = messages
-      def requiresFakeStreaming(modelId: String): Boolean                          = false
-      def disallowedParams(modelId: String): Set[String]                           = Set.empty
-    }
-
-    val result = TransformationResult.transform("any", CompletionOptions(temperature = 0.2), messages, custom).value
-
-    result.options.temperature shouldBe 1.0
-    result.adjustments shouldBe empty
+  test("RequestTransformer is sealed: a transformer is built by its factories, so every one reports") {
+    assertDoesNotCompile("""
+      new RequestTransformer {
+        def transformOptions(modelId: String, options: CompletionOptions, dropUnsupported: Boolean) = Right(options)
+        def transformMessages(modelId: String, messages: Seq[Message]): Seq[Message] = messages
+        def requiresFakeStreaming(modelId: String): Boolean = false
+      }
+    """)
   }
-
-  test("a transformer that refuses the request still fails it, with or without dropUnsupported") {
-    val refusal = ValidationError("options", "rejected by policy")
-    val rejecting = new RequestTransformer {
-      def transformOptions(
-        modelId: String,
-        options: CompletionOptions,
-        dropUnsupported: Boolean
-      ): Result[CompletionOptions] = Left(refusal)
-      def transformMessages(modelId: String, messages: Seq[Message]): Seq[Message] = messages
-      def requiresFakeStreaming(modelId: String): Boolean                          = false
-      def disallowedParams(modelId: String): Set[String]                           = Set.empty
-    }
-
-    TransformationResult.transform("any", CompletionOptions(), messages, rejecting).left.value shouldBe refusal
-    TransformationResult
-      .transform("any", CompletionOptions(), messages, rejecting, dropUnsupported = false)
-      .left
-      .value shouldBe refusal
-  }
-
-  // ---- the types ----
 
   test("TransformationResult and Completion default to no adjustments and set them with withAdjustments") {
     val adjustments = List(Dropped(RequestOption.TopP, "not supported"))

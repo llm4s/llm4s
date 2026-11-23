@@ -108,7 +108,6 @@ reliability-guide.md | fd2c3a178c | with | import org.llm4s.reliability._
 reliability-guide.md | a48b40ce3c | with | import org.llm4s.reliability._; import scala.concurrent.duration._; import org.llm4s.error._
 reliability-guide.md | b30e8f450e | with | import org.llm4s.reliability._; import scala.concurrent.duration._
 reliability-guide.md | c7ecba27e8 | with | import org.llm4s.reliability._
-reliability-guide.md | b52cbbfd39 | with | import org.llm4s.reliability._
 reliability-guide.md | 86288480cb | with | import org.llm4s.reliability._
 reliability-guide.md | 37f427ee8d | with | import org.llm4s.reliability._; import scala.concurrent.duration._
 reliability-guide.md | d58076267d | with | import org.llm4s.reliability._
@@ -117,14 +116,14 @@ reliability-guide.md | 2c0d6d235a | with | import org.llm4s.reliability._
 reliability-guide.md | c727d02cbc | with | import org.llm4s.reliability._; import scala.concurrent.duration._
 reliability-guide.md | 73e2ef368d | with | import org.llm4s.reliability._; import scala.concurrent.duration._
 reliability-guide.md | 94a0e049b6 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-reliability-guide.md | 25116bcad0 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+reliability-guide.md | 708c0ce1fc | with | import org.llm4s.reliability._; import scala.concurrent.duration._
 reliability-guide.md | f07b226a63 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
 reliability-guide.md | fd762bb41c | with | import org.llm4s.reliability._; import scala.concurrent.duration._
 reliability-guide.md | 72f66091ea | with | import org.llm4s.reliability._
 reliability-guide.md | 96df290f68 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService
 reliability-guide.md | 7d18961271 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService; import org.llm4s.reliability._
 reliability-guide.md | 3e60aa3697 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-reliability-guide.md | ea2b58a14f | with | import org.llm4s.error.LLMError; import scala.concurrent.duration.FiniteDuration
+reliability-guide.md | 5b1796e84b | with | import org.llm4s.error.LLMError; import scala.concurrent.duration.FiniteDuration
 reliability-guide.md | b36aaef65f | with | import scala.concurrent.duration._
 reliability-guide.md | fa35020d32 | with | import scala.concurrent.duration._
 guide/agents/handoffs.md | a9aa90095d | skip | specialistBuilder stands for the reader's specialist AgentBuilder; the Quick Start above shows a full one

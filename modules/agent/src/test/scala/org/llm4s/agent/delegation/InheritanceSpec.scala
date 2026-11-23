@@ -1238,10 +1238,6 @@ object InheritanceSpec {
       }
       Right(())
     }
-    def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
-    def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
-    def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
-    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
     def endedAgents: Vector[String] = scala.jdk.CollectionConverters.CollectionHasAsScala(ended).asScala.toVector
   }
 

@@ -1,7 +1,6 @@
 package org.llm4s.spring
 
 import org.llm4s.llmconnect.config.TracingSettings
-import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.trace.{ TraceEvent, Tracing, TracingMode }
 import org.llm4s.trace.spi.TracingBackend
 import org.llm4s.types.Result
@@ -14,11 +13,7 @@ final class RecordingTracing(val extras: Map[String, String]) extends Tracing {
   @volatile var shutDown: Boolean              = false
 
   override def traceEvent(event: TraceEvent): Result[Unit] = { events.add(event); Right(()) }
-  override def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
-  override def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
-  override def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
-  override def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
-  override def shutdown(): Unit                                                                   = shutDown = true
+  override def close(): Unit                               = shutDown = true
 }
 
 /**

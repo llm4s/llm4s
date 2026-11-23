@@ -57,6 +57,9 @@ for
 yield TracingComposer.combine(LangfuseTracing.from(langfuse), new ConsoleTracing())
 ```
 
+Traces are sent private (`public: false`); `llm4s.tracing.langfuse.public = true` shares them by link. A trace's
+`userId` is the agent run's `RunConfig.principal`, and is not sent when the run has none.
+
 See the [observability guide](../../docs/guide/observability/index.md#langfuse-monitoring-workflow)
 for the full Langfuse monitoring workflow, including what gets captured and a trace structure
 example.

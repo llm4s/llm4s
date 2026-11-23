@@ -96,7 +96,7 @@ A: The Postgres store requires `pgvector`. Install the extension on your DB serv
 ## Observability & Tracing
 
 **Q: Traces are not showing up in Langfuse**
-A: Verify you have set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_URL`. Crucially, ensure you invoke `Tracing.shutdown()` before your application exits to avoid dropping pending trace batches.
+A: Verify you have set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_URL`. Crucially, ensure you close the tracer (`tracing.close()`) before your application exits to avoid dropping pending trace batches.
 
 **Q: Getting RateLimitError: 429 Too Many Requests frequently**
 A: Use `LLMClientRetry` or the `ReliabilityConfig` to automatically handle 429s with exponential backoff. Example: `ReliabilityConfig.default.withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3))`.

@@ -283,33 +283,6 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
   }
 
   // ============================================
-  // Disallowed params query tests
-  // ============================================
-
-  test("O-series models should return disallowed params set") {
-    org.llm4s.model.ModelRegistryTestSupport.defaultServiceResult() match
-      case Left(error) =>
-        fail(error.message)
-      case Right(service) =>
-        val disallowed = transformer(service).disallowedParams("o1")
-
-        disallowed should contain("top_p")
-        disallowed should contain("presence_penalty")
-        disallowed should contain("frequency_penalty")
-        disallowed should contain("logprobs")
-  }
-
-  test("Standard models should return empty disallowed params set") {
-    org.llm4s.model.ModelRegistryTestSupport.defaultServiceResult() match
-      case Left(error) =>
-        fail(error.message)
-      case Right(service) =>
-        val disallowed = transformer(service).disallowedParams("gpt-4o")
-
-        disallowed shouldBe empty
-  }
-
-  // ============================================
   // Response format (structured output) tests
   // ============================================
 
@@ -545,7 +518,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
           seen = Some(id -> caps)
           caps
         }
-        t.disallowedParams("some-model")
+        t.requiresFakeStreaming("some-model")
         seen.map(_._1) shouldBe Some("some-model")
   }
 }
