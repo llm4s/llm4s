@@ -56,7 +56,7 @@ class FinishReasonSpec extends AnyFlatSpec with Matchers {
   }
 
   "StreamingAccumulator" should "put the last reason it saw on the Completion it builds" in {
-    val acc = StreamingAccumulator.create()
+    val acc = StreamingAccumulator("test-model")
     acc.addChunk(StreamedChunk(id = "s", content = Some("Hel")))
     acc.addChunk(StreamedChunk(id = "s", content = Some("lo"), finishReason = Some(FinishReason.Length)))
     acc.isComplete shouldBe true
@@ -64,14 +64,14 @@ class FinishReasonSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "keep a real reason when a later chunk carries an empty one" in {
-    val acc = StreamingAccumulator.create()
+    val acc = StreamingAccumulator("test-model")
     acc.addChunk(StreamedChunk(id = "s", content = Some("Hel"), finishReason = Some(FinishReason.Length)))
     acc.addChunk(StreamedChunk(id = "s", content = None, finishReason = Some(FinishReason.Other(""))))
     acc.toCompletion(created).map(_.finishReason) shouldBe Right(FinishReason.Length)
   }
 
   it should "build Other(\"\") when the stream carried no reason, never a Stop the provider didn't send" in {
-    val acc = StreamingAccumulator.create()
+    val acc = StreamingAccumulator("test-model")
     acc.addChunk(StreamedChunk(id = "s", content = Some("Hel")))
     acc.isComplete shouldBe false
     acc.toCompletion(created).map(_.finishReason) shouldBe Right(FinishReason.Other(""))

@@ -18,7 +18,7 @@ import ujson._
  * Expected behavior:
  *   • If output size > threshold → externalized with [EXTERNALIZED: key | KIND | preview].
  *   • If compressed size < threshold → remains inline (smaller representation).
- *   • Binary/base64 content → always externalized, regardless of threshold.
+ *   • Binary content (a data: URI, a base64 run) over 2KB → externalized whole, never cut.
  *   • Lower thresholds → more externalization; higher thresholds → more inline results.
  *
  * Output:

@@ -1,0 +1,2 @@
+# A module whose descriptors throw when asked for their id or aliases (#2812).
+org.llm4s.llmconnect.spi.fixtures.SkewedProviderModule
