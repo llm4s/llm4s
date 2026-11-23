@@ -24,13 +24,36 @@ import org.llm4s.annotation.Stable
 final case class ContextError private (
   override val message: String,
   contextType: String,
-  details: Map[String, String]
+  details: Map[String, String] = Map.empty
 ) extends LLMError
     with NonRecoverableError {
   override val context: Map[String, String] = Map("contextType" -> contextType) ++ details
 }
 
 object ContextError {
+
+  /**
+   * The token count of the context is above its budget.
+   *
+   * @param currentTokens the number of tokens the context uses
+   * @param budget the maximum number of tokens allowed
+   * @return an error with contextType `"tokenBudget"` and details `currentTokens` and `budget`
+   */
+  def tokenBudgetExceeded(currentTokens: Int, budget: Int): ContextError =
+    new ContextError(
+      s"Token budget exceeded: $currentTokens tokens > $budget budget",
+      "tokenBudget",
+      Map("currentTokens" -> currentTokens.toString, "budget" -> budget.toString)
+    )
+
+  /**
+   * A trimming operation on the context is invalid.
+   *
+   * @param reason why the trimming is invalid
+   * @return an error with contextType `"trimming"` and no details
+   */
+  def invalidTrimming(reason: String): ContextError =
+    new ContextError(s"Invalid trimming operation: $reason", "trimming")
 
   /**
    * An artifact store operation failed. `ToolOutputCompressor` raises it, with operation
