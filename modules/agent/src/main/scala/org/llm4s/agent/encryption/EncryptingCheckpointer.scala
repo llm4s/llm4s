@@ -50,7 +50,7 @@ final class EncryptingCheckpointer private (
   settings: EncryptionSettings
 ) extends Checkpointer:
   import EncryptingCheckpointer.*
-  import ThreadCipher.traverse
+  import PayloadCipher.traverse
 
   /** Each thread's tenant, by the claim it was read under: what a commit with no checkpoint is keyed by. */
   private val tenants = new java.util.LinkedHashMap[String, (Long, Option[String])](16, 0.75f, false):
@@ -78,7 +78,7 @@ final class EncryptingCheckpointer private (
               owner.flatMap(_.tenantId)
             }
 
-  private def cipher(threadId: ThreadId) = new ThreadCipher(threadId, keys, settings)
+  private def cipher(threadId: ThreadId) = PayloadCipher.ofThread(threadId, keys, settings)
 
   // ---- writes ----
 
@@ -183,7 +183,7 @@ final class EncryptingCheckpointer private (
 
 @Experimental
 object EncryptingCheckpointer:
-  import ThreadCipher.{ traverse, Codec }
+  import PayloadCipher.{ traverse, Codec }
 
   /** The most threads whose tenant a checkpointer remembers between commits; the oldest is forgotten first, and read again. */
   val TenantCacheLimit: Int = 10000

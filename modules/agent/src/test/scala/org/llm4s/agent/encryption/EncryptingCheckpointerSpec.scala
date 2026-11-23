@@ -151,7 +151,7 @@ class EncryptingCheckpointerSpec extends AnyFlatSpec with Matchers with EitherVa
     fill(store, on)
 
     (dump(raw, on) should not).include(Secret)
-    dump(raw, on) should include(ThreadCipher.Marker)
+    dump(raw, on) should include(PayloadCipher.Marker)
 
     val latest = store.latest(on).value.value
     latest.checkpoint shouldBe checkpoint(on)
@@ -248,10 +248,10 @@ class EncryptingCheckpointerSpec extends AnyFlatSpec with Matchers with EitherVa
     val on    = thread()
     fill(store, on)
     val kept = stored(raw, on)
-    val text = ThreadCipher.envelope(kept.snapshot.state("messages").value).value
+    val text = PayloadCipher.envelope(kept.snapshot.state("messages").value).value
 
     def withMessages(envelope: String): Checkpointer = {
-      val state = kept.snapshot.state.updated("messages", VersionedJson(1, ujson.Obj(ThreadCipher.Marker -> envelope)))
+      val state = kept.snapshot.state.updated("messages", VersionedJson(1, ujson.Obj(PayloadCipher.Marker -> envelope)))
       EncryptingCheckpointer(planted(kept.withSnapshot(kept.snapshot.copy(state = state))), keys)
     }
 
@@ -380,7 +380,7 @@ class EncryptingCheckpointerSpec extends AnyFlatSpec with Matchers with EitherVa
     val store     = EncryptingCheckpointer(InMemoryCheckpointer(), StaticKeySource(key("k1")))
     val on        = thread()
     val token     = claimed(store, on)
-    val lookalike = ujson.Obj(ThreadCipher.Marker -> "1.k1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+    val lookalike = ujson.Obj(PayloadCipher.Marker -> "1.k1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
     val draft     = custom().copy(event = RunEvent.Custom("app.note", 1, lookalike))
     store.commit(on, Commit(token, Some(checkpoint(on)), events = Vector(draft))).value
     store.eventsAfter(on, 0L, 10).value.map(_.event) shouldBe Vector(draft.event)
@@ -393,7 +393,7 @@ class EncryptingCheckpointerSpec extends AnyFlatSpec with Matchers with EitherVa
     val error    = EncryptingCheckpointer(raw, StaticKeySource(key("k1"))).latest(on).left.value
     val rendered = s"${error.message} ${error.formatted} $error"
     (rendered should not).include(Secret)
-    (rendered should not).include(ThreadCipher.envelope(stored(raw, on).snapshot.state("messages").value).value)
+    (rendered should not).include(PayloadCipher.envelope(stored(raw, on).snapshot.state("messages").value).value)
     rendered should include(on.value)
   }
 

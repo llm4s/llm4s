@@ -604,6 +604,8 @@ yield files // thread state everywhere else, the shared store under /memories
 - **`search` is a keyword match**: the query, case-insensitively, as a substring of a key or of any string in a
   value. It is not semantic search; for that, use [semantic memory](memory) over `PostgresMemoryStore`.
 - **PostgreSQL text holds no NUL.** A key, or a tenant id, containing NUL is refused.
+- **Values are stored in plain**, also when the checkpointer is wrapped for encryption: wrap this store too, with
+  [`EncryptingLongTermStore`](#encrypting-the-long-term-store).
 
 Opening a build with this store moves the schema to version 6 (three tables added, none changed); an older build
 then refuses the schema, so upgrade every process sharing the database together. To write a store of your own, mix
@@ -867,10 +869,11 @@ page costs the same however many threads the store holds.
 
 ## Encrypting what the store holds
 
-A store keeps what users said and what tools returned in plain. `EncryptingCheckpointer` and `EncryptingRunQueue`
-(`org.llm4s.agent.encryption`, experimental) wrap any store and its run queue so those values are stored encrypted,
-with keys your application holds: AES-256-GCM from the JDK, no schema change, and the same code over the in-memory,
-SQLite and PostgreSQL stores.
+A store keeps what users said and what tools returned in plain. `EncryptingCheckpointer`, `EncryptingRunQueue` and
+`EncryptingLongTermStore` (`org.llm4s.agent.encryption`, experimental) wrap any store, its run queue and its
+[long-term store](#long-term-memory-on-the-same-database) so those values are stored encrypted, with keys your
+application holds: AES-256-GCM from the JDK, no schema change, and the same code over the in-memory, SQLite and
+PostgreSQL stores.
 
 ```scala
 import org.llm4s.agent.encryption.*
@@ -889,6 +892,10 @@ yield worker
 Wrap **both**: the queue is a separate SPI, and a queued query is the user's input. Every runtime, worker and
 submitter of the service must use the wrappers with the same keys. Put `MeteredCheckpointer` outside, as above: it then
 times commits with their encryption and still counts child tasks, whose events it reads before they are sealed.
+
+The **long-term store is a third SPI**, and wrapping the checkpointer does not cover it: the `/memories/` files and
+items an agent keeps across threads are stored in plain until you wrap it too
+([below](#encrypting-the-long-term-store)).
 
 - **Encrypted**: a checkpoint's state values, pending task inputs and parked questions; a pending write's updates,
   route payloads and question; a custom event's payload; an effect record's outcome; a queue entry's `Start` input
@@ -923,13 +930,58 @@ val keys = StaticKeySource(december)            // every thread without a key of
   [retention](#retention) has pruned what it wrote (a read of a row whose key is gone is `UnknownKey`).
 - **Switching it on over an existing store.** Rows written before are plaintext, and by default reading one is
   refused (`NotEncrypted`), so that nobody who can write to the database can swap a ciphertext for a plaintext. Pass
-  `EncryptionSettings().withPlaintextReads(true)` to both wrappers while old rows remain - writes are encrypted
+  `EncryptionSettings().withPlaintextReads(true)` to the wrappers while old rows remain - writes are encrypted
   either way - and remove it once retention has pruned them.
 - **Losing a key loses the data.** There is no recovery without it.
 
 A thread put back to an earlier state of itself by someone who can write to the database still opens: encryption
 binds a value to its place, not to its time. The design is
 `docs/superpowers/specs/2026-11-22-checkpoint-encryption-design.md`.
+
+### Encrypting the long-term store
+
+`EncryptingLongTermStore` wraps any `LongTermStore` - `store.longTermStore(limits)`, `InMemoryLongTermStore` or your
+own - with the same key source. Give the wrapper, never the store under it, to everything that takes the store, on
+every instance:
+
+```scala
+val wanted = StoreLimits.default      // what callers may write: 64 KiB an item, 1000 items and 4 MiB a namespace
+for
+  memories <- StoreFileBackend(
+                EncryptingLongTermStore(store.longTermStore(EncryptingLongTermStore.storageLimits(wanted)), keys),
+                Vector("memories")
+              )
+  mount <- VPath("/memories")
+  files <- CompositeBackend(StateFileBackend(), mount -> memories)
+yield files // the files under /memories are stored encrypted
+```
+
+A `StoreFileBackend` over the wrapper needs nothing more: its files are items of the store.
+
+- **Encrypted**: each item's value, and the outcome the store records with a write until the replay guard forgets
+  it. A value opens only for its tenant, namespace and key, so one copied to another item, namespace or tenant fails.
+- **Still plain**, because the store looks items up, lists and bounds by them: item keys (a file's path),
+  namespaces and their tenants, `updated_at`, effect keys and claim tokens, the id of the key that sealed a value,
+  and each value's size. Keep content out of keys and namespace paths.
+- **Keys** are the namespace's tenant's: `keys.current(namespace.tenant)`, so `withTenantKey` seals a tenant's
+  items as it seals its threads.
+- **`search` gives the same results** as without encryption, but the store cannot match ciphertext, so the wrapper
+  reads the namespace, opens each value in key order and matches it itself, stopping once it has `limit` hits and
+  one more. A search therefore costs up to the whole namespace read and decrypted - at most `maxItems` items and
+  `maxBytes` bytes, 1000 and 4 MiB by default.
+- **Limits mean what they meant.** The wrapper's `limits` are counted over what callers write, and it refuses with
+  the messages the store gives. A sealed item is larger - at most `121 + 4n/3` bytes for `n` - so the wrapper offers
+  the largest limits that always fit the store under it: over `StoreLimits.default`, about 48 KiB an item and
+  2.9 MiB a namespace. Open the store with `EncryptingLongTermStore.storageLimits(wanted)`, as above, to offer exactly
+  `wanted`; the item limit that can be offered tops out near 768 KiB. A write counts its namespace's bytes by
+  reading the namespace once more than the store does.
+- **Failure is an error, never plaintext or a shorter list.** One item that cannot be opened fails the `get`,
+  `list` or `search` that reached it, and cannot be overwritten or deleted through the wrapper - a change is
+  decided against the item as it is. Remove such an item through the store under it.
+- **Items outlive retention**, so two things differ from threads. After a **rotation**, an item keeps its old key
+  until it is next written: keep the retired key for as long as any item names it. And when **switching encryption on
+  over a store that holds items**, pass `EncryptionSettings().withPlaintextReads(true)` and rewrite each item (read
+  it and `put` it back) before removing the setting: no sweep will prune the plaintext for you.
 
 ## Writing a store
 

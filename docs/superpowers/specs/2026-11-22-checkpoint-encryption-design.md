@@ -231,3 +231,136 @@ keys: an application builds its key source in code from wherever it keeps secret
 - Failure messages and cancel notes (decision 2), which needs the tenant on `Lease`.
 - A `reference.conf` binding and a KMS-backed `EncryptionKeySource`.
 - Binding an event to its sequence number and a queue input to its entry id, which needs the store's help.
+
+## The long-term store (added 2026-11-23)
+
+`LongTermStore` gained a PostgreSQL implementation and a contract (#2453) the day this design merged, so an
+application with both wrappers above still stored every `/memories/` file and long-term item in plain.
+`EncryptingLongTermStore(inner, keys, settings)` closes that: a third wrapper, over any `LongTermStore`, on the cipher,
+key source, settings and errors above. `ThreadCipher` became `PayloadCipher`, one cipher with two kinds of scope (a
+thread, a namespace); nothing about a thread's subkey, associated data or stored form changed. It is
+`LongTermStoreContract` that checks the wrapper, unchanged, over the in-memory store and over PostgreSQL.
+
+### L1. Values and recorded outcomes are sealed; keys and namespaces stay plain
+
+Sealed: an item's value, and the outcome `modify` records under its effect key (a `modify` is generic in its outcome,
+and a backend's may quote content; the record lives until C4's guard forgets it, or for as long as a crashed run is
+not recovered). Plain: item keys, namespace paths and tenants - `get` is by `(namespace, key)`, `list` by key prefix
+in key order, and the PostgreSQL store digests the namespace into its row id - and `updated`, effect keys and scopes,
+fencing tokens. A reader of the database therefore learns every key (for `StoreFileBackend`, every file path), every
+namespace and tenant, when each item was last written, which key id sealed it, and the length of its value to the
+byte (the envelope's length gives it), and none of the content.
+
+*Rejected:* sealing keys too. Deterministic encryption would keep `get` but lose prefix listing and key order, which
+`StoreFileBackend` is built on; anything else needs the store's help. *Rejected:* leaving outcomes plain. The built-in
+`put` and `delete` record a boolean, but the SPI does not promise that.
+
+### L2. `search` reads the namespace and matches plaintext, with the stores' own matcher
+
+`inner.search` would match ciphertext, so it is never called. The wrapper checks the query and limit as the stores do,
+reads the namespace with `inner.list(ns, "", Int.MaxValue)`, opens values in key order and applies
+`LongTermStore.matcher` - the function both shipped stores match with - stopping at `limit + 1` hits. The results,
+their order and `truncated` are those of an unencrypted store over the same items, which the contract's search cases
+and a direct comparison check. Cost: one read of the namespace, held in memory at once - at most `inner.limits`'
+`maxItems` items and `maxBytes` bytes, 1000 and about 4 MiB by default - and one decryption per item reached. The
+PostgreSQL store's own search pages (256 rows at a time); the SPI's `list` has no cursor, so the wrapper cannot, and
+the bound is the namespace's, not a page's.
+
+An item that does not open fails the search (and a `list` that returns it), typed. *Rejected:* skipping it, which is
+a silently shorter answer. *Rejected:* a blind index of tokens beside each value: a second stored format, leakage of
+token equality, and it cannot answer a substring match. A store whose `search` is not this keyword match (a semantic
+one) loses it under the wrapper; none is shipped.
+
+### L3. Limits are the caller's, checked by the wrapper on plaintext
+
+A sealed value is longer: `19 + |key id| + ceil(4(n + 28)/3)` bytes of JSON for `n` bytes, at most `121 + 4n/3`.
+`LongTermStoreContract` states the bounds to the byte, with the messages, so the wrapper cannot leave them to `inner`.
+It checks `limits.maxItemBytes`, the value's and outcome's depth and the outcome's size with `LongTermStore.check`,
+then the namespace's item count and bytes with `LongTermStore.within`, inside `inner`'s transaction, before it
+hands `inner` the sealed change; an item's bytes are its key plus the bytes that are sealed. Its `limits` are derived
+from `inner.limits`: the largest for which every sealed item and namespace fits, assuming a 64-character key id, so
+`inner` never refuses first. `EncryptingLongTermStore.storageLimits(wanted)` is the inverse, exactly: a wrapper over
+a store opened with it offers `wanted`. Over `StoreLimits.default` the wrapper offers 49 061 bytes an item and
+3 054 978 a namespace. A store too small to hold one sealed item is refused when the wrapper is built
+(`IllegalArgumentException`, as `StoreLimits` refuses a bad limit).
+
+Three precise differences from an unencrypted store. (a) To count a namespace's plaintext bytes the wrapper reads the
+namespace through the `StoreView` on every `Put` - sizes come from each envelope's length, nothing is decrypted - one
+read more than `inner` makes. (b) A value holding an unpaired surrogate has no UTF-8; it is sealed with its non-ASCII
+characters escaped and counted at that size toward its namespace (an unencrypted store counts the surrogate as one
+byte). (c) An outcome is recorded sealed, so the largest is about three quarters of the replay cap (its sealed form
+must be within 1 MiB). `maxItemBytes` can be offered up to 786 341.
+
+*Rejected:* passing `inner`'s limits through and documenting "limits count ciphertext". It fails the contract, moves
+every caller's arithmetic (`StoreFileBackend` sizes writes by `limits.maxItemBytes`), and makes a limit depend on the
+length of a key id. *Rejected:* a `limits` parameter on the wrapper: two sets of numbers to keep consistent, and a
+wrapper whose `inner` can refuse first, with ciphertext sizes in its message. *Rejected:* a size method on `StoreView`
+to avoid (a): an SPI change every store would implement for one caller; worth revisiting if the read shows up in a
+profile.
+
+### L4. `modify` stays `inner`'s transaction; nothing compares stored bytes
+
+The wrapper calls `inner.modify[ujson.Value]` once. Fencing, the applied-key lookup, the write and the record are
+`inner`'s and unchanged: an applied key is answered before the wrapper's change runs, and matched by effect key
+alone, so a fresh nonce per encryption changes nothing (unlike the run queue's submission key, decision 7). Inside the
+transaction the wrapper opens the current item, runs the caller's change over a view that opens what it reads,
+encodes the outcome once (the contract's "codec emitted once" case), checks, seals, and returns the sealed change.
+Outside, it opens the recorded outcome `inner` returns - a first run and a replay alike - and decodes it.
+
+The current item is opened before the change is asked, because `StoreView.current` is not a `Result`. So an item
+that does not open cannot be overwritten or deleted through the wrapper; an operator removes it through `inner`.
+*Rejected:* a lazy `current` that throws. A write with no key for the tenant, `Remove` and `Keep` included, fails
+`NoCurrentKey` and records nothing: the outcome is sealed too.
+
+### L5. A subkey per namespace; tenant, namespace and key as associated data
+
+The subkey is HKDF-Expand of the key with the label `llm4s-agent-items-v1` and the namespace - tenant first, as an
+ASCII JSON array, so no two namespaces share a context. The label differs from a thread's, so no thread id derives
+a namespace's subkey. Associated data: the format, the key id, that same namespace, then `("value", key)` or
+`("outcome", key, effect key)`, length-prefixed. A ciphertext moved to another key, namespace (a parent or child
+path included) or tenant, or an outcome planted under another effect, does not authenticate.
+
+**Nonce bound.** 2^32 encryptions per namespace per key id keep a repeated nonce below 2^-32. A write is two
+encryptions (value and outcome), so 2^31 writes to one namespace under one key: a namespace written ten times a
+second reaches it in seven years. Rotating the key starts the count again.
+
+*Rejected:* a subkey per tenant, which pools every namespace of a tenant under one bound. *Rejected:* a subkey per
+item, which buys nothing a namespace's bound needs and costs an HMAC per item on every search.
+
+### L6. Keys, rotation and plaintext
+
+Writes use `keys.current(namespace.tenant)`; reads use the key id in the envelope. Items are not pruned by retention,
+so an item keeps its old key until it is next written: the retired key is kept as long as any item names it. A
+plaintext item is refused with `NotEncrypted` unless `plaintextReads`, as a checkpoint is; switching encryption on
+over a store with items means rewriting them, since nothing prunes them. No re-encryption sweep is shipped.
+
+### L7. `EncryptionError` names an owner, not a thread
+
+`DecryptionFailed`, `NotEncrypted`, `MalformedCiphertext` and `EncryptionFailed` carried `threadId: ThreadId`. An
+item has no thread, so that field is now `owner: EncryptionError.Owner` - `Owner.Thread(threadId)` or
+`Owner.Item(namespace, key)` - with `field` as before (`value` or `outcome` for an item). A break, in unreleased
+experimental API. *Rejected:* a second set of cases for items, and a thread id that is sometimes a namespace.
+
+### L8. `StoreFileBackend` is covered by wrapping its store
+
+It reads and writes only through `LongTermStore` (`list`, `modify` and its view, `limits`), so over the wrapper its
+files are sealed and its bounds are the wrapper's. `FileBackendContract` runs over it, and a direct test checks the
+store under it holds no content.
+
+### Tests
+
+`LongTermStoreContract`, `ReplayContract` and `FileBackendContract` over the wrapper on the in-memory store
+(`llm4s-agent-testkit`); `LongTermStoreContract` over it on PostgreSQL (`modules/it`, `@Docker`), with a sibling
+wrapper per machine. Direct (`EncryptingLongTermStoreSpec`): no plaintext stored; a ciphertext moved to another key,
+namespace or tenant, tampered or malformed fails typed; rotation; a missing key; per-tenant keys; search equal to an
+unencrypted store's; limits exact, and `inner` never refusing within them, at every size; plaintext refused or read;
+replay and fencing; a value with an unpaired surrogate read back as written.
+
+The shared cipher changed in one way: a value holding an unpaired surrogate is sealed with its non-ASCII characters
+escaped, and every plaintext is parsed as text, so such a value reads back as it was written - as the in-memory and
+PostgreSQL stores keep it. Ciphertexts already stored open as before.
+
+### Left for later
+
+- A re-encryption sweep for items (rotation, and switching on over existing items).
+- A cursor on `LongTermStore.list`, which would let `search` page.

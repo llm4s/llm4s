@@ -35,9 +35,9 @@ import scala.concurrent.duration.FiniteDuration
 @Experimental
 final class EncryptingRunQueue private (val inner: RunQueue, keys: EncryptionKeySource, settings: EncryptionSettings)
     extends RunQueue:
-  import ThreadCipher.{ traverse, Codec }
+  import PayloadCipher.{ traverse, Codec }
 
-  private def cipher(threadId: ThreadId) = new ThreadCipher(threadId, keys, settings)
+  private def cipher(threadId: ThreadId) = PayloadCipher.ofThread(threadId, keys, settings)
 
   private def through(
     codec: Codec,

@@ -1,7 +1,15 @@
 package org.llm4s.agent.testkit
 
-import org.llm4s.agent.encryption.{ EncryptingCheckpointer, EncryptingRunQueue, EncryptionKey, KeyId, StaticKeySource }
+import org.llm4s.agent.encryption.{
+  EncryptingCheckpointer,
+  EncryptingLongTermStore,
+  EncryptingRunQueue,
+  EncryptionKey,
+  KeyId,
+  StaticKeySource
+}
 import org.llm4s.agent.graph.{ Checkpointer, InMemoryCheckpointer, TenantId }
+import org.llm4s.agent.harness.{ FileBackend, InMemoryLongTermStore, LongTermStore, StoreLimits }
 import org.scalatest.flatspec.AnyFlatSpec
 
 import java.time.Clock
@@ -41,4 +49,53 @@ class EncryptingRunQueueContractSpec extends AnyFlatSpec with RunQueueContract {
       EncryptingRunQueue(store.runQueue, ContractKeys.keys)
     )
   }
+}
+
+/** The encrypted long-term stores the contract runs use, over the reference store. */
+object EncryptedStores {
+
+  /** An encrypting store offering exactly `limits`: the store under it has the room their sealed items need. */
+  def over(limits: StoreLimits = StoreLimits.default): EncryptingLongTermStore =
+    EncryptingLongTermStore(InMemoryLongTermStore(EncryptingLongTermStore.storageLimits(limits)), ContractKeys.keys)
+
+  /** The applied keys of the reference store under `store`. */
+  def appliedKeys(store: LongTermStore): Int = store match {
+    case encrypting: EncryptingLongTermStore =>
+      encrypting.inner match {
+        case inMemory: InMemoryLongTermStore => inMemory.appliedKeys
+        case other                           => throw new IllegalStateException(s"not the in-memory store: $other")
+      }
+    case other => throw new IllegalStateException(s"not an encrypting store: $other")
+  }
+}
+
+/**
+ * [[EncryptingLongTermStore]] over the reference store passes the contract every long-term store must pass (#2449,
+ * #2453), bounds and search included: encryption above a store changes nothing a caller can observe of it.
+ */
+class EncryptingLongTermStoreContractSpec extends AnyFlatSpec with LongTermStoreContract {
+  protected def newStore(limits: StoreLimits): LongTermStore = EncryptedStores.over(limits)
+  protected def appliedKeys(store: LongTermStore): Int       = EncryptedStores.appliedKeys(store)
+}
+
+/** A replay across a crash is answered from the applied key, its sealed outcome opened (#2449). */
+class EncryptingLongTermStoreReplaySpec extends AnyFlatSpec with ReplayContract {
+  protected def newSubject(): ReplayContract.Subject = {
+    val store = EncryptedStores.over()
+    LongTermStoreContract.CounterSubject(
+      "an encrypting long-term store's transactional modify",
+      store,
+      () => EncryptedStores.appliedKeys(store)
+    )
+  }
+}
+
+/** A `StoreFileBackend` over an [[EncryptingLongTermStore]] passes the file contract: its files need no more wiring. */
+class EncryptedStoreFileBackendContractSpec extends AnyFlatSpec with FileBackendContract {
+  protected def newBackend(): FileBackend =
+    HarnessBackends.storeFiles(EncryptedStores.over(StoreLimits(maxBytes = 200)))
+  override protected def tenantScoped: Boolean = true
+  // each item is its key, plus {"content":"..."}: 94 bytes; two fit, the third is over
+  override protected def boundedBatch: Option[Vector[(String, String)]] =
+    Some(Vector("/a" -> "x" * 78, "/b" -> "x" * 78, "/c" -> "x" * 78))
 }
