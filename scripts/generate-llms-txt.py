@@ -112,6 +112,8 @@ def render(body, values, counts, path):
     body = re.sub(r"\{%-?\s*include\s+api\.html\s+([^%]*?)\s*-?%\}", api, body)
     body = body.replace("{{ llm4s_chat_providers }}", str(counts[0]))
     body = body.replace("{{ llm4s_embedding_providers }}", str(counts[1]))
+    # {% raw %}: text the site prints as written (another tool's template syntax in an example).
+    body = re.sub(r"\{%-?\s*raw\s*-?%\}(.*?)\{%-?\s*endraw\s*-?%\}", lambda m: m.group(1), body, flags=re.S)
     if "{%" in body:
         fail(f"docs/{path} uses Liquid this generator does not resolve: {re.search(r'{%.*', body).group(0)[:80]}")
     # Jekyll/just-the-docs only: attribute lists, the TOC and the "Table of contents" heading.
