@@ -51,7 +51,42 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
 [Langfuse traces are private and name the run's user](#langfuse-traces-are-private-and-name-the-runs-user-2828),
-and [`Tracing` has one abstract method](#tracing-has-one-abstract-method-2799).
+[`Tracing` has one abstract method](#tracing-has-one-abstract-method-2799),
+and [`ReliableClient`'s metrics are generic metrics](#reliableclients-metrics-are-generic-metrics-2801).
+
+## `ReliableClient`'s metrics are generic metrics (#2801)
+
+`MetricsCollector` had three methods with no-op defaults that only `ReliableClient` called: `recordRetryAttempt`,
+`recordCircuitBreakerTransition` and `recordError`. A backend that did not override them dropped them silently, and
+`PrometheusMetrics` did not. They are removed. `ReliableClient` records three counters declared in
+`org.llm4s.reliability.ReliabilityMetrics` through `MetricsCollector.increment`, which every backend that exports
+generic metrics already implements.
+
+| Before | After |
+|---|---|
+| `override def recordRetryAttempt(provider, attemptNumber)` | In `increment`: `case (ReliabilityMetrics.Retries, Seq(provider))` |
+| `override def recordCircuitBreakerTransition(provider, newState)` | In `increment`: `case (ReliabilityMetrics.CircuitBreakerTransitions, Seq(provider, state))` |
+| `override def recordError(errorKind, provider)` | In `increment`: `case (ReliabilityMetrics.Errors, Seq(provider, errorType))` |
+| `collector.recordRetryAttempt("openai", 1)` | `collector.increment(ReliabilityMetrics.Retries, Seq("openai"))` |
+
+```scala
+override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit =
+  (metric, labelValues) match {
+    case (ReliabilityMetrics.CircuitBreakerTransitions, Seq(provider, state)) => alert(provider, state)
+    case _                                                                    => ()
+  }
+```
+
+- **Prometheus gains three series**: `llm4s_retries_total{provider}`,
+  `llm4s_circuit_breaker_transitions_total{provider,state}` and `llm4s_reliability_errors_total{provider,error_type}`.
+  Nothing else changes there.
+- **Micrometer keeps its meters** (`llm4s.retries`, `llm4s.circuit.breaker.transitions`, `llm4s.reliability.errors`)
+  and their tags. Their values now pass through the generic label guard: a provider is capped at
+  `MetricsCollector.MaxLabelValues` (256) distinct values per meter, not the collector's 64, and `state` is one of
+  `open`, `closed` and `half-open`, which `ReliableClient` passes from `CircuitState`. `MicrometerMetrics.Names.Retries`,
+  `CircuitBreakerTransitions` and `ReliabilityErrors` are no longer constant expressions.
+- The retry's attempt number is no longer passed: no backend recorded it. `error_type` arrives as its label
+  (`rate_limit`, `timeout`, ...; `ReliabilityMetrics.errorTypeLabel`), not as an `ErrorKind`.
 
 ## `Tracing` has one abstract method (#2799)
 

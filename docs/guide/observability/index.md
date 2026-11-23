@@ -594,7 +594,7 @@ stops its exporter, and a composed tracer closes the ones it wraps. Close the tr
 
 Tracing records what happened inside one request. Metrics count what happens across all of them: requests, tokens, cost, errors and latency, per provider and model. They are cheap enough to alert on, and they answer "is a provider failing right now?" faster than a trace search.
 
-The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, plus calls for retries, circuit-breaker transitions, errors and image generation, and the generic `increment`, `observe` and `set` through which other modules record metrics of their own ([below](#agent-runtime-metrics)). Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`. If your application already has a Micrometer `MeterRegistry` (Spring Boot Actuator, Quarkus), use `llm4s-observability-micrometer` instead: its `MicrometerMetrics` records the same series into that registry, and the Spring Boot starter wires it with no code. See [Micrometer metrics](micrometer).
+The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, plus calls for image generation, and the generic `increment`, `observe` and `set` through which `ReliableClient` records its retries, circuit-breaker transitions and errors (`ReliabilityMetrics`) and other modules record metrics of their own ([below](#agent-runtime-metrics)). Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`. If your application already has a Micrometer `MeterRegistry` (Spring Boot Actuator, Quarkus), use `llm4s-observability-micrometer` instead: its `MicrometerMetrics` records the same series into that registry, and the Spring Boot starter wires it with no code. See [Micrometer metrics](micrometer).
 
 ### Add the module
 
@@ -695,6 +695,9 @@ val endpoint: Option[PrometheusEndpoint] =
 | `llm4s_image_generation_duration_seconds` | histogram | `provider`, `model`, `operation` |
 | `llm4s_image_generation_cost_usd_total` | counter | `provider`, `model` |
 | `llm4s_image_generation_errors_total` | counter | `provider`, `model`, `operation`, `error_type` |
+| `llm4s_retries_total` | counter | `provider`; a `ReliableClient` retry |
+| `llm4s_circuit_breaker_transitions_total` | counter | `provider`, `state` (`open`, `closed` or `half-open`) |
+| `llm4s_reliability_errors_total` | counter | `provider`, `error_type`; what a `ReliableClient` call ended on |
 
 After one successful call and one rate-limited call to `gpt-4o`, the chat series on `/metrics` look like this (comment lines left out; the second call took 90 seconds):
 
@@ -808,7 +811,7 @@ tenant id is ever a label, and no metric carries message content. Every backend 
 
 ### Limits
 
-- **Retries, circuit-breaker transitions and `ReliableClient`'s error events have no series of their own.** `ReliableClient` takes its own `collector` argument and reports those three kinds of event to it, but `PrometheusMetrics` does not implement them. The request series still see every attempt: `ReliableClient` calls the wrapped client once per attempt, and a metrics-enabled client records each of those calls, so a call that fails twice and then succeeds adds three requests - two `error_*`, one `success` - and three latency observations. Request and error rates are per attempt, not per logical call.
+- **Request and error rates are per attempt, not per logical call.** `ReliableClient` takes its own `collector` argument and reports its retries, circuit-breaker transitions and the errors its calls end on as `llm4s_retries_total`, `llm4s_circuit_breaker_transitions_total` and `llm4s_reliability_errors_total`; pass it the same collector as the client it wraps. The request series see every attempt as well: `ReliableClient` calls the wrapped client once per attempt, and a metrics-enabled client records each of those calls, so a call that fails twice and then succeeds adds three requests - two `error_*`, one `success` - three latency observations and two retries. `llm4s_errors_total` counts the failed attempts, `llm4s_reliability_errors_total` only the final failure.
 - **The latency buckets are fixed** (0.1 to 120 seconds); there is no way to configure them.
 - **Counters live in the process.** A restart starts them from zero, which is what `rate()` and `increase()` expect.
 - **The endpoint has no authentication and no TLS**: llm4s starts it with only a port and a registry. Keep it off the public network and let your network policy decide who can scrape it.
