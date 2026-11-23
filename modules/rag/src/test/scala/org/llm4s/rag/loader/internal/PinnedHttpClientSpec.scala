@@ -184,6 +184,14 @@ class PinnedHttpClientSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "return an error status without reading its body" in {
+    withRawServer("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 1000000\r\n\r\nstart", holdOpen = true) {
+      port =>
+        val resp = PinnedHttpClient.get(s"http://127.0.0.1:$port/", Seq.empty, 2.seconds, loopbackPolicy)
+        resp.map(r => (r.status, r.body)) shouldBe Right((500, ""))
+    }
+  }
+
   /**
    * A one-shot server that reads the request head (if `readRequest`) and answers `response` verbatim, then closes, or
    * with `holdOpen` waits for the client to close first.

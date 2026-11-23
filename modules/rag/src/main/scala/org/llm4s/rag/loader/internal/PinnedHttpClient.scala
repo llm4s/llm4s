@@ -22,11 +22,11 @@ import scala.util.{ Failure, Success, Try, Using }
  * itself, and sends the original `Host` header; for `https` it runs TLS over that socket with the original host as
  * the SNI server name and the certificate check (`HTTPS` endpoint identification), as a browser would. Redirects are
  * followed here, each hop asking the policy again. It speaks `Connection: close` and `identity` encoding, decodes a
- * chunked or `Content-Length` body, and reads the body as UTF-8. A redirect's body is not read. It uses no proxy.
+ * chunked or `Content-Length` body, and reads the body as UTF-8. Only a `2xx` response's body is read: any other's is empty. It uses no proxy.
  */
 private[loader] object PinnedHttpClient {
 
-  /** A response: the status, the reason phrase, headers by lower-case name (first value wins) and the body. */
+  /** A response: the status, the reason phrase, headers by lower-case name (first value wins) and the body (empty unless `2xx`). */
   final case class Response(status: Int, reason: String, headers: Map[String, String], body: String, url: String) {
     def header(name: String): Option[String] = headers.get(name.toLowerCase(Locale.ROOT))
   }
@@ -180,8 +180,9 @@ private[loader] object PinnedHttpClient {
   private def readResponse(in: InputStream, url: String): Response = {
     val (status, reason, headers) = readHead(in)
     val bodyBytes =
-      // A redirect's body is never used: the connection closes after its headers, so a slow or endless one cannot stall
-      if (status >= 300 && status < 400) Array.emptyByteArray
+      // Only a 2xx body is used (a redirect is followed, an error status refused): any other closes the connection
+      // after its headers, so a slow or endless body cannot stall the caller
+      if (status < 200 || status >= 300) Array.emptyByteArray
       else if (headers.get("transfer-encoding").exists(_.toLowerCase(Locale.ROOT).contains("chunked"))) readChunked(in)
       else
         headers.get("content-length").flatMap(_.trim.toLongOption) match {
