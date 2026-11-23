@@ -285,8 +285,8 @@ baseline.
 - **No HTTP server product.** Endpoints, authentication, Agent Protocol, A2A and AG-UI belong to the service you build
   on the kernel; the example service shows one shape and authenticates nothing (its `X-Tenant-Id` header is not auth).
 - **Not yet:** semantic search in the shared long-term store, cron and webhooks, versioned assistants, background
-  subagents. See the [parity matrix](../../reference/agent-platform-parity) for where each went. (Checkpoint
-  encryption at rest is [here](durable-checkpointers#encrypting-what-the-store-holds): wrap the store and its queue
+  subagents. See the [parity matrix](../../reference/agent-platform-parity) for where each went. (Encryption at rest is
+  [here](durable-checkpointers#encrypting-what-the-store-holds): wrap the store, its queue and its long-term store
   on every instance, with the same keys.)
 
 ## See also

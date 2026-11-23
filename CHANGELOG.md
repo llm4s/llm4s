@@ -126,7 +126,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
-- **Added** checkpoint encryption at rest (`org.llm4s.agent.encryption`, experimental): `EncryptingCheckpointer` and `EncryptingRunQueue` wrap any store and its queue, sealing state, pending writes, custom events, effect outcomes and queued inputs with AES-256-GCM under keys from an `EncryptionKeySource` (`StaticKeySource`: per-tenant keys, rotation by key id)
+- **Added** checkpoint encryption at rest (`org.llm4s.agent.encryption`, experimental): `EncryptingCheckpointer`, `EncryptingRunQueue` and `EncryptingLongTermStore` wrap any store, its queue and its long-term store, sealing state, pending writes, custom events, effect outcomes, queued inputs and long-term items (`/memories/` files included) with AES-256-GCM under keys from an `EncryptionKeySource` (`StaticKeySource`: per-tenant keys, rotation by key id)
   ([guide](docs/guide/agents/durable-checkpointers.md#encrypting-what-the-store-holds), [design](docs/superpowers/specs/2026-11-22-checkpoint-encryption-design.md)) [#2449](https://github.com/llm4s/llm4s/issues/2449).
 - **Added** `Agent.abandon(threadId, reason)`: closes a cancelled, failed or crashed run instead of recovering it - each unfinished tool call gets `reason` as its result,
   a finished one keeps its own, nothing runs again and the thread takes a new turn. Also on `BoundAgent`, `JAgent`, the Kotlin `AgentKt`, `AgentIO`, `AgentZ` and `AgentPekko`.
