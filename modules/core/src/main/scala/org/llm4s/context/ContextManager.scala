@@ -34,15 +34,17 @@ import org.slf4j.LoggerFactory
  *  2. '''HistoryCompression''' ([[HistoryCompressor]]):
  *     Keeps the last `config.maxSemanticBlocks` semantic blocks verbatim and
  *     replaces older blocks with compact `[HISTORY_SUMMARY]` digests, capped to
- *     `config.summaryTokenTarget` tokens. No API calls.
+ *     `config.summaryTokenTarget` tokens, and to at most half the budget left after headroom, so that the
+ *     digests, which step 4 pins, leave room for the recent turns. No API calls.
  *
  *  3. '''LLMHistorySqueeze''' ([[LLMCompressor]]):
  *     If still over budget and `config.enableLLMCompression` is `true`, compresses
  *     only the digest messages further via one LLM inference call per digest.
  *
  *  4. '''FinalTokenTrim''' ([[TokenWindow]]):
- *     Hard-trims to `budget` tokens (with `config.headroomPercent`), always pinning
- *     `[HISTORY_SUMMARY]` messages so they are never dropped.
+ *     Hard-trims to `budget` tokens (with `config.headroomPercent`), pinning the leading system and
+ *     `[HISTORY_SUMMARY]` messages and dropping older turns whole, a tool call with its results. Fails
+ *     when not even the newest turn fits beside the pinned messages.
  *
  * ==Usage==
  *
@@ -62,8 +64,8 @@ import org.slf4j.LoggerFactory
  *                      and which steps are enabled
  * @param llmClient     Optional LLM client; required for Step 3 (LLMHistorySqueeze);
  *                      Step 3 is skipped if `None`
- * @param artifactStore Optional store for externalized binary/large content from Step 1;
- *                      defaults to an in-memory store if `None`
+ * @param artifactStore Store for externalized binary/large content from Step 1. With `None` nothing is
+ *                      externalized: large tool output is compressed inline and binary content is kept
  *
  * @see [[DeterministicCompressor]] for Step 1 implementation
  * @see [[HistoryCompressor]] for Step 2 implementation
@@ -147,8 +149,11 @@ class ContextManager(
       Right(PipelineStep("HistoryCompression", messages, currentTokens, currentTokens, applied = false))
     } else {
       logger.info("Applying history compression with deterministic digest")
+      // Step 4 pins every digest, so they may take at most half the usable budget.
+      val usable    = (budget * (1.0 - config.headroomPercent.asRatio)).toInt
+      val digestCap = math.max(1, math.min(config.summaryTokenTarget, usable / 2))
       HistoryCompressor
-        .compressToDigest(messages, tokenCounter, config.summaryTokenTarget, config.maxSemanticBlocks)
+        .compressToDigest(messages, tokenCounter, digestCap, config.maxSemanticBlocks)
         .map { compressedMessages =>
           val finalTokens = tokenCounter.countConversation(Conversation(compressedMessages))
           PipelineStep(
@@ -192,7 +197,7 @@ class ContextManager(
   }
 
   /**
-   * Step 4: Final token trim (with digest pinned)
+   * Step 4: Final token trim (leading system and digest messages pinned)
    */
   private def applyFinalTokenTrim(messages: Seq[Message], budget: TokenBudget): Result[PipelineStep] = {
     val currentTokens = tokenCounter.countConversation(Conversation(messages))
