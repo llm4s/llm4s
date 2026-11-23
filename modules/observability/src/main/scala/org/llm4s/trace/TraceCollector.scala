@@ -96,12 +96,15 @@ class TraceCollectorTracing[F[_]](
   override def traceCompletion(completion: Completion, model: String): Result[Unit] =
     lift(
       store.saveSpan(
-        Span
-          .start(traceId, s"llm:$model", SpanKind.LlmCall)
-          .withAttribute("model", SpanValue.StringValue(model))
-          .withAttribute("completion_id", SpanValue.StringValue(completion.id))
-          .withAttribute("tool_calls_count", SpanValue.LongValue(completion.message.toolCalls.length.toLong))
-          .withAttribute("content_length", SpanValue.LongValue(completion.message.content.length.toLong))
+        completion.servedTier
+          .foldLeft(
+            Span
+              .start(traceId, s"llm:$model", SpanKind.LlmCall)
+              .withAttribute("model", SpanValue.StringValue(model))
+              .withAttribute("completion_id", SpanValue.StringValue(completion.id))
+              .withAttribute("tool_calls_count", SpanValue.LongValue(completion.message.toolCalls.length.toLong))
+              .withAttribute("content_length", SpanValue.LongValue(completion.message.content.length.toLong))
+          )((span, tier) => span.withAttribute("service_tier", SpanValue.StringValue(TraceEvent.serviceTierName(tier))))
           .end()
           .withStatus(SpanStatus.Ok)
       )
@@ -160,22 +163,23 @@ class TraceCollectorTracing[F[_]](
           )
         )
 
-      case TraceEvent.CompletionReceived(id, model, toolCalls, content, ts, _, _, _, _, _, _, _, _, _) =>
+      case e: TraceEvent.CompletionReceived =>
+        val attributes = Map(
+          "completion_id"    -> SpanValue.StringValue(e.id),
+          "model"            -> SpanValue.StringValue(e.model),
+          "tool_calls_count" -> SpanValue.LongValue(e.toolCalls.toLong),
+          "content"          -> SpanValue.StringValue(e.content)
+        ) ++ e.servedTier.map(t => "service_tier" -> SpanValue.StringValue(TraceEvent.serviceTierName(t)))
         Span(
           spanId = spanId,
           traceId = traceId,
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.LlmCall,
-          startTime = ts,
-          endTime = Some(ts),
+          startTime = e.timestamp,
+          endTime = Some(e.timestamp),
           status = SpanStatus.Ok,
-          attributes = Map(
-            "completion_id"    -> SpanValue.StringValue(id),
-            "model"            -> SpanValue.StringValue(model),
-            "tool_calls_count" -> SpanValue.LongValue(toolCalls.toLong),
-            "content"          -> SpanValue.StringValue(content)
-          )
+          attributes = attributes
         )
 
       case TraceEvent.ToolExecuted(name, input, output, duration, success, ts) =>
@@ -346,7 +350,8 @@ class TraceCollectorTracing[F[_]](
             llmPromptTokens,
             llmCompletionTokens,
             totalCostUsd,
-            ts
+            ts,
+            stageDurations
           ) =>
         val baseAttrs: Map[String, SpanValue] = Map(
           "operation"   -> SpanValue.StringValue(operation),
@@ -356,7 +361,10 @@ class TraceCollectorTracing[F[_]](
         val promptAttr     = llmPromptTokens.map(v => "llm_prompt_tokens" -> SpanValue.LongValue(v.toLong))
         val completionAttr = llmCompletionTokens.map(v => "llm_completion_tokens" -> SpanValue.LongValue(v.toLong))
         val costAttr       = totalCostUsd.map(v => "total_cost_usd" -> SpanValue.DoubleValue(v))
-        val attrs          = baseAttrs ++ embeddingAttr ++ promptAttr ++ completionAttr ++ costAttr
+        val stageAttrs = stageDurations.map { case (stage, d) =>
+          s"stage_${stage}_ms" -> SpanValue.LongValue(d.toMillis)
+        }
+        val attrs = baseAttrs ++ embeddingAttr ++ promptAttr ++ completionAttr ++ costAttr ++ stageAttrs
         Span(
           spanId = spanId,
           traceId = traceId,

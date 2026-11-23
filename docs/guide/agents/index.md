@@ -212,7 +212,8 @@ which belong to the {% include api.html t="org.llm4s.agent.Agent" %}. `AgentResu
 - `agent.start(threadId, query)` returns an {% include api.html t="org.llm4s.agent.AgentRun" %} at once, with `await()` and `cancel()`;
   `run` is `start` followed by `await`.
 - A run that failed or was cancelled leaves its thread recoverable: `agent.recover(threadId)`
-  re-runs only the work that did not finish.
+  re-runs only the work that did not finish. `agent.abandon(threadId)` closes the run instead, running
+  nothing again (see "A call cut short" below).
 - A run that suspended for a person (`AgentStatus.Suspended`) - an approval, a tool's or a middleware's
   question, or a static breakpoint - continues with `agent.resume(threadId, answers)`, building each
   answer with `result.approve(id)`, `result.reject(id, reason)`, `result.edit(id, arguments)`,
@@ -341,14 +342,42 @@ before it is stored, and `history` you import must keep the same rule. The OpenA
 clients are checked against this contract in both wire formats (`assertOneToolResultPerCall` in
 `llm4s-provider-testkit`).
 
-**A call cut short gets no result until it runs again.** When a turn is cancelled, times out, or
+**A call cut short gets no result until it runs again, or is abandoned.** When a turn is cancelled, times out, or
 fails on a tool's `Fatal` or a store error mid-batch, the calls that finished keep their results
 and the unfinished ones get none: the thread is left for `recover`, which runs only the unfinished
 calls and never repeats a finished one. `start` refuses the thread until then (`IncompleteRun`).
-Until [#1702](https://github.com/llm4s/llm4s/issues/1702) adds `updateState`, there is no way to
-give an unfinished call a result of your own: a call that misbehaves every time it runs - it hangs
-until cancelled, or fails with `Fatal` - leaves the thread two choices, `recover` (run it again) or
-`forget` (drop the thread and its history).
+
+A call that misbehaves every time it runs - it hangs until cancelled, or fails with `Fatal` - would
+make `recover` a loop. `agent.abandon(threadId)` closes the turn instead of continuing it
+([#1750](https://github.com/llm4s/llm4s/issues/1750)):
+
+```scala
+agent.start(threadId, "Reconcile the ledger").foreach { run =>
+  run.cancel() // the reconcile tool hangs
+  run.await()  // Left(Cancelled): wait for the run to end before abandoning its thread
+}
+
+for {
+  _      <- agent.abandon(threadId, "abandoned: the ledger service did not answer; do not retry it")
+  result <- agent.run(threadId, "Summarise what you have so far") // the model reads the reason as the call's result
+} yield result
+```
+
+- Every call of the turn that has no result gets one: its own, if its tool had finished when the run
+  stopped, else the reason - `Agent.AbandonedResult` unless you pass your own. The reason is text the
+  model reads, so say what it should conclude. No tool runs and no model is called.
+- The thread is then at rest, its run settled as a failure (`RunOutcome.Failed("Abandoned", ...)`,
+  a `RunFailed` event): `run` starts the next turn and `recover` has nothing to continue.
+- It works after a cancel, a failure or a crash, from any process sharing the store, under the
+  thread's claim. A thread a run still holds is `ThreadBusy` - a crashed process's until its claim
+  lapses - so nothing is abandoned under a live run.
+- Anything else is refused and left unchanged: a thread at rest or unknown is `NothingToRecover`, a
+  suspended one `PendingInterrupts` (answer it with `resume`), another tenant's `TenantMismatch`.
+- An abandoned call may still have had its effect: a tool cut short is not known to have done
+  nothing. Say so in the reason if the model should check before acting again.
+
+A queued run does not need this: cancelling it through its queue settles the turn the same way
+(see [Durable Checkpointers](durable-checkpointers)).
 
 **Tools run at least once, so pass the idempotency key on.** A call can run again: a retrying
 `wrapToolCall` middleware, `recover` after a cancellation, failure or crash, and an approval each
@@ -501,7 +530,9 @@ once (`CompositeBackend`), files the application ships, read-only (`StaticFileBa
 and point `SkillsConfig.withSources` and `InstructionsConfig.withPaths` there, since on state files only a tool
 call writes a file), a directory of the host (`HostFileBackend`), or one chosen per run
 (`FileBackend.resolved`). Each backend declares the locks its mutations hold, replays its external
-effects through `ReplayGuard`, and enforces its own size limits.
+effects through `ReplayGuard`, and enforces its own size limits. A `StoreFileBackend` is as shared as its
+`LongTermStore`: `InMemoryLongTermStore` is one process's, and `PostgresCheckpointer.longTermStore()` is every
+machine's ([long-term memory on the same database](durable-checkpointers#long-term-memory-on-the-same-database)).
 
 `HostFileBackend.open(root, lockDirectory)` exposes a trusted directory as `/`
 ([design §4.40](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.40-host-file-backend.md)).

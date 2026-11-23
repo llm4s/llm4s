@@ -321,6 +321,17 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     output should include("ID: completion-7")
     output should include("Tool Calls: 2")
     output should include("Content: Calling echo")
+    (output should not).include("Served Tier")
+  }
+
+  it should "show the served tier when the completion reports one (#2750)" in {
+    val completion = Completion("c-1", Instant.EPOCH, "hi", "m", AssistantMessage("hi"))
+    printed(new ConsoleTracing().traceCompletion(completion.withServedTier(ServiceTier.Flex), "m")) should include(
+      "Served Tier: flex"
+    )
+    printed(
+      new ConsoleTracing().traceCompletion(completion.withServedTier(ServiceTier.Other("scale")), "m")
+    ) should include("Served Tier: scale")
   }
 
   it should "show every count for TokenUsage" in {

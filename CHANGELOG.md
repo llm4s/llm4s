@@ -31,7 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is removed: `assertModelCallContract` replaces it (PR 5).
 - A positional pattern on `TokenUsage` or `ModelPricing` gains a field (`longCacheCreationTokens`,
   `cacheCreationInputTokenCostAbove1hr`; [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 6), and one on
-  `CompletionOptions` two (`promptCache`, `serviceTier`, [#2726](https://github.com/llm4s/llm4s/issues/2726));
+  `CompletionOptions` two (`promptCache`, `serviceTier`, [#2726](https://github.com/llm4s/llm4s/issues/2726)), and one
+  on `Completion`, `ModelCallCompleted` or `TraceEvent.CompletionReceived` `servedTier`
+  ([#2746](https://github.com/llm4s/llm4s/issues/2746), [#2750](https://github.com/llm4s/llm4s/issues/2750));
   [migration](docs/reference/migration.md#tokenusage-and-modelpricing-gain-a-prompt-cache-field-2115).
 - An agent turn whose answer was cut off at the output limit ends `AgentStatus.Truncated(partialAnswer)`, not
   `Completed`, and `AgentStatusKind` gains `TRUNCATED`; a `match` on `AgentStatus` needs the case (RFC 0009 open
@@ -47,12 +49,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [migration](docs/reference/migration.md#a-rag-with-a-searchindex-ingests-only-with-permissions-2716).
 - A `DocumentRegistry` of your own implements `register(docId, version, sourceId)` and `documentIds(sourceId)`
   (#2714); [migration](docs/reference/migration.md#documentregistry-is-source-scoped-2714).
+- A positional pattern on `RAGAnswerResult` or `TraceEvent.RAGOperationCompleted` gains a field (`metrics`,
+  `stageDurations`) (#2734); [migration](docs/reference/migration.md#rag-tracing-covers-every-model-call-and-each-querys-stages-2734).
+- `RAG.ingestChunks` takes `Seq[DocumentChunk]` and returns `Seq[IndexedChunk]`, and `SearchIndex.ingest` returns the
+  stored ids (#2732); [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
 
 ### Providers
 
 - **Fixed** watsonx, Perplexity and Jlama leaving options out without reporting them: each now puts on
   `Completion.adjustments` what it does not send as asked (`reasoning` and `thinking`; Perplexity and Jlama also the
   penalties, Jlama also `top_p` and `responseFormat`), on `complete` and streams; watsonx's per-process warnings give way to the reports ([RFC 0008](docs/rfcs/0008-generation-controls.md) decision 15) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+- **Fixed** Anthropic under-pricing cached requests: `TokenUsage.promptTokens` is now the whole input, cache reads and
+  writes included, on `complete` and streams, as every other provider reports it [#2745](https://github.com/llm4s/llm4s/issues/2745).
 - **Added** `ModelCapabilities` reads the thinking and effort metadata: `supportsAdaptiveThinking`, `supportsOutputConfig`,
   `supportedReasoningEfforts`, `supportsThinkingOff`, and `supportsBudgetThinking`, which the overrides file's new patch
   entries set to `false` for Claude Opus 4.7/4.8 and Fable 5 ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
@@ -78,7 +86,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Kotlin `serviceTier`): OpenAI and Azure send `service_tier`, Anthropic `auto` or `standard_only`, Gemini `serviceTier`,
   Vertex AI its shared-request-type header and Bedrock `serviceTier`; each reports what it cannot send, and every
   other provider reports it `Dropped` ([cost controls](docs/guide/cost-controls.md#service-tiers),
-  [#2726](https://github.com/llm4s/llm4s/issues/2726)).
+  [#2726](https://github.com/llm4s/llm4s/issues/2726)); `Completion.servedTier`, also on `ModelCallCompleted` and Java
+  `JCompletion.servedTier()`, reports the tier that served the call, and `ServiceTier.Other(raw)` keeps one the enum
+  does not name ([#2746](https://github.com/llm4s/llm4s/issues/2746), [#2751](https://github.com/llm4s/llm4s/issues/2751));
+  tracing records it on `TraceEvent.CompletionReceived`, as OpenTelemetry's `llm4s.service_tier` (and
+  `openai.response.service_tier` for OpenAI) and in Langfuse's generation metadata
+  ([#2750](https://github.com/llm4s/llm4s/issues/2750)).
 
 ### Java & Kotlin APIs
 
@@ -112,6 +125,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** checkpoint encryption at rest (`org.llm4s.agent.encryption`, experimental): `EncryptingCheckpointer` and `EncryptingRunQueue` wrap any store and its queue, sealing state, pending writes, custom events, effect outcomes and queued inputs with AES-256-GCM under keys from an `EncryptionKeySource` (`StaticKeySource`: per-tenant keys, rotation by key id)
   ([guide](docs/guide/agents/durable-checkpointers.md#encrypting-what-the-store-holds), [design](docs/superpowers/specs/2026-11-22-checkpoint-encryption-design.md)) [#2449](https://github.com/llm4s/llm4s/issues/2449).
+- **Added** `Agent.abandon(threadId, reason)`: closes a cancelled, failed or crashed run instead of recovering it - each unfinished tool call gets `reason` as its result,
+  a finished one keeps its own, nothing runs again and the thread takes a new turn ([guide](docs/guide/agents/index.md), [design 4.57](docs/design/typed-agent-runtime/4.57-stage-5-slice-w3-cancel-from-any-machine-and-the-busy-thread-policy.md)) [#1750](https://github.com/llm4s/llm4s/issues/1750).
 - **Added** `Checkpointer.owner`: a thread's tenant and parent (`ThreadOwner`) without decoding its latest checkpoint, which
   `Agent.forget` and `GraphRuntime.deleteThread` now check with; a default over `latest` keeps other stores compiling, and the in-memory, SQLite and PostgreSQL stores read it from their indexed columns [#2642](https://github.com/llm4s/llm4s/issues/2642).
 - **Changed** a turn whose final answer ended `FinishReason.Length` ends `AgentStatus.Truncated(partialAnswer)` (no `answer`;
@@ -120,6 +135,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent harness
 
+- **Added** `PostgresCheckpointer.longTermStore`: a `LongTermStore` in the checkpoint database, so every machine of an
+  agent service shares `/memories/` files (PostgreSQL schema 6), and `LongTermStoreContract` in `llm4s-agent-testkit`, the suite every store passes
+  [#2453](https://github.com/llm4s/llm4s/issues/2453); [spec](docs/superpowers/specs/2026-11-22-postgres-long-term-store-design.md); [migration](docs/reference/migration.md#the-postgresql-checkpoint-schema-moves-to-version-6-2453).
 - **Added** `ContainerisedWorkspace(commandCgroups = true)`: on Linux each workspace command runs in a cgroup of its own and is
   killed whole, so a daemon it starts cannot outlive it [#2008](https://github.com/llm4s/llm4s/issues/2008); [design §4.39](docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md).
 - **Fixed** cancelling a `ContainerisedWorkspace` command (an interrupted `executeCommand`, as when an agent run is cancelled)
@@ -139,12 +157,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Embeddings & RAG
 
+- **Fixed** `RAGConfig.withTracing` traces the answer, LLM-rerank and `LLMQueryRewriter` calls, tagged `rag.answer`,
+  `rag.rerank`, `rag.rewrite`, and each query's `RAGOperationCompleted` with stage durations; **Added**
+  `RAGAnswerResult.metrics` (`RAGQueryMetrics`) [#2734](https://github.com/llm4s/llm4s/issues/2734).
 - **Added** `RAGConfig.withCompletionOptions`: the options `queryWithAnswer` and `queryWithPermissionsAndAnswer` generate
   the answer with, which each call can override (`options = ...`); the default is still temperature 0.0. Java:
   `JRagBuilder.completionOptions` [#2715](https://github.com/llm4s/llm4s/issues/2715).
 - **Added** `RAG.queryWithAnswerStreaming` and `queryWithPermissionsAndAnswerStreaming`: the contexts to one callback
   first, so a UI can show citations at once, then each `StreamedChunk` of the answer, then the whole
   `RAGAnswerResult` [#2717](https://github.com/llm4s/llm4s/issues/2717).
+- **Added** an optional `history: Seq[Message]` on `queryWithAnswer`, `queryWithPermissionsAndAnswer` and their
+  streaming forms, sent before the context and question, and `RAGConfig.withQuestionCondenser` to retrieve with a
+  standalone question built from it [#2733](https://github.com/llm4s/llm4s/issues/2733).
 - **Fixed** a `RAG` with a `SearchIndex` refuses plain ingest and sync (a `ConfigurationError`) instead of writing rows
   no permission query finds, and plain `query`, `queryWithAnswer(Streaming)`, GraphRAG's Hybrid mode and `clear`
   instead of searching or deleting every collection unfiltered; `deleteDocument` deletes from every collection;
@@ -155,6 +179,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SQLiteDocumentRegistry`, so `sync` survives a restart; `sync(loader, sourceId)` deletes only its own source's
   documents [#2714](https://github.com/llm4s/llm4s/issues/2714);
   [migration](docs/reference/migration.md#documentregistry-is-source-scoped-2714).
+- **Added** pre-chunked ingest that keeps each chunk's `ChunkMetadata` in its stored record: `RAG.ingestChunks` and
+  `ingestChunksWithPermissions` take `DocumentChunk`s and return the stored ids, with `RAG.chunk` and
+  `ingestBytesWithPermissions` [#2732](https://github.com/llm4s/llm4s/issues/2732);
+  [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
 
 ### Build & tooling
 

@@ -91,6 +91,10 @@ trait StoreView:
  *
  * `ujson.Value` is mutable, so a store copies every value it is given and every value it hands out.
  * An implementation keeps its applied keys only until C4's guard forgets them, and never by age.
+ *
+ * [[InMemoryLongTermStore]] is one process's; `PostgresCheckpointer.longTermStore`
+ * (`llm4s-agent-checkpoint-postgres`) is shared by every machine of a service. Both pass
+ * `LongTermStoreContract` (`llm4s-agent-testkit`), the suite a store of your own is written against.
  */
 @Experimental
 trait LongTermStore extends AppliedKeys:
@@ -190,7 +194,7 @@ object LongTermStore:
    * continuing on this thread is safe; every other fatal error still propagates.
    */
   // scalafix:off DisableSyntax.NoKeywordCatch
-  private[harness] def encoded[A: ReadWriter](outcome: A, maxBytes: Long): Either[Unencoded, ujson.Value] =
+  private[llm4s] def encoded[A: ReadWriter](outcome: A, maxBytes: Long): Either[Unencoded, ujson.Value] =
     try
       // the codec runs once, into a buffer that stops past `maxBytes`, so an outcome over the cap is
       // refused before more of it is held (rule 12); the tree is parsed from those very bytes, so what is
@@ -206,7 +210,7 @@ object LongTermStore:
   // scalafix:on DisableSyntax.NoKeywordCatch
 
   /** Why an outcome was not encoded: over the cap, or a codec that failed. */
-  private[harness] enum Unencoded:
+  private[llm4s] enum Unencoded:
     case Over
     case Failed(reason: String)
 
@@ -223,6 +227,110 @@ object LongTermStore:
   private object Capped:
     final class Over extends RuntimeException("over the cap", null, false, false)
 
+  /** What a checked change writes: `Put`'s value is the store's own copy, sized in UTF-8 bytes with its key. */
+  private[llm4s] enum Write:
+    case Put(value: ujson.Value, bytes: Long)
+    case Remove
+    case Keep
+
+  /** A change within the item's bounds, and its outcome as it is recorded: encoded once, sized and copied. */
+  final private[llm4s] case class Checked(write: Write, recorded: ujson.Value)
+
+  /** One item's UTF-8 bytes, its key plus its encoded value, counted (to just past `limits.maxItemBytes`), not rendered. */
+  private[llm4s] def itemBytes(key: String, value: ujson.Value, limits: StoreLimits): Long =
+    Text.utf8Bytes(key) + Text.jsonValueBytes(value, limits.maxItemBytes.toLong)
+
+  /**
+   * `change` as every store checks it before it writes, in this order: a `Put`'s item within
+   * `limits.maxItemBytes`, then its value within [[MaxDepth]], then the outcome encoded within the replay cap and
+   * [[MaxDepth]]. The namespace's bounds ([[within]]) come after, in the store's transaction.
+   */
+  private[llm4s] def check[A: ReadWriter](key: String, limits: StoreLimits, change: StoreChange[A]): Result[Checked] =
+    change match
+      // sized first: the count is iterative and stops at the cap (a wide value at its least size, before
+      // its children), so every later walk of the value - depth, copy - is bounded by `maxItemBytes`
+      case StoreChange.Put(value, _) if itemBytes(key, value, limits) > limits.maxItemBytes =>
+        Left(BackendRefused("put", Text.quoted(key), s"the item is over the limit of ${limits.maxItemBytes} bytes"))
+      // a value is walked recursively by every copy, encoding and search, so its depth is checked next,
+      // without recursion: a deep one would overflow the stack past any `Try`
+      case StoreChange.Put(value, _) if !Text.depthWithin(value, MaxDepth) =>
+        Left(BackendRefused("put", Text.quoted(key), s"the value is nested deeper than $MaxDepth levels"))
+      case decided =>
+        val (write, outcome) = decided match
+          case StoreChange.Put(value, o) => (Write.Put(ujson.copy(value), itemBytes(key, value, limits)), o)
+          case StoreChange.Remove(o)     => (Write.Remove, o)
+          case StoreChange.Keep(o)       => (Write.Keep, o)
+        // the applied key outlives a crash before the guard forgets it, so its outcome is bounded too:
+        // encoded (contained, as `A`'s codec recurses), checked in depth without recursion, then copied
+        // (it may be the caller's own tree) and sized
+        encoded(outcome, ReplayGuard.DefaultMaxOutcomeBytes.toLong) match
+          case Left(Unencoded.Over) =>
+            Left(
+              ValidationError(
+                "outcome",
+                s"the outcome is over the replay cap of ${ReplayGuard.DefaultMaxOutcomeBytes} bytes"
+              )
+            )
+          case Left(Unencoded.Failed(reason)) => Left(BackendRefused("put", Text.quoted(key), reason))
+          case Right(json) if !Text.depthWithin(json, MaxDepth) =>
+            Left(BackendRefused("put", Text.quoted(key), s"the outcome is nested deeper than $MaxDepth levels"))
+          case Right(json) => Right(Checked(write, ujson.copy(json)))
+
+  /**
+   * The bounds of a namespace as a change would leave it: `item` is the changed item's bytes (`None` once
+   * removed), `items` and `total` the namespace's item count and bytes after the change.
+   */
+  private[llm4s] def within(
+    key: String,
+    limits: StoreLimits,
+    item: Option[Long],
+    items: Long,
+    total: Long
+  ): Result[Unit] =
+    def refuse(reason: String) = Left(BackendRefused("put", Text.quoted(key), reason))
+    if item.exists(_ > limits.maxItemBytes) then
+      refuse(s"the item is ${item.get} bytes, over the limit of ${limits.maxItemBytes}")
+    else if items > limits.maxItems then
+      refuse(s"the namespace would hold $items items, over its limit of ${limits.maxItems}")
+    else if total > limits.maxBytes then
+      refuse(s"the namespace would hold $total bytes, over its limit of ${limits.maxBytes}")
+    else Right(())
+
+  /** A recorded outcome decoded, from a copy: `A` may be `ujson.Value`, whose reader hands back the tree it is given. */
+  private[llm4s] def decode[A: ReadWriter](recorded: ujson.Value): Result[A] =
+    Try(upickle.default.read[A](ujson.copy(recorded))).toResult
+
+  /** Why `key` is not one a store keeps, if it is not: checked inside the transaction, after the fence. */
+  private[llm4s] def invalidKey(key: String): Option[BackendRefused] =
+    Option.when(!java.nio.charset.StandardCharsets.UTF_8.newEncoder().canEncode(key))(
+      BackendRefused("put", Text.quoted(key), "the key is not valid Unicode (an unpaired surrogate)")
+    )
+
+  /** The error of a token older than the newest a store has seen for its scope. */
+  private[llm4s] def stale(token: FencingToken, seen: FencingToken): ProcessingError =
+    ProcessingError("long-term-store", s"stale claim: token ${token.value} is older than ${seen.value}")
+
+  /** The error of a `modify` or `forget` called from inside a `modify` change of the same store. */
+  private[llm4s] def reentered(operation: String): ProcessingError =
+    ProcessingError(
+      "long-term-store",
+      s"$operation was called from inside another transaction of this store (a modify change); a change " +
+        "must not call back into the store"
+    )
+
+  /**
+   * How the shipped stores match a `search`: `query`, case-insensitively, as a substring of the key or of any
+   * string in the value. Locale-independent, so a Turkish JVM matches `I` to `i` as every other does.
+   */
+  private[llm4s] def matcher(query: String): (String, ujson.Value) => Boolean =
+    val needle = query.toLowerCase(java.util.Locale.ROOT)
+    def strings(v: ujson.Value): Iterator[String] = v match
+      case ujson.Str(s) => Iterator(s)
+      case ujson.Arr(a) => a.iterator.flatMap(strings)
+      case ujson.Obj(o) => o.valuesIterator.flatMap(strings)
+      case _            => Iterator.empty
+    (key, value) => (Iterator(key) ++ strings(value)).exists(_.toLowerCase(java.util.Locale.ROOT).contains(needle))
+
 /**
  * The in-memory [[LongTermStore]], for tests and single-process applications: one lock for the store.
  * `search` is a case-insensitive substring match over keys and string values.
@@ -237,7 +345,7 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
   private def fenced[A](key: EffectKey, token: FencingToken)(body: => Result[A]): Result[A] =
     newest.get(key.scope) match
       case Some(seen) if token.value < seen.value =>
-        Left(ProcessingError("long-term-store", s"stale claim: token ${token.value} is older than ${seen.value}"))
+        Left(LongTermStore.stale(token, seen))
       case _ =>
         newest = newest.updated(key.scope, token)
         body
@@ -255,14 +363,7 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
 
   /** `body` as the store's one transaction, under its lock; a transaction begun inside another is refused. */
   private def transaction[A](operation: String)(body: => Result[A]): Result[A] = synchronized {
-    if transacting then
-      Left(
-        ProcessingError(
-          "long-term-store",
-          s"$operation was called from inside another transaction of this store (a modify change); a change " +
-            "must not call back into the store"
-        )
-      )
+    if transacting then Left(LongTermStore.reentered(operation))
     else
       transacting = true
       scala.util.Using.resource(new AutoCloseable { def close(): Unit = transacting = false })(_ => body)
@@ -285,25 +386,13 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
 
   def search(ns: Namespace, query: String, limit: Int): Result[Listing[StoreEntry]] =
     LongTermStore.checked("search", ns, query).flatMap(_ => Text.checkLimit("search", query, limit)).map { _ =>
-      // locale-independent, so a Turkish JVM matches `I` to `i` as every other does
-      val needle = query.toLowerCase(java.util.Locale.ROOT)
-      def strings(v: ujson.Value): Iterator[String] = v match
-        case ujson.Str(s) => Iterator(s)
-        case ujson.Arr(a) => a.iterator.flatMap(strings)
-        case ujson.Obj(o) => o.valuesIterator.flatMap(strings)
-        case _            => Iterator.empty
-      val all = synchronized(items(ns))
+      val matches = LongTermStore.matcher(query)
+      val all     = synchronized(items(ns))
       val hits = all.toVector.sortBy(_._1).iterator.collect {
-        case (k, item)
-            if (Iterator(k) ++ strings(item.value)).exists(_.toLowerCase(java.util.Locale.ROOT).contains(needle)) =>
-          StoreEntry(k, detached(item))
+        case (k, item) if matches(k, item.value) => StoreEntry(k, detached(item))
       }
       Listing.of(hits, limit)
     }
-
-  // counted, not rendered: a value is sized before it is copied or stored (rule 12)
-  private def itemBytes(key: String, value: ujson.Value): Long =
-    Text.utf8Bytes(key) + Text.jsonValueBytes(value, limits.maxItemBytes.toLong)
 
   def modify[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey, token: FencingToken)(
     change: StoreView => Result[StoreChange[A]]
@@ -312,96 +401,50 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
   private def modifyChecked[A: ReadWriter](ns: Namespace, key: String, effect: EffectKey, token: FencingToken)(
     change: StoreView => Result[StoreChange[A]]
   ): Result[A] = transaction("modify")(fenced(effect, token) {
-    if !java.nio.charset.StandardCharsets.UTF_8.newEncoder().canEncode(key) then
-      Left(BackendRefused("put", Text.quoted(key), "the key is not valid Unicode (an unpaired surrogate)"))
-    else
-      applied.get(effect.value) match
-        // decoded from a copy: `A` may be `ujson.Value`, whose reader hands back the tree it is given
-        case Some(recorded) => Try(upickle.default.read[A](ujson.copy(recorded))).toResult
-        case None =>
-          val current = items(ns)
-          val view = new StoreView:
-            val current: Option[StoreItem]                    = items(ns).get(key).map(detached)
-            def get(other: String): Result[Option[StoreItem]] = Right(items(ns).get(other).map(detached))
-            def withPrefix(prefix: String, limit: Int): Result[Vector[StoreEntry]] =
-              Right(
-                items(ns).toVector
-                  .filter(_._1.startsWith(prefix))
-                  .sortBy(_._1)
-                  .take(limit)
-                  .map((k, i) => StoreEntry(k, detached(i)))
-              )
-          change(view).flatMap {
-            // sized first: the count is iterative and stops at the cap (a wide value at its least size, before
-            // its children), so every later walk of the value - depth, copy - is bounded by `maxItemBytes`
-            case StoreChange.Put(value, _) if itemBytes(key, value) > limits.maxItemBytes =>
-              Left(
-                BackendRefused("put", Text.quoted(key), s"the item is over the limit of ${limits.maxItemBytes} bytes")
-              )
-            // a value is walked recursively by every copy, encoding and search, so its depth is checked next,
-            // without recursion: a deep one would overflow the stack past any `Try`
-            case StoreChange.Put(value, _) if !Text.depthWithin(value, LongTermStore.MaxDepth) =>
-              Left(
-                BackendRefused(
-                  "put",
-                  Text.quoted(key),
-                  s"the value is nested deeper than ${LongTermStore.MaxDepth} levels"
+    LongTermStore.invalidKey(key) match
+      case Some(refused) => Left(refused)
+      case None =>
+        applied.get(effect.value) match
+          case Some(recorded) => LongTermStore.decode[A](recorded)
+          case None =>
+            val current = items(ns)
+            val view = new StoreView:
+              val current: Option[StoreItem]                    = items(ns).get(key).map(detached)
+              def get(other: String): Result[Option[StoreItem]] = Right(items(ns).get(other).map(detached))
+              def withPrefix(prefix: String, limit: Int): Result[Vector[StoreEntry]] =
+                Right(
+                  items(ns).toVector
+                    .filter(_._1.startsWith(prefix))
+                    .sortBy(_._1)
+                    .take(limit)
+                    .map((k, i) => StoreEntry(k, detached(i)))
                 )
-              )
-            case decided =>
-              val (next, outcome) = decided match
-                case StoreChange.Put(value, o) =>
-                  (Some(current.updated(key, StoreItem(ujson.copy(value), clock.instant()))), o)
-                case StoreChange.Remove(o) => (Some(current - key), o)
-                case StoreChange.Keep(o)   => (None, o)
-              // the applied key outlives a crash before the guard forgets it, so its outcome is bounded too:
-              // encoded (contained, as `A`'s codec recurses), checked in depth without recursion, then copied
-              // (it may be the caller's own tree) and sized
-              LongTermStore.encoded(outcome, ReplayGuard.DefaultMaxOutcomeBytes.toLong) match
-                case Left(LongTermStore.Unencoded.Over) =>
-                  Left(
-                    ValidationError(
-                      "outcome",
-                      s"the outcome is over the replay cap of ${ReplayGuard.DefaultMaxOutcomeBytes} bytes"
-                    )
-                  )
-                case Left(LongTermStore.Unencoded.Failed(reason)) =>
-                  Left(BackendRefused("put", Text.quoted(key), reason))
-                case Right(encoded) if !Text.depthWithin(encoded, LongTermStore.MaxDepth) =>
-                  Left(
-                    BackendRefused(
-                      "put",
-                      Text.quoted(key),
-                      s"the outcome is nested deeper than ${LongTermStore.MaxDepth} levels"
-                    )
-                  )
-                case Right(encoded) =>
-                  val recorded = ujson.copy(encoded)
-                  // the outcome returned is the one recorded, decoded, so this run and a replay of it return
-                  // the same value, read from the one encoding that was sized
-                  within(key, next)
-                    .flatMap(_ => Try(upickle.default.read[A](ujson.copy(recorded))).toResult)
-                    .map { decoded =>
-                      next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
-                      applied = applied.updated(effect.value, recorded)
-                      decoded
-                    }
-          }
+            change(view).flatMap(LongTermStore.check(key, limits, _)).flatMap { checked =>
+              val next = checked.write match
+                case LongTermStore.Write.Put(value, _) =>
+                  Some(current.updated(key, StoreItem(value, clock.instant())))
+                case LongTermStore.Write.Remove => Some(current - key)
+                case LongTermStore.Write.Keep   => None
+              // the outcome returned is the one recorded, decoded, so this run and a replay of it return
+              // the same value, read from the one encoding that was sized
+              within(key, next).flatMap(_ => LongTermStore.decode[A](checked.recorded)).map { decoded =>
+                next.foreach(n => namespaces = if n.isEmpty then namespaces - ns else namespaces.updated(ns, n))
+                applied = applied.updated(effect.value, checked.recorded)
+                decoded
+              }
+            }
   })
 
   /** The bounds of `next`, the namespace after a change; `None` changes nothing. */
   private def within(key: String, next: Option[Map[String, StoreItem]]): Result[Unit] =
     next.fold[Result[Unit]](Right(())) { items =>
-      def refuse(reason: String) = Left(BackendRefused("put", Text.quoted(key), reason))
-      val item                   = items.get(key).map(i => itemBytes(key, i.value))
-      val total                  = items.iterator.map((k, i) => itemBytes(k, i.value)).sum
-      if item.exists(_ > limits.maxItemBytes) then
-        refuse(s"the item is ${item.get} bytes, over the limit of ${limits.maxItemBytes}")
-      else if items.size > limits.maxItems then
-        refuse(s"the namespace would hold ${items.size} items, over its limit of ${limits.maxItems}")
-      else if total > limits.maxBytes then
-        refuse(s"the namespace would hold $total bytes, over its limit of ${limits.maxBytes}")
-      else Right(())
+      LongTermStore.within(
+        key,
+        limits,
+        items.get(key).map(i => LongTermStore.itemBytes(key, i.value, limits)),
+        items.size.toLong,
+        items.iterator.map((k, i) => LongTermStore.itemBytes(k, i.value, limits)).sum
+      )
     }
 
 object InMemoryLongTermStore:

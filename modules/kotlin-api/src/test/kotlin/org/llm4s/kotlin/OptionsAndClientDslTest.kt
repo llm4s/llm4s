@@ -82,7 +82,7 @@ class OptionsAndClientDslTest {
                         CollectionConverters.asScala(listOf<org.llm4s.llmconnect.model.ToolCall>()).toList(),
                         Option.empty(), Option.empty(),
                         CollectionConverters.asScala(listOf<Citation>()).toList(),
-                        Completion.`apply$default$10`(), Completion.`apply$default$11`(),
+                        Completion.`apply$default$10`(), Completion.`apply$default$11`(), Completion.`apply$default$12`(),
                     ),
                 )
             }

@@ -79,15 +79,17 @@ LLM4S has been presented at various conferences and meetups:
 
 ### Conference Talks
 
-- **Scala Days 2025** - [Slides](https://github.com/llm4s/llm4s/tree/main/docs/image_assets/scala-days-2025)
-- **London Scala User Group** - [Materials](https://github.com/llm4s/llm4s/tree/main/docs/image_assets/london-scala)
-- **Bay Area Scala Enthusiasts** - [Resources](https://github.com/llm4s/llm4s/tree/main/docs/image_assets/bay-area-scala)
+- **Scala Days 2025**, Lausanne - [Talk info](https://scaladays.org/editions/2025/talks/scala-meets-genai-build-the), [Recording](https://www.youtube.com/watch?v=5od95FbNjiI)
+- **London Scala User Group**, August 2025 - [Meetup event](https://www.meetup.com/london-scala/events/308564399/)
+- **Bay Area Scala**, February 2025 - [Event info](https://lu.ma/5fz2y9or), [Recording](https://www.youtube.com/watch?v=SXybj2P3_DE&t=779s)
+
+Every talk, with its slides, recordings and write-ups, is listed in the [talks archive](https://github.com/llm4s/llm4s#talks--presentations-archive); photos and banners are in [`docs/image_assets/talks`](https://github.com/llm4s/llm4s/tree/main/docs/image_assets/talks).
 
 ### Google Summer of Code
 
 LLM4S participated in Google Summer of Code 2025:
 
-- [GSoC Materials](https://github.com/llm4s/llm4s/tree/main/docs/image_assets/google-summer-of-code-2025)
+- [GSoC Materials](https://github.com/llm4s/llm4s/tree/main/docs/image_assets/gsoc_assets/gsoc_2025)
 - Project presentations and outcomes
 
 [View all talks →](https://github.com/llm4s/llm4s/tree/main/docs/image_assets)

@@ -205,7 +205,7 @@ object GraphError:
     override val message: String =
       s"Thread '$threadId' has an incomplete execution at checkpoint $checkpointId; recover it before starting a new run"
 
-  /** `recover` was called on a thread with no incomplete execution. */
+  /** `recover`, or the agent's `abandon`, was called on a thread with no incomplete execution. */
   final case class NothingToRecover(threadId: String) extends GraphError with NonRecoverableError:
     override val message: String = s"Thread '$threadId' has no incomplete execution to recover"
 
@@ -224,7 +224,7 @@ object GraphError:
   final case class InvalidResume(graphId: String, problems: List[String]) extends GraphError with NonRecoverableError:
     override val message: String = s"Cannot resume graph '$graphId': ${problems.mkString("; ")}"
 
-  /** `start` or `recover` was called on a suspended thread; answer its interrupts with `resume`. */
+  /** `start`, `recover` or the agent's `abandon` was called on a suspended thread; answer its interrupts with `resume`. */
   final case class PendingInterrupts(threadId: String, interrupts: List[String])
       extends GraphError
       with NonRecoverableError:

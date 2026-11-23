@@ -13,7 +13,7 @@ import org.llm4s.trace.TraceEvent
 
 object PositionalPatternsGainFieldsTest {
   def summary(completion: Completion): String = completion match {
-    case Completion(id, _, content, _, _, _, _, _, _, _, _) => s"$id $content"
+    case Completion(id, _, content, _, _, _, _, _, _, _, _, _) => s"$id $content"
   }
 
   def vision(capabilities: ModelCapabilities): Boolean = capabilities match {
@@ -22,7 +22,7 @@ object PositionalPatternsGainFieldsTest {
 
   // gained finishReason since 0.6.0 (RFC 0009 PR 6, #2687)
   def model(event: ModelCallCompleted): String = event match {
-    case ModelCallCompleted(_, model, _, _, _, _, _, _, _) => model
+    case ModelCallCompleted(_, model, _, _, _, _, _, _, _, _) => model
   }
 
   // gained usage since 0.6.0, but its hand-written unapply keeps 0.6.0's four fields: left alone
@@ -32,6 +32,12 @@ object PositionalPatternsGainFieldsTest {
 
   def failedModel(event: TraceEvent): Option[String] = event match {
     case TraceEvent.ErrorOccurred(_, _, _, _, _, model, _, _, _, _) => model
+    case _ => None
+  }
+
+  // gained servedTier since 0.6.0 (#2750)
+  def completionModel(event: TraceEvent): Option[String] = event match {
+    case TraceEvent.CompletionReceived(_, model, _, _, _, _, _, _, _, _, _, _, _, _, _) => Some(model)
     case _ => None
   }
 
@@ -57,6 +63,6 @@ object PositionalPatternsGainFieldsTest {
 
   // gained completionOptions since 0.6.0 (#2715)
   def topK(config: RAGConfig): Int = config match {
-    case RAGConfig(_, _, _, _, _, _, topK, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => topK
+    case RAGConfig(_, _, _, _, _, _, topK, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => topK
   }
 }

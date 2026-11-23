@@ -53,7 +53,7 @@ final class JCompletionOptions private (token: FacadeToken, private[javaapi] val
 
   /** The service tier asked for, or empty to leave it to the provider. */
   def serviceTier: Optional[JServiceTier] =
-    underlying.serviceTier.fold(Optional.empty[JServiceTier]())(t => Optional.of(JCompletionOptions.toJava(t)))
+    underlying.serviceTier.collect(JCompletionOptions.toJavaTier).fold(Optional.empty[JServiceTier]())(Optional.of)
 
   /** A builder that starts from these options. */
   def toBuilder: JCompletionOptions.Builder = new JCompletionOptions.Builder(FacadeToken.INSTANCE, underlying)
@@ -190,7 +190,8 @@ object JCompletionOptions {
     case JServiceTier.PRIORITY => ServiceTier.Priority
   }
 
-  private def toJava(tier: ServiceTier): JServiceTier = tier match {
+  /** Every tier but `ServiceTier.Other`, which the builder cannot set. */
+  private val toJavaTier: PartialFunction[ServiceTier, JServiceTier] = {
     case ServiceTier.Auto     => JServiceTier.AUTO
     case ServiceTier.Default  => JServiceTier.DEFAULT
     case ServiceTier.Flex     => JServiceTier.FLEX

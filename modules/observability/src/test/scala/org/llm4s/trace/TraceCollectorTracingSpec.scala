@@ -207,7 +207,9 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   }
 
   it should "convert RAGOperationCompleted to Rag span" in {
-    val event = TraceEvent.RAGOperationCompleted("search", 500.millis, Some(100), Some(50), Some(20), Some(0.01))
+    val event = TraceEvent
+      .RAGOperationCompleted("search", 500.millis, Some(100), Some(50), Some(20), Some(0.01))
+      .withStageDurations(Map("search" -> 40.millis))
     collector.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
@@ -220,6 +222,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     span.attributes("llm_prompt_tokens").asLong shouldBe Some(50L)
     span.attributes("llm_completion_tokens").asLong shouldBe Some(20L)
     span.attributes("total_cost_usd").asDouble shouldBe Some(0.01)
+    span.attributes("stage_search_ms").asLong shouldBe Some(40L)
   }
 
   it should "convert CacheHit to Cache span" in {
@@ -352,5 +355,23 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
 
     span1.spanId shouldBe spanId
     span1 shouldBe span2
+  }
+
+  it should "keep a completion's served tier as its span's service_tier (#2750)" in {
+    import org.llm4s.llmconnect.model.{ Completion, ServiceTier }
+    import org.llm4s.trace.model.SpanValue
+    val completion = Completion("c-1", java.time.Instant.EPOCH, "hi", "m", AssistantMessage("hi"))
+    collector.traceEvent(
+      TraceEvent.CompletionReceived("c-1", "m", 0, "hi", servedTier = Some(ServiceTier.Flex))
+    ) shouldBe Right(())
+    collector.traceEvent(TraceEvent.CompletionReceived("c-2", "m", 0, "hi")) shouldBe Right(())
+    collector.traceCompletion(completion.withServedTier(ServiceTier.Other("scale")), "m") shouldBe Right(())
+    collector.traceCompletion(completion, "m") shouldBe Right(())
+    store.getSpans(collector.traceId).map(_.attributes.get("service_tier")) should contain theSameElementsAs Seq(
+      Some(SpanValue.StringValue("flex")),
+      None,
+      Some(SpanValue.StringValue("scale")),
+      None
+    )
   }
 }

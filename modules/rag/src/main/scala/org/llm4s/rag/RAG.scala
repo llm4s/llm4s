@@ -1,8 +1,8 @@
 package org.llm4s.rag
 
-import org.llm4s.chunking.{ ChunkerFactory, DocumentChunk, DocumentChunker }
+import org.llm4s.chunking.{ ChunkMetadata, ChunkerFactory, DocumentChunk, DocumentChunker }
 import org.llm4s.core.safety.Safety
-import org.llm4s.error.{ ConfigurationError, LLMError, ProcessingError }
+import org.llm4s.error.{ ConfigurationError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.security.Secret
 import org.llm4s.knowledgegraph.graphrag.{ GraphRAG, GraphRAGAnswer, GraphRAGMode }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
@@ -93,6 +93,14 @@ final class RAG private (
     case None    => embeddingClient
   }
 
+  // The answer's LLM client: with a tracer, each call is traced and its usage tagged `rag.answer` (#2734)
+  private lazy val answerClient: Option[LLMClient] =
+    llmClient.map(client => tracer.fold(client)(t => RAGTracing.llm(client, t, RAGTracing.Answer)))
+
+  // The query transformers, each traced (an LLMQueryRewriter's calls tagged `rag.rewrite`) when there is a tracer
+  private lazy val queryTransformers: Seq[QueryTransformer] =
+    tracer.fold(config.queryTransformers)(t => config.queryTransformers.map(_.withTracing(t)))
+
   // ========== Ingestion API ==========
 
   /**
@@ -142,24 +150,39 @@ final class RAG private (
     content: String,
     documentId: String,
     metadata: Map[String, String] = Map.empty
-  ): Result[Int] = {
-    val chunks = chunker.chunk(content, config.chunkingConfig)
-    indexChunks(documentId, chunks, metadata)
-  }
+  ): Result[Int] =
+    indexChunks(documentId, chunk(content), metadata).map(_.size)
 
   /**
-   * Ingest pre-chunked content (for advanced use cases).
+   * Split text into chunks with this pipeline's chunker and chunking config: the chunks [[ingestText]] and
+   * [[ingestWithPermissions]] would index. Chunk once with this, keep the chunks, and hand them to [[ingestChunks]]
+   * or [[ingestChunksWithPermissions]] to know exactly what was indexed without chunking the text twice.
+   *
+   * @param content the text to split
+   * @return the chunks, indexed from 0
+   */
+  def chunk(content: String): Seq[DocumentChunk] =
+    chunker.chunk(content, config.chunkingConfig)
+
+  /**
+   * Ingest a document that is already chunked.
+   *
+   * Each chunk's [[org.llm4s.chunking.ChunkMetadata ChunkMetadata]] is stored in its record's metadata next to the
+   * document's `metadata` (see [[org.llm4s.chunking.ChunkMetadata.toRecordMetadata ChunkMetadata.toRecordMetadata]]),
+   * so a search result carries it. Ingesting an id that is already indexed replaces it, as [[ingestText]] does.
+   *
+   * @param documentId unique identifier for this document
+   * @param chunks     the document's chunks, whose indices must run `0, 1, 2, ...` in order
+   * @param metadata   metadata attached to every chunk of the document
+   * @return the chunks as indexed, with the ids their records are stored under, in chunk order; a
+   *         `ValidationError` if the chunk indices are not `0, 1, 2, ...`
    */
   def ingestChunks(
     documentId: String,
-    chunks: Seq[String],
+    chunks: Seq[DocumentChunk],
     metadata: Map[String, String] = Map.empty
-  ): Result[Int] = {
-    val docChunks = chunks.zipWithIndex.map { case (content, idx) =>
-      DocumentChunk(content, idx)
-    }
-    indexChunks(documentId, docChunks, metadata)
-  }
+  ): Result[Seq[IndexedChunk]] =
+    RAG.sequentialIndices(chunks).flatMap(_ => indexChunks(documentId, chunks, metadata))
 
   // ========== Byte-Based Ingestion API ==========
 
@@ -187,6 +210,31 @@ final class RAG private (
       extracted =>
         val enrichedMetadata = metadata ++ extracted.metadata + ("format" -> extracted.format.name)
         ingestText(extracted.text, documentId, enrichedMetadata)
+    }
+
+  /**
+   * Ingest a document from raw bytes into a collection with permission control: [[ingestBytes]]'s extraction, then
+   * [[ingestWithPermissions]].
+   *
+   * @param collectionPath target collection (must be a leaf collection)
+   * @param content        raw document bytes
+   * @param filename       filename for format detection (e.g., "report.pdf")
+   * @param documentId     unique document identifier
+   * @param metadata       additional document metadata
+   * @param readableBy     principal IDs that can read this document (empty = inherit from collection)
+   * @return number of chunks indexed
+   */
+  def ingestBytesWithPermissions(
+    collectionPath: CollectionPath,
+    content: Array[Byte],
+    filename: String,
+    documentId: String,
+    metadata: Map[String, String] = Map.empty,
+    readableBy: Set[PrincipalId] = Set.empty
+  ): Result[Int] =
+    permissionIndex.flatMap(_ => TikaDocumentExtractor.extract(content, filename)).flatMap { extracted =>
+      val enrichedMetadata = metadata ++ extracted.metadata + ("format" -> extracted.format.name)
+      ingestWithPermissions(collectionPath, documentId, extracted.text, enrichedMetadata, readableBy)
     }
 
   /**
@@ -865,7 +913,7 @@ final class RAG private (
     }
 
     val chunks = effectiveChunker.chunk(doc.content, effectiveConfig)
-    val result = indexChunks(doc.id, chunks, doc.metadata)
+    val result = indexChunks(doc.id, chunks, doc.metadata).map(_.size)
 
     // Register version if enabled - only once it is indexed: a document that failed keeps its previous
     // version, and registering the new one would make the next sync skip it as unchanged.
@@ -908,13 +956,23 @@ final class RAG private (
    * @return Ranked search results
    */
   def query(query: String, topK: Option[Int] = None): Result[Seq[RAGSearchResult]] = {
-    val k = topK.getOrElse(config.topK)
-
+    val meter = new QueryMeter
     for {
-      _                <- plainQueryAllowed("query", "queryWithPermissions")
-      transformedQuery <- applyQueryTransforms(query)
-      queryEmbedding   <- embedQuery(transformedQuery)
-      results          <- searchWithStrategy(queryEmbedding, transformedQuery, k)
+      _       <- plainQueryAllowed("query", "queryWithPermissions")
+      results <- retrieve(query, topK, meter)
+    } yield {
+      RAGTracing.emit(tracer, meter.metrics(results.size).toTraceEvent("query"))
+      results
+    }
+  }
+
+  /** [[query]]'s search, timed by `meter`, emitting nothing. */
+  private def retrieve(query: String, topK: Option[Int], meter: QueryMeter): Result[Seq[RAGSearchResult]] = {
+    val k = topK.getOrElse(config.topK)
+    for {
+      transformedQuery <- applyQueryTransforms(query, meter)
+      queryEmbedding   <- embedQuery(transformedQuery, meter)
+      results          <- searchWithStrategy(queryEmbedding, transformedQuery, k, meter)
     } yield results.map(toSearchResult)
   }
 
@@ -927,6 +985,11 @@ final class RAG private (
    * @param topK Override default topK (optional)
    * @param options the completion options for this answer; the config's (`RAGConfig.withCompletionOptions`,
    *                temperature 0.0 by default) unless given, so one pipeline can compare settings per call
+   * @param history the conversation so far, oldest first, for a chat: sent to the model between the system prompt and
+   *                the message with the contexts and the question. It holds no `SystemMessage` (the pipeline's system
+   *                prompt is the only one), or the call is a `ValidationError`. With a
+   *                [[RAGConfig.withQuestionCondenser question condenser]] configured and a non-empty history, the
+   *                search uses the standalone question the condenser builds; the model still gets `question`.
    * On a RAG with a [[org.llm4s.rag.permissions.SearchIndex SearchIndex]] it returns a `ConfigurationError`, as
    * [[query]] does: use [[queryWithPermissionsAndAnswer]].
    *
@@ -935,17 +998,19 @@ final class RAG private (
   def queryWithAnswer(
     question: String,
     topK: Option[Int] = None,
-    options: CompletionOptions = config.completionOptions
+    options: CompletionOptions = config.completionOptions,
+    history: Seq[Message] = Seq.empty
   ): Result[RAGAnswerResult] =
     plainQueryAllowed("queryWithAnswer", "queryWithPermissionsAndAnswer")
-      .flatMap(_ => answerFromQuery(question, topK, options))
+      .flatMap(_ => answerFromQuery(question, topK, options, history))
 
   private def answerFromQuery(
     question: String,
     topK: Option[Int],
-    options: CompletionOptions
+    options: CompletionOptions,
+    history: Seq[Message]
   ): Result[RAGAnswerResult] =
-    llmClient match {
+    answerClient match {
       case None =>
         Left(
           ConfigurationError(
@@ -953,9 +1018,11 @@ final class RAG private (
           )
         )
       case Some(client) =>
+        val meter = new QueryMeter
         for {
-          searchResults <- query(question, topK)
-          answer        <- generateAnswer(client, question, searchResults, options)
+          searchQuestion <- searchQuestion(question, history)
+          searchResults  <- retrieve(searchQuestion, topK, meter)
+          answer         <- generateAnswer(client, question, history, searchResults, options, meter)
         } yield answer
     }
 
@@ -982,6 +1049,7 @@ final class RAG private (
    * @param question   the question to answer
    * @param topK       override the default topK
    * @param options    the completion options for this answer; the config's unless given
+   * @param history    the conversation so far, as [[queryWithAnswer]] takes it
    * @param onContexts the contexts the answer is generated from, before any chunk
    * @param onChunk    each piece of the answer as it arrives
    * @return the whole answer with its contexts, once the stream has ended
@@ -989,20 +1057,22 @@ final class RAG private (
   def queryWithAnswerStreaming(
     question: String,
     topK: Option[Int] = None,
-    options: CompletionOptions = config.completionOptions
+    options: CompletionOptions = config.completionOptions,
+    history: Seq[Message] = Seq.empty
   )(onContexts: Seq[RAGSearchResult] => Unit, onChunk: StreamedChunk => Unit): Result[RAGAnswerResult] =
     plainQueryAllowed("queryWithAnswerStreaming", "queryWithPermissionsAndAnswerStreaming").flatMap { _ =>
-      streamAnswerFromQuery(question, topK, options, onContexts, onChunk)
+      streamAnswerFromQuery(question, topK, options, history, onContexts, onChunk)
     }
 
   private def streamAnswerFromQuery(
     question: String,
     topK: Option[Int],
     options: CompletionOptions,
+    history: Seq[Message],
     onContexts: Seq[RAGSearchResult] => Unit,
     onChunk: StreamedChunk => Unit
   ): Result[RAGAnswerResult] =
-    llmClient match {
+    answerClient match {
       case None =>
         Left(
           ConfigurationError(
@@ -1010,9 +1080,11 @@ final class RAG private (
           )
         )
       case Some(client) =>
+        val meter = new QueryMeter
         for {
-          searchResults <- query(question, topK)
-          answer        <- streamAnswer(client, question, searchResults, options, onContexts, onChunk)
+          searchQuestion <- searchQuestion(question, history)
+          searchResults  <- retrieve(searchQuestion, topK, meter)
+          answer         <- streamAnswer(client, question, history, searchResults, options, onContexts, onChunk, meter)
         } yield answer
     }
 
@@ -1075,8 +1147,8 @@ final class RAG private (
             for {
               // Its vector half is a plain search, with no permission filter
               _              <- plainQueryAllowed("GraphRAG's Hybrid mode", "queryWithPermissionsAndAnswer")
-              queryEmbedding <- embedQuery(question)
-              vectorResults  <- searchWithStrategy(queryEmbedding, question, k)
+              queryEmbedding <- embedQuery(question, new QueryMeter)
+              vectorResults  <- searchWithStrategy(queryEmbedding, question, k, new QueryMeter)
               hybrid         <- engine.hybridSearch(question, vectorResults, config.graphRAGConfig.localTraversalDepth)
             } yield GraphRAGAnswer(
               query = question,
@@ -1124,6 +1196,21 @@ final class RAG private (
     collectionPattern: CollectionPattern,
     queryText: String,
     topK: Option[Int] = None
+  ): Result[Seq[RAGSearchResult]] = {
+    val meter = new QueryMeter
+    retrieveWithPermissions(auth, collectionPattern, queryText, topK, meter).map { results =>
+      RAGTracing.emit(tracer, meter.metrics(results.size).toTraceEvent("query"))
+      results
+    }
+  }
+
+  /** [[queryWithPermissions]]'s search, timed by `meter`, emitting nothing. */
+  private def retrieveWithPermissions(
+    auth: UserAuthorization,
+    collectionPattern: CollectionPattern,
+    queryText: String,
+    topK: Option[Int],
+    meter: QueryMeter
   ): Result[Seq[RAGSearchResult]] =
     config.searchIndex match {
       case None =>
@@ -1137,16 +1224,29 @@ final class RAG private (
         // As HybridSearcher.searchWithReranking: with a reranker, fetch rerankTopK candidates for it to order
         val candidates = if (reranker.isDefined) config.rerankTopK else k
         for {
-          transformedQuery <- applyQueryTransforms(queryText)
-          fused            <- permissionSearch(index, auth, collectionPattern, transformedQuery, candidates)
-          results <- reranker match {
-            case Some(r) =>
-              r.rerank(RerankRequest(transformedQuery, fused.map(_.content), Some(k)))
-                .flatMap(response => RerankMapping.applyRerank(fused, response.results))
-            case None => Right(fused.take(k))
-          }
+          transformedQuery <- applyQueryTransforms(queryText, meter)
+          fused   <- meter.search(permissionSearch(index, auth, collectionPattern, transformedQuery, candidates, meter))
+          results <- rerankOrTake(transformedQuery, fused, k, meter)
         } yield results.map(toSearchResult)
     }
+
+  /** The candidates reranked to `k`, or the first `k` of them without a reranker. */
+  private def rerankOrTake(
+    queryText: String,
+    candidates: Seq[HybridSearchResult],
+    k: Int,
+    meter: QueryMeter
+  ): Result[Seq[HybridSearchResult]] = {
+    meter.retrieved(candidates.size)
+    reranker match {
+      case Some(r) =>
+        meter.rerank(
+          r.rerank(RerankRequest(queryText, candidates.map(_.content), Some(k)))
+            .flatMap(response => RerankMapping.applyRerank(candidates, response.results))
+        )
+      case None => Right(candidates.take(k))
+    }
+  }
 
   /**
    * One permission-filtered search under the configured fusion strategy. The fused strategies fetch twice `topK`
@@ -1157,10 +1257,11 @@ final class RAG private (
     auth: UserAuthorization,
     collectionPattern: CollectionPattern,
     queryText: String,
-    topK: Int
+    topK: Int,
+    meter: QueryMeter
   ): Result[Seq[HybridSearchResult]] = {
     def vector(n: Int): Result[Seq[ScoredRecord]] =
-      embedQuery(queryText).flatMap(embedding => index.query(auth, collectionPattern, embedding, n, None))
+      embedQuery(queryText, meter).flatMap(embedding => index.query(auth, collectionPattern, embedding, n, None))
     def keyword(n: Int): Result[Seq[KeywordSearchResult]] =
       index.keywordQuery(auth, collectionPattern, queryText, n, None)
 
@@ -1211,7 +1312,8 @@ final class RAG private (
           ConfigurationError(
             s"$operation is not available on a RAG built with .withSearchIndex: documents it ingested would belong " +
               "to no collection, so queryWithPermissions could never return them. Ingest with " +
-              "ingestWithPermissions(collectionPath, documentId, content, ...) instead. deleteDocument still " +
+              "ingestWithPermissions(collectionPath, documentId, content, ...) or ingestChunksWithPermissions instead. " +
+              "deleteDocument still " +
               "deletes a document from every collection."
           )
         )
@@ -1228,6 +1330,7 @@ final class RAG private (
    * @param topK Maximum number of results
    * @param options the completion options for this answer; the config's (`RAGConfig.withCompletionOptions`,
    *                temperature 0.0 by default) unless given
+   * @param history the conversation so far, as [[queryWithAnswer]] takes it
    * @return Answer with permission-filtered supporting contexts
    */
   def queryWithPermissionsAndAnswer(
@@ -1235,9 +1338,10 @@ final class RAG private (
     collectionPattern: CollectionPattern,
     question: String,
     topK: Option[Int] = None,
-    options: CompletionOptions = config.completionOptions
+    options: CompletionOptions = config.completionOptions,
+    history: Seq[Message] = Seq.empty
   ): Result[RAGAnswerResult] =
-    llmClient match {
+    answerClient match {
       case None =>
         Left(
           ConfigurationError(
@@ -1245,9 +1349,11 @@ final class RAG private (
           )
         )
       case Some(client) =>
+        val meter = new QueryMeter
         for {
-          searchResults <- queryWithPermissions(auth, collectionPattern, question, topK)
-          answer        <- generateAnswer(client, question, searchResults, options)
+          searchQuestion <- searchQuestion(question, history)
+          searchResults  <- retrieveWithPermissions(auth, collectionPattern, searchQuestion, topK, meter)
+          answer         <- generateAnswer(client, question, history, searchResults, options, meter)
         } yield answer
     }
 
@@ -1261,6 +1367,7 @@ final class RAG private (
    * @param question          the question to answer
    * @param topK              maximum number of results
    * @param options           the completion options for this answer; the config's unless given
+   * @param history           the conversation so far, as [[queryWithAnswer]] takes it
    * @param onContexts        the permission-filtered contexts the answer is generated from, before any chunk
    * @param onChunk           each piece of the answer as it arrives
    * @return the whole answer with its contexts, once the stream has ended
@@ -1270,9 +1377,10 @@ final class RAG private (
     collectionPattern: CollectionPattern,
     question: String,
     topK: Option[Int] = None,
-    options: CompletionOptions = config.completionOptions
+    options: CompletionOptions = config.completionOptions,
+    history: Seq[Message] = Seq.empty
   )(onContexts: Seq[RAGSearchResult] => Unit, onChunk: StreamedChunk => Unit): Result[RAGAnswerResult] =
-    llmClient match {
+    answerClient match {
       case None =>
         Left(
           ConfigurationError(
@@ -1280,9 +1388,11 @@ final class RAG private (
           )
         )
       case Some(client) =>
+        val meter = new QueryMeter
         for {
-          searchResults <- queryWithPermissions(auth, collectionPattern, question, topK)
-          answer        <- streamAnswer(client, question, searchResults, options, onContexts, onChunk)
+          searchQuestion <- searchQuestion(question, history)
+          searchResults  <- retrieveWithPermissions(auth, collectionPattern, searchQuestion, topK, meter)
+          answer         <- streamAnswer(client, question, history, searchResults, options, onContexts, onChunk, meter)
         } yield answer
     }
 
@@ -1305,34 +1415,78 @@ final class RAG private (
     metadata: Map[String, String] = Map.empty,
     readableBy: Set[PrincipalId] = Set.empty
   ): Result[Int] =
-    config.searchIndex match {
-      case None =>
-        Left(
-          ConfigurationError(
-            "SearchIndex required for permission-aware ingestion. Use .withSearchIndex(index) when building RAG."
-          )
-        )
-      case Some(index) =>
-        val docChunks = chunker.chunk(content, config.chunkingConfig)
-        for {
-          embeddings <- embedBatch(docChunks.map(_.content))
-          chunksWithEmbeddings = docChunks.zip(embeddings).map { case (chunk, embedding) =>
-            ChunkWithEmbedding(
-              content = chunk.content,
-              embedding = embedding,
-              chunkIndex = chunk.index,
-              metadata = metadata
-            )
-          }
-          count <- index.ingest(
-            collectionPath = collectionPath,
-            documentId = documentId,
-            chunks = chunksWithEmbeddings,
-            metadata = metadata,
-            readableBy = readableBy
-          )
-        } yield count
+    permissionIndex.flatMap { index =>
+      indexWithPermissions(index, collectionPath, documentId, chunk(content), metadata, readableBy).map(_.size)
     }
+
+  /**
+   * Ingest an already chunked document into a collection with permission control: [[ingestChunks]] for a `RAG` built
+   * with `.withSearchIndex`. Each chunk's [[org.llm4s.chunking.ChunkMetadata ChunkMetadata]] is stored in its record's
+   * metadata next to the document's `metadata`.
+   *
+   * @param collectionPath target collection (must be a leaf collection)
+   * @param documentId     unique document identifier
+   * @param chunks         the document's chunks, whose indices must run `0, 1, 2, ...` in order
+   * @param metadata       additional document metadata
+   * @param readableBy     principal IDs that can read this document (empty = inherit from collection)
+   * @return the chunks as indexed, with the ids the `SearchIndex` stored them under, in chunk order; a
+   *         `ValidationError` if the chunk indices are not `0, 1, 2, ...`
+   */
+  def ingestChunksWithPermissions(
+    collectionPath: CollectionPath,
+    documentId: String,
+    chunks: Seq[DocumentChunk],
+    metadata: Map[String, String] = Map.empty,
+    readableBy: Set[PrincipalId] = Set.empty
+  ): Result[Seq[IndexedChunk]] =
+    for {
+      index   <- permissionIndex
+      _       <- RAG.sequentialIndices(chunks)
+      indexed <- indexWithPermissions(index, collectionPath, documentId, chunks, metadata, readableBy)
+    } yield indexed
+
+  private def permissionIndex: Result[SearchIndex] =
+    config.searchIndex.toRight(
+      ConfigurationError(
+        "SearchIndex required for permission-aware ingestion. Use .withSearchIndex(index) when building RAG."
+      )
+    )
+
+  private def indexWithPermissions(
+    index: SearchIndex,
+    collectionPath: CollectionPath,
+    documentId: String,
+    chunks: Seq[DocumentChunk],
+    metadata: Map[String, String],
+    readableBy: Set[PrincipalId]
+  ): Result[Seq[IndexedChunk]] =
+    for {
+      embeddings <- if (chunks.isEmpty) Right(Seq.empty[Array[Float]]) else embedBatch(chunks.map(_.content))
+      chunksWithEmbeddings = chunks.zip(embeddings).map { case (chunk, embedding) =>
+        ChunkWithEmbedding(
+          content = chunk.content,
+          embedding = embedding,
+          chunkIndex = chunk.index,
+          metadata = ChunkMetadata.toRecordMetadata(chunk.metadata)
+        )
+      }
+      ids <- index.ingest(
+        collectionPath = collectionPath,
+        documentId = documentId,
+        chunks = chunksWithEmbeddings,
+        metadata = metadata,
+        readableBy = readableBy
+      )
+      _ <-
+        if (ids.size == chunks.size) Right(())
+        else
+          Left(
+            ProcessingError(
+              "rag-ingest-permissions",
+              s"SearchIndex.ingest returned ${ids.size} chunk ids for the ${chunks.size} chunks of $documentId"
+            )
+          )
+    } yield chunks.zip(ids).map { case (chunk, id) => IndexedChunk(id, chunk.index, chunk.content) }
 
   /**
    * Delete a document from a collection.
@@ -1417,9 +1571,9 @@ final class RAG private (
    * Apply configured query transforms sequentially.
    * Returns the original query unchanged if no transforms are configured.
    */
-  private def applyQueryTransforms(query: String): Result[String] =
-    if (config.queryTransformers.isEmpty) Right(query)
-    else QueryTransformer.applyChain(query, config.queryTransformers)
+  private def applyQueryTransforms(query: String, meter: QueryMeter): Result[String] =
+    if (queryTransformers.isEmpty) Right(query)
+    else meter.rewrite(QueryTransformer.applyChain(query, queryTransformers))
 
   private val supportedExtensions = Set(".txt", ".md", ".pdf", ".docx", ".json", ".xml", ".html")
 
@@ -1446,7 +1600,7 @@ final class RAG private (
       case Right(document) =>
         val fullMetadata = metadata + ("source" -> file.getName) + ("path" -> file.getAbsolutePath)
         val chunks       = chunker.chunkWithSource(document.text, file.getName, config.chunkingConfig)
-        indexChunks(docId, chunks, fullMetadata)
+        indexChunks(docId, chunks, fullMetadata).map(_.size)
     }
   }
 
@@ -1454,7 +1608,7 @@ final class RAG private (
     docId: String,
     chunks: Seq[DocumentChunk],
     metadata: Map[String, String]
-  ): Result[Int] = {
+  ): Result[Seq[IndexedChunk]] = {
     // Replace, don't merge (#1318): the stores upsert by chunk id, so a document that now has fewer
     // chunks would otherwise keep its old tail and keep matching queries. Embed, read the previous
     // version, write the new chunks over it, then remove its tail. Nothing is deleted before the write,
@@ -1467,25 +1621,25 @@ final class RAG private (
       _          <- plainIngestAllowed("ingest")
       embeddings <- if (chunks.isEmpty) Right(Seq.empty[Array[Float]]) else embedBatch(chunks.map(_.content))
       previous   <- storedVersion(docId)
-      vectorRecords = chunks.zip(embeddings).map { case (chunk, embedding) =>
+      recordMetadata = chunks.map { chunk =>
+        metadata ++ ChunkMetadata.toRecordMetadata(chunk.metadata) + ("docId" -> docId) +
+          ("chunkIndex"                                                       -> chunk.index.toString)
+      }
+      vectorRecords = chunks.zip(embeddings).zip(recordMetadata).map { case ((chunk, embedding), meta) =>
         VectorRecord(
           id = chunkId(docId, chunk.index),
           embedding = embedding,
           content = Some(chunk.content),
-          metadata = metadata + ("docId" -> docId) + ("chunkIndex" -> chunk.index.toString)
+          metadata = meta
         )
       }
-      keywordDocs = chunks.map { chunk =>
-        KeywordDocument(
-          id = chunkId(docId, chunk.index),
-          content = chunk.content,
-          metadata = metadata + ("docId" -> docId) + ("chunkIndex" -> chunk.index.toString)
-        )
+      keywordDocs = chunks.zip(recordMetadata).map { case (chunk, meta) =>
+        KeywordDocument(id = chunkId(docId, chunk.index), content = chunk.content, metadata = meta)
       }
       _ <- replaceVersion(docId, previous, vectorRecords, keywordDocs, newIds)
     } yield {
       if (chunks.isEmpty) indexedChunkCounts.remove(docId) else indexedChunkCounts.update(docId, chunks.size)
-      chunks.size
+      chunks.zip(newIds).map { case (chunk, id) => IndexedChunk(id, chunk.index, chunk.content) }
     }
   }
 
@@ -1593,16 +1747,17 @@ final class RAG private (
     run(steps, Nil)
   }
 
-  private def embedQuery(query: String): Result[Array[Float]] = {
+  private def embedQuery(query: String, meter: QueryMeter): Result[Array[Float]] = {
     // A query, not a document: models that embed the two differently need to be told which this is.
     val request = EmbeddingRequest(Seq(query), embeddingModelConfig, InputPurpose.Query)
-    tracedEmbeddingClient
-      .embed(request)
-      .flatMap(
-        _.embeddings.headOption
+    meter
+      .embedding(tracedEmbeddingClient.embed(request))
+      .flatMap { response =>
+        response.usage.foreach(u => meter.addEmbeddingTokens(u.totalTokens))
+        response.embeddings.headOption
           .toRight(EmbeddingError(None, "Embedding provider returned empty embeddings list", embeddingModelConfig.name))
           .map(_.map(_.toFloat).toArray)
-      )
+      }
   }
 
   private def embedBatch(texts: Seq[String]): Result[Seq[Array[Float]]] = {
@@ -1635,30 +1790,29 @@ final class RAG private (
   private def searchWithStrategy(
     queryEmbedding: Array[Float],
     queryText: String,
-    topK: Int
+    topK: Int,
+    meter: QueryMeter
   ): Result[Seq[HybridSearchResult]] =
     // Every public caller checks first, with its own message; this keeps a new caller from searching unfiltered
-    plainQueryAllowed("search", "queryWithPermissions").flatMap(_ => plainSearch(queryEmbedding, queryText, topK))
+    plainQueryAllowed("search", "queryWithPermissions").flatMap(_ =>
+      plainSearch(queryEmbedding, queryText, topK, meter)
+    )
 
+  /**
+   * As `HybridSearcher.searchWithReranking`, in two timed steps: with a reranker, `rerankTopK` candidates, reranked
+   * to `topK`; without one, `topK` results.
+   */
   private def plainSearch(
     queryEmbedding: Array[Float],
     queryText: String,
-    topK: Int
-  ): Result[Seq[HybridSearchResult]] =
-    reranker match {
-      case Some(r) =>
-        hybridSearcher.searchWithReranking(
-          queryEmbedding,
-          queryText,
-          topK,
-          config.rerankTopK,
-          config.fusionStrategy,
-          None,
-          Some(r)
-        )
-      case None =>
-        hybridSearcher.search(queryEmbedding, queryText, topK, config.fusionStrategy)
-    }
+    topK: Int,
+    meter: QueryMeter
+  ): Result[Seq[HybridSearchResult]] = {
+    val candidates = if (reranker.isDefined) config.rerankTopK else topK
+    meter
+      .search(hybridSearcher.search(queryEmbedding, queryText, candidates, config.fusionStrategy))
+      .flatMap(rerankOrTake(queryText, _, topK, meter))
+  }
 
   private def toSearchResult(hsr: HybridSearchResult): RAGSearchResult =
     RAGSearchResult(
@@ -1673,35 +1827,75 @@ final class RAG private (
   private def generateAnswer(
     client: LLMClient,
     question: String,
+    history: Seq[Message],
     contexts: Seq[RAGSearchResult],
-    options: CompletionOptions
+    options: CompletionOptions,
+    meter: QueryMeter
   ): Result[RAGAnswerResult] =
-    client.complete(answerConversation(question, contexts), options).map(answerResult(question, contexts))
+    meter
+      .answering(client.complete(answerConversation(question, history, contexts), options))
+      .map(answerResult(question, contexts, meter))
 
   /** The contexts to `onContexts`, then the answer streamed to `onChunk`, then the whole answer. */
   private def streamAnswer(
     client: LLMClient,
     question: String,
+    history: Seq[Message],
     contexts: Seq[RAGSearchResult],
     options: CompletionOptions,
     onContexts: Seq[RAGSearchResult] => Unit,
-    onChunk: StreamedChunk => Unit
+    onChunk: StreamedChunk => Unit,
+    meter: QueryMeter
   ): Result[RAGAnswerResult] =
     for {
-      _          <- Safety.safely(onContexts(contexts))
-      completion <- client.streamComplete(answerConversation(question, contexts), options, onChunk)
-    } yield answerResult(question, contexts)(completion)
+      _ <- Safety.safely(onContexts(contexts))
+      completion <- meter.answering(
+        client.streamComplete(answerConversation(question, history, contexts), options, onChunk)
+      )
+    } yield answerResult(question, contexts, meter)(completion)
 
-  private def answerResult(question: String, contexts: Seq[RAGSearchResult])(completion: Completion): RAGAnswerResult =
+  /** The answer with its metrics, which a traced RAG also emits as one `RAGOperationCompleted` (`answer`). */
+  private def answerResult(question: String, contexts: Seq[RAGSearchResult], meter: QueryMeter)(
+    completion: Completion
+  ): RAGAnswerResult = {
+    val metrics = meter.metrics(contexts.size)
+    RAGTracing.emit(tracer, metrics.toTraceEvent("answer"))
     RAGAnswerResult(
       answer = completion.content,
       question = question,
       contexts = contexts,
-      usage = completion.usage
+      usage = completion.usage,
+      metrics = Some(metrics)
     )
+  }
 
-  /** The system prompt, and the question with the numbered contexts, that an answer is generated from. */
-  private def answerConversation(question: String, contexts: Seq[RAGSearchResult]): Conversation = {
+  /**
+   * The question to search with: `question` itself, or, with a non-empty history and a question condenser configured,
+   * the standalone question the condenser builds from both. A history holding a `SystemMessage` is refused first.
+   */
+  private def searchQuestion(question: String, history: Seq[Message]): Result[String] =
+    if (history.exists(_.isInstanceOf[SystemMessage]))
+      Left(
+        ValidationError(
+          "history",
+          "must not contain a SystemMessage: the RAG pipeline sends its own system prompt (RAGConfig.withSystemPrompt)"
+        )
+      )
+    else
+      config.questionCondenser match {
+        case Some(condense) if history.nonEmpty => condense(question, history)
+        case _                                  => Right(question)
+      }
+
+  /**
+   * The system prompt, the conversation so far, and the question with the numbered contexts, that an answer is
+   * generated from.
+   */
+  private def answerConversation(
+    question: String,
+    history: Seq[Message],
+    contexts: Seq[RAGSearchResult]
+  ): Conversation = {
     val contextText = contexts.zipWithIndex
       .map { case (ctx, i) => s"[${i + 1}] ${ctx.content}" }
       .mkString("\n\n")
@@ -1715,12 +1909,7 @@ Question: $question
 
 Answer:"""
 
-    Conversation(
-      Seq(
-        SystemMessage(systemPrompt),
-        UserMessage(userPrompt)
-      )
-    )
+    Conversation((SystemMessage(systemPrompt) +: history) :+ UserMessage(userPrompt))
   }
 
   private val DefaultSystemPrompt =
@@ -1803,6 +1992,21 @@ object RAG {
       resolveRerankerConfig,
       hybridSearcher
     )
+
+  /** A `ValidationError` unless the chunks' indices are `0, 1, 2, ...` in order: their ids are built from them. */
+  private def sequentialIndices(chunks: Seq[DocumentChunk]): Result[Unit] =
+    chunks.iterator.zipWithIndex.collectFirst {
+      case (chunk, position) if chunk.index != position => (chunk, position)
+    } match {
+      case None => Right(())
+      case Some((chunk, position)) =>
+        Left(
+          ValidationError(
+            "chunks",
+            s"chunk indices must run 0, 1, 2, ... in order, but the chunk at position $position has index ${chunk.index}"
+          )
+        )
+    }
 
   private def build(
     config: RAGConfig,
@@ -2053,7 +2257,10 @@ object RAG {
       case RerankingStrategy.LLM =>
         config.llmClient match {
           case Some(client) =>
-            Right(Some(RerankerFactory.llm(client)))
+            // With a tracer, the reranker's calls are traced and tagged `rag.rerank` (#2734)
+            Right(
+              Some(RerankerFactory.llm(config.tracer.fold(client)(t => RAGTracing.llm(client, t, RAGTracing.Rerank))))
+            )
           case None =>
             Left(
               ConfigurationError(

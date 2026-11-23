@@ -31,6 +31,10 @@ import java.time.Instant
  * @param finishReason Why the model's turn ended (RFC 0009). `Stop` unless the client sets it; a client that read no
  *                     reason sets `FinishReason.Other("")`. A completion assembled from streamed chunks carries the
  *                     last reason a chunk had that was not empty.
+ * @param servedTier The [[ServiceTier]] the provider reports it served the request at, which may differ from the
+ *                   [[CompletionOptions.serviceTier]] asked for (#2746). A tier the provider names that the enum does
+ *                   not is [[ServiceTier.Other]], as written. `None` when the provider reported none: one without
+ *                   tiers, or a reply that named none.
  */
 @Stable
 final case class Completion private (
@@ -44,7 +48,8 @@ final case class Completion private (
   estimatedCost: Option[Double],
   citations: List[Citation],
   adjustments: List[RequestAdjustment],
-  finishReason: FinishReason
+  finishReason: FinishReason,
+  servedTier: Option[ServiceTier]
 ) {
   def withId(id: String): Completion                                    = copy(id = id)
   def withCreated(created: Instant): Completion                         = copy(created = created)
@@ -59,6 +64,8 @@ final case class Completion private (
   def withCitations(citations: List[Citation]): Completion              = copy(citations = citations)
   def withAdjustments(adjustments: List[RequestAdjustment]): Completion = copy(adjustments = adjustments)
   def withFinishReason(finishReason: FinishReason): Completion          = copy(finishReason = finishReason)
+  def withServedTier(servedTier: ServiceTier): Completion               = copy(servedTier = Some(servedTier))
+  def withServedTier(servedTier: Option[ServiceTier]): Completion       = copy(servedTier = servedTier)
 
   /**
    * Extract content as text (for compatibility)
@@ -114,7 +121,8 @@ object Completion {
     estimatedCost: Option[Double] = None,
     citations: List[Citation] = List.empty,
     adjustments: List[RequestAdjustment] = List.empty,
-    finishReason: FinishReason = FinishReason.Stop
+    finishReason: FinishReason = FinishReason.Stop,
+    servedTier: Option[ServiceTier] = None
   ): Completion =
     new Completion(
       id,
@@ -127,7 +135,8 @@ object Completion {
       estimatedCost,
       citations,
       adjustments,
-      finishReason
+      finishReason,
+      servedTier
     )
 
 }
@@ -135,7 +144,11 @@ object Completion {
 /**
  * Token usage statistics for a completion request.
  *
- * @param promptTokens Number of tokens in the prompt (input).
+ * @param promptTokens Number of tokens in the whole prompt (input), prompt-cache reads and writes included:
+ *                     `cachedTokens` and `cacheCreationTokens` are parts of it, and the uncached input is
+ *                     what is left. A provider whose API reports the uncached input alone (Anthropic's
+ *                     `input_tokens`) has its client add the cache counts, so `CostEstimator` prices each
+ *                     token once.
  * @param completionTokens Number of tokens in the completion (output).
  * @param totalTokens Total tokens (prompt + completion).
  * @param thinkingTokens Optional number of tokens used for thinking/reasoning, billed as output.

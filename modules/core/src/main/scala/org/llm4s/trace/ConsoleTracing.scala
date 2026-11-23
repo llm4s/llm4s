@@ -110,6 +110,7 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
           println(s"${GREEN}Model: ${e.model}$RESET")
           println(s"${GREEN}ID: ${e.id}$RESET")
           println(s"${GREEN}Tool Calls: ${e.toolCalls}$RESET")
+          e.servedTier.foreach(t => println(s"${GREEN}Served Tier: ${TraceEvent.serviceTierName(t)}$RESET"))
           println(s"${GREEN}${content("Content", e.content, 200)}$RESET")
           println()
 
@@ -233,6 +234,9 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
           e.llmPromptTokens.foreach(t => println(s"${CYAN}LLM Prompt Tokens: $t$RESET"))
           e.llmCompletionTokens.foreach(t => println(s"${CYAN}LLM Completion Tokens: $t$RESET"))
           e.totalCostUsd.foreach(c => println(s"${CYAN}Total Cost (USD): $$${f"$c%.6f"}$RESET"))
+          e.stageDurations.toSeq.sortBy(_._1).foreach { case (stage, d) =>
+            println(s"${CYAN}Stage $stage: ${d.toMillis}ms$RESET")
+          }
           println()
       }
     }.toEither.left.map(error => UnknownError(error.getMessage, error))
@@ -252,7 +256,8 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
       id = completion.id,
       model = model,
       toolCalls = completion.message.toolCalls.size,
-      content = completion.message.content
+      content = completion.message.content,
+      servedTier = completion.servedTier
     )
     traceEvent(event)
   }

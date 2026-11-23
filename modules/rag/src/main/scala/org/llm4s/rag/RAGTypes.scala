@@ -45,12 +45,14 @@ final case class RAGSearchResult(
  * @param question The original question
  * @param contexts The chunks used as context for generation
  * @param usage Optional token usage statistics
+ * @param metrics The query's stage durations, candidate and chunk counts, tokens and cost (#2734); `RAG` always sets it
  */
 final case class RAGAnswerResult(
   answer: String,
   question: String,
   contexts: Seq[RAGSearchResult],
-  usage: Option[TokenUsage] = None
+  usage: Option[TokenUsage] = None,
+  metrics: Option[RAGQueryMetrics] = None
 )
 
 /**
@@ -64,4 +66,18 @@ final case class RAGStats(
   documentCount: Int,
   chunkCount: Int,
   vectorCount: Long
+)
+
+/**
+ * A chunk as `RAG` indexed it: the id its records are stored under, which is the `id` a search result for it carries.
+ *
+ * @param id      the stored id: `<documentId>-chunk-<index>`, or, in a collection of a permission-aware `SearchIndex`,
+ *                the id that index gives it (`coll-<collectionId>-<documentId>-chunk-<index>` for `PgSearchIndex`)
+ * @param index   the chunk's position in its document, from 0
+ * @param content the chunk's text
+ */
+final case class IndexedChunk(
+  id: String,
+  index: Int,
+  content: String
 )

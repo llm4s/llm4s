@@ -84,10 +84,11 @@ class AnthropicStreamingUsageSpec extends AnyFlatSpec with Matchers with EitherV
       )
     ) ++ text ++ Seq(messageDelta("""{"output_tokens":40}"""), messageStop)
     withStream(events*) { baseUrl =>
+      // promptTokens is the whole input: input_tokens plus the cache reads and writes
       streamedUsage(baseUrl) shouldBe TokenUsage(
-        promptTokens = 12,
+        promptTokens = 3262,
         completionTokens = 40,
-        totalTokens = 52,
+        totalTokens = 3302,
         cachedTokens = Some(3000),
         cacheCreationTokens = Some(250)
       )
@@ -105,7 +106,7 @@ class AnthropicStreamingUsageSpec extends AnyFlatSpec with Matchers with EitherV
     )
     withStream(events*) { baseUrl =>
       val usage = streamedUsage(baseUrl)
-      usage.promptTokens shouldBe 20
+      usage.promptTokens shouldBe 3020
       usage.completionTokens shouldBe 40
       usage.cachedTokens shouldBe Some(3000)
       usage.cacheCreationTokens shouldBe None
@@ -133,12 +134,46 @@ class AnthropicStreamingUsageSpec extends AnyFlatSpec with Matchers with EitherV
         )
     withStream(events*) { baseUrl =>
       streamedUsage(baseUrl) shouldBe TokenUsage(
-        promptTokens = 12,
+        promptTokens = 3012,
         completionTokens = 1,
-        totalTokens = 13,
+        totalTokens = 3013,
         cachedTokens = Some(3000),
         cacheCreationTokens = None
       )
+    }
+  }
+
+  it should "keep the cache counts of message_start in the whole input when message_delta repeats only input_tokens" in {
+    val events = Seq(
+      messageStart(
+        """{"input_tokens":12,"output_tokens":1,"cache_read_input_tokens":3000,"cache_creation_input_tokens":250}"""
+      )
+    ) ++ text ++ Seq(messageDelta("""{"input_tokens":20,"output_tokens":40}"""), messageStop)
+    withStream(events*) { baseUrl =>
+      val usage = streamedUsage(baseUrl)
+      usage.promptTokens shouldBe 3270
+      usage.cachedTokens shouldBe Some(3000)
+      usage.cacheCreationTokens shouldBe Some(250)
+    }
+  }
+
+  it should "price a cached stream with each input token counted once" in {
+    val events = Seq(
+      messageStart(
+        """{"input_tokens":12,"output_tokens":1,"cache_read_input_tokens":3000,"cache_creation_input_tokens":250}"""
+      )
+    ) ++ text ++ Seq(messageDelta("""{"output_tokens":40}"""), messageStop)
+    withStream(events*) { baseUrl =>
+      val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+        .streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions(), _ => ())
+        .value
+      val pricing =
+        summon[ModelRegistryService].lookup(testConfig.model).toOption.value.pricing
+      val expected = 12 * pricing.inputCostPerToken.value +
+        3000 * pricing.cacheReadInputTokenCost.value +
+        250 * pricing.cacheCreationInputTokenCost.value +
+        40 * pricing.outputCostPerToken.value
+      completion.estimatedCost.value shouldBe expected +- 1e-12
     }
   }
 }

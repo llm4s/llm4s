@@ -18,6 +18,7 @@ import org.llm4s.llmconnect.model.{
   Completion,
   Message,
   ModelUsage,
+  ServiceTier,
   SystemMessage,
   ThinkingBlock,
   TokenUsage,
@@ -288,8 +289,18 @@ private[llm4s] object FacadeInternals {
       // as core's `ModelUsage.add` converts it, so a reply's cost and an agent turn's total agree; a cost that is not a
       // number has no decimal value and reads as unknown
       completion.estimatedCost.filter(_.isFinite).map(BigDecimal.decimal(_).bigDecimal).toJava,
-      completion.thinking.toJava
+      completion.thinking.toJava,
+      completion.servedTier.map(tierName).toJava
     )
+
+  /** A served tier as `JCompletion.servedTier` names it: a [[JServiceTier]]'s lower-case name, or the provider's raw. */
+  def tierName(tier: ServiceTier): String = tier match {
+    case ServiceTier.Auto       => "auto"
+    case ServiceTier.Default    => "default"
+    case ServiceTier.Flex       => "flex"
+    case ServiceTier.Priority   => "priority"
+    case ServiceTier.Other(raw) => raw
+  }
 
   /** `usage` as Java and Kotlin callers read it: a count the provider did not report is zero. */
   def tokenUsage(usage: TokenUsage): JTokenUsage =

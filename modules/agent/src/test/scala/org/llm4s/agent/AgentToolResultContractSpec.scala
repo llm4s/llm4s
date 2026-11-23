@@ -34,7 +34,7 @@ import scala.jdk.CollectionConverters._
  * after every outcome of a call - success, a tool error, a throw, an unknown tool, invalid
  * arguments, denial, rejection, an edited or approved call, an answered question, a refused handoff
  * batch, a handoff, provider ids reused across turns, and a batch cut short by cancellation, a
- * `Fatal` or a crash and finished by `recover`. Every request the server receives is checked with
+ * `Fatal` or a crash and finished by `recover` or closed by `abandon` (#1750). Every request the server receives is checked with
  * `ToolResultContract.violations`, and must carry every call the model issued so far, each with
  * its result: a client that dropped an unanswered call would hide a dangling one.
  *
@@ -172,6 +172,10 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
   /** The stored conversation itself keeps the rule. */
   private def wellFormed(result: AgentResult): Unit =
     ToolResultRule.violations(result.messages) shouldBe empty
+
+  /** Each tool call's stored result, as text. */
+  private def results(result: AgentResult): Map[String, String] =
+    result.messages.collect { case t: ToolMessage => t.toolCallId -> ContentPart.text(t.parts) }.toMap
 
   /**
    * Records which call-tool pending writes reached the store, and can stop storing anything, as a dying process: once
@@ -527,6 +531,118 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       doneRan.get shouldBe 1
       keys.of("k1") should have size 2
       keys.of("k1").distinct should have size 1
+    }
+
+    // #1750: the batch is abandoned rather than recovered, and the next turn's request still has one result per call
+    it should "answer a call cut short by cancellation once its batch is abandoned, never re-running it" in {
+      val keys    = new Keys
+      val fastRan = new AtomicInteger()
+      val started = new CountDownLatch(1)
+      val fast = tool("fast", keys) { (_, _) =>
+        fastRan.incrementAndGet()
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("fast")))
+      }
+      val slow = tool("slow", keys) { (_, _) =>
+        started.countDown()
+        Thread.sleep(60_000) // interrupted by cancel
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("slow")))
+      }
+      val store = new ProbeCheckpointer(new InMemoryCheckpointer)
+      scripted(wire, Reply.Calls(toolCall("f1", "fast"), toolCall("s1", "slow")), Reply.Says("moved on")) {
+        (client, requests) =>
+          val agent = built(
+            Agent.builder("assistant", client).withTools(SpecTools.set(fast, slow)).withRuntime(new GraphRuntime(store))
+          )
+          val thread = ThreadId(s"abandon-cancelled-${wire.name}")
+          val run    = agent.start(thread, "go").fold(e => fail(e.message), identity)
+          started.await(10, TimeUnit.SECONDS) shouldBe true
+          await(store.toolWrites.get >= 1) // the fast sibling's result is durable
+          run.cancel()
+          cause(run.await().error) shouldBe a[GraphError.Cancelled]
+          requests() shouldBe 1
+
+          agent.abandon(thread, "abandoned: slow hung") shouldBe Right(())
+          requests() shouldBe 1
+          val done = agent.run(thread, "carry on without it").value
+          done.answer shouldBe Some("moved on")
+          requests() shouldBe 2
+          wellFormed(done)
+          results(done) shouldBe Map("f1" -> "fast", "s1" -> "abandoned: slow hung")
+      }
+      fastRan.get shouldBe 1
+      keys.of("s1") should have size 1
+    }
+
+    it should "answer a call that failed Fatal once its batch is abandoned, never re-running it" in {
+      val keys    = new Keys
+      val goodRan = new AtomicInteger()
+      val good = tool("good", keys) { (_, _) =>
+        goodRan.incrementAndGet()
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("good")))
+      }
+      val flaky = tool("flaky", keys)((_, _) => ToolOutcome.Fatal(ValidationError("flaky", "backend down")))
+      scripted(wire, Reply.Calls(toolCall("g1", "good"), toolCall("x1", "flaky")), Reply.Says("without flaky")) {
+        (client, requests) =>
+          val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(good, flaky)))
+          val thread = ThreadId(s"abandon-fatal-${wire.name}")
+          cause(agent.run(thread, "go").error) shouldBe a[GraphError.ToolFailed]
+          requests() shouldBe 1
+
+          agent.abandon(thread) shouldBe Right(())
+          val done = agent.run(thread, "carry on without it").value
+          done.answer shouldBe Some("without flaky")
+          requests() shouldBe 2
+          wellFormed(done)
+          results(done) shouldBe Map("g1" -> "good", "x1" -> Agent.AbandonedResult)
+      }
+      goodRan.get shouldBe 1
+      keys.of("x1") should have size 1
+    }
+
+    it should "answer a crashed run's call once another runtime abandons its batch, never replaying a completed call" in {
+      val keys    = new Keys
+      val doneRan = new AtomicInteger()
+      val clock   = new MovingClock
+      val healthy = new InMemoryCheckpointer(clock)
+      val dying   = new ProbeCheckpointer(healthy)
+      val done = tool("done", keys) { (_, _) =>
+        doneRan.incrementAndGet()
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
+      }
+      // waits for its sibling's result to be stored, then the process "dies"
+      val crasher = tool("crasher", keys) { (_, _) =>
+        await(dying.toolWrites.get >= 1)
+        dying.dead.set(true)
+        ToolOutcome.Success(ToolContent.Json(ujson.Str("lost with the process")))
+      }
+      scripted(wire, Reply.Calls(toolCall("d1", "done"), toolCall("k1", "crasher")), Reply.Says("after the crash")) {
+        (client, requests) =>
+          def agentOver(store: Checkpointer) =
+            built(
+              Agent
+                .builder("assistant", client)
+                .withTools(SpecTools.set(done, crasher))
+                .withRuntime(new GraphRuntime(store))
+            )
+          val thread = ThreadId(s"abandon-crash-${wire.name}")
+          agentOver(dying).run(thread, "go").isLeft shouldBe true
+          requests() shouldBe 1
+          // the dead process released nothing: its claim holds the thread until it expires by the store's clock
+          agentOver(healthy).abandon(thread) match {
+            case Left(_: GraphError.ThreadBusy) => ()
+            case other => fail(s"expected ThreadBusy while the dead run's claim is live, got $other")
+          }
+          clock.advance(ClaimPolicy().ttl + 1.second)
+
+          agentOver(healthy).abandon(thread) shouldBe Right(())
+          val moved = agentOver(healthy).run(thread, "carry on").value
+          moved.answer shouldBe Some("after the crash")
+          requests() shouldBe 2
+          wellFormed(moved)
+          results(moved) shouldBe Map("d1" -> "done", "k1" -> Agent.AbandonedResult)
+      }
+      doneRan.get shouldBe 1
+      keys.of("k1") should have size 1
     }
   }
 }

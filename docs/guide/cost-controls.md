@@ -131,6 +131,7 @@ neither read from nor wrote to it, the completion reports
 **Cost.** `TokenUsage.cachedTokens` are the tokens read from the cache and `cacheCreationTokens` those written to it,
 of which `longCacheCreationTokens` were written with the long lifetime. `CostEstimator` prices each at the model's own
 rate: a read at the cache-read price, a write at the cache-write price, and a long write at the 1-hour write price.
+Both are parts of `promptTokens`, which is always the whole input; the rest is priced at the input rate.
 
 ### Warm the cache before a fan-out
 
@@ -175,3 +176,16 @@ What each tier costs, and which models and accounts may use it, is the provider'
 another tier than the one asked for (Gemini and Vertex AI serve Priority over its limit at standard), and a Flex
 request may be shed under load: expect, and retry, 429 and 503 replies. `CachingLLMClient` ignores `serviceTier` when
 it matches a cached answer.
+
+`Completion.servedTier` reports the tier that did serve the call, on `complete` and on a stream, and an agent's
+`ModelCallCompleted` event carries it too. OpenAI and Azure read the reply's `service_tier`, Anthropic its
+`usage.service_tier` (`standard` is `Default`), Gemini the `x-gemini-service-tier` header, Vertex AI
+`usageMetadata.trafficType` (`ON_DEMAND` is `Default`) and Bedrock `serviceTier.type`. A tier the enum does not name,
+such as OpenAI's `scale`, Anthropic's `batch` or Vertex AI's `PROVISIONED_THROUGHPUT`, is `ServiceTier.Other(raw)`; a
+provider that reports none leaves it `None`. Set on `serviceTier`, `Other(raw)` is sent as written.
+
+```scala
+client.complete(conversation, CompletionOptions().withServiceTier(ServiceTier.Auto)).map { c =>
+  if (c.servedTier.contains(ServiceTier.Priority)) println("served at priority, billed at its rate")
+}
+```

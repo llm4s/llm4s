@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.chunking.DocumentChunk
 import org.llm4s.security.Secret
 import org.llm4s.error.{ ConfigurationError, ProcessingError }
 import org.llm4s.knowledgegraph.graphrag.{ GraphRAGConfig, GraphRAGMode }
@@ -478,10 +479,10 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
     val rag = createMockRAG().toOption.get
 
     val chunks = Seq("Chunk 1 content", "Chunk 2 content", "Chunk 3 content")
-    val result = rag.ingestChunks("doc-1", chunks)
+    val result = rag.ingestChunks("doc-1", DocumentChunk.fromTexts(chunks))
 
     result.isRight shouldBe true
-    result.toOption.get shouldBe 3
+    result.toOption.get.size shouldBe 3
     rag.chunkCount shouldBe 3
   }
 
@@ -653,7 +654,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
     // Try to ingest multiple chunks but provider only returns 1 embedding
     val result = rag.ingestChunks(
       "doc1",
-      Seq("Chunk 1", "Chunk 2")
+      DocumentChunk.fromTexts(Seq("Chunk 1", "Chunk 2"))
     )
 
     result.fold(
@@ -675,12 +676,12 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
 
     val result = rag.ingestChunks(
       "doc1",
-      Seq("Chunk 1", "Chunk 2", "Chunk 3")
+      DocumentChunk.fromTexts(Seq("Chunk 1", "Chunk 2", "Chunk 3"))
     )
 
     result.fold(
       error => fail(s"Expected success but got error: ${error.message}"),
-      count => count shouldBe 3
+      indexed => indexed.size shouldBe 3
     )
   }
 
@@ -799,7 +800,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
 
     rag.chunkCount shouldBe 0
 
-    rag.ingestChunks("doc1", Seq("Chunk 1", "Chunk 2", "Chunk 3"))
+    rag.ingestChunks("doc1", DocumentChunk.fromTexts(Seq("Chunk 1", "Chunk 2", "Chunk 3")))
     rag.chunkCount shouldBe 3
   }
 

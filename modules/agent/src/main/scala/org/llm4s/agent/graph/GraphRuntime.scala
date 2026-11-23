@@ -911,7 +911,8 @@ final class GraphRuntime(
     amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty),
     owns: Checkpoint => Boolean = _ => true,
     parentClaim: Option[FencingToken] = None
-  ): Result[Unit] = settling(threadId, graph, outcome, message, config, amend, owns, parentClaim, child = true)
+  ): Result[Unit] =
+    settling(threadId, graph, outcome, message, config, amend, owns, parentClaim, child = true, abandoning = false)
 
   /**
    * Settles the top-level thread `threadId` as `outcome`, a failure, as [[settleChild]] settles a child: a `Failed`
@@ -934,7 +935,38 @@ final class GraphRuntime(
     config: RunConfig,
     amend: ThreadState => Result[StateUpdate],
     owns: Checkpoint => Boolean
-  ): Result[Unit] = settling(threadId, graph, outcome, message, config, amend, owns, None, child = false)
+  ): Result[Unit] =
+    settling(threadId, graph, outcome, message, config, amend, owns, None, child = false, abandoning = false)
+
+  /**
+   * Abandons the incomplete run on the top-level thread `threadId` ([[https://github.com/llm4s/llm4s/issues/1750 #1750]]):
+   * what `recover` would continue is instead settled as `outcome`, as [[settleQueued]] settles a queued run's thread - a
+   * `Failed` checkpoint over the incomplete latest, with the update `amend` makes to its state and a
+   * [[RunEvent.RunFailed]] carrying `message`, as run `config.runId`, under the thread's claim. For a thread's owner,
+   * after a run it started directly was cancelled, failed or crashed, so three things differ from the worker's settle:
+   *
+   *  - it is whoever may run the thread that settles it, not the run that stopped, so no run id has to match;
+   *  - the tasks of the cut superstep that finished and recorded a pending write are not lost: each one's update is
+   *    applied to the state before `amend` sees it, as the superstep's commit would have applied it and as `recover`
+   *    would reuse it. A task that was suspended, failed or never ran contributes nothing, and the settled checkpoint
+   *    carries no pending write;
+   *  - a thread that is not incomplete is refused, not passed over: one at rest (`Completed` or `Failed`) or with no
+   *    checkpoint is [[GraphError.NothingToRecover]], and a suspended one [[GraphError.PendingInterrupts]].
+   *
+   * A thread a run holds - in this runtime, or by a live claim in the store - is [[GraphError.ThreadBusy]], another
+   * tenant's [[GraphError.TenantMismatch]], a child thread [[GraphError.ChildThread]]; none of them is changed. Never
+   * throws, as an admission never does.
+   */
+  private[agent] def abandon[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    outcome: RunOutcome,
+    message: String,
+    config: RunConfig,
+    amend: ThreadState => Result[StateUpdate]
+  ): Result[Unit] = admission(threadId) {
+    settling(threadId, graph, outcome, message, config, amend, _ => true, None, child = false, abandoning = true)
+  }
 
   private def settling[I, O](
     threadId: ThreadId,
@@ -945,9 +977,19 @@ final class GraphRuntime(
     amend: ThreadState => Result[StateUpdate],
     owns: Checkpoint => Boolean,
     parentClaim: Option[FencingToken],
-    child: Boolean
+    child: Boolean,
+    abandoning: Boolean
   ): Result[Unit] =
     def latest: Result[Option[StoredCheckpoint]] = checkpointer.latest(threadId)
+    // an abandoned thread must be incomplete: there is a turn to close only where `recover` would continue one
+    def incomplete(stored: StoredCheckpoint): Result[Unit] =
+      if !abandoning then Right(())
+      else
+        stored.checkpoint.status match
+          case CheckpointStatus.Running   => Right(())
+          case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
+          case CheckpointStatus.Completed | CheckpointStatus.Failed =>
+            Left(GraphError.NothingToRecover(threadId.value))
     // checked before the claim, and again under it: the thread may have been deleted and recreated in between
     def valid(stored: StoredCheckpoint): Result[Unit] =
       checkTenant(threadId, stored, config)
@@ -960,6 +1002,7 @@ final class GraphRuntime(
             ValidationError("threadId", s"'${threadId.value}' is not the thread being settled")
           )
         )
+        .flatMap(_ => incomplete(stored))
     val checked = latest.flatMap {
       case None         => Left(GraphError.NothingToRecover(threadId.value))
       case Some(stored) => valid(stored)
@@ -975,7 +1018,8 @@ final class GraphRuntime(
         case Some(stored) =>
           val open = stored.checkpoint
           for
-            execution <- graph.restoreStored(open)
+            restored  <- graph.restoreStored(open)
+            execution <- if abandoning then withFinishedWrites(graph, restored, stored) else Right(restored)
             settled   <- amended(execution, amend)
             snapshot  <- graph.snapshot(settled)
             now = clock.instant()
@@ -999,6 +1043,27 @@ final class GraphRuntime(
             _ <- held.committing(commit)(commitAndDeliver(threadId, commit).left.map(fenceRefused(threadId, fence)))
           yield ()
       }
+    }
+
+  /**
+   * `execution`, restored from `stored`'s checkpoint, with the updates of the tasks that finished in its cut superstep:
+   * each pending write of a task that ran to its end ([[TaskResult.Done]]) applied to the state, in the frontier's
+   * order, as the superstep's commit would have applied it. Their routes are not followed - the execution is being
+   * settled, not continued - and a suspended task's write is left out. A write that no longer binds to the frontier
+   * or does not decode is [[GraphError.RestoreRejected]], as it is for `recover`.
+   */
+  private def withFinishedWrites(
+    graph: CompiledGraph[?, ?],
+    execution: Execution,
+    stored: StoredCheckpoint
+  ): Result[Execution] =
+    reusableWrites(graph, execution, stored).flatMap { reused =>
+      val finished = execution.frontier.flatMap(task => reused.get(task.id)).collect {
+        case ReusedWrite(TaskResult.Done(command), _) => command.update
+      }
+      finished
+        .foldLeft[Result[ThreadState]](Right(execution.state))((state, update) => state.flatMap(_.applyUpdate(update)))
+        .map(state => if finished.isEmpty then execution else execution.edited(state, execution.superstep))
     }
 
   /**

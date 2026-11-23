@@ -82,7 +82,14 @@ is generated at temperature 0.0, so it keeps to the passages; set other options 
 To stream the answer to a chat UI, `rag.queryWithAnswerStreaming(question)(onContexts, onChunk)` takes two
 callbacks: the contexts arrive first, so the sources can be shown at once, then each `StreamedChunk` of the answer as
 the model writes it; the call returns the whole answer when the stream ends.
-`queryWithPermissionsAndAnswerStreaming` does the same over the permission-filtered contexts. Instead
+`queryWithPermissionsAndAnswerStreaming` does the same over the permission-filtered contexts.
+
+For a chat, pass the conversation so far as `history`: `rag.queryWithAnswer(question, history = Seq(UserMessage(...),
+AssistantMessage(...)))`, and likewise on the permission and streaming variants. The model sees it between the system
+prompt and the passages with the question; a `SystemMessage` in it is a `ValidationError`, since the pipeline sends its
+own. A follow-up such as "what about the second one?" retrieves poorly on its own, so
+`RAGConfig.withQuestionCondenser((question, history) => ...)` can return the standalone question to search with (for
+example by asking a model to rewrite it); the answer is still to the question asked. Instead
 of text, `rag.ingest(path)` reads a file or a whole directory, and `rag.query(question)` returns the passages without
 asking the model. Retrieval is hybrid: vector similarity and keyword (BM25) search, fused, with optional reranking by
 Cohere or by a model ([vector store guide](../guide/vector-store#hybrid-search)).

@@ -23,7 +23,8 @@ import upickle.default.ReadWriter
  *
  * Which models and accounts each tier is open to is the provider's: a provider may serve a request at a different
  * tier than the one asked for (Priority over its limit is served at standard on Gemini and Vertex AI), and Flex may
- * be shed under load, so a Flex caller should expect and retry 429 and 503 replies.
+ * be shed under load, so a Flex caller should expect and retry 429 and 503 replies. [[Completion.servedTier]] reports
+ * the tier that served it (#2746).
  */
 @Stable
 enum ServiceTier derives ReadWriter {
@@ -39,4 +40,12 @@ enum ServiceTier derives ReadWriter {
 
   /** Faster and more reliable under load, at a higher price, where the account has access to it. */
   case Priority
+
+  /**
+   * A tier this enum does not name, as the provider writes it: OpenAI's `scale`, Anthropic's `batch` or Vertex AI's
+   * `PROVISIONED_THROUGHPUT`, on [[Completion.servedTier]]. Set on [[CompletionOptions.serviceTier]], it is sent as
+   * written to a provider that takes a tier by name (OpenAI, Azure OpenAI, Anthropic, Gemini, Vertex AI's header and
+   * Bedrock); one that has no tier to choose reports it `Dropped`, as it does any other.
+   */
+  case Other(raw: String)
 }

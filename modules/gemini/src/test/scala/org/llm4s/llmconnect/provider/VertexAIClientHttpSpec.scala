@@ -759,4 +759,44 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       )
     }
   }
+
+  "servedTier" should "be the tier usageMetadata.trafficType names, on complete and on a stream (#2746)" in {
+    def body(trafficType: String) =
+      """{"candidates":[{"content":{"parts":[{"text":"Hi"}],"role":"model"},"finishReason":"STOP"}],""" +
+        s""""usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"trafficType":"$trafficType"}}"""
+    def served(trafficType: String) = completeOf(body(trafficType)).toOption.value.servedTier
+    served("ON_DEMAND") shouldBe Some(ServiceTier.Default)
+    served("ON_DEMAND_FLEX") shouldBe Some(ServiceTier.Flex)
+    served("ON_DEMAND_PRIORITY") shouldBe Some(ServiceTier.Priority)
+    served("PROVISIONED_THROUGHPUT") shouldBe Some(ServiceTier.Other("PROVISIONED_THROUGHPUT"))
+    served("TRAFFIC_TYPE_UNSPECIFIED") shouldBe None
+    completeOf(successBody).toOption.value.servedTier shouldBe None
+
+    streamOf(s"data: ${body("ON_DEMAND_FLEX")}\n\n", _ => ()).toOption.value.servedTier shouldBe
+      Some(ServiceTier.Flex)
+  }
+
+  it should "send ServiceTier.Other as the shared request type header, as written" in {
+    var capturedHeaders: Map[String, String] = Map.empty
+    val mockHttp                             = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).onCall {
+      (url: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+        Right {
+          if (url.contains("oauth2.googleapis.com")) HttpResponse(200, tokenBody, Map.empty)
+          else {
+            capturedHeaders = headers
+            httpOk(successBody)
+          }
+        }
+    }
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    val client = new VertexAIClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
+    client.complete(conversation("Hi"), CompletionOptions().withServiceTier(ServiceTier.Other("dedicated")))
+    capturedHeaders.get("X-Vertex-AI-LLM-Shared-Request-Type") shouldBe Some("dedicated")
+  }
 }

@@ -27,7 +27,7 @@ class RAGWithSearchIndexSpec extends AnyFlatSpec with Matchers {
         chunks: Seq[ChunkWithEmbedding],
         metadata: Map[String, String],
         readableBy: Set[PrincipalId]
-      ): Result[Int] = ???
+      ): Result[Seq[String]] = ???
       override def deleteDocument(collectionPath: CollectionPath, documentId: String): Result[Long] = ???
       override def clearCollection(collectionPath: CollectionPath): Result[Long]                    = ???
       override def initializeSchema(): Result[Unit]                                                 = ???
@@ -78,9 +78,9 @@ class RAGWithSearchIndexSpec extends AnyFlatSpec with Matchers {
       chunks: Seq[ChunkWithEmbedding],
       metadata: Map[String, String],
       readableBy: Set[PrincipalId]
-    ): Result[Int] = {
+    ): Result[Seq[String]] = {
       ingestCalls += ((collectionPath, documentId, chunks))
-      Right(chunks.size)
+      Right(chunks.map(c => s"$documentId-${c.chunkIndex}"))
     }
 
     override def deleteDocument(collectionPath: CollectionPath, documentId: String): Result[Long] =

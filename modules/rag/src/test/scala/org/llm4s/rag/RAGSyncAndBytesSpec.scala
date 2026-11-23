@@ -1,5 +1,7 @@
 package org.llm4s.rag
 
+import org.llm4s.chunking.{ ChunkMetadata, DocumentChunk }
+import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -372,9 +374,9 @@ class RAGSyncAndBytesSpec extends AnyFlatSpec with Matchers {
     val rag = createMockRAG().toOption.get
     try {
       val chunks = Seq("Chunk one.", "Chunk two.", "Chunk three.")
-      val result = rag.ingestChunks("doc-chunked", chunks)
+      val result = rag.ingestChunks("doc-chunked", DocumentChunk.fromTexts(chunks))
       result.isRight shouldBe true
-      result.toOption.get shouldBe 3
+      result.toOption.get.map(_.id) shouldBe Seq("doc-chunked-chunk-0", "doc-chunked-chunk-1", "doc-chunked-chunk-2")
       rag.chunkCount shouldBe 3
     } finally rag.close()
   }
@@ -383,15 +385,60 @@ class RAGSyncAndBytesSpec extends AnyFlatSpec with Matchers {
     val rag = createMockRAG().toOption.get
     try {
       val result = rag.ingestChunks("doc-empty", Seq.empty)
-      result shouldBe Right(0)
+      result shouldBe Right(Seq.empty)
     } finally rag.close()
   }
 
   it should "accept metadata" in {
     val rag = createMockRAG().toOption.get
     try {
-      val result = rag.ingestChunks("doc-meta", Seq("Chunk."), Map("key" -> "value"))
+      val result = rag.ingestChunks("doc-meta", DocumentChunk.fromTexts(Seq("Chunk.")), Map("key" -> "value"))
       result.isRight shouldBe true
+    } finally rag.close()
+  }
+
+  it should "store each chunk's metadata next to the document's, so search results carry it" in {
+    val rag = createMockRAG().toOption.get
+    try {
+      val meta = ChunkMetadata(
+        sourceFile = Some("guide.md"),
+        headings = Seq("Setup", "Install"),
+        startOffset = Some(0),
+        endOffset = Some(25)
+      )
+      val chunks = Seq(DocumentChunk("Install the widget first.", 0, meta), DocumentChunk("Then configure it.", 1))
+      rag.ingestChunks("doc-meta", chunks, Map("key" -> "value")).map(_.map(_.id)) shouldBe
+        Right(Seq("doc-meta-chunk-0", "doc-meta-chunk-1"))
+
+      val results = rag.query("Install the widget", topK = Some(5)).toOption.get
+      val first   = results.find(_.id == "doc-meta-chunk-0").get
+      first.metadata("key") shouldBe "value"
+      first.metadata("docId") shouldBe "doc-meta"
+      ChunkMetadata.fromRecordMetadata(first.metadata) shouldBe meta
+      ChunkMetadata.fromRecordMetadata(results.find(_.id == "doc-meta-chunk-1").get.metadata) shouldBe
+        ChunkMetadata.empty
+    } finally rag.close()
+  }
+
+  it should "reject chunk indices that do not run 0, 1, 2, ..., writing nothing" in {
+    val rag = createMockRAG().toOption.get
+    try {
+      val result = rag.ingestChunks("doc-bad", Seq(DocumentChunk("a", 1)))
+      result.left.toOption.get shouldBe a[ValidationError]
+      result.left.toOption.get.message should include("position 0 has index 1")
+      rag.chunkCount shouldBe 0
+    } finally rag.close()
+  }
+
+  "RAG.chunk" should "return the chunks ingestText indexes" in {
+    val rag = createMockRAG().toOption.get
+    try {
+      val text   = "A sentence of some length. " * 100
+      val chunks = rag.chunk(text)
+      chunks.size should be > 1
+      chunks.map(_.index) shouldBe chunks.indices
+      rag.ingestText(text, "doc-t") shouldBe Right(chunks.size)
+      rag.ingestChunks("doc-c", chunks).map(_.size) shouldBe Right(chunks.size)
     } finally rag.close()
   }
 

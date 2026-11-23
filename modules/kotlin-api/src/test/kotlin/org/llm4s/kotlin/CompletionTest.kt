@@ -62,7 +62,7 @@ internal fun reply(text: String = "Let me check.", cost: Option<Any> = Option.ap
         Option.apply(TokenUsage.apply(12, 5, 17, Option.empty(), Option.apply<Any>(8), Option.apply<Any>(3), Option.empty())),
         cost,
         scala.jdk.javaapi.CollectionConverters.asScala(listOf<Citation>()).toList(),
-        Completion.`apply$default$10`(), Completion.`apply$default$11`(),
+        Completion.`apply$default$10`(), Completion.`apply$default$11`(), Completion.`apply$default$12`(),
     )
 
 /**

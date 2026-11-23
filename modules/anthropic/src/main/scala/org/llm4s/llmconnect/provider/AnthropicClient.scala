@@ -385,6 +385,10 @@ curl https://api.anthropic.com/v1/messages \
         var textLength = 0
         // whether `message_stop` came: a stream without it was cut off, and is no reply (RFC 0009, rule 1)
         var stopped = false
+        // the input counts reported so far, so promptTokens stays the whole input when a delta repeats only some
+        var streamedInput = AnthropicClient.StreamedInput()
+        // the tier `message_start`'s usage names (#2746)
+        var servedTier = Option.empty[ServiceTier]
 
         // Process the stream
         val attempt = Try {
@@ -404,6 +408,7 @@ curl https://api.anthropic.com/v1/messages \
               if (messageStartOpt != null && messageStartOpt.isPresent) {
                 val msgStart = messageStartOpt.get()
                 currentMessageId = Some(msgStart.message().id())
+                servedTier = AnthropicServiceTier.served(msgStart.message().usage())
               }
 
               // Check for content block delta event
@@ -538,7 +543,11 @@ curl https://api.anthropic.com/v1/messages \
               }
 
               AnthropicClient.streamedUsage(event) match {
-                case Success(usage) => usage.foreach(accumulator.updateUsage)
+                case Success(usage) =>
+                  usage.foreach { u =>
+                    streamedInput = streamedInput.update(u)
+                    accumulator.updateUsage(u.withPromptTokens(streamedInput.total))
+                  }
                 case Failure(e) =>
                   logger.warn(s"Keeping the streamed usage counts so far: ${e.getClass.getSimpleName}: ${e.getMessage}")
               }
@@ -570,6 +579,7 @@ curl https://api.anthropic.com/v1/messages \
                 .withEstimatedCost(cost)
                 .withCitations(citations.toList)
                 .withAdjustments(adjustments ++ answeredCache(transformed.options, c.usage))
+                .withServedTier(servedTier)
             }
         )
 
@@ -833,10 +843,13 @@ curl https://api.anthropic.com/v1/messages \
       val cachedTokens: Option[Int]        = AnthropicClient.optionalCount(usage.cacheReadInputTokens())
       val cacheCreationTokens: Option[Int] = AnthropicClient.optionalCount(usage.cacheCreationInputTokens())
 
+      // Anthropic's input_tokens leaves out the cache reads and writes; promptTokens is the whole input
+      val promptTokens = usage.inputTokens().toInt + cachedTokens.getOrElse(0) + cacheCreationTokens.getOrElse(0)
+
       val tokenUsage = TokenUsage(
-        promptTokens = usage.inputTokens().toInt,
+        promptTokens = promptTokens,
         completionTokens = usage.outputTokens().toInt,
-        totalTokens = (usage.inputTokens() + usage.outputTokens()).toInt,
+        totalTokens = promptTokens + usage.outputTokens().toInt,
         cachedTokens = cachedTokens,
         cacheCreationTokens = cacheCreationTokens,
         longCacheCreationTokens = AnthropicClient.longCacheWrites(usage)
@@ -856,6 +869,7 @@ curl https://api.anthropic.com/v1/messages \
         usage = Some(tokenUsage),
         estimatedCost = cost,
         citations = AnthropicWebSearch.citations(contentBlocks),
+        servedTier = AnthropicServiceTier.served(usage),
         finishReason = AnthropicClient
           .rawStopReason(response.stopReason())
           .fold(FinishReason.Other(""))(
@@ -1332,12 +1346,30 @@ object AnthropicClient {
   }
 
   /** A token count the SDK reports as optional (absent, or JSON null) as an `Option[Int]`. */
+  /**
+   * The input counts a stream has reported so far: Anthropic's `input_tokens`, which leaves out the
+   * prompt cache, and the cache reads and writes. `total` is the whole input, what
+   * `TokenUsage.promptTokens` means. A count an event leaves out (`0` or `None`) keeps its value.
+   */
+  final private[provider] case class StreamedInput(input: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0) {
+    def total: Int = input + cacheRead + cacheWrite
+
+    /** These counts updated from `usage`, whose `promptTokens` is Anthropic's raw `input_tokens`. */
+    def update(usage: TokenUsage): StreamedInput =
+      StreamedInput(
+        input = if (usage.promptTokens > 0) usage.promptTokens else input,
+        cacheRead = usage.cachedTokens.getOrElse(cacheRead),
+        cacheWrite = usage.cacheCreationTokens.getOrElse(cacheWrite)
+      )
+  }
+
   private[provider] def optionalCount(count: java.util.Optional[java.lang.Long]): Option[Int] =
     count.toScala.map(_.intValue)
 
   /**
    * The usage a streamed `message_start` or `message_delta` reports, for
-   * `StreamingAccumulator.updateUsage`, or `None` for any other event. Anthropic sends the input
+   * `StreamingAccumulator.updateUsage` once [[StreamedInput]] has made `promptTokens` the whole
+   * input (here it is Anthropic's raw `input_tokens`), or `None` for any other event. Anthropic sends the input
    * and prompt-cache counts on `message_start`, and the cumulative output count on
    * `message_delta`, which repeats the others only when they changed. A count an event leaves out
    * is `0` or `None`, which `updateUsage` reads as unchanged, and no event states a total. A

@@ -213,7 +213,8 @@ class VertexAIClient(
               val citations = scala.collection.mutable.ArrayBuffer.empty[Citation] // grounding sources, in order
               var textLength = 0     // characters of answer text streamed so far: where a text signature sits
               var callsSeen  = false // whether a function call has streamed: a STOP after one is ToolCalls
-              var lastUsage = Option.empty[TokenUsage] // the last usage a chunk reported
+              var lastUsage  = Option.empty[TokenUsage]  // the last usage a chunk reported
+              var servedTier = Option.empty[ServiceTier] // the last trafficType a chunk named (#2746)
               // a chunk nested too deeply, or a filter stop: the stream fails with it, unread past it
               var refused = Option.empty[org.llm4s.error.LLMError]
               var finish  = Option.empty[String] // the last finish reason a chunk stated
@@ -263,6 +264,7 @@ class VertexAIClient(
                                 lastUsage = Some(usage)
                                 accumulator.updateUsage(usage)
                               }
+                              GeminiServiceTier.trafficType(json).foreach(tier => servedTier = Some(tier))
                           }
                         case Left(tooDeep @ BoundedJson.TooDeep()) =>
                           logger.warn(
@@ -297,6 +299,7 @@ class VertexAIClient(
                         ThinkingReplay.bindOrigin(replayOrigin, message)
                       )
                       .withAdjustments(adjustments)
+                      .withServedTier(servedTier)
                     completion
                   }
                 )
@@ -498,7 +501,8 @@ class VertexAIClient(
             usage = usageOpt,
             estimatedCost = cost,
             citations = GeminiGrounding.citations(candidate),
-            finishReason = GeminiBlocked.mapped(GeminiBlocked.finishReason(json), toolCalls.nonEmpty)
+            finishReason = GeminiBlocked.mapped(GeminiBlocked.finishReason(json), toolCalls.nonEmpty),
+            servedTier = GeminiServiceTier.trafficType(json)
           )
         )
       }
