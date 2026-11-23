@@ -70,10 +70,13 @@ object PruningStrategy {
   case object MiddleOut extends PruningStrategy
 
   /**
-   * Keep only the most recent N complete turns (user+assistant pairs).
-   * Drops everything older than the specified number of turns.
+   * Keep only the most recent N turns, each from its user message with the replies, tool calls and
+   * results that follow. The turn count is a limit of its own: a longer history is pruned whether
+   * or not `maxTokens` or `maxMessages` is set. When one is set and those turns exceed it, the
+   * oldest of them are dropped until they fit. `ContextWindowConfig.minRecentTurns` turns are
+   * always kept, so a lower `turns` acts as that.
    *
-   * @param turns Number of recent turns to keep
+   * @param turns Number of recent turns to keep, the current one included
    */
   case class RecentTurnsOnly(turns: Int) extends PruningStrategy
 

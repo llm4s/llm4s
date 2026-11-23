@@ -62,7 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `ContainerisedWorkspace` with `networkAllowed = false` (the default) has no egress, and needs this release's image
   and a Docker host that grants `NET_ADMIN` (#870); [migration](docs/reference/migration.md#a-workspace-container-has-no-egress-870).
 - `ContextWindowConfig.minRecentTurns` is honoured and defaults to 1, not 3; `PruningStrategy.AdaptiveWindowing.preserveMinTurns`
-  is removed in its favour, and `maxTokens` and `maxMessages` set together are both enforced
+  is removed in its favour, `maxTokens` and `maxMessages` set together are both enforced, and `RecentTurnsOnly` prunes to
+  its turn count with no other limit set
   ([#2728](https://github.com/llm4s/llm4s/issues/2728), [#2729](https://github.com/llm4s/llm4s/issues/2729));
   [migration](docs/reference/migration.md#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729).
 
@@ -136,9 +137,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
+- **Added** RAG guardrails run inside an agent (experimental): `RAGGuardrail.withTurnContext(guardrail)(turn => Some(RAGContext.fromToolResults(turn, Set("search"))))` is an output guardrail for `GuardrailMiddleware` that checks each final answer against the turn's retrieval-tool results,
+  its judge calls counted in the run's usage; `GuardrailConfig.outputGuardrailsWithContext` does it for a preset ([guide](docs/guide/agents/guardrails.md#rag-guardrails)) [#2781](https://github.com/llm4s/llm4s/issues/2781).
 - **Changed** `llm4s-agent` is tiered: every public top-level type is `@Stable` (the agent, graph, event, middleware and guardrail APIs) or `@Experimental` (harness, run queue and worker, encryption, subagent definition, permissions, the checkpointer SPI, the RAG guardrails, `assistant`), `sbt stabilityTierCheck` covers the module, and its Stable case classes are growth-safe
   ([tiers](docs/reference/api-stability.md#tiers-in-the-code), [migration](docs/reference/migration.md#llm4s-agent-types-are-tiered-and-growth-safe-2778)) [#2778](https://github.com/llm4s/llm4s/issues/2778).
-- **Fixed** context pruning (`ContextWindowMiddleware`): `ContextWindowConfig.minRecentTurns`, which nothing read, keeps the last N turns whole under every strategy (default 1, the current turn), and `maxTokens` and `maxMessages` set together are both limits, as is `AdaptiveWindowing`'s window; `MiddleOut` fits `maxTokens`
+- **Fixed** context pruning (`ContextWindowMiddleware`): `ContextWindowConfig.minRecentTurns`, which nothing read, keeps the last N turns whole under every strategy (default 1, the current turn), and `maxTokens` and `maxMessages` set together are both limits, as are `AdaptiveWindowing`'s window and `RecentTurnsOnly`'s turn count, which did nothing with neither set; `MiddleOut` fits `maxTokens`
   ([guide](docs/guide/context-window-pruning.md)) [#2728](https://github.com/llm4s/llm4s/issues/2728), [#2729](https://github.com/llm4s/llm4s/issues/2729).
 - **Added** checkpoint encryption at rest (`org.llm4s.agent.encryption`, experimental): `EncryptingCheckpointer`, `EncryptingRunQueue` and `EncryptingLongTermStore` wrap any store, its queue and its long-term store, sealing state, pending writes, custom events, effect outcomes, queued inputs and long-term items (`/memories/` files included) with AES-256-GCM under keys from an `EncryptionKeySource` (`StaticKeySource`: per-tenant keys, rotation by key id)
   ([guide](docs/guide/agents/durable-checkpointers.md#encrypting-what-the-store-holds), [design](docs/superpowers/specs/2026-11-22-checkpoint-encryption-design.md)) [#2449](https://github.com/llm4s/llm4s/issues/2449).
