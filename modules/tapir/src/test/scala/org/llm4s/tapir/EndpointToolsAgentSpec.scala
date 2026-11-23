@@ -91,7 +91,7 @@ class EndpointToolsAgentSpec extends AnyFlatSpec with Matchers with EitherValues
     cancelled shouldBe empty
 
     val answers = suspended.status match {
-      case s: AgentStatus.Suspended => s.approvals.map((id, _) => suspended.approve(id)).toMap
+      case AgentStatus.Suspended(s) => s.approvals.map((id, _) => suspended.approve(id)).toMap
       case other                    => fail(s"expected a suspension, got $other")
     }
     val resumed = agent.resume(suspended.threadId, answers).value

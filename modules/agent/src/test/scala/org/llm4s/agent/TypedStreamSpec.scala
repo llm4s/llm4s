@@ -42,7 +42,7 @@ class TypedStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
   private val pinging: (SpecTools.Text, graph.tool.ToolContext) => ToolOutcome = (_, ctx) =>
     Pinged.emit(ctx.run, Ping(1))
     Progressed.progress(ctx.run, Ping(2))
-    ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+    ToolOutcome.success(ToolContent.Json(ujson.Str("ok")))
 
   final private class Seen:
     private val all           = new CopyOnWriteArrayList[String]()
@@ -78,7 +78,7 @@ class TypedStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       (1 to 3000).foreach(i => Progressed.progress(ctx.run, Ping(i)))
       emitted.countDown()
       Pinged.emit(ctx.run, Ping(0))
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("ok")))
     val progressed = new AtomicInteger(0)
     val gaps       = new AtomicInteger(0)
     val pinged     = new AtomicInteger(0)
@@ -109,7 +109,7 @@ class TypedStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       Pinged.emit(ctx.run, Ping(attempt))
       Progressed.progress(ctx.run, Ping(attempt))
       if attempt == 1 then ToolOutcome.Fatal(SimpleError("first attempt fails"))
-      else ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+      else ToolOutcome.success(ToolContent.Json(ujson.Str("ok")))
     val agent    = agentWith(failingFirst, runtime)
     val threadId = ThreadId("ts4")
     val first    = Seen()

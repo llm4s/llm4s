@@ -36,7 +36,7 @@ class TimedOutEffectSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   private def outcome[A](result: Either[org.llm4s.error.LLMError, A]): ToolOutcome = result match {
-    case Right(value)                            => ToolOutcome.Success(ToolContent.Json(ujson.Str(value.toString)))
+    case Right(value)                            => ToolOutcome.success(ToolContent.Json(ujson.Str(value.toString)))
     case Left(r: GraphError.EffectReplayRefused) => ToolOutcome.Error(r.message)
     case Left(other)                             => ToolOutcome.Fatal(other)
   }

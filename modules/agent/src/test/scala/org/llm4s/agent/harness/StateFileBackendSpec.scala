@@ -322,7 +322,7 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
   private def tools(backend: FileBackend) = {
     def lockOf(path: String) = VPath(path).fold(_ => Set(LockKey("")), backend.locks)
     def outcome[A](r: org.llm4s.types.Result[(A, StateUpdate)]): ToolOutcome =
-      r.fold(BackendRefused.toolOutcome, (a, u) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.toString)), u))
+      r.fold(BackendRefused.toolOutcome, (a, u) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.toString)), u))
     val write =
       AgentTool(SpecTools.spec("write_file").withLocks(t => lockOf(t.text.takeWhile(_ != '|'))), backend.writes) {
         (args, context) =>
@@ -344,7 +344,7 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
         .read(p(args.text), 0, 100, FileContext(context))
         .fold(
           BackendRefused.toolOutcome,
-          lines => ToolOutcome.Success(ToolContent.Json(ujson.Str(lines.lines.mkString("\n"))))
+          lines => ToolOutcome.success(ToolContent.Json(ujson.Str(lines.lines.mkString("\n"))))
         )
     }
     SpecTools.set(write, edit, delete, read)

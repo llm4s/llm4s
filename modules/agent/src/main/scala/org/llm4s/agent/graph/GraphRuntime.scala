@@ -663,10 +663,12 @@ final class GraphRuntime(
                       // The store names it only if it was a claim of this run's tenant (#1926)
                       granted =>
                         RunEvent.RunRecovered(
-                          stored.checkpoint.id,
-                          config.tenantId.map(_.value),
-                          config.principal.map(_.value),
-                          granted.takenOverFrom.map(_.value)
+                          RunRecoveredDetails(
+                            stored.checkpoint.id,
+                            config.tenantId.map(_.value),
+                            config.principal.map(_.value),
+                            granted.takenOverFrom.map(_.value)
+                          )
                         ),
                       // read again under the claim: a holder whose claim expired but was not yet replaced
                       // could still add pending writes after the read above, and only the claim stops it
@@ -771,9 +773,11 @@ final class GraphRuntime(
                     Some(stored.checkpoint.id),
                     _ =>
                       RunEvent.RunResumed(
-                        suspended.parked.map(_.interrupt).filter(answers.contains).map(_.value),
-                        config.tenantId.map(_.value),
-                        config.principal.map(_.value)
+                        RunResumedDetails(
+                          suspended.parked.map(_.interrupt).filter(answers.contains).map(_.value),
+                          config.tenantId.map(_.value),
+                          config.principal.map(_.value)
+                        )
                       ),
                     fence = parentFenceOf(stored, parentClaim),
                     amend = amended(_, amend)
@@ -1046,7 +1050,14 @@ final class GraphRuntime(
               open.origin,
               Some(outcome)
             ).withTrace(open.trace)
-            event  = EventDraft(run.value, Some(saved.id), None, None, now, RunEvent.RunFailed(message))
+            event = EventDraft(
+              run.value,
+              Some(saved.id),
+              None,
+              None,
+              now,
+              RunEvent.RunFailed(RunFailedDetails(message))
+            )
             fence  = parentFenceOf(stored, parentClaim)
             commit = Commit(held.claim.token, Some(saved), Vector.empty, Vector(event)).withFence(fence)
             _ <- held.committing(commit)(commitAndDeliver(threadId, commit).left.map(fenceRefused(threadId, fence)))
@@ -1472,7 +1483,14 @@ final class GraphRuntime(
               Some(outcome)
             ).withTrace(open.trace)
             val event =
-              EventDraft(config.runId.value, Some(saved.id), None, None, now, RunEvent.RunFailed(message))
+              EventDraft(
+                config.runId.value,
+                Some(saved.id),
+                None,
+                None,
+                now,
+                RunEvent.RunFailed(RunFailedDetails(message))
+              )
             val fence  = Some(parent -> token)
             val commit = Commit(held.claim.token, Some(saved), Vector.empty, Vector(event)).withFence(fence)
             held
@@ -1638,7 +1656,9 @@ final class GraphRuntime(
               None,
               None,
               now,
-              RunEvent.ThreadForked(source.value, checkpointId, tenant, config.principal.map(_.value))
+              RunEvent.ThreadForked(
+                ThreadForkedDetails(source.value, checkpointId, tenant, config.principal.map(_.value))
+              )
             )
             val commit = Commit(claim.token, Some(forked), events = Vector(event))
             held
@@ -1736,7 +1756,7 @@ final class GraphRuntime(
             None,
             nodeId,
             now,
-            RunEvent.StateUpdated(parentId, nodeId, tenant, config.principal.map(_.value))
+            RunEvent.StateUpdated(StateUpdatedDetails(parentId, nodeId, tenant, config.principal.map(_.value)))
           )
           val commit =
             Commit(claim.token, Some(saved), stored.pendingWrites.map(_.withCheckpointId(saved.id)), Vector(event))
@@ -2383,7 +2403,7 @@ final class GraphRuntime(
   private[graph] def handOverMarked(threadId: ThreadId): Boolean = hub.marked(threadId)
 
   private def started(config: RunConfig): RunEvent =
-    RunEvent.RunStarted(config.tenantId.map(_.value), config.principal.map(_.value))
+    RunEvent.RunStarted(RunStartedDetails(config.tenantId.map(_.value), config.principal.map(_.value)))
 
   /**
    * [[GraphError.ThreadBusy]] naming the thread's latest checkpoint and the run holding it in this
@@ -3243,7 +3263,8 @@ final class GraphRuntime(
         failedUsage.updateAndGet(_.merge(context.usage.lost))
         failedSteps.addAndGet(context.usage.lostSteps): Unit
 
-    private def failed(message: String): RunEvent = RunEvent.RunFailed(message, lostUsage, failedSteps.get)
+    private def failed(message: String): RunEvent =
+      RunEvent.RunFailed(RunFailedDetails(message, lostUsage, failedSteps.get))
 
     /**
      * When the claim was found lost, at any stage of the run, as a `System.nanoTime` value; set once. The
@@ -3795,13 +3816,13 @@ final class GraphRuntime(
         case StopCause.Cancelled | StopCause.Finishing =>
           closeStopped(
             execution,
-            RunEvent.RunCancelled(lostUsage, failedSteps.get),
+            RunEvent.RunCancelled(RunStoppedDetails(lostUsage, failedSteps.get)),
             GraphError.Cancelled(Some(threadId.value), Some(checkpointId))
           )
         case StopCause.Expired =>
           closeStopped(
             execution,
-            RunEvent.RunTimedOut(lostUsage, failedSteps.get),
+            RunEvent.RunTimedOut(RunStoppedDetails(lostUsage, failedSteps.get)),
             GraphError.DeadlineExceeded(threadId.value, Some(checkpointId))
           )
       Thread.currentThread().interrupt()
@@ -3826,12 +3847,12 @@ final class GraphRuntime(
           )
           closeStopped(
             execution,
-            RunEvent.RunCancelled(lostUsage, failedSteps.get),
+            RunEvent.RunCancelled(RunStoppedDetails(lostUsage, failedSteps.get)),
             GraphError.Cancelled(Some(threadId.value), Some(parent))
           )
         case Right((settled, saved)) =>
           committer.forgetInterruptedFailure()
-          submit(saved, RunEvent.RunCancelled(lostUsage, failedSteps.get))
+          submit(saved, RunEvent.RunCancelled(RunStoppedDetails(lostUsage, failedSteps.get)))
           stop(settled, GraphError.Cancelled(Some(threadId.value), Some(saved.id)))
 
     /** Commits a stopped run's closing `event`, against its last durable checkpoint, and fails it with `error`. */
@@ -3917,14 +3938,16 @@ final class GraphRuntime(
         )
       private def liveEvent(name: String, version: Int, payload: ujson.Value): StreamEvent.Live =
         StreamEvent.Live(
-          threadId.value,
-          runId.value,
-          token,
-          task.id.value,
-          task.node.value,
-          name,
-          version,
-          ujson.copy(payload)
+          LiveEvent(
+            threadId.value,
+            runId.value,
+            token,
+            task.id.value,
+            task.node.value,
+            name,
+            version,
+            ujson.copy(payload)
+          )
         )
       // a child's event, forwarded from the child's run (design 4.47): fenced like progress, and also once the run has
       // released its claim, so a child that outlives its parent's run (it ignored a cancel past the drain) sends

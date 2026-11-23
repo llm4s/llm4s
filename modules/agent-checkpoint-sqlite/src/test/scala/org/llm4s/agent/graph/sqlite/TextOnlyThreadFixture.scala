@@ -77,14 +77,14 @@ object TextOnlyThreadFixture:
     def tool(name: String)(outcome: => ToolOutcome) = AgentTool(spec(name))((_, _) => outcome)
     val tools = ToolSet
       .of(
-        tool("lookup")(ToolOutcome.Success(lookup)),
+        tool("lookup")(ToolOutcome.success(lookup)),
         tool("good") {
           goodRuns.incrementAndGet()
-          ToolOutcome.Success(ToolContent.Json(ujson.Str("good result")))
+          ToolOutcome.success(ToolContent.Json(ujson.Str("good result")))
         },
         tool("flaky")(
           if broken.get then ToolOutcome.Fatal(ValidationError("flaky", "backend down"))
-          else ToolOutcome.Success(ToolContent.Json(ujson.Str("flaky result")))
+          else ToolOutcome.success(ToolContent.Json(ujson.Str("flaky result")))
         )
       )
       .fold(e => throw new IllegalStateException(e.message), identity)

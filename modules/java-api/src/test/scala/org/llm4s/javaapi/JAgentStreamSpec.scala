@@ -6,7 +6,15 @@ import java.util.Optional
 import org.llm4s.agent.AgentResult
 import org.llm4s.agent.events.AgentEvents
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
-import org.llm4s.agent.graph.{ GraphError, GraphRuntime, InterruptId, RunEvent, StreamEvent, ThreadId }
+import org.llm4s.agent.graph.{
+  RunStartedDetails,
+  GraphError,
+  GraphRuntime,
+  InterruptId,
+  RunEvent,
+  StreamEvent,
+  ThreadId
+}
 import org.llm4s.error.{ CancelledError, LLMError, NetworkError, ValidationError }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
@@ -59,7 +67,7 @@ class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
     recorder.completed.get shouldBe result
     recorder.failed.get shouldBe null
     recorder.terminals.get shouldBe 1
-    recorder.durable.head shouldBe RunEvent.RunStarted(None, None)
+    recorder.durable.head shouldBe RunEvent.RunStarted(RunStartedDetails(None, None))
     recorder.durable.last shouldBe RunEvent.RunCompleted
     recorder.threads.asScala.toSet should have size 1
     recorder.threads.get(0) should not be Thread.currentThread()
@@ -528,7 +536,7 @@ class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
     val resumed =
       agent.streamResume(threadId, java.util.List.of(Answer.approve(id.value)), recorder).get().await().get()
     resumed.answer() shouldBe Optional.of("fine")
-    recorder.durable.head should matchPattern { case RunEvent.RunResumed(_, _, _) => }
+    recorder.durable.head should matchPattern { case RunEvent.RunResumed(_) => }
     recorder.durable.last shouldBe RunEvent.RunCompleted
   }
 

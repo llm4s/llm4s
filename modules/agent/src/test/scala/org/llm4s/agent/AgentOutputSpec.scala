@@ -69,7 +69,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   // a format on a request that offers tools conflicts with tool use for several providers (Codex, #1924)
   it should "send no response format on a call that offers the agent's tools, so the model can still call them" in {
-    val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+    val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
     val client = new ScriptedLLMClient(Right(calling(call("c1", "echo"))), Right(CompletionFixture.simple(valid)))
     val result = built(withFormat(client).withTools(SpecTools.set(echo))).run("bill Acme").value
 
@@ -89,7 +89,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "send the format when a model wrapper removes the tools from the request" in {
-    val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+    val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
     val toolless = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("toolless")
       override def wrapModelCall(request: ModelRequest, context: ModelContext)(
@@ -103,7 +103,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "send no response format of the completion options on a tool call either" in {
-    val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+    val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
     val client = new ScriptedLLMClient(Right(calling(call("c1", "echo"))), Right(CompletionFixture.simple(valid)))
     built(
       withFormat(client)
@@ -201,7 +201,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "route the corrective call's tool calls as usual" in {
-    val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+    val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
     val client = new ScriptedLLMClient(
       Right(CompletionFixture.simple(invalid)),
       Right(calling(call("c1", "echo"))),
@@ -232,7 +232,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       .eventsAfter(thread, 0L, 1000)
       .fold(e => fail(e.message), identity)
       .map(_.event)
-      .collect { case f: RunEvent.RunFailed => f }
+      .collect { case RunEvent.RunFailed(f) => f }
     failed.flatMap(_.usage).map(_.requestCount) shouldBe Vector(1L)
     val recovered = agent.recover(thread).value
     recovered.decodeOutput[Invoice] shouldBe Right(Invoice("Acme", 12.5))
@@ -341,7 +341,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "remove a turn's tool calls too" in {
-    val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+    val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
     val client = new ScriptedLLMClient(
       Right(calling(call("c1", "echo"))),
       Right(CompletionFixture.simple(invalid)),
@@ -360,7 +360,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val files = org.llm4s.agent.graph.StateKey.replace[Map[String, String]]("files", Map.empty)
     val write = org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("write"), writes = Set(files)) { (a, context) =>
       val current = context.state.get(files).getOrElse(Map.empty)
-      ToolOutcome.Success(
+      ToolOutcome.success(
         ToolContent.Json(ujson.Str("ok")),
         org.llm4s.agent.graph.StateUpdate.update(files, current + (a.text -> a.text))
       )
@@ -389,7 +389,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val files = org.llm4s.agent.graph.StateKey.replace[Map[String, String]]("files", Map.empty)
     val write = org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("write"), writes = Set(files)) { (a, context) =>
       val current = context.state.get(files).getOrElse(Map.empty)
-      ToolOutcome.Success(
+      ToolOutcome.success(
         ToolContent.Json(ujson.Str("ok")),
         org.llm4s.agent.graph.StateUpdate.update(files, current + (a.text -> a.text))
       )
@@ -416,8 +416,8 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     val parked = agent.run(thread, "first").value
     val asked = parked.status match {
-      case AgentStatus.Suspended(_, _, asked, _, _) => asked
-      case other                                    => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(suspension) => suspension.middlewareQuestions
+      case other                             => fail(s"expected Suspended, got $other")
     }
     agent.resume(thread, Map(parked.reply(asked.head._1, true))).error shouldBe a[GraphError.OutputInvalid]
 

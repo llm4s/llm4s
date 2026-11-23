@@ -3,7 +3,7 @@ package org.llm4s.javaapi
 import org.llm4s.testutil.TestTimeLimit
 
 import java.util.Optional
-import org.llm4s.agent.AgentStatus
+import org.llm4s.agent.{ AgentStatus, Suspension }
 import org.llm4s.agent.graph.{ GraphError, IdempotencyKey, InterruptId }
 import org.llm4s.agent.graph.toolloop.{ ApprovalRequest, ApprovalSource, ToolQuestionRequest }
 import org.llm4s.error.{ CancelledError, NetworkError, ValidationError }
@@ -125,8 +125,10 @@ class JAgentPendingSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   it should "report a missing approval reason or question as empty, never as a null in an Optional" in {
     val c = call("c1", "deploy", "x")
     val status = AgentStatus.Suspended(
-      Vector(InterruptId("a1") -> ApprovalRequest("m1", c, null, ApprovalSource.Tool, IdempotencyKey("k1"))),
-      Vector(InterruptId("q1") -> ToolQuestionRequest("m1", c, null, IdempotencyKey("q1")))
+      Suspension(
+        Vector(InterruptId("a1") -> ApprovalRequest("m1", c, null, ApprovalSource.Tool, IdempotencyKey("k1"))),
+        Vector(InterruptId("q1") -> ToolQuestionRequest("m1", c, null, IdempotencyKey("q1")))
+      )
     )
     val List(approval, question) = FacadeInternals.pending(status).asScala.toList: @unchecked
     approval.kind shouldBe InterruptKind.APPROVAL
@@ -146,31 +148,33 @@ class JAgentPendingSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val request =
       ApprovalRequest("m1", c, "check", ApprovalSource.Tool, IdempotencyKey("k1"))
     val status = AgentStatus.Suspended(
-      Vector.empty,
-      Vector.empty,
-      delegated = Vector(
-        InterruptId("1.0~2.0") -> DelegatedRequest(child, ChildInterrupt.Approval(InterruptId("2.0"), request)),
-        InterruptId("1.0~2.1") -> DelegatedRequest(
-          child,
-          ChildInterrupt
-            .Question(InterruptId("2.1"), ToolQuestionRequest("m1", c, ujson.Str("unit?"), IdempotencyKey("q")))
-        ),
-        InterruptId("1.0~2.2") -> DelegatedRequest(
-          child,
-          ChildInterrupt.MiddlewareQuestion(
-            InterruptId("2.2"),
-            MiddlewareQuestionRequest(child.agent, MiddlewareId("ask"), MiddlewareHook.BeforeAgent, ujson.Str("ok?"))
-          )
-        ),
-        InterruptId("1.0~2.3") -> DelegatedRequest(
-          child,
-          ChildInterrupt.Breakpoint(InterruptId("2.3"), BreakpointRequest(NodeId("worker/model"), GraphPhase.Before))
-        ),
-        InterruptId("1.0~2.4") -> DelegatedRequest(
-          child,
-          ChildInterrupt.Delegated(
-            InterruptId("2.4~3.0"),
-            DelegatedRequest(child, ChildInterrupt.Approval(InterruptId("3.0"), request))
+      Suspension(
+        Vector.empty,
+        Vector.empty,
+        delegated = Vector(
+          InterruptId("1.0~2.0") -> DelegatedRequest(child, ChildInterrupt.Approval(InterruptId("2.0"), request)),
+          InterruptId("1.0~2.1") -> DelegatedRequest(
+            child,
+            ChildInterrupt
+              .Question(InterruptId("2.1"), ToolQuestionRequest("m1", c, ujson.Str("unit?"), IdempotencyKey("q")))
+          ),
+          InterruptId("1.0~2.2") -> DelegatedRequest(
+            child,
+            ChildInterrupt.MiddlewareQuestion(
+              InterruptId("2.2"),
+              MiddlewareQuestionRequest(child.agent, MiddlewareId("ask"), MiddlewareHook.BeforeAgent, ujson.Str("ok?"))
+            )
+          ),
+          InterruptId("1.0~2.3") -> DelegatedRequest(
+            child,
+            ChildInterrupt.Breakpoint(InterruptId("2.3"), BreakpointRequest(NodeId("worker/model"), GraphPhase.Before))
+          ),
+          InterruptId("1.0~2.4") -> DelegatedRequest(
+            child,
+            ChildInterrupt.Delegated(
+              InterruptId("2.4~3.0"),
+              DelegatedRequest(child, ChildInterrupt.Approval(InterruptId("3.0"), request))
+            )
           )
         )
       )

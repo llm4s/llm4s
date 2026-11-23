@@ -46,7 +46,7 @@ class InstructionMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Eit
   private val noop: AgentTool[ujson.Value] =
     AgentTool(
       AgentToolSpec[ujson.Value]("noop", "does nothing", org.llm4s.toolapi.Schema.`object`[ujson.Value]("none"))
-    )((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("ok"))))
+    )((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("ok"))))
 
   private def loopOf(model: ModelStep, stack: Seq[AgentMiddleware], tools: ToolSet = ToolSet.empty): ToolLoop =
     ToolLoop.build("instructions", "1", agentA, Vector(LoopAgent(agentA, model, tools).withMiddleware(stack))).value

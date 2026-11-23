@@ -64,7 +64,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     writes = Set(files)
   ) { (args, context) =>
     val current = context.state.get(files).getOrElse(Map.empty)
-    ToolOutcome.Success(
+    ToolOutcome.success(
       ToolContent.Json(ujson.Str("ok")),
       StateUpdate.update(files, current + (args.text -> args.text))
     )
@@ -504,7 +504,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     val loop  = loopOf(ScriptedModel(answer("hi"), answer("again")), Seq(failing))
     GraphRuntime(store).start(t, loop.graph, AgentInput("go")).awaited.value.failed
     val failed =
-      store.eventsAfter(t, 0L, 1000).value.map(_.event).collect { case f: RunEvent.RunFailed =>
+      store.eventsAfter(t, 0L, 1000).value.map(_.event).collect { case RunEvent.RunFailed(f) =>
         f
       }
     failed.size shouldBe 1
@@ -514,9 +514,9 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
   }
 
   "A stored RunFailed without usage" should "still decode" in {
-    val old = upickle.default.writeJs[RunEvent](RunEvent.RunFailed("boom"))
+    val old = upickle.default.writeJs[RunEvent](RunEvent.RunFailed(RunFailedDetails("boom")))
     old.obj.remove("usage")
-    upickle.default.read[RunEvent](old) shouldBe RunEvent.RunFailed("boom")
+    upickle.default.read[RunEvent](old) shouldBe RunEvent.RunFailed(RunFailedDetails("boom"))
   }
 
   // ---- round 2: bounds measured on what is sent, a Block undoing only the turn's own writes, usage of every attempt
@@ -593,7 +593,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     called.await(5, TimeUnit.SECONDS) shouldBe true
     handle.cancel()
     awaitResult(handle).value.failed
-    val cancelled = store.eventsAfter(t, 0L, 1000).value.map(_.event).collect { case c: RunEvent.RunCancelled => c }
+    val cancelled = store.eventsAfter(t, 0L, 1000).value.map(_.event).collect { case RunEvent.RunCancelled(c) => c }
     cancelled.map(_.usage.map(_.requestCount)) shouldBe Vector(Some(1L))
   }
 
@@ -615,17 +615,17 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       .awaited
       .value
       .failed
-    val timedOut = store.eventsAfter(t, 0L, 1000).value.map(_.event).collect { case e: RunEvent.RunTimedOut => e }
+    val timedOut = store.eventsAfter(t, 0L, 1000).value.map(_.event).collect { case RunEvent.RunTimedOut(e) => e }
     timedOut.map(_.usage.map(_.requestCount)) shouldBe Vector(Some(1L))
   }
 
   "A stored RunCancelled or RunTimedOut from before usage" should "decode as one with none" in {
-    upickle.default.read[RunEvent]("\"RunCancelled\"") shouldBe RunEvent.RunCancelled(None)
-    upickle.default.read[RunEvent]("\"RunTimedOut\"") shouldBe RunEvent.RunTimedOut(None)
+    upickle.default.read[RunEvent]("\"RunCancelled\"") shouldBe RunEvent.RunCancelled(RunStoppedDetails.empty)
+    upickle.default.read[RunEvent]("\"RunTimedOut\"") shouldBe RunEvent.RunTimedOut(RunStoppedDetails.empty)
     upickle.default.read[RunEvent](
-      upickle.default.write[RunEvent](RunEvent.RunCancelled(Some(UsageSummary())))
+      upickle.default.write[RunEvent](RunEvent.RunCancelled(RunStoppedDetails(Some(UsageSummary()))))
     ) shouldBe
-      RunEvent.RunCancelled(Some(UsageSummary()))
+      RunEvent.RunCancelled(RunStoppedDetails(Some(UsageSummary())))
   }
 
   "A wrapper that calls next several times, then fails" should "leave every completed call's usage on RunFailed" in {
@@ -647,7 +647,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       .value
       .failed
     val failed =
-      store.eventsAfter(t, 0L, 1000).value.map(_.event).collect { case f: RunEvent.RunFailed =>
+      store.eventsAfter(t, 0L, 1000).value.map(_.event).collect { case RunEvent.RunFailed(f) =>
         f
       }
     failed.map(_.usage.map(_.requestCount)) shouldBe Vector(Some(2L))

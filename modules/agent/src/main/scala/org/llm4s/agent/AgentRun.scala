@@ -273,7 +273,7 @@ private[agent] object AgentRun:
           middleware  <- loop.middlewareQuestions(suspended)
           breakpoints <- loop.breakpoints(suspended)
           delegated   <- delegatedOf(loop, suspended)
-        yield AgentStatus.Suspended(approvals, questions, middleware, breakpoints, delegated)
+        yield AgentStatus.Suspended(Suspension(approvals, questions, middleware, breakpoints, delegated))
       case RunResult.Failed(_, blocked: GuardrailBlocked) if isBlock =>
         Right(AgentStatus.Blocked(blocked.guardrail, blocked.reason))
       case RunResult.Failed(_, error) => Left(error)

@@ -43,7 +43,7 @@ class AncestorPermissionsSpec extends AnyFlatSpec with Matchers {
 
   private def ran(counter: AtomicInteger)(): ToolOutcome = {
     counter.incrementAndGet()
-    ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+    ToolOutcome.success(ToolContent.Json(ujson.Str("ok")))
   }
 
   "AncestorPermissions" should "ask once when any level asks, and pass every level once the call is approved" in {

@@ -198,9 +198,9 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
     val parked = agent.run("q").value
 
     val approvals = parked.status match {
-      case AgentStatus.Suspended(approvals, questions, _, _, _) =>
-        questions shouldBe empty
-        approvals
+      case AgentStatus.Suspended(suspension) =>
+        suspension.questions shouldBe empty
+        suspension.approvals
       case other => fail(s"expected Suspended, got $other")
     }
     approvals.map(_._2.call.id) shouldBe Vector("c1")

@@ -58,11 +58,11 @@ object MultiStepAgentExample {
   @tailrec
   private def approveAll(agent: Agent, result: AgentResult): Result[AgentResult] =
     result.status match {
-      case AgentStatus.Suspended(approvals, _, _, _, _) =>
-        approvals.foreach { case (_, request) =>
+      case AgentStatus.Suspended(suspension) =>
+        suspension.approvals.foreach { case (_, request) =>
           logger.info("Pending approval: {} ({})", request.call.name, request.reason)
         }
-        agent.resume(result.threadId, approvals.map { case (id, _) => result.approve(id) }.toMap) match {
+        agent.resume(result.threadId, suspension.approvals.map { case (id, _) => result.approve(id) }.toMap) match {
           case Right(next) => approveAll(agent, next)
           case left        => left
         }

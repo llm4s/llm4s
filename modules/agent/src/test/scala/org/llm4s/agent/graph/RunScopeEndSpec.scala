@@ -118,7 +118,7 @@ class RunScopeEndSpec extends AnyFlatSpec with Matchers with Eventually:
         // await drained the stream's scope: it has ended, and left the live set, already
         runtime.liveSubscriptions(threadId) shouldBe 0
         durable(events).map(_.event).exists(RunScopeEndSpec.terminal) shouldBe false
-        durable(events).headOption.map(_.event) shouldBe Some(RunEvent.RunStarted(None, None))
+        durable(events).headOption.map(_.event) shouldBe Some(RunEvent.RunStarted(RunStartedDetails(None, None)))
         durable(events) shouldBe stored(store, threadId, run.runId)
       }
 
@@ -135,7 +135,7 @@ class RunScopeEndSpec extends AnyFlatSpec with Matchers with Eventually:
         run.await().isLeft shouldBe true
         runtime.liveSubscriptions(threadId) shouldBe 0
         durable(events) shouldBe stored(store, threadId, run.runId)
-        durable(events).headOption.map(_.event) shouldBe Some(RunEvent.RunStarted(None, None))
+        durable(events).headOption.map(_.event) shouldBe Some(RunEvent.RunStarted(RunStartedDetails(None, None)))
       }
 
     s"AgentRun.await, when the store $how the run's terminal commit" should

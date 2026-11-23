@@ -33,19 +33,21 @@ class AgentBreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val deploy = SpecTools.tool("deploy") { (a, _) =>
     ran.add(a.text)
-    ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
+    ToolOutcome.success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
   }
 
   private def breakpointsOf(result: AgentResult): Vector[(InterruptId, BreakpointRequest)] = result.status match {
-    case AgentStatus.Suspended(approvals, questions, asked, held, _) =>
-      (approvals ++ questions ++ asked).size shouldBe 0
-      held
+    case AgentStatus.Suspended(suspension) =>
+      (suspension.approvals ++ suspension.questions ++ suspension.middlewareQuestions).size shouldBe 0
+      suspension.breakpoints
     case other => fail(s"expected Suspended, got $other")
   }
 
   /** The one interrupt `result` waits for: a middleware question. */
   private def onlyQuestion(result: AgentResult): InterruptId = result.status match {
-    case AgentStatus.Suspended(Vector(), Vector(), Vector((id, _)), Vector(), _) => id
+    case AgentStatus.Suspended(s)
+        if s.approvals.isEmpty && s.questions.isEmpty && s.breakpoints.isEmpty && s.middlewareQuestions.sizeIs == 1 =>
+      s.middlewareQuestions.head._1
     case other => fail(s"expected one middleware question, got $other")
   }
 
@@ -159,10 +161,12 @@ class AgentBreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     )
     val parked = agent.run("deploy").value
     val (approval, held) = parked.status match {
-      case AgentStatus.Suspended(approvals, Vector(), Vector(), breakpoints, _) =>
-        approvals.map(_._2.call.id) shouldBe Vector("c1")
-        breakpoints.map(_._2) shouldBe Vector(BreakpointRequest(toolNode, BreakpointPhase.After, None))
-        (approvals.head._1, breakpoints.head._1)
+      case AgentStatus.Suspended(suspension) =>
+        suspension.questions shouldBe empty
+        suspension.middlewareQuestions shouldBe empty
+        suspension.approvals.map(_._2.call.id) shouldBe Vector("c1")
+        suspension.breakpoints.map(_._2) shouldBe Vector(BreakpointRequest(toolNode, BreakpointPhase.After, None))
+        (suspension.approvals.head._1, suspension.breakpoints.head._1)
       case other => fail(s"expected an approval and a breakpoint, got $other")
     }
     ran.asScala.toVector shouldBe Vector("two")
@@ -236,14 +240,16 @@ class AgentBreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val confirm = new AgentTool.Asking[Text, Need, Boolean](SpecTools.spec("confirm")) {
       def execute(args: Text, context: ToolContext): ToolOutcome = ask(Need("sure?"))
       def resume(args: Text, question: Need, answer: Boolean, context: ToolContext): ToolOutcome =
-        ToolOutcome.Success(ToolContent.Json(ujson.Str(s"confirmed $answer")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str(s"confirmed $answer")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm")), CompletionFixture.simple("done"))
     val agent =
       built(Agent.builder("assistant", client).withTools(SpecTools.set(confirm)).withInterruptAfter(AgentNode.Tool))
     val parked = agent.run("go").value
     val question = parked.status match {
-      case AgentStatus.Suspended(Vector(), Vector((id, _)), Vector(), Vector(), _) => id
+      case AgentStatus.Suspended(s)
+          if s.approvals.isEmpty && s.middlewareQuestions.isEmpty && s.breakpoints.isEmpty && s.questions.sizeIs == 1 =>
+        s.questions.head._1
       case other => fail(s"expected a tool question, got $other")
     }
     val answered = agent.resume(parked.threadId, Map(parked.reply(question, true))).value
@@ -343,7 +349,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val flaky = SpecTools.tool("deploy") { (_, _) =>
       runs.incrementAndGet()
       if failOnce.getAndSet(false) then ToolOutcome.Fatal(ValidationError("deploy", "store down"))
-      else ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+      else ToolOutcome.success(ToolContent.Json(ujson.Str("ok")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy")), CompletionFixture.simple("done"))
     val agent =
@@ -362,7 +368,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         entered.countDown()
         Thread.sleep(60_000) // interrupted by cancel
       }
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("ok")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy")), CompletionFixture.simple("done"))
     val agent =

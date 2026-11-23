@@ -32,7 +32,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
       None,
       None,
       java.time.Instant.EPOCH,
-      RunEvent.RunStarted(None, None)
+      RunEvent.RunStarted(RunStartedDetails(None, None))
     )
 
   /** A run-scoped listener recording, in one sequence, each event's label and each barrier reached. */
@@ -167,7 +167,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
       case _ => ()
     }
     def live(i: Int): StreamEvent.Live =
-      StreamEvent.Live(thread.value, run.value, claim, "task", "node", "test.progress", 1, ujson.Num(i))
+      StreamEvent.Live(LiveEvent(thread.value, run.value, claim, "task", "node", "test.progress", 1, ujson.Num(i)))
     val hub = EventHub(InMemoryCheckpointer())
     val sub =
       hub
@@ -262,7 +262,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
         case _ => ()
     }
     def live(i: Int): StreamEvent.Live =
-      StreamEvent.Live(thread.value, run.value, claim, "task", "node", "test.progress", 1, ujson.Num(i))
+      StreamEvent.Live(LiveEvent(thread.value, run.value, claim, "task", "node", "test.progress", 1, ujson.Num(i)))
     val hub = EventHub(log)
     val b =
       hub.observe(thread, capacity = 16, behind, cut.apply, TenantScope.Unscoped).claimed(claim).start(lastSeq = 0L)
@@ -430,7 +430,10 @@ class EventHubBarrierSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val l = hub
       .subscribe(thread, afterSeq = 0L, capacity = 16, late, AbandonedWrites.none, TenantScope.Unscoped)
       .fold(e => fail(e.message), identity)
-    hub.live(thread, StreamEvent.Live(thread.value, run.value, claim, "task", "node", "test.progress", 1, ujson.Num(0)))
+    hub.live(
+      thread,
+      StreamEvent.Live(LiveEvent(thread.value, run.value, claim, "task", "node", "test.progress", 1, ujson.Num(0)))
+    )
     lateJoined.await(5, TimeUnit.SECONDS) shouldBe true
     late.seen.asScala.toVector shouldBe Vector("1", "live")
     log.release.countDown()
@@ -447,7 +450,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   }
 
   private def live(i: Int, token: FencingToken = claim): StreamEvent.Live =
-    StreamEvent.Live(thread.value, run.value, token, "task", "node", "test.progress", 1, ujson.Num(i))
+    StreamEvent.Live(LiveEvent(thread.value, run.value, token, "task", "node", "test.progress", 1, ujson.Num(i)))
 
   /** A thread-scoped listener recording each event's label, as [[Recording]] does. */
   private def recording(onEvent: StreamEvent => Unit = _ => ()): Recording = Recording(onEvent)

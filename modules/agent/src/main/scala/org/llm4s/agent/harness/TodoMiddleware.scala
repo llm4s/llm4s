@@ -97,11 +97,11 @@ final class TodoMiddleware(
         resolve(current, args) match
           case Left(message) => ToolOutcome.Error(message)
           case Right(next) if next == current =>
-            ToolOutcome.Success(ToolContent.Json(ujson.Str(s"Plan unchanged:\n${render(next)}")))
+            ToolOutcome.success(ToolContent.Json(ujson.Str(s"Plan unchanged:\n${render(next)}")))
           case Right(next) =>
             HarnessEvents.TodosUpdated.emit(context.run, TodosUpdated(next.todos.map(t => TodoMark(t.id, t.status))))
             HarnessEvents.TodosProgress.progress(context.run, TodosProgress(next.todos))
-            ToolOutcome.Success(
+            ToolOutcome.success(
               ToolContent.Json(ujson.Str(s"Plan updated:\n${render(next)}")),
               StateUpdate.update(key, next)
             )

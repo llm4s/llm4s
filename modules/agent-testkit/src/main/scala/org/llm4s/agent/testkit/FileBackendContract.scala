@@ -192,9 +192,9 @@ object FileBackendContract:
         case op :: p :: _ if Mutations(op) => VPath(p).fold(_ => Set(LockKey("")), backend.locks)
         case _                             => Set.empty
     def mutated[A](r: Result[(A, StateUpdate)]): ToolOutcome =
-      r.fold(e => errorOf(e), (a, u) => ToolOutcome.Success(ToolContent.Json(ujson.Str(fields(a))), u))
+      r.fold(e => errorOf(e), (a, u) => ToolOutcome.success(ToolContent.Json(ujson.Str(fields(a))), u))
     def read[A](r: Result[A])(render: A => String): ToolOutcome =
-      r.fold(e => errorOf(e), a => ToolOutcome.Success(ToolContent.Json(ujson.Str(render(a)))))
+      r.fold(e => errorOf(e), a => ToolOutcome.success(ToolContent.Json(ujson.Str(render(a)))))
     val tool = AgentTool(spec.withLocks(locks), backend.writes) { (call, context) =>
       val ctx = FileContext(context)
       call.text.split("\\|", -1).toList match
@@ -233,7 +233,7 @@ object FileBackendContract:
       case r: BackendRefused if r.kind != BackendRefused.Kind.Refused => s"[${r.kind}] "
       case _                                                          => ""
     BackendRefused.toolOutcome(error) match
-      case ToolOutcome.Error(message) => ToolOutcome.Success(ToolContent.Json(ujson.Str(s"error: $kind$message")))
+      case ToolOutcome.Error(message) => ToolOutcome.success(ToolContent.Json(ujson.Str(s"error: $kind$message")))
       case fatal                      => fatal
 
   /** `created=true`, `replacements=2`: a product's fields by name. */

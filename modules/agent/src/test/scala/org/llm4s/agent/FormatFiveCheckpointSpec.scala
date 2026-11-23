@@ -45,7 +45,7 @@ import scala.jdk.CollectionConverters.*
  *   def main(args: Array[String]): Unit =
  *     val thread = ThreadId("format-5-approvals")
  *     val store  = new InMemoryCheckpointer()
- *     val deploy = SpecTools.tool("deploy")((_, _) => ToolOutcome.Success(ujson.Str("never run by the old build")))
+ *     val deploy = SpecTools.tool("deploy")((_, _) => ToolOutcome.success(ujson.Str("never run by the old build")))
  *     val client = ScriptedLLMClient.of(calling(call("c1", "deploy", "one"), call("c2", "deploy", "two")))
  *     val agent = Agent
  *       .builder("assistant", client)
@@ -56,7 +56,7 @@ import scala.jdk.CollectionConverters.*
  *       .fold(e => sys.error(e.message), identity)
  *     val parked = agent.run(thread, "deploy twice").fold(e => sys.error(e.message), identity)
  *     val approvals = parked.status match
- *       case AgentStatus.Suspended(approvals, _) => approvals
+ *       case AgentStatus.Suspended(suspension) => suspension.approvals
  *       case other                               => sys.error(s"expected Suspended, got $other")
  *     require(approvals.size == 2, s"two approvals expected: $approvals")
  *     val stored = store.latest(thread).fold(e => sys.error(e.message), identity).get
@@ -121,7 +121,7 @@ class FormatFiveCheckpointSpec extends AnyFlatSpec with Matchers with EitherValu
     val seen = new ConcurrentHashMap[String, IdempotencyKey]()
     val deploy = SpecTools.tool("deploy") { (a, context) =>
       seen.put(a.text, context.idempotencyKey)
-      ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
     }
     val client = ScriptedLLMClient.of(CompletionFixture.simple("both shipped"))
     val agent = built(

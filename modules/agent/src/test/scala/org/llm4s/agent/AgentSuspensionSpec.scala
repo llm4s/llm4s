@@ -25,7 +25,7 @@ class AgentSuspensionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val deploy = SpecTools.tool("deploy") { (a, _) =>
     ran.add(a.text)
-    ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
+    ToolOutcome.success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
   }
 
   private def agentOver(client: ScriptedLLMClient, tools: AgentTool[?]*): Agent =
@@ -37,8 +37,8 @@ class AgentSuspensionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     )
 
   private def approvalsOf(result: AgentResult): Vector[InterruptId] = result.status match {
-    case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.map(_._1)
-    case other                                        => fail(s"expected Suspended, got $other")
+    case AgentStatus.Suspended(suspension) => suspension.approvals.map(_._1)
+    case other                             => fail(s"expected Suspended, got $other")
   }
 
   "A tool behind ApprovalMiddleware" should "suspend with one approval, and resume completes once approved" in {
@@ -61,7 +61,7 @@ class AgentSuspensionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val slow = SpecTools.tool("deploy") { (_, _) =>
       entered.countDown()
       Thread.sleep(60_000) // interrupted by cancel
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("never")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("never")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy", "prod")), CompletionFixture.simple("shipped"))
     val agent  = agentOver(client, slow)
@@ -128,17 +128,17 @@ class AgentSuspensionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val asker = new AgentTool.Asking[Text, Confirm, Answer](SpecTools.spec("confirm")) {
       def execute(args: Text, context: ToolContext): ToolOutcome = ask(Confirm(s"really ${args.text}?"))
       def resume(args: Text, question: Confirm, answer: Answer, context: ToolContext): ToolOutcome =
-        ToolOutcome.Success(ToolContent.Json(ujson.Str(s"${question.prompt} ${answer.ok}")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str(s"${question.prompt} ${answer.ok}")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm", "go")), CompletionFixture.simple("confirmed"))
     val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(asker)))
 
     val parked = agent.run("ask me").value
     val (id, request) = parked.status match {
-      case AgentStatus.Suspended(approvals, questions, _, _, _) =>
-        approvals shouldBe empty
-        questions should have size 1
-        questions.head
+      case AgentStatus.Suspended(suspension) =>
+        suspension.approvals shouldBe empty
+        suspension.questions should have size 1
+        suspension.questions.head
       case other => fail(s"expected Suspended, got $other")
     }
     request.call.id shouldBe "c1"

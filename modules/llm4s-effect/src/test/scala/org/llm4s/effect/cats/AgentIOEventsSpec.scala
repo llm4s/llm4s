@@ -5,7 +5,7 @@ import org.llm4s.testutil.TestTimeLimit
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.llm4s.agent.AgentRun
-import org.llm4s.agent.graph.{ EventHandlers, RunEvent, StreamEvent, ThreadId }
+import org.llm4s.agent.graph.{ RunStartedDetails, EventHandlers, RunEvent, StreamEvent, ThreadId }
 import org.llm4s.agent.graph.tool.ToolOutcome
 import org.llm4s.agent.graph.tool.ToolContent
 import org.llm4s.agent.testkit.Fixtures
@@ -79,7 +79,7 @@ class AgentIOEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       context => {
         Pings.Pinged.emit(context.run, Ping(1))
         release.await(5, TimeUnit.SECONDS)
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("ok")))
       },
       "e4"
     )
@@ -133,7 +133,7 @@ class AgentIOEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         case _                      => None
       }
     val events = io.events(run, kernel).compile.toList.unsafeRunSync().flatten
-    events.head shouldBe RunEvent.RunStarted(None, None)
+    events.head shouldBe RunEvent.RunStarted(RunStartedDetails(None, None))
     events.last shouldBe RunEvent.RunCompleted
   }
 }

@@ -55,7 +55,7 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
         AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
       ) { (a, context) =>
         keys.add(context.idempotencyKey.value)
-        ToolOutcome.Success(ToolContent.Json(ujson.Str(lines(a.text.toInt))))
+        ToolOutcome.success(ToolContent.Json(ujson.Str(lines(a.text.toInt))))
       }
   }
 
@@ -116,7 +116,7 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     val json = AgentTool(
       AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
     )((a, _) =>
-      ToolOutcome.Success(
+      ToolOutcome.success(
         ToolContent.Json(ujson.Arr((1 to a.text.toInt).map(i => ujson.Obj("i" -> i, "pad" -> "y" * 30))*))
       )
     )
@@ -159,7 +159,7 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "measure rendered JSON in characters, so multibyte text under the threshold stays inline" in {
     val cjk = AgentTool(
       AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
-    )((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Obj("text" -> "漢" * 1500))))
+    )((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Obj("text" -> "漢" * 1500))))
     val model = ScriptedModel(calling("c1" -> 1), answer("done"))
     val (state, _) =
       runInMemory(
@@ -174,7 +174,7 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "measure a blank string as the loop sends it, rendered as JSON" in {
     val blank = AgentTool(
       AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
-    )((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("\n" * 3000))))
+    )((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("\n" * 3000))))
     val model = ScriptedModel(calling("c1" -> 1), answer("done"))
     val (state, _) =
       runInMemory(
@@ -199,7 +199,7 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     val parts = AgentTool(
       AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
     )((_, _) =>
-      ToolOutcome.Success(
+      ToolOutcome.success(
         ToolContent.Parts(Vector(ContentPart.Text(lines(300)), chart, ContentPart.Text(lines(300)), photo))
       )
     )

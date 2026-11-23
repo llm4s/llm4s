@@ -266,7 +266,7 @@ private[agent] object DelegationMiddleware:
               maxReportBytes
             )
           )
-        else ToolOutcome.Success(ToolContent.Json(json))
+        else ToolOutcome.success(ToolContent.Json(json))
       case TaskOutcome.Refused(child, reason, _) =>
         refused(s"subagent '$name' (child thread ${child.threadId.value}) ", reason)
       case TaskOutcome.NotStarted(_, reason) =>

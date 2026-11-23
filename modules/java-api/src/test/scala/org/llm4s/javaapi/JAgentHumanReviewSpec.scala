@@ -2,7 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.testutil.TestTimeLimit
 
-import org.llm4s.agent.{ AgentNode, AgentStatus }
+import org.llm4s.agent.{ Suspension, AgentNode, AgentStatus }
 import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, IdempotencyKey, InterruptId, NodeId }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, BoundaryResult, MiddlewareId, ModelContext, ToolCallRequest }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome, ToolSet }
@@ -36,7 +36,7 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with TestTimeLimit with Matchers
 
   private val deploy = AgentTool(SuspensionFixtures.spec("deploy")) { (args, _) =>
     ran.add(args.text)
-    ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${args.text}")))
+    ToolOutcome.success(ToolContent.Json(ujson.Str(s"deployed ${args.text}")))
   }
 
   private def tools: ToolSet = ToolSet.of(deploy).fold(e => throw new AssertionError(e.message), identity)
@@ -121,18 +121,20 @@ class JAgentHumanReviewSpec extends AnyFlatSpec with TestTimeLimit with Matchers
   "FacadeInternals.pending" should "list approvals, then tool questions, middleware questions and breakpoints" in {
     val c = call("c1", "deploy", "x")
     val status = AgentStatus.Suspended(
-      Vector(InterruptId("a") -> ApprovalRequest("m", c, "why", ApprovalSource.Tool, IdempotencyKey("k1"))),
-      Vector(InterruptId("q") -> ToolQuestionRequest("m", c, ujson.Obj("q" -> 1), IdempotencyKey("k1"))),
-      Vector(
-        InterruptId("m") -> MiddlewareQuestionRequest(
-          AgentId.unsafe("assistant"),
-          MiddlewareId("mw"),
-          MiddlewareHook.WrapToolCall,
-          ujson.Null,
-          call = Some(ToolTask("m", c, IdempotencyKey("k1")))
-        )
-      ),
-      Vector(InterruptId("b") -> BreakpointRequest(NodeId("assistant/finish"), GraphPhase.Before, None))
+      Suspension(
+        Vector(InterruptId("a") -> ApprovalRequest("m", c, "why", ApprovalSource.Tool, IdempotencyKey("k1"))),
+        Vector(InterruptId("q") -> ToolQuestionRequest("m", c, ujson.Obj("q" -> 1), IdempotencyKey("k1"))),
+        Vector(
+          InterruptId("m") -> MiddlewareQuestionRequest(
+            AgentId.unsafe("assistant"),
+            MiddlewareId("mw"),
+            MiddlewareHook.WrapToolCall,
+            ujson.Null,
+            call = Some(ToolTask("m", c, IdempotencyKey("k1")))
+          )
+        ),
+        Vector(InterruptId("b") -> BreakpointRequest(NodeId("assistant/finish"), GraphPhase.Before, None))
+      )
     )
     val pending = FacadeInternals.pending(status).asScala.toList
     pending.map(p => p.id -> p.kind) shouldBe List(

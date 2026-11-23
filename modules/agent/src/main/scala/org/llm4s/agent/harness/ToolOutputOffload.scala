@@ -68,10 +68,10 @@ final class ToolOutputOffload(
 
   override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
     next() match
-      case ToolOutcome.Success(content, update) =>
-        val text = resultText(content, thresholdChars)
+      case unchanged @ ToolOutcome.Success(success) =>
+        val text = resultText(success.content, thresholdChars)
         text.filter(_.length.toLong > thresholdChars) match
-          case None => ToolOutcome.Success(content, update)
+          case None => unchanged
           case Some(large) =>
             val segment = segmentOf(context.idempotencyKey.value)
             val tool    = Text.cutEncoded(request.toolName.value, MaxNameBytes)._1
@@ -79,8 +79,9 @@ final class ToolOutputOffload(
             val (stored, isCut) = Text.cutEncoded(large, maxResultBytes)
             val result          = OffloadedResult(segment, tool, stored, Text.utf8Bytes(large), isCut)
             ToolOutcome.Success(
-              shown(content, preview(result, large)),
-              update.combine(StateUpdate.update(key, OffloadUpdate.Put(result, maxTotalBytes)))
+              success
+                .withContent(shown(success.content, preview(result, large)))
+                .withUpdate(success.update.combine(StateUpdate.update(key, OffloadUpdate.Put(result, maxTotalBytes))))
             )
       // an error over the threshold is cut before it is stored: it is the model's to read, not to page through
       case ToolOutcome.Error(message) if message.length.toLong > thresholdChars =>

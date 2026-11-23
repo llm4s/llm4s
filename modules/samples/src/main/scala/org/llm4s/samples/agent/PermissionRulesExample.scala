@@ -59,7 +59,7 @@ object PermissionRulesExample {
 
     AgentTool(spec) { (args, _) =>
       files.put(args.path, args.content)
-      ToolOutcome.Success(ToolContent.Json(ujson.Obj("path" -> args.path, "written" -> true)))
+      ToolOutcome.success(ToolContent.Json(ujson.Obj("path" -> args.path, "written" -> true)))
     }
   }
 
@@ -91,7 +91,8 @@ object PermissionRulesExample {
         .build()
       parked <- agent.run("Write the source, system and deployment files.")
       approval <- parked.status match {
-        case AgentStatus.Suspended(Vector((id, _)), Vector(), Vector(), Vector(), Vector()) => Right(id)
+        case AgentStatus.Suspended(suspension) if suspension.approvals.sizeIs == 1 =>
+          Right(suspension.approvals.head._1)
         case other => Left(ValidationError("permission rules example", s"expected one approval, got $other"))
       }
       completed <- agent.resume(parked.threadId, Map(parked.approve(approval)))

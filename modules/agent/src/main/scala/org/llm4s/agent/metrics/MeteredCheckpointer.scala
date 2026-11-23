@@ -108,18 +108,18 @@ final class MeteredCheckpointer private (val inner: Checkpointer, metrics: Metri
     val graph = commit.checkpoint.map(_.snapshot.graphId)
     records.foreach { r =>
       r.event match
-        case RunEvent.RunStarted(_, _) =>
+        case RunEvent.RunStarted(_) =>
           began(r, graph, "start")
           commit.checkpoint
             .flatMap(_.origin)
             .foreach(origin => metrics.increment(TasksStarted, Seq(origin.agent.value)))
-        case RunEvent.RunResumed(_, _, _)      => began(r, graph, "resume")
-        case RunEvent.RunRecovered(_, _, _, _) => began(r, graph, "recover")
-        case RunEvent.RunCompleted             => ended(r, graph, "completed")
-        case RunEvent.RunSuspended(_)          => ended(r, graph, "suspended")
-        case RunEvent.RunFailed(_, _, _)       => ended(r, graph, "failed")
-        case RunEvent.RunCancelled(_, _)       => ended(r, graph, "cancelled")
-        case RunEvent.RunTimedOut(_, _)        => ended(r, graph, "timed_out")
+        case RunEvent.RunResumed(_)   => began(r, graph, "resume")
+        case RunEvent.RunRecovered(_) => began(r, graph, "recover")
+        case RunEvent.RunCompleted    => ended(r, graph, "completed")
+        case RunEvent.RunSuspended(_) => ended(r, graph, "suspended")
+        case RunEvent.RunFailed(_)    => ended(r, graph, "failed")
+        case RunEvent.RunCancelled(_) => ended(r, graph, "cancelled")
+        case RunEvent.RunTimedOut(_)  => ended(r, graph, "timed_out")
         case RunEvent.Custom(name, _, payload) if name == SubagentEvents.TaskEnded.name =>
           Try(upickle.default.read[TaskEnded](payload)).foreach { task =>
             val labels = Seq(task.child.agent.value, taskStatus(task.status))

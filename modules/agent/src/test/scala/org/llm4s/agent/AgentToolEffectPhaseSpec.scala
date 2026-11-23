@@ -46,14 +46,14 @@ class AgentToolEffectPhaseSpec extends AnyFlatSpec with Matchers {
           case Right(n) =>
             answered.add(question.prompt)
             // the same question again, answered the same: still a phase of its own
-            if answered.size < asks then ask(Confirm("sure?")) else ToolOutcome.Success(ToolContent.Json(ujson.Num(n)))
+            if answered.size < asks then ask(Confirm("sure?")) else ToolOutcome.success(ToolContent.Json(ujson.Num(n)))
         }
     }
   }
 
   private def questionId(result: AgentResult) = result.status match {
-    case AgentStatus.Suspended(_, questions, _, _, _) => questions.head._1
-    case other                                        => fail(s"expected Suspended, got $other")
+    case AgentStatus.Suspended(suspension) => suspension.questions.head._1
+    case other                             => fail(s"expected Suspended, got $other")
   }
 
   private def agentWith(tool: AgentTool[?]): Agent =
@@ -109,14 +109,14 @@ class AgentToolEffectPhaseSpec extends AnyFlatSpec with Matchers {
         case Left(r: GraphError.EffectReplayRefused) => ToolOutcome.Error(r.message)
         case Left(error)                             => ToolOutcome.Fatal(error)
         case Right(n) if !context.approved           => ToolOutcome.NeedsApproval(s"applied $n")
-        case Right(n)                                => ToolOutcome.Success(ToolContent.Json(ujson.Num(n)))
+        case Right(n)                                => ToolOutcome.success(ToolContent.Json(ujson.Num(n)))
       }
     }
     val agent  = agentWith(tool)
     val parked = agent.run("go").value
     val id = parked.status match {
-      case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
-      case other                                        => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(suspension) => suspension.approvals.head._1
+      case other                             => fail(s"expected Suspended, got $other")
     }
     agent.resume(parked.threadId, Map(parked.approve(id))).value.answer shouldBe Some("done")
     applied.get shouldBe 1

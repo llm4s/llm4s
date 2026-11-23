@@ -130,7 +130,7 @@ class AgentTodosSpec extends AnyFlatSpec with Matchers with EitherValues with Op
             org.llm4s.agent.SpecTools.set(
               org.llm4s.agent.SpecTools.tool("echo")((a, _) =>
                 org.llm4s.agent.graph.tool.ToolOutcome
-                  .Success(org.llm4s.agent.graph.tool.ToolContent.Json(ujson.Str(a.text)))
+                  .success(org.llm4s.agent.graph.tool.ToolContent.Json(ujson.Str(a.text)))
               )
             )
           )
@@ -140,8 +140,8 @@ class AgentTodosSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     val calling = org.llm4s.agent.SpecTools.calling(org.llm4s.agent.SpecTools.call("c1", "echo"))
     val parked  = agent(Agent.builder("assistant", ScriptedLLMClient.of(calling))).run(thread, "go").value
     val answers = parked.status match {
-      case org.llm4s.agent.AgentStatus.Suspended(approvals, _, _, _, _) =>
-        approvals.map(a => parked.approve(a._1)).toMap
+      case org.llm4s.agent.AgentStatus.Suspended(suspension) =>
+        suspension.approvals.map(a => parked.approve(a._1)).toMap
       case other => fail(s"expected Suspended, got $other")
     }
     // the family's version changed: a turn in flight resumes only under the family it started in

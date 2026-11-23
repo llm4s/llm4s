@@ -114,7 +114,10 @@ class EncryptingCheckpointerSpec extends AnyFlatSpec with Matchers with EitherVa
           token,
           Some(checkpoint(on, tenant = tenant)),
           Vector(write()),
-          Vector(custom(), EventDraft("r1", None, None, None, at, RunEvent.RunStarted(tenant, None))),
+          Vector(
+            custom(),
+            EventDraft("r1", None, None, None, at, RunEvent.RunStarted(RunStartedDetails(tenant, None)))
+          ),
           effects = Vector(effect(on))
         )
       )
@@ -188,7 +191,7 @@ class EncryptingCheckpointerSpec extends AnyFlatSpec with Matchers with EitherVa
     store.latestOfRuns(on, Set(RunId("r1"))).value.value shouldBe checkpoint(on)
     store.effect(on, effect(on).key).value.value shouldBe effect(on)
     val events = store.eventsAfter(on, 0L, 10).value
-    events.map(_.event) shouldBe Vector(custom().event, RunEvent.RunStarted(None, None))
+    events.map(_.event) shouldBe Vector(custom().event, RunEvent.RunStarted(RunStartedDetails(None, None)))
     store.awaitEventsAfter(on, 0L, 10, 1.second).value shouldBe events
   }
 

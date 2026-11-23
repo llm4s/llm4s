@@ -275,7 +275,7 @@ class AgentWorkerSpec
     val slow = SpecTools.tool("slow") { (_, _) =>
       entered.release()
       CancelledError.catchInterrupt(Thread.sleep(60_000)): Unit
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("late")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("late")))
     }
     val client = new FnClient((_, _) =>
       if (calls.incrementAndGet() == 1) Right(SpecTools.calling(SpecTools.call("c1", "slow")))

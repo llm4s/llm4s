@@ -16,7 +16,13 @@ import org.llm4s.llmconnect.model.{ Message, UsageSummary }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
-/** How an agent's turn ended, or why it is waiting. */
+/**
+ * How an agent's turn ended, or why it is waiting.
+ *
+ * `Completed`, `Truncated` and `Blocked` are closed: each is exactly the fields it has, and anything more about the
+ * turn goes on [[AgentResult]]. `Suspended` holds a [[Suspension]], which can gain a kind of pending interrupt
+ * without breaking a caller.
+ */
 @Stable
 enum AgentStatus:
 
@@ -52,25 +58,53 @@ enum AgentStatus:
   case TokenLimitReached
 
   /**
-   * The turn is parked on tool approvals, tool questions, middleware questions and static
-   * breakpoints, each keyed by its interrupt id. Answer them - any non-empty subset at a time - with
-   * [[AgentResult.approve]], [[AgentResult.reject]] and [[AgentResult.edit]] (approvals),
-   * [[AgentResult.reply]] (a tool's or a middleware's question, with its answer type) and
-   * [[AgentResult.proceed]] (breakpoints), and continue with [[Agent.resume]]; unanswered ones stay
-   * pending.
-   *
-   * `delegated` lists the interrupts of suspended subagents (design 4.46), flattened: each child interrupt under the
-   * composite id `<parent interrupt>~<child interrupt>` (a grandchild's `p~c~g`), with the child run that waits. The
-   * same helpers answer them by that id, encoding the answer the child expects, and [[Agent.resume]] routes each to
-   * its child through the parent. A `task` call waiting on its child is listed only here, never in `questions`.
+   * The turn is parked on the interrupts `suspension` lists: tool approvals, tool questions, middleware questions,
+   * static breakpoints and the interrupts of suspended subagents, each keyed by its interrupt id. Answer them - any
+   * non-empty subset at a time - with [[AgentResult.approve]], [[AgentResult.reject]] and [[AgentResult.edit]]
+   * (approvals), [[AgentResult.reply]] (a tool's or a middleware's question, with its answer type) and
+   * [[AgentResult.proceed]] (breakpoints), and continue with [[Agent.resume]]; unanswered ones stay pending.
    */
-  case Suspended(
-    approvals: Vector[(InterruptId, ApprovalRequest)],
-    questions: Vector[(InterruptId, ToolQuestionRequest)],
+  case Suspended(suspension: Suspension)
+
+/**
+ * What a suspended turn waits on ([[AgentStatus.Suspended]]), each interrupt keyed by its id.
+ *
+ * `delegated` lists the interrupts of suspended subagents (design 4.46), flattened: each child interrupt under the
+ * composite id `<parent interrupt>~<child interrupt>` (a grandchild's `p~c~g`), with the child run that waits. The
+ * [[AgentResult]] helpers answer them by that id, encoding the answer the child expects, and [[Agent.resume]] routes
+ * each to its child through the parent. A `task` call waiting on its child is listed only here, never in `questions`.
+ *
+ * @param approvals tool calls waiting for approval
+ * @param questions questions tools asked
+ * @param middlewareQuestions questions middleware asked
+ * @param breakpoints static breakpoints holding a task
+ * @param delegated interrupts of suspended subagents
+ */
+@Stable
+final case class Suspension private (
+  approvals: Vector[(InterruptId, ApprovalRequest)],
+  questions: Vector[(InterruptId, ToolQuestionRequest)],
+  middlewareQuestions: Vector[(InterruptId, MiddlewareQuestionRequest)],
+  breakpoints: Vector[(InterruptId, BreakpointRequest)],
+  delegated: Vector[(InterruptId, DelegatedRequest)]
+):
+  def withApprovals(value: Vector[(InterruptId, ApprovalRequest)]): Suspension     = copy(approvals = value)
+  def withQuestions(value: Vector[(InterruptId, ToolQuestionRequest)]): Suspension = copy(questions = value)
+  def withMiddlewareQuestions(value: Vector[(InterruptId, MiddlewareQuestionRequest)]): Suspension =
+    copy(middlewareQuestions = value)
+  def withBreakpoints(value: Vector[(InterruptId, BreakpointRequest)]): Suspension = copy(breakpoints = value)
+  def withDelegated(value: Vector[(InterruptId, DelegatedRequest)]): Suspension    = copy(delegated = value)
+
+object Suspension:
+
+  def apply(
+    approvals: Vector[(InterruptId, ApprovalRequest)] = Vector.empty,
+    questions: Vector[(InterruptId, ToolQuestionRequest)] = Vector.empty,
     middlewareQuestions: Vector[(InterruptId, MiddlewareQuestionRequest)] = Vector.empty,
     breakpoints: Vector[(InterruptId, BreakpointRequest)] = Vector.empty,
     delegated: Vector[(InterruptId, DelegatedRequest)] = Vector.empty
-  )
+  ): Suspension =
+    new Suspension(approvals, questions, middlewareQuestions, breakpoints, delegated)
 
 /**
  * The outcome of one agent run: where it ran, how it ended, and the thread's state at its end. A

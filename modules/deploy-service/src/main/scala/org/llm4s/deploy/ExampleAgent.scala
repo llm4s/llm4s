@@ -89,7 +89,7 @@ object ExampleAgent:
       val slept = CancelledError.catchInterrupt(TimeUnit.NANOSECONDS.sleep(delay.toNanos))
       report(active.decrementAndGet())
       slept match
-        case Right(_) => ToolOutcome.Success(ToolContent.Json(ujson.Obj("paused" -> delay.toMillis.toDouble)))
+        case Right(_) => ToolOutcome.success(ToolContent.Json(ujson.Obj("paused" -> delay.toMillis.toDouble)))
         case Left(_) =>
           Thread.currentThread().interrupt()
           ToolOutcome.Error("the pause was interrupted")

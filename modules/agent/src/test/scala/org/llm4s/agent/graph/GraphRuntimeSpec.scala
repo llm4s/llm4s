@@ -96,8 +96,8 @@ class GraphRuntimeSpec
         .collect { case d: StreamEvent.Durable => d }
         .toVector shouldBe empty
 
-    def durable: Vector[EventRecord]   = taken.toVector.collect { case StreamEvent.Durable(r) => r }
-    def live: Vector[StreamEvent.Live] = taken.toVector.collect { case l: StreamEvent.Live => l }
+    def durable: Vector[EventRecord] = taken.toVector.collect { case StreamEvent.Durable(r) => r }
+    def live: Vector[LiveEvent]      = taken.toVector.collect { case StreamEvent.Live(l) => l }
   }
 
   /** The thread's last committed `seq`, read from the earliest event the store still holds. */
