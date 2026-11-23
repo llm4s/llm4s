@@ -263,7 +263,7 @@ class MixedOkHttpClasspathSpec extends AnyFlatSpec with Matchers with EitherValu
     withGrpc { (port, seen) =>
       val tracing = new OpenTelemetryTracing("okhttp-classpath", s"http://localhost:$port", Map.empty)
       tracing.traceEvent(TraceEvent.CustomEvent("probe", ujson.Obj("k" -> "v"))) shouldBe Right(())
-      tracing.shutdown()
+      tracing.close()
       withClue(okHttpOrigin) {
         seen.asScala.toList should contain("POST /opentelemetry.proto.collector.trace.v1.TraceService/Export")
       }

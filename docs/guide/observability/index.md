@@ -574,6 +574,20 @@ tracing.traceRAGOperation(
 )
 ```
 
+`traceEvent(event: TraceEvent)` is the only method a tracer implements. Every other one - `traceError`,
+`traceCompletion`, `traceTokenUsage`, `traceToolCall(name, input, output, duration, success)`, `traceCost` and the
+rest - is `final`: it builds a `TraceEvent` and passes it to `traceEvent`, so a `TracingComposer.filter` or
+`transform` sees everything traced through it.
+
+```scala
+val recording = new Tracing {
+  def traceEvent(event: TraceEvent): Result[Unit] = { events.add(event); Right(()) }
+}
+```
+
+`Tracing` is `AutoCloseable`. `close()` does nothing unless a backend holds resources: OpenTelemetry's flushes and
+stops its exporter, and a composed tracer closes the ones it wraps. Close the tracer once, when the application stops.
+
 ---
 
 ## Metrics

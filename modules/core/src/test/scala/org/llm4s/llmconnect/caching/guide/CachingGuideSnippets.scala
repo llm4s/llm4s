@@ -137,7 +137,6 @@ object CachingGuideSnippets {
   // ---- 5. Seeing what the cache did
 
   object Observing {
-    import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
     import org.llm4s.trace.{ TraceEvent, Tracing }
     import org.llm4s.types.Result
     import scala.collection.mutable.ListBuffer
@@ -146,10 +145,6 @@ object CachingGuideSnippets {
       val events = ListBuffer.empty[TraceEvent]
       val tracing = new Tracing {
         override def traceEvent(event: TraceEvent): Result[Unit] = { events.synchronized(events += event); Right(()) }
-        override def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
-        override def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
-        override def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
-        override def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
       }
       (tracing, () => events.synchronized(events.toList))
     }

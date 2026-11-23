@@ -218,10 +218,6 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   final private class Recorder extends Tracing {
     val events                                               = new CopyOnWriteArrayList[TraceEvent]()
     override def traceEvent(event: TraceEvent): Result[Unit] = { events.add(event); Right(()) }
-    override def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
-    override def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
-    override def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
-    override def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
   }
 
   "maxSteps" should "end a turn STEP_LIMIT_REACHED after that many steps, and refuse one below 1" in {

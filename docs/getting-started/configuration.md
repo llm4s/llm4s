@@ -1133,7 +1133,7 @@ val result = for {
   tracer   <- Tracing.fromSettings(settings)
   _        <- tracer.traceEvent(TraceEvent.AgentInitialized("query", Vector("tool1")))
   _        <- tracer.traceTokenUsage(usage, "gpt-4o", "completion")
-  _         = tracer.shutdown() // always shut down to flush pending spans
+  _         = tracer.close() // always shut down to flush pending spans
 } yield ()
 ```
 

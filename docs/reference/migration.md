@@ -50,7 +50,32 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
-and [Langfuse traces are private and name the run's user](#langfuse-traces-are-private-and-name-the-runs-user-2828).
+[Langfuse traces are private and name the run's user](#langfuse-traces-are-private-and-name-the-runs-user-2828),
+and [`Tracing` has one abstract method](#tracing-has-one-abstract-method-2799).
+
+## `Tracing` has one abstract method (#2799)
+
+`Tracing` declared five abstract methods, four of them wrappers every backend re-implemented. `TracingComposer.filter`
+and `transform` forwarded those four to the wrapped tracer untouched, so a filter or a redacting transform did not
+apply to `traceToolCall`, `traceError`, `traceCompletion` or `traceTokenUsage`. Now `traceEvent(event: TraceEvent)` is
+the only abstract method and the others are `final`: each builds its event and passes it to `traceEvent`.
+
+| Before | After |
+|---|---|
+| A `Tracing` overriding `traceToolCall`, `traceError`, `traceCompletion`, `traceTokenUsage` | Delete the four overrides. What they did belongs in `traceEvent`, matching `TraceEvent.ToolExecuted`, `ErrorOccurred`, `CompletionReceived` or `TokenUsageRecorded` |
+| `tracing.traceToolCall(name, input, output)` (recorded zero duration and `success = true`) | `tracing.traceToolCall(name, input, output, duration, success)` |
+| `tracing.shutdown()` | `tracing.close()`; `Tracing` is `AutoCloseable`. A backend overriding `shutdown()` overrides `close()` |
+| `class X extends TracingComposer`, or `TracingComposer` as a type | The `TracingComposer` object: `TracingComposer.combine` / `filter` / `transform` |
+| `TRACING_MODE=print` | `TRACING_MODE=console` |
+
+- A filter or transform that let those four calls through unchanged now sees them. A predicate written for
+  `traceEvent` calls only may start dropping tool calls, errors, completions and token usage: check it.
+- `TraceCollectorTracing` stored the four calls as spans of their own shape (`tool:<name>`, `llm:<model>`,
+  `tokens:<operation>`, `error`). They are now the spans their events become, as `traceEvent` always made them: named
+  by event type (`tool_executed`, `completion_received`, `token_usage_recorded`, `error_occurred`), a completion's span
+  holding `content` where the old one held `content_length`, and a tool call's `duration_ms` and `success`.
+- A composed tracer's `close()` closes every tracer it wraps, whatever an earlier one throws.
+- Spring Boot: the `llm4sTracing` bean's destroy method is `close`.
 
 ## Langfuse traces are private and name the run's user (#2828)
 
