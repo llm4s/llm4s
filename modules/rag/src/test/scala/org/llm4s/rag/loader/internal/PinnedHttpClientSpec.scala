@@ -172,8 +172,25 @@ class PinnedHttpClientSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  /** A one-shot server that reads the request head (if `readRequest`) and answers `response` verbatim, then closes. */
-  private def withRawServer[A](response: String, readRequest: Boolean = true)(f: Int => A): A =
+  it should "follow a redirect without reading its body" in {
+    withServer("/to" -> Reply(200, "arrived")) { target =>
+      // A redirect whose promised body never comes: reading it would wait out the timeout
+      val head = s"HTTP/1.1 302 Found\r\nLocation: ${target.baseUrl}/to\r\nContent-Length: 1000000\r\n\r\nstart"
+      withRawServer(head, holdOpen = true) { port =>
+        val resp = PinnedHttpClient.get(s"http://127.0.0.1:$port/from", Seq.empty, 2.seconds, loopbackPolicy)
+        resp.map(_.body) shouldBe Right("arrived")
+        target.paths shouldBe Seq("/to")
+      }
+    }
+  }
+
+  /**
+   * A one-shot server that reads the request head (if `readRequest`) and answers `response` verbatim, then closes, or
+   * with `holdOpen` waits for the client to close first.
+   */
+  private def withRawServer[A](response: String, readRequest: Boolean = true, holdOpen: Boolean = false)(
+    f: Int => A
+  ): A =
     Using.resource(new ServerSocket()) { server =>
       server.bind(new InetSocketAddress(InetAddress.getLoopbackAddress, 0))
       val thread = new Thread(() => {
@@ -184,6 +201,7 @@ class PinnedHttpClientSpec extends AnyFlatSpec with Matchers {
               Iterator.continually(in.readLine()).takeWhile(l => l != null && l.nonEmpty).foreach(_ => ())
             socket.getOutputStream.write(response.getBytes(StandardCharsets.UTF_8))
             socket.getOutputStream.flush()
+            if (holdOpen) in.read()
           }
         }
         ()

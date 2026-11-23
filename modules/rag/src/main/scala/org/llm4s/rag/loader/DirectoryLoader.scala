@@ -5,6 +5,7 @@ import org.llm4s.error.ProcessingError
 import java.io.File
 import java.nio.file.{ Files, Path }
 import java.util.Locale
+import scala.annotation.tailrec
 import scala.jdk.CollectionConverters.*
 import scala.util.{ Try, Using }
 
@@ -67,29 +68,45 @@ final case class DirectoryLoader(
     Try(path.toRealPath()).toOption match {
       case None => Seq.empty
       case Some(rootReal) =>
-        val visited = scala.collection.mutable.Set[Path](rootReal)
-
         def inside(real: Path): Boolean = !confineToRoot || real.startsWith(rootReal)
 
-        def walk(dir: Path, depth: Int): Seq[Path] =
-          if (depth > maxDepth) Seq.empty
-          else {
-            val entries = Using(Files.list(dir))(_.iterator().asScala.toVector.sortBy(_.getFileName.toString))
-              .getOrElse(Vector.empty)
-            // Follows links: the real path is what the entry would be read from
-            val resolved = entries.flatMap(e => Try(e.toRealPath()).toOption.filter(inside).map(e -> _))
-            val files = resolved.collect {
-              case (entry, real) if Files.isRegularFile(real) && matchesExtension(entry) => entry
+        // Each entry of `dir` that is inside the root, with the real path it would be read from (links followed)
+        def entries(dir: Path): Vector[(Path, Path)] =
+          Using(Files.list(dir))(_.iterator().asScala.toVector.sortBy(_.getFileName.toString))
+            .getOrElse(Vector.empty)
+            .flatMap(e => Try(e.toRealPath()).toOption.filter(inside).map(e -> _))
+
+        def subdirs(dir: Path): Vector[(Path, Path)] = entries(dir).filter { case (_, real) => Files.isDirectory(real) }
+
+        // The shallowest depth each real directory is reachable at, breadth first, so a directory reached through a
+        // deep link is still walked as deep as its shallowest path allows; each real directory is listed once here
+        val shallowest = scala.collection.mutable.Map[Path, Int](rootReal -> 0)
+        @tailrec
+        def level(frontier: Vector[Path], depth: Int): Unit =
+          if (frontier.nonEmpty && depth < maxDepth) {
+            val next = frontier.flatMap(subdirs).collect {
+              case (entry, real) if !shallowest.contains(real) =>
+                shallowest(real) = depth + 1
+                entry
             }
-            val subdirFiles =
-              if (!recursive) Seq.empty
-              else
-                resolved.collect {
-                  case (entry, real) if depth < maxDepth && Files.isDirectory(real) && visited.add(real) =>
-                    walk(entry, depth + 1)
-                }.flatten
-            files ++ subdirFiles
+            level(next, depth + 1)
           }
+        if (recursive) level(Vector(path), 0)
+
+        // Depth first, entering a real directory once, at its shallowest depth: link loops end there
+        val walked = scala.collection.mutable.Set[Path](rootReal)
+        def walk(dir: Path, depth: Int): Seq[Path] = {
+          val resolved = entries(dir)
+          val files = resolved.collect {
+            case (entry, real) if Files.isRegularFile(real) && matchesExtension(entry) => entry
+          }
+          val subdirFiles = resolved.collect {
+            case (entry, real)
+                if Files.isDirectory(real) && shallowest.get(real).contains(depth + 1) && walked.add(real) =>
+              walk(entry, depth + 1)
+          }.flatten
+          files ++ subdirFiles
+        }
 
         walk(path, 0)
     }
