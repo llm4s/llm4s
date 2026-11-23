@@ -27,7 +27,7 @@ class OpenTelemetrySpanTreeSpec extends AnyWordSpec with Matchers:
     val exporter = new Collecting
     val tracing  = OpenTelemetryTracing.exportingTo("span-tree-spec", exporter)
     try body(tracing, () => exporter.spans.asScala.toVector)
-    finally tracing.shutdown()
+    finally tracing.close()
 
   private val submitter = TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7")
   private val t0        = Instant.parse("2026-10-21T10:00:00Z")

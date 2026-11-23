@@ -38,7 +38,7 @@ class ConsoleTracingDefaultSpec extends AnyFlatSpec with Matchers {
       tracing.traceEvent(TraceEvent.CompletionReceived("c-1", "test-model", 1, answer))
       tracing.traceTokenUsage(org.llm4s.llmconnect.model.TokenUsage(20, 10, 30), "test-model", "agent_completion")
       tracing.traceEvent(TraceEvent.ToolExecuted("balance", toolInput, toolOutput, 12.millis, true))
-      tracing.traceToolCall("balance", toolInput, toolOutput)
+      tracing.traceToolCall("balance", toolInput, toolOutput, scala.concurrent.duration.Duration.Zero, success = true)
       tracing.traceError(new IllegalStateException(failure), s"while answering: $query")
       tracing.traceEvent(
         TraceEvent.AgentRunEnded(

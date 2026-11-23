@@ -10,6 +10,8 @@ import org.llm4s.agent.graph.{
   EventRecord,
   GraphRuntime,
   InMemoryCheckpointer,
+  Principal,
+  RunConfig,
   RunEvent,
   RunOutcome,
   StoredCheckpoint,
@@ -57,13 +59,6 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       events.add(event)
       if (failing) Left(UnknownError("tracing down", new RuntimeException("x"))) else Right(())
     }
-    def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())
-    def traceError(error: Throwable, context: String): Result[Unit] = {
-      events.add(TraceEvent.ErrorOccurred(error, context))
-      Right(())
-    }
-    def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
-    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
 
     def all: Vector[TraceEvent]                = events.asScala.toVector
     def custom: Vector[TraceEvent.CustomEvent] = all.collect { case c: TraceEvent.CustomEvent => c }
@@ -129,6 +124,17 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     tracing.custom.map(_.data("runId").str).toSet shouldBe Set(result.runId.value)
     tracing.custom.map(_.data("threadId").str).toSet shouldBe Set(result.threadId.value)
     tracing.custom.map(_.data("seq").num) shouldBe sorted
+  }
+
+  it should "name the run's principal as the ended run's user, and no user for a run without one (#2828)" in {
+    val tracing = new Recording()
+    val agent   = traced(new Scripted(Right(answer("hello")), Right(answer("again"))), tracing)
+    ok(agent.run("hi", RunConfig().withPrincipal(Principal("alice"))))
+    ok(agent.run("hi"))
+
+    eventually {
+      tracing.all.collect { case e: TraceEvent.AgentRunEnded => e.userId } shouldBe Vector(Some("alice"), None)
+    }
   }
 
   it should "record the client's provider on its model calls and the run (#2275)" in {
@@ -224,14 +230,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     private val out                                 = new java.io.ByteArrayOutputStream()
     private def capture[A](body: => A): A           = Console.withOut(out)(body)
     def traceEvent(event: TraceEvent): Result[Unit] = capture(underlying.traceEvent(event))
-    def traceToolCall(toolName: String, input: String, output: String): Result[Unit] =
-      capture(underlying.traceToolCall(toolName, input, output))
-    def traceError(error: Throwable, context: String): Result[Unit] = capture(underlying.traceError(error, context))
-    def traceCompletion(completion: Completion, model: String): Result[Unit] =
-      capture(underlying.traceCompletion(completion, model))
-    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
-      capture(underlying.traceTokenUsage(usage, model, operation))
-    def printed: String = out.synchronized(out.toString).replaceAll("\u001b\\[[0-9;]*m", "")
+    def printed: String                             = out.synchronized(out.toString).replaceAll("\u001b\\[[0-9;]*m", "")
   }
 
   private def secret = "SECRET-4111-1111"
@@ -593,10 +592,6 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
         }
         recording.traceEvent(event)
       }
-      def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())
-      def traceError(error: Throwable, context: String): Result[Unit]          = recording.traceError(error, context)
-      def traceCompletion(completion: Completion, model: String): Result[Unit] = Right(())
-      def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
     }
     val agent = traced(Scripted(Right(answer("first answer")), Right(answer("second answer"))), gated)
     val one   = agent.start(ThreadId("t12"), "one").fold(e => fail(e.message), identity)

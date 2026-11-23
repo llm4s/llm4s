@@ -11,7 +11,7 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
     provider: String,
     mode: ModelMode,
     capabilities: ModelCapabilities = ModelCapabilities(),
-    deprecationDate: Option[String] = None
+    deprecationDate: Option[java.time.LocalDate] = None
   ): ModelMetadata =
     ModelMetadata(
       modelId = modelId,
@@ -19,8 +19,6 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
       mode = mode,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(1024),
-      inputCostPerToken = None,
-      outputCostPerToken = None,
       capabilities = capabilities,
       pricing = ModelPricing(),
       deprecationDate = deprecationDate
@@ -49,7 +47,7 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
     modelId = "image-c",
     provider = "openai",
     mode = ModelMode.ImageGeneration,
-    deprecationDate = Some("2000-01-01")
+    deprecationDate = Some(java.time.LocalDate.parse("2000-01-01"))
   )
 
   private val modelD = makeModel(
@@ -83,7 +81,7 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
 
   it should "match listByProvider case-insensitively and return listProviders sorted without duplicates" in:
     registry.listByProvider("OPENAI") shouldBe registry.listByProvider("openai")
-    registry.listProviders() shouldBe Right(List("acme", "openai", "zebra"))
+    registry.listProviders() shouldBe List("acme", "openai", "zebra")
 
   it should "resolve lookup with whitespace, case differences, and provider prefixes" in:
     registry.lookup("  acme/model-a  ") shouldBe Right(modelA)
@@ -107,17 +105,3 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
         err.message should include("Model not found: acme/nonexistent")
       case other =>
         fail(s"Expected Left(ValidationError), got $other")
-
-  it should "calculate statistics accurately for the small custom registry" in:
-    registry.statistics() shouldBe Right(
-      Map(
-        "totalModels"           -> 5,
-        "embeddedModels"        -> 5,
-        "customModels"          -> 0,
-        "providers"             -> 3,
-        "chatModels"            -> 3,
-        "embeddingModels"       -> 1,
-        "imageGenerationModels" -> 1,
-        "deprecatedModels"      -> 1
-      )
-    )

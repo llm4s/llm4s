@@ -96,6 +96,10 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
     d.parentThreadId shouldBe None
     d.parentRunId shouldBe None
     d.span shouldBe None
+    d.userId shouldBe None
+    d.toJson.obj.contains("user_id") shouldBe false
+    d.withUserId("alice").toJson("user_id").str shouldBe "alice"
+    d.withUserId("alice").withUserId(None).userId shouldBe None
     val usage = UsageSummary().add("m", TokenUsage(1, 2, 3), None)
     val msgs  = Seq(UserMessage("hi"))
     val c = d

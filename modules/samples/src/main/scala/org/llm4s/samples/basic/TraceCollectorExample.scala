@@ -28,7 +28,13 @@ object TraceCollectorExample {
 
       // 1. Record a tool call, some events and an error
       _ <- collector.traceEvent(TraceEvent.AgentInitialized("What is 2 + 2?", Vector("calculator")))
-      _ <- collector.traceToolCall("calculator", """{"expression":"2 + 2"}""", "4")
+      _ <- collector.traceToolCall(
+        "calculator",
+        """{"expression":"2 + 2"}""",
+        "4",
+        scala.concurrent.duration.Duration.Zero,
+        success = true
+      )
       _ <- collector.traceEvent(TraceEvent.CompletionReceived("completion-1", Model, 0, "2 + 2 is 4."))
       _ <- collector.traceEvent(TraceEvent.TokenUsageRecorded(TokenUsage(12, 7, 19), Model, "completion"))
       _ <- collector.traceError(new IllegalStateException("model call timed out"), "second question")
@@ -51,7 +57,13 @@ object TraceCollectorExample {
       before = store.getSpans(collector.traceId).size
       both   = TracingComposer.combine(collector, new ConsoleTracing(captureContent = true))
       _ <- both.traceEvent(TraceEvent.AgentInitialized("What is 3 + 3?", Vector("calculator")))
-      _ <- both.traceToolCall("calculator", """{"expression":"3 + 3"}""", "6")
+      _ <- both.traceToolCall(
+        "calculator",
+        """{"expression":"3 + 3"}""",
+        "6",
+        scala.concurrent.duration.Duration.Zero,
+        success = true
+      )
       // The composer turns traceToolCall into a TraceEvent, so this span is named after the event, not tool:calculator.
       _ = println(
         s"\nNew spans in the store: ${store.getSpans(collector.traceId).drop(before).map(_.name).mkString(", ")}"

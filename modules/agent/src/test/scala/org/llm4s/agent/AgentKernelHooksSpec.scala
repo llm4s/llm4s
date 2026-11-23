@@ -3,7 +3,6 @@ package org.llm4s.agent
 import org.llm4s.agent.AgentFixture.built
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelContext, ModelRequest, ModelResponse }
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.trace.{ TraceEvent, Tracing }
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -18,10 +17,6 @@ class AgentKernelHooksSpec extends AnyFlatSpec with Matchers {
   final private class Recording extends Tracing {
     private val events                              = new ConcurrentLinkedQueue[TraceEvent]()
     def traceEvent(event: TraceEvent): Result[Unit] = { events.add(event); Right(()) }
-    def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
-    def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
-    def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
-    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
     def ended: Vector[TraceEvent.AgentRunEnded] =
       events.asScala.toVector.collect { case e: TraceEvent.AgentRunEnded => e }
   }

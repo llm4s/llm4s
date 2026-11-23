@@ -334,7 +334,7 @@ class TraceCollectorPropertySpec
     forAll(genNonEmptyString, Gen.alphaStr, Gen.alphaStr) { (toolName, input, output) =>
       store.clear()
       val tc = collector()
-      tc.traceToolCall(toolName, input, output)
+      tc.traceToolCall(toolName, input, output, scala.concurrent.duration.Duration.Zero, success = true)
       val spans = store.getSpans(tc.traceId)
       spans should have size 1L
       spans.head.kind shouldBe SpanKind.ToolCall

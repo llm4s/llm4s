@@ -453,11 +453,7 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
   it should "trace the answer's output tokens as billed: the completion plus the thinking it leaves out" in {
     val events = mutable.Buffer.empty[org.llm4s.trace.TraceEvent]
     val recording = new org.llm4s.trace.Tracing {
-      def traceEvent(event: org.llm4s.trace.TraceEvent): Result[Unit]                  = { events += event; Right(()) }
-      def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())
-      def traceError(error: Throwable, context: String): Result[Unit]                  = Right(())
-      def traceCompletion(completion: Completion, model: String): Result[Unit]         = Right(())
-      def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
+      def traceEvent(event: org.llm4s.trace.TraceEvent): Result[Unit] = { events += event; Right(()) }
     }
     // a reasoning reply after its client's conversion: 18 answer tokens and 46 thinking tokens
     val reasoning = new MockLLMClient {

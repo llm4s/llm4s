@@ -17,8 +17,6 @@ class ModelRegistryMemoSpec extends AnyFlatSpec with Matchers:
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(1024),
-      inputCostPerToken = Some(0.000001),
-      outputCostPerToken = Some(0.000002),
       capabilities = ModelCapabilities(),
       pricing = ModelPricing(),
       deprecationDate = None
@@ -82,8 +80,9 @@ class ModelRegistryMemoSpec extends AnyFlatSpec with Matchers:
       "model-b",       // exact
       "MODEL-B",       // case-insensitive
       "other/model-b", // provider prefix stripped
-      "model-d",       // fuzzy, one match
-      "model-a",       // fuzzy, several matches: ambiguous
+      "zebra/model-d", // exact, prefixed
+      "model-d",       // contained in one id: not found, lookup is exact (#2823)
+      "model-a",       // contained in several ids: not found
       "  model-b  ",   // trimmed
       "bench-model"    // not found
     )
@@ -92,8 +91,9 @@ class ModelRegistryMemoSpec extends AnyFlatSpec with Matchers:
       registry.lookup(id) shouldBe expected
       registry.lookup(id) shouldBe expected
     }
-    registry.lookup("model-a").left.toOption.get.message should include("Ambiguous model identifier 'model-a'")
-    registry.lookup("model-d").map(_.modelId) shouldBe Right("zebra/model-d")
+    registry.lookup("model-a").left.toOption.get.message should include("Model not found: model-a")
+    registry.lookup("zebra/model-d").map(_.modelId) shouldBe Right("zebra/model-d")
+    registry.lookup("model-d").isLeft shouldBe true
     registry.lookup("other/model-b").map(_.modelId) shouldBe Right("model-b")
   }
 

@@ -77,24 +77,13 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
     tempFile.toFile.deleteOnExit()
 
     ModelRegistryService
-      .fromConfig(ModelRegistryConfig(resourcePath = None, filePath = None, url = Some(tempFile.toUri.toString)))
+      .fromConfig(ModelRegistryConfig.default.withUrl(tempFile.toUri.toString))
       .flatMap(_.lookup("custom-url-model")) match
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
         metadata.modelId shouldBe "custom-url-model"
         metadata.provider shouldBe "custom"
-
-  it should "reject model registry configs with multiple sources" in:
-    val result = ModelRegistryService.fromConfig(
-      ModelRegistryConfig(
-        resourcePath = Some(ModelRegistryConfig.DefaultResourcePath),
-        filePath = Some("/tmp/models.json"),
-        url = None
-      )
-    )
-
-    result.isLeft shouldBe true
 
   it should "return error for unknown model" in:
     defaultServiceResult().flatMap(_.lookup("unknown-model-xyz")) match
@@ -126,25 +115,13 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         models.foreach(_.supports("vision") shouldBe true)
 
   it should "list all providers" in:
-    defaultServiceResult().flatMap(_.listProviders()) match
+    defaultServiceResult().map(_.listProviders()) match
       case Left(error) =>
         fail(error.message)
       case Right(providers) =>
-        providers should not be empty
+        providers.isEmpty shouldBe false
         providers should contain("openai")
         providers should contain("anthropic")
-
-  it should "provide statistics" in:
-    defaultServiceResult().flatMap(_.statistics()) match
-      case Left(error) =>
-        fail(error.message)
-      case Right(stats) =>
-        (stats should contain).key("totalModels")
-        (stats should contain).key("providers")
-        (stats should contain).key("chatModels")
-        (stats should contain).key("embeddingModels")
-        stats("totalModels").asInstanceOf[Int] should be > 0
-        stats("providers").asInstanceOf[Int] should be > 0
 
   it should "create a registry from custom models" in:
     val customModel = ModelMetadata(
@@ -153,8 +130,6 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
       mode = ModelMode.Chat,
       maxInputTokens = Some(10000),
       maxOutputTokens = Some(2000),
-      inputCostPerToken = Some(1e-6),
-      outputCostPerToken = Some(5e-6),
       capabilities = ModelCapabilities(),
       pricing = ModelPricing(),
       deprecationDate = None
@@ -187,8 +162,6 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         mode = ModelMode.Chat,
         maxInputTokens = Some(10000),
         maxOutputTokens = Some(2000),
-        inputCostPerToken = None,
-        outputCostPerToken = None,
         capabilities = ModelCapabilities(),
         pricing = ModelPricing(),
         deprecationDate = None
@@ -199,8 +172,6 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         mode = ModelMode.Embedding,
         maxInputTokens = Some(8192),
         maxOutputTokens = Some(8192),
-        inputCostPerToken = None,
-        outputCostPerToken = None,
         capabilities = ModelCapabilities(),
         pricing = ModelPricing(),
         deprecationDate = None
@@ -211,24 +182,23 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
     service.lookup("custom-1").isRight shouldBe true
     service.lookup("custom-2").isRight shouldBe true
 
-  it should "handle fuzzy matching for a unique partial model name" in:
+  it should "not resolve a partial model name, which only search finds" in:
     val customModel = ModelMetadata(
       modelId = "my-unique-test-model-xyz",
       provider = "custom",
       mode = ModelMode.Chat,
       maxInputTokens = Some(10000),
       maxOutputTokens = Some(2000),
-      inputCostPerToken = None,
-      outputCostPerToken = None,
       capabilities = ModelCapabilities(),
       pricing = ModelPricing(),
       deprecationDate = None
     )
 
     val service = ModelRegistryService.fromModels(List(customModel))
-    service.lookup("unique-test").isRight shouldBe true
+    service.lookup("unique-test").isLeft shouldBe true
+    service.search("unique-test").map(_.modelId) shouldBe List("my-unique-test-model-xyz")
 
-  it should "return error for ambiguous fuzzy matches" in:
+  it should "not resolve a name several ids contain" in:
     val service = ModelRegistryService.fromModels(
       List(
         ModelMetadata(
@@ -237,8 +207,6 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
           mode = ModelMode.Chat,
           maxInputTokens = Some(10000),
           maxOutputTokens = Some(2000),
-          inputCostPerToken = None,
-          outputCostPerToken = None,
           capabilities = ModelCapabilities(),
           pricing = ModelPricing(),
           deprecationDate = None
@@ -249,8 +217,6 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
           mode = ModelMode.Chat,
           maxInputTokens = Some(10000),
           maxOutputTokens = Some(2000),
-          inputCostPerToken = None,
-          outputCostPerToken = None,
           capabilities = ModelCapabilities(),
           pricing = ModelPricing(),
           deprecationDate = None
@@ -362,7 +328,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
       val metadata = service.lookup(id).toOption.get
       metadata.capabilities.supportsBudgetThinking shouldBe Some(false)
       metadata.provider shouldBe "anthropic"
-      metadata.inputCostPerToken shouldBe raw(id).obj.get("input_cost_per_token").map(_.num)
+      metadata.pricing.inputCostPerToken shouldBe raw(id).obj.get("input_cost_per_token").map(_.num)
       metadata.capabilities.supportsAdaptiveThinking shouldBe Some(true)
 
     service.lookup("us.anthropic.claude-opus-4-7").toOption.get.capabilities.supportsBudgetThinking shouldBe Some(false)

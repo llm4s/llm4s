@@ -49,15 +49,14 @@ object EmbeddingCacheExample {
   /** What one call did: the texts asked for, and how many provider calls and texts it cost. */
   final case class Step(label: String, texts: Seq[String], providerCalls: Int, providerTexts: Int, hit: Boolean)
 
-  final case class Report(steps: Seq[Step], stats: CacheStats)
+  /** `stats` is `None` only for a cache that keeps none; the in-memory cache always does. */
+  final case class Report(steps: Seq[Step], stats: Option[CacheStats])
 
   /** Runs the three calls against `provider` through a `CachedEmbeddingClient`; the logic of the sample. */
   def run(provider: EmbeddingProvider, model: EmbeddingModelConfig)(using ModelRegistryService): Result[Report] = {
     val counting = new CountingProvider(provider)
-    val cache    = new InMemoryEmbeddingCache[Seq[Double]](maxSize = 1000, ttl = Some(1.hour))
-    val cached   = new CachedEmbeddingClient(new EmbeddingClient(counting), cache)
 
-    def step(label: String, texts: Seq[String]): Result[Step] = {
+    def step(cached: CachedEmbeddingClient, label: String, texts: Seq[String]): Result[Step] = {
       val (callsBefore, textsBefore) = (counting.calls, counting.texts)
       cached.embed(EmbeddingRequest(texts, model)).map { _ =>
         val calls = counting.calls - callsBefore
@@ -66,9 +65,11 @@ object EmbeddingCacheExample {
     }
 
     for {
-      first  <- step("1. first call", Seq("hello world"))
-      second <- step("2. same text again", Seq("hello world"))
-      third  <- step("3. one cached, one new", Seq("hello world", "something new"))
+      cache <- InMemoryEmbeddingCache.create(maxSize = 1000, ttl = Some(1.hour))
+      cached = new CachedEmbeddingClient(new EmbeddingClient(counting), cache)
+      first  <- step(cached, "1. first call", Seq("hello world"))
+      second <- step(cached, "2. same text again", Seq("hello world"))
+      third  <- step(cached, "3. one cached, one new", Seq("hello world", "something new"))
     } yield Report(Seq(first, second, third), cached.cacheStats)
   }
 
@@ -81,10 +82,12 @@ object EmbeddingCacheExample {
             .mkString("[\"", "\", \"", "\"]")}"
       )
     }
-    println(
-      s"\nCache stats: ${report.stats.hits} hits, ${report.stats.misses} misses, " +
-        f"hit rate ${report.stats.hitRatePercent}%.1f%%, ${report.stats.size} entries"
-    )
+    report.stats.foreach { stats =>
+      println(
+        s"\nCache stats: ${stats.hits} hits, ${stats.misses} misses, " +
+          f"hit rate ${stats.hitRatePercent}%.1f%%, ${stats.size} entries"
+      )
+    }
   }
 
   def main(args: Array[String]): Unit = {
