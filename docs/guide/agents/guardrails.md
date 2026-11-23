@@ -115,7 +115,8 @@ Each judge scores the content and passes it when the score reaches its `threshol
 
 ### RAG-Specific Guardrails
 
-For retrieval-augmented generation:
+For retrieval-augmented generation (experimental). The first three check an answer against the context retrieved for
+it, and do nothing until they are given that context: see [RAG Guardrails](#rag-guardrails).
 
 | Guardrail | Purpose |
 |-----------|---------|
@@ -390,64 +391,156 @@ class CustomLLMGuardrail(client: LLMClient) extends LLMGuardrail {
 
 ## RAG Guardrails
 
-### Basic RAG Setup
+`org.llm4s.agent.guardrails.rag` is **experimental**: its API may change in a minor release.
+
+Three of these guardrails are `RAGGuardrail`s - `GroundingGuardrail`, `ContextRelevanceGuardrail` and
+`SourceAttributionGuardrail`. Each judges an answer against what was retrieved for it, so each needs a
+`RAGContext`: the query, the retrieved chunks and, optionally, a source per chunk. The context is never a
+constructor argument. It is given with the answer, to `validateWithContext`:
 
 ```scala
+import org.llm4s.agent.Agent
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+import org.llm4s.agent.guardrails.GuardrailAction
 import org.llm4s.agent.guardrails.rag._
+import org.llm4s.toolapi.ToolRegistry
+```
 
-val ragGuardrails = RAGGuardrails.standard(client)
+```scala
+val context = RAGContext.withSources(
+  query = "What is the refund window?",
+  chunks = Seq("Refunds are accepted within 30 days of purchase."),
+  sources = Seq("refund-policy.md")
+)
 
-val agent = Agent.builder("rag", client)
-  .withTools(tools)
-  .withMiddleware(GuardrailMiddleware(ragGuardrails.inputGuardrails, ragGuardrails.outputGuardrails))
+val grounding = new GroundingGuardrail(llmClient = judge, threshold = 0.8)
+
+// Right(answer) when the judge scores it at or above the threshold, Left(ValidationError) otherwise
+val checked = grounding.validateWithContext("You can get a refund within 30 days.", context)
+```
+
+`judge` is the `LLMClient` that scores the answer; it can be the agent's own client or a cheaper model.
+
+{: .warning }
+> The plain `validate(answer)` of a `RAGGuardrail` has no context to check against, so it **passes every answer**
+> and calls no judge. Put one in a `GuardrailMiddleware` as it is and it checks nothing: wrap it with
+> `RAGGuardrail.withTurnContext` first, as below.
+
+### In an agent
+
+An agent retrieves by calling a tool, so the retrieved text of a turn is in that turn's tool results.
+`RAGGuardrail.withTurnContext` turns a `RAGGuardrail` into an output guardrail for `GuardrailMiddleware`: you give it
+a function from the turn's messages to the turn's `RAGContext`, and it validates each final answer with that context.
+`RAGContext.fromToolResults` is the usual function: the query is the turn's user message, and each result of the
+tools you name is one chunk.
+
+```scala
+// The turn's context: its user message is the query, each result of the "search_docs" tool is a chunk
+val grounded = RAGGuardrail.withTurnContext(GroundingGuardrail.balanced(judge)) { turn =>
+  Some(RAGContext.fromToolResults(turn, Set("search_docs")))
+}
+
+val agent = Agent
+  .builder("support", client)
+  .withTools(new ToolRegistry(Seq(searchDocs)))
+  .withMiddleware(new GuardrailMiddleware(input = Seq.empty, output = Seq(grounded)))
   .build()
 
-agent.flatMap(_.run(question))
+val result = agent.flatMap(_.run("What is the refund window?"))
 ```
+
+What to know:
+
+- **The turn** is the current turn only, as the thread stores it: the user message, each assistant message with its
+  tool calls, each tool result, and the final answer last. Results retrieved in an earlier turn are not in it.
+- **A chunk is a tool's whole result**, as the model read it (the tool's JSON, or the error it returned).
+  `fromToolResults` sets no sources. A tool that returns several passages, or their sources, needs your own function:
+  parse the `ToolMessage`s of the turn and build the context with `RAGContext.withSources`.
+- **Returning `None`** skips the check for that turn, and the answer passes. Returning a context with no chunks does
+  not: the guardrail's own rule applies, and a blocking `GroundingGuardrail` or `ContextRelevanceGuardrail` rejects an
+  answer to a turn that retrieved nothing. Return `None` for the turns that may answer without retrieving.
+- **A block** ends the turn `AgentStatus.Blocked("GroundingGuardrail", reason)`, like any output guardrail's.
+- **The judge's calls are counted** in the run's `usage`, and held to its token budget.
+
+Nothing here depends on `llm4s-rag`: the function you pass is the only thing that knows where retrieval happens.
 
 ### Preset Configurations
 
+A preset is a `RAGGuardrails.GuardrailConfig`: `inputGuardrails`, `outputGuardrails` and `ragGuardrails`.
+`outputGuardrailsWithContext` gives the last two, in that order, as the output list of a `GuardrailMiddleware`, each
+RAG guardrail wrapped with `RAGGuardrail.withTurnContext`.
+
 ```scala
-// Minimal - basic safety only
-val minimal = RAGGuardrails.minimal()
+val minimal    = RAGGuardrails.minimal           // no LLM calls
+val standard   = RAGGuardrails.standard(judge)
+val strict     = RAGGuardrails.strict(judge, allowedTopics = Seq("refunds", "shipping"))
+val monitoring = RAGGuardrails.monitoring(judge) // warns, never blocks
 
-// Standard - balanced for production
-val standard = RAGGuardrails.standard(client)
-
-// Strict - maximum safety
-val strict = RAGGuardrails.strict(client)
-
-// Monitoring - warn mode, doesn't block
-val monitoring = RAGGuardrails.monitoring(client)
+val guardrails = new GuardrailMiddleware(
+  input = standard.inputGuardrails,
+  output = standard.outputGuardrailsWithContext(turn => Some(RAGContext.fromToolResults(turn, Set("search_docs"))))
+)
 ```
+
+| Preset | Input | Output | RAG |
+|--------|-------|--------|-----|
+| `minimal` | `PIIDetector`, `PromptInjectionDetector` | `PIIMasker` | none |
+| `standard(judge)` | `PIIDetector`, `PromptInjectionDetector` | `PIIMasker` | grounding, context relevance |
+| `strict(judge, allowedTopics)` | strict PII and injection checks, `TopicBoundaryGuardrail` | `PIIMasker` | strict grounding, context relevance, source attribution |
+| `monitoring(judge)` | PII and injection checks that only warn | `PIIMasker` | all three, in warn mode |
+
+`standardWithTopics`, `customerSupport`, `softwareDocumentation`, `research`, `financial` and `custom` are the others.
+Each LLM-judged guardrail is one model call per turn.
 
 ### Individual RAG Guardrails
 
+The constructor parameters, with their defaults:
+
 ```scala
-// Verify answer is grounded in retrieved context
+// Is the answer supported by the retrieved chunks? strictMode fails on any unsupported claim, whatever the score
 val grounding = new GroundingGuardrail(
-  client = client,
-  retrievedContext = retrievedDocuments
+  llmClient = judge,
+  threshold = 0.7,
+  onFail = GuardrailAction.Block,
+  strictMode = false
 )
 
-// Check retrieved context is relevant to query
+// Are the retrieved chunks relevant to the query? A chunk scoring at least `threshold` is relevant
 val relevance = new ContextRelevanceGuardrail(
-  client = client,
-  query = userQuery
+  llmClient = judge,
+  threshold = 0.5,
+  minRelevantRatio = 0.5,
+  onFail = GuardrailAction.Block
 )
 
-// Ensure sources are properly cited
+// Does the answer cite its sources?
 val attribution = new SourceAttributionGuardrail(
-  client = client,
-  sourceDocuments = sources
+  llmClient = judge,
+  requireAttributions = true,
+  minAttributionScore = 0.5,
+  onFail = GuardrailAction.Block
 )
 
-// Prevent off-topic responses
+// Is the query about an allowed topic? An input guardrail: it needs no RAGContext
 val topicBoundary = new TopicBoundaryGuardrail(
-  client = client,
-  allowedTopics = Set("programming", "software engineering")
+  llmClient = judge,
+  allowedTopics = Seq("programming", "software engineering"),
+  threshold = 0.5,
+  onFail = GuardrailAction.Block
 )
 ```
+
+Each has the factories `strict`, `balanced`, `lenient` and `monitoring` (`GroundingGuardrail.strict(judge)`,
+`TopicBoundaryGuardrail.balanced(judge, allowedTopics)`).
+
+- `ContextRelevanceGuardrail` judges the retrieval, not the answer: it fails when fewer than `minRelevantRatio` of the
+  chunks are relevant to the query.
+- `SourceAttributionGuardrail` passes without a judge call when the context has no chunks or `requireAttributions` is
+  `false`. Give it a context with `sources`, or the judge has no source names to look for.
+- `GuardrailAction.Warn` logs and passes. None of them can repair an answer, so `GuardrailAction.Fix` does not fix:
+  `GroundingGuardrail` and `TopicBoundaryGuardrail` block as `Block` does, and the other two log and pass as `Warn`
+  does.
+- `TopicBoundaryGuardrail` is an ordinary `InputGuardrail` on the query: pass it in `input`, with no wrapping.
 
 ---
 

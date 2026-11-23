@@ -100,8 +100,8 @@ records.map(_.event).collect { case f: RunEvent.RunFailed => f }
 `DelegatedRequest` (`AgentStatus.Suspended.delegated`, `StreamEvent.Nested`). `@Experimental` members of Stable
 types: `AgentBuilder.withHarness`, `withSubagents`, `withDelegation`, `Agent.delegation`, and
 `InMemoryCheckpointer.runQueue`. The RAG
-guardrails (`org.llm4s.agent.guardrails.rag`) are `@Experimental`: the agent runtime does not yet hand them a
-`RAGContext`.
+guardrails (`org.llm4s.agent.guardrails.rag`) are `@Experimental`: an agent gives them the turn's `RAGContext` only
+through `RAGGuardrail.withTurnContext`, whose shape may still change.
 
 ## Context pruning enforces both limits and `minRecentTurns` (#2728, #2729)
 
