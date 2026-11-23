@@ -33,8 +33,8 @@ private[config] object EmbeddingsConfigLoader {
 
   /** The part of `llm4s.embeddings` that is not a provider section. */
   final private case class EmbeddingsSection(
-    model: Option[String],   // Unified format: provider/model (e.g., openai/text-embedding-3-small)
-    provider: Option[String] // Legacy fallback
+    model: Option[String],   // provider/model (e.g., openai/text-embedding-3-small)
+    provider: Option[String] // the removed provider-only form, read only to report it
   )
 
   final private case class EmbeddingsRoot(embeddings: Option[EmbeddingsSection])
@@ -98,20 +98,24 @@ private[config] object EmbeddingsConfigLoader {
   )(using registry: ProviderRegistry): Result[(String, EmbeddingProviderConfig)] = {
     val emb = root.embeddings.getOrElse(EmbeddingsSection(None, None))
 
-    // Unified `EMBEDDING_MODEL=provider/model` first, then the legacy EMBEDDING_PROVIDER.
+    // `EMBEDDING_MODEL=provider/model` is the only selector. A section still selecting the provider alone
+    // through `llm4s.embeddings.provider` (once bound to EMBEDDING_PROVIDER) is told so rather than
+    // reported as having no embedding config at all.
     val selection: Result[Selection] =
       trimmed(emb.model) match {
         case Some(modelSpec) => unified(modelSpec, Some(UnifiedModelPath))
         case None =>
-          trimmed(emb.provider)
-            .map(provider => Right(Selection(provider.toLowerCase, None, Some(LegacyProviderPath))))
-            .getOrElse(
-              Left(
-                ConfigurationError(
-                  "Missing embedding config: set EMBEDDING_MODEL (e.g., openai/text-embedding-3-small) or EMBEDDING_PROVIDER"
-                )
+          Left(
+            ConfigurationError(
+              trimmed(emb.provider).fold(
+                "Missing embedding config: set EMBEDDING_MODEL (llm4s.embeddings.model) to provider/model, " +
+                  "e.g. openai/text-embedding-3-small"
+              )(provider =>
+                s"$RemovedProviderPath ('$provider') is no longer read: set EMBEDDING_MODEL ($UnifiedModelPath) " +
+                  s"to provider/model, e.g. $provider/<model>, and remove $RemovedProviderPath"
               )
             )
+          )
       }
 
     selection.flatMap(configFor(_, source))
@@ -156,18 +160,16 @@ private[config] object EmbeddingsConfigLoader {
         .withApiKeyProvider(resolved.flatMap(_.file).map(ApiKeyProvider.file))
     }
 
-  private val UnifiedModelPath   = "llm4s.embeddings.model"
-  private val LegacyProviderPath = "llm4s.embeddings.provider"
+  private val UnifiedModelPath    = "llm4s.embeddings.model"
+  private val RemovedProviderPath = "llm4s.embeddings.provider"
 
   /**
    * Which provider was asked for, and which setting asked for it.
    *
    * @param provider      the configured provider name, lowercased; not yet canonical.
-   * @param modelOverride the `<model>` half of a unified `EMBEDDING_MODEL`, when that form was used.
+   * @param modelOverride the `<model>` half of the `provider/model` selector.
    * @param origin        the config path the selection came from, or none for a model the caller
-   *                      passed. Carried rather than assumed because an unregistered provider is
-   *                      reported against it, and pointing a legacy `EMBEDDING_PROVIDER` user at
-   *                      `llm4s.embeddings.model` names a key they never set.
+   *                      passed, against which an unregistered provider is reported.
    */
   final private case class Selection(provider: String, modelOverride: Option[String], origin: Option[String])
 

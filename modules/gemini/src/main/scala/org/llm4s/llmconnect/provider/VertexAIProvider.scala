@@ -30,8 +30,7 @@ import org.llm4s.types.Result
  * }}}
  *
  * Until [[https://github.com/llm4s/llm4s/issues/1215 #1215]] the project was read
- * from `endpoint` and the location from `organization`. Both still work as
- * deprecated aliases, with a warning, and will be removed in a later release.
+ * from `endpoint` and the location from `organization`; those names are no longer read.
  */
 @Stable
 object VertexAIProvider extends ProviderDescriptor:
@@ -55,14 +54,12 @@ object VertexAIProvider extends ProviderDescriptor:
       ProviderConfigKey(
         ProjectKey,
         "the GCP project ID that owns your Vertex AI resources",
-        required = true,
-        deprecatedAliases = Seq("endpoint")
+        required = true
       ),
       ProviderConfigKey(
         LocationKey,
         "the GCP region that serves the model, e.g. us-central1",
-        default = Some(VertexAIConfig.DEFAULT_LOCATION),
-        deprecatedAliases = Seq("organization")
+        default = Some(VertexAIConfig.DEFAULT_LOCATION)
       ),
       GeminiGrounding.GoogleSearchConfigKey
     )

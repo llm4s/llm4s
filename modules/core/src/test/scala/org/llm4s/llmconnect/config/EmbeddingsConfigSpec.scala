@@ -29,9 +29,8 @@ class EmbeddingsConfigSpec extends AnyWordSpec with Matchers {
   "Llm4sConfig.embeddings" should {
     "load embeddings config via llm4s.*" in {
       val props = Map(
-        "llm4s.embeddings.provider"                 -> "fixtureembedding",
+        "llm4s.embeddings.model"                    -> "fixtureembedding/fixture-embed-large",
         "llm4s.embeddings.fixtureembedding.baseUrl" -> "https://embeddings.example.test",
-        "llm4s.embeddings.fixtureembedding.model"   -> "fixture-embed-large",
         "llm4s.embeddings.fixtureembedding.apiKey"  -> "vk-test"
       )
       withProps(props) {

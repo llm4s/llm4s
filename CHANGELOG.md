@@ -66,9 +66,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its turn count with no other limit set
   ([#2728](https://github.com/llm4s/llm4s/issues/2728), [#2729](https://github.com/llm4s/llm4s/issues/2729));
   [migration](docs/reference/migration.md#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729).
+- `EMBEDDING_PROVIDER` (`llm4s.embeddings.provider`) is removed: select embeddings with `EMBEDDING_MODEL=provider/model`;
+  [migration](docs/reference/migration.md#the-legacy-embedding-provider-selector-is-removed).
+- Vertex AI no longer reads `endpoint` and `organization` (use `project` and `location`), and `ProviderConfigKey`'s
+  `deprecatedAliases` mechanism is removed; [migration](docs/reference/migration.md#vertex-ai-no-longer-reads-endpoint-and-organization).
 
 ### Providers
 
+- **Removed** Vertex AI's `endpoint` / `organization` aliases for `project` / `location`, and with them
+  `ProviderConfigKey.deprecatedAliases` and `ProviderConfigSpec.BuiltinAliasKeys` ([migration](docs/reference/migration.md#vertex-ai-no-longer-reads-endpoint-and-organization)).
 - **Fixed** watsonx, Perplexity and Jlama leaving options out without reporting them: each now puts on
   `Completion.adjustments` what it does not send as asked (`reasoning` and `thinking`; Perplexity and Jlama also the
   penalties, Jlama also `top_p` and `responseFormat`), on `complete` and streams; watsonx's per-process warnings give way to the reports ([RFC 0008](docs/rfcs/0008-generation-controls.md) decision 15) [#2115](https://github.com/llm4s/llm4s/issues/2115).
@@ -183,6 +189,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Embeddings & RAG
 
+- **Removed** the provider-only `EMBEDDING_PROVIDER` / `llm4s.embeddings.provider` selector; a config still setting it
+  fails, naming `EMBEDDING_MODEL` ([migration](docs/reference/migration.md#the-legacy-embedding-provider-selector-is-removed)).
 - **Fixed** `RAGConfig.withTracing` traces the answer, LLM-rerank and `LLMQueryRewriter` calls, tagged `rag.answer`,
   `rag.rerank`, `rag.rewrite`, and each query's `RAGOperationCompleted` with stage durations; **Added**
   `RAGAnswerResult.metrics` (`RAGQueryMetrics`) [#2734](https://github.com/llm4s/llm4s/issues/2734).

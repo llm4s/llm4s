@@ -70,8 +70,7 @@ object ProvidersConfigModel:
    *                      redacted in `toString`.
    *  @param extras       the provider-specific keys its descriptor declares in
    *                      `ProviderConfigSpec.extras`, as validation leaves them: required ones
-   *                      present, defaults filled in, deprecated aliases resolved to the current
-   *                      name, and undeclared keys dropped. Values are redacted in `toString`,
+   *                      present, defaults filled in and undeclared keys dropped. Values are redacted in `toString`,
    *                      since a provider may declare a credential here. Vendor-specific settings
    *                      live here rather than as fields - Azure's `endpoint` and `apiVersion`,
    *                      OpenAI's `organization`, the generic `openai-compatible` provider's

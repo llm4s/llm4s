@@ -71,29 +71,6 @@ class OllamaEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       cfg.baseUrl shouldBe "http://localhost:11434"
     }
 
-    "successfully load Ollama embeddings via legacy provider setting" in {
-      val hocon =
-        """
-          |llm4s {
-          |  embeddings {
-          |    provider = "ollama"
-          |    ollama {
-          |      baseUrl = "http://ollama-server:11434"
-          |    }
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      val (provider, cfg) = result.value
-      provider shouldBe "ollama"
-      // Ollama has a default model
-      cfg.model shouldBe "nomic-embed-text"
-      cfg.baseUrl shouldBe "http://ollama-server:11434"
-    }
-
     "use default baseUrl for Ollama when not specified" in {
       val hocon =
         """
@@ -109,31 +86,14 @@ class OllamaEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       result.isRight shouldBe true
       result.value._2.baseUrl shouldBe "http://localhost:11434"
     }
-
-    "use default model for Ollama when not specified" in {
-      val hocon =
-        """
-          |llm4s {
-          |  embeddings {
-          |    provider = "ollama"
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      result.value._2.model shouldBe "nomic-embed-text"
-    }
   }
 
   "Llm4sConfig.embeddings" should {
 
     "load Ollama embeddings config via llm4s.*" in {
       val props = Map(
-        "llm4s.embeddings.provider"       -> "ollama",
-        "llm4s.embeddings.ollama.baseUrl" -> "http://localhost:11434",
-        "llm4s.embeddings.ollama.model"   -> "nomic-embed-text"
+        "llm4s.embeddings.model"          -> "ollama/nomic-embed-text",
+        "llm4s.embeddings.ollama.baseUrl" -> "http://localhost:11434"
       )
       withProps(props) {
         val (provider, cfg) = Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
@@ -147,8 +107,7 @@ class OllamaEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
 
     "load Ollama embeddings config with defaults" in {
       val props = Map(
-        "llm4s.embeddings.provider"     -> "ollama",
-        "llm4s.embeddings.ollama.model" -> "mxbai-embed-large"
+        "llm4s.embeddings.model" -> "ollama/mxbai-embed-large"
       )
       withProps(props) {
         val (provider, cfg) = Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)

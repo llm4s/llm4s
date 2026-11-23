@@ -88,12 +88,12 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
   }
 
   // --------------------------------------------------------------------------
-  // Legacy EMBEDDING_PROVIDER Format Tests
+  // The removed provider-only form (EMBEDDING_PROVIDER, llm4s.embeddings.provider)
   // --------------------------------------------------------------------------
 
-  "EmbeddingsConfigLoader with legacy provider format" should {
+  "EmbeddingsConfigLoader without a model selector" should {
 
-    "successfully load embeddings via legacy provider setting" in {
+    "fail, naming EMBEDDING_MODEL, when only the removed provider setting is present" in {
       val hocon =
         """
           |llm4s {
@@ -107,37 +107,15 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
           |}
           |""".stripMargin
 
-      val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
+      val error = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon)).left.value
 
-      result.isRight shouldBe true
-      val (provider, cfg) = result.value
-      provider shouldBe "fixtureembedding"
-      cfg.model shouldBe "fixture-embed-large"
-      cfg.apiKey.reveal shouldBe "vk-legacy"
+      error.message shouldBe
+        "llm4s.embeddings.provider ('fixtureembedding') is no longer read: set EMBEDDING_MODEL " +
+        "(llm4s.embeddings.model) to provider/model, e.g. fixtureembedding/<model>, and remove " +
+        "llm4s.embeddings.provider"
     }
 
-    "fail with clear error for unknown legacy provider" in {
-      val hocon =
-        """
-          |llm4s {
-          |  embeddings {
-          |    provider = "cohere"
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
-
-      result.isLeft shouldBe true
-      val error = result.left.value
-      // The registry's own message: it names the registered providers and the scan that
-      // found them, so "never added the dependency" is distinguishable from "module failed".
-      error.message should include("is not registered")
-      error.message should include("Registered embedding providers")
-      error.message should include("cohere")
-    }
-
-    "fail with clear error when neither model nor provider is set" in {
+    "fail with clear error when no model is set" in {
       val hocon =
         """
           |llm4s {
@@ -152,7 +130,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       val error = result.left.value
       error.message should include("Missing embedding config")
       error.message should include("EMBEDDING_MODEL")
-      error.message should include("EMBEDDING_PROVIDER")
+      (error.message should not).include("EMBEDDING_PROVIDER")
     }
   }
 
@@ -182,27 +160,6 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       error.message should include("Missing fixtureembedding embeddings apiKey")
       error.message should include("set apiKey under llm4s.embeddings.fixtureembedding in application.conf")
       error.message should include("FIXTURE_EMBEDDING_API_KEY")
-    }
-
-    "fail with clear error when the model is missing in legacy mode" in {
-      val hocon =
-        """
-          |llm4s {
-          |  embeddings {
-          |    provider = "fixtureembedding"
-          |    fixtureembedding {
-          |      apiKey = "vk-test"
-          |    }
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
-
-      result.isLeft shouldBe true
-      val error = result.left.value
-      error.message should include("Missing fixtureembedding embeddings model")
-      error.message should include("FIXTURE_EMBEDDING_MODEL")
     }
   }
 
@@ -238,7 +195,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
   "EmbeddingsConfigLoader precedence" should {
 
-    "prefer unified model format over legacy provider when both are set" in {
+    "ignore the removed provider setting when a model is set" in {
       val hocon =
         """
           |llm4s {
