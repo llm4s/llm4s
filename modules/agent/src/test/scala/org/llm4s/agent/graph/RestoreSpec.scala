@@ -102,7 +102,7 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
     )
     // a node nothing stored reaches is not a change the run can observe (GraphEvolutionSpec has the rest)
     graph(extraNode = true).restore(snapshot).value
-    problems(graph().restore(snapshot.copy(graphId = "elsewhere", superstep = -1))) shouldBe List(
+    problems(graph().restore(snapshot.withGraphId("elsewhere").withSuperstep(-1))) shouldBe List(
       "snapshot is of graph 'elsewhere'",
       "superstep -1 is negative"
     )
@@ -111,11 +111,11 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
   it should "reject state that is unregistered or does not decode" in {
     val snapshot = snapshotAt(3)
     problems(
-      graph().restore(snapshot.copy(state = snapshot.state + ("ghost" -> VersionedJson(1, ujson.Num(1)))))
+      graph().restore(snapshot.withState(snapshot.state + ("ghost" -> VersionedJson(1, ujson.Num(1)))))
     ) shouldBe
       List("state key 'ghost' is not registered with this graph")
     problems(
-      graph().restore(snapshot.copy(state = snapshot.state.updated("log", VersionedJson(1, ujson.Str("not-a-list")))))
+      graph().restore(snapshot.withState(snapshot.state.updated("log", VersionedJson(1, ujson.Str("not-a-list")))))
     ).loneElement should startWith("state key 'log' does not decode")
   }
 
@@ -123,15 +123,15 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
     val snapshot               = snapshotAt(1)
     val Vector(w0, w1, w2, c1) = snapshot.frontier
     def withFrontier(tasks: GraphSnapshot.PendingTask*) =
-      problems(graph().restore(snapshot.copy(frontier = tasks.toVector)))
+      problems(graph().restore(snapshot.withFrontier(tasks.toVector)))
 
-    withFrontier(w0, w1, w2, c1.copy(nodeId = "gone")) shouldBe List("pending task 1.3 targets unknown node 'gone'")
-    withFrontier(w0, w1, w2.copy(input = VersionedJson(1, ujson.Arr(3))), c1).loneElement should
+    withFrontier(w0, w1, w2, c1.withNodeId("gone")) shouldBe List("pending task 1.3 targets unknown node 'gone'")
+    withFrontier(w0, w1, w2.withInput(VersionedJson(1, ujson.Arr(3))), c1).loneElement should
       startWith("pending task 1.2 input does not decode for node 'worker'")
-    withFrontier(w0, w1, w2, c1.copy(joinId = Some("workers"))) should contain(
+    withFrontier(w0, w1, w2, c1.withJoinId(Some("workers"))) should contain(
       "pending task 1.3 has half a join slot"
     )
-    withFrontier(w0, w1, w2, c1.copy(joinId = Some("nope"), fanOutTask = Some("0.0"))) shouldBe List(
+    withFrontier(w0, w1, w2, c1.withJoinId(Some("nope")).withFanOutTask(Some("0.0"))) shouldBe List(
       "pending task 1.3 belongs to unknown dynamic join 'nope'"
     )
     withFrontier(w0, w1, w2, w2, c1) shouldBe List("task 1.2 is pending more than once")
@@ -139,29 +139,29 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
 
   it should "reject a dynamic activation that waits for work nothing will do, or has already released" in {
     val snapshot = snapshotAt(1)
-    val dropped  = snapshot.copy(frontier = snapshot.frontier.filterNot(_.taskId == "1.1"))
+    val dropped  = snapshot.withFrontier(snapshot.frontier.filterNot(_.taskId == "1.1"))
     problems(graph().restore(dropped)) shouldBe List(
       "dynamic join 'workers' (fan-out 0.0) waits for 1.1, which are not pending"
     )
     val activation = snapshot.dynamicJoins.head
     problems(
-      graph().restore(snapshot.copy(dynamicJoins = Vector(activation.copy(arrived = Vector("9.9")))))
+      graph().restore(snapshot.withDynamicJoins(Vector(activation.withArrived(Vector("9.9")))))
     ) shouldBe List(
       "dynamic join 'workers' records unexpected arrivals 9.9"
     )
-    problems(graph().restore(snapshot.copy(dynamicJoins = Vector(activation.copy(joinId = "nope"))))) shouldBe List(
+    problems(graph().restore(snapshot.withDynamicJoins(Vector(activation.withJoinId("nope"))))) shouldBe List(
       "dynamic join 'nope' is not part of this graph",
       "pending task 1.0 belongs to no open activation of dynamic join 'workers'",
       "pending task 1.1 belongs to no open activation of dynamic join 'workers'",
       "pending task 1.2 belongs to no open activation of dynamic join 'workers'"
     )
     problems(
-      graph().restore(snapshot.copy(dynamicJoins = Vector(activation.copy(arrived = activation.expected))))
+      graph().restore(snapshot.withDynamicJoins(Vector(activation.withArrived(activation.expected))))
     ) shouldBe
       List("dynamic join 'workers' (fan-out 0.0) has every arrival, so it has already released")
-    problems(graph().restore(snapshot.copy(dynamicJoins = Vector(activation.copy(expected = Vector.empty))))) should
+    problems(graph().restore(snapshot.withDynamicJoins(Vector(activation.withExpected(Vector.empty))))) should
       contain("dynamic join 'workers' (fan-out 0.0) has every arrival, so it has already released")
-    problems(graph().restore(snapshot.copy(dynamicJoins = Vector(activation, activation)))) shouldBe List(
+    problems(graph().restore(snapshot.withDynamicJoins(Vector(activation, activation)))) shouldBe List(
       "dynamic join 'workers' has more than one activation for fan-out 0.0"
     )
   }
@@ -169,17 +169,17 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
   it should "reject static arrivals for unknown joins, from non-sources, or that are not partial" in {
     val snapshot = snapshotAt(3)
     problems(
-      graph().restore(snapshot.copy(staticJoins = Vector(GraphSnapshot.StaticArrivals("nope", Vector("c3")))))
+      graph().restore(snapshot.withStaticJoins(Vector(GraphSnapshot.StaticArrivals("nope", Vector("c3")))))
     ) shouldBe
       List("static join 'nope' is not part of this graph")
     problems(
       graph().restore(
-        snapshot.copy(staticJoins = Vector(GraphSnapshot.StaticArrivals("both", Vector("c1", "summarize"))))
+        snapshot.withStaticJoins(Vector(GraphSnapshot.StaticArrivals("both", Vector("c1", "summarize"))))
       )
     ) shouldBe List("static join 'both' records arrivals from non-sources c1")
     def withArrivals(arrived: String*) =
       problems(
-        graph().restore(snapshot.copy(staticJoins = Vector(GraphSnapshot.StaticArrivals("both", arrived.toVector))))
+        graph().restore(snapshot.withStaticJoins(Vector(GraphSnapshot.StaticArrivals("both", arrived.toVector))))
       )
     withArrivals() shouldBe List("static join 'both' records no arrivals")
     withArrivals("c3", "summarize") shouldBe List("static join 'both' records every source, so it has already released")

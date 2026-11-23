@@ -1,5 +1,7 @@
 package org.llm4s.agent.guardrails.rag
 
+import org.llm4s.annotation.Experimental
+import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.agent.guardrails.GuardrailAction
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -18,7 +20,7 @@ import org.llm4s.util.Redaction
  * @param relevantChunkCount Number of chunks meeting the threshold
  * @param explanation Brief explanation of the evaluation
  */
-final case class ContextRelevanceResult(
+final private[guardrails] case class ContextRelevanceResult(
   overallScore: Double,
   chunkScores: Seq[Double],
   relevantChunkCount: Int,
@@ -77,6 +79,7 @@ final case class ContextRelevanceResult(
  * @param minRelevantRatio Minimum ratio of relevant chunks required (default: 0.5)
  * @param onFail Action to take when relevance is insufficient (default: Block)
  */
+@Experimental
 class ContextRelevanceGuardrail(
   val llmClient: LLMClient,
   val threshold: Double = 0.5,
@@ -95,7 +98,14 @@ class ContextRelevanceGuardrail(
   /**
    * Validate that retrieved context is relevant to the query.
    */
-  override def validateWithContext(output: String, context: RAGContext): Result[String] = {
+  override def validateWithContext(output: String, context: RAGContext): Result[String] =
+    checked(output, context, llmClient)
+
+  /** As `validateWithContext(output, context)`, the judge called through `hook.accounted(llmClient)`, so its call is counted. */
+  override def validateWithContext(output: String, context: RAGContext, hook: ModelContext): Result[String] =
+    checked(output, context, hook.accounted(llmClient))
+
+  private def checked(output: String, context: RAGContext, client: LLMClient): Result[String] = {
     val _ = output // Output not used - we're validating context, not response
 
     if (context.retrievedChunks.isEmpty) {
@@ -113,7 +123,7 @@ class ContextRelevanceGuardrail(
           )
       }
     } else {
-      evaluateRelevance(context).flatMap { result =>
+      evaluateRelevance(context, client).flatMap { result =>
         val relevantRatio = result.relevantChunkCount.toDouble / context.retrievedChunks.size
         if (relevantRatio >= minRelevantRatio) {
           Right(output)
@@ -171,7 +181,7 @@ class ContextRelevanceGuardrail(
   /**
    * Evaluate the relevance of each chunk to the query.
    */
-  private def evaluateRelevance(context: RAGContext): Result[ContextRelevanceResult] = {
+  private def evaluateRelevance(context: RAGContext, client: LLMClient): Result[ContextRelevanceResult] = {
     val systemPrompt = buildSystemPrompt()
     val userPrompt   = buildUserPrompt(context)
 
@@ -188,7 +198,7 @@ class ContextRelevanceGuardrail(
     )
 
     for {
-      completion <- llmClient.complete(conversation, options)
+      completion <- client.complete(conversation, options)
       result     <- parseRelevanceResult(completion.message.content, context.retrievedChunks.size)
     } yield result
   }
@@ -316,6 +326,7 @@ class ContextRelevanceGuardrail(
   }
 }
 
+@Experimental
 object ContextRelevanceGuardrail {
 
   /**

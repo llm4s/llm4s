@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.security.RegexSafetyManager
@@ -70,6 +71,7 @@ import scala.util.matching.Regex
  *                           companion's `String` factories set it when the pattern is refused or does not
  *                           compile
  */
+@Stable
 class RegexValidator(
   compiledPattern: Pattern,
   patternDescription: String,

@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.types.{ Result, TryOps }
 
 import scala.util.Try
@@ -12,6 +13,7 @@ import scala.util.Try
  * registered key's id - is an [[GraphError.UnknownStateKey]]. A registered key with no stored
  * entry reads as its initial value. The erasure to `Any` stays private to this boundary.
  */
+@Stable
 final class ThreadState private[graph] (
   private[graph] val keys: Map[StateKeyId, StateKey[?, ?]],
   private[graph] val values: Map[StateKeyId, Any]

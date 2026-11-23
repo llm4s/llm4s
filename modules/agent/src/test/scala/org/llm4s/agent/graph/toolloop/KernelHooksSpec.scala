@@ -504,7 +504,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     val loop  = loopOf(ScriptedModel(answer("hi"), answer("again")), Seq(failing))
     GraphRuntime(store).start(t, loop.graph, AgentInput("go")).awaited.value.failed
     val failed =
-      store.eventsAfter(t, 0L, 1000).value.collect { case EventRecord(_, _, _, _, _, _, _, _, f: RunEvent.RunFailed) =>
+      store.eventsAfter(t, 0L, 1000).value.map(_.event).collect { case f: RunEvent.RunFailed =>
         f
       }
     failed.size shouldBe 1
@@ -593,9 +593,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     called.await(5, TimeUnit.SECONDS) shouldBe true
     handle.cancel()
     awaitResult(handle).value.failed
-    val cancelled = store.eventsAfter(t, 0L, 1000).value.collect {
-      case EventRecord(_, _, _, _, _, _, _, _, c: RunEvent.RunCancelled) => c
-    }
+    val cancelled = store.eventsAfter(t, 0L, 1000).value.map(_.event).collect { case c: RunEvent.RunCancelled => c }
     cancelled.map(_.usage.map(_.requestCount)) shouldBe Vector(Some(1L))
   }
 
@@ -617,9 +615,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       .awaited
       .value
       .failed
-    val timedOut = store.eventsAfter(t, 0L, 1000).value.collect {
-      case EventRecord(_, _, _, _, _, _, _, _, e: RunEvent.RunTimedOut) => e
-    }
+    val timedOut = store.eventsAfter(t, 0L, 1000).value.map(_.event).collect { case e: RunEvent.RunTimedOut => e }
     timedOut.map(_.usage.map(_.requestCount)) shouldBe Vector(Some(1L))
   }
 
@@ -651,7 +647,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       .value
       .failed
     val failed =
-      store.eventsAfter(t, 0L, 1000).value.collect { case EventRecord(_, _, _, _, _, _, _, _, f: RunEvent.RunFailed) =>
+      store.eventsAfter(t, 0L, 1000).value.map(_.event).collect { case f: RunEvent.RunFailed =>
         f
       }
     failed.map(_.usage.map(_.requestCount)) shouldBe Vector(Some(2L))

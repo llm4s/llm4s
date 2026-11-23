@@ -185,6 +185,7 @@ final class CompositeBackend private (default: FileBackend, routes: Vector[(VPat
       routed.backend.search(routed.path, regex, p => toComposite(p).exists(accept), limit, ctx)
     }
 
+@Experimental
 object CompositeBackend:
 
   /** The refusals the mount fallback of `ls` stands in for: the path is absent, or a file. */

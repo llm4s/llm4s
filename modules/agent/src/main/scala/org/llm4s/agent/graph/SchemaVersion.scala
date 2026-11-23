@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
@@ -13,6 +14,7 @@ import upickle.default.ReadWriter
  * A step keyed `n` migrates JSON written at version `n` to version `n + 1`. Steps are plain
  * functions of the compiled graph, never persisted.
  */
+@Stable
 final class SchemaVersion private (val current: Int, steps: Map[Int, ujson.Value => Result[ujson.Value]]):
 
   /** Migrates JSON written at version `from` to [[current]], one step at a time. */
@@ -35,4 +37,5 @@ object SchemaVersion:
     new SchemaVersion(current, steps.toMap)
 
 /** A persisted value and the version of the codec that wrote it. */
+@Stable
 final case class VersionedJson(version: Int, value: ujson.Value) derives ReadWriter

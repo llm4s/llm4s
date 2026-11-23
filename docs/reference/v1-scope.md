@@ -62,8 +62,7 @@ Every top-level package of the published modules, the module that ships it, and 
 | `security` | `llm4s-core` | Frozen at 1.0 |
 | `llmconnect` (API only — see provider split below) | `llm4s-core` | Frozen at 1.0 |
 | `reliability` | `llm4s-core` | Frozen at 1.0 |
-| `agent` (excludes `agent/memory`), its stable core — building and running an agent, its result and status, handoffs, the guardrail middleware — **carved** | `llm4s-agent` | Frozen at 1.0 |
-| `agent/graph`, `agent/harness`, `agent/service`, `agent/delegation`, `agent/encryption` — the rest of the agent runtime, free to change in 1.x minor releases — **carved** | `llm4s-agent` | Experimental |
+| `agent` (excludes `agent/memory`) — **carved** | `llm4s-agent` | Frozen at 1.0 |
 | `assistant` — **carved** | `llm4s-agent` | Beta |
 | `trace` — the contract: `Tracing`, `TraceEvent`, `TracingComposer`, `TracingMode`, the `trace/spi` `TracingBackend` SPI, `NoOpTracing`, `ConsoleTracing`, and `TracingSettings` (in `llmconnect/config`) | `llm4s-core` | Frozen at 1.0 |
 | `metrics` — the contract: `MetricsCollector` | `llm4s-core` | Frozen at 1.0 |
@@ -134,6 +133,7 @@ Notes:
 
 - `llmconnect/provider` in `llm4s-core` now holds only the plumbing every provider module shares - cost estimation, HTTP error mapping, metrics recording, the `EmbeddingProvider` trait, exchange recording - and no client. With the registration SPI in `llmconnect/spi` from [slice 4](https://github.com/llm4s/llm4s/issues/1131) and the streaming and request helpers providers build on, it is a **frozen provider-author SPI**, public so that a provider can be published outside this repository: a provider is a `ProviderDescriptor` listed in its own module's `Llm4sProviderModule`, so adding one adds a dependency and edits nothing in core. See [Writing a provider](../guide/writing-a-provider). Helpers specific to one wire format live with it - `ResponseFormatMapper` and `ToolCallDeserializer` in `llm4s-openai-compatible`, OpenAI's model-name rules in `llm4s-openai` - and helpers only llm4s's own modules use, such as `ProviderResultOps`, are `private[llm4s]`. Vendor API keys (`llm4s.credentials.<provider>.apiKey`) are read by core's `config`, but each key is bound in its provider module's `reference.conf`, beside the descriptor that uses it.
 - The tracing and metrics **contracts** stay in `llm4s-core`, and they are what is frozen: `llmconnect`, the agent runtime and every provider module trace and record metrics through them alone. The **integrations** are separate modules that plug into that contract - a tracing backend is a `TracingBackend` registered in `META-INF/services`, discovered by `TRACING_MODE`, the way a provider is a `ProviderDescriptor`. They are Beta, like every integration module other than the frozen provider modules: Langfuse's ingestion format and OpenTelemetry's SDK move on their vendors' schedule, not ours, and a new tracing backend should be a new module rather than a change to the frozen surface. See the [migration guide](migration#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core).
+- `llm4s-agent` is frozen type by type ([#2778](https://github.com/llm4s/llm4s/issues/2778)): the `agent` row covers what the code marks `@Stable` - the agent, graph, event, middleware and guardrail APIs. The parts still moving are `@Experimental` and outside the promise: `agent/harness`, `agent/service` (run queue and worker), `agent/encryption`, `agent/metrics`, subagent definition in `agent/delegation`, tool permissions, the checkpointer SPI and settings (`agent/graph/spi`), `agent/guardrails/rag`, and `assistant`. See [Tiers in the Code](api-stability#tiers-in-the-code).
 - Rows marked **carved** already live in their target sbt module. Their package names are unchanged, so this is a build-file change for users, not an import rewrite — with one exception, `org.llm4s.extract`, described in the [migration guide](migration#slice-1-llm4s-rag-and-llm4s-knowledgegraph).
 - `org.llm4s.media` is a new package, not a carve. It consolidates the three overlapping image-format enumerations `llm4s-core` had accumulated, so that `llm4s-image` and `llm4s-speech` carve as pure file moves rather than moves plus a vocabulary change. It is the one part of slice 3 with a source break, described in the [migration guide](migration#slice-3-llm4s-media); it is deliberate and taken now rather than after 1.0.
 - `org.llm4s.extract` is a new package name, not a rename of an existing one — see [Slice 1](https://github.com/llm4s/llm4s/issues/1128) for why the two extractors were consolidated rather than just moved.
@@ -144,8 +144,10 @@ Notes:
 
 ## What Frozen means
 
-A Frozen module can hold Experimental parts. `llm4s-agent` is the main case: a stable core, the types a typical user
-touches, and an Experimental runtime underneath it. Which types are which is not a list on this page: each public
+A Frozen module can hold Experimental parts. `llm4s-agent` is the main case: its agent, graph, event, middleware and
+guardrail APIs are `@Stable`, while the harness, the run queue and worker (`agent.service`), encryption, subagent
+definition (`agent.delegation`), permissions, the checkpointer SPI, the RAG guardrails and `org.llm4s.assistant` are
+`@Experimental` ([#2778](https://github.com/llm4s/llm4s/issues/2778)). That summary is not the source of truth: each public
 type's tier is its `@Stable` or `@Experimental` annotation (`org.llm4s.annotation`), shown in the
 [Scaladoc](/scaladoc/), and MiMa skips `@Experimental` types ([API Stability](api-stability#tiers-in-the-code)).
 

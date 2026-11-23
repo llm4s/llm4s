@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.model.UsageSummary
@@ -22,6 +23,7 @@ import scala.util.control.Exception.catching
  * runs anything, and makes everything durable before it returns - so a returned
  * [[RunResult.Suspended]] has been persisted and can be resumed by another process.
  */
+@Stable
 enum Durability:
   /** Each task result and superstep is committed before the run moves on. */
   case Sync
@@ -221,6 +223,7 @@ object GraphRuntime:
  * [[StreamEvent.Live]] and [[StreamEvent.LiveGap]], which have no `seq`, and treats [[StreamEvent.Disconnected]] as the
  * end of the subscription, not as a record: it carries `lastSeq` and a reason.
  */
+@Stable
 final class GraphRuntime(
   checkpointer: Checkpointer,
   clock: Clock = Clock.systemUTC(),
@@ -1736,7 +1739,7 @@ final class GraphRuntime(
             RunEvent.StateUpdated(parentId, nodeId, tenant, config.principal.map(_.value))
           )
           val commit =
-            Commit(claim.token, Some(saved), stored.pendingWrites.map(_.copy(checkpointId = saved.id)), Vector(event))
+            Commit(claim.token, Some(saved), stored.pendingWrites.map(_.withCheckpointId(saved.id)), Vector(event))
           held
             .committing(commit)(commitAndDeliver(threadId, commit))
             .left
@@ -3144,7 +3147,7 @@ final class GraphRuntime(
         claim = Commit(
           token,
           Some(claimed),
-          carried.map(_.copy(checkpointId = claimed.id)),
+          carried.map(_.withCheckpointId(claimed.id)),
           Vector(draft(Some(claimed.id), None, event))
         ).withFence(fence).withMetadata(metadata)
         // through the committer's fence, so that a claim found lost before it begins never lands

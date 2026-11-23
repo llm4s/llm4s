@@ -2,7 +2,7 @@ package org.llm4s.agent.delegation
 
 import org.llm4s.agent.{ AgentId, AgentStatus }
 import org.llm4s.agent.graph.{ RunId, ThreadId, ToolCallId }
-import org.llm4s.annotation.Experimental
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.llmconnect.model.UsageSummary
 import upickle.default.ReadWriter
 
@@ -37,10 +37,27 @@ enum ChildFailure:
  * id, the parent's tool call that started it, and its depth - 1 for a child of a top-level thread. A child run with no
  * parent ([[BoundAgent.run]]) has depth 0 and no `toolCallId`.
  */
-@Experimental
-final case class ChildRef(threadId: ThreadId, runId: RunId, agent: AgentId, toolCallId: Option[ToolCallId], depth: Int)
+@Stable
+final case class ChildRef private (
+  threadId: ThreadId,
+  runId: RunId,
+  agent: AgentId,
+  toolCallId: Option[ToolCallId],
+  depth: Int
+):
+  def withThreadId(value: ThreadId): ChildRef             = copy(threadId = value)
+  def withRunId(value: RunId): ChildRef                   = copy(runId = value)
+  def withAgent(value: AgentId): ChildRef                 = copy(agent = value)
+  def withToolCallId(value: ToolCallId): ChildRef         = copy(toolCallId = Some(value))
+  def withToolCallId(value: Option[ToolCallId]): ChildRef = copy(toolCallId = value)
+  def withDepth(value: Int): ChildRef                     = copy(depth = value)
 
+@Stable
 object ChildRef:
+
+  def apply(threadId: ThreadId, runId: RunId, agent: AgentId, toolCallId: Option[ToolCallId], depth: Int): ChildRef =
+    new ChildRef(threadId, runId, agent, toolCallId, depth)
+
   private given ReadWriter[RunId]      = upickle.default.readwriter[String].bimap(_.value, RunId(_))
   private given ReadWriter[ToolCallId] = upickle.default.readwriter[String].bimap(_.value, ToolCallId(_))
 
@@ -103,6 +120,7 @@ enum TaskRefusal derives ReadWriter:
     case OutputInvalid(errors)      => s"its answer did not match its output schema: ${errors.mkString("; ")}"
     case Failed(message)            => s"failed: $message"
 
+@Experimental
 object TaskRefusal:
   /**
    * The status label `SubagentEvents.TaskEnded` gives `reason` (design 4.47): `blocked:<guardrail>`,

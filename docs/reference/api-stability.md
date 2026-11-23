@@ -57,12 +57,12 @@ and is not `@Experimental`: today the Mistral, Cohere and xAI dialects of `llm4s
 Stable signature ([#1818](https://github.com/llm4s/llm4s/issues/1818)). Promote the type, or keep the member out of
 the Stable surface. It runs its own fixtures first (`StabilityTiers.selfTest`), so a change that stops it finding
 such a leak fails the build. It reads sources, not classes, because Scala compiles `private[llm4s]` to a public
-bytecode member. It covers `llm4s-core`, `llm4s-openai`, `llm4s-openai-compatible`,
-`llm4s-anthropic`, `llm4s-gemini` and `llm4s-ollama`. **`llm4s-agent` is in 1.0 Scope's Frozen-at-1.0 tier but is not
-covered yet**. It takes the 0.7.0 baseline, and at 1.0 it has a small stable core (building and running an agent,
-its result and status, handoffs, the guardrail middleware) over an Experimental runtime (graph, harness, service,
-delegation, encryption) that may change in 1.x minor releases. Each type's tier is its annotation, shown in the
-Scaladoc. Add `llm4s-agent` to `stabilityTierModules` in `build.sbt` once its types carry those annotations.
+bytecode member. It covers every module in 1.0 Scope's Frozen-at-1.0 tier (`stabilityTierModules` in `build.sbt`):
+`llm4s-core`, `llm4s-openai`, `llm4s-openai-compatible`, `llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama` and
+`llm4s-agent` ([#2778](https://github.com/llm4s/llm4s/issues/2778)). In `llm4s-agent` the agent, graph, event,
+middleware and guardrail APIs are `@Stable`; the harness, the run queue and worker (`agent.service`), encryption,
+subagent definition (`agent.delegation`), permissions, the checkpointer SPI and settings, the RAG guardrails and
+`org.llm4s.assistant` are `@Experimental`.
 
 The same check enforces [RFC 0004](../rfcs/#index): a public member of a `@Stable` type must not expose a
 third-party type, because freezing the signature would freeze the library behind it

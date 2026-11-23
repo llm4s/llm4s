@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.types.Result
 
@@ -14,6 +15,7 @@ import scala.annotation.unused
  *
  * @tparam A The type of value to validate
  */
+@Stable
 trait Guardrail[A] {
 
   /**
@@ -65,6 +67,7 @@ trait Guardrail[A] {
  * - System prompts
  * - Tool arguments
  */
+@Stable
 trait InputGuardrail extends Guardrail[String] {
 
   /**
@@ -105,6 +108,7 @@ object InputGuardrail {
  * - Tool results
  * - Final responses
  */
+@Stable
 trait OutputGuardrail extends Guardrail[String] {
 
   /**

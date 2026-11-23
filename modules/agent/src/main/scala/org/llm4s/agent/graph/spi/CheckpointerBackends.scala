@@ -46,6 +46,7 @@ final class CheckpointerBackends private (
 
   override def toString: String = s"CheckpointerBackends(${kinds.mkString(", ")})"
 
+@Experimental
 object CheckpointerBackends:
 
   private val logger = LoggerFactory.getLogger(classOf[CheckpointerBackends])

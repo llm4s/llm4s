@@ -166,6 +166,7 @@ final class StoreFileBackend private (val store: LongTermStore, val path: Vector
             )
     }
 
+@Experimental
 object StoreFileBackend:
 
   /**

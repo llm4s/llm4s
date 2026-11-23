@@ -41,7 +41,7 @@ class ContextWindowConfigSpec extends AnyFlatSpec with Matchers {
 
   it should "support copy with modifications" in {
     val original = ContextWindowConfig(maxMessages = Some(100))
-    val modified = original.copy(maxTokens = Some(8000))
+    val modified = original.withMaxTokens(Some(8000))
 
     modified.maxMessages shouldBe Some(100)
     modified.maxTokens shouldBe Some(8000)

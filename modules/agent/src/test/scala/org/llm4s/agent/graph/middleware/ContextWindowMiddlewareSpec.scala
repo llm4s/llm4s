@@ -467,7 +467,7 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
       st  <- strategies
       cfg <- Seq(ContextWindowConfig(maxMessages = Some(2)), ContextWindowConfig(maxTokens = Some(800)))
     } withClue(s"$st $cfg") {
-      ContextPruning.prune(msgs, cfg.copy(minRecentTurns = 3, pruningStrategy = st), sized) shouldBe msgs.takeRight(6)
+      ContextPruning.prune(msgs, cfg.withMinRecentTurns(3).withPruningStrategy(st), sized) shouldBe msgs.takeRight(6)
     }
   }
 
@@ -484,11 +484,63 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
 
   it should "count RecentTurnsOnly's turns from the end, the protected ones included" in {
     val cfg = ContextWindowConfig(
-      maxMessages = Some(2),
+      maxMessages = Some(6),
       minRecentTurns = 2,
       pruningStrategy = PruningStrategy.RecentTurnsOnly(3)
     )
     ContextPruning.prune(convo(6), cfg, sized) shouldBe convo(6).takeRight(6)
+  }
+
+  "ContextPruning.prune with RecentTurnsOnly" should "keep that many turns when no other limit is set" in {
+    val cfg = ContextWindowConfig(pruningStrategy = PruningStrategy.RecentTurnsOnly(2))
+    ContextPruning.prune(convo(6), cfg, sized) shouldBe convo(6).takeRight(4)
+    ContextPruning.prune(SystemMessage("s") +: convo(6), cfg, sized) shouldBe SystemMessage("s") +: convo(6).takeRight(
+      4
+    )
+  }
+
+  it should "keep that many turns under limits the history is within" in {
+    val cfg = ContextWindowConfig(
+      maxTokens = Some(100_000),
+      maxMessages = Some(100),
+      pruningStrategy = PruningStrategy.RecentTurnsOnly(2)
+    )
+    ContextPruning.prune(convo(6), cfg, sized) shouldBe convo(6).takeRight(4)
+  }
+
+  it should "leave a history of no more turns untouched" in {
+    val cfg = ContextWindowConfig(pruningStrategy = PruningStrategy.RecentTurnsOnly(6))
+    ContextPruning.prune(convo(6), cfg, sized) shouldBe convo(6)
+  }
+
+  it should "drop the oldest of its turns when they exceed maxTokens or maxMessages" in {
+    val strategy = PruningStrategy.RecentTurnsOnly(4) // eight messages, 3,200 tokens
+    ContextPruning.prune(
+      convo(6),
+      ContextWindowConfig(maxTokens = Some(1_600), pruningStrategy = strategy),
+      sized
+    ) shouldBe
+      convo(6).takeRight(4)
+    ContextPruning.prune(
+      convo(6),
+      ContextWindowConfig(maxMessages = Some(6), pruningStrategy = strategy),
+      sized
+    ) shouldBe
+      convo(6).takeRight(6)
+  }
+
+  it should "keep minRecentTurns turns when its own count is lower, and the current turn at zero" in {
+    val low = ContextWindowConfig(minRecentTurns = 3, pruningStrategy = PruningStrategy.RecentTurnsOnly(1))
+    ContextPruning.prune(convo(6), low, sized) shouldBe convo(6).takeRight(6)
+    val zero = ContextWindowConfig(pruningStrategy = PruningStrategy.RecentTurnsOnly(0))
+    ContextPruning.prune(convo(6), zero, sized) shouldBe convo(6).takeRight(2)
+  }
+
+  it should "keep a kept turn's tool calls with their results" in {
+    val cfg    = ContextWindowConfig(pruningStrategy = PruningStrategy.RecentTurnsOnly(1))
+    val pruned = ContextPruning.prune(toolHistory :+ AssistantMessage("a2"), cfg, sized)
+    texts(pruned) shouldBe Seq("sys", "q2", "a2")
+    Message.validateConversation(pruned.toList) shouldBe Right(())
   }
 
   it should "keep the whole history when it has fewer turns, and treat a value below 1 as 1" in {

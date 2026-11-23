@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.types.Result
 
@@ -28,6 +29,7 @@ import scala.concurrent.duration.*
  * @param maxBackoff the longest wait
  * @param retryOn whether an error is worth another attempt
  */
+@Stable
 final case class RetryPolicy private (
   maxAttempts: Int,
   initialBackoff: FiniteDuration,

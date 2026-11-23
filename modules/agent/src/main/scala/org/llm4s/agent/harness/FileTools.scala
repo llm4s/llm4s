@@ -36,6 +36,7 @@ final case class FileToolLimits private (readLimit: Int, maxLineChars: Int, maxR
   def withMaxResults(n: Int): FileToolLimits     = FileToolLimits(readLimit, maxLineChars, n, maxResultChars)
   def withMaxResultChars(n: Int): FileToolLimits = FileToolLimits(readLimit, maxLineChars, maxResults, n)
 
+@Experimental
 object FileToolLimits:
 
   /** The least `maxResultChars`: room for a result's notes, whatever else it holds. */

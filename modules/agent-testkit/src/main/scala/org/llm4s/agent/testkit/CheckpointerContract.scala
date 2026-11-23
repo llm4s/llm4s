@@ -937,7 +937,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     def payload(): ujson.Obj = ujson.Obj("text" -> "kept", "list" -> ujson.Arr(1, 2))
     def checkpoint(p: ujson.Value): Checkpoint =
       val base = s.checkpoint("c1", None)
-      base.withSnapshot(base.snapshot.copy(state = Map("log" -> VersionedJson(1, p))))
+      base.withSnapshot(base.snapshot.withState(Map("log" -> VersionedJson(1, p))))
     def write(p: ujson.Value): PendingWrite =
       PendingWrite("c1", "0.0", "n", Vector(EncodedOperation.Update("log", VersionedJson(1, p))), Vector.empty)
     def event(p: ujson.Value): RunEvent = RunEvent.Custom("contract.alias", 1, p)
@@ -1971,7 +1971,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val claim = s.claim("registrar", on = on, tenant = tenant.map(_.value)).value
     val base  = s.checkpoint(s"c-${java.util.UUID.randomUUID()}", s.latestId(on), Some(claim.token), on, status)
     val checkpoint = base
-      .withSnapshot(base.snapshot.copy(graphId = graph))
+      .withSnapshot(base.snapshot.withGraphId(graph))
       .withTenantId(tenant.map(_.value))
       .withOrigin(origin)
       .withDeleting(deleting)

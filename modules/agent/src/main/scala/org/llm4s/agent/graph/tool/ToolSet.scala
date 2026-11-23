@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.tool
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
@@ -9,6 +10,7 @@ import org.llm4s.types.Result
  * only through [[ToolSet.of]], so every name is valid and unique, every argument schema is an
  * object, and every schema keyword is one the validator checks.
  */
+@Stable
 final class ToolSet private (
   val tools: Vector[AgentTool[?]],
   val validator: ToolArgumentValidator,

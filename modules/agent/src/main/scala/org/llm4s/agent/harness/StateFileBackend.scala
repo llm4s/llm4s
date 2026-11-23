@@ -13,6 +13,7 @@ import java.util.regex.Pattern
 @Experimental
 final case class FileEntry(content: String, modified: Instant) derives ReadWriter
 
+@Experimental
 object FileEntry:
   private given ReadWriter[Instant] =
     upickle.default.readwriter[String].bimap[Instant](_.toString, Instant.parse)
@@ -175,6 +176,7 @@ final class StateFileBackend private (
   ): Result[Listing[GrepMatch]] =
     valid("grep", ctx).flatMap(FileTree.search(_, under, regex, accept, limit))
 
+@Experimental
 object StateFileBackend:
 
   /** 1 MiB: the default bound on a thread's files. */

@@ -17,3 +17,4 @@ org.llm4s.scalafix.ThinkingReplacesBudgetTokens
 org.llm4s.scalafix.FinishReasonTyped
 org.llm4s.scalafix.AgentStatusGainsTruncated
 org.llm4s.scalafix.CompressionRuleTransform
+org.llm4s.scalafix.AgentCopyToWithSetters

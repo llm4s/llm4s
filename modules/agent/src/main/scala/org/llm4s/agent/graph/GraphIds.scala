@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
+
 /** Stable identifier of a node in a compiled graph; persisted in snapshots. */
 opaque type NodeId = String
 
@@ -12,18 +14,22 @@ opaque type JoinId = String
 /** Stable identifier of a [[StateKey]]; persisted in snapshots. */
 opaque type StateKeyId = String
 
+@Stable
 object NodeId:
   def apply(value: String): NodeId         = value
   extension (id: NodeId) def value: String = id
 
+@Stable
 object TaskId:
   def apply(value: String): TaskId         = value
   extension (id: TaskId) def value: String = id
 
+@Stable
 object JoinId:
   def apply(value: String): JoinId         = value
   extension (id: JoinId) def value: String = id
 
+@Stable
 object StateKeyId:
   def apply(value: String): StateKeyId         = value
   extension (id: StateKeyId) def value: String = id
@@ -34,6 +40,7 @@ opaque type ThreadId = String
 /** One execution attempt on a thread; `start`, `recover` and (later) `resume` each begin a new run. */
 opaque type RunId = String
 
+@Stable
 object ThreadId:
   def apply(value: String): ThreadId         = value
   extension (id: ThreadId) def value: String = id
@@ -59,6 +66,7 @@ object ThreadId:
   given upickle.default.ReadWriter[ThreadId] =
     upickle.default.ReadWriter.join(upickle.default.StringReader, upickle.default.StringWriter)
 
+@Stable
 object RunId:
   def apply(value: String): RunId         = value
   def random(): RunId                     = java.util.UUID.randomUUID().toString
@@ -67,6 +75,7 @@ object RunId:
 /** Identifies a parked continuation awaiting an answer; stable across processes. */
 opaque type InterruptId = String
 
+@Stable
 object InterruptId:
   def apply(value: String): InterruptId         = value
   extension (id: InterruptId) def value: String = id
@@ -74,6 +83,7 @@ object InterruptId:
 /** The tenant a thread belongs to. */
 opaque type TenantId = String
 
+@Stable
 object TenantId:
   def apply(value: String): TenantId         = value
   extension (id: TenantId) def value: String = id
@@ -81,6 +91,7 @@ object TenantId:
 /** Who a run acts for. */
 opaque type Principal = String
 
+@Stable
 object Principal:
   def apply(value: String): Principal         = value
   extension (id: Principal) def value: String = id
@@ -88,6 +99,7 @@ object Principal:
 /** The provider's identifier of one tool call; unique within a conversation. */
 opaque type ToolCallId = String
 
+@Stable
 object ToolCallId:
   def apply(value: String): ToolCallId         = value
   extension (id: ToolCallId) def value: String = id
@@ -106,6 +118,7 @@ object ToolCallId:
  */
 opaque type IdempotencyKey = String
 
+@Stable
 object IdempotencyKey:
 
   /** A key with this exact value, such as one read back from an external system's log. */
@@ -170,6 +183,7 @@ object IdempotencyKey:
 /** The name of a tool, as the model calls it. */
 opaque type ToolName = String
 
+@Stable
 object ToolName:
   def apply(value: String): ToolName           = value
   extension (name: ToolName) def value: String = name
@@ -182,6 +196,7 @@ object ToolName:
  */
 opaque type FencingToken = Long
 
+@Stable
 object FencingToken:
   def apply(value: Long): FencingToken            = value
   extension (token: FencingToken) def value: Long = token

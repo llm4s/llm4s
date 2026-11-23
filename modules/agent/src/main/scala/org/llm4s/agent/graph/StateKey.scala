@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
@@ -17,6 +18,7 @@ import scala.util.Try
  *
  * Keys are compared by identity. A graph rejects two distinct keys with the same `id`.
  */
+@Stable
 final class StateKey[A, U] private (
   val id: StateKeyId,
   val stateCodec: ReadWriter[A],

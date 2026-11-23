@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.patterns
 
+import org.llm4s.annotation.Stable
 import scala.util.matching.Regex
 
 /**
@@ -20,6 +21,7 @@ import scala.util.matching.Regex
  * Note: These patterns favor recall over precision - they may have false
  * positives but minimize false negatives for security-sensitive use cases.
  */
+@Stable
 object PIIPatterns {
 
   /**

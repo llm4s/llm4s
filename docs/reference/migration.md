@@ -51,6 +51,7 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
+[`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
 [the legacy embedding provider selector is removed](#the-legacy-embedding-provider-selector-is-removed),
 and [Vertex AI no longer reads `endpoint` and `organization`](#vertex-ai-no-longer-reads-endpoint-and-organization).
 
@@ -101,6 +102,58 @@ For provider authors, the alias mechanism goes with them: `ProviderConfigKey` lo
 `withDeprecatedAliases`, and `ProviderConfigSpec.BuiltinAliasKeys` is removed. Before 1.0 a key is renamed outright,
 with a migration note ([compatibility policy](compatibility-policy)).
 
+## `llm4s-agent` types are tiered and growth-safe (#2778)
+
+Every public top-level type of `llm4s-agent` now carries `@Stable` or `@Experimental`
+([Tiers in the Code](api-stability#tiers-in-the-code)), and `sbt stabilityTierCheck` covers the module. A `@Stable`
+case class that may gain a field has a private constructor and `copy`, as core's do. There is no shim.
+
+**Growth-safe types.** `X(...)` still builds each one; `new X(...)` and `.copy(...)` no longer compile.
+
+| Package | Types |
+|---|---|
+| `org.llm4s.agent` | `ContextWindowConfig`, `PruningStrategy.AdaptiveWindowing`, `Handoff` |
+| `agent.events` | `CallUsage`, `ModelCallCompleted`, `ToolExecuted`, `HandedOff`, `GuardrailBlock`, `ModelCallStarted`, `TextDelta`, `ThinkingDelta`, `ToolCallStarted`, `ToolCallResult` |
+| `agent.graph` | `Command`, `PendingInterrupt`, `Observer`, `EventRecord`, `EventDraft`, `PendingWrite`, `ThreadOwner`, `ChildThread`, `GraphShape`, `GraphSnapshot` and its `PendingTask`, `Activation` and `ParkedContinuation`, `GraphError.CheckpointWriteFailed`, `GraphError.ThreadBusy` |
+| `agent.graph.toolloop` | `AgentInput`, `TurnOutput`, `TurnState`, `Transfer`, `LoopHandoff`, `ToolTask` |
+| `agent.delegation` | `ChildRef` |
+| `agent.guardrails.builtin` | `InjectionPattern` |
+
+The rewrite is mechanical: each field has a `with` setter of its name, and an `Option` field's setter takes the value
+or the `Option`. Read a field by name instead of matching the type positionally, so a later field does not break
+the pattern. The Scalafix rule `AgentCopyToWithSetters` ([Scalafix rules](scalafix#migration-rules)) rewrites the
+`copy` calls.
+
+```scala
+// before
+config.copy(maxTokens = Some(8000), minRecentTurns = 2)
+records.collect { case EventRecord(_, _, _, _, _, _, _, _, f: RunEvent.RunFailed) => f }
+// after
+config.withMaxTokens(8000).withMinRecentTurns(2)
+records.map(_.event).collect { case f: RunEvent.RunFailed => f }
+```
+
+**No longer public.** None was used outside `llm4s-agent`:
+
+| Was | Now |
+|---|---|
+| `guardrails.GuardrailResult` and its cases | removed: nothing produced one. A guardrail returns `Result[A]` |
+| `graph.middleware.MiddlewareStack`, `MiddlewareAsked` | internal: an agent orders its own middleware, and `AgentMiddleware.Asking.ask` raises the question |
+| `ToolLoop.results`, `ToolLoop.queue`, `toolloop.ToolResult`, `LockSchedule` | internal state of a turn; read `Messages.key` for a tool's result |
+| `guardrails.rag.GroundingResult`, `ContextRelevanceResult`, `SourceAttributionResult`, `TopicBoundaryResult`, `guardrails.builtin.InjectionMatch` | internal: each guardrail's parsed verdict |
+| `org.llm4s.assistant.Command` | internal to `AssistantAgent` |
+
+**Tiers that moved.** Now `@Stable`, because a Stable signature names them: `ModelContext`, `ModelResponse`,
+`BoundaryResult`, `PromptSection`, `Placement` (the `AgentMiddleware` hooks); `ToolResource`, `Operation`, `LockKey`,
+`OutputFormat` and core's `ToolHints` (the tool contract); `EffectKey`, `EffectRecord`, `RunOrigin`, `RunOutcome`,
+`ChildThread`, `ThreadStatus`, `ThreadMetadata`, `ThreadCursor`, `ThreadQuery`, `ThreadSummary`, `ThreadPage`,
+`SweepPolicy`, `SweepGuard`, `SweepPage` (the `Checkpointer` contract); `ChildRef`, `ChildInterrupt`,
+`DelegatedRequest` (`AgentStatus.Suspended.delegated`, `StreamEvent.Nested`). `@Experimental` members of Stable
+types: `AgentBuilder.withHarness`, `withSubagents`, `withDelegation`, `Agent.delegation`, and
+`InMemoryCheckpointer.runQueue`. The RAG
+guardrails (`org.llm4s.agent.guardrails.rag`) are `@Experimental`: an agent gives them the turn's `RAGContext` only
+through `RAGGuardrail.withTurnContext`, whose shape may still change.
+
 ## Context pruning enforces both limits and `minRecentTurns` (#2728, #2729)
 
 `ContextWindowConfig` (`llm4s-agent`, used by `ContextWindowMiddleware`) now does what its fields say.
@@ -122,6 +175,11 @@ with a migration note ([compatibility policy](compatibility-policy)).
   as much of the start and the end as the limits allow, and no longer counts system messages outside `maxMessages`.
 - **No earlier message is kept past a limit.** `OldestFirst` kept at least one message of the earlier history even
   when the protected turns had used the whole budget.
+- **`RecentTurnsOnly(n)` always prunes to `n` turns.** It acted only once `maxTokens` or `maxMessages` was exceeded,
+  so with neither set it did nothing, and with one set the history was sent whole until it crossed the limit. Now a
+  history of more than `n` turns is pruned to the last `n` regardless. Those turns also obey the limits: when they
+  exceed `maxTokens` or `maxMessages`, the oldest of them are dropped. If you relied on a generous limit to keep more
+  than `n` turns, raise `n`.
 
 ## RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root (#2724)
 

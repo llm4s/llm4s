@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
@@ -10,6 +11,7 @@ import upickle.default.ReadWriter
  */
 opaque type AgentId = String
 
+@Stable
 object AgentId:
   private val Pattern = "[a-zA-Z0-9_-]{1,52}".r
 

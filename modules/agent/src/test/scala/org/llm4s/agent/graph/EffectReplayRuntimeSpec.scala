@@ -265,7 +265,7 @@ class EffectReplayRuntimeSpec extends AnyFlatSpec with TestTimeLimit with Matche
       "old",
       CheckpointStatus.Running,
       Instant.EPOCH,
-      legacy.copy(frontier = legacy.frontier.map(_.copy(lineage = "")))
+      legacy.withFrontier(legacy.frontier.map(_.withLineage("")))
     )
     val token = store.claim(thread, ClaimRequest(RunId("old"), None, 1.minute)).value.token
     store.commit(thread, Commit(token, Some(format6))).value

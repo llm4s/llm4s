@@ -1,5 +1,7 @@
 package org.llm4s.agent.guardrails.rag
 
+import org.llm4s.annotation.Experimental
+import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.agent.guardrails.GuardrailAction
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -20,7 +22,7 @@ import scala.util.Try
  * @param uncitedClaims Claims that should have been cited but weren't
  * @param explanation Brief explanation of the evaluation
  */
-final case class SourceAttributionResult(
+final private[guardrails] case class SourceAttributionResult(
   hasAttributions: Boolean,
   attributionScore: Double,
   citedSources: Seq[String],
@@ -66,6 +68,7 @@ final case class SourceAttributionResult(
  * @param minAttributionScore Minimum attribution quality score (default: 0.5)
  * @param onFail Action to take when attribution is insufficient (default: Block)
  */
+@Experimental
 class SourceAttributionGuardrail(
   val llmClient: LLMClient,
   val requireAttributions: Boolean = true,
@@ -85,6 +88,13 @@ class SourceAttributionGuardrail(
    * Validate that response properly attributes sources.
    */
   override def validateWithContext(output: String, context: RAGContext): Result[String] =
+    checked(output, context, llmClient)
+
+  /** As `validateWithContext(output, context)`, the judge called through `hook.accounted(llmClient)`, so its call is counted. */
+  override def validateWithContext(output: String, context: RAGContext, hook: ModelContext): Result[String] =
+    checked(output, context, hook.accounted(llmClient))
+
+  private def checked(output: String, context: RAGContext, client: LLMClient): Result[String] =
     if (context.retrievedChunks.isEmpty) {
       // No sources to attribute - pass through
       Right(output)
@@ -92,7 +102,7 @@ class SourceAttributionGuardrail(
       // Attributions not required - pass through
       Right(output)
     } else {
-      evaluateAttribution(output, context).flatMap { result =>
+      evaluateAttribution(output, context, client).flatMap { result =>
         if (result.attributionScore >= minAttributionScore) {
           Right(output)
         } else {
@@ -157,7 +167,11 @@ class SourceAttributionGuardrail(
   /**
    * Evaluate the source attribution in the response.
    */
-  private def evaluateAttribution(output: String, context: RAGContext): Result[SourceAttributionResult] = {
+  private def evaluateAttribution(
+    output: String,
+    context: RAGContext,
+    client: LLMClient
+  ): Result[SourceAttributionResult] = {
     val systemPrompt = buildSystemPrompt()
     val userPrompt   = buildUserPrompt(output, context)
 
@@ -174,7 +188,7 @@ class SourceAttributionGuardrail(
     )
 
     for {
-      completion <- llmClient.complete(conversation, options)
+      completion <- client.complete(conversation, options)
       result     <- parseAttributionResult(completion.message.content)
     } yield result
   }
@@ -286,6 +300,7 @@ class SourceAttributionGuardrail(
   }
 }
 
+@Experimental
 object SourceAttributionGuardrail {
 
   /**
