@@ -8,17 +8,23 @@ import org.llm4s.llmconnect.model.Message
  * Provides flexible strategies for pruning conversation history
  * to stay within token or message count limits.
  *
- * @param maxTokens Maximum number of tokens to keep (if specified, requires tokenCounter)
- * @param maxMessages Maximum number of messages to keep (simpler alternative to token-based)
+ * `maxTokens` and `maxMessages` are both limits when both are set: the history is pruned when either
+ * is exceeded, and what is kept satisfies both.
+ *
+ * @param maxTokens Maximum number of tokens to send, by the middleware's token counter
+ * @param maxMessages Maximum number of messages to send
  * @param preserveSystemMessage Always keep the system message (recommended)
- * @param minRecentTurns Minimum number of recent turns to preserve (even if limit exceeded)
- * @param pruningStrategy Strategy for pruning messages when limits are exceeded
+ * @param minRecentTurns The most recent turns that are never pruned, even past a limit: a turn runs
+ *                       from a user message to the next. The current turn is always kept, so a
+ *                       value below 1 acts as 1, the default. A higher value keeps more of the
+ *                       conversation coherent, and can send more than the limits allow.
+ * @param pruningStrategy Strategy for pruning the history before those turns when a limit is exceeded
  */
 case class ContextWindowConfig(
   maxTokens: Option[Int] = None,
   maxMessages: Option[Int] = None,
   preserveSystemMessage: Boolean = true,
-  minRecentTurns: Int = 3,
+  minRecentTurns: Int = 1,
   pruningStrategy: PruningStrategy = PruningStrategy.OldestFirst
 )
 
@@ -51,9 +57,9 @@ object PruningStrategy {
 
   /**
    * Custom pruning function.
-   * Receives the history before the current turn (the latest user message onwards, which is never
-   * pruned and is appended afterwards) and returns the messages to send in its place - a subset, or
-   * copies it has changed. The result is then repaired: a tool call left without its results, or a
+   * Receives the history before the protected turns (the last `minRecentTurns` turns, the current one
+   * included, which are never pruned and are appended afterwards) and returns the messages to send
+   * in its place - a subset, or copies it has changed. The result is then repaired: a tool call left without its results, or a
    * result without its call, is dropped, and the history starts with a user message.
    * The function should be pure (no side effects) and deterministic.
    *
@@ -68,8 +74,10 @@ object PruningStrategy {
    * This strategy optimizes for cost-quality balance:
    * - Uses tier-appropriate percentage of model's context window (reserves space for outputs)
    * - Adjusts ratio based on model size (larger models use larger windows)
-   * - Preserves minimum recent turns for conversation coherence
    * - Can optionally use cost-sensitive tuning
+   *
+   * The window is a token limit like `maxTokens`: with both set, the smaller applies, and `maxMessages`
+   * applies as well. The turns kept past the window are `ContextWindowConfig.minRecentTurns`.
    *
    * Model tiers and window ratios:
    * - Small (≤32K): 60% window to reduce costs
@@ -80,7 +88,6 @@ object PruningStrategy {
    * @param contextWindowSize The model's actual context window in tokens
    * @param inputCostPerToken Optional cost per input token (enables cost optimization)
    * @param outputCostPerToken Optional cost per output token
-   * @param preserveMinTurns Minimum number of recent turns to always preserve (default: 3)
    * @param costSensitivity How aggressively to optimize for cost (0.0-1.0, default: 0.5)
    *                        0.0 = maximize quality, 1.0 = minimize cost
    */
@@ -88,7 +95,6 @@ object PruningStrategy {
     contextWindowSize: Int,
     inputCostPerToken: Option[Double] = None,
     outputCostPerToken: Option[Double] = None,
-    preserveMinTurns: Int = 3,
     costSensitivity: Double = 0.5
   ) extends PruningStrategy {
     require(contextWindowSize > 0, "Context window size must be positive")
