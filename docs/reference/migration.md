@@ -44,7 +44,7 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the forwarding `apply` overloads are removed](#the-forwarding-apply-overloads-are-removed-1281),
 [`CompressionRule`'s `apply` field is `transform`](#compressionrules-apply-field-is-transform-1281),
 [`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714),
-[RAG tracing covers every model call and each query's stages](#rag-tracing-covers-every-model-call-and-each-querys-stages-2734)
+[RAG tracing covers every model call and each query's stages](#rag-tracing-covers-every-model-call-and-each-querys-stages-2734),
 [`RAG.ingestChunks` takes `DocumentChunk`s](#ragingestchunks-takes-documentchunks-2732),
 and [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453).
 
