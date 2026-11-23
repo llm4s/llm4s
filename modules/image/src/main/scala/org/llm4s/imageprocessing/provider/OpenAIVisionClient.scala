@@ -4,7 +4,7 @@ import org.llm4s.imageprocessing._
 import org.llm4s.imageprocessing.config.OpenAIVisionConfig
 import org.llm4s.media.{ ImageMediaType, MediaType }
 import org.llm4s.error.{ CancelledError, LLMError }
-import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.types.Result
 import ujson.read
@@ -26,7 +26,7 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
-  private val httpClient = Llm4sHttpClient.create(connectTimeout = config.connectTimeout)
+  private val httpClient = Llm4sHttpClient.create(HttpClientOptions(connectTimeout = Some(config.connectTimeout)))
 
   /**
    * Analyzes an image using OpenAI's GPT-4 Vision API.

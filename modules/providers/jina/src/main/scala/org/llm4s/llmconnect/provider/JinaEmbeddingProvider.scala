@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.JinaConfigKeys
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
-import org.llm4s.http.{ HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
+import org.llm4s.http.{ HttpClientOptions, HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
@@ -93,7 +93,7 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   /** Creates an [[EmbeddingProvider]] backed by Jina AI whose `task` follows each request's [[org.llm4s.llmconnect.model.InputPurpose]]. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
-    create(cfg, None, Llm4sHttpClient.create(cfg.network))
+    create(cfg, None, Llm4sHttpClient.create(HttpClientOptions(cfg.network)))
 
   /**
    * Creates an [[EmbeddingProvider]] backed by Jina AI that sends `task` with every request, whatever the
@@ -101,7 +101,7 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
    * one the purpose cannot express, such as [[JinaTask.TextMatching]].
    */
   def fromConfig(cfg: EmbeddingProviderConfig, task: JinaTask): EmbeddingProvider =
-    create(cfg, Some(task), Llm4sHttpClient.create(cfg.network))
+    create(cfg, Some(task), Llm4sHttpClient.create(HttpClientOptions(cfg.network)))
 
   private[provider] def forTest(cfg: EmbeddingProviderConfig, httpClient: Llm4sHttpClient): EmbeddingProvider =
     create(cfg, None, httpClient)

@@ -569,9 +569,9 @@ An HTTP client of your own - a tool, a vector store, an MCP transport - takes th
 
 ```scala
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 
-val routedClient = Llm4sConfig.httpNetwork().map(network => Llm4sHttpClient.create(network))
+val routedClient = Llm4sConfig.httpNetwork().map(network => Llm4sHttpClient.create(HttpClientOptions(network)))
 ```
 
 Java builders take the same settings with `proxy`, `proxyCredentials`, `nonProxyHosts`, `trustStore` and `keyStore`
@@ -593,7 +593,7 @@ What is not covered:
 ### Your own HTTP client
 
 A service that already has a tuned HTTP stack - connection pool, proxy, request logging, tracing - can hand it to the
-provider clients instead: implement `org.llm4s.http.Llm4sHttpClient` over it and pass it with
+provider clients instead: implement `org.llm4s.http.Llm4sHttpClient` over it (one method, `send`) and pass it with
 `LlmClientOptions.withHttpClient` ([#2341](https://github.com/llm4s/llm4s/issues/2341)).
 
 ```scala

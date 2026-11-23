@@ -200,6 +200,25 @@ trait HttpTransportContract extends AnyFlatSpecLike with Matchers with BeforeAnd
     reader.close()
   }
 
+  it should "fail a read of a streamed body that stalls for longer than the timeout" in {
+    firstChunkRead = new CountDownLatch(1)
+    val response = client.postStream(s"$baseUrl/stream", body = "{}", timeout = 300.millis).ok
+    val reader   = new java.io.BufferedReader(new java.io.InputStreamReader(response.body, UTF_8))
+    reader.readLine() shouldBe "data: one"
+    reader.readLine() shouldBe ""
+    val stalled = scala.util.Try(reader.readLine())
+    firstChunkRead.countDown()
+    scala.util.Try(reader.close())
+    stalled.failed.toOption.map(_.getClass) shouldBe Some(classOf[java.net.SocketTimeoutException])
+  }
+
+  it should "return Left(TimeoutError) when a buffered body stalls for longer than the timeout" in {
+    firstChunkRead = new CountDownLatch(1)
+    val result = client.post(s"$baseUrl/stream", body = "{}", timeout = 300.millis)
+    firstChunkRead.countDown()
+    result.left.toOption.map(_.getClass) shouldBe Some(classOf[TimeoutError])
+  }
+
   // ---- timeouts and transport failures
 
   it should "return Left(TimeoutError) when the server is slower than the timeout" in {
@@ -250,6 +269,15 @@ trait HttpTransportContract extends AnyFlatSpecLike with Matchers with BeforeAnd
     body should include("""name="file"; filename="audio.wav"""")
     body.linesIterator.map(_.trim).toSeq should contain("file-content")
     body should include(s"--$boundary--")
+  }
+
+  it should "escape a quote or line break in a part's names, and send its content type" in {
+    val part = MultipartPart.FilePart.ofBytes("fi\"le", "x".getBytes(UTF_8), "a\".wav\r\nX-Evil: 1", "audio/wav")
+    val body = client.postMultipart(s"$baseUrl/echo", parts = Seq(part)).ok.body
+    body should include("name=\"fi%22le\"")
+    body should include("filename=\"a%22.wav%0D%0AX-Evil: 1\"")
+    body.toLowerCase should include("content-type: audio/wav")
+    (body should not).include("\r\nX-Evil")
   }
 
   it should "return Left(ValidationError) when a multipart file cannot be read" in {

@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.GeminiConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
+import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.{ LLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, VertexAIConfig }
@@ -63,15 +63,15 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
             throw new InterruptedIOException("interrupted")
           case Right(_) => -1
     }
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).onCall { (url, _, _, _) =>
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall { (url, _, _, _) =>
       if url.contains("aiplatform") then
         never.await()
         Right(HttpResponse(200, "{}", Map.empty))
       else Right(HttpResponse(200, tokenBody, Map.empty))
     }
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, stalling)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, stalling)))
     new VertexAIClient(config, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
   }
 
@@ -82,13 +82,13 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
   private def vertexClientAt(baseUrl: String): VertexAIClient = {
     val tokenBody = """{"access_token":"ya29.test-token","expires_in":3600}"""
     val real      = Llm4sHttpClient.create()
-    val mockHttp  = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).onCall { (url, headers, body, timeout) =>
+    val mockHttp  = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).onCall { (url, headers, body, timeout) =>
       if url.contains("aiplatform") then real.post(s"$baseUrl/vertex", headers, body, timeout)
       else Right(HttpResponse(200, tokenBody, Map.empty))
     }
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    (mockHttp.postStream _).when(*, *, *, *).onCall { (_, headers, body, timeout) =>
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onPostStream _).when(*, *, *, *).onCall { (_, headers, body, timeout) =>
       real.postStream(s"$baseUrl/vertex", headers, body, timeout)
     }
     new VertexAIClient(

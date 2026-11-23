@@ -674,29 +674,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
   it should "leave an HTTP client it was handed open" in {
     var closed = false
     val http = new Llm4sHttpClient {
-      override def get(
-        url: String,
-        headers: Map[String, String],
-        params: Map[String, String],
-        timeout: FiniteDuration
-      ) = fail("unused")
-      override def post(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
-        fail("unused")
-      override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: FiniteDuration) =
-        fail("unused")
-      override def postMultipart(
-        url: String,
-        headers: Map[String, String],
-        parts: Seq[org.llm4s.http.MultipartPart],
-        timeout: FiniteDuration
-      ) = fail("unused")
-      override def put(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
-        fail("unused")
-      override def delete(url: String, headers: Map[String, String], timeout: FiniteDuration) = fail("unused")
-      override def postRaw(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
-        fail("unused")
-      override def postStream(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
-        fail("unused")
+      override def send(request: org.llm4s.http.HttpRequest) = fail("unused")
       override def close(): Unit = closed = true
     }
 

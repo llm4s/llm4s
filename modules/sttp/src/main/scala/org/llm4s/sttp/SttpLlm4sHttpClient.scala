@@ -3,11 +3,11 @@ package org.llm4s.sttp
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NetworkError, TimeoutError, UnknownError, ValidationError }
 import org.llm4s.http.{
+  HttpBody,
   HttpFailures,
-  HttpRawResponse,
-  HttpResponse,
+  HttpRequest,
   Llm4sHttpClient,
-  MultipartPart,
+  MultipartEncoding,
   StreamingHttpResponse
 }
 import org.llm4s.types.Result
@@ -16,10 +16,9 @@ import sttp.model.{ Header, Method, Part, Uri }
 
 import java.io.InputStream
 import java.net.http.HttpTimeoutException
-import java.nio.file.Files
+import java.nio.charset.StandardCharsets.UTF_8
 import java.util.Locale
 import scala.concurrent.duration.FiniteDuration
-import scala.util.Try
 
 /**
  * An [[org.llm4s.http.Llm4sHttpClient]] over an sttp 4 synchronous backend, so the provider clients send their
@@ -27,10 +26,15 @@ import scala.util.Try
  * tracing middleware, or a stub backend in tests. Pass it with `LlmClientOptions.withHttpClient`.
  *
  * It behaves as `Llm4sHttpClient.create()` does: a non-2xx status is a `Right` response, response headers are keyed
- * in lower case, `postStream` hands back the open body (`asInputStreamAlwaysUnsafe`) for the caller to close, and a
+ * in lower case, `send` hands back the open body (`asInputStreamAlwaysUnsafe`) for the caller to close, and a
  * transport failure is the same `Left` - a `TimeoutError` for a timeout, a `NetworkError` for a refused connection or
  * an I/O failure, a `ValidationError` for an invalid URL or an unreadable multipart file, a `CancelledError` for an
- * interrupt. Each request's `timeout` is its sttp `readTimeout`.
+ * interrupt.
+ *
+ * A request's `responseTimeout` is its sttp `readTimeout`, which is as much as the backend makes of it: the default
+ * `HttpClientSyncBackend` waits that long for the response head. Its `idleTimeout` is enforced here, on the body, for
+ * every backend (`StreamingHttpResponse.withIdleTimeout`). A multipart body is sent as sttp's own multipart body,
+ * its field and file names escaped as the default client escapes them.
  *
  * The caller owns `backend`: closing this client does not close it.
  *
@@ -40,107 +44,41 @@ import scala.util.Try
 @Experimental
 final class SttpLlm4sHttpClient(backend: SyncBackend) extends Llm4sHttpClient {
 
-  override def get(
-    url: String,
-    headers: Map[String, String],
-    params: Map[String, String],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] =
-    send(Method.GET, url, timeout, request(headers, timeout), _.addParams(params))(textResponse)
-
-  override def post(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[HttpResponse] =
-    send(Method.POST, url, timeout, request(headers, timeout).body(body))(textResponse)
-
-  override def postBytes(
-    url: String,
-    headers: Map[String, String],
-    data: Array[Byte],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] =
-    send(Method.POST, url, timeout, request(headers, timeout).body(data))(textResponse)
-
-  override def postMultipart(
-    url: String,
-    headers: Map[String, String],
-    parts: Seq[MultipartPart],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] =
-    // Files are read up front, as the default client does, so an unreadable one is a ValidationError, not an I/O error.
-    multipartParts(parts).flatMap(sttpParts =>
-      send(Method.POST, url, timeout, request(headers, timeout).multipartBody(sttpParts))(textResponse)
-    )
-
-  override def put(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[HttpResponse] =
-    send(Method.PUT, url, timeout, request(headers, timeout).body(body))(textResponse)
-
-  override def delete(
-    url: String,
-    headers: Map[String, String],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] =
-    send(Method.DELETE, url, timeout, request(headers, timeout))(textResponse)
-
-  override def postRaw(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[HttpRawResponse] =
-    send(Method.POST, url, timeout, request(headers, timeout).body(body).response(asByteArrayAlways)) { response =>
-      HttpRawResponse(response.code.code, response.body, headerMap(response.headers))
-    }
-
-  override def postStream(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[StreamingHttpResponse] =
-    send(Method.POST, url, timeout, request(headers, timeout).body(body).response(asInputStreamAlwaysUnsafe)) {
-      (response: Response[InputStream]) =>
-        StreamingHttpResponse(response.code.code, response.body, headerMap(response.headers))
-    }
+  override def send(request: HttpRequest): Result[StreamingHttpResponse] = {
+    val method = Method(request.method.name)
+    val url    = request.fullUrl
+    for {
+      uri <- parseUrl(method, url)
+      // Files are read and names escaped up front, as the default client does, so an unreadable file is a
+      // ValidationError, not an I/O error.
+      parts <- request.body match {
+        case HttpBody.Multipart(parts) => MultipartEncoding.resolve(parts).map(Some(_))
+        case _                         => Right(None)
+      }
+      response <- HttpFailures
+        .attempt(method.method, url, request.responseTimeout) {
+          val base = basicRequest
+            .headers(request.headers)
+            .readTimeout(request.responseTimeout)
+            .response(asInputStreamAlwaysUnsafe)
+          val withBody = request.body match {
+            case HttpBody.Text(text)   => base.body(text)
+            case HttpBody.Bytes(bytes) => base.body(bytes)
+            case HttpBody.Empty        => base
+            case _: HttpBody.Multipart => base.multipartBody(parts.getOrElse(Nil).map(sttpPart))
+          }
+          val sent: Response[InputStream] = withBody.method(method, uri).send(backend)
+          StreamingHttpResponse(sent.code.code, sent.body, headerMap(sent.headers))
+            .withIdleTimeout(request.idleTimeout)
+        }
+        .left
+        .map(unwrapSttp(_, method.method, url, request.responseTimeout))
+    } yield response
+  }
 
   // ============================================================
   // Internal helpers
   // ============================================================
-
-  private def request(headers: Map[String, String], timeout: FiniteDuration): PartialRequest[String] =
-    basicRequest
-      .headers(headers)
-      .readTimeout(timeout)
-      .response(asStringAlways)
-
-  private def textResponse(response: Response[String]): HttpResponse =
-    HttpResponse(response.code.code, response.body, headerMap(response.headers))
-
-  /**
-   * Parses `url`, builds the request for `method` and sends it, mapping every failure - including one sttp wraps in
-   * an `SttpClientException` - as the default client does.
-   */
-  private def send[T, A](
-    method: Method,
-    url: String,
-    timeout: FiniteDuration,
-    partial: PartialRequest[T],
-    adjustUri: Uri => Uri = identity
-  )(convert: Response[T] => A): Result[A] =
-    parseUrl(method, url).flatMap { uri =>
-      HttpFailures
-        .attempt(method.method, url, timeout)(convert(partial.method(method, adjustUri(uri)).send(backend)))
-        .left
-        .map(unwrapSttp(_, method.method, url, timeout))
-    }
 
   /** An absolute `http`/`https` URL, else the `ValidationError` the default client gives for an invalid one. */
   private def parseUrl(method: Method, url: String): Result[Uri] =
@@ -175,18 +113,11 @@ final class SttpLlm4sHttpClient(backend: SyncBackend) extends Llm4sHttpClient {
       case other => other
     }
 
-  private def multipartParts(parts: Seq[MultipartPart]): Result[Seq[Part[BasicBodyPart]]] =
-    parts.foldLeft[Result[Vector[Part[BasicBodyPart]]]](Right(Vector.empty)) { (acc, part) =>
-      acc.flatMap { built =>
-        val next: Result[Part[BasicBodyPart]] = part match {
-          case MultipartPart.TextField(name, value) => Right(multipart(name, value))
-          case MultipartPart.FilePart(name, path, filename) =>
-            Try(Files.readAllBytes(path)).toEither.left
-              .map(e => ValidationError("parts", s"Failed to read multipart body: ${e.getMessage}"))
-              .map(bytes => multipart(name, bytes).fileName(filename).contentType("application/octet-stream"))
-        }
-        next.map(built :+ _)
-      }
+  private def sttpPart(part: MultipartEncoding.Resolved): Part[BasicBodyPart] =
+    part.file match {
+      case None => multipart(part.name, new String(part.bytes, UTF_8))
+      case Some((filename, contentType)) =>
+        multipart(part.name, part.bytes).fileName(filename).contentType(contentType)
     }
 
   private def headerMap(headers: Seq[Header]): Map[String, Seq[String]] =

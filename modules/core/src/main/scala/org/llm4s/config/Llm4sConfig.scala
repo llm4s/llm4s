@@ -8,7 +8,7 @@ import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProvidersConfig }
 import org.llm4s.error.LLMError
-import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import com.typesafe.config.{ Config, ConfigFactory }
 import pureconfig.ConfigSource
@@ -267,7 +267,7 @@ object Llm4sConfig {
   /**
    * The proxy and TLS settings of the `llm4s.http` block: what every provider client loaded through this
    * object uses, unless its section's own `http` block overrides it. Pass them to
-   * `Llm4sHttpClient.create(network)` for an HTTP client of your own - a tool, a vector store - that should
+   * `Llm4sHttpClient.create(HttpClientOptions(network))` for an HTTP client of your own - a tool, a vector store - that should
    * take the same route.
    *
    * A missing trust or key store, or a wrong password, is a `ConfigurationError` naming the key.
@@ -318,7 +318,7 @@ object Llm4sConfig {
   ): Result[List[DiscoveredModel]] =
     sections
       .network(ProviderName(name))
-      .flatMap(network => scala.util.Using.resource(Llm4sHttpClient.create(network))(listModels(name, sections, _)))
+      .flatMap(network => scala.util.Using.resource(Llm4sHttpClient.create(HttpClientOptions(network)))(listModels(name, sections, _)))
 
   private[config] def listModels(
     name: String,

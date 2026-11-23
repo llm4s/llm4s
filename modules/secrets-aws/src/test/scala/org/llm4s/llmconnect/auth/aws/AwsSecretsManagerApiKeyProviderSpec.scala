@@ -424,7 +424,7 @@ class AwsSecretsManagerApiKeyProviderSpec extends AnyFlatSpec with Matchers with
     val closedFlag = new AtomicBoolean(false)
     val supplied = new Llm4sHttpClient {
       private val inner = Llm4sHttpClient.create()
-      export inner.{ close as _, * }
+      def send(request: org.llm4s.http.HttpRequest) = inner.send(request)
       override def close(): Unit = closedFlag.set(true)
     }
     val p = AwsSecretsManagerApiKeyProvider(settings("llm4s/closing"), supplied).fold(e => fail(e.formatted), identity)

@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.config.OpenAICompatibleModelLister
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient, MultipartPart, StreamingHttpResponse }
+import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient }
 import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentitySource, TokenExchangeConfig }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.LLMClient
@@ -16,12 +16,9 @@ import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.io.ByteArrayInputStream
-import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Path }
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ Callable, Executors }
-import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 
 class OpenAICompatibleWorkloadIdentitySpec
@@ -806,17 +803,8 @@ class OpenAICompatibleWorkloadIdentitySpec
             s"""{"error":{"message":"bad request with $token"}}"""
           }
           val http = new Llm4sHttpClient:
-            private def unused = Left(org.llm4s.error.ValidationError("http", "not used by this spec"))
-            def get(u: String, h: Map[String, String], p: Map[String, String], t: FiniteDuration) = unused
-            def post(u: String, h: Map[String, String], b: String, t: FiniteDuration) =
-              Right(HttpResponse(400, echo(h)))
-            def postBytes(u: String, h: Map[String, String], d: Array[Byte], t: FiniteDuration)            = unused
-            def postMultipart(u: String, h: Map[String, String], p: Seq[MultipartPart], t: FiniteDuration) = unused
-            def put(u: String, h: Map[String, String], b: String, t: FiniteDuration)                       = unused
-            def delete(u: String, h: Map[String, String], t: FiniteDuration)                               = unused
-            def postRaw(u: String, h: Map[String, String], b: String, t: FiniteDuration)                   = unused
-            def postStream(u: String, h: Map[String, String], b: String, t: FiniteDuration) =
-              Right(StreamingHttpResponse(400, new ByteArrayInputStream(echo(h).getBytes(StandardCharsets.UTF_8))))
+            def send(request: org.llm4s.http.HttpRequest) =
+              Right(HttpResponse(400, echo(request.headers)).toStreaming)
           val c = new OpenAICompatibleClient(
             settings(OpenAICompatibleClient.Credential.Dynamic(perCall)),
             OpenAICompatibleDialect.Standard

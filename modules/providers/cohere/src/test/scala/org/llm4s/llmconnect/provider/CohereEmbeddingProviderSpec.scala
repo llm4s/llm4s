@@ -2,7 +2,15 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.security.Secret
 import org.llm4s.error.{ CancelledError, NetworkError, RateLimitError }
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient, MultipartPart }
+import org.llm4s.http.{
+  HttpBody,
+  HttpMethod,
+  HttpRequest,
+  HttpResponse,
+  Llm4sHttpClient,
+  MockHttpClient,
+  StreamingHttpResponse
+}
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingUsage }
 import org.llm4s.testkit.LocalProviderTestServer
@@ -51,35 +59,27 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
     val bodies: mutable.Buffer[String] = mutable.Buffer.empty
     def textsOf(i: Int): Seq[String]   = read(bodies(i))("texts").arr.map(_.str).toSeq
 
-    private def fail[A]: Result[A] = Left(NetworkError("not a post", None, "http://cohere-test"))
-    def post(u: String, h: Map[String, String], b: String, t: FiniteDuration): Result[HttpResponse] = {
-      bodies += b
-      Right(respond(bodies.size - 1, textsOf(bodies.size - 1)))
-    }
-    def get(u: String, h: Map[String, String], p: Map[String, String], t: FiniteDuration)          = fail
-    def postBytes(u: String, h: Map[String, String], d: Array[Byte], t: FiniteDuration)            = fail
-    def postMultipart(u: String, h: Map[String, String], p: Seq[MultipartPart], t: FiniteDuration) = fail
-    def put(u: String, h: Map[String, String], b: String, t: FiniteDuration)                       = fail
-    def delete(u: String, h: Map[String, String], t: FiniteDuration)                               = fail
-    def postRaw(u: String, h: Map[String, String], b: String, t: FiniteDuration)                   = fail
-    def postStream(u: String, h: Map[String, String], b: String, t: FiniteDuration)                = fail
+    def send(request: HttpRequest): Result[StreamingHttpResponse] =
+      postedText(request).map { b =>
+        bodies += b
+        respond(bodies.size - 1, textsOf(bodies.size - 1)).toStreaming
+      }
   }
 
   /** Answers the nth POST with `script(n)`, which may also throw. Everything else fails. */
   private class ScriptedPost(script: Int => Result[HttpResponse]) extends Llm4sHttpClient {
     val calls = new java.util.concurrent.atomic.AtomicInteger(0)
 
-    private def fail[A]: Result[A] = Left(NetworkError("not a post", None, "http://cohere-test"))
-    def post(u: String, h: Map[String, String], b: String, t: FiniteDuration): Result[HttpResponse] =
-      script(calls.getAndIncrement())
-    def get(u: String, h: Map[String, String], p: Map[String, String], t: FiniteDuration)          = fail
-    def postBytes(u: String, h: Map[String, String], d: Array[Byte], t: FiniteDuration)            = fail
-    def postMultipart(u: String, h: Map[String, String], p: Seq[MultipartPart], t: FiniteDuration) = fail
-    def put(u: String, h: Map[String, String], b: String, t: FiniteDuration)                       = fail
-    def delete(u: String, h: Map[String, String], t: FiniteDuration)                               = fail
-    def postRaw(u: String, h: Map[String, String], b: String, t: FiniteDuration)                   = fail
-    def postStream(u: String, h: Map[String, String], b: String, t: FiniteDuration)                = fail
+    def send(request: HttpRequest): Result[StreamingHttpResponse] =
+      postedText(request).flatMap(_ => script(calls.getAndIncrement())).map(_.toStreaming)
   }
+
+  /** The text a POST sends; any other request fails. */
+  private def postedText(request: HttpRequest): Result[String] =
+    (request.method, request.body) match {
+      case (HttpMethod.Post, HttpBody.Text(text)) => Right(text)
+      case _                                      => Left(NetworkError("not a post", None, "http://cohere-test"))
+    }
 
   /** One distinguishable vector per text: `[n]` for the text "tn", so order is checkable. */
   private def vectorsFor(texts: Seq[String]): Seq[Seq[Double]] = texts.map(t => Seq(t.drop(1).toDouble))
@@ -339,10 +339,7 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
     authErr.message should startWith("Authentication failed")
     (authErr.message should not).include(secretKey)
 
-    val failing = new RecordingHttp((_, _) => HttpResponse(200, "", Map.empty)) {
-      override def post(u: String, h: Map[String, String], b: String, t: FiniteDuration): Result[HttpResponse] =
-        Left(NetworkError("connect timed out", None, "http://cohere-test/v2/embed"))
-    }
+    val failing = new ScriptedPost(_ => Left(NetworkError("connect timed out", None, "http://cohere-test/v2/embed")))
     val err = embed(failing, Seq("a")).left.toOption.get
     err shouldBe a[NetworkError]
     (err.toString should not).include(secretKey)

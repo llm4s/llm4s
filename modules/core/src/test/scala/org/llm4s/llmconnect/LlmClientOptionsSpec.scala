@@ -131,21 +131,8 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
   test("a provider closes only the HTTP client it built itself, never a supplied one") {
     var closed = 0
     val supplied = new Llm4sHttpClient {
-      def get(url: String, headers: Map[String, String], params: Map[String, String], timeout: FiniteDuration) =
-        ???
-      def post(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration)           = ???
-      def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: FiniteDuration) = ???
-      def postMultipart(
-        url: String,
-        headers: Map[String, String],
-        parts: Seq[org.llm4s.http.MultipartPart],
-        timeout: FiniteDuration
-      ) = ???
-      def put(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration)        = ???
-      def delete(url: String, headers: Map[String, String], timeout: FiniteDuration)                   = ???
-      def postRaw(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration)    = ???
-      def postStream(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) = ???
-      override def close(): Unit                                                                       = closed += 1
+      def send(request: org.llm4s.http.HttpRequest) = ???
+      override def close(): Unit                   = closed += 1
     }
 
     val chosen = Llm4sHttpClient.suppliedOrFromConfig(Some(supplied))

@@ -1,6 +1,6 @@
 package org.llm4s.imagegeneration.provider
 
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MultipartPart }
+import org.llm4s.http.{ HttpResponse, MultipartPart, StubbedHttpCalls }
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -67,7 +67,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
   "SimpleHttpClient.post()" should {
 
     "delegate to Llm4sHttpClient with correct parameters" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
       val url     = "https://api.example.com/generate"
@@ -75,22 +75,22 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       val data    = """{"prompt": "test"}"""
       val timeout = 30000.millis
 
-      (mockLlm4s.post _)
+      (mockLlm4s.onPost _)
         .when(url, headers, data, timeout)
         .returns(Right(successResponse(200, """{"result":"success"}""")))
 
       val result = client.post(url, headers, data, timeout)
 
       result shouldBe a[Success[_]]
-      (mockLlm4s.post _).verify(url, headers, data, timeout).once()
+      (mockLlm4s.onPost _).verify(url, headers, data, timeout).once()
     }
 
     "return Success with HttpResponse on successful request" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
       val expectedResponse = successResponse(200, """{"status":"ok"}""")
-      (mockLlm4s.post _).when(*, *, *, *).returns(Right(expectedResponse))
+      (mockLlm4s.onPost _).when(*, *, *, *).returns(Right(expectedResponse))
 
       val result = client.post("https://api.example.com", Map.empty, "{}", 10000.millis)
 
@@ -98,11 +98,11 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "return Success even with non-200 status code" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
       val expectedResponse = successResponse(500, """{"error":"server error"}""")
-      (mockLlm4s.post _).when(*, *, *, *).returns(Right(expectedResponse))
+      (mockLlm4s.onPost _).when(*, *, *, *).returns(Right(expectedResponse))
 
       val result = client.post("https://api.example.com", Map.empty, "{}", 10000.millis)
 
@@ -111,10 +111,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "return Failure on network timeout" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.post _)
+      (mockLlm4s.onPost _)
         .when(*, *, *, *)
         .returns(Left(transportFailure(new java.net.http.HttpTimeoutException("Request timed out"))))
 
@@ -127,10 +127,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "return Failure on connection exception" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.post _)
+      (mockLlm4s.onPost _)
         .when(*, *, *, *)
         .returns(Left(transportFailure(new java.net.ConnectException("Connection refused"))))
 
@@ -143,10 +143,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "return Failure on unknown host" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.post _)
+      (mockLlm4s.onPost _)
         .when(*, *, *, *)
         .returns(Left(transportFailure(new java.net.UnknownHostException("unknown.host"))))
 
@@ -159,10 +159,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle empty headers" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.post _).when(*, *, *, *).returns(Right(successResponse()))
+      (mockLlm4s.onPost _).when(*, *, *, *).returns(Right(successResponse()))
 
       val result = client.post("https://api.example.com", Map.empty, "{}", 10000.millis)
 
@@ -170,10 +170,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle empty data" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.post _).when(*, *, *, *).returns(Right(successResponse()))
+      (mockLlm4s.onPost _).when(*, *, *, *).returns(Right(successResponse()))
 
       val result = client.post("https://api.example.com", Map.empty, "", 10000.millis)
 
@@ -184,7 +184,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
   "SimpleHttpClient.postBytes()" should {
 
     "delegate to Llm4sHttpClient with byte array" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
       val url     = "https://api.example.com/upload"
@@ -192,22 +192,22 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       val data    = "test data".getBytes
       val timeout = 30000.millis
 
-      (mockLlm4s.postBytes _)
+      (mockLlm4s.onPostBytes _)
         .when(url, headers, data, timeout)
         .returns(Right(successResponse(201, """{"uploaded":true}""")))
 
       val result = client.postBytes(url, headers, data, timeout)
 
       result shouldBe a[Success[_]]
-      (mockLlm4s.postBytes _).verify(url, headers, data, timeout).once()
+      (mockLlm4s.onPostBytes _).verify(url, headers, data, timeout).once()
     }
 
     "return Success with HttpResponse on successful request" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
       val expectedResponse = successResponse(200, """{"bytes_received":100}""")
-      (mockLlm4s.postBytes _).when(*, *, *, *).returns(Right(expectedResponse))
+      (mockLlm4s.onPostBytes _).when(*, *, *, *).returns(Right(expectedResponse))
 
       val result = client.postBytes("https://api.example.com", Map.empty, Array[Byte](1, 2, 3), 10000.millis)
 
@@ -215,10 +215,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle empty byte array" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.postBytes _).when(*, *, *, *).returns(Right(successResponse()))
+      (mockLlm4s.onPostBytes _).when(*, *, *, *).returns(Right(successResponse()))
 
       val result = client.postBytes("https://api.example.com", Map.empty, Array.empty[Byte], 10000.millis)
 
@@ -226,11 +226,11 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle large byte array" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
       val largeData = new Array[Byte](1024 * 1024) // 1MB
-      (mockLlm4s.postBytes _).when(*, *, *, *).returns(Right(successResponse()))
+      (mockLlm4s.onPostBytes _).when(*, *, *, *).returns(Right(successResponse()))
 
       val result = client.postBytes("https://api.example.com", Map.empty, largeData, 60000.millis)
 
@@ -238,10 +238,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "return Failure on exception" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.postBytes _).when(*, *, *, *).returns(Left(transportFailure(new java.io.IOException("Upload failed"))))
+      (mockLlm4s.onPostBytes _).when(*, *, *, *).returns(Left(transportFailure(new java.io.IOException("Upload failed"))))
 
       val result = client.postBytes("https://api.example.com", Map.empty, Array[Byte](1, 2, 3), 10000.millis)
 
@@ -255,7 +255,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
   "SimpleHttpClient.postMultipart()" should {
 
     "delegate to Llm4sHttpClient with multipart parts" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
       val url      = "https://api.example.com/upload"
@@ -267,22 +267,22 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       )
       val timeout = 30000.millis
 
-      (mockLlm4s.postMultipart _)
+      (mockLlm4s.onPostMultipart _)
         .when(url, headers, parts, timeout)
         .returns(Right(successResponse(200, """{"uploaded":true}""")))
 
       val result = client.postMultipart(url, headers, parts, timeout)
 
       result shouldBe a[Success[_]]
-      (mockLlm4s.postMultipart _).verify(url, headers, parts, timeout).once()
+      (mockLlm4s.onPostMultipart _).verify(url, headers, parts, timeout).once()
     }
 
     "return Success with HttpResponse on successful request" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
       val expectedResponse = successResponse(201, """{"files_uploaded":1}""")
-      (mockLlm4s.postMultipart _).when(*, *, *, *).returns(Right(expectedResponse))
+      (mockLlm4s.onPostMultipart _).when(*, *, *, *).returns(Right(expectedResponse))
 
       val parts  = Seq(MultipartPart.TextField("key", "value"))
       val result = client.postMultipart("https://api.example.com", Map.empty, parts, 10000.millis)
@@ -291,10 +291,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle empty parts sequence" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.postMultipart _).when(*, *, *, *).returns(Right(successResponse()))
+      (mockLlm4s.onPostMultipart _).when(*, *, *, *).returns(Right(successResponse()))
 
       val result = client.postMultipart("https://api.example.com", Map.empty, Seq.empty, 10000.millis)
 
@@ -302,10 +302,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle multiple text fields" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.postMultipart _).when(*, *, *, *).returns(Right(successResponse()))
+      (mockLlm4s.onPostMultipart _).when(*, *, *, *).returns(Right(successResponse()))
 
       val parts = Seq(
         MultipartPart.TextField("field1", "value1"),
@@ -318,10 +318,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle mixed text and file parts" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.postMultipart _).when(*, *, *, *).returns(Right(successResponse()))
+      (mockLlm4s.onPostMultipart _).when(*, *, *, *).returns(Right(successResponse()))
 
       val tempFile = createTempFile("file content")
       val parts = Seq(
@@ -335,10 +335,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "return Failure on exception" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.postMultipart _)
+      (mockLlm4s.onPostMultipart _)
         .when(*, *, *, *)
         .returns(Left(transportFailure(new RuntimeException("Multipart upload failed"))))
 
@@ -355,29 +355,29 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
   "SimpleHttpClient.get()" should {
 
     "delegate to Llm4sHttpClient with correct parameters" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
       val url     = "https://api.example.com/status"
       val headers = Map("Authorization" -> "Bearer token")
       val timeout = 15000.millis
 
-      (mockLlm4s.get _)
+      (mockLlm4s.onGet _)
         .when(url, headers, *, timeout)
         .returns(Right(successResponse(200, """{"status":"running"}""")))
 
       val result = client.get(url, headers, timeout)
 
       result shouldBe a[Success[_]]
-      (mockLlm4s.get _).verify(url, headers, *, timeout).once()
+      (mockLlm4s.onGet _).verify(url, headers, *, timeout).once()
     }
 
     "return Success with HttpResponse on successful request" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
       val expectedResponse = successResponse(200, """{"data":"response"}""")
-      (mockLlm4s.get _).when(*, *, *, *).returns(Right(expectedResponse))
+      (mockLlm4s.onGet _).when(*, *, *, *).returns(Right(expectedResponse))
 
       val result = client.get("https://api.example.com", Map.empty, 10000.millis)
 
@@ -385,10 +385,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "handle empty headers" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.get _).when(*, *, *, *).returns(Right(successResponse()))
+      (mockLlm4s.onGet _).when(*, *, *, *).returns(Right(successResponse()))
 
       val result = client.get("https://api.example.com", Map.empty, 10000.millis)
 
@@ -396,10 +396,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "return Failure on network exception" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.get _)
+      (mockLlm4s.onGet _)
         .when(*, *, *, *)
         .returns(Left(transportFailure(new java.net.SocketTimeoutException("Read timed out"))))
 
@@ -415,10 +415,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
   "SimpleHttpClient error handling" should {
 
     "wrap all exceptions in Try" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.post _).when(*, *, *, *).returns(Left(transportFailure(new RuntimeException("Unexpected error"))))
+      (mockLlm4s.onPost _).when(*, *, *, *).returns(Left(transportFailure(new RuntimeException("Unexpected error"))))
 
       val result = client.post("https://api.example.com", Map.empty, "{}", 10000.millis)
 
@@ -431,10 +431,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "not throw exceptions directly" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.get _).when(*, *, *, *).returns(Left(transportFailure(new NullPointerException("Null pointer"))))
+      (mockLlm4s.onGet _).when(*, *, *, *).returns(Left(transportFailure(new NullPointerException("Null pointer"))))
 
       // Should not throw, should return Failure
       noException should be thrownBy {
@@ -443,11 +443,11 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
     }
 
     "preserve exception types in Failure" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
       val originalException = new java.io.IOException("connection reset")
-      (mockLlm4s.postBytes _).when(*, *, *, *).returns(Left(transportFailure(originalException)))
+      (mockLlm4s.onPostBytes _).when(*, *, *, *).returns(Left(transportFailure(originalException)))
 
       val result = client.postBytes("https://api.example.com", Map.empty, Array.empty, 10000.millis)
 
@@ -461,13 +461,13 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
   "SimpleHttpClient integration" should {
 
     "work with all HTTP methods in sequence" in {
-      val mockLlm4s = stub[Llm4sHttpClient]
+      val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.get _).when(*, *, *, *).returns(Right(successResponse(200, """{"status":"ok"}""")))
-      (mockLlm4s.post _).when(*, *, *, *).returns(Right(successResponse(201, """{"created":true}""")))
-      (mockLlm4s.postBytes _).when(*, *, *, *).returns(Right(successResponse(202, """{"accepted":true}""")))
-      (mockLlm4s.postMultipart _).when(*, *, *, *).returns(Right(successResponse(200, """{"uploaded":true}""")))
+      (mockLlm4s.onGet _).when(*, *, *, *).returns(Right(successResponse(200, """{"status":"ok"}""")))
+      (mockLlm4s.onPost _).when(*, *, *, *).returns(Right(successResponse(201, """{"created":true}""")))
+      (mockLlm4s.onPostBytes _).when(*, *, *, *).returns(Right(successResponse(202, """{"accepted":true}""")))
+      (mockLlm4s.onPostMultipart _).when(*, *, *, *).returns(Right(successResponse(200, """{"uploaded":true}""")))
 
       val get           = client.get("https://api.example.com", Map.empty, 10000.millis)
       val post          = client.post("https://api.example.com", Map.empty, "{}", 10000.millis)

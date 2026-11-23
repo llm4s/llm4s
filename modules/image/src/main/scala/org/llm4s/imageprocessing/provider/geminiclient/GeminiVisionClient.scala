@@ -4,7 +4,7 @@ import org.llm4s.imageprocessing._
 import org.llm4s.imageprocessing.config.GeminiVisionConfig
 import org.llm4s.imageprocessing.provider.LocalImageProcessor
 import org.llm4s.error.{ ConfigurationError, LLMError }
-import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 import org.llm4s.media.{ ImageMediaType, MediaType }
 import ujson.read
 
@@ -38,7 +38,7 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
     extends org.llm4s.imageprocessing.ImageProcessingClient {
 
   def this(config: GeminiVisionConfig) =
-    this(config, Llm4sHttpClient.create(connectTimeout = config.connectTimeoutSeconds.seconds))
+    this(config, Llm4sHttpClient.create(HttpClientOptions(connectTimeout = Some(config.connectTimeoutSeconds.seconds))))
 
   private val localProcessor = new LocalImageProcessor()
 

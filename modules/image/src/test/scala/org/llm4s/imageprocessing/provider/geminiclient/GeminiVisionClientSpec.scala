@@ -2,7 +2,7 @@ package org.llm4s.imageprocessing.provider.geminiclient
 
 import org.llm4s.security.Secret
 import org.llm4s.error.NetworkError
-import org.llm4s.http.{ HttpRawResponse, HttpResponse, Llm4sHttpClient, MultipartPart, StreamingHttpResponse }
+import org.llm4s.http.{ HttpRequest, HttpResponse, Llm4sHttpClient }
 import org.llm4s.imageprocessing._
 import org.llm4s.types.Result
 import org.llm4s.imageprocessing.config.GeminiVisionConfig
@@ -15,21 +15,11 @@ import java.awt.image.BufferedImage
 import java.awt.Color
 import java.nio.file.Files
 import javax.imageio.ImageIO
-import scala.concurrent.duration.FiniteDuration
 import scala.util.{ Failure, Success, Try }
 
 /** Test double for the HTTP layer: every request gets the same canned outcome. */
 class FixedHttpClient(outcome: Result[HttpResponse]) extends Llm4sHttpClient {
-  override def get(u: String, h: Map[String, String], p: Map[String, String], t: FiniteDuration)          = outcome
-  override def post(u: String, h: Map[String, String], b: String, t: FiniteDuration)                      = outcome
-  override def postBytes(u: String, h: Map[String, String], d: Array[Byte], t: FiniteDuration)            = outcome
-  override def postMultipart(u: String, h: Map[String, String], p: Seq[MultipartPart], t: FiniteDuration) = outcome
-  override def put(u: String, h: Map[String, String], b: String, t: FiniteDuration)                       = outcome
-  override def delete(u: String, h: Map[String, String], t: FiniteDuration)                               = outcome
-  override def postRaw(u: String, h: Map[String, String], b: String, t: FiniteDuration) =
-    outcome.map(r => HttpRawResponse(r.statusCode, r.body.getBytes, r.headers))
-  override def postStream(u: String, h: Map[String, String], b: String, t: FiniteDuration) =
-    outcome.map(r => StreamingHttpResponse(r.statusCode, new java.io.ByteArrayInputStream(r.body.getBytes), r.headers))
+  override def send(request: HttpRequest) = outcome.map(_.toStreaming)
 }
 
 /** A [[GeminiVisionClient]] whose HTTP layer answers with a canned outcome. */

@@ -5,7 +5,7 @@ import org.llm4s.imageprocessing.config.AnthropicVisionConfig
 import org.llm4s.imageprocessing.provider.LocalImageProcessor
 import org.llm4s.media.{ ImageMediaType, MediaType }
 import org.llm4s.error.{ CancelledError, LLMError }
-import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 import org.llm4s.types.Result
 import ujson.read
 
@@ -25,7 +25,7 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
-  private val httpClient = Llm4sHttpClient.create(connectTimeout = config.connectTimeout)
+  private val httpClient = Llm4sHttpClient.create(HttpClientOptions(connectTimeout = Some(config.connectTimeout)))
 
   /**
    * Analyzes an image using Anthropic's Claude Vision API.
