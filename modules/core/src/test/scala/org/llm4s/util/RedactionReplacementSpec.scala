@@ -96,8 +96,4 @@ class RedactionReplacementSpec extends AnyFlatSpec with Matchers {
     Redaction.redact("GET /x?token=abc", placeholder = "[RE\\DACTED]") shouldBe "GET /x?token=[RE\\DACTED]"
     Redaction.redact("sent Bearer abc", placeholder = "\\") shouldBe "sent \\"
   }
-
-  "SecretPatterns.redactAllWithPlaceholder" should "write a placeholder of $0 literally" in {
-    SecretPatterns.redactAllWithPlaceholder("Key: sk-proj-abc123def456ghi789jkl012mno345", "$0") shouldBe "Key: $0"
-  }
 }

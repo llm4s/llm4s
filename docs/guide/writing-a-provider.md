@@ -951,6 +951,24 @@ interrupted. It must not throw `InterruptedException` or clear the flag. A clien
 `assertEmbeddingCancelsWhenInterrupted`, and any other client call that returns a `Result` (a reranker, a speech
 or image client) `assertCallCancelsWhenInterrupted("name")(call)`. A client that does not extend `BaseLifecycleLLMClient` can use the public helpers `CancelledError.attempt`, `CancelledError.whenInterrupted`, `CancelledError.fromThrowable` and `CancelledError.isCancellation`. `fromThrowable` and `isCancellation` only classify: they never set the flag, so if your code catches an `InterruptedException` itself, restore the flag with `Thread.currentThread().interrupt()`. A bare `InterruptedIOException`, such as OkHttp's call timeout, is not a cancellation unless the thread is interrupted or an `InterruptedException` lies beneath it.
 
+### `validate()`
+
+`LLMClient.validate()` is how an application checks a client at startup, so it must never report success without
+having checked something. Its default is `Left(ValidationUnsupportedError)`: nothing was checked.
+
+- If the vendor has a cheap request that needs the same credential a completion does - a lookup of one model, a
+  model listing - override `validate()` to send it, with a short timeout, and map a refusal as a completion's is
+  mapped (`HttpErrorMapper`). Prefer a lookup of the configured model, which also tells the user that the model
+  exists. Never send a completion: `validate()` costs no tokens. Check a listing endpoint needs the key: one that
+  answers without it would pass a wrong key.
+- If it has none, leave the default.
+
+Your module spec runs `assertValidates(accept, reject)(clientAt)` for the first kind, against a
+`LocalProviderTestServer`: a request must reach the server before `Right(())`, a 401 must be an
+`AuthenticationError`, and nothing listening must be a `Left`. For the second it runs
+`assertValidationUnsupported(client)`. A client on `OpenAICompatibleClient` has the first already: `GET /models`,
+or the dialect's `validationPath` (`None` for a vendor with no such request).
+
 ### Tool results
 
 An agent's tool loop sends a conversation in which every tool call has exactly one result, straight
@@ -1020,6 +1038,8 @@ classpath; for an OpenAI-compatible vendor, contribute a dialect there instead.
       request mapping cannot send ([reporting adjustments](#requesttransformer-and-transformationresult))
 - [ ] `Llm4s<Name>ModuleSpec`, on `llm4s-provider-testkit`, covering discovery, sole ownership,
       explicit registration, the config-to-client round trip and the credential binding
+- [ ] a chat provider runs `assertValidates`, or `assertValidationUnsupported` when the vendor has no cheap
+      authenticated request ([`validate()`](#validate))
 - [ ] a chat provider that takes tools runs `assertOneToolResultPerCall`
 - [ ] a chat provider runs `assertModelCallContract`, every `ContractCase` declared, `CleanText` applying,
       and its `complete` path refuses a tool call in a `Length` reply ([the model call contract](#the-model-call-contract))

@@ -331,6 +331,26 @@ class GeminiClient(
   override def getReserveCompletion(): Int = config.reserveCompletion
 
   /**
+   * Asks for the configured model with `GET <baseUrl>/models/<model>` (the API's `models.get`), sending the key as
+   * a completion does. `Right(())` means the endpoint answered, took the key and has the model. A refused key is an
+   * `AuthenticationError` and an unknown model the `ServiceError` 404 a completion gets.
+   */
+  override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
+    requestKey().flatMap { key =>
+      // the URL carries the key as a query parameter, as a completion's does: it is not logged
+      http
+        .get(
+          s"${config.baseUrl}/models/${config.model}?key=$key",
+          timeout = requestTimeout.min(GeminiClient.ValidationTimeout)
+        )
+        .flatMap { response =>
+          if (response.statusCode >= 200 && response.statusCode < 300) Right(())
+          else handleErrorResponse(response.statusCode, response.body, response.headers)
+        }
+    }
+  }
+
+  /**
    * Builds the Gemini API request body from a conversation and options.
    *
    * [[org.llm4s.llmconnect.model.SystemMessage SystemMessage]] is extracted into `systemInstruction`; all other
@@ -668,6 +688,9 @@ object GeminiClient {
 
   /** The timeout of a non-streaming call when the section sets no `timeouts.request`: two minutes. */
   val DefaultRequestTimeout: FiniteDuration = 120.seconds
+
+  /** The longest `validate()` waits for its one request: ten seconds. */
+  val ValidationTimeout: FiniteDuration = 10.seconds
 
   /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
   val DefaultStreamTimeout: FiniteDuration = 10.minutes

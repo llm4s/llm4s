@@ -465,7 +465,9 @@ An agent built with `Agent.builder(...).withTracing(tracing)` sends, for each ru
 
 - `graph.*` custom events for the runtime's own events (run, task and checkpoint lifecycle), and
   `agent.*` custom events for the agent's durable events (`agent.model_call_completed`,
-  `agent.tool_executed`, `agent.handed_off`, `agent.guardrail_blocked`), which carry no message content;
+  `agent.tool_executed`, `agent.handed_off`, `agent.guardrail_blocked`), which carry no message content.
+  `graph.task_failed` and `graph.run_failed` carry the error's message: a guardrail block's names only
+  the guardrail (`Guardrail '<name>' blocked`, never its reason), any other error's is sent as it is;
 - a `TokenUsageRecorded` for each model call that reports usage;
 - one `TraceEvent.AgentRunEnded` when the run ends: thread id, run id, the active agent, a status
   (`completed`, `suspended`, `step_limit_reached`, `blocked:<guardrail>`, `cancelled`, `timed_out`,
@@ -822,39 +824,68 @@ tenant id is ever a label, and no metric carries message content. Every backend 
 
 ### Startup Validation
 
-Building the client is the startup check that matters: `Llm4sConfig.defaultProvider()` validates the section it
-loads (a missing key, a missing provider module, an invalid value) and `LLMConnect.getClient` fails if the client
-cannot be built, so fail fast on that `Left`:
+`client.validate()` sends the provider one cheap request, with the client's credentials, and no completion: it uses
+no tokens. `Right(())` means the provider accepted that request. A client never returns it without having checked.
+
+| Provider | The request | A wrong key | A model that does not exist |
+|---|---|---|---|
+| `openai` | `GET /models/<model>` | `AuthenticationError` | `ServiceError` 404 |
+| `anthropic` | `GET /v1/models/<model>` | `AuthenticationError` | `ServiceError` 404 |
+| `gemini` | `GET /models/<model>` | `AuthenticationError` | `ServiceError` 404 |
+| `ollama` | `POST /api/show` | no key | `ServiceError` 404, with the `ollama pull` hint |
+| `openai-compatible`, `deepseek`, `mistral`, `xai`, `requesty` | `GET /models` | `AuthenticationError` | not checked |
+| `openrouter` | `GET /key` | `AuthenticationError` | not checked |
+| `azure`, `vertexai`, `bedrock`, `zai`, `cohere`, `watsonx`, `perplexity`, `jlama` | none | `Left(ValidationUnsupportedError)` | |
+
+A provider in the last row has no cheap authenticated request, so its client returns
+`Left(ValidationUnsupportedError)`: nothing was checked, and the client may well work. So does a client that does not
+implement the check, such as a test double. An endpoint that does not answer is a `NetworkError` or `TimeoutError`
+(the request waits ten seconds at most). Wrappers (`ReliableClient`, `CachingLLMClient`, a traced client) return what
+the client they wrap returns.
+
+Use it at startup to fail fast on misconfiguration, treating "cannot check" as its own case:
 
 ```scala
+import org.llm4s.error.ValidationUnsupportedError
+
 val clientResult = for {
   config   <- Llm4sConfig.defaultProvider()
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
   client   <- LLMConnect.getClient(config)
+  _ <- client.validate() match {
+    case Left(_: ValidationUnsupportedError) => Right(()) // this provider has no validation request
+    case checked                             => checked
+  }
 } yield client
 
 clientResult match {
   case Left(error) =>
-    logger.error(s"LLM client setup failed: ${error.formatted}")
+    logger.error(s"LLM client validation failed: ${error.formatted}")
     System.exit(1)
   case Right(client) =>
     logger.info("LLM client ready")
 }
 ```
 
-`LLMClient.validate()` does **not** add a check: its default returns `Right(())`, and none of the built-in provider
-clients overrides it, so it contacts nothing and verifies no key. Do not use it as a health check.
-
-For a fuller report at startup - JDK, configuration, the provider module, the key, a local model server, and
-optionally one live call - run the [doctor](../../reference/doctor) from code (`Doctor.run(DoctorOptions())`, in
-`llm4s-doctor`) and log `report.renderText`.
+To check a provider in the last row, or that a model answers, send a small completion once at startup, or run
+[`llm4s-doctor` with `--live`](../../getting-started/installation#checking-your-setup-the-doctor), which does that
+and says what to change.
 
 ### Readiness Probes
 
-Only a real request proves that the provider answers and the key is accepted, and a hosted provider bills it. If
-readiness should depend on the provider, check it on a schedule with a small request (or `Doctor.run` with
-`DoctorOptions().withLive(true)`) and report the last result, rather than calling the provider on every probe.
+For Kubernetes deployments, include LLM connectivity in readiness checks. `validate()` is a network call, so cache
+its result for a few seconds rather than calling the provider on every probe:
+
+```scala
+// Integrate with your framework's health check mechanism
+def isLLMReady(): Boolean =
+  client.validate() match {
+    case Right(())                           => true
+    case Left(_: ValidationUnsupportedError) => true // nothing to check with: do not fail the pod for it
+    case Left(_)                             => false
+  }
+```
 
 ### Liveness vs Readiness
 

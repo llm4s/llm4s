@@ -905,7 +905,9 @@ items an agent keeps across threads are stored in plain until you wrap it too
   numbers; the graph's id, version and shape, and the names of state keys; thread metadata (keep content out of it);
   trace contexts; the built-in events, with a failed run's error message, and a queue entry's failure message or
   cancel note; and the digests kept beside values, which let someone who can guess a value exactly confirm the guess.
-  The size of each value shows too. Disk or database encryption still has a job.
+  The size of each value shows too. Disk or database encryption still has a job. An outcome is text when a run was
+  refused or failed: a blocked run's holds its guardrail's reason, an invalid typed answer's the schema errors and a
+  failure's the error message, so a guardrail whose reason quotes its input puts that input here in plain.
 - **Bound to its place.** Each value opens only on its thread and in its place (for a checkpoint: its tenant,
   checkpoint and state key), so one copied elsewhere in the database fails to open. Two things are not bound, because
   the store numbers them itself: a custom event to its sequence number, and a queued input to its entry id.

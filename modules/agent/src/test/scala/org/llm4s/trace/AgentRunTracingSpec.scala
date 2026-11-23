@@ -4,6 +4,7 @@ import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.agent.graph.{
+  CheckpointStatus,
   Checkpointer,
   Commit,
   EventRecord,
@@ -12,16 +13,24 @@ import org.llm4s.agent.graph.{
   Principal,
   RunConfig,
   RunEvent,
+  RunOutcome,
   StoredCheckpoint,
   ThreadId
 }
-import org.llm4s.error.{ NetworkError, ProcessingError, UnknownError }
+import org.llm4s.error.{ NetworkError, ProcessingError, UnknownError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 import org.llm4s.agent.AgentStatus
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  BoundaryResult,
+  GuardrailMiddleware,
+  MiddlewareId,
+  ModelContext
+}
+import org.llm4s.agent.guardrails.InputGuardrail
 import org.llm4s.agent.guardrails.builtin.LengthCheck
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.concurrent.Eventually
@@ -374,6 +383,114 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     ended.head.status shouldBe s"blocked:${guard.name}"
     ended.head.messages shouldBe empty
     tracing.all.foreach(e => (e.toJson.render() should not).include(marker))
+  }
+
+  /** An input guardrail whose reason quotes the text it refused, as a PII or prompt-injection match does. */
+  private def quoting: InputGuardrail = new InputGuardrail {
+    val name: String                            = "QuotesInput"
+    def validate(value: String): Result[String] = Left(ValidationError.invalid("input", s"refused '$value'"))
+  }
+
+  /** Replaces `secret` in the turn's query, as a PII-masking middleware does. */
+  final private class Redacting(secret: String) extends AgentMiddleware {
+    val id: MiddlewareId = MiddlewareId("redacting")
+    override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] =
+      Right(BoundaryResult(text.replace(secret, "[REDACTED]")))
+  }
+
+  private def stored[A](result: Result[A]): A = result.fold(e => fail(e.message), identity)
+
+  "A guardrail's reason" should "reach the caller but neither the durable event log nor the trace (#2793)" in {
+    val marker  = "SECRET-42"
+    val store   = new InMemoryCheckpointer()
+    val tracing = Recording()
+    val thread  = ThreadId("t-reason")
+    val agent = Agent
+      .builder("assistant", Scripted(Right(answer("never sent"))))
+      .withMiddleware(new GuardrailMiddleware(input = Seq(quoting), output = Nil))
+      .withRuntime(new GraphRuntime(store))
+      .withTracing(tracing)
+      .build()
+      .fold(e => fail(e.message), identity)
+
+    ok(agent.run(thread, s"my card is $marker")).status match {
+      case AgentStatus.Blocked(guardrail, reason) =>
+        guardrail shouldBe "QuotesInput"
+        reason should include(marker)
+      case other => fail(s"expected Blocked, got $other")
+    }
+
+    val events = stored(store.eventsAfter(thread, 0L, 100))
+    events.map(_.event).collect { case RunEvent.RunFailed(details) => details.message } shouldBe
+      Vector("Guardrail 'QuotesInput' blocked")
+    events.map(_.event).collect { case RunEvent.TaskFailed(message) => message } shouldBe
+      Vector("Guardrail 'QuotesInput' blocked")
+    events.foreach(e => (e.toString should not).include(marker))
+
+    eventually(endedOf(tracing).size shouldBe 1)
+    tracing.all.foreach(e => (e.toJson.render() should not).include(marker))
+  }
+
+  it should "stay on the closing checkpoint's outcome, which rebuilds the turn's status from the thread (#2793)" in {
+    val marker = "SECRET-42"
+    val store  = new InMemoryCheckpointer()
+    val thread = ThreadId("t-outcome")
+    val agent = Agent
+      .builder("assistant", Scripted(Right(answer("never sent"))))
+      .withMiddleware(new GuardrailMiddleware(input = Seq(quoting), output = Nil))
+      .withRuntime(new GraphRuntime(store))
+      .build()
+      .fold(e => fail(e.message), identity)
+    ok(agent.run(thread, s"my card is $marker"))
+
+    // the documented limit: the checkpoint store holds the reason, and with it whatever the reason quotes
+    val history = stored(store.history(thread, None, 100))
+    history.flatMap(_.outcome) should matchPattern {
+      case Vector(RunOutcome.Blocked("QuotesInput", reason: String)) if reason.contains(marker) =>
+    }
+    // and nothing else of the blocked turn: its earlier checkpoints, which held the query, are retracted
+    history.map(_.withOutcome(None)).foreach(c => (c.toString should not).include(marker))
+  }
+
+  "A query a beforeAgent hook redacts" should "be redacted in the thread, the event log and the trace (#2793)" in {
+    val marker  = "SECRET-42"
+    val store   = new InMemoryCheckpointer()
+    val tracing = Recording()
+    val thread  = ThreadId("t-redacted")
+    val agent = Agent
+      .builder("assistant", Scripted(Right(answer("done"))))
+      .withMiddleware(new Redacting(marker))
+      .withRuntime(new GraphRuntime(store))
+      .withTracing(tracing)
+      .build()
+      .fold(e => fail(e.message), identity)
+
+    val result = ok(agent.run(thread, s"my card is $marker"))
+    val text   = result.messages.map(_.content).mkString("\n")
+    text should include("[REDACTED]")
+    (text should not).include(marker)
+
+    stored(store.latest(thread)).foreach(latest => (latest.checkpoint.toString should not).include(marker))
+    stored(store.eventsAfter(thread, 0L, 100)).foreach(e => (e.toString should not).include(marker))
+    eventually(endedOf(tracing).size shouldBe 1)
+    tracing.all.foreach(e => (e.toJson.render() should not).include(marker))
+  }
+
+  it should "still be in the run's first checkpoint as submitted: the hook runs after it is stored (#2793)" in {
+    val marker = "SECRET-42"
+    val store  = new InMemoryCheckpointer()
+    val thread = ThreadId("t-first")
+    val agent = Agent
+      .builder("assistant", Scripted(Right(answer("done"))))
+      .withMiddleware(new Redacting(marker))
+      .withRuntime(new GraphRuntime(store))
+      .build()
+      .fold(e => fail(e.message), identity)
+    ok(agent.run(thread, s"my card is $marker"))
+
+    // the documented limit: a redacting hook does not keep the submitted query out of checkpoint history
+    val holding = stored(store.history(thread, None, 100)).filter(_.toString.contains(marker))
+    holding.map(_.status) shouldBe Vector(CheckpointStatus.Running)
   }
 
   it should "trace a failed run as failed, with ErrorOccurred" in {

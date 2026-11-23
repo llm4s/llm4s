@@ -11,7 +11,7 @@ class ReliabilityConfigSpec extends AnyFlatSpec with Matchers {
 
   // A config with no field at its default, so a setter that resets another field is caught.
   private def reliability(
-    rateLimit: RateLimitConfig = RateLimitConfig.default,
+    rateLimit: RateLimitConfig = RateLimitConfig(enabled = true),
     deadline: Option[FiniteDuration] = Some(1.minute),
     enabled: Boolean = false
   ): ReliabilityConfig =
@@ -63,7 +63,7 @@ class ReliabilityConfigSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "ReliabilityConfig fluent API" should "support disabled" in {
-    val config = ReliabilityConfig.default.disabled
+    val config = ReliabilityConfig.default.withEnabled(false)
     config.enabled shouldBe false
   }
 
@@ -84,8 +84,8 @@ class ReliabilityConfigSpec extends AnyFlatSpec with Matchers {
     config.deadline shouldBe Some(1.minute)
   }
 
-  it should "support withoutDeadline" in {
-    val config = ReliabilityConfig.default.withoutDeadline
+  it should "remove the deadline with withDeadline(None)" in {
+    val config = ReliabilityConfig.default.withDeadline(None)
     config.deadline shouldBe None
   }
 
@@ -117,7 +117,7 @@ class ReliabilityConfigSpec extends AnyFlatSpec with Matchers {
 
   it should "not mutate the original config" in {
     val original = ReliabilityConfig.default
-    val modified = original.disabled.withoutDeadline
+    val modified = original.withEnabled(false).withDeadline(None)
     original.enabled shouldBe true
     original.deadline shouldBe Some(5.minutes)
     modified.enabled shouldBe false
@@ -191,8 +191,10 @@ class ReliabilityConfigSpec extends AnyFlatSpec with Matchers {
     config.burstCapacity shouldBe 60
   }
 
-  "RateLimitConfig.default" should "be enabled, 60 requests per minute, burst 60" in {
-    RateLimitConfig.default shouldBe RateLimitConfig(enabled = true, requestsPerMinute = 60, burstCapacity = 60)
+  "RateLimitConfig.default" should "be RateLimitConfig(): disabled, 60 requests per minute, burst 60 (#2797)" in {
+    RateLimitConfig.default shouldBe RateLimitConfig()
+    RateLimitConfig.default shouldBe RateLimitConfig(enabled = false, requestsPerMinute = 60, burstCapacity = 60)
+    RateLimitConfig.default shouldBe RateLimitConfig.disabled
   }
 
   "RateLimitConfig.disabled" should "be disabled, 60 requests per minute, burst 60" in {
@@ -222,5 +224,41 @@ class ReliabilityConfigSpec extends AnyFlatSpec with Matchers {
   it should "support withEnabled" in {
     rateLimit.withEnabled(false) shouldBe RateLimitConfig(enabled = false, requestsPerMinute = 30, burstCapacity = 10)
     rateLimit.withEnabled(false).withEnabled(true) shouldBe rateLimit
+  }
+
+  "validate" should "accept every preset" in {
+    Seq(
+      ReliabilityConfig.default,
+      ReliabilityConfig.conservative,
+      ReliabilityConfig.aggressive,
+      ReliabilityConfig.disabled
+    )
+      .foreach(config => config.validate shouldBe Right(config))
+    Seq(
+      CircuitBreakerConfig.default,
+      CircuitBreakerConfig.conservative,
+      CircuitBreakerConfig.aggressive,
+      CircuitBreakerConfig.disabled
+    ).foreach(config => config.validate shouldBe Right(config))
+    RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1).validate.isRight shouldBe true
+  }
+
+  it should "name the field a client cannot run with (#2797)" in {
+    def field(result: org.llm4s.types.Result[Any]): String = result.left.toOption.get match {
+      case e: org.llm4s.error.ValidationError => e.field
+      case other                              => fail(s"not a ValidationError: $other")
+    }
+    field(CircuitBreakerConfig(failureThreshold = 0).validate) shouldBe "circuitBreaker.failureThreshold"
+    field(CircuitBreakerConfig(successThreshold = 0).validate) shouldBe "circuitBreaker.successThreshold"
+    field(CircuitBreakerConfig(recoveryTimeout = -1.second).validate) shouldBe "circuitBreaker.recoveryTimeout"
+    field(RateLimitConfig(burstCapacity = 0).validate) shouldBe "rateLimit.burstCapacity"
+    field(RateLimitConfig(requestsPerMinute = -1).validate) shouldBe "rateLimit.requestsPerMinute"
+    val config = ReliabilityConfig.default
+    field(config.withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 0)).validate) shouldBe
+      "circuitBreaker.failureThreshold"
+    field(config.withRateLimit(RateLimitConfig(enabled = true, burstCapacity = 0)).validate) shouldBe
+      "rateLimit.burstCapacity"
+    // a rate limit that is off is not read, so its numbers are not checked
+    config.withRateLimit(RateLimitConfig(enabled = false, burstCapacity = 0)).validate.isRight shouldBe true
   }
 }

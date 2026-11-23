@@ -64,6 +64,12 @@ Underneath, a block is the graph runtime's *Block*: the run ends as a finished f
 `recover` has nothing to continue and `start` accepts like a completed thread. A `Left` from another
 middleware's `beforeAgent` or `afterAgent` blocks the same way, but is returned as that `Left`.
 
+The `reason` is for the caller. The run's durable events and its trace name the guardrail only (the
+error's message is `Guardrail '<name>' blocked`; its `reason` field holds the rest), because a reason
+may quote the text it refused. It is stored in one place, the blocked run's closing checkpoint
+(`RunOutcome.Blocked`), from which the turn's status is rebuilt; see
+[Durable vs live](streaming#durable-vs-live-and-the-content-rule) and its limits.
+
 A list of guardrails runs completely: each guardrail, in order, on the value the previous one
 returned, **even after one has failed**. That is why the block carries every failure's error, and why a
 guardrail that costs a call - an LLM judge - runs on every turn that reaches its list. To stop at the first
