@@ -21,7 +21,7 @@ import org.slf4j.LoggerFactory
  *       – ToolDeterministicCompaction runs first (externalize big tool outputs).
  *       – If still over: HistoryCompression creates [HISTORY_SUMMARY] digest(s).
  *       – If enabled and needed: LLM squeeze lowers digest to summaryTokenTarget.
- *       – FinalTokenTrim removes oldest messages (digest is pinned) to fit the window.
+ *       – FinalTokenTrim removes the oldest turns (leading system and digest messages are pinned) to fit the window.
  *   • If conversation ≤ budget: no steps run (no-op).
  *   • Tool-heavy convo collapses mostly via ToolDeterministicCompaction alone.
  *

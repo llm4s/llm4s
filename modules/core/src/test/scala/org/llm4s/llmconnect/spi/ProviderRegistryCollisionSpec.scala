@@ -49,7 +49,7 @@ class ProviderRegistryCollisionSpec extends AnyWordSpec with Matchers:
 
       val registry = ProviderRegistry.of(first, second)
 
-      registry.get(ProviderId("acme")) shouldBe Right(second)
+      registry.resolve(ProviderId("acme")) shouldBe Right(second)
       registry.report.hasCollisions shouldBe true
       registry.report.collisions shouldBe Seq(ProviderIdCollision("chat", "acme", "explicit registration", None))
     }
@@ -84,7 +84,7 @@ class ProviderRegistryCollisionSpec extends AnyWordSpec with Matchers:
 
       val registry = ProviderRegistry.discover(loader)
 
-      registry.get(ProviderId("fixturecloud")) shouldBe Right(CollidingProvider)
+      registry.resolve(ProviderId("fixturecloud")) shouldBe Right(CollidingProvider)
       registry.report.hasCollisions shouldBe true
 
       val collision = registry.report.collisions

@@ -50,89 +50,78 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
-[`SecretPatterns` is in `llm4s-agent`](#secretpatterns-is-in-llm4s-agent-2824),
-[`RegexSafetyManager` returns `Result`](#regexsafetymanager-returns-result-2825),
-and [an open circuit is a `CircuitOpenError`](#an-open-circuit-is-a-circuitopenerror-2797).
+[`ProviderRegistry` lookups accept aliases](#providerregistry-lookups-accept-aliases-2812),
+[`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
+and [context trimming fails when nothing fits, and externalizes only into a store](#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817).
 
-## An open circuit is a `CircuitOpenError` (#2797)
+## Context trimming fails when nothing fits, and externalizes only into a store (#2817)
 
-While its circuit is open, or half-open with a probe in flight, `ReliableClient` returned
-`ServiceError(503, "circuit-breaker", ...)`. A 503 is retryable, so an outer retry (`LLMClientRetry`, an agent
-node's retry policy, a second `ReliableClient`) repeated the fast-fail. It now returns
-`org.llm4s.error.CircuitOpenError`, which `RetryPolicy.isRetryable` does not retry:
+In `org.llm4s.context` (`llm4s-core`). No signature changes; behaviour you may rely on changed.
 
-```scala
-client.complete(conversation) match
-  case Left(e: CircuitOpenError) => fallBack(after = e.retryAfter) // was: Left(e: ServiceError) if e.provider == "circuit-breaker"
-  case other                     => other
-```
+**`TokenWindow.trimToBudget`** pins every leading `SystemMessage` (the system prompt and all `[HISTORY_SUMMARY]`
+digests, where it pinned only a digest in first position), and drops older history in whole turns: an assistant
+message with tool calls goes with its tool results, so the window never starts at an orphaned `ToolMessage`. It now
+returns `Left(ContextError)` when the pinned messages exceed the budget, or when not even the newest turn fits beside
+them, where it returned `Right` with an empty or pinned-only conversation. `ContextManager.manageContext` returns that
+`Left` from its last step; raise the budget, or trim the system prompt. To leave room for the turns,
+`ContextManager` now caps the history digests at half the budget left after headroom (and at
+`summaryTokenTarget`, as before).
 
-`provider` is the name the `ReliableClient` was given, `retryAfter` the time left before a probe is let through
-(zero when `probing`), and `ErrorKind.fromLLMError` still reports it as `ServiceError`. Code that sent a retryable
-error back to a queue, as the Kafka sample does, adds `CircuitOpenError` to that branch, or it dead-letters during
-an outage.
+**Externalization needs a store.** With `artifactStore = None` (the default of `DeterministicCompressor.compressToCap`
+and of `ContextManager`), tool output over 8 KB used to become an `[EXTERNALIZED: key ...]` pointer into a store
+created and discarded on each call. Now nothing is externalized: the output is compressed inline. Pass
+`Some(store)` to keep externalizing and be able to `retrieve` the content.
 
-Also in `org.llm4s.reliability`:
+**Binary content** is a `data:...;base64,` URI, a run of 256 or more base64 characters, or text that is mostly
+control characters; mentioning the word "base64" no longer counts. It is never cut: over 2 KB it is externalized
+whole when there is a store, and otherwise left as it is. The `[BINARY CONTENT - n bytes - externalized: id]`
+placeholder, which stored nothing, is gone.
 
-- **`RateLimitConfig.default` is `RateLimitConfig()`**, which is disabled, like every other `default`. It was the
-  one enabled value: write `RateLimitConfig(enabled = true)` or `RateLimitConfig.default.withEnabled(true)`.
-- **Removed:** `ReliabilityConfig.withoutDeadline` (`withDeadline(None)`) and the instance method
-  `config.disabled` (`config.withEnabled(false)`). `ReliabilityConfig.disabled`, the preset, is unchanged.
-- **A configuration a client cannot run with is an error, not a silent oddity.** `ReliabilityConfig.validate`
-  (and `CircuitBreakerConfig.validate`, `RateLimitConfig.validate`) return a `ValidationError` for a
-  `failureThreshold` or `successThreshold` below 1, a negative `recoveryTimeout`, a `burstCapacity` below 1 or a
-  negative `requestsPerMinute` on an enabled rate limit. A `ReliableClient` built with one returns that error
-  from every call and from `validate()`.
-- **Only a probe's success closes a half-open circuit.** A call that began before the circuit opened and
-  succeeds after it went half-open no longer counts towards `successThreshold`.
+**User messages** are no longer rewritten by `CompressionRule.compressRepetitiveContent` or
+`removeRedundantPhrases`, as `DeterministicCompressor`'s Scaladoc always promised.
 
-## `RegexSafetyManager` returns `Result` (#2825)
+## `StreamingAccumulator` takes the model and reports usage one way (#2813)
 
-`RegexSafetyManager.safeCompile` and `safeFind` (`org.llm4s.security`) return `Result`, not `Either[String, _]`: a
-refusal is a `ValidationError` for the field `pattern` or `input`, and the text that was the `Left` is in its
-`message` after `Invalid pattern: ` or `Invalid input: `.
+For provider authors using `org.llm4s.llmconnect.streaming` in `llm4s-core`.
 
-```scala
-RegexSafetyManager.safeCompile(userPattern) match
-  case Right(pattern) => RegexSafetyManager.safeFind(pattern, text) // Result[Boolean]
-  case Left(error)    => refuse(error.message)                      // was: case Left(reason) => refuse(reason)
-```
+| Before | After |
+|---|---|
+| `StreamingAccumulator.create()` | `StreamingAccumulator(model)`; `toCompletion`'s `Completion.model` is `model`, where it was `"unknown"` |
+| `updateTokens(prompt, completion)` | `updateUsage(TokenUsage(prompt, completion, prompt + completion))` |
+| `updateTokensWithThinking(prompt, completion, thinking)` | `updateUsage(TokenUsage(prompt, completion, prompt + completion + thinking, thinkingTokens = Some(thinking)))` |
+| `addThinkingDelta(delta)` | `addChunk` a `StreamedChunk` whose `thinkingDelta` is `Some(delta)` |
+| `SSEEvent.retry: Option[Int]`, `withRetry(Int)` | `Option[FiniteDuration]`, `withRetry(FiniteDuration)`: `retry.map(_.toMillis)` for the number |
+| `SSEParser.parseStream(text)` | a `createStreamingParser()`: `addChunk(text)`, drain `nextEvent()`, then `flush()` |
+| `StreamingParser#getEvents()` | drain `nextEvent()` while `hasEvents` |
+| `new SSEParser.StreamingParser()` | `SSEParser.createStreamingParser()` (the class is `final`) |
 
-- **`safeFind` takes no `maxSteps`.** The budget is the documented 10000000 character accesses.
-- **Removed, with no caller in llm4s:** `safeMatches` (anchor the pattern with `^...$` and use `safeFind`),
-  `compileLiteralCaseInsensitive` (`compileLiteral(text, Pattern.CASE_INSENSITIVE)`), `replaceAllLiteral` and
-  `replaceFirstLiteral` (`String.replace`, or `compileLiteral(text).matcher(input).replaceFirst(Matcher.quoteReplacement(r))`),
-  and the `RegexComplexityException` class, which never escaped the object.
-- **A quantified alternation compiles.** `safeCompile`, and so `RegexValidator("...")` and a `FileBackend`'s `grep`,
-  refused every `(x|y)+` and `(x|y)*`, such as `(foo|bar)+` and `^(GET|POST)+$`. They now refuse only one whose
-  alternatives overlap, such as `(a|ab)*`, as documented. A pattern your application relied on being refused may
-  now run, within the step budget.
+`updateUsage` keeps the cache counts the removed methods dropped. The streaming parser now reads CRLF and CR line
+endings, so a CRLF stream fed in raw chunks yields each event as its blank line arrives, where it yielded nothing until
+`flush()` and then one merged event.
 
-## `SecretPatterns` is in `llm4s-agent` (#2824)
+## `ProviderRegistry` lookups accept aliases (#2812)
 
-`SecretPatterns`, with `SecretType` and `SecretMatch`, moved from `org.llm4s.util` in `llm4s-core` to
-`org.llm4s.agent.guardrails.patterns` in `llm4s-agent`, beside `PIIPatterns` and its one consumer,
-`SecretLeakGuardrail`. Change the import; there is no forwarder:
+`find`, `resolve`, `findEmbedding` and `resolveEmbedding` accept a provider's alias as well as its id, so
+`registry.resolve(registry.canonicalId(raw))` is now `registry.resolve(ProviderId(raw))`. `canonicalId` stays, for
+when you need the canonical id itself.
 
-```scala
-import org.llm4s.agent.guardrails.patterns.SecretPatterns            // was org.llm4s.util.SecretPatterns
-import org.llm4s.agent.guardrails.patterns.SecretPatterns.SecretType
-```
+| Before | After |
+|---|---|
+| `registry.get(id)` | `registry.resolve(id)` |
+| `registry.resolve(registry.canonicalId(raw), path)` | `registry.resolve(ProviderId(raw), path)` |
 
-- **`SecretType` is open.** It was sealed, so `SecretLeakGuardrail(secretTypes)` could only choose among the built-in
-  types. `new SecretType(name, pattern, placeholder)` adds a credential format of your own. A `match` over the
-  built-in case objects now needs a `case _`.
-- **Group 1 of a pattern is the secret.** `SecretType.JwtToken.pattern` now has a capturing group, and its whole match
-  can start before the token. Code that applied `secretType.pattern` itself reads group 1 when the pattern has one,
-  or calls `secretType.findAll(text)` or the new `secretType.redact(text)`.
-- **`SecretType.PrivateKeyPem` matches the whole key**, from `-----BEGIN ... PRIVATE KEY-----` through
-  `-----END ... PRIVATE KEY-----`, not the header line: `SecretMatch.value` is the block, and `redactAll` leaves no
-  key body behind.
-- **`SecretType.OpenAIKey` and `AnthropicKey` match keys holding `-` and `_`** (`sk-proj-...`, `sk-svcacct-...`,
-  `sk-admin-...`, `sk-ant-...`), which they cut short or missed.
-- **Removed:** `SecretPatterns.redactAllWithPlaceholder` (fold `secretType.findAll` over the text for a placeholder of
-  your own), and `SecretMatch.withSecretType`, `withValue`, `withStartIndex` and `withEndIndex`: a match is a result,
-  built with `SecretMatch(secretType, value, startIndex, endIndex)`.
+Behaviour changes:
+
+- **An id beats an alias.** An alias equal to another provider's id used to win, so that provider could not be
+  reached from config. Now the id wins. The alias is ignored and reported as a collision of kind `chat alias` or
+  `embedding alias`.
+- **Alias collisions are reported.** When two providers declare the same alias, the later one still keeps it, but
+  `report.collisions` now records it, the discovery log warns about it, and `ProviderModuleChecks.assertSoleSupplier`
+  fails a module whose id or alias collides.
+- **A version-skewed descriptor no longer aborts discovery.** A descriptor whose `id` or `aliases` throws is left out
+  and recorded in `report.failures`. The module's other descriptors are kept.
+- **`discover()` scans core's own class loader as well as the context loader.** A module both loaders see counts once.
+  `discover(loader)` scans only the loaders you pass.
 
 ## `llm4s-agent` types are tiered and growth-safe (#2778)
 
@@ -1691,8 +1680,7 @@ Pattern matching (`case ToolCallRequest(name, args)`) and the fields are unchang
 ### Config, model and util types are growth-safe (#2384)
 
 `Llm4sConfig.TextEmbeddingModelSettings`, `ProvidersConfigModel.ProvidersConfig` (`org.llm4s.config`),
-`TransformationResult` (`org.llm4s.model`) and `SecretPatterns.SecretMatch` (now in `llm4s-agent`, without setters:
-[#2824](#secretpatterns-is-in-llm4s-agent-2824)) follow the growth-prone
+`TransformationResult` (`org.llm4s.model`) and `SecretPatterns.SecretMatch` (`org.llm4s.util`) follow the growth-prone
 pattern ([#2384](https://github.com/llm4s/llm4s/issues/2384)). Each is a `final case class` whose constructor and `copy`
 are private:
 
@@ -1706,6 +1694,7 @@ are private:
   | `TextEmbeddingModelSettings` | `withProvider`, `withModelName`, `withDimensions` |
   | `ProvidersConfig` | `withSelectedProvider` (a `ProviderName` or an `Option`), `withNamedProviders` |
   | `TransformationResult` | `withOptions`, `withMessages`, `withRequiresFakeStreaming` |
+  | `SecretMatch` | `withSecretType`, `withValue`, `withStartIndex`, `withEndIndex` |
 
   ```scala
   val fake = result.withRequiresFakeStreaming(true) // was result.copy(requiresFakeStreaming = true)

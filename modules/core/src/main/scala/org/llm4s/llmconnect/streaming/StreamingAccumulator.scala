@@ -12,17 +12,19 @@ import scala.collection.mutable
  * Accumulates streaming chunks into a complete response.
  * Handles content accumulation, tool call accumulation, thinking content, and token tracking.
  *
+ * Created with `StreamingAccumulator(model)`, the model the completion reports. Feed it with
+ * [[addChunk]], report the provider's usage with [[updateUsage]], and finish with [[toCompletion]].
+ *
  * Mutable and not thread-safe: use one accumulator per stream, fed from the thread that reads
  * it. Tool calls are keyed by id, so every chunk of a streamed tool call - continuations
  * included - must carry its call's id; a tool-call chunk with an empty id is ignored. Clients
  * whose wire format identifies continuations only by index must map them back to the id first.
  */
 @Stable
-final class StreamingAccumulator private () {
+final class StreamingAccumulator private (model: String) {
 
   private val contentBuilder                       = new StringBuilder()
   private val thinkingBuilder                      = new StringBuilder()
-  private val toolCalls                            = mutable.ArrayBuffer[ToolCall]()
   private var messageId: Option[String]            = None
   private var finishReason: Option[FinishReason]   = None
   private var promptTokens: Int                    = 0
@@ -86,12 +88,6 @@ final class StreamingAccumulator private () {
   }
 
   /**
-   * Add thinking content delta directly
-   */
-  def addThinkingDelta(delta: String): Unit =
-    thinkingBuilder.append(delta)
-
-  /**
    * Get the current accumulated content
    */
   def currentContent: String = contentBuilder.toString
@@ -107,15 +103,12 @@ final class StreamingAccumulator private () {
    * call whose arguments are not yet a JSON object (still arriving, or broken) carries them as the raw `Str`; empty
    * is `{}`. Only [[toCompletion]] decides whether the calls stand (RFC 0009, Part 3).
    */
-  def currentToolCalls: Seq[ToolCall] = {
-    val completed = toolCalls.toSeq
-    val partial = partialToolCalls.values.map { p =>
+  def currentToolCalls: Seq[ToolCall] =
+    partialToolCalls.values.map { p =>
       val raw = p.argumentsBuilder.toString
       // the one boundary parser: unparseable or nested too deeply stays the raw Str, never parsed (#1562)
       ToolCall(id = p.id, name = p.name, arguments = StreamingToolArgumentParser.parse(raw).getOrElse(ujson.Str(raw)))
     }.toSeq
-    completed ++ partial
-  }
 
   /**
    * The tool calls as the stream ended them, under RFC 0009's rules: a `Left` for any call when the output limit cut
@@ -135,7 +128,7 @@ final class StreamingAccumulator private () {
         arguments <- ToolCallRules.parseArguments(p.name, raw)
       } yield calls :+ ToolCall(id = p.id, name = p.name, arguments = arguments)
     }
-    partial.map(toolCalls.toSeq ++ _)
+    partial
   }
 
   /**
@@ -197,35 +190,11 @@ final class StreamingAccumulator private () {
       id = messageId.getOrElse(""),
       created = created,
       content = contentBuilder.toString(),
-      model = "unknown",
+      model = model,
       message = message,
       usage = usage,
       finishReason = reason
     )
-  }
-
-  /**
-   * Update the prompt and completion token counts.
-   *
-   * The completion's total becomes their sum plus any thinking tokens; cache counts set by
-   * [[updateUsage]] are kept. Use [[updateUsage]] when the provider reports more than these two.
-   */
-  def updateTokens(prompt: Int, completion: Int): Unit = {
-    promptTokens = prompt
-    completionTokens = completion
-    reportedTotal = None
-  }
-
-  /**
-   * Update token counts including thinking tokens.
-   *
-   * The completion's total becomes their sum; cache counts set by [[updateUsage]] are kept.
-   */
-  def updateTokensWithThinking(prompt: Int, completion: Int, thinking: Int): Unit = {
-    promptTokens = prompt
-    completionTokens = completion
-    thinkingTokens = thinking
-    reportedTotal = None
   }
 
   /**
@@ -264,7 +233,6 @@ final class StreamingAccumulator private () {
   def clear(): Unit = {
     contentBuilder.clear()
     thinkingBuilder.clear()
-    toolCalls.clear()
     partialToolCalls.clear()
     messageId = None
     finishReason = None
@@ -293,8 +261,11 @@ final class StreamingAccumulator private () {
 object StreamingAccumulator {
 
   /**
-   * Create a new accumulator instance
+   * A new, empty accumulator.
+   *
+   * @param model the model the completion reports as `Completion.model`: the model the request named, or
+   *              `""` where the caller does not know it
    */
-  def create(): StreamingAccumulator = new StreamingAccumulator()
+  def apply(model: String): StreamingAccumulator = new StreamingAccumulator(model)
 
 }

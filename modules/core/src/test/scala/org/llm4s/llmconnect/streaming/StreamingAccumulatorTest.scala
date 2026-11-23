@@ -11,7 +11,7 @@ import java.time.Instant
 class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
 
   test("should accumulate content from multiple chunks") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     accumulator.addChunk(StreamedChunk("msg-1", Some("Hello "), None, None))
     accumulator.addChunk(StreamedChunk("msg-1", Some("world"), None, None))
@@ -21,7 +21,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should handle chunks with no content") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     accumulator.addChunk(StreamedChunk("msg-1", None, None, None))
     accumulator.addChunk(StreamedChunk("msg-1", Some("test"), None, None))
@@ -31,7 +31,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should track message ID") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     accumulator.addChunk(StreamedChunk("msg-123", Some("content"), None, None))
 
@@ -41,7 +41,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should accumulate tool calls") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     val toolCall1 = ToolCall("tool-1", "function1", ujson.Obj("arg" -> "value1"))
     val toolCall2 = ToolCall("tool-2", "function2", ujson.Obj("arg" -> "value2"))
@@ -57,7 +57,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should track finish reason") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
     accumulator.isComplete shouldBe false
@@ -67,9 +67,9 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should update token counts") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
-    accumulator.updateTokens(100, 50)
+    accumulator.updateUsage(TokenUsage(100, 50, 150))
     accumulator.addChunk(StreamedChunk("msg-1", Some("response"), None, None))
 
     val completion = accumulator.toCompletion
@@ -83,11 +83,11 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should create completion with accumulated data") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     accumulator.addChunk(StreamedChunk("msg-456", Some("Hello "), None, None))
     accumulator.addChunk(StreamedChunk("msg-456", Some("world!"), None, None))
-    accumulator.updateTokens(10, 5)
+    accumulator.updateUsage(TokenUsage(10, 5, 15))
     accumulator.addChunk(StreamedChunk("msg-456", None, None, Some(FinishReason.Stop)))
 
     val completion = accumulator.toCompletion
@@ -100,10 +100,10 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should clear accumulator state") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
-    accumulator.updateTokens(10, 5)
+    accumulator.updateUsage(TokenUsage(10, 5, 15))
 
     accumulator.currentContent shouldBe "content"
 
@@ -114,10 +114,10 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should carry message id, content and tokens into the completion") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
-    accumulator.updateTokens(10, 5)
+    accumulator.updateUsage(TokenUsage(10, 5, 15))
 
     val completion = accumulator.toCompletion(Instant.EPOCH).toOption.get
 
@@ -127,7 +127,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should handle partial tool call accumulation") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     // Simulate receiving tool call in parts — empty sentinel signals "no args yet"
     val partialCall1 = ToolCall("tool-1", "get_weather", ujson.Obj())
@@ -143,7 +143,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should filter empty-object sentinel from tool call arguments") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     // Empty Obj() is the sentinel for "no arguments yet" — should not be appended
     val sentinelCall = ToolCall("tool-1", "get_weather", ujson.Obj())
@@ -156,7 +156,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should preserve raw string fragments for later assembly") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     // Partial JSON arrives as ujson.Str fragments via StreamingToolArgumentParser
     val partial1 = ToolCall("tool-1", "search", ujson.Str("{\"query\":"))
@@ -171,7 +171,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should assemble tool call arguments from raw JSON fragments") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     val partialCall1 = ToolCall("tool-1", "get_weather", ujson.Str("{\"location\":"))
     val partialCall2 = ToolCall("tool-1", "", ujson.Str("\"SF\"}"))
@@ -189,7 +189,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   // ===========================================
 
   test("should accumulate thinking content from chunks") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     accumulator.addChunk(StreamedChunk("msg-1", None, None, None, Some("Let me ")))
     accumulator.addChunk(StreamedChunk("msg-1", None, None, None, Some("think about ")))
@@ -200,7 +200,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should return None for thinking when no thinking content") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None, None))
 
@@ -209,7 +209,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should handle mixed content and thinking chunks") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     // Thinking comes first
     accumulator.addChunk(StreamedChunk("msg-1", None, None, None, Some("Thinking...")))
@@ -221,7 +221,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should include thinking in completion") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     accumulator.addChunk(StreamedChunk("msg-1", None, None, None, Some("Let me calculate...")))
     accumulator.addChunk(StreamedChunk("msg-1", Some("The answer is 42."), None, None, None))
@@ -239,24 +239,15 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("a stream without thinking leaves the message's thinking empty") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
     accumulator.addChunk(StreamedChunk("msg-1", Some("Hi"), None, Some(FinishReason.Stop), None))
     accumulator.toCompletion.map(_.message.thinking) shouldBe Right(Seq.empty)
   }
 
-  test("should add thinking delta directly") {
-    val accumulator = StreamingAccumulator.create()
-
-    accumulator.addThinkingDelta("First part. ")
-    accumulator.addThinkingDelta("Second part.")
-
-    accumulator.currentThinking shouldBe Some("First part. Second part.")
-  }
-
   test("should track thinking tokens") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
-    accumulator.updateTokensWithThinking(100, 50, 200)
+    accumulator.updateUsage(TokenUsage(100, 50, 350, thinkingTokens = Some(200)))
     accumulator.addChunk(StreamedChunk("msg-1", Some("response"), None, None, Some("thinking")))
 
     val completion = accumulator.toCompletion
@@ -272,10 +263,10 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should include thinking tokens in the completion") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None, Some("thinking")))
-    accumulator.updateTokensWithThinking(10, 5, 20)
+    accumulator.updateUsage(TokenUsage(10, 5, 35, thinkingTokens = Some(20)))
 
     val completion = accumulator.toCompletion(Instant.EPOCH).toOption.get
 
@@ -285,10 +276,10 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should clear thinking content on clear") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None, Some("thinking")))
-    accumulator.updateTokensWithThinking(10, 5, 20)
+    accumulator.updateUsage(TokenUsage(10, 5, 35, thinkingTokens = Some(20)))
 
     accumulator.currentThinking shouldBe Some("thinking")
     accumulator.hasThinking shouldBe true
@@ -300,7 +291,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("updateUsage carries every TokenUsage field onto the completion") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
     accumulator.updateUsage(
       TokenUsage(
@@ -326,7 +317,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("updateUsage merges partial reports, each field following the latest report that states it") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
     // input and cache counts first, output last, as some providers split them
     accumulator.updateUsage(
       TokenUsage(promptTokens = 100, completionTokens = 0, totalTokens = 0, cachedTokens = Some(60))
@@ -346,36 +337,36 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("updateUsage reports usage that only has cache counts") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
     accumulator.updateUsage(TokenUsage(promptTokens = 0, completionTokens = 0, totalTokens = 0, cachedTokens = Some(5)))
 
     accumulator.toCompletion(Instant.EPOCH).toOption.get.usage.flatMap(_.cachedTokens) shouldBe Some(5)
   }
 
-  test("updateTokens after updateUsage replaces the counts and the reported total, keeping cache counts") {
-    val accumulator = StreamingAccumulator.create()
-    accumulator.updateUsage(
-      TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 999, cachedTokens = Some(40))
-    )
-    accumulator.updateTokens(10, 5)
-
-    val usage = accumulator.toCompletion(Instant.EPOCH).toOption.get.usage.get
-    usage.promptTokens shouldBe 10
-    usage.completionTokens shouldBe 5
-    usage.totalTokens shouldBe 15
-    usage.cachedTokens shouldBe Some(40)
+  test("the completion reports the model the accumulator was created for") {
+    val accumulator = StreamingAccumulator("gpt-test")
+    accumulator.addChunk(StreamedChunk("msg-1", Some("hi"), None, Some(FinishReason.Stop)))
+    accumulator.toCompletion(Instant.EPOCH).map(_.model) shouldBe Right("gpt-test")
   }
 
-  test("updateTokensWithThinking after updateUsage recomputes the total") {
-    val accumulator = StreamingAccumulator.create()
-    accumulator.updateUsage(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 999))
-    accumulator.updateTokensWithThinking(10, 5, 20)
+  test("a report without a total after one with a total keeps the counts it does not state") {
+    val accumulator = StreamingAccumulator("test-model")
+    accumulator.updateUsage(
+      TokenUsage(promptTokens = 100, completionTokens = 0, totalTokens = 0, cachedTokens = Some(40))
+    )
+    accumulator.updateUsage(TokenUsage(promptTokens = 0, completionTokens = 5, totalTokens = 0))
 
-    accumulator.toCompletion(Instant.EPOCH).toOption.get.usage.map(_.totalTokens) shouldBe Some(35)
+    val usage = accumulator.toCompletion(Instant.EPOCH).toOption.get.usage.get
+    (usage.promptTokens, usage.completionTokens, usage.totalTokens, usage.cachedTokens) shouldBe ((
+      100,
+      5,
+      105,
+      Some(40)
+    ))
   }
 
   test("clear resets the usage merged by updateUsage") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
     accumulator.updateUsage(
       TokenUsage(
         promptTokens = 100,
@@ -392,7 +383,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should stamp the completion with the given creation time") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
 
     val completion = accumulator.toCompletion(created = Instant.ofEpochSecond(1_700_000_000L))
@@ -400,7 +391,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("should stamp the completion with the current time when no creation time is given") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
 
     val before  = Instant.now()
@@ -415,7 +406,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     // Ids chosen so hash order and stream order disagree: before #1132 the partial calls sat in
     // an unordered map and came back in hash order.
     val ids         = Seq("call_zeta", "call_alpha", "call_mu", "call_beta", "call_omega", "call_c", "call_q", "call_k")
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
 
     // Each call opens with its id, name and first fragment, then all continue interleaved.
     ids.zipWithIndex.foreach { (id, i) =>
@@ -442,7 +433,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   // comparisons happen inside it so no failure message renders a deep value.
   test("tool-call arguments nested too deeply are never parsed: a raw Str live, a Left at the end") {
     val deep        = "[" * 100000 + "]" * 100000
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(ToolCall("call-1", "f", ujson.Str(deep))), None))
     accumulator.addChunk(StreamedChunk("msg-1", None, None, Some(FinishReason.ToolCalls)))
 
@@ -456,7 +447,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   // ===========================================
 
   private def streamed(arguments: Seq[String], reason: Option[FinishReason]): Result[Completion] = {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(ToolCall("call-1", "lookup", ujson.Obj())), None))
     arguments.foreach { fragment =>
       accumulator.addChunk(StreamedChunk("msg-1", None, Some(ToolCall("call-1", "", ujson.Str(fragment))), None))
@@ -496,7 +487,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   }
 
   test("a stream cut by the output limit with no tool call is still a Right") {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
     accumulator.addChunk(StreamedChunk("msg-1", Some("partial"), None, Some(FinishReason.Length)))
     accumulator.toCompletion.map(_.finishReason) shouldBe Right(FinishReason.Length)
   }
