@@ -19,7 +19,7 @@ class ContextWindowConfigSpec extends AnyFlatSpec with Matchers {
     config.maxTokens shouldBe None
     config.maxMessages shouldBe None
     config.preserveSystemMessage shouldBe true
-    config.minRecentTurns shouldBe 3
+    config.minRecentTurns shouldBe 1
     config.pruningStrategy shouldBe PruningStrategy.OldestFirst
   }
 

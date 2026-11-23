@@ -30,9 +30,9 @@ import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 
 val contextConfig = ContextWindowConfig(
   maxTokens = Some(4096),              // Keep max 4K tokens
-  maxMessages = Some(20),              // OR max 20 messages
+  maxMessages = Some(20),              // And max 20 messages: both limits apply
   preserveSystemMessage = true,        // Always keep system prompt
-  minRecentTurns = 3,                  // Keep last 3 user/assistant pairs
+  minRecentTurns = 3,                  // Never prune the last 3 turns
   pruningStrategy = PruningStrategy.OldestFirst  // How to prune
 )
 
@@ -42,6 +42,17 @@ val agent = Agent.builder("assistant", client)
 
 agent.flatMap(_.runMultiTurn("...", Seq(...)))
 ```
+
+Two rules hold under every strategy:
+
+- **`maxTokens` and `maxMessages` are both limits.** With both set, the history is pruned when either is
+  exceeded, and what is kept satisfies both. `AdaptiveWindowing`'s window is one more token limit: with
+  `maxTokens` set as well, the smaller applies.
+- **The last `minRecentTurns` turns are never pruned**, even past a limit. A turn runs from a user message to the
+  next, so it includes the tool calls and results that answered it. The default is 1: the current turn is always
+  sent whole. A higher value keeps the recent conversation coherent, and can send more than the limits allow, so
+  leave room for it under the model's context window. The strategy prunes only the history before those turns,
+  with whatever budget they leave.
 
 ## Pruning Strategies
 
@@ -266,12 +277,12 @@ val strategy = PruningStrategy.AdaptiveWindowing(
   contextWindowSize = 128_000,           // gpt-4o context
   inputCostPerToken = Some(0.000005),    // $5 per 1M input tokens
   outputCostPerToken = Some(0.000015),   // $15 per 1M output tokens
-  preserveMinTurns = 3,
   costSensitivity = 0.5  // Balanced (0=quality, 1=cost)
 )
 
 val config = ContextWindowConfig(
-  pruningStrategy = strategy
+  pruningStrategy = strategy,
+  minRecentTurns = 3     // Kept even past the window
 )
 
 println(strategy.calculateOptimalWindow)  // Output: 89,600 tokens (70% * 128K)
@@ -373,7 +384,7 @@ val config = ContextWindowConfig(
   pruningStrategy = PruningStrategy.OldestFirst
 )
 // Enforces BOTH limits
-// Prunes when either limit exceeded
+// Prunes when either limit is exceeded, and keeps what satisfies both
 ```
 
 ### Pattern 4: Preserve Minimum Context
@@ -385,8 +396,8 @@ val config = ContextWindowConfig(
   minRecentTurns = 3,                    // Always keep last 3 turns
   pruningStrategy = PruningStrategy.RecentTurnsOnly(5)
 )
-// Guarantees minimum context is always available
-// Even if other limits would be exceeded
+// The last 3 turns are always sent, even past maxMessages;
+// up to 5 turns are sent when over it
 ```
 
 ### Pattern 5: Adaptive Mode (Multi-model)
@@ -566,14 +577,13 @@ val config = ContextWindowConfig(
 
 ### Issue: Conversations are too short
 
-**Cause:** minRecentTurns or preserveSystemMessage settings
+**Cause:** the limits are too tight for the recent turns, and only the current turn is protected by default
 
 **Solution:**
 ```scala
 val config = ContextWindowConfig(
-  maxTokens = Some(8192),
-  minRecentTurns = 1,              // Fewer forced turns
-  preserveSystemMessage = false,   // Allow system to be pruned if needed
+  maxTokens = Some(8192),          // A larger budget
+  minRecentTurns = 3,              // The last 3 turns are sent whatever the budget
   pruningStrategy = PruningStrategy.OldestFirst
 )
 ```

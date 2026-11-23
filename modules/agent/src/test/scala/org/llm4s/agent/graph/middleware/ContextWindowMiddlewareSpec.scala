@@ -79,9 +79,10 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   }
 
   it should "trim under AdaptiveWindowing" in {
-    val strategy       = PruningStrategy.AdaptiveWindowing(contextWindowSize = 1000, preserveMinTurns = 2)
-    val (sent, stored) = turn(new ContextWindowMiddleware(ContextWindowConfig(pruningStrategy = strategy), sized))
-    // window 1000 holds two 400-token messages; preserveMinTurns = 2 floors it at four, a3 first is cut to start on a user
+    val strategy       = PruningStrategy.AdaptiveWindowing(contextWindowSize = 1000)
+    val cfg            = ContextWindowConfig(pruningStrategy = strategy, minRecentTurns = 2)
+    val (sent, stored) = turn(new ContextWindowMiddleware(cfg, sized))
+    // window 1000 holds two 400-token messages; minRecentTurns = 2 keeps the last two turns whole past it
     texts(sent) shouldBe Seq("be brief", "q3", "a3", "q4")
     sent.head shouldBe a[SystemMessage]
     stored shouldBe 8
@@ -337,7 +338,7 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
 
   it should "respect preserveSystemMessage" in {
     val msgs     = SystemMessage("Critical") +: convo(5)
-    val strategy = PruningStrategy.AdaptiveWindowing(contextWindowSize = 1000, preserveMinTurns = 1)
+    val strategy = PruningStrategy.AdaptiveWindowing(contextWindowSize = 1000)
     val keep     = ContextPruning.prune(msgs, ContextWindowConfig(pruningStrategy = strategy), sized)
     keep.head shouldBe msgs.head
     val drop = ContextPruning.prune(
@@ -348,12 +349,24 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     drop.head shouldBe a[UserMessage]
   }
 
-  it should "keep at least preserveMinTurns turns" in {
+  it should "keep at least minRecentTurns turns" in {
     val msgs = convo(20)
     val cfg = ContextWindowConfig(
-      pruningStrategy = PruningStrategy.AdaptiveWindowing(contextWindowSize = 4_000, preserveMinTurns = 5)
+      pruningStrategy = PruningStrategy.AdaptiveWindowing(contextWindowSize = 4_000),
+      minRecentTurns = 5
     )
     ContextPruning.prune(msgs, cfg, sized).length should be >= 10
+  }
+
+  it should "take the smaller of its window and maxTokens, and maxMessages as well" in {
+    val msgs = convo(20)
+    // a 6,000-token window holds 15 messages, cut to 14 to start on a user message
+    val adaptive = PruningStrategy.AdaptiveWindowing(contextWindowSize = 10_000)
+    ContextPruning.prune(msgs, ContextWindowConfig(pruningStrategy = adaptive), sized).length shouldBe 14
+    val tokens = ContextWindowConfig(maxTokens = Some(2_400), pruningStrategy = adaptive)
+    ContextPruning.prune(msgs, tokens, sized).length shouldBe 6
+    val count = ContextWindowConfig(maxMessages = Some(4), pruningStrategy = adaptive)
+    ContextPruning.prune(msgs, count, sized).length shouldBe 4
   }
 
   it should "prune an expensive-input model at least as hard as a cheap-input one" in {
@@ -371,6 +384,118 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     val cheap                   = ContextPruning.prune(msgs, cfg(0.000001, 0.00001), counter)
     expensive.length should be <= cheap.length
     expensive.length should be < msgs.length
+  }
+
+  // ---- maxTokens and maxMessages together (#2729) ----
+
+  private def bothStrategies = Seq(PruningStrategy.OldestFirst, PruningStrategy.MiddleOut)
+
+  "ContextPruning.prune with both limits" should "prune a history over maxMessages but under maxTokens" in {
+    val msgs = convo(10) // 20 messages, 8,000 tokens
+    bothStrategies.foreach { st =>
+      val cfg = ContextWindowConfig(maxTokens = Some(100_000), maxMessages = Some(6), pruningStrategy = st)
+      withClue(st)(ContextPruning.prune(msgs, cfg, sized).length shouldBe 6)
+    }
+  }
+
+  it should "keep within maxTokens when maxMessages alone would allow more" in {
+    val msgs = convo(10)
+    bothStrategies.foreach { st =>
+      val cfg    = ContextWindowConfig(maxTokens = Some(2_400), maxMessages = Some(15), pruningStrategy = st)
+      val pruned = ContextPruning.prune(msgs, cfg, sized)
+      withClue(st)(pruned.length shouldBe 6)
+    }
+  }
+
+  it should "keep within maxMessages when maxTokens alone would allow more" in {
+    val msgs = convo(10)
+    bothStrategies.foreach { st =>
+      val cfg = ContextWindowConfig(maxTokens = Some(6_000), maxMessages = Some(4), pruningStrategy = st)
+      withClue(st)(ContextPruning.prune(msgs, cfg, sized).length shouldBe 4)
+    }
+  }
+
+  it should "leave a history within both limits untouched" in {
+    val msgs = convo(3)
+    val cfg  = ContextWindowConfig(maxTokens = Some(2_400), maxMessages = Some(6))
+    ContextPruning.prune(msgs, cfg, sized) shouldBe msgs
+  }
+
+  it should "count a preserved system message against both limits" in {
+    val msgs = SystemMessage("s") +: convo(10)
+    val kept = ContextPruning.prune(msgs, ContextWindowConfig(maxTokens = Some(2_000), maxMessages = Some(9)), sized)
+    kept shouldBe msgs.head +: msgs.takeRight(4) // 2,000 tokens: the system message and four more
+    ContextPruning.prune(msgs, ContextWindowConfig(maxTokens = Some(9_000), maxMessages = Some(5)), sized) shouldBe kept
+  }
+
+  "ContextPruning.prune under MiddleOut" should "fit maxTokens, keeping the start and the end" in {
+    val msgs   = convo(10)
+    val cfg    = ContextWindowConfig(maxTokens = Some(2_400), pruningStrategy = PruningStrategy.MiddleOut)
+    val pruned = ContextPruning.prune(msgs, cfg, sized)
+    pruned.map(sized).sum should be <= 2_400
+    pruned.head shouldBe msgs.head
+    pruned.last shouldBe msgs.last
+  }
+
+  it should "send no message twice when the limit is larger than the earlier history" in {
+    val msgs = convo(3)
+    val cfg = ContextWindowConfig(
+      maxTokens = Some(2_000),
+      maxMessages = Some(50),
+      pruningStrategy = PruningStrategy.MiddleOut
+    )
+    val pruned = ContextPruning.prune(msgs, cfg, sized)
+    pruned.distinct shouldBe pruned
+    pruned.map(sized).sum should be <= 2_000
+  }
+
+  // ---- minRecentTurns (#2728) ----
+
+  "ContextPruning.prune with minRecentTurns" should "keep only the current turn past the limit by default" in {
+    texts(ContextPruning.prune(convo(5), ContextWindowConfig(maxMessages = Some(1)), sized)) shouldBe
+      texts(convo(5).takeRight(2))
+  }
+
+  it should "keep that many recent turns whole past either limit, under every strategy" in {
+    val msgs = convo(6)
+    val strategies = bothStrategies ++ Seq(
+      PruningStrategy.RecentTurnsOnly(1),
+      PruningStrategy.Custom(_ => Seq.empty),
+      PruningStrategy.AdaptiveWindowing(contextWindowSize = 1000)
+    )
+    for {
+      st  <- strategies
+      cfg <- Seq(ContextWindowConfig(maxMessages = Some(2)), ContextWindowConfig(maxTokens = Some(800)))
+    } withClue(s"$st $cfg") {
+      ContextPruning.prune(msgs, cfg.copy(minRecentTurns = 3, pruningStrategy = st), sized) shouldBe msgs.takeRight(6)
+    }
+  }
+
+  it should "keep a protected turn's tool calls and results" in {
+    val cfg     = ContextWindowConfig(maxMessages = Some(1), minRecentTurns = 2)
+    val lastTwo = toolHistory.tail // q1 with its tool exchange, and q2
+    ContextPruning.prune(Seq(UserMessage("q0"), AssistantMessage("a0")) ++ lastTwo, cfg, sized) shouldBe lastTwo
+  }
+
+  it should "spend what the protected turns leave on earlier history" in {
+    val cfg = ContextWindowConfig(maxMessages = Some(8), minRecentTurns = 2)
+    ContextPruning.prune(convo(6), cfg, sized) shouldBe convo(6).takeRight(8)
+  }
+
+  it should "count RecentTurnsOnly's turns from the end, the protected ones included" in {
+    val cfg = ContextWindowConfig(
+      maxMessages = Some(2),
+      minRecentTurns = 2,
+      pruningStrategy = PruningStrategy.RecentTurnsOnly(3)
+    )
+    ContextPruning.prune(convo(6), cfg, sized) shouldBe convo(6).takeRight(6)
+  }
+
+  it should "keep the whole history when it has fewer turns, and treat a value below 1 as 1" in {
+    val msgs = convo(2)
+    ContextPruning.prune(msgs, ContextWindowConfig(maxMessages = Some(1), minRecentTurns = 9), sized) shouldBe msgs
+    ContextPruning.prune(msgs, ContextWindowConfig(maxMessages = Some(1), minRecentTurns = 0), sized) shouldBe
+      msgs.takeRight(2)
   }
 
   "ContextPruning.prune with Custom" should "apply the custom function" in {
