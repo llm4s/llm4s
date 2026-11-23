@@ -87,7 +87,8 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     done.message shouldBe AssistantMessage("4")
     done.id shouldBe "resp-1"
     done.model shouldBe "spring-model"
-    done.usage shouldBe Some(TokenUsage(10, 2, 12, cachedTokens = Some(3), cacheCreationTokens = Some(1)))
+    // cache writes are reported only by models whose prompt count leaves the cache out: added to it (#2765)
+    done.usage shouldBe Some(TokenUsage(14, 2, 16, cachedTokens = Some(3), cacheCreationTokens = Some(1)))
     done.finishReason shouldBe FinishReason.Other("STOP") // Spring AI's reason as the model sent it, never a guess
     model.prompts.head.getUserMessage.getText shouldBe "What is 2+2?"
   }
