@@ -111,7 +111,6 @@ object CopyToWithSetters_1_0 {
         ),
         "provider-spi-caching-streaming-and-exchange-sink-types-are-growth-safe-2379" -> List(
           "llmconnect/JsonlProviderExchangeSink",
-          "llmconnect/caching/CacheEntry",
           "llmconnect/caching/CacheStats",
           "llmconnect/provider/OpenAICompatibleClient.Settings",
           "llmconnect/spi/EmbeddingProviderSection",

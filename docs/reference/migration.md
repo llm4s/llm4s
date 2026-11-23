@@ -49,7 +49,54 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
-and [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778).
+[`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
+and [the caching types report failure, and tool loops bypass the cache](#the-caching-types-report-failure-and-tool-loops-bypass-the-cache-2803).
+
+## The caching types report failure, and tool loops bypass the cache (#2803)
+
+In `org.llm4s.llmconnect.caching`. There is no shim.
+
+**`EmbeddingCache`** has no type parameter (it only ever held `Seq[Double]`), and a backend reports a failure
+instead of throwing:
+
+| Before | After |
+|---|---|
+| `EmbeddingCache[Seq[Double]]` | `EmbeddingCache` |
+| `get(key): Option[Seq[Double]]` | `get(key): Result[Option[Seq[Double]]]` |
+| `put(key, v): Unit` | `put(key, v): Result[Unit]` |
+| `clear(): Unit = ()` (a default) | `clear(): Result[Unit]` (abstract) |
+| `stats(): CacheStats` (abstract) | `stats(): Option[CacheStats] = None` |
+
+`CachedEmbeddingClient` treats a failed `get` as a miss and a failed `put` as not stored, and logs both. Its
+`cacheStats` is an `Option[CacheStats]` and `clearCache()` returns the backend's `Result[Unit]`.
+
+**`InMemoryEmbeddingCache`** is built with `create`, which refuses a `maxSize` or `ttl` that is not positive (a
+negative `maxSize` used to throw), and takes a `java.time.Clock` in place of `() => Long`:
+
+```scala
+// before
+val cache = new InMemoryEmbeddingCache[Seq[Double]](maxSize = 1000, ttl = Some(1.hour), clock = () => nowMillis)
+// after
+val cache: Result[InMemoryEmbeddingCache] = InMemoryEmbeddingCache.create(maxSize = 1000, ttl = Some(1.hour), clock = clock)
+```
+
+**`CacheStats`** holds `size`, `hits` and `misses`; `totalRequests` and `hitRatePercent` are computed, so
+`CacheStats(size, hits, misses, total, rate)` becomes `CacheStats(size, hits, misses)` and `withTotalRequests` and
+`withHitRatePercent` are gone.
+
+**`CacheEntry`** is internal to `CachingLLMClient`.
+
+**`CacheConfig`** is a `final case class` with `withSimilarityThreshold`, `withTtl` and `withMaxSize`, each returning a
+`Result` because it checks the new value. `CacheConfig.create` is unchanged.
+
+**`CachedEmbeddingClient` is an `EmbeddingProvider`**, and so is `EmbeddingClient`. The wrapper's `baseClient` is an
+`EmbeddingProvider`, so an `EmbeddingClient` still fits; where an `EmbeddingClient` is required, wrap the cache in
+one: `new EmbeddingClient(cached)`. A response that called the base client keeps its `usage`, `metadata` and `dim`;
+one served wholly from the cache has no `usage`. `CachingLLMClient`'s `embeddingClient` is an `EmbeddingProvider` too.
+
+**`CachingLLMClient` no longer caches a conversation with a tool turn** (an assistant message with tool calls, or a
+tool message): such a request goes straight to the base client and is not stored. Only user and system text is
+embedded, so a tool loop's later steps used to be served the first step's tool-call completion.
 
 ## `llm4s-agent` types are tiered and growth-safe (#2778)
 

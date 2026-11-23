@@ -13,33 +13,50 @@ object CachingGuideSnippets {
 
   // ---- 3. Caching embeddings
 
-  def embeddingCache(base: org.llm4s.llmconnect.EmbeddingClient): org.llm4s.llmconnect.caching.CacheStats = {
+  def embeddingCache(
+    base: org.llm4s.llmconnect.EmbeddingClient
+  ): org.llm4s.types.Result[Option[org.llm4s.llmconnect.caching.CacheStats]] = {
     import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
     import org.llm4s.llmconnect.model.EmbeddingRequest
     import scala.concurrent.duration._
 
-    val cache  = new InMemoryEmbeddingCache[Seq[Double]](maxSize = 10000, ttl = Some(1.hour))
-    val cached = new CachedEmbeddingClient(base, cache)
-    val model  = EmbeddingModelConfig("text-embedding-3-small", 1536)
+    val model = EmbeddingModelConfig("text-embedding-3-small", 1536)
 
-    cached.embed(EmbeddingRequest(Seq("hello", "world"), model)) // two misses, sent as one batched call
-    cached.embed(EmbeddingRequest(Seq("hello", "again"), model)) // "hello" is served from the cache
-    cached.cacheStats
+    for {
+      cache <- InMemoryEmbeddingCache.create(maxSize = 10000, ttl = Some(1.hour))
+      cached = new CachedEmbeddingClient(base, cache)
+      _ <- cached.embed(EmbeddingRequest(Seq("hello", "world"), model)) // two misses, sent as one batched call
+      _ <- cached.embed(EmbeddingRequest(Seq("hello", "again"), model)) // "hello" is served from the cache
+    } yield cached.cacheStats
   }
 
-  def queryCache(base: org.llm4s.llmconnect.EmbeddingClient): org.llm4s.llmconnect.caching.CacheStats = {
+  def queryCache(
+    base: org.llm4s.llmconnect.EmbeddingClient
+  ): org.llm4s.types.Result[Option[org.llm4s.llmconnect.caching.CacheStats]] = {
     import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
     import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
 
-    val queries = new CachedEmbeddingClient(base, new InMemoryEmbeddingCache[Seq[Double]]())
-    val model   = EmbeddingModelConfig("text-embedding-3-small", 1536)
+    val model = EmbeddingModelConfig("text-embedding-3-small", 1536)
 
-    queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a miss
-    queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a hit
-    queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model))                     // a miss: a document
-    queries.cacheStats
+    for {
+      cache <- InMemoryEmbeddingCache.create()
+      queries = new CachedEmbeddingClient(base, cache)
+      _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a miss
+      _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a hit
+      _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model))                     // a miss: a document
+    } yield queries.cacheStats
+  }
+
+  def asEmbeddingClient(base: org.llm4s.llmconnect.EmbeddingClient)(using
+    org.llm4s.model.ModelRegistryService
+  ): org.llm4s.types.Result[org.llm4s.llmconnect.EmbeddingClient] = {
+    import org.llm4s.llmconnect.EmbeddingClient
+    import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
+
+    // A CachedEmbeddingClient is an EmbeddingProvider; wrap it where an EmbeddingClient is required.
+    InMemoryEmbeddingCache.create().map(cache => new EmbeddingClient(new CachedEmbeddingClient(base, cache)))
   }
 
   class TenantKey(base: org.llm4s.llmconnect.EmbeddingClient) {
@@ -51,34 +68,32 @@ object CachingGuideSnippets {
     def tenantKey(tenant: String)(text: String, model: String, purpose: InputPurpose): String =
       CacheKeyGenerator.sha256(tenant, model, purpose.toString, text)
 
-    val cache  = new InMemoryEmbeddingCache[Seq[Double]]()
-    val cached = new CachedEmbeddingClient(base, cache, tenantKey("tenant-a"))
+    val cached =
+      InMemoryEmbeddingCache.create().map(cache => new CachedEmbeddingClient(base, cache, tenantKey("tenant-a")))
 
-    cached.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("text-embedding-3-small", 1536)))
+    cached.flatMap(_.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("text-embedding-3-small", 1536))))
   }
 
   object OwnStorage {
     import org.llm4s.llmconnect.caching.{ CacheStats, EmbeddingCache }
+    import org.llm4s.types.Result
     import java.util.concurrent.ConcurrentHashMap
-    import java.util.concurrent.atomic.AtomicInteger
+    import java.util.concurrent.atomic.AtomicLong
 
     /** A backend of your own: any store that can get and put a vector by key. */
-    class MapEmbeddingCache extends EmbeddingCache[Seq[Double]] {
+    class MapEmbeddingCache extends EmbeddingCache {
       private val store  = new ConcurrentHashMap[String, Seq[Double]]()
-      private val hits   = new AtomicInteger(0)
-      private val misses = new AtomicInteger(0)
+      private val hits   = new AtomicLong(0)
+      private val misses = new AtomicLong(0)
 
-      def get(key: String): Option[Seq[Double]] = {
+      def get(key: String): Result[Option[Seq[Double]]] = {
         val found = Option(store.get(key))
         if (found.isDefined) hits.incrementAndGet() else misses.incrementAndGet()
-        found
+        Right(found)
       }
-      def put(key: String, embedding: Seq[Double]): Unit = { store.put(key, embedding); () }
-      override def clear(): Unit                         = store.clear()
-      def stats(): CacheStats = {
-        val (h, m) = (hits.get().toLong, misses.get().toLong)
-        CacheStats(store.size(), h, m, h + m, if (h + m == 0) 0.0 else 100.0 * h / (h + m))
-      }
+      def put(key: String, embedding: Seq[Double]): Result[Unit] = { store.put(key, embedding); Right(()) }
+      def clear(): Result[Unit]                                  = { store.clear(); Right(()) }
+      override def stats(): Option[CacheStats] = Some(CacheStats(store.size(), hits.get(), misses.get()))
     }
   }
 
