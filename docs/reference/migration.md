@@ -49,7 +49,34 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
-and [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778).
+[`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
+and [`SecretPatterns` is in `llm4s-agent`](#secretpatterns-is-in-llm4s-agent-2824).
+
+## `SecretPatterns` is in `llm4s-agent` (#2824)
+
+`SecretPatterns`, with `SecretType` and `SecretMatch`, moved from `org.llm4s.util` in `llm4s-core` to
+`org.llm4s.agent.guardrails.patterns` in `llm4s-agent`, beside `PIIPatterns` and its one consumer,
+`SecretLeakGuardrail`. Change the import; there is no forwarder:
+
+```scala
+import org.llm4s.agent.guardrails.patterns.SecretPatterns            // was org.llm4s.util.SecretPatterns
+import org.llm4s.agent.guardrails.patterns.SecretPatterns.SecretType
+```
+
+- **`SecretType` is open.** It was sealed, so `SecretLeakGuardrail(secretTypes)` could only choose among the built-in
+  types. `new SecretType(name, pattern, placeholder)` adds a credential format of your own. A `match` over the
+  built-in case objects now needs a `case _`.
+- **Group 1 of a pattern is the secret.** `SecretType.JwtToken.pattern` now has a capturing group, and its whole match
+  can start before the token. Code that applied `secretType.pattern` itself reads group 1 when the pattern has one,
+  or calls `secretType.findAll(text)` or the new `secretType.redact(text)`.
+- **`SecretType.PrivateKeyPem` matches the whole key**, from `-----BEGIN ... PRIVATE KEY-----` through
+  `-----END ... PRIVATE KEY-----`, not the header line: `SecretMatch.value` is the block, and `redactAll` leaves no
+  key body behind.
+- **`SecretType.OpenAIKey` and `AnthropicKey` match keys holding `-` and `_`** (`sk-proj-...`, `sk-svcacct-...`,
+  `sk-admin-...`, `sk-ant-...`), which they cut short or missed.
+- **Removed:** `SecretPatterns.redactAllWithPlaceholder` (fold `secretType.findAll` over the text for a placeholder of
+  your own), and `SecretMatch.withSecretType`, `withValue`, `withStartIndex` and `withEndIndex`: a match is a result,
+  built with `SecretMatch(secretType, value, startIndex, endIndex)`.
 
 ## `llm4s-agent` types are tiered and growth-safe (#2778)
 
@@ -1608,7 +1635,8 @@ Pattern matching (`case ToolCallRequest(name, args)`) and the fields are unchang
 ### Config, model and util types are growth-safe (#2384)
 
 `Llm4sConfig.TextEmbeddingModelSettings`, `ProvidersConfigModel.ProvidersConfig` (`org.llm4s.config`),
-`TransformationResult` (`org.llm4s.model`) and `SecretPatterns.SecretMatch` (`org.llm4s.util`) follow the growth-prone
+`TransformationResult` (`org.llm4s.model`) and `SecretPatterns.SecretMatch` (now in `llm4s-agent`, without setters:
+[#2824](#secretpatterns-is-in-llm4s-agent-2824)) follow the growth-prone
 pattern ([#2384](https://github.com/llm4s/llm4s/issues/2384)). Each is a `final case class` whose constructor and `copy`
 are private:
 
@@ -1622,7 +1650,6 @@ are private:
   | `TextEmbeddingModelSettings` | `withProvider`, `withModelName`, `withDimensions` |
   | `ProvidersConfig` | `withSelectedProvider` (a `ProviderName` or an `Option`), `withNamedProviders` |
   | `TransformationResult` | `withOptions`, `withMessages`, `withRequiresFakeStreaming` |
-  | `SecretMatch` | `withSecretType`, `withValue`, `withStartIndex`, `withEndIndex` |
 
   ```scala
   val fake = result.withRequiresFakeStreaming(true) // was result.copy(requiresFakeStreaming = true)

@@ -21,7 +21,6 @@ class RedactionKnownSecretsSpec extends AnyFlatSpec with Matchers {
       (Redaction.redact(text) should not).include(cred)
       (Redaction.safeBody(text) should not).include(cred)
       (Redaction.redactForLogging(text) should not).include(cred)
-      (Redaction.safe(text) should not).include(cred)
       (Redaction.remoteBody(text) should not).include(cred)
       (Redaction.scrubRemote(text) should not).include(cred)
       (Redaction.scrubKnown(text) should not).include(cred)

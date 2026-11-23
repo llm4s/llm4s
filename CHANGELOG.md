@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `SecretPatterns` (`SecretType`, `SecretMatch`) moved from `org.llm4s.util` in `llm4s-core` to `org.llm4s.agent.guardrails.patterns` in `llm4s-agent`; `redactAllWithPlaceholder` and `SecretMatch`'s setters are removed, and `SecretType.PrivateKeyPem` matches the whole key
+  ([migration](docs/reference/migration.md#secretpatterns-is-in-llm4s-agent-2824)) [#2824](https://github.com/llm4s/llm4s/issues/2824).
 - 36 `llm4s-agent` case classes (`ContextWindowConfig`, `Handoff`, the `AgentEvents` payloads, `EventRecord`, `GraphSnapshot`, `Command` and others) have a private constructor and `copy`: use `X(...)` and the `with*` setters. `GuardrailResult` is removed, and `MiddlewareStack`, `ToolLoop.results`/`queue` and nine other internal types are no longer public. `AgentStatus.Suspended`, eight `RunEvent` cases, `StreamEvent.Live` and `ToolOutcome.Success` each hold one growth-safe class (`Suspension`, `RunFailedDetails`, `LiveEvent`, `ToolSuccess`, ...) in place of positional fields, and a tool returns `ToolOutcome.success(content)` ([#2781](https://github.com/llm4s/llm4s/issues/2781));
   [migration](docs/reference/migration.md#llm4s-agent-types-are-tiered-and-growth-safe-2778).
 - `CompletionOptions.budgetTokens` and `withBudgetTokens`, and `ReasoningEffort.None`, are removed: use `thinking`
@@ -134,6 +136,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
+- **Fixed** the JWT secret pattern is linear (60 KB of `eyJ` took 4.7 s in `SecretLeakGuardrail` and in the redaction of every log and error message), a PEM private key is redacted whole, not only its header line, and OpenAI project keys and Anthropic keys holding `-` or `_` are matched whole [#2824](https://github.com/llm4s/llm4s/issues/2824).
+- **Changed** `SecretType` is open, so `SecretLeakGuardrail` takes an application's own credential pattern: `new SecretType(name, pattern, placeholder)`
+  ([migration](docs/reference/migration.md#secretpatterns-is-in-llm4s-agent-2824)) [#2824](https://github.com/llm4s/llm4s/issues/2824).
 - **Added** RAG guardrails run inside an agent (experimental): `RAGGuardrail.withTurnContext(guardrail)(turn => Some(RAGContext.fromToolResults(turn, Set("search"))))` is an output guardrail for `GuardrailMiddleware` that checks each final answer against the turn's retrieval-tool results,
   its judge calls counted in the run's usage; `GuardrailConfig.outputGuardrailsWithContext` does it for a preset ([guide](docs/guide/agents/guardrails.md#rag-guardrails)) [#2781](https://github.com/llm4s/llm4s/issues/2781).
 - **Changed** `llm4s-agent` is tiered: every public top-level type is `@Stable` (the agent, graph, event, middleware and guardrail APIs) or `@Experimental` (harness, run queue and worker, encryption, subagent definition, permissions, the checkpointer SPI, the RAG guardrails, `assistant`), `sbt stabilityTierCheck` covers the module, and its Stable case classes are growth-safe. So are the enum cases with fields of every frozen module: the check now fails for one that is neither a wrapper over a growth-safe class nor listed as closed with its reason ([#2781](https://github.com/llm4s/llm4s/issues/2781))

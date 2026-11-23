@@ -319,7 +319,7 @@ private[llm4s] object Redaction {
    * `SensitiveKeySuffixes`: the names the redaction passes read as keys. A plural (`api_keys`) is not one of them;
    * `isCredentialName` takes those too.
    */
-  private[llm4s] def isSensitiveKey(key: String): Boolean = {
+  private def isSensitiveKey(key: String): Boolean = {
     val normalised = key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit)
     SensitiveKeyWords.contains(normalised) || SensitiveKeySuffixes.exists(normalised.endsWith)
   }
@@ -1939,7 +1939,10 @@ private[llm4s] object Redaction {
     authHeaderPasses(placeholder, variant) ++
       Vector((text: String) => redactQueryParams(text, placeholder, endBeforeJson = variant)) ++
       jsonFieldPasses(placeholder, inputQuotes, escaped, variant) ++
-      SecretPatterns.SecretType.default.toVector.map(t => (text: String) => regexPass(t.pattern, text, placeholder)) ++
+      SecretPatterns.default.map { pattern =>
+        val group = SecretPatterns.secretGroup(pattern)
+        (text: String) => regexPass(pattern, text, placeholder, group)
+      } ++
       containerLeafPasses(placeholder) :+
       ((text: String) => redactCookieHeaders(text, placeholder))
 
@@ -2096,24 +2099,6 @@ private[llm4s] object Redaction {
       redacted
     }
   }
-
-  /**
-   * Create a safe string representation for logging.
-   *
-   * Designed for use with SLF4J-style logging:
-   * {{{
-   * logger.debug("Request body: {}", Redaction.safe(requestBody))
-   * }}}
-   *
-   * @param value The value to make safe for logging
-   * @return A safe string representation
-   */
-  def safe(value: Any): String =
-    value match {
-      case null      => "null"
-      case s: String => redactForLogging(s)
-      case other     => redactForLogging(other.toString)
-    }
 
   /**
    * A remote reply's body (or an exception message carrying one), fit to put in an `LLMError` or a log

@@ -157,8 +157,7 @@ object CopyToWithSetters_1_0 {
         "config-model-and-util-types-are-growth-safe-2384" -> List(
           "config/Llm4sConfig.TextEmbeddingModelSettings",
           "config/ProvidersConfigModel.ProvidersConfig",
-          "model/TransformationResult",
-          "util/SecretPatterns.SecretMatch"
+          "model/TransformationResult"
         )
       )
     byNote.flatMap { case (anchor, names) => names.map(n => s"org/llm4s/$n" -> Migration.guide10(anchor)) }.toMap
