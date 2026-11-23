@@ -205,7 +205,7 @@ class VertexAIClient(
               recordExchange(startedAt, requestText, Some(err), errorResult)
               errorResult
             case Right(response) =>
-              val accumulator = StreamingAccumulator.create()
+              val accumulator = StreamingAccumulator(config.model)
               val messageId   = UUID.randomUUID().toString
               val rawStream   = StringBuilder()
               val signatures =
@@ -289,7 +289,6 @@ class VertexAIClient(
                     // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
                     val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
                     val completion = c
-                      .withModel(config.model)
                       .withToolCalls(
                         c.message.toolCalls.toList
                       ) // the accumulator keeps streamed calls on the message only

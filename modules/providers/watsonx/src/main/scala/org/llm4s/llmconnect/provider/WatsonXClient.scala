@@ -347,7 +347,7 @@ class WatsonXClient(
     token: String,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    val accumulator                   = StreamingAccumulator.create()
+    val accumulator                   = StreamingAccumulator(config.model)
     val calls                         = mutable.LinkedHashMap.empty[Int, PartialCall]
     var promptTokens, generatedTokens = 0
     var terminal: Option[String]      = None
@@ -449,13 +449,13 @@ class WatsonXClient(
           emit(
             StreamedChunk(id = responseId, content = None, toolCall = None, finishReason = Some(toFinishReason(reason)))
           )
-          accumulator.updateTokens(promptTokens, generatedTokens)
+          accumulator.updateUsage(TokenUsage(promptTokens, generatedTokens, promptTokens + generatedTokens))
         }
       }
       .flatMap(_ => accumulator.toCompletion)
       .map { c =>
         // the accumulator reports streamed calls on the message only
-        c.withModel(config.model)
+        c
           .withToolCalls(c.message.toolCalls.toList)
           .withEstimatedCost(c.usage.flatMap(estimateCost))
       }

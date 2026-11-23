@@ -323,7 +323,7 @@ class OpenAIClient private[provider] (
     adjustments: List[RequestAdjustment],
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator(model)
     val toolCalls   = new StreamToolCalls
     val rawStream   = StringBuilder()
     val state       = new StreamState
@@ -350,7 +350,7 @@ class OpenAIClient private[provider] (
           // breakdown and its total (`StreamingAccumulator.updateUsage`).
           accumulator.toCompletion.map { c =>
             val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
-            c.withModel(model)
+            c
               .withToolCalls(c.message.toolCalls.toList)
               .withEstimatedCost(cost)
               .withAdjustments(adjustments)

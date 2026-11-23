@@ -182,7 +182,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
     val loop  = family(LoopAgent(idA, model, tools))
     val cut   = Vector(UserMessage("hi"), AssistantMessage(None, Seq(ToolCall("t1", "echo", ujson.Obj("text" -> "x")))))
     val (_, error) = runInMemory(loop.graph, AgentInput("go", cut)).failed
-    error.message should include("Conversation validation failed")
+    error.message should include("Invalid conversation")
     model.calls shouldBe 0
   }
 
