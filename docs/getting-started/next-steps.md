@@ -454,7 +454,7 @@ val result = for {
 
 **Problem: Slow responses**
 - Use streaming for real-time feedback
-- Consider using a faster model (gpt-3.5-turbo, claude-haiku)
+- Consider using a faster model (gpt-4o-mini, a Claude Haiku model)
 - Check your internet connection
 
 **Problem: Token limit errors**
@@ -522,7 +522,6 @@ val result = for {
 ### Documentation
 - [User Guide](../guide/basic-usage) - Feature guides
 - [API Reference](/api/) - API docs
-- [Advanced Topics](/advanced/) - Production topics
 
 ### Examples
 - [All Examples](/examples/) - Browse all examples

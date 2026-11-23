@@ -29,7 +29,7 @@ Run LLM4S with Ollama for **free, local LLM inference** - no API keys required!
 - ✅ **Private** - Your data never leaves your machine
 - ✅ **Fast** - Low latency for local inference
 - ✅ **Offline** - Works without internet connection
-- ✅ **Multiple Models** - Easy model switching (llama2, mistral, phi, etc.)
+- ✅ **Multiple Models** - Easy model switching (llama3.1, mistral, phi3, etc.)
 
 Perfect for **development**, **testing**, and **production** workloads where privacy matters.
 
@@ -56,8 +56,7 @@ libraryDependencies ++= Seq(
 )
 ```
 
-Adding `llm4s-ollama` registers the provider; there is nothing else to wire up. Before 0.5.0, Ollama was
-part of `llm4s-core`. See the
+Adding `llm4s-ollama` registers the provider; there is nothing else to wire up. See the
 [installation guide](installation#for-ollama-local-models).
 
 ---
@@ -125,11 +124,10 @@ ollama pull mistral
 | Model | Size | RAM Required | Best For | Pull Command |
 |-------|------|--------------|----------|--------------|
 | **mistral** | 4.1GB | 8GB | General purpose, fast | `ollama pull mistral` |
-| **llama2** | 3.8GB | 8GB | Good balance | `ollama pull llama2` |
-| **phi** | 1.6GB | 4GB | Lightweight, fast | `ollama pull phi` |
-| **neural-chat** | 4.1GB | 8GB | Conversational | `ollama pull neural-chat` |
+| **llama3.1** | 4.9GB | 8GB | General purpose, tool calling | `ollama pull llama3.1` |
+| **llama3.2** | 2.0GB | 8GB | Small, long context | `ollama pull llama3.2` |
+| **phi3** | 2.2GB | 4GB | Lightweight, fast | `ollama pull phi3` |
 | **codellama** | 3.8GB | 8GB | Code generation | `ollama pull codellama` |
-| **llama3.2** | 2.0GB | 8GB | Latest Llama | `ollama pull llama3.2` |
 | **gemma2** | 5.4GB | 8GB | Google's model | `ollama pull gemma2` |
 
 {: .tip }
@@ -158,8 +156,6 @@ libraryDependencies ++= Seq(
   "org.llm4s" %% "llm4s-ollama" % llm4sVersion  // the Ollama provider
 )
 ```
-
-Before 0.5.0 the Ollama provider shipped inside `llm4s-core`, so `llm4s-core` alone was enough.
 
 ### Add an `ollama-local` section
 
@@ -238,7 +234,7 @@ sbt run
 ### Example Output
 
 ```
-✓ Response from mistral:
+Response from mistral:
 Scala is a statically-typed programming language that combines
 object-oriented and functional programming paradigms, running on
 the Java Virtual Machine (JVM).
@@ -268,7 +264,7 @@ Then run your program again without code changes!
 
 ## Step 6a: Write Your First LLM4S + Ollama/Llama3.2 App
 
-Llama 3.2 is Meta's latest with an impressive 128K context window. Perfect for processing large documents and long conversations.
+Llama 3.2 (1B and 3B) is small and has a 128K context window. Perfect for processing large documents and long conversations.
 
 For the code, use the same Scala example from **Step 5** - simply change the model in the
 `ollama-local` section of `application.conf` (run `ollama pull llama3.2` first):
@@ -445,7 +441,8 @@ does not). Sending tools to any other model fails, and the client reports it ins
 Invalid tools: Ollama model 'llama3:latest' does not support tool calling (the server said: registry.ollama.ai/library/llama3:latest does not support tools). Use a model whose Ollama page lists the 'tools' capability, or send no tools.
 ```
 
-Pull a tool-capable model (`ollama pull llama3.1`) and set `OLLAMA_MODEL` to it:
+Pull a tool-capable model (`ollama pull llama3.1`) and set the section's `model` to it (or `OLLAMA_MODEL`, if you
+added that binding in Step 4):
 
 ```scala
 import org.llm4s.agent.Agent
@@ -508,10 +505,8 @@ Performance comparison running on Apple M1 Mac:
 | Model | Speed (tokens/sec) | Quality | Memory | Best Use Case |
 |-------|-------------------|---------|--------|---------------|
 | **mistral** | ~40 | ⭐⭐⭐⭐ | 8GB | General purpose, great balance |
-| **llama2** | ~35 | ⭐⭐⭐⭐ | 8GB | Conversational, creative |
-| **phi** | ~80 | ⭐⭐⭐ | 4GB | Quick tests, development |
+| **phi3** | ~70 | ⭐⭐⭐ | 4GB | Quick tests, development |
 | **codellama** | ~35 | ⭐⭐⭐⭐ | 8GB | Code generation |
-| **neural-chat** | ~40 | ⭐⭐⭐⭐ | 8GB | Dialogue, chat apps |
 
 {: .note }
 > Performance varies by hardware. These are approximate values on M1 MacBook Pro 16GB RAM.
@@ -523,11 +518,10 @@ Performance comparison running on Apple M1 Mac:
 ### Temperature Control
 
 ```scala
-CompletionOptions(
-  temperature = 0.7,  // Higher = more creative (0.0-2.0)
-  maxTokens = Some(1000),
-  topP = 0.9
-)
+CompletionOptions()
+  .withTemperature(0.7)  // Higher = more creative (0.0-2.0)
+  .withMaxTokens(1000)
+  .withTopP(0.9)
 ```
 
 ### Context Length
@@ -535,7 +529,7 @@ CompletionOptions(
 Ollama models have different context windows:
 
 - **mistral**: 8k tokens
-- **llama2**: 4k tokens
+- **llama3.1**: 128k tokens
 - **llama3.2**: 128k tokens
 - **codellama**: 16k tokens
 - **gemma2**: 8k tokens
@@ -567,7 +561,7 @@ ollama pull mistral
 **Problem**: Not enough RAM or CPU
 
 **Solutions**:
-- Use a smaller model: `ollama pull phi`
+- Use a smaller model: `ollama pull phi3`
 - Close other applications
 - Check if running on GPU (M-series Mac, CUDA GPU)
 
@@ -578,7 +572,7 @@ ollama pull mistral
 ollama list
 
 # Delete a model to free space
-ollama rm llama2
+ollama rm codellama
 ```
 
 ---
@@ -656,7 +650,7 @@ This assumes the app's `ollama-local` section binds the server address, as in St
 ```bash
 # Pull models into Docker volume
 docker-compose exec ollama ollama pull mistral
-docker-compose exec ollama ollama pull llama2
+docker-compose exec ollama ollama pull llama3.1
 ```
 
 ---

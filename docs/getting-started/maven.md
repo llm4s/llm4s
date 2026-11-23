@@ -214,8 +214,9 @@ export OPENAI_API_KEY=sk-...
 mvn -q compile exec:java
 ```
 
-You should see one sentence; the wording depends on the model. With a local Ollama, change the section to
-`provider = "ollama"` with a `model` you have pulled, as in the [Ollama quick start](ollama-quickstart).
+You should see one sentence; the wording depends on the model. With a local Ollama, replace the `llm4s-openai_3`
+dependency with `llm4s-ollama_3` and change the section to `provider = "ollama"` with a `model` you have pulled, as
+in the [Ollama quick start](ollama-quickstart).
 
 ## If something goes wrong
 

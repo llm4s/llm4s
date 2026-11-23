@@ -125,8 +125,9 @@ jbang HelloLlm4s.java
 The first run downloads the dependencies, which takes a while. You should see one sentence; the wording depends on
 the model. To compile without running, use `jbang build HelloLlm4s.java`.
 
-For OpenAI instead of Ollama, change the section in `application.conf` to `provider = "openai"` with
-`model = "gpt-4o-mini"`, and set `OPENAI_API_KEY` in the shell.
+For OpenAI instead of Ollama, change the provider module's `//DEPS` line to
+`org.llm4s:llm4s-openai_3:{{ site.data.project.latest_release }}`, change the section in `application.conf` to
+`provider = "openai"` with `model = "gpt-4o-mini"`, and set `OPENAI_API_KEY` in the shell.
 
 ## If something goes wrong
 
@@ -143,7 +144,7 @@ missing.
 
 ## Trying the code on `main`
 
-`llm4s-java-api` ships with `0.5.0`. Before a change is released, publish it to your local Maven repository from a
+To try a change before it is released, publish it to your local Maven repository from a
 checkout of this repository, as the [Gradle sample](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java)
 does:
 

@@ -12,22 +12,26 @@ scala_2_13: tasty-reader
 # Using LLM4S from Scala 2.13
 {: .no_toc }
 
-Scala 2.13: call-only, via the TASTy reader. A Spark job, a Play application or an Akka or Pekko service can call LLM4S's Scala 3 artifacts today.
+Scala 2.13: call-only, via the TASTy reader, best effort. A Spark job, a Play application or an Akka or Pekko service can call LLM4S's Scala 3 artifacts.
 {: .fs-6 .fw-300 }
+
+{: .note }
+> **Best effort, not a supported configuration.** LLM4S is published for Scala 3 only, with no Scala 2.13 artifacts.
+> Calling it from Scala 2.13 through the TASTy reader is probed in CI, as this page describes, but it is not a
+> supported configuration: the probes tell you what works today, not what later releases promise.
 
 1. TOC
 {:toc}
 
 ---
 
-LLM4S is published for Scala 3 only: there is no `_2.13` artifact, and a cross-build is not planned before 1.0
-([#874](https://github.com/llm4s/llm4s/issues/874)). But the Scala 2.13 compiler can read Scala 3 libraries through
+There is no `_2.13` artifact ([#874](https://github.com/llm4s/llm4s/issues/874)). But the Scala 2.13 compiler can read Scala 3 libraries through
 its TASTy reader, and a project on Scala 2.13.16 or later that does so can *call* LLM4S: load a provider, complete
 and stream, build options, run an agent and run tools. What it cannot do is *extend* LLM4S with Scala types (define a
 tool with `ToolBuilder`, ask for structured output into a case class, implement `LLMClient`); for the first two,
 `llm4s-java-api` is the route, and it works from Scala 2.13 through the TASTy reader as well.
 
-These are not promises written from reading the code: each statement below is a probe, a small Scala 2.13 program
+The statements below are not read off the code: each is a probe, a small Scala 2.13 program
 that CI compiles and runs against the current build, on Scala 2.13.16 and the latest 2.13, and that fails the build
 when its outcome changes ([what is checked](#how-this-is-checked)).
 
@@ -136,8 +140,7 @@ import org.llm4s.javaapi.Llm4s
 val city: City = Llm4s.createDefaultClient().get().complete("The largest city in Japan", classOf[City]).get()
 ```
 
-`JTool` and `JLlmClient.complete(prompt, Record.class)` are on `main` and not yet in a release: until the next one,
-[build LLM4S locally](installation#unreleased-changes-main) to use them.
+`JTool` and `JLlmClient.complete(prompt, Record.class)` are in `llm4s-java-api` from 0.6.0.
 
 ### 3. Implementing `LLMClient`
 

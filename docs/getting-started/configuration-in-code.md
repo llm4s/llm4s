@@ -142,6 +142,7 @@ then base URL**. Whatever is optional (has a default) comes after what is requir
 | `bedrock` | `llm4s-bedrock` | `BedrockConfig.fromValues(model, region, credentials = None)`: no key; AWS credentials or the default chain |
 | `watsonx` | `llm4s-watsonx` | `WatsonXConfig.fromValues(model, apiKey, projectId, spaceId = None, baseUrl = DEFAULT_BASE_URL)` |
 | `perplexity` | `llm4s-perplexity` | `PerplexityConfig.fromValues(model, apiKey, baseUrl = DEFAULT_BASE_URL)` |
+| `jlama` | `llm4s-jlama` | `JlamaConfig.fromValues(model, modelDir = defaultModelDir, threads = None)`: no key; the model runs in your JVM |
 
 Each config class has a `DEFAULT_BASE_URL` where the vendor has one. Each module's
 `<Name>InCodeConfigSpec` builds its clients this way, with no `application.conf`.
