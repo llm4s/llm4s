@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `StreamingAccumulator.create()` is `StreamingAccumulator(model)`; `updateTokens`, `updateTokensWithThinking` and
+  `addThinkingDelta` are removed for `updateUsage`; `SSEEvent.retry` is a `FiniteDuration`; `SSEParser.parseStream` and
+  `getEvents` are removed; [migration](docs/reference/migration.md#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813).
 - 36 `llm4s-agent` case classes (`ContextWindowConfig`, `Handoff`, the `AgentEvents` payloads, `EventRecord`, `GraphSnapshot`, `Command` and others) have a private constructor and `copy`: use `X(...)` and the `with*` setters. `GuardrailResult` is removed, and `MiddlewareStack`, `ToolLoop.results`/`queue` and nine other internal types are no longer public. `AgentStatus.Suspended`, eight `RunEvent` cases, `StreamEvent.Live` and `ToolOutcome.Success` each hold one growth-safe class (`Suspension`, `RunFailedDetails`, `LiveEvent`, `ToolSuccess`, ...) in place of positional fields, and a tool returns `ToolOutcome.success(content)` ([#2781](https://github.com/llm4s/llm4s/issues/2781));
   [migration](docs/reference/migration.md#llm4s-agent-types-are-tiered-and-growth-safe-2778).
 - `CompletionOptions.budgetTokens` and `withBudgetTokens`, and `ReasoningEffort.None`, are removed: use `thinking`
@@ -66,6 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Fixed** `SSEParser`'s streaming parser reads CRLF and CR line endings, where a CRLF stream fed in raw chunks yielded
+  no event until `flush()`, and ends an event only at a blank line, where a chunk ending at a line break split it; a streamed `Completion.model` is the model the client was created for, never `"unknown"`,
+  and `StreamingAccumulator` reports usage only through `updateUsage`, which keeps cache counts [#2813](https://github.com/llm4s/llm4s/issues/2813).
 - **Fixed** watsonx, Perplexity and Jlama leaving options out without reporting them: each now puts on
   `Completion.adjustments` what it does not send as asked (`reasoning` and `thinking`; Perplexity and Jlama also the
   penalties, Jlama also `top_p` and `responseFormat`), on `complete` and streams; watsonx's per-process warnings give way to the reports ([RFC 0008](docs/rfcs/0008-generation-controls.md) decision 15) [#2115](https://github.com/llm4s/llm4s/issues/2115).

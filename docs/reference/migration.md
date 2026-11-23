@@ -49,7 +49,27 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
-and [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778).
+[`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
+and [`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813).
+
+## `StreamingAccumulator` takes the model and reports usage one way (#2813)
+
+For provider authors using `org.llm4s.llmconnect.streaming` in `llm4s-core`.
+
+| Before | After |
+|---|---|
+| `StreamingAccumulator.create()` | `StreamingAccumulator(model)`; `toCompletion`'s `Completion.model` is `model`, where it was `"unknown"` |
+| `updateTokens(prompt, completion)` | `updateUsage(TokenUsage(prompt, completion, prompt + completion))` |
+| `updateTokensWithThinking(prompt, completion, thinking)` | `updateUsage(TokenUsage(prompt, completion, prompt + completion + thinking, thinkingTokens = Some(thinking)))` |
+| `addThinkingDelta(delta)` | `addChunk` a `StreamedChunk` whose `thinkingDelta` is `Some(delta)` |
+| `SSEEvent.retry: Option[Int]`, `withRetry(Int)` | `Option[FiniteDuration]`, `withRetry(FiniteDuration)`: `retry.map(_.toMillis)` for the number |
+| `SSEParser.parseStream(text)` | a `createStreamingParser()`: `addChunk(text)`, drain `nextEvent()`, then `flush()` |
+| `StreamingParser#getEvents()` | drain `nextEvent()` while `hasEvents` |
+| `new SSEParser.StreamingParser()` | `SSEParser.createStreamingParser()` (the class is `final`) |
+
+`updateUsage` keeps the cache counts the removed methods dropped. The streaming parser now reads CRLF and CR line
+endings, so a CRLF stream fed in raw chunks yields each event as its blank line arrives, where it yielded nothing until
+`flush()` and then one merged event.
 
 ## `llm4s-agent` types are tiered and growth-safe (#2778)
 

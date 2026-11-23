@@ -40,7 +40,7 @@ class ToolCallRulesSpec extends AnyFlatSpec with Matchers {
   }
 
   "wholeCall" should "keep a whole call's explicit {} as arguments the accumulator reads, whatever the finish" in {
-    val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator.create()
+    val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator("test-model")
     val chunk = org.llm4s.llmconnect.model.StreamedChunk("m", None, Some(ToolCall("c1", "now", ujson.Obj())), None)
     accumulator.addChunk(ToolCallRules.wholeCall(chunk))
     accumulator.addChunk(org.llm4s.llmconnect.model.StreamedChunk("m", None, None, Some(FinishReason.Other("OTHER"))))

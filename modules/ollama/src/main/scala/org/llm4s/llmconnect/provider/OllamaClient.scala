@@ -280,7 +280,7 @@ class OllamaClient(
           mapError(response.statusCode, err, response.headers, options)
         )
       case Right(response) =>
-        val accumulator = StreamingAccumulator.create()
+        val accumulator = StreamingAccumulator(config.model)
         val ids         = new OllamaClient.CallIds
         var failure     = Option.empty[org.llm4s.error.LLMError]
         var sawCalls    = false
@@ -344,7 +344,7 @@ class OllamaClient(
                       if (done) {
                         val prompt = json.obj.get("prompt_eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
                         val comp   = json.obj.get("eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
-                        if (prompt > 0 || comp > 0) accumulator.updateTokens(prompt, comp)
+                        accumulator.updateUsage(TokenUsage(prompt, comp, prompt + comp))
                       }
                   }
                 }
@@ -358,7 +358,7 @@ class OllamaClient(
           .map { c =>
             // the accumulator reports streamed calls on the message only
             val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            c.withModel(config.model).withToolCalls(c.message.toolCalls.toList).withEstimatedCost(cost)
+            c.withToolCalls(c.message.toolCalls.toList).withEstimatedCost(cost)
           }
 
         recordingExchange(startedAt, requestText, rawResponse.result())(result)

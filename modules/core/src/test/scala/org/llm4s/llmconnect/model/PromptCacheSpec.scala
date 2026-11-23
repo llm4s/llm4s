@@ -149,7 +149,7 @@ class PromptCacheSpec extends AnyFlatSpec with Matchers {
   }
 
   "StreamingAccumulator" should "carry the 1-hour cache writes onto the streamed completion's usage" in {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
     accumulator.updateUsage(
       TokenUsage(100, 0, 0, cacheCreationTokens = Some(80), longCacheCreationTokens = Some(80))
     )

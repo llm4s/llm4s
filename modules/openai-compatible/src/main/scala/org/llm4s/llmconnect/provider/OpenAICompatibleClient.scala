@@ -223,7 +223,7 @@ class OpenAICompatibleClient(
     rawStream: StringBuilder,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator(settings.model)
     val toolCalls   = new StreamToolCalls
     val details     = Vector.newBuilder[ujson.Value]
     val sseParser   = SSEParser.createStreamingParser()
@@ -234,9 +234,14 @@ class OpenAICompatibleClient(
     var failure     = Option.empty[LLMError]
     var filtered    = Option.empty[ContentFilteredError] // a content-filter finish: the stream's end
     var textLength  = 0                                  // characters of answer text delivered
-    Iterator.continually(if (failure.isEmpty) reader.readLine() else null).takeWhile(_ != null).foreach { line =>
-      rawStream.append(line).append('\n')
-      sseParser.addChunk(line + "\n")
+    val lines =
+      Iterator.continually(if (failure.isEmpty) reader.readLine() else null).takeWhile(_ != null).map { line =>
+        rawStream.append(line).append('\n')
+        line + "\n"
+      }
+    // the end of the body ends an event that no blank line closed
+    (lines ++ Iterator.single("\n").filter(_ => failure.isEmpty)).foreach { chunk =>
+      sseParser.addChunk(chunk)
       while (sseParser.hasEvents)
         sseParser.nextEvent().foreach { event =>
           if (event.data.contains("[DONE]")) ended = true

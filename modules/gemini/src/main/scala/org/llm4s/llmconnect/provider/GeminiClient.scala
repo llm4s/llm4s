@@ -217,7 +217,7 @@ class GeminiClient(
               handleErrorResponse(response.statusCode, err, response.headers)
             )(Some(err))
           case Right(response) =>
-            val accumulator = StreamingAccumulator.create()
+            val accumulator = StreamingAccumulator(config.model)
             val messageId   = UUID.randomUUID().toString
             val rawStream   = StringBuilder()
             val signatures  = scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
@@ -303,7 +303,7 @@ class GeminiClient(
                     val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
                     // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
                     val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
-                    c.withModel(config.model)
+                    c
                       .withToolCalls(
                         c.message.toolCalls.toList
                       ) // the accumulator keeps streamed calls on the message only

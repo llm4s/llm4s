@@ -349,7 +349,7 @@ class BedrockClient(
     // the visitor; a Finished already queued by the handler makes this one a no-op.
     future.whenComplete((_, error) => if (error != null) queue.put(StreamSignal.Finished(Some(error))))
 
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator(config.model)
     val messageId   = java.util.UUID.randomUUID().toString
     val toolIds     = scala.collection.mutable.Map.empty[Int, String]
     // reasoning blocks by content-block index, so each keeps its own text and signature
@@ -443,7 +443,7 @@ class BedrockClient(
                 val message =
                   if (reasoning.isEmpty) c.message
                   else c.message.withThinking(reasoning.values.map(_.toBlock).toSeq)
-                c.withModel(config.model)
+                c
                   .withMessage(message)
                   .withToolCalls(c.message.toolCalls.toList)
                   .withEstimatedCost(c.usage.flatMap(u => CostEstimator.estimate(config.model, u)))
