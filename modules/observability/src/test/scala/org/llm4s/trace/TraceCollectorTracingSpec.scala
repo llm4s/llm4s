@@ -207,7 +207,9 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   }
 
   it should "convert RAGOperationCompleted to Rag span" in {
-    val event = TraceEvent.RAGOperationCompleted("search", 500.millis, Some(100), Some(50), Some(20), Some(0.01))
+    val event = TraceEvent
+      .RAGOperationCompleted("search", 500.millis, Some(100), Some(50), Some(20), Some(0.01))
+      .withStageDurations(Map("search" -> 40.millis))
     collector.traceEvent(event) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
@@ -220,6 +222,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     span.attributes("llm_prompt_tokens").asLong shouldBe Some(50L)
     span.attributes("llm_completion_tokens").asLong shouldBe Some(20L)
     span.attributes("total_cost_usd").asDouble shouldBe Some(0.01)
+    span.attributes("stage_search_ms").asLong shouldBe Some(40L)
   }
 
   it should "convert CacheHit to Cache span" in {

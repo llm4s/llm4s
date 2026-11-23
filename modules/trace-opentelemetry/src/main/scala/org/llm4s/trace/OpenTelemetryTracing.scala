@@ -415,19 +415,17 @@ class OpenTelemetryTracing private[trace] (
         )
 
       case e: TraceEvent.RAGOperationCompleted =>
-        (
-          "RAG " + e.operation,
-          Attributes
-            .builder()
-            .put(TraceAttributes.EventType, "rag-operation")
-            .put("operation", e.operation)
-            .put("duration_ms", e.duration.toMillis)
-            .put("embedding_tokens", e.embeddingTokens.map(_.toLong).getOrElse(0L))
-            .put("llm_prompt_tokens", e.llmPromptTokens.map(_.toLong).getOrElse(0L))
-            .put("llm_completion_tokens", e.llmCompletionTokens.map(_.toLong).getOrElse(0L))
-            .put("total_cost_usd", e.totalCostUsd.getOrElse(0.0))
-            .build()
-        )
+        val builder = Attributes
+          .builder()
+          .put(TraceAttributes.EventType, "rag-operation")
+          .put("operation", e.operation)
+          .put("duration_ms", e.duration.toMillis)
+          .put("embedding_tokens", e.embeddingTokens.map(_.toLong).getOrElse(0L))
+          .put("llm_prompt_tokens", e.llmPromptTokens.map(_.toLong).getOrElse(0L))
+          .put("llm_completion_tokens", e.llmCompletionTokens.map(_.toLong).getOrElse(0L))
+          .put("total_cost_usd", e.totalCostUsd.getOrElse(0.0))
+        e.stageDurations.foreach { case (stage, d) => builder.put(s"stage_${stage}_ms", d.toMillis) }
+        ("RAG " + e.operation, builder.build())
 
       case e: TraceEvent.CacheHit =>
         (

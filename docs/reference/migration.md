@@ -42,8 +42,19 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [a workspace container has no egress](#a-workspace-container-has-no-egress-870),
 [a RAG with a `SearchIndex` ingests only with permissions](#a-rag-with-a-searchindex-ingests-only-with-permissions-2716),
 [the forwarding `apply` overloads are removed](#the-forwarding-apply-overloads-are-removed-1281),
-[`CompressionRule`'s `apply` field is `transform`](#compressionrules-apply-field-is-transform-1281)
-and [`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714).
+[`CompressionRule`'s `apply` field is `transform`](#compressionrules-apply-field-is-transform-1281),
+[`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714)
+and [RAG tracing covers every model call and each query's stages](#rag-tracing-covers-every-model-call-and-each-querys-stages-2734).
+
+## RAG tracing covers every model call and each query's stages (#2734)
+
+- **`RAGAnswerResult` gains `metrics: Option[RAGQueryMetrics]`** (stage durations, candidates retrieved, chunks
+  used, tokens, cost), and **`TraceEvent.RAGOperationCompleted` gains `stageDurations`**, so a positional pattern on
+  either needs one more field. Match by name or read the fields.
+- **A `RAG` built `withTracing` traces its own model calls.** If you wrapped the client you passed to `withLLM` in
+  `TracingLLMClient` to see the answer calls, remove the wrapper or each call is traced twice.
+- **A `QueryTransformer` of your own** can override `withTracing(tracing)` to trace its LLM calls; the default returns
+  it unchanged.
 
 ## `DocumentRegistry` is source-scoped (#2714)
 

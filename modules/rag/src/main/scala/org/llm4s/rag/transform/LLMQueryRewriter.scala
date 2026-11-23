@@ -3,6 +3,8 @@ package org.llm4s.rag.transform
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
+import org.llm4s.rag.RAGTracing
+import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
 
 /**
@@ -31,6 +33,10 @@ final class LLMQueryRewriter(
 ) extends QueryTransformer {
 
   override val name: String = "llm-query-rewriter"
+
+  /** This rewriter with its calls traced to `tracing`, each one's usage tagged `rag.rewrite` (#2734). */
+  override def withTracing(tracing: Tracing): QueryTransformer =
+    new LLMQueryRewriter(RAGTracing.llm(llmClient, tracing, RAGTracing.Rewrite), systemPrompt)
 
   override def transform(query: String): Result[String] = {
     val conversation = Conversation(

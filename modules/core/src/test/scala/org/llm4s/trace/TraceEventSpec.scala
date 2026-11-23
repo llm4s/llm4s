@@ -295,6 +295,18 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
     json.obj.contains("llm_prompt_tokens") shouldBe false
     json.obj.contains("llm_completion_tokens") shouldBe false
     json.obj.contains("total_cost_usd") shouldBe false
+    json.obj.contains("stage_durations_ms") shouldBe false
+  }
+
+  it should "serialize its stage durations in milliseconds (#2734)" in {
+    val event = TraceEvent
+      .RAGOperationCompleted("answer", 500.millis, timestamp = fixedTimestamp)
+      .withStageDurations(Map("search" -> 40.millis, "answer" -> 300.millis))
+
+    event.stageDurations("search") shouldBe 40.millis
+    val stages = event.toJson("stage_durations_ms").obj
+    stages.keys.toSeq shouldBe Seq("answer", "search")
+    stages("search").num shouldBe 40
   }
 
   // ============ TraceEvent Trait ============

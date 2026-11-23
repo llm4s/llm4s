@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [migration](docs/reference/migration.md#a-rag-with-a-searchindex-ingests-only-with-permissions-2716).
 - A `DocumentRegistry` of your own implements `register(docId, version, sourceId)` and `documentIds(sourceId)`
   (#2714); [migration](docs/reference/migration.md#documentregistry-is-source-scoped-2714).
+- A positional pattern on `RAGAnswerResult` or `TraceEvent.RAGOperationCompleted` gains a field (`metrics`,
+  `stageDurations`) (#2734); [migration](docs/reference/migration.md#rag-tracing-covers-every-model-call-and-each-querys-stages-2734).
 
 ### Providers
 
@@ -142,6 +144,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Embeddings & RAG
 
+- **Fixed** `RAGConfig.withTracing` traces the answer, LLM-rerank and `LLMQueryRewriter` calls, tagged `rag.answer`,
+  `rag.rerank`, `rag.rewrite`, and each query's `RAGOperationCompleted` with stage durations; **Added**
+  `RAGAnswerResult.metrics` (`RAGQueryMetrics`) [#2734](https://github.com/llm4s/llm4s/issues/2734).
 - **Added** `RAGConfig.withCompletionOptions`: the options `queryWithAnswer` and `queryWithPermissionsAndAnswer` generate
   the answer with, which each call can override (`options = ...`); the default is still temperature 0.0. Java:
   `JRagBuilder.completionOptions` [#2715](https://github.com/llm4s/llm4s/issues/2715).

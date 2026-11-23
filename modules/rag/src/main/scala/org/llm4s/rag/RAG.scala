@@ -93,6 +93,14 @@ final class RAG private (
     case None    => embeddingClient
   }
 
+  // The answer's LLM client: with a tracer, each call is traced and its usage tagged `rag.answer` (#2734)
+  private lazy val answerClient: Option[LLMClient] =
+    llmClient.map(client => tracer.fold(client)(t => RAGTracing.llm(client, t, RAGTracing.Answer)))
+
+  // The query transformers, each traced (an LLMQueryRewriter's calls tagged `rag.rewrite`) when there is a tracer
+  private lazy val queryTransformers: Seq[QueryTransformer] =
+    tracer.fold(config.queryTransformers)(t => config.queryTransformers.map(_.withTracing(t)))
+
   // ========== Ingestion API ==========
 
   /**
@@ -908,13 +916,23 @@ final class RAG private (
    * @return Ranked search results
    */
   def query(query: String, topK: Option[Int] = None): Result[Seq[RAGSearchResult]] = {
-    val k = topK.getOrElse(config.topK)
-
+    val meter = new QueryMeter
     for {
-      _                <- plainQueryAllowed("query", "queryWithPermissions")
-      transformedQuery <- applyQueryTransforms(query)
-      queryEmbedding   <- embedQuery(transformedQuery)
-      results          <- searchWithStrategy(queryEmbedding, transformedQuery, k)
+      _       <- plainQueryAllowed("query", "queryWithPermissions")
+      results <- retrieve(query, topK, meter)
+    } yield {
+      RAGTracing.emit(tracer, meter.metrics(results.size).toTraceEvent("query"))
+      results
+    }
+  }
+
+  /** [[query]]'s search, timed by `meter`, emitting nothing. */
+  private def retrieve(query: String, topK: Option[Int], meter: QueryMeter): Result[Seq[RAGSearchResult]] = {
+    val k = topK.getOrElse(config.topK)
+    for {
+      transformedQuery <- applyQueryTransforms(query, meter)
+      queryEmbedding   <- embedQuery(transformedQuery, meter)
+      results          <- searchWithStrategy(queryEmbedding, transformedQuery, k, meter)
     } yield results.map(toSearchResult)
   }
 
@@ -945,7 +963,7 @@ final class RAG private (
     topK: Option[Int],
     options: CompletionOptions
   ): Result[RAGAnswerResult] =
-    llmClient match {
+    answerClient match {
       case None =>
         Left(
           ConfigurationError(
@@ -953,9 +971,10 @@ final class RAG private (
           )
         )
       case Some(client) =>
+        val meter = new QueryMeter
         for {
-          searchResults <- query(question, topK)
-          answer        <- generateAnswer(client, question, searchResults, options)
+          searchResults <- retrieve(question, topK, meter)
+          answer        <- generateAnswer(client, question, searchResults, options, meter)
         } yield answer
     }
 
@@ -1002,7 +1021,7 @@ final class RAG private (
     onContexts: Seq[RAGSearchResult] => Unit,
     onChunk: StreamedChunk => Unit
   ): Result[RAGAnswerResult] =
-    llmClient match {
+    answerClient match {
       case None =>
         Left(
           ConfigurationError(
@@ -1010,9 +1029,10 @@ final class RAG private (
           )
         )
       case Some(client) =>
+        val meter = new QueryMeter
         for {
-          searchResults <- query(question, topK)
-          answer        <- streamAnswer(client, question, searchResults, options, onContexts, onChunk)
+          searchResults <- retrieve(question, topK, meter)
+          answer        <- streamAnswer(client, question, searchResults, options, onContexts, onChunk, meter)
         } yield answer
     }
 
@@ -1075,8 +1095,8 @@ final class RAG private (
             for {
               // Its vector half is a plain search, with no permission filter
               _              <- plainQueryAllowed("GraphRAG's Hybrid mode", "queryWithPermissionsAndAnswer")
-              queryEmbedding <- embedQuery(question)
-              vectorResults  <- searchWithStrategy(queryEmbedding, question, k)
+              queryEmbedding <- embedQuery(question, new QueryMeter)
+              vectorResults  <- searchWithStrategy(queryEmbedding, question, k, new QueryMeter)
               hybrid         <- engine.hybridSearch(question, vectorResults, config.graphRAGConfig.localTraversalDepth)
             } yield GraphRAGAnswer(
               query = question,
@@ -1124,6 +1144,21 @@ final class RAG private (
     collectionPattern: CollectionPattern,
     queryText: String,
     topK: Option[Int] = None
+  ): Result[Seq[RAGSearchResult]] = {
+    val meter = new QueryMeter
+    retrieveWithPermissions(auth, collectionPattern, queryText, topK, meter).map { results =>
+      RAGTracing.emit(tracer, meter.metrics(results.size).toTraceEvent("query"))
+      results
+    }
+  }
+
+  /** [[queryWithPermissions]]'s search, timed by `meter`, emitting nothing. */
+  private def retrieveWithPermissions(
+    auth: UserAuthorization,
+    collectionPattern: CollectionPattern,
+    queryText: String,
+    topK: Option[Int],
+    meter: QueryMeter
   ): Result[Seq[RAGSearchResult]] =
     config.searchIndex match {
       case None =>
@@ -1137,16 +1172,29 @@ final class RAG private (
         // As HybridSearcher.searchWithReranking: with a reranker, fetch rerankTopK candidates for it to order
         val candidates = if (reranker.isDefined) config.rerankTopK else k
         for {
-          transformedQuery <- applyQueryTransforms(queryText)
-          fused            <- permissionSearch(index, auth, collectionPattern, transformedQuery, candidates)
-          results <- reranker match {
-            case Some(r) =>
-              r.rerank(RerankRequest(transformedQuery, fused.map(_.content), Some(k)))
-                .flatMap(response => RerankMapping.applyRerank(fused, response.results))
-            case None => Right(fused.take(k))
-          }
+          transformedQuery <- applyQueryTransforms(queryText, meter)
+          fused   <- meter.search(permissionSearch(index, auth, collectionPattern, transformedQuery, candidates, meter))
+          results <- rerankOrTake(transformedQuery, fused, k, meter)
         } yield results.map(toSearchResult)
     }
+
+  /** The candidates reranked to `k`, or the first `k` of them without a reranker. */
+  private def rerankOrTake(
+    queryText: String,
+    candidates: Seq[HybridSearchResult],
+    k: Int,
+    meter: QueryMeter
+  ): Result[Seq[HybridSearchResult]] = {
+    meter.retrieved(candidates.size)
+    reranker match {
+      case Some(r) =>
+        meter.rerank(
+          r.rerank(RerankRequest(queryText, candidates.map(_.content), Some(k)))
+            .flatMap(response => RerankMapping.applyRerank(candidates, response.results))
+        )
+      case None => Right(candidates.take(k))
+    }
+  }
 
   /**
    * One permission-filtered search under the configured fusion strategy. The fused strategies fetch twice `topK`
@@ -1157,10 +1205,11 @@ final class RAG private (
     auth: UserAuthorization,
     collectionPattern: CollectionPattern,
     queryText: String,
-    topK: Int
+    topK: Int,
+    meter: QueryMeter
   ): Result[Seq[HybridSearchResult]] = {
     def vector(n: Int): Result[Seq[ScoredRecord]] =
-      embedQuery(queryText).flatMap(embedding => index.query(auth, collectionPattern, embedding, n, None))
+      embedQuery(queryText, meter).flatMap(embedding => index.query(auth, collectionPattern, embedding, n, None))
     def keyword(n: Int): Result[Seq[KeywordSearchResult]] =
       index.keywordQuery(auth, collectionPattern, queryText, n, None)
 
@@ -1237,7 +1286,7 @@ final class RAG private (
     topK: Option[Int] = None,
     options: CompletionOptions = config.completionOptions
   ): Result[RAGAnswerResult] =
-    llmClient match {
+    answerClient match {
       case None =>
         Left(
           ConfigurationError(
@@ -1245,9 +1294,10 @@ final class RAG private (
           )
         )
       case Some(client) =>
+        val meter = new QueryMeter
         for {
-          searchResults <- queryWithPermissions(auth, collectionPattern, question, topK)
-          answer        <- generateAnswer(client, question, searchResults, options)
+          searchResults <- retrieveWithPermissions(auth, collectionPattern, question, topK, meter)
+          answer        <- generateAnswer(client, question, searchResults, options, meter)
         } yield answer
     }
 
@@ -1272,7 +1322,7 @@ final class RAG private (
     topK: Option[Int] = None,
     options: CompletionOptions = config.completionOptions
   )(onContexts: Seq[RAGSearchResult] => Unit, onChunk: StreamedChunk => Unit): Result[RAGAnswerResult] =
-    llmClient match {
+    answerClient match {
       case None =>
         Left(
           ConfigurationError(
@@ -1280,9 +1330,10 @@ final class RAG private (
           )
         )
       case Some(client) =>
+        val meter = new QueryMeter
         for {
-          searchResults <- queryWithPermissions(auth, collectionPattern, question, topK)
-          answer        <- streamAnswer(client, question, searchResults, options, onContexts, onChunk)
+          searchResults <- retrieveWithPermissions(auth, collectionPattern, question, topK, meter)
+          answer        <- streamAnswer(client, question, searchResults, options, onContexts, onChunk, meter)
         } yield answer
     }
 
@@ -1417,9 +1468,9 @@ final class RAG private (
    * Apply configured query transforms sequentially.
    * Returns the original query unchanged if no transforms are configured.
    */
-  private def applyQueryTransforms(query: String): Result[String] =
-    if (config.queryTransformers.isEmpty) Right(query)
-    else QueryTransformer.applyChain(query, config.queryTransformers)
+  private def applyQueryTransforms(query: String, meter: QueryMeter): Result[String] =
+    if (queryTransformers.isEmpty) Right(query)
+    else meter.rewrite(QueryTransformer.applyChain(query, queryTransformers))
 
   private val supportedExtensions = Set(".txt", ".md", ".pdf", ".docx", ".json", ".xml", ".html")
 
@@ -1593,16 +1644,17 @@ final class RAG private (
     run(steps, Nil)
   }
 
-  private def embedQuery(query: String): Result[Array[Float]] = {
+  private def embedQuery(query: String, meter: QueryMeter): Result[Array[Float]] = {
     // A query, not a document: models that embed the two differently need to be told which this is.
     val request = EmbeddingRequest(Seq(query), embeddingModelConfig, InputPurpose.Query)
-    tracedEmbeddingClient
-      .embed(request)
-      .flatMap(
-        _.embeddings.headOption
+    meter
+      .embedding(tracedEmbeddingClient.embed(request))
+      .flatMap { response =>
+        response.usage.foreach(u => meter.addEmbeddingTokens(u.totalTokens))
+        response.embeddings.headOption
           .toRight(EmbeddingError(None, "Embedding provider returned empty embeddings list", embeddingModelConfig.name))
           .map(_.map(_.toFloat).toArray)
-      )
+      }
   }
 
   private def embedBatch(texts: Seq[String]): Result[Seq[Array[Float]]] = {
@@ -1635,30 +1687,29 @@ final class RAG private (
   private def searchWithStrategy(
     queryEmbedding: Array[Float],
     queryText: String,
-    topK: Int
+    topK: Int,
+    meter: QueryMeter
   ): Result[Seq[HybridSearchResult]] =
     // Every public caller checks first, with its own message; this keeps a new caller from searching unfiltered
-    plainQueryAllowed("search", "queryWithPermissions").flatMap(_ => plainSearch(queryEmbedding, queryText, topK))
+    plainQueryAllowed("search", "queryWithPermissions").flatMap(_ =>
+      plainSearch(queryEmbedding, queryText, topK, meter)
+    )
 
+  /**
+   * As `HybridSearcher.searchWithReranking`, in two timed steps: with a reranker, `rerankTopK` candidates, reranked
+   * to `topK`; without one, `topK` results.
+   */
   private def plainSearch(
     queryEmbedding: Array[Float],
     queryText: String,
-    topK: Int
-  ): Result[Seq[HybridSearchResult]] =
-    reranker match {
-      case Some(r) =>
-        hybridSearcher.searchWithReranking(
-          queryEmbedding,
-          queryText,
-          topK,
-          config.rerankTopK,
-          config.fusionStrategy,
-          None,
-          Some(r)
-        )
-      case None =>
-        hybridSearcher.search(queryEmbedding, queryText, topK, config.fusionStrategy)
-    }
+    topK: Int,
+    meter: QueryMeter
+  ): Result[Seq[HybridSearchResult]] = {
+    val candidates = if (reranker.isDefined) config.rerankTopK else topK
+    meter
+      .search(hybridSearcher.search(queryEmbedding, queryText, candidates, config.fusionStrategy))
+      .flatMap(rerankOrTake(queryText, _, topK, meter))
+  }
 
   private def toSearchResult(hsr: HybridSearchResult): RAGSearchResult =
     RAGSearchResult(
@@ -1674,9 +1725,12 @@ final class RAG private (
     client: LLMClient,
     question: String,
     contexts: Seq[RAGSearchResult],
-    options: CompletionOptions
+    options: CompletionOptions,
+    meter: QueryMeter
   ): Result[RAGAnswerResult] =
-    client.complete(answerConversation(question, contexts), options).map(answerResult(question, contexts))
+    meter
+      .answering(client.complete(answerConversation(question, contexts), options))
+      .map(answerResult(question, contexts, meter))
 
   /** The contexts to `onContexts`, then the answer streamed to `onChunk`, then the whole answer. */
   private def streamAnswer(
@@ -1685,20 +1739,30 @@ final class RAG private (
     contexts: Seq[RAGSearchResult],
     options: CompletionOptions,
     onContexts: Seq[RAGSearchResult] => Unit,
-    onChunk: StreamedChunk => Unit
+    onChunk: StreamedChunk => Unit,
+    meter: QueryMeter
   ): Result[RAGAnswerResult] =
     for {
-      _          <- Safety.safely(onContexts(contexts))
-      completion <- client.streamComplete(answerConversation(question, contexts), options, onChunk)
-    } yield answerResult(question, contexts)(completion)
+      _ <- Safety.safely(onContexts(contexts))
+      completion <- meter.answering(
+        client.streamComplete(answerConversation(question, contexts), options, onChunk)
+      )
+    } yield answerResult(question, contexts, meter)(completion)
 
-  private def answerResult(question: String, contexts: Seq[RAGSearchResult])(completion: Completion): RAGAnswerResult =
+  /** The answer with its metrics, which a traced RAG also emits as one `RAGOperationCompleted` (`answer`). */
+  private def answerResult(question: String, contexts: Seq[RAGSearchResult], meter: QueryMeter)(
+    completion: Completion
+  ): RAGAnswerResult = {
+    val metrics = meter.metrics(contexts.size)
+    RAGTracing.emit(tracer, metrics.toTraceEvent("answer"))
     RAGAnswerResult(
       answer = completion.content,
       question = question,
       contexts = contexts,
-      usage = completion.usage
+      usage = completion.usage,
+      metrics = Some(metrics)
     )
+  }
 
   /** The system prompt, and the question with the numbered contexts, that an answer is generated from. */
   private def answerConversation(question: String, contexts: Seq[RAGSearchResult]): Conversation = {
@@ -2053,7 +2117,10 @@ object RAG {
       case RerankingStrategy.LLM =>
         config.llmClient match {
           case Some(client) =>
-            Right(Some(RerankerFactory.llm(client)))
+            // With a tracer, the reranker's calls are traced and tagged `rag.rerank` (#2734)
+            Right(
+              Some(RerankerFactory.llm(config.tracer.fold(client)(t => RAGTracing.llm(client, t, RAGTracing.Rerank))))
+            )
           case None =>
             Left(
               ConfigurationError(
