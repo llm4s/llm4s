@@ -56,6 +56,8 @@ provider in its own module, and so on); each guide names the module it needs, an
   - **[Human Review](agents/human-review)** - Pause for a person: approve a tool call, answer a question, review an answer, then resume
   - **[Streaming Events](agents/streaming)** - Real-time execution feedback for responsive UIs
   - **[Durable Checkpointers](agents/durable-checkpointers)** - Share a checkpoint store, recover a run whose process died, fork and prune history
+  - **[Graphs](agents/graphs)** - Build your own workflow on the graph runtime: typed state, fan-out and joins, routing, interrupts, retries
+  - **[Writing Middleware](agents/middleware)** - Hooks around an agent's turn, model calls and tool calls: logging, redaction, tool policy, prompt context
   - **[Running Agents on Several Machines](agents/multiple-machines)** - Several instances sharing threads through one PostgreSQL database
 - **[Context Window Pruning](context-window-pruning)** - Keep a long conversation within the model's context window
 - **[Built-in Tools](builtin-tools)** - Calculator, date and time, UUID, JSON, files, HTTP, shell and web search tools, the bundles that hold them, and what each one can do
@@ -124,7 +126,9 @@ provider in its own module, and so on); each guide names the module it needs, an
 - **[Production Deployment](production-deployment)** - Configuration, secrets, reliability, observability, scaling and container images
 - **[Reference Architecture](reference-architecture)** - Deploy behind an AI gateway: secret injection, egress policy, failover, quotas and spend, with tested Kubernetes manifests
 - **[Data Protection](data-protection)** - What personal data LLM4S sends where, what it keeps and logs, data residency and deletion
+- **[Secrets and API Keys](secrets)** - Choose a key source (config, environment, key file, custom provider, Vault, AWS Secrets Manager), with caching, rotation and failure behaviour
 - **[Monitoring](observability/)** - Tracing (Langfuse, OpenTelemetry), logging, metrics, health checks and cost monitoring
+  - **[Agent Tracing and Metrics](observability/agents)** - The span tree and attributes of an agent run, agent runtime and run queue metrics, usage, cost and alerts
   - **[Micrometer Metrics](observability/micrometer)** - Request, token, cost and error metrics in a Micrometer `MeterRegistry`
   - **[Provider Exchange Logging](observability/provider-exchange-logging)** - Capture raw provider requests and responses for debugging
   - **[In-Process Tracing Use Cases](observability/enhanced-tracing-use-cases)** - `TraceCollectorTracing` and `InMemoryTraceStore`: trace lookup, deterministic agent tests and latency analysis
