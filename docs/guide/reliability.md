@@ -1,4 +1,24 @@
+---
+layout: page
+title: Reliable LLM Calling
+description: "Wrap any LLM4S client in ReliableClient: retry policies, a circuit breaker, deadlines, local rate limiting and metrics for provider calls."
+search_title: "Retries and circuit breakers for LLM calls in Scala"
+parent: User Guide
+nav_order: 58
+---
+
 # Reliable LLM Calling
+{: .no_toc }
+
+`ReliableClient` is in `llm4s-core`; it wraps the `LLMClient` of any provider module.
+
+## Table of contents
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
+---
 
 Production-grade fault tolerance for LLM provider calls through retry logic, circuit breakers, and deadline enforcement. Automatic failure recovery with intelligent retry strategies, circuit breakers to prevent cascading failures, deadline enforcement to prevent unbounded waiting, and built-in metrics for monitoring.
 
@@ -222,13 +242,13 @@ llm4s {
 
     claude {
       provider = "anthropic"
-      model    = "claude-sonnet-4-5-latest"
+      model    = "claude-sonnet-4-5"
     }
   }
 }
 ```
 
-See [Configuration](getting-started/configuration.md) for every provider's section keys.
+See [Configuration](../getting-started/configuration) for every provider's section keys.
 
 ## Retry Policies
 
@@ -698,9 +718,9 @@ reliableClient.resetCircuitBreaker()
 **Solution**: fix the underlying service issue and wait for auto-recovery: the circuit
 tests recovery by itself after `recoveryTimeout`. Reset it by hand only in an emergency.
 
-## Migration Guide
+## Adding it to an existing client
 
-### From Non-Reliable Clients
+### Wrapping a client
 
 **Before:**
 ```scala
@@ -725,15 +745,6 @@ val clientResult =
 ```
 
 `ReliableClient` is an `LLMClient`, so nothing that uses the client changes.
-
-### From `ReliableProviders` / `withReliability`
-
-`ReliableProviders.wrap`, the `ReliabilitySyntax` extension (`.withReliability(...)`) and the
-`ReliableClient(...)` / `ReliableClient.withProviderName(...)` factories have been removed;
-the factories guessed the provider name from the client's class name. Build the client with
-`LLMConnect.getClient` and call the constructor with an explicit provider name, as above.
-`ReliabilityConfig.rateLimit`, which only `ReliableProviders.wrap` used to honour, is now
-applied by `ReliableClient` itself.
 
 ### Testing Strategies
 
@@ -975,7 +986,7 @@ object ProductionExample {
 ### ReliabilityConfig
 
 ```scala
-final case class ReliabilityConfig(
+final case class ReliabilityConfig private (
   retryPolicy: RetryPolicy = RetryPolicy.exponentialBackoff(),
   circuitBreaker: CircuitBreakerConfig = CircuitBreakerConfig.default,
   rateLimit: RateLimitConfig = RateLimitConfig.disabled,
@@ -984,8 +995,12 @@ final case class ReliabilityConfig(
 )
 ```
 
-**Builders:** `withRetryPolicy`, `withCircuitBreaker`, `withRateLimit`, `withDeadline`,
-`withoutDeadline`, `disabled`.
+Build one with `ReliabilityConfig(...)` (every argument has the default shown) or start from a preset, and change it
+with the `with*` setters: the constructor and `.copy` are private, so fields can be added without breaking callers.
+The same holds for `CircuitBreakerConfig` and `RateLimitConfig` below.
+
+**Setters:** `withRetryPolicy`, `withCircuitBreaker`, `withRateLimit`, `withDeadline`,
+`withoutDeadline`, `withEnabled`, `disabled`.
 
 **Factory Methods:**
 - `ReliabilityConfig.default` - Recommended starting point
@@ -1013,7 +1028,7 @@ sealed trait RetryPolicy {
 ### CircuitBreakerConfig
 
 ```scala
-final case class CircuitBreakerConfig(
+final case class CircuitBreakerConfig private (
   failureThreshold: Int = 5,
   recoveryTimeout: FiniteDuration = 30.seconds,
   successThreshold: Int = 2
@@ -1029,7 +1044,7 @@ final case class CircuitBreakerConfig(
 ### RateLimitConfig
 
 ```scala
-final case class RateLimitConfig(
+final case class RateLimitConfig private (
   enabled: Boolean = false,
   requestsPerMinute: Int = 60,
   burstCapacity: Int = 60
@@ -1046,54 +1061,22 @@ final class ReliableClient(
   underlying: LLMClient,
   providerName: String,
   config: ReliabilityConfig,
-  collector: Option[MetricsCollector] = None
+  collector: Option[MetricsCollector] = None,
+  clock: () => Instant = () => Instant.now(),                                // for tests: the time deadlines use
+  sleep: FiniteDuration => Unit = delay => Thread.sleep(delay.toMillis)     // for tests: how backoff waits
 ) extends LLMClient
 
 def currentCircuitState: CircuitState   // Closed | Open | HalfOpen
 def resetCircuitBreaker(): Unit         // testing / emergencies only
 ```
 
-## Summary
+## Next steps
 
-### ✅ Production-Ready Reliability
+1. Start with `ReliabilityConfig.default`.
+2. Monitor circuit breaker transitions in production.
+3. Tune retry attempts from the failure rates you observe.
+4. Set deadlines that suit each use case.
+5. Send the metrics to your backend: see [Monitoring](observability/#metrics).
 
-- **Automatic Failure Recovery**: Intelligent retry with exponential backoff
-- **Circuit Breaker Protection**: Fail fast when services are down
-- **Deadline Enforcement**: Prevent unbounded waiting and resource exhaustion
-- **Comprehensive Observability**: Track retries, circuit state, and errors
-
-### ✅ Easy Integration
-
-- **One-Line Setup**: `new ReliableClient(client, providerName, ReliabilityConfig.default)`
-- **Universal Support**: Wraps any `LLMClient`, from any provider module
-- **Drop-In Replacement**: No code changes required
-- **Thread-Safe**: Share clients across threads safely
-
-### ✅ Highly Configurable
-
-- **Flexible Retry Policies**: Exponential, linear, fixed, or custom logic
-- **Tunable Circuit Breaker**: Adjust thresholds for your SLA requirements
-- **Environment-Specific**: Different configs for dev/staging/production
-- **Optional Features**: Enable/disable independently, including local rate limiting
-
-### ✅ Battle-Tested Patterns
-
-- **Graceful Degradation**: Fallback between providers
-- **Provider-Specific Tuning**: Different configs per service
-- **Operation-Specific Timeouts**: Balance speed vs. success rate
-- **Alerting Integration**: Monitor circuit breaker health
-
----
-
-**Next Steps:**
-
-1. Start with `ReliabilityConfig.default` for immediate protection
-2. Monitor circuit breaker transitions in production
-3. Tune retry attempts based on observed failure rates
-4. Set appropriate deadlines for your use cases
-5. Integrate with your metrics backend for observability
-
-**Additional Resources:**
-
-- [Source code](../modules/core/src/main/scala/org/llm4s/reliability/)
-- [LLM Provider Documentation](guide/)
+See also the [source](https://github.com/llm4s/llm4s/tree/main/modules/core/src/main/scala/org/llm4s/reliability)
+and the [Providers](providers) guide.

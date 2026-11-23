@@ -112,14 +112,13 @@ libraryDependencies ++= Seq(
 )
 ```
 
-On `0.4.1` and earlier, Langfuse, the collector and `CostTracker` ship inside `llm4s-core`.
 
 ### Configuration
 
 Core reads only `llm4s.tracing.mode`, and hands the selected mode's block to its backend as
 `TracingSettings.extras`. Each block, with its variable bindings, ships in the `reference.conf`
 of the module that reads it - `langfuse` in `llm4s-observability`, `opentelemetry` in
-`llm4s-observability-otel` - so the keys and variables below are unchanged, and apply once the
+`llm4s-observability-otel` - so the keys and variables below apply once the
 module is on the classpath:
 
 ```hocon
@@ -426,7 +425,7 @@ val parsed = TraceModelJson.parseSpan(json)   // Result[Span]
 
 parsed match {
   case Right(s)    => println(s.name)
-  case Left(error) => println(s"Parse error: ${error.field} — ${error.reason}")
+  case Left(error) => println(s"Parse error: ${error.formatted}")
 }
 ```
 
@@ -447,18 +446,18 @@ Langfuse provides purpose-built LLM observability. When configured, LLM4S automa
 
 ### Trace Structure Example
 
-A typical RAG query produces this hierarchy:
+An agent run that calls one tool appears in Langfuse as one trace, in the session of its thread:
 
 ```
-Trace: "RAG Query Processing"
-├── Span: "Document Retrieval" (200ms)
-│   └── Event: "Retrieved 5 documents"
-├── Generation: "Context Synthesis" (1,200ms)
-│   ├── Model: gpt-4o
-│   ├── Prompt tokens: 1,234
-│   └── Completion tokens: 456
-└── Event: "Response Delivered"
+Trace <the run's trace id>            session = thread id; input = first user message, output = last answer
+└── invoke_agent support              the run: agent, status and usage in its metadata
+    ├── chat gpt-4o                   generation: model, prompt, completion, token usage
+    ├── execute_tool search_docs      span: the tool's input and output
+    ├── chat gpt-4o                   generation: the final answer
+    └── one span per message of the turn
 ```
+
+The names are the ones the next section lists; a subagent's run nests under the `execute_tool task` that started it.
 
 ### What an agent run sends
 
@@ -574,7 +573,7 @@ The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`
 libraryDependencies += "org.llm4s" %% "llm4s-observability-prometheus" % llm4sVersion
 ```
 
-On `0.4.1` and earlier this code ships inside `llm4s-core`; the [migration note](../../reference/migration#slice-6-llm4s-observability-prometheus---prometheus-leaves-core) has the details. Package names are unchanged.
+
 
 ### Turn it on from configuration
 
@@ -792,7 +791,9 @@ tenant id is ever a label, and no metric carries message content. Every backend 
 
 ### Startup Validation
 
-Use `client.validate()` during application startup to fail fast on misconfiguration:
+Building the client is the startup check that matters: `Llm4sConfig.defaultProvider()` validates the section it
+loads (a missing key, a missing provider module, an invalid value) and `LLMConnect.getClient` fails if the client
+cannot be built, so fail fast on that `Left`:
 
 ```scala
 val clientResult = for {
@@ -800,34 +801,36 @@ val clientResult = for {
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
   client   <- LLMConnect.getClient(config)
-  _        <- client.validate()
 } yield client
 
 clientResult match {
   case Left(error) =>
-    logger.error(s"LLM client validation failed: $error")
+    logger.error(s"LLM client setup failed: ${error.formatted}")
     System.exit(1)
   case Right(client) =>
     logger.info("LLM client ready")
 }
 ```
 
+`LLMClient.validate()` does **not** add a check: its default returns `Right(())`, and none of the built-in provider
+clients overrides it, so it contacts nothing and verifies no key. Do not use it as a health check.
+
+For a fuller report at startup - JDK, configuration, the provider module, the key, a local model server, and
+optionally one live call - run the [doctor](../../reference/doctor) from code (`Doctor.run(DoctorOptions())`, in
+`llm4s-doctor`) and log `report.renderText`.
+
 ### Readiness Probes
 
-For Kubernetes deployments, include LLM connectivity in readiness checks:
-
-```scala
-// Integrate with your framework's health check mechanism
-def isLLMReady(): Boolean =
-  client.validate().isRight
-```
+Only a real request proves that the provider answers and the key is accepted, and a hosted provider bills it. If
+readiness should depend on the provider, check it on a schedule with a small request (or `Doctor.run` with
+`DoctorOptions().withLive(true)`) and report the last result, rather than calling the provider on every probe.
 
 ### Liveness vs Readiness
 
 - **Liveness**: Application process is healthy (standard JVM checks)
-- **Readiness**: Can serve LLM requests (includes `client.validate()`)
+- **Readiness**: Can serve LLM requests (the last scheduled provider check succeeded)
 
-Separating these prevents pod restarts during temporary provider outages.
+Keep provider failures out of liveness: that prevents pod restarts during temporary provider outages.
 
 ---
 
@@ -938,7 +941,7 @@ import org.llm4s.types.HeadroomPercent
 val budget = client.getContextBudget(HeadroomPercent.Standard)
 val config = ContextWindowConfig(maxTokens = Some(budget))
 
-// ContextWindowMiddleware uses a default token counter (words * 1.3)
+// ContextWindowMiddleware counts tokens with cl100k_base by default
 // or accepts a custom tokenCounter function for more accurate estimation
 val agent = Agent.builder("assistant", client)
   .withMiddleware(new ContextWindowMiddleware(config))
@@ -978,8 +981,8 @@ Before deploying, verify monitoring coverage:
 
 ### Health
 
-- [ ] `client.validate()` called on startup
-- [ ] Readiness probe includes LLM connectivity
+- [ ] Client built at startup, failing fast on a `Left`
+- [ ] Readiness reflects a scheduled provider check, not a call per probe
 - [ ] Graceful degradation for provider outages
 
 ---
@@ -993,14 +996,11 @@ Current monitoring limitations in LLM4S:
 - **No real-time streaming metrics** - Streaming completions are traced on completion, not in-flight
 - **Guardrail metrics require custom tracing** - Add `traceEvent` calls in guardrail implementations; the resulting spans are then queryable via `InMemoryTraceStore`
 
-These are tracked in the [Production Readiness Roadmap](../../reference/roadmap).
-
 ---
 
 ## Related Documentation
 
 - [Provider Exchange Logging](provider-exchange-logging) - Capture raw provider requests and responses for debugging
 - [In-Process Tracing Use Cases](enhanced-tracing-use-cases) - Full catalogue of `TraceCollectorTracing` + `InMemoryTraceStore` scenarios
-- [Langfuse Workflow Patterns](../../langfuse-workflow-patterns.md) - Detailed trace event sequences
 - [Configuration Guide](../../getting-started/configuration) - Complete configuration reference
-- [Roadmap](../../reference/roadmap) - Planned observability improvements
+- [Roadmap](../../reference/roadmap) - Project roadmap

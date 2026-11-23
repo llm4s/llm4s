@@ -490,4 +490,4 @@ A reply can report token usage and a model name (`Reply.text("hi").withModel("gp
 ## See also
 
 - [Error Handling](error-handling) for the error types a `Reply.failure` can carry.
-- [Reliability Guide](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md) for `ReliableClient`.
+- [Reliability Guide](reliability) for `ReliableClient`.

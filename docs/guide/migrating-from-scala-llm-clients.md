@@ -313,7 +313,7 @@ These are things a client leaves to you, and that LLM4S has in code today:
 - **Tracing and metrics**: Langfuse and OpenTelemetry tracing, Prometheus and Micrometer metrics
   ([monitoring](observability/)).
 - **Reliability**: retries, a circuit breaker and deadlines around any `LLMClient`
-  ([reliability guide](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md)).
+  ([reliability guide](reliability)).
 - **A scripted client for tests** that records every request ([testing](testing-with-the-testkit)).
 
 sttp-ai and openai-scala-client have some of these too: sttp-ai has its own agent loop, with interceptors, MCP tools

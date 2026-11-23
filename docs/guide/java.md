@@ -31,8 +31,7 @@ model, `ConversationBuilder` builds a conversation, and every call returns an `L
 It does not hide every Scala type. `Conversation` and `ProviderConfig` are Scala classes that still appear in its
 signatures, as does `LLMError` behind `LlmException.error()`, though [its kind](#handling-a-failure) reads as a Java
 enum, and so does core's `CompletionOptions`, in an overload that [`JCompletionOptions`](#completion-options)
-makes unnecessary. [What is not here yet](#what-is-not-here-yet) says which of them gets in
-your way.
+makes unnecessary. [What is not here yet](#what-is-not-here-yet) lists what Java cannot do.
 
 The values it hands you to read - `JCompletion`, `JAgentResult`, `JMessage`, `PendingInterrupt`, `JEmbeddings` and the
 rest - are Java classes whose constructors are package-private: you receive them, you do not build them, so a later
@@ -48,8 +47,7 @@ not for you either: each takes a first parameter of a type only the package can 
 > `llm4s-java-api` is on Maven Central from `0.5.0` on; the current release is {{ site.data.project.latest_release }}.
 > The [`gradle-java` sample](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java) is a complete Java
 > project you can copy. It needs **JDK 21**: it depends on `llm4s-agent`, which is compiled for JDK 21 and starts
-> virtual threads (see [Scala and JDK support](/reference/v1-scope#scala-and-jdk-support)). Whether some artifacts get a
-> lower floor before 1.0 is tracked in [#1493](https://github.com/llm4s/llm4s/issues/1493).
+> virtual threads. Every artifact needs JDK 21 (see [Scala and JDK support](/reference/v1-scope#scala-and-jdk-support)).
 
 ## Add the dependency
 
@@ -149,7 +147,7 @@ reads a `LLM_MODEL` variable; the model is the `model` key of the section.
 
 ### Configure in code
 
-To build a client in code instead of from a file, `Llm4s` has a builder for each provider this module brings:
+To build a client in code instead of from a file, `Llm4s` has a builder for each provider module you add:
 `openAi()`, `anthropic()`, `gemini()`, `ollama()`, `openAiCompatible()` (vLLM, LM Studio, LiteLLM, a gateway: any
 server that speaks OpenAI's chat-completions API) and `azureOpenAi()`. Each takes plain Java values and builds an
 `LlmResult<JLlmClient>`:
@@ -1005,12 +1003,13 @@ structured output; for an agent with tools from Scala, `llm4s-testkit`'s `Script
 
 ## What is not here yet
 
-`llm4s-java-api` covers a client, a conversation, the whole reply, the kind of a failure and embeddings. These are not
-available from Java yet, each with the issue that tracks it:
+`llm4s-java-api` covers a client, a conversation, the whole reply, the kind of a failure, embeddings, tools and agents.
+These are not available from Java:
 
-| You may expect | State today |
-|---|---|
-| Agents beyond a turn | [An agent turn](#an-agent-turn) reads a result; the agent guide covers [streaming a turn](agents/streaming#java-and-kotlin) and [suspended turns](agents/#suspended-turns-from-java-and-kotlin) from Java. Tools are defined from Java in [Tools](#tools) |
+- **Guardrails written in Java.** The built-in guardrails are on `JGuardrails`; [an agent](#an-agent-with-a-system-prompt-guardrails-and-a-context-window) takes no guardrail of your own.
+- **Tools and response formats as completion options.** Define tools as in [Tools](#tools) and ask for a record with
+  `complete(prompt, SomeRecord.class)`.
+- **Scala-only features.** Postgres and pgvector, reranking and GraphRAG are Scala APIs; see [Java RAG](java-rag).
 
 ## Where next
 
@@ -1021,7 +1020,7 @@ available from Java yet, each with the issue that tracks it:
 - [Java RAG](java-rag): ingest documents and ask questions about them, with `llm4s-java-rag`.
 - [Java Reactor](java-reactor): a streamed reply as a Reactor `Flux<String>`, with `llm4s-reactor`.
 - [Spring Boot](spring-boot): auto-configuration, a template bean and a health indicator on top of this module.
-- [Quarkus](quarkus): the client as a CDI bean, configured from `application.properties`, behind a REST endpoint.
+- [Quarkus](quarkus): the client as a CDI bean, configured from `application.properties`, behind a REST endpoint (the extension is built from source, outside the 1.0 scope).
 - [Basic usage](basic-usage) and [providers](providers): the same concepts in Scala, and every provider's configuration.
 - [Gradle integration](../getting-started/gradle): dependency recipes for Gradle builds.
 - The [`gradle-java` sample](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java): a Java project you

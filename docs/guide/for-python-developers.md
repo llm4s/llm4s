@@ -5,8 +5,6 @@ description: "LLM code in Python (OpenAI SDK, LangChain, LlamaIndex, Pydantic) n
 search_title: "From Python LangChain and OpenAI SDK to Scala 3 with LLM4S"
 parent: User Guide
 nav_order: 53
-# scripts/check-cited-issues.sh fails when an issue listed here is closed: refresh the tooling section then.
-cites_open_issues: [2296]
 ---
 
 # Coming from Python
@@ -425,8 +423,8 @@ The closest Scala equivalent is [Scala CLI](https://scala-cli.virtuslab.org/): o
 declare its dependencies (`//> using dep org.llm4s::llm4s-core:...`), run with `scala-cli run main.scala`. No virtual
 environment: dependencies are resolved per file and cached. The [Scala CLI quick start](../getting-started/scala-cli)
 has a complete one-file program. For the notebook workflow, [Try llm4s in the REPL](../getting-started/repl) covers
-the Scala CLI REPL and Metals worksheets; Almond (Jupyter) notebooks are tracked in
-[#2296](https://github.com/llm4s/llm4s/issues/2296). A service uses sbt and a `build.sbt` instead
+the Scala CLI REPL and Metals worksheets; Jupyter notebooks run through Almond, as
+[Jupyter notebooks](notebooks) describes. A service uses sbt and a `build.sbt` instead
 ([installation](../getting-started/installation)).
 
 Where Python reads `OPENAI_API_KEY` in `OpenAI()`, LLM4S reads a named provider section from `application.conf`

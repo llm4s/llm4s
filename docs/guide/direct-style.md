@@ -59,7 +59,7 @@ calling thread until the reply ends.
 ## The llm4s-ox module
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-ox" % "<version>"
+libraryDependencies += "org.llm4s" %% "llm4s-ox" % "{{ site.data.project.latest_release }}"
 ```
 
 It depends on `llm4s-core` and Ox only. `import org.llm4s.ox.*` brings in the extensions below.

@@ -53,7 +53,7 @@ for {
 } yield answer.content
 ```
 
-`UserMessage(text)` and `ToolMessage(text, toolCallId)` build the one-text-part message, as before. `content` is a
+`UserMessage(text)` and `ToolMessage(text, toolCallId)` build the one-text-part message. `content` is a
 message's text view: its text parts joined by newlines, `""` for a message that is all media.
 
 ## Why inline media is bounded
@@ -73,7 +73,7 @@ the role. No part is dropped and none is turned into text. A `ProviderFile` goes
 | Provider | User message | Tool result |
 |---|---|---|
 | OpenAI, Azure OpenAI, Requesty | text; image `Url`, `Inline`; PDF `Inline`, own `ProviderFile` | text |
-| OpenAI-compatible (generic, Z.ai, OpenRouter, Mistral, Cohere) | text; image `Url`, `Inline` | text |
+| OpenAI-compatible (generic, Z.ai, OpenRouter, Mistral, Cohere, xAI) | text; image `Url`, `Inline` | text |
 | OpenRouter, in addition | PDF `Url`, `Inline` | |
 | Mistral, in addition | PDF `Url` | |
 | DeepSeek | text | text |
@@ -83,6 +83,8 @@ the role. No part is dropped and none is turned into text. A `ProviderFile` goes
 | Ollama | text; image `Inline` | text |
 | Bedrock | text; image (PNG, JPEG, GIF, WebP) and document (all five) `Inline` or an `s3://` `Url` | the same |
 | watsonx.ai | text; image `Inline` | text |
+| Perplexity | text | text |
+| Jlama | text | text |
 
 A `Url` sent to OpenAI, an OpenAI-compatible provider or Anthropic must be `http` or `https`; the Gemini API fetches no web
 URL, so upload the file or send it inline.
@@ -113,13 +115,13 @@ val plot = AgentTool(plotSpec) { (args, _) =>
 }
 ```
 
-`ToolContent.Json(value)` is the JSON result a tool returned before. The loop puts `Parts` in the call's
+`ToolContent.Json(value)` is a plain JSON result. The loop puts `Parts` in the call's
 `ToolMessage` unchanged. A result with no content, or with more than 5 MiB of inline bytes in total, is the call's
 error result instead, so the model is told and the run continues. The live `ToolCallResult` event carries the text
 view only.
 
 ## Stored conversations
 
-The JSON of a one-text message is unchanged, and JSON written before content parts reads as one text part, so
-existing memory stores, saved conversations and agent threads keep working. The semantic cache (`CachingLLMClient`)
+A message whose JSON has a plain text `content` and no parts reads as one text part, so stored conversations, memory
+entries and agent threads written that way read back unchanged. The semantic cache (`CachingLLMClient`)
 embeds a prompt's text, so it passes a conversation with media straight to the model.

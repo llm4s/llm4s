@@ -77,7 +77,17 @@ object SimpleExample extends App {
 The fragments in the rest of this guide use the imports of this example, plus `org.llm4s.types.Result`
 (and `org.llm4s.error.LLMError` where they name it), and a `client` built as above.
 
-**Before running, configure a provider** in `src/main/resources/application.conf`:
+**Before running, add a provider module** next to `llm4s-core`: `llm4s-core` ships no provider, and each one is
+its own artifact ([Providers](providers) names them all). For OpenAI:
+
+```sbt
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % "{{ site.data.project.latest_release }}",
+  "org.llm4s" %% "llm4s-openai" % "{{ site.data.project.latest_release }}"
+)
+```
+
+**Then configure a provider** in `src/main/resources/application.conf`:
 
 ```hocon
 llm4s {
@@ -378,26 +388,20 @@ startup match {
 
 ### Retrying Failed Calls
 
-For transient failures, implement retry logic:
+For transient failures (rate limits, timeouts, server errors), wrap the client in `ReliableClient`, from
+`llm4s-core`. It retries what `LLMError.isRecoverable` accepts, with exponential backoff, and returns any other error at
+once:
 
 ```scala
-def retryWithBackoff[T](maxRetries: Int = 3)(
-  operation: () => Result[T]
-): Result[T] = {
-  (1 until maxRetries).foldLeft(operation()) { (acc, attempt) =>
-    if (acc.isRight) acc
-    else {
-      Thread.sleep(math.pow(2, attempt.toDouble).toLong * 100)
-      operation()
-    }
-  }
-}
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
 
-// Usage
-val response = retryWithBackoff(3) { () =>
-  client.complete(Conversation(Seq(UserMessage("Hello!"))))
-}
+val reliable: LLMClient = new ReliableClient(client, "openai", ReliabilityConfig.default)
+val response            = reliable.complete(Conversation(Seq(UserMessage("Hello!"))))
 ```
+
+Retry policies, the circuit breaker and deadlines are in [Reliable LLM Calling](reliability).
 
 ### Logging Errors
 
@@ -430,11 +434,13 @@ response match {
 ### "Model not found"
 
 - Verify the model name matches the provider's API
-- Check [MODEL_METADATA.md](/MODEL_METADATA.md) for available models
+- Check the vendor's model list; the [model registry](../reference/model-metadata) shows the models LLM4S has metadata for
 - Some models may not be available in your region or account
 
 ### "Configuration not found"
 
+- Ensure the section's provider module (`llm4s-openai`, `llm4s-anthropic`, ...) is a dependency: without it the
+  error says the provider is not registered and lists the providers that are
 - Ensure `application.conf` (in `src/main/resources`) has a section under `llm4s.providers` and
   that `llm4s.providers.provider` names it - `LLM_MODEL` is not read
 - Ensure the vendor's variable (or the one the section's own `apiKey` binds) is exported in the

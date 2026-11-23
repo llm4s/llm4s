@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Image Generation
-description: "Generate images from Scala with LLM4S using Stable Diffusion through a local WebUI or the Hugging Face Inference API, with setup and options."
+description: "Generate images from Scala with LLM4S: OpenAI GPT Image and DALL-E, Stability AI, Hugging Face or a Stable Diffusion server, with options."
 search_title: "Generate images in Scala with LLM4S"
 parent: User Guide
 nav_order: 8
@@ -9,137 +9,144 @@ nav_order: 8
 
 # Image Generation with LLM4S
 
-The LLM4S library provides a powerful and flexible API for generating images using different providers like Stable Diffusion (via a local WebUI) and the Hugging Face Inference API.
+`llm4s-image` generates images with OpenAI (GPT Image and DALL-E), Stability AI, the Hugging Face Inference API, or a
+Stable Diffusion server you run (the AUTOMATIC1111 web UI).
+
+```sbt
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"  % "{{ site.data.project.latest_release }}",
+  "org.llm4s" %% "llm4s-image" % "{{ site.data.project.latest_release }}"
+)
+```
 
 ---
 
 ## Core Concepts
 
-The API is centered around the `ImageGenerationClient` trait, which defines the common interface for interacting with different image generation services. You can get a pre-configured client using the `ImageGeneration` factory object.
+Everything is in `org.llm4s.imagegeneration`:
 
-Key models include:
-- `ImageGenerationConfig`: A trait for provider-specific configurations (`StableDiffusionConfig`, `HuggingFaceConfig`).
-- `ImageGenerationOptions`: A class to control generation parameters like image size, seed, and negative prompts.
-- `GeneratedImage`: A case class representing the generated image, including its data and metadata.
+- `ImageGenerationClient`: `generateImage(prompt, options)`, `generateImages(prompt, count, options)` and
+  `editImage(...)`, each returning `Either[LLMError, ...]`.
+- `ImageGeneration`: builds a client. `ImageGeneration.openAIClient`, `stabilityAIClient`, `huggingFaceClient` and
+  `stableDiffusionClient` each return `Either[LLMError, ImageGenerationClient]`; `ImageGeneration.client(config)` takes
+  a config (`OpenAIConfig`, `StabilityAIConfig`, `HuggingFaceConfig`, `StableDiffusionConfig`).
+- `ImageGenerationOptions`: size, format, seed, negative prompt and the provider-specific options below.
+- `GeneratedImage`: the image (base64 `data`, `format`, `size`, `prompt`, `seed`), with `saveToFile(path)`.
+
+The library reads no API key for image generation itself: read the key from your application's configuration at its
+edge and pass it in.
 
 ---
 
-## Using the Stable Diffusion Client
+## OpenAI
 
-This client connects to an instance of the [AUTOMATIC1111/stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui). You must have this running locally or on a remote server.
-
-### Setup
-
-First, ensure your `build.sbt` includes the LLM4S dependencies. Image generation is in `llm4s-image`.
-
-```scala
-libraryDependencies += "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
-{%- unless site.data.project.latest_release contains "0.4." %}
-libraryDependencies += "org.llm4s" %% "llm4s-image" % "{{ site.data.project.latest_release }}"
-{%- endunless %}
-```
-
-### Example Usage
-
-Here's how to create a client and generate an image:
+`model` is `gpt-image-1` (and its successors), `dall-e-3` or `dall-e-2` (the default). OpenAI has scheduled DALL-E
+for removal; the client logs a warning naming the GPT Image models to move to.
 
 ```scala
 import org.llm4s.imagegeneration._
 import java.nio.file.Paths
 
-// 1. Create a client for a local Stable Diffusion server
-val sdClient = ImageGeneration.stableDiffusionClient(
-  baseUrl = "http://localhost:7860" // Default URL
-)
+def drawLighthouse(apiKey: String): Unit = {
+  val result = for {
+    client <- ImageGeneration.openAIClient(apiKey, model = "gpt-image-1")
+    image  <- client.generateImage(
+                "A watercolour of a lighthouse at dawn",
+                ImageGenerationOptions(size = ImageSize.Square1024, quality = Some("high"))
+              )
+    saved  <- image.saveToFile(Paths.get("lighthouse.png"))
+  } yield saved
 
-// 2. Define a prompt and generation options
-val prompt = "A photorealistic portrait of a majestic lion"
-val options = ImageGenerationOptions(
-  size = ImageSize.Square512,
-  negativePrompt = Some("cartoon, drawing, sketch, blurry")
-)
-
-// 3. Generate the image
-println("Generating image with Stable Diffusion...")
-sdClient.generateImage(prompt, options) match {
-  case Right(image) =>
-    println("Image generated successfully!")
-    // Save the image
-    val path = Paths.get("stable_diffusion_lion.png")
-    image.saveToFile(path)
-    println(s"Image saved to ${path.toAbsolutePath}")
-
-  case Left(error) =>
-    println(s"Error generating image: ${error.message}")
-}
-```
-
----
-
-## Using the Hugging Face Client
-
-This client uses the Hugging Face Inference API, which requires an API token.
-
-### Setup
-
-You will need a Hugging Face account and an API token with write permissions.
-
-### Example Usage
-
-The process is very similar. The main difference is the configuration.
-
-```scala
-import org.llm4s.imagegeneration._
-import java.nio.file.Paths
-
-// 1. Get your API token (it's best to use an environment variable)
-val hfApiKey = sys.env.getOrElse("HF_API_TOKEN", "your_hf_api_token_here")
-
-if (hfApiKey == "your_hf_api_token_here") {
-  println("Please set the HF_API_TOKEN environment variable.")
-} else {
-  // 2. Create a Hugging Face client
-  val hfClient = ImageGeneration.huggingFaceClient(
-    apiKey = hfApiKey,
-    model = "runwayml/stable-diffusion-v1-5" // You can choose other models
-  )
-
-  // 3. Define a prompt
-  val prompt = "A cute robot reading a book, sci-fi concept art"
-
-  // 4. Generate the image
-  println("Generating image with Hugging Face...")
-  hfClient.generateImage(prompt) match {
-    case Right(image) =>
-      println("Image generated successfully!")
-      val path = Paths.get("hugging_face_robot.png")
-      image.saveToFile(path)
-      println(s"Image saved to ${path.toAbsolutePath}")
-
-    case Left(error) =>
-      println(s"Error generating image: ${error.message}")
+  result match {
+    case Right(image) => println(s"Saved a ${image.size} image")
+    case Left(error)  => println(s"Error generating image: ${error.message}")
   }
 }
 ```
 
 ---
 
+## Stability AI
+
+```scala
+import org.llm4s.imagegeneration._
+
+def drawWithStability(apiKey: String): Either[org.llm4s.error.LLMError, GeneratedImage] =
+  for {
+    client <- ImageGeneration.stabilityAIClient(apiKey) // model stable-diffusion-xl-1024-v1-0 by default
+    image  <- client.generateImage("A cute robot reading a book, sci-fi concept art")
+  } yield image
+```
+
+---
+
+## Hugging Face
+
+The Hugging Face Inference API needs an access token. The default model is
+`stabilityai/stable-diffusion-xl-base-1.0`.
+
+```scala
+import org.llm4s.imagegeneration._
+
+def drawWithHuggingFace(token: String): Either[org.llm4s.error.LLMError, GeneratedImage] =
+  for {
+    client <- ImageGeneration.huggingFaceClient(apiKey = token)
+    image  <- client.generateImage("A cute robot reading a book, sci-fi concept art")
+  } yield image
+```
+
+---
+
+## A Stable Diffusion server
+
+This client connects to the [AUTOMATIC1111 stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
+API, running locally or on a server of yours (`http://localhost:7860` by default; pass `apiKey` if it needs one).
+
+```scala
+import org.llm4s.imagegeneration._
+
+val lion = for {
+  client <- ImageGeneration.stableDiffusionClient(baseUrl = "http://localhost:7860")
+  image  <- client.generateImage(
+              "A photorealistic portrait of a majestic lion",
+              ImageGenerationOptions(
+                size = ImageSize.Square512,
+                negativePrompt = Some("cartoon, drawing, sketch, blurry")
+              )
+            )
+} yield image
+```
+
+---
+
 ## Customizing Generation
 
-The `ImageGenerationOptions` class allows you to fine-tune the generation process:
+`ImageGenerationOptions` holds every option; a provider ignores the ones it has no use for.
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `size` | `ImageSize` | The dimensions of the output image (e.g., `ImageSize.Square512`) |
-| `format` | `ImageMediaType` | The image format, from `org.llm4s.media` (`MediaType.Png` or `MediaType.Jpeg`) |
-| `seed` | `Option[Long]` | A specific seed for reproducible results |
-| `guidanceScale` | `Double` | How strictly the model should follow the prompt |
-| `inferenceSteps` | `Int` | The number of steps in the diffusion process |
-| `negativePrompt` | `Option[String]` | A prompt describing what you *don't* want to see |
+| Option | Type | Used by | Description |
+|--------|------|---------|-------------|
+| `size` | `ImageSize` | all | `Square512` (default), `Square1024`, `Landscape768x512`, `Portrait512x768`, `Landscape1536x1024`, `Portrait1024x1536`, `Auto`, or `Custom(width, height)` |
+| `format` | `ImageMediaType` | all | The image format, from `org.llm4s.media` (`MediaType.Png` by default, or `MediaType.Jpeg`) |
+| `seed` | `Option[Long]` | Stable Diffusion, Stability AI, Hugging Face | A seed for reproducible results |
+| `guidanceScale` | `Double` | Stable Diffusion, Stability AI, Hugging Face | How strictly the model follows the prompt (default 7.5) |
+| `inferenceSteps` | `Int` | Stable Diffusion, Stability AI, Hugging Face | Diffusion steps (default 20) |
+| `negativePrompt` | `Option[String]` | Stable Diffusion, Stability AI, Hugging Face | What you *don't* want to see |
+| `samplerName` | `Option[String]` | Stable Diffusion, Stability AI | The sampler |
+| `quality` | `Option[String]` | OpenAI | DALL-E 3: `standard` or `hd`; GPT Image: `low`, `medium`, `high` or `auto` |
+| `style` | `Option[String]` | OpenAI DALL-E 3 | `vivid` or `natural` |
+| `responseFormat` | `Option[String]` | OpenAI DALL-E | `url` or `b64_json` |
+| `outputFormat` | `Option[String]` | OpenAI GPT Image | `png`, `jpeg` or `webp` |
+| `background` | `Option[String]` | OpenAI GPT Image | `transparent`, `opaque` or `auto` |
+| `outputCompression` | `Option[Int]` | OpenAI GPT Image | 0 to 100, for `jpeg` and `webp` |
+| `user` | `Option[String]` | OpenAI | An end-user identifier for abuse monitoring |
+
+Image generation records metrics through `InstrumentedImageGenerationClient` and a `MetricsCollector`; see
+[Monitoring](observability/#metrics).
 
 ---
 
 ## See Also
 
 - [Examples](/examples/) - Working code examples
-- [API Reference](/api/) - Complete API documentation
+- [Multimodal Content](multimodal) - Send images to a chat model
+- [Data Protection](data-protection) - Where image prompts are sent

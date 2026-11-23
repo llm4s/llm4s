@@ -372,5 +372,5 @@ sbt examplesHttp/test
 ## What a real service adds
 
 These apps leave out authentication, rate limiting, request size limits, conversation history (each request starts
-a new thread in the agent's in-memory store) and deployment. See [Production Deployment](../PRODUCTION_DEPLOYMENT) for
+a new thread in the agent's in-memory store) and deployment. See [Production Deployment](production-deployment) for
 closing the client and the rest of running llm4s in production.

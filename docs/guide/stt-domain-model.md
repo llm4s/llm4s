@@ -1,21 +1,29 @@
 ---
 layout: page
 title: STT Domain Model
-description: "The expanded speech-to-text domain model in LLM4S: STTOptions, WordTimestamp, Transcription and the STTError cases, with validation and examples."
+description: "The speech-to-text domain model of LLM4S: STTOptions, WordTimestamp, Transcription and the STTError cases, with validation and examples."
 search_title: "STT domain model in LLM4S: options, transcripts, errors"
 parent: User Guide
 nav_order: 40
 ---
 
-# STT Domain Model Expansion (#894) - Implementation Guide
+# STT Domain Model
 
-## Overview
-This document describes the expanded STT domain model that includes richer metadata, validation, and error handling.
+The types every speech-to-text engine in `llm4s-speech` (`org.llm4s.speech.stt`) takes and returns: the options of a
+request, the transcription with its word timings, and the errors. See [Speech](speech) for the engines themselves.
 
-## Domain Model Changes
+```sbt
+libraryDependencies += "org.llm4s" %% "llm4s-speech" % "{{ site.data.project.latest_release }}"
+```
+
+**Construction checks.** `STTOptions`, `WordTimestamp` and `Transcription` check their arguments with `require`, so
+constructing one with an invalid value throws an `IllegalArgumentException`. To get a `Result` instead, build options
+and words with `STTOptions.validate` and `WordTimestamp.validate` ([below](#typed-validation-result-based)).
+
+## Types
 
 ### STTOptions
-Extended speech-to-text configuration with the following fields:
+The options of a transcription request:
 
 ```scala
 final case class STTOptions(
@@ -28,8 +36,9 @@ final case class STTOptions(
 ```
 
 **Validation:**
-- `confidenceThreshold`: Must be in range [0.0, 1.0]
-- `language`: Must be valid BCP 47 tag (e.g., "en", "en-US", "fr-FR") or None
+- `confidenceThreshold`: must be in [0.0, 1.0]; the constructor throws otherwise
+- `language`: a BCP 47 tag (e.g., "en", "en-US", "fr-FR") or None; checked by `STTOptions.validate`, not by the
+  constructor
 
 **Example:**
 ```scala
@@ -242,108 +251,16 @@ result match {
 - `endSec`: Must be >= startSec
 - `confidence`: If provided, must be in [0.0, 1.0]
 
-## Migration Guide
-
-### For Code Creating STTOptions
-**Before (direct construction):**
-```scala
-val options = STTOptions(
-  language = Some("en"),
-  confidenceThreshold = 0.85
-)
-// Could throw IllegalArgumentException if values invalid
-```
-
-**After (recommended - use typed validation):**
-```scala
-val result = STTOptions.validate(
-  language = Some("en"),
-  confidenceThreshold = 0.85
-)
-
-result match {
-  case Right(options) => /* use options */
-  case Left(error) => /* handle error */
-}
-```
-
-**Backward Compatibility:**
-Direct construction still works for valid values, but typed validation is recommended for robustness.
-
-### For Code Using filterByConfidence
-**Before:**
-```scala
-// Would filter based on meetsConfidence logic
-val filtered = trans.filterByConfidence(0.8)
-```
-
-**After (breaking change):**
-```scala
-// Now filters to ONLY keep words with confidence >= threshold
-// Words without confidence scores are excluded
-val filtered = trans.filterByConfidence(0.8)
-```
-
-**Migration note:** If you relied on keeping words without confidence scores, you need to adjust your logic.
-
-### For Code Using Additional Helper Methods
-**New in this version:**
-```scala
-traits.averageConfidence      // Average of all word confidences
-trans.minConfidence            // Minimum word confidence
-trans.maxConfidence            // Maximum word confidence
-trans.wordCount                // Total word count
-trans.wordsBySpeaker(id)       // Filter words by speaker
-trans.speakerSegments          // Get time ranges by speaker
-trans.meetsQualityThreshold()  // Quality checks
-```
-
-These methods are additive and don't affect existing code.
-
-### Updated Provider Implementations
-
-Providers now populate additional metadata:
-
-```scala
-// WhisperSpeechToText and VoskSpeechToText
-// - Track processingTime during transcription
-// - Extract confidence scores from output (when available)
-// - Extract word-level timestamps (when enableTimestamps=true)
-// - Handle diarization metadata (when available)
-```
-
-**Example of updated provider result:**
-```scala
-import scala.concurrent.duration.*
-
-val transcription = Transcription(
-  text = "Hello world",
-  language = Some("en"),
-  confidence = Some(0.88),           // Extracted from provider
-  timestamps = List(                 // Extracted when enabled
-    WordTimestamp("Hello", 0.0, 0.5, confidence = Some(0.92)),
-    WordTimestamp("world", 0.6, 1.1, confidence = Some(0.84))
-  ),
-  processingTime = Some(234.millis)  // Tracked by provider
-)
-```
-
 ## Error Handling Strategy
 
-### Provider-level Validation
-Validation happens at construction and public API boundaries:
+### Validation and runtime errors
+An invalid constructor argument throws, so build values from untrusted input with the `validate` factories. A
+transcription's own failures are always a `Left`:
 
 ```scala
-// This validates immediately
-try {
-  val options = STTOptions(confidenceThreshold = 1.5)  // Throws IllegalArgumentException
-} catch {
-  case e: IllegalArgumentException => 
-    // Handle validation error
-}
+val options: Result[STTOptions] = STTOptions.validate(confidenceThreshold = userThreshold)
 
-// Use Result type for runtime errors
-val result: Result[Transcription] = provider.transcribe(input, options)
+val result: Result[Transcription] = options.flatMap(o => provider.transcribe(input, o))
 ```
 
 ### Error Classification
@@ -412,62 +329,21 @@ result.map { trans =>
 }
 ```
 
-## Testing Guide
-
-### Unit Tests
-- Domain model validation (STTOptions, WordTimestamp, Transcription)
-- STTError variants and their properties
-- Helper method correctness (filterByConfidence, totalDuration, uniqueSpeakers)
-
-### Integration Tests
-- Provider adapters populate metadata correctly
-- Error handling in real transcription scenarios
-- Confidence threshold validation with actual provider output
-
-### Edge Cases Covered
-- Unicode and multilingual text
-- Very long transcriptions
-- Many speakers (diarization stress test)
-- Zero-duration words
-- Unsorted timestamps
-- Missing optional fields in various combinations
-
-## Performance Considerations
-
-1. **Processing Time Tracking:**
-   - Minimal overhead - simple time delta
-   - Helps identify slow providers or configurations
-
-2. **Timestamp Extraction:**
-   - Regex-based parsing for JSON/VTT output
-   - Optional - only parsed if enableTimestamps=true
-
-3. **Confidence Filtering:**
-   - Lazy: creates new list only when called
-   - Can be used to reduce downstream processing
-
 ## Troubleshooting
 
 ### Validation Errors
 ```scala
-// Validate options before use
-try {
-  val options = STTOptions(language = Some("invalid"))
-} catch {
-  case e: IllegalArgumentException =>
-    System.err.println(s"Invalid option: ${e.getMessage}")
+// An invalid language tag is a Left from validate; the constructor would accept it
+STTOptions.validate(language = Some("english")) match {
+  case Left(error)    => System.err.println(s"Invalid option: ${error.message}")
+  case Right(options) => // use options
 }
 ```
 
 ### Metadata Not Populated
-```scala
-// Check if provider supports the feature
-if (provider.supportedFeatures.contains("timestamps")) {
-  // Use enableTimestamps=true
-} else {
-  // Timestamps won't be extracted
-}
-```
+Word timings, confidence and speaker ids are filled in only when the engine reports them: ask for timings with
+`enableTimestamps = true`, and check `transcription.hasTimestamps` before reading them. `provider.supportedFormats`
+lists the audio formats an engine accepts.
 
 ### Error Classification
 ```scala

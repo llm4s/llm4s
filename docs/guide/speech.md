@@ -33,38 +33,39 @@ A comprehensive speech recognition and text-to-speech synthesis module for the L
 
 ## Architecture
 
-The module follows functional programming principles with:
-- **Result Types**: `Either[LLMError, T]` for error handling
-- **Pure Functions**: Immutable audio transformations
-- **ADTs**: Algebraic Data Types for type-safe modeling
-- **Composition**: Functional composition for audio processing pipelines
+Speech is the `llm4s-speech` module:
+
+```sbt
+libraryDependencies += "org.llm4s" %% "llm4s-speech" % "{{ site.data.project.latest_release }}"
+```
+
+Every engine is a `SpeechToText` (`transcribe(input, options)`) or a `TextToSpeech` (`synthesize(text, options)`), and
+every call returns a `Result` (`Either[LLMError, A]`) rather than throwing. The local engines (Vosk, and the Whisper
+and Tacotron2 command-line tools) send nothing over the network; the [cloud providers](#cloud-providers) are selected
+from configuration.
 
 ---
 
 ## Quick Start
 
-### Basic Usage
+### Local transcription and synthesis
+
+Whisper and Tacotron2 run as command-line programs that must be on the `PATH` (see [External Tools](#external-tools));
+pass another command if yours is installed elsewhere.
 
 ```scala
-import org.llm4s.speech._
-import org.llm4s.speech.stt.{WhisperSpeechToText, STTOptions}
-import org.llm4s.speech.tts.{Tacotron2TextToSpeech, TTSOptions}
-import org.llm4s.speech.util.PlatformCommands
+import org.llm4s.speech.AudioInput
+import org.llm4s.speech.stt.{ STTOptions, WhisperSpeechToText }
+import org.llm4s.speech.tts.{ Tacotron2TextToSpeech, TTSOptions }
+import java.nio.file.Paths
 
-// Speech Recognition
-val stt = new WhisperSpeechToText(PlatformCommands.mockSuccess)
-val audioInput = AudioInput.FileAudio(Paths.get("audio.wav"))
-val options = STTOptions(language = Some("en"))
-val result = stt.transcribe(audioInput, options)
+// Speech recognition with the openai-whisper CLI and its "base" model
+val stt    = new WhisperSpeechToText(command = Seq("whisper"), model = "base")
+val result = stt.transcribe(AudioInput.FileAudio(Paths.get("audio.wav")), STTOptions(language = Some("en")))
 
-// Text-to-Speech
-val tts = new Tacotron2TextToSpeech(PlatformCommands.echo)
-val ttsOptions = TTSOptions(
-  voice = Some("en-female"),
-  language = Some("en"),
-  speakingRate = Some(1.2)
-)
-val audio = tts.synthesize("Hello, world!", ttsOptions)
+// Text-to-speech with a Tacotron2 command-line tool
+val tts   = new Tacotron2TextToSpeech(command = Seq("tacotron2-cli"))
+val audio = tts.synthesize("Hello, world!", TTSOptions(language = Some("en"), speakingRate = Some(1.2)))
 ```
 
 ### Audio Preprocessing
@@ -99,55 +100,19 @@ matching tail, so the source's final fraction of a millisecond is not in the out
 
 ### Vosk Configuration
 
+Vosk runs in the JVM from a model directory you download from the
+[Vosk model list](https://alphacephei.com/vosk/models). With no `modelPath` it loads
+`models/vosk-model-small-en-us-0.15`, relative to the working directory; no environment variable is read.
+
 ```scala
 import org.llm4s.speech.stt.VoskSpeechToText
 
-// Use default English model
+// The small English model, unpacked into ./models/vosk-model-small-en-us-0.15
 val stt = new VoskSpeechToText()
 
-// Use custom model path
-val stt = new VoskSpeechToText(modelPath = Some("/path/to/vosk-model"))
+// A model somewhere else
+val german = new VoskSpeechToText(modelPath = Some("/opt/vosk/vosk-model-small-de-0.15"))
 ```
-
-### Environment Variables
-
-```bash
-# Vosk Model Path (optional)
-VOSK_MODEL_PATH=/path/to/vosk-model
-```
-
----
-
-## File Structure
-
-```
-src/main/scala/org/llm4s/speech/
-├── Audio.scala                    # Core audio data structures
-├── stt/                          # Speech-to-Text implementations
-│   ├── SpeechToText.scala        # STT trait interface
-│   ├── VoskSpeechToText.scala    # Vosk integration
-│   └── WhisperSpeechToText.scala # Whisper CLI integration
-├── tts/                          # Text-to-Speech implementations
-│   ├── TextToSpeech.scala        # TTS trait interface
-│   └── Tacotron2TextToSpeech.scala # Tacotron2 CLI integration
-├── processing/                    # Audio preprocessing utilities
-│   └── AudioPreprocessing.scala  # Audio transformation functions
-├── io/                           # Audio I/O operations
-│   └── AudioIO.scala             # File saving utilities
-└── util/                         # Cross-platform utilities
-    └── PlatformCommands.scala    # OS-agnostic command helpers
-```
-
----
-
-## Cross-Platform Support
-
-The `PlatformCommands` utility automatically provides the right commands:
-
-| Platform | Echo | File Reader | Directory Listing |
-|----------|------|-------------|-------------------|
-| Windows  | `cmd /c echo` | `cmd /c type` | `cmd /c dir` |
-| POSIX    | `echo` | `cat` | `ls` |
 
 ---
 
@@ -159,9 +124,10 @@ The `PlatformCommands` utility automatically provides the right commands:
 - **Models**: Supports various model sizes (tiny, base, small, medium, large)
 
 ### Tacotron2
-- **Installation**: Requires Tacotron2 CLI tool
-- **Usage**: The module integrates with Tacotron2 CLI for synthesis
-- **Features**: Voice customization, language support, audio output
+- **Installation**: a command-line wrapper around a Tacotron2 model, called as
+  `<command> --text <text> --out <file.wav>`, plus `--voice`, `--lang`, `--rate`, `--pitch` and `--gain` from
+  `TTSOptions`
+- **Output**: WAV (PCM); MP3 is offered only by the cloud clients
 
 ---
 
@@ -248,24 +214,8 @@ result match {
 
 ## Testing
 
-The module includes comprehensive tests that work cross-platform:
-
-```bash
-# Run all tests
-sbt test
-
-# Run specific test suites
-sbt "testOnly org.llm4s.speech.*"
-
-# Run the current supported Scala build
-sbt test
-```
-
-The cloud clients are covered without a network by `speech/test` (stubbed HTTP layer, including
-`CloudSpeechProviderIntegrationSpec`). Live-API smoke suites, one per provider, are in
-`modules/it` (`org.llm4s.speech.*`, tier `@Cloud`): run them with `sbt testSmoke` and
-`OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION` set. They make
-billed calls; a suite whose key is missing is skipped, or fails under `LLM4S_IT_STRICT=true`.
+The cloud clients take an `Llm4sHttpClient`, so a test can inject a stub and never touch the network; the local
+engines take the command to run, so a test can pass a script of its own.
 
 ---
 

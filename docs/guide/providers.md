@@ -102,36 +102,23 @@ error naming `ANTHROPIC_API_KEY` and `claude`'s `apiKey`. See
 
 ### Available Models
 
-See [MODEL_METADATA.md](/MODEL_METADATA.md) for the complete model list. Quick reference:
-
-**OpenAI:** `gpt-4o`, `gpt-4-turbo`, `gpt-3.5-turbo`
-
-**Anthropic:** `claude-opus-4-6`, `claude-sonnet-4-5-latest`, `claude-haiku-3-5`
-
-**Google Gemini:** `gemini-2.0-flash`, `gemini-1.5-pro`, `gemini-1.5-flash`
-
-**DeepSeek:** `deepseek-chat`, `deepseek-reasoner`
-
-**Mistral:** `mistral-large-latest`, `mistral-small-latest`, `magistral-medium-latest`
-
-**Cohere:** `command-a-03-2025`
-
-**Ollama:** `mistral`, `llama2`, `neural-chat`, `nomic-embed-text` (100+ models)
+A section's `model` is the vendor's own model id, passed through as it is. Which ids each vendor serves changes
+faster than this guide, so follow the vendor's model list (linked in each section below). The
+[model registry](../reference/model-metadata) - the LiteLLM metadata bundled with `llm4s-core` - gives the context
+window, prices and capabilities of the models it knows.
 
 ---
 
 ## OpenAI
 
-From the release after `0.4.1`, OpenAI support - chat, embeddings, and the Azure OpenAI and
-Requesty providers that share its client - ships in its own artifact, alongside `llm4s-core`;
-adding it registers the providers:
+OpenAI support - chat, embeddings, and the Azure OpenAI and Requesty providers that share its
+client - is the `llm4s-openai` artifact, next to `llm4s-core`; adding it registers the providers:
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-openai" % llm4sVersion
 ```
 
-In `0.4.1` and earlier it is part of `llm4s-core`. See the
-[installation guide](../getting-started/installation#for-openai-azure-openai-and-requesty).
+See the [installation guide](../getting-started/installation#for-openai-azure-openai-and-requesty).
 
 ### Setup
 
@@ -170,10 +157,9 @@ because the section binds it.
 
 ### Available Models
 
-- **Latest:** `gpt-4o`, `gpt-4o-mini`
-- **Reasoning:** the gpt-5 family (`gpt-5`, `gpt-5-mini`, `gpt-5.1`, ...) and the o-series (`o3`, `o4-mini`)
-- **Turbo:** `gpt-4-turbo`
-- **Legacy:** `gpt-3.5-turbo`
+General models such as `gpt-4o`, `gpt-4o-mini` and `gpt-4.1`, and reasoning models: the gpt-5 family (`gpt-5`,
+`gpt-5-mini`, `gpt-5.1`, ...) and the o-series (`o3`, `o4-mini`). See
+[OpenAI's model list](https://platform.openai.com/docs/models).
 
 ### Reasoning models
 
@@ -188,8 +174,8 @@ client.complete(conversation, CompletionOptions().withReasoning(ReasoningEffort.
 
 | `ReasoningEffort` | `reasoning_effort` |
 |---|---|
-| `Low` / `Medium` / `High` | `low` / `medium` / `high` |
-| `None` | not sent: the model's own default applies |
+| `Minimal` / `Low` / `Medium` / `High` / `XHigh` / `Max` | `minimal` / `low` / `medium` / `high` / `xhigh` / `max`, or the nearest level the model accepts |
+| not set (`reasoning` is `None`) | not sent: the model's own default applies |
 
 Which models are reasoning models comes from the model registry's `supports_reasoning` flag
 (the same metadata llm4s uses for context windows and costs), so the o-series and the gpt-5
@@ -221,30 +207,22 @@ non-streamed one. The final chunk produces no `StreamedChunk`.
 
 ### Costs
 
-See [OpenAI Pricing](https://openai.com/pricing). Generally:
-- `gpt-4o`: $2.50-$10 per 1M input tokens
-- `gpt-3.5-turbo`: $0.50-$1.50 per 1M input tokens
-
-### Tips
-
-- Use `gpt-4o-mini` for cost-effective applications
-- Use `o1` for complex reasoning and math
-- Batching API available for high-volume use
-- Vision support in `gpt-4o`
+See [OpenAI Pricing](https://openai.com/pricing). A `Completion`'s `estimatedCost` comes from the
+[model registry](../reference/model-metadata)'s prices; `ServiceTier.Flex` halves the price for work that can wait
+([service tiers](cost-controls#service-tiers)).
 
 ---
 
 ## Anthropic
 
-From the release after `0.4.1`, Anthropic support ships in its own artifact, alongside
-`llm4s-core`; adding it registers the provider:
+Anthropic support is the `llm4s-anthropic` artifact, next to `llm4s-core`; adding it registers the
+provider:
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-anthropic" % llm4sVersion
 ```
 
-In `0.4.1` and earlier it is part of `llm4s-core`. See the
-[installation guide](../getting-started/installation#for-anthropic).
+See the [installation guide](../getting-started/installation#for-anthropic).
 
 ### Setup
 
@@ -277,23 +255,16 @@ llm4s {
 
 ### Available Models
 
-- **Best Quality:** `claude-opus-4-6` (200K context)
-- **Balanced:** `claude-sonnet-4-5-latest` (200K context)
-- **Fast:** `claude-haiku-3-5` (200K context)
+Claude models such as `claude-opus-4-6`, `claude-sonnet-4-5` and `claude-haiku-4-5`; see
+[Anthropic's model list](https://docs.anthropic.com/en/docs/about-claude/models). The context window of each comes from
+the [model registry](../reference/model-metadata).
 
 ### Costs
 
-- `claude-opus-4-6`: $3-$15 per 1M input tokens
-- `claude-sonnet`: $3-$15 per 1M input tokens
-- `claude-haiku`: $0.80-$4 per 1M input tokens
-
-Claude models generally score higher on reasoning benchmarks.
+See [Anthropic's pricing](https://www.anthropic.com/pricing).
 
 ### Tips
 
-- All Claude models have 200K context window
-- Exceptional at writing and analysis tasks
-- Excellent vision capabilities
 - Supports prompt caching for repeated queries: `CompletionOptions().withPromptCache(PromptCache.default)` sends
   `cache_control` breakpoints ([provider-side prompt caching](cost-controls#provider-side-prompt-caching))
 
@@ -319,15 +290,14 @@ so it never reaches a `ToolRegistry` and the completion's `toolCalls` do not inc
 
 ## Google Gemini
 
-From the release after `0.4.1`, Gemini (and Vertex AI) support ships in its own artifact,
-alongside `llm4s-core`; adding it registers both providers:
+Gemini (and Vertex AI) support is the `llm4s-gemini` artifact, next to `llm4s-core`; adding it
+registers both providers:
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-gemini" % llm4sVersion
 ```
 
-In `0.4.1` and earlier they are part of `llm4s-core`. See the
-[installation guide](../getting-started/installation#for-gemini-and-vertex-ai).
+See the [installation guide](../getting-started/installation#for-gemini-and-vertex-ai).
 
 ### Setup
 
@@ -363,23 +333,13 @@ llm4s {
 
 ### Available Models
 
-- **Latest:** `gemini-2.0-flash` (1M context)
-- **Advanced:** `gemini-1.5-pro` (1M context)
-- **Fast:** `gemini-1.5-flash` (1M context)
+Gemini models such as `gemini-2.5-flash`, `gemini-2.5-pro` and the Gemini 3 previews; see
+[Google's model list](https://ai.google.dev/gemini-api/docs/models).
 
 ### Costs
 
-- **Free tier:** 60 requests/minute, 2M free tokens/month
-- **Paid:** Pay as you go (~$0.075-$1.50 per 1M input tokens)
-
-Great for cost-conscious projects and high-volume applications.
-
-### Tips
-
-- Free tier perfect for development and testing
-- 1M context window for processing large documents
-- Very fast inference latency
-- Strong code generation capabilities
+Google offers a free tier with rate limits, and paid usage per token; see
+[Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing).
 
 ### Thinking
 
@@ -507,7 +467,7 @@ unchanged.
 > mapping and redaction for a wrong key. That proves IBM's clients send these shapes, not that the
 > service accepts them today. The module is Beta and its API is not frozen. The `@Cloud` suite
 > `WatsonXAssumptionProbeSpec` (modules/it) checks each of those details against a real account and prints
-> which held; running it is still open in [#1314](https://github.com/llm4s/llm4s/issues/1314). Until it has
+> which held; it has not been run yet. Until it has
 > been run, treat tool calling and streaming as unconfirmed.
 
 IBM's enterprise AI platform, serving Granite, Llama and Mistral models. It lives in its own module,
@@ -630,7 +590,7 @@ llm4s.providers.perplexity-main {
 
 ## Azure OpenAI
 
-Azure OpenAI ships in `llm4s-openai` with OpenAI itself, from the release after `0.4.1`; see
+Azure OpenAI ships in `llm4s-openai` with OpenAI itself; see
 [OpenAI](#openai) above. It runs on OpenAI's Java SDK (`com.openai:openai-java`), which covers
 Azure too: requests go to `<endpoint>/openai/deployments/<deployment>/chat/completions` with an
 `api-key` header and the `api-version` query parameter. `apiVersion` accepts the wire form
@@ -682,10 +642,8 @@ llm4s {
 
 ### Available Models
 
-Same as OpenAI (via Azure deployment). Choose models when deploying:
-- `gpt-4o`
-- `gpt-4-turbo`
-- `gpt-35-turbo`
+The models of your Azure OpenAI resource, each deployed under a deployment name, which is what a section's `model`
+names (see below).
 
 ### Reasoning deployments
 
@@ -710,20 +668,14 @@ those versions accept `stream_options`, so it is not sent for older ones, such a
 
 ### Costs
 
-Similar to OpenAI but often bundled with enterprise agreements.
-
-### Tips
-
-- Use for VPC-isolated workloads
-- Enterprise support available
-- Same API as OpenAI (easy migration)
-- Reserve capacity for predictable costs
+Billed by Azure for the resource; see
+[Azure OpenAI pricing](https://azure.microsoft.com/en-us/pricing/details/cognitive-services/openai-service/).
 
 ---
 
 ## DeepSeek
 
-From the release after `0.4.1`, DeepSeek ships in `llm4s-openai-compatible`, with Z.ai,
+DeepSeek ships in `llm4s-openai-compatible`, with Z.ai,
 OpenRouter and the generic [OpenAI-compatible](#openai-compatible-endpoints) provider; adding it
 registers them:
 
@@ -731,7 +683,7 @@ registers them:
 libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
 ```
 
-In `0.4.1` and earlier it is part of `llm4s-core`. See the
+See the
 [installation guide](../getting-started/installation#for-deepseek-zai-openrouter-mistral-cohere-and-any-openai-compatible-endpoint).
 
 ### Setup
@@ -773,20 +725,13 @@ llm4s {
 
 ### Costs
 
-Very competitive: ~$0.14-$0.28 per 1M input tokens
-
-### Tips
-
-- Excellent cost/performance ratio
-- Reasoning model rivals GPT-4o
-- Good for translations and multilingual tasks
-- Supports very long contexts
+See [DeepSeek's pricing](https://api-docs.deepseek.com/quick_start/pricing).
 
 ---
 
 ## OpenRouter and Z.ai
 
-Both ship in `llm4s-openai-compatible` from the release after `0.4.1`, as DeepSeek does.
+Both ship in `llm4s-openai-compatible`, as DeepSeek does.
 
 ```hocon
 llm4s {
@@ -845,8 +790,7 @@ are returned on the message and sent back (see [Thinking in conversation history
 Any server that speaks the OpenAI `/chat/completions` API works with
 `provider = "openai-compatible"` - hosted APIs such as Groq, Together, Fireworks, xAI or NVIDIA
 NIM, local servers such as vLLM, LM Studio or llama.cpp, or an internal gateway. It needs no code
-and no module of its own, only `llm4s-openai-compatible`, which ships in the release after `0.4.1`
-(see the [installation guide](../getting-started/installation#for-deepseek-zai-openrouter-mistral-cohere-and-any-openai-compatible-endpoint)):
+and no module of its own, only `llm4s-openai-compatible` (see the [installation guide](../getting-started/installation#for-deepseek-zai-openrouter-mistral-cohere-and-any-openai-compatible-endpoint)):
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
@@ -865,7 +809,7 @@ Each named section is one endpoint, so several can sit side by side. The
 | `apiKey` | no | Sent as `Authorization: Bearer <key>`; with none, no `Authorization` header is sent |
 | `contextWindow` | no | The model's context window; overrides the model registry. With none, the registry's window for `model` when it has one of at least 8192 (see [where the context window comes from](#where-the-context-window-comes-from)), else 8192, which is deliberately small |
 | `reserveCompletion` | no | Tokens held back for the reply. Default 2048, or a quarter of a smaller window |
-| `registryProvider` | no | The [model registry](../MODEL_METADATA.md) provider whose entry for `model` gives the context window when `contextWindow` is not set: `groq`, `together_ai`, `fireworks_ai`, `xai`, `perplexity`, ... Inferred from the `baseUrl` host for those five hosted APIs; naming one here switches the inference off |
+| `registryProvider` | no | The [model registry](../reference/model-metadata) provider whose entry for `model` gives the context window when `contextWindow` is not set: `groq`, `together_ai`, `fireworks_ai`, `xai`, `perplexity`, ... Inferred from the `baseUrl` host for those five hosted APIs; naming one here switches the inference off |
 | `headers` | no | Extra headers sent on every request; values are redacted when the config is printed |
 | `streamUsage` | no | Whether a streaming request asks for token usage with `stream_options.include_usage`. Default `true`; set `false` for an endpoint that rejects the field (see [streamed token usage](#what-the-generic-path-does-and-does-not-do)) |
 
@@ -881,7 +825,7 @@ The generic provider cannot ask an arbitrary endpoint how large the model's wind
 the first of these that has an answer:
 
 1. the section's `contextWindow`;
-2. the [model registry](../MODEL_METADATA.md)'s entry for `model` under the `registryProvider` the section names;
+2. the [model registry](../reference/model-metadata)'s entry for `model` under the `registryProvider` the section names;
 3. when the section names none, the registry's entry under the provider inferred from the `baseUrl` host, for
    exactly these hosts: `api.groq.com` (`groq`), `api.together.xyz` and `api.together.ai` (`together_ai`),
    `api.fireworks.ai` (`fireworks_ai`), `api.x.ai` (`xai`) and `api.perplexity.ai` (`perplexity`);
@@ -1016,9 +960,10 @@ or, building the config in code, with
 `OpenAICompatibleConfig.fromValues(..., streamUsage = false)`.
 
 A non-streaming request fails with a timeout after **two minutes** without a response, and a
-streaming one after five minutes without one. Both are fixed for now; configurable timeouts are
-[#712](https://github.com/llm4s/llm4s/issues/712). A slow local model answering a long prompt
-can take longer than two minutes: stream it instead.
+streaming one after five minutes without one. Those are the defaults: set `timeouts.request` and
+`timeouts.stream` on the section to change them ([Timeouts](../getting-started/configuration#timeouts)).
+A slow local model answering a long prompt can take longer than two minutes: raise `timeouts.request`, or
+stream it.
 
 What it does **not** do:
 
@@ -1485,15 +1430,12 @@ The sources for the values above:
 
 ## Mistral
 
-From the release after `0.4.1`, Mistral ships in `llm4s-openai-compatible`: Mistral's API is
+Mistral ships in `llm4s-openai-compatible`: Mistral's API is
 the OpenAI `/v1/chat/completions` format, so it runs on the shared client with a small dialect.
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
 ```
-
-In `0.4.1` and earlier it is part of `llm4s-core`, and does not stream
-([#925](https://github.com/llm4s/llm4s/issues/925)).
 
 ### Setup
 
@@ -1538,16 +1480,13 @@ Chat, **streaming** (text, tool calls and token usage), **tool calling**, struct
 
 ## Cohere
 
-From the release after `0.4.1`, Cohere ships in `llm4s-openai-compatible` and calls Cohere's
+Cohere chat ships in `llm4s-openai-compatible` and calls Cohere's
 [OpenAI-compatibility API](https://docs.cohere.com/docs/compatibility-api)
 (`https://api.cohere.ai/compatibility/v1`) rather than its native v2 `/v2/chat`:
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
 ```
-
-In `0.4.1` and earlier it is part of `llm4s-core`, calls `/v2/chat`, sends text only and does
-not stream ([#925](https://github.com/llm4s/llm4s/issues/925)).
 
 ### Setup
 
@@ -1577,7 +1516,7 @@ llm4s {
 }
 ```
 
-A `baseUrl` naming Cohere's native API root, as configs written for `0.4.1` do
+A `baseUrl` naming Cohere's native API root
 (`https://api.cohere.com`, with or without `/v1` or `/v2`), is mapped to
 `<root>/compatibility/v1` and logged; a proxy root is treated the same way. A `baseUrl` already
 ending in `/compatibility/v1` is used as it is.
@@ -1677,15 +1616,13 @@ structured output, model listing (`/v1/models`) and exchange logging.
 
 ## Ollama (Local Models)
 
-From the release after `0.4.1`, Ollama support - chat and embeddings - ships in its own
-artifact, alongside `llm4s-core`:
+Ollama support - chat and embeddings - is the `llm4s-ollama` artifact, next to `llm4s-core`:
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-ollama" % llm4sVersion
 ```
 
-In `0.4.1` and earlier it is part of `llm4s-core`. See the
-[installation guide](../getting-started/installation#for-ollama-local-models).
+See the [installation guide](../getting-started/installation#for-ollama-local-models).
 
 ### Setup
 
@@ -1745,25 +1682,9 @@ The reply's `message.thinking` is the completion's thinking.
 
 ### Available Models
 
-100+ models available:
-
-- **Small:** `phi`, `neural-chat` (~4GB)
-- **Medium:** `mistral`, `llama2` (~13GB)
-- **Large:** `llama2-70b` (~40GB)
-- **Specialized:** `neural-chat`, `orca`, `wizard-math`
-
-Run `ollama list` to see installed models.
-
-### Costs
-
-Free! Just compute (CPU or GPU needed).
-
-### Tips
-
-- Perfect for development and testing
-- Works offline (no internet needed)
-- Use GPU for faster inference
-- Ideal for sensitive data (runs locally)
+Any model in the [Ollama library](https://ollama.com/library) you have pulled, such as `llama3`, `llama3.1` or
+`mistral` for chat and `nomic-embed-text` for embeddings: `ollama pull llama3` first, and `ollama list` shows what is
+installed. Nothing leaves the machine, and there is no per-token cost.
 
 ---
 
@@ -2207,39 +2128,31 @@ place. Defaults when `baseUrl` is omitted:
 | `openrouter` | `https://openrouter.ai/api/v1` |
 | `zai` | `https://api.z.ai/api/paas/v4` |
 | `requesty` | `https://router.requesty.ai/v1` |
+| `xai` | `https://api.x.ai/v1` |
+| `perplexity` | `https://api.perplexity.ai` |
+| `watsonx` | `https://us-south.ml.cloud.ibm.com` |
 | `ollama` | `http://localhost:11434` |
 | `openai-compatible` | none - required |
 
+Azure OpenAI takes its resource's `endpoint`, Vertex AI an endpoint for its `location`, and Bedrock one for its
+`region`; Jlama runs in the JVM and has no URL.
+
 ---
 
-## Provider Comparison Table
+## Choosing a provider
 
-| Feature | OpenAI | Anthropic | Gemini | Azure | DeepSeek | Cohere | Ollama | OpenAI-compatible |
-|---------|--------|-----------|--------|-------|----------|--------|--------|-------------------|
-| **Setup Difficulty** | Easy | Easy | Easy | Hard | Easy | Easy | Medium | Easy |
-| **API Key Required** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | Hosted ✅, local ❌ |
-| **Free Tier** | Limited | Limited | ✅ Generous | ❌ | Limited | Limited | ✅ | Endpoint-specific |
-| **Local Option** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ vLLM, LM Studio, llama.cpp |
-| **Context Window** | 128K | 200K | 1M | 128K | 4K-32K | 8K | Model-specific | Set in config (default 8K) |
-| **Vision Support** | ✅ | ✅ | ✅ | ✅ | ⚠️ Limited | ❌ | Model-specific | ❌ Text only |
-| **Function Calling** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ If the model supports it | ✅ If the endpoint supports it |
-| **Reasoning Models** | ✅ o1 | ❌ | ❌ | ✅ (via OpenAI) | ✅ deepseek-reasoner | ❌ | ❌ | ⚠️ Run, but reasoning not configured or read |
-| **Enterprise Support** | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | N/A | Endpoint-specific |
-| **Cost (Budget)** | Medium | Medium | 🏆 Low | High | 🏆 Very Low | Low | Free | Endpoint-specific |
-| **Speed** | Fast | Medium | 🏆 Very Fast | Medium | Fast | Medium | Varies | Endpoint-specific |
-| **Reliability** | 🏆 Enterprise | 🏆 Enterprise | Good | 🏆 Enterprise | Good | Good | Local | Endpoint-specific |
+What each provider supports with LLM4S - chat, streaming, tool calling, vision, embeddings, workload identity - is in
+the [compatibility matrix](../reference/compatibility-matrix), generated from the provider modules' code. Some
+starting points:
 
-### Which Provider Should I Use?
-
-- **Getting started?** → Try **Gemini** (free tier) or **Ollama** (local)
-- **Production API?** → **OpenAI** (most stable) or **Anthropic** (best reasoning)
-- **Cost-conscious?** → **DeepSeek** or **Ollama**
-- **Enterprise?** → **Azure OpenAI** or **Anthropic**
-- **Private data?** → **Ollama** (runs locally)
-- **xAI (Grok)?** → [**xAI**](#xai-grok)
-- **Groq, Together, Fireworks, NVIDIA NIM, or a local vLLM, LM Studio or llama.cpp server?** → the generic [**OpenAI-compatible**](#openai-compatible-endpoints) provider
-- **Reasoning tasks?** → **Anthropic Claude** or **DeepSeek reasoner**
-- **Vision/multimodal?** → **OpenAI GPT-4o** or **Anthropic Claude**
+- **No key, nothing leaves the machine** → [Ollama](#ollama-local-models), or [Jlama](#jlama-in-process) inside the JVM
+- **A free tier to start with** → [Gemini](#google-gemini)
+- **Your cloud account's governance and billing** → [Azure OpenAI](#azure-openai), [Vertex AI](#google-vertex-ai),
+  [Bedrock](#aws-bedrock-with-iam-roles) or [watsonx.ai](#ibm-watsonxai)
+- **Many vendors' models behind one key** → [OpenRouter](#openrouter-and-zai) or Requesty
+- **Web-search answers with citations** → [Perplexity](#perplexity)
+- **Groq, Together, Fireworks, NVIDIA NIM, or a local vLLM, LM Studio or llama.cpp server** → the generic
+  [OpenAI-compatible](#openai-compatible-endpoints) provider
 
 ---
 

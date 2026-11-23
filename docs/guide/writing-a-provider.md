@@ -731,7 +731,7 @@ object AcmeEmbeddings extends EmbeddingProviderDescriptor:
 (local Ollama). Override `buildConfig(section, modelOverride)` only when the config cannot be
 expressed with the spec.
 
-## Testing: `Llm4s<Name>ModuleSpec`
+## Testing: `Llm4s<Name>ModuleSpec` {#testing}
 
 Every provider module in this repository proves its registration in one spec, and yours should
 too - it replaces the exhaustivity check the compiler gave when providers were a closed `enum`.
