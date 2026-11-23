@@ -113,7 +113,7 @@ class GeminiModelListerSpec extends AnyFunSuite with Matchers:
   }
 
   test("the registered Gemini provider exposes its model lister") {
-    ProviderRegistry.default.get(ProviderId("gemini")) match
+    ProviderRegistry.default.resolve(ProviderId("gemini")) match
       case Right(descriptor) => descriptor.modelLister shouldBe Some(GeminiModelLister)
       case Left(err)         => fail(s"Expected the Gemini provider to be registered, got error: ${err.message}")
   }

@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking changes
 
 - `EmbeddingCache` has no type parameter, returns `Result`s and has an optional `stats`; `InMemoryEmbeddingCache.create` (a `java.time.Clock`, checked arguments) replaces its constructors; `CacheStats` computes `totalRequests` and `hitRatePercent`; `CacheEntry` is internal; `CachedEmbeddingClient`'s `cacheStats` is an `Option` and `clearCache` a `Result` ([#2803](https://github.com/llm4s/llm4s/issues/2803)); [migration](docs/reference/migration.md#the-caching-types-report-failure-and-tool-loops-bypass-the-cache-2803).
+- `TokenWindow.trimToBudget` (and so `ContextManager`) returns a `ContextError` when the pinned system and digest messages, or they and the newest turn, do not fit, where it returned an empty or digest-only conversation; with no `ArtifactStore`, `DeterministicCompressor` and `ContextManager` no longer externalize ([#2817](https://github.com/llm4s/llm4s/issues/2817)); [migration](docs/reference/migration.md#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817).
+- `StreamingAccumulator.create()` is `StreamingAccumulator(model)`; `updateTokens`, `updateTokensWithThinking` and
+  `addThinkingDelta` are removed for `updateUsage`; `SSEEvent.retry` is a `FiniteDuration`; `SSEParser.parseStream` and
+  `getEvents` are removed; [migration](docs/reference/migration.md#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813).
+- `ProviderRegistry.get` is removed: use `resolve`, which with `find`, `findEmbedding` and `resolveEmbedding` now
+  accepts an alias as well as an id;
+  [migration](docs/reference/migration.md#providerregistry-lookups-accept-aliases-2812).
 - 36 `llm4s-agent` case classes (`ContextWindowConfig`, `Handoff`, the `AgentEvents` payloads, `EventRecord`, `GraphSnapshot`, `Command` and others) have a private constructor and `copy`: use `X(...)` and the `with*` setters. `GuardrailResult` is removed, and `MiddlewareStack`, `ToolLoop.results`/`queue` and nine other internal types are no longer public. `AgentStatus.Suspended`, eight `RunEvent` cases, `StreamEvent.Live` and `ToolOutcome.Success` each hold one growth-safe class (`Suspension`, `RunFailedDetails`, `LiveEvent`, `ToolSuccess`, ...) in place of positional fields, and a tool returns `ToolOutcome.success(content)` ([#2781](https://github.com/llm4s/llm4s/issues/2781));
   [migration](docs/reference/migration.md#llm4s-agent-types-are-tiered-and-growth-safe-2778).
 - `CompletionOptions.budgetTokens` and `withBudgetTokens`, and `ReasoningEffort.None`, are removed: use `thinking`
@@ -67,6 +74,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Fixed** `SSEParser`'s streaming parser reads CRLF and CR line endings, where a CRLF stream fed in raw chunks yielded
+  no event until `flush()`, and ends an event only at a blank line, where a chunk ending at a line break split it; a streamed `Completion.model` is the model the client was created for, never `"unknown"`,
+  and `StreamingAccumulator` reports usage only through `updateUsage`, which keeps cache counts [#2813](https://github.com/llm4s/llm4s/issues/2813).
+- **Fixed** `ProviderRegistry`: an id beats an alias, so another provider's alias can no longer make a provider
+  unreachable; alias collisions are reported like id collisions; a descriptor whose `id` or `aliases` throws is
+  recorded instead of aborting `ProviderRegistry.default`; and `discover()` also scans core's own class loader
+  when the context loader is set [#2812](https://github.com/llm4s/llm4s/issues/2812).
 - **Fixed** watsonx, Perplexity and Jlama leaving options out without reporting them: each now puts on
   `Completion.adjustments` what it does not send as asked (`reasoning` and `thinking`; Perplexity and Jlama also the
   penalties, Jlama also `top_p` and `responseFormat`), on `complete` and streams; watsonx's per-process warnings give way to the reports ([RFC 0008](docs/rfcs/0008-generation-controls.md) decision 15) [#2115](https://github.com/llm4s/llm4s/issues/2115).
@@ -116,6 +130,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Core
 
 - **Fixed** `CachingLLMClient` bypasses the cache for a conversation with a tool call or tool result, so a tool loop's next step is no longer served the first step's completion; `CachedEmbeddingClient` is an `EmbeddingProvider`, as `EmbeddingClient` now is, keeps the base response's `usage`, `metadata` and `dim`, and survives a failing `EmbeddingCache`, whose operations return `Result`s ([migration](docs/reference/migration.md#the-caching-types-report-failure-and-tool-loops-bypass-the-cache-2803)) [#2803](https://github.com/llm4s/llm4s/issues/2803).
+- **Fixed** context compression loses no content it cannot give back: without an `ArtifactStore` nothing is externalized (it went to a throwaway store); binary tool output is detected by content, not the word "base64", and stored whole or left; `TokenWindow` pins every leading system and digest message and trims whole tool-call turns; the subjective rules no longer rewrite user messages; `SemanticBlock.getBlockSummary` no longer throws on an empty block [#2817](https://github.com/llm4s/llm4s/issues/2817).
 - **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
   traces too, and on each agent call's `ModelCallCompleted` (an event stored before reads with none, a reason this version cannot read as `Other(raw)`), mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider, in place of `assertStreams`
   ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1, 2, 5 and 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
@@ -133,6 +148,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   moving every digest to the end of the conversation [#2481](https://github.com/llm4s/llm4s/issues/2481).
 - **Fixed** `HistoryCompressor`, `LLMCompressor` and `TokenWindow` recognise a history digest the same way: a `SystemMessage`
   starting with `[HISTORY_SUMMARY]`, so `TokenWindow` no longer pins a message that merely quotes the marker [#2505](https://github.com/llm4s/llm4s/issues/2505).
+- **Fixed** message and conversation validation name the field they reject (`content`, `toolCallId`, `toolMessage`,
+  `conversation`) and give the reason as the violation, where field and reason were swapped [#2796](https://github.com/llm4s/llm4s/issues/2796).
 
 ### Agent runtime
 

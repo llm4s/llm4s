@@ -181,6 +181,11 @@ required fields are present, the API key has fallen back to `llm4s.credentials.<
 `section.extras` holds exactly your declared extra keys, defaults applied. `buildClient` must
 check the config's type rather than cast - `ProviderDescriptor.expectConfig` does that.
 
+`aliases` are other names a section's `provider` may use: `ProviderRegistry.find` and `resolve` accept an
+alias as they accept the id. An id always wins, so an alias equal to another provider's id is ignored, and of
+two providers declaring one alias the later registered keeps it; both cases appear in
+`ProviderRegistry.report.collisions` (kind `chat alias` or `embedding alias`) and in the discovery log.
+
 ### Workload identity
 
 A provider that can authenticate with a workload identity token (a SPIFFE JWT-SVID, say) declares
@@ -595,11 +600,13 @@ for both purposes against a local server, as `VoyageAIInputTypeSpec` does.
 ### Streaming: `SSEParser`, `StreamingAccumulator`, `StreamingToolArgumentParser`
 
 - `SSEParser.createStreamingParser()` returns an incremental parser: `addChunk(text)`, then drain
-  `nextEvent()` / `hasEvents`, and `flush()` at end of stream. Each `SSEEvent` has `data`,
-  `event`, `id` and `retry`. `SSEParser.parseEvent` / `parseStream` handle whole strings.
-- `StreamingAccumulator.create()` folds `StreamedChunk`s into a final `Completion`:
-  `addChunk(chunk)`, `updateTokens(prompt, completion)` (or `updateTokensWithThinking`) when usage
-  arrives, then `toCompletion: Result[Completion]`. It keys tool calls by id, so **every
+  `nextEvent()` / `hasEvents`, and `flush()` at end of stream. Feed it the body as it arrives, in
+  chunks of any size: lines may end in LF, CRLF or CR, split anywhere. Each `SSEEvent` has `data`,
+  `event`, `id` and `retry` (a `FiniteDuration`). `SSEParser.parseEvent` reads one event's lines.
+- `StreamingAccumulator(model)` folds `StreamedChunk`s into a final `Completion` whose `model` is
+  `model`: `addChunk(chunk)`, `updateUsage(usage)` with each `TokenUsage` the stream reports
+  (thinking and cache counts included; a field a later report leaves at zero or `None` keeps its
+  earlier value), then `toCompletion: Result[Completion]`. It keys tool calls by id, so **every
   tool-call chunk must carry its call's id** - if the wire format identifies continuations only
   by index, map index to id yourself; a chunk with an empty id is skipped. It is mutable: one per
   request.
@@ -667,7 +674,7 @@ final class AcmeClient(
     options: CompletionOptions,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
-    completeWithMetrics(...) // postStream + SSEParser + StreamingAccumulator, as Ollama's client does
+    completeWithMetrics(...) // postStream + SSEParser + StreamingAccumulator, as OpenAICompatibleClient does
 
   def getContextWindow(): Int     = config.contextWindow
   def getReserveCompletion(): Int = config.reserveCompletion

@@ -290,19 +290,17 @@ object Doctor {
           .withFix(s"""add provider = "<id>" under $path (registered: ${registry.ids.mkString(", ")})""") ::
           skipped("needs a provider", AfterDefault.drop(1))
       case Some(raw) =>
-        val id = registry.canonicalId(raw)
-        registry.find(id) match {
-          case None =>
-            val message =
-              registry.resolve(id, Some(s"$path.provider")).fold(_.message, _ => s"'$raw' is not registered")
+        val id = ProviderId(raw)
+        registry.resolve(id, Some(s"$path.provider")) match {
+          case Left(error) =>
             DoctorCheck
-              .fail(Module, message)
+              .fail(Module, error.message)
               .withFix(
                 s"add the LLM4S module that supplies '${id.asString}' to your build, or use a registered provider: " +
                   registry.ids.mkString(", ")
               ) :: skipped("needs the provider module", AfterDefault.drop(1))
-          case Some(descriptor) =>
-            moduleFound(id, options) :: keyAndConfigChecks(source, name, section, descriptor, options, ports)
+          case Right(descriptor) =>
+            moduleFound(descriptor.id, options) :: keyAndConfigChecks(source, name, section, descriptor, options, ports)
         }
     }
   }
