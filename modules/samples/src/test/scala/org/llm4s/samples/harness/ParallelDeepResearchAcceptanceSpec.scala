@@ -340,7 +340,7 @@ class ParallelDeepResearchAcceptanceSpec
 
     val first = process.agent.run(thread, ParallelResearchModel.ApprovalQuery, config).value
     val suspended = first.status match {
-      case s: AgentStatus.Suspended => s
+      case AgentStatus.Suspended(s) => s
       case other                    => fail(s"expected the lead suspended, got $other")
     }
     // one delegated approval: the researcher's fetch, asked by the lead's rule, nothing fetched yet

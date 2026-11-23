@@ -29,7 +29,7 @@ class IdempotencyKeySuspendSpec extends AnyFlatSpec with Matchers {
     val seen = new ConcurrentHashMap[String, Vector[IdempotencyKey]]()
     val deploy = SpecTools.tool("deploy") { (a, context: ToolContext) =>
       seen.merge(a.text, Vector(context.idempotencyKey), _ ++ _)
-      ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
     }
     def byText: Map[String, Vector[IdempotencyKey]] = seen.asScala.toMap
   }
@@ -52,8 +52,8 @@ class IdempotencyKeySuspendSpec extends AnyFlatSpec with Matchers {
     built(configure(builder(twoCalls("done"), keys))).run(thread, "deploy both").value.answer shouldBe Some("done")
     keys.byText
 
-  private def suspended(result: AgentResult): AgentStatus.Suspended = result.status match {
-    case s: AgentStatus.Suspended => s
+  private def suspended(result: AgentResult): Suspension = result.status match {
+    case AgentStatus.Suspended(s) => s
     case other                    => fail(s"expected Suspended, got $other")
   }
 

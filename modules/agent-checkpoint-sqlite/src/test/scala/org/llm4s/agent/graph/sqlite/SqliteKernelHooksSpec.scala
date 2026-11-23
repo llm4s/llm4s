@@ -39,7 +39,7 @@ class SqliteKernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues 
     writes = Set(files)
   ) { (args, context) =>
     val current = context.state.get(files).getOrElse(Map.empty)
-    ToolOutcome.Success(
+    ToolOutcome.success(
       ToolContent.Json(ujson.Str("ok")),
       StateUpdate.update(files, current + (args.text -> args.text))
     )

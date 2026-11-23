@@ -132,7 +132,7 @@ object DeepResearch {
         ).withResources(args => Vector(ToolResource(Operation.Network, args.url)))
       ) { (args, _) =>
         pages(args.url) match {
-          case Some(text) => ToolOutcome.Success(ToolContent.Parts(Vector(ContentPart.Text(text), figure)))
+          case Some(text) => ToolOutcome.success(ToolContent.Parts(Vector(ContentPart.Text(text), figure)))
           case None       => ToolOutcome.Error(s"no page at ${args.url}")
         }
       }

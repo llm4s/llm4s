@@ -71,7 +71,7 @@ private object LiveWorkspace {
       AgentToolSpec[Go]("go", "go", Schema.`object`[Go]("go").withRequiredField("x", Schema.string("x")))
     ) { (_, context) =>
       out.set(body(FileContext(context)))
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("ok")))
     }
     val client =
       ScriptedLLMClient.sequence(Reply.toolCalls(ToolCall("c", "go", ujson.Obj("x" -> ""))), Reply.text("done"))

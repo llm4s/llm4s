@@ -157,12 +157,12 @@ private[llm4s] object FacadeInternals {
    * unmodifiable `java.util.List`.
    */
   def pending(status: AgentStatus): java.util.List[PendingInterrupt] = status match {
-    case AgentStatus.Suspended(approvals, questions, asked, breakpoints, delegated) =>
-      val all = approvals.map((id, request) => approval(id, request)) ++
-        questions.map((id, request) => question(id, request)) ++
-        asked.map((id, request) => middlewareQuestion(id, request)) ++
-        breakpoints.map((id, request) => breakpoint(id, request)) ++
-        delegated.map((id, request) => delegatedInterrupt(id, request))
+    case AgentStatus.Suspended(suspension) =>
+      val all = suspension.approvals.map((id, request) => approval(id, request)) ++
+        suspension.questions.map((id, request) => question(id, request)) ++
+        suspension.middlewareQuestions.map((id, request) => middlewareQuestion(id, request)) ++
+        suspension.breakpoints.map((id, request) => breakpoint(id, request)) ++
+        suspension.delegated.map((id, request) => delegatedInterrupt(id, request))
       java.util.List.copyOf(all.asJava)
     case _ => none
   }

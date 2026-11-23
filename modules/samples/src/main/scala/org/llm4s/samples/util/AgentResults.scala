@@ -17,9 +17,9 @@ object AgentResults {
     case AgentStatus.Blocked(guardrail, why) => s"blocked by guardrail $guardrail: $why"
     case AgentStatus.StepLimitReached        => "stopped at the step limit before reaching an answer"
     case AgentStatus.TokenLimitReached       => "stopped at the token budget before reaching an answer"
-    case AgentStatus.Suspended(approvals, qs, asked, held, delegated) =>
-      s"suspended with ${approvals.size} pending approval(s), ${qs.size + asked.size} pending question(s), " +
-        s"${held.size} breakpoint(s) and ${delegated.size} subagent interrupt(s)"
+    case AgentStatus.Suspended(suspension) =>
+      s"suspended with ${suspension.approvals.size} pending approval(s), ${suspension.questions.size + suspension.middlewareQuestions.size} pending question(s), " +
+        s"${suspension.breakpoints.size} breakpoint(s) and ${suspension.delegated.size} subagent interrupt(s)"
   }
 
   /** The answer when the run completed, otherwise a description of its status. */

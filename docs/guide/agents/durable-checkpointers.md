@@ -234,7 +234,7 @@ is free:
 - Until the loss is noticed, such a run's live progress events (`StreamEvent.Live`, which are never stored) still
   reach the subscribers of its own runtime; from then on its tasks send none, even a task that ignores the interrupt
   and outlives the run. Its durable events are refused or dropped with its commits. A live event carries its run's
-  claim token (`StreamEvent.Live.token`), so a subscription that has been handed a newer claim's commit drops an
+  claim token (`LiveEvent.token`), so a subscription that has been handed a newer claim's commit drops an
   older claim's progress, and a run's observer and its run-scoped streams never deliver another claim's, even under
   the same `RunId`.
 - A `ClaimLost` run's own event stream - `AgentRun.subscribe`, `Agent.stream`, its observer and its tracing - ends
@@ -1066,7 +1066,7 @@ its own tenant, also across a reopen), and two or more `GraphRuntime`s contendin
 store - a live run refused elsewhere, renewal, takeover after expiry without re-running completed tasks, a stale
 run's commits refused, only one of several runtimes admitted to recover a thread, `updateState` and `fork` fenced
 against a live run, a blocked turn leaving nothing in the history, and another tenant's claim on a thread never
-revealing its run to the thread's tenant through `ThreadBusy`, `RunRecovered.takenOverFrom` or `ClaimLost`. It also checks change notification:
+revealing its run to the thread's tenant through `ThreadBusy`, `RunRecoveredDetails.takenOverFrom` or `ClaimLost`. It also checks change notification:
 `awaitEventsAfter` itself, and subscriptions in one runtime that receive another runtime's commits in order, mid-run,
 across a restart, and only until they are cancelled or the thread is deleted. `InMemoryCheckpointer` passes it.
 

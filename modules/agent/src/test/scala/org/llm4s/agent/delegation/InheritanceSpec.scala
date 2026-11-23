@@ -69,7 +69,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val threads = new AtomicReference[String]("")
     val shared = AgentTool(SpecText.spec("shared")) { (_, ctx) =>
       threads.set(ctx.run.position.threadId.value)
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("ran")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("ran")))
     }
     val client = RoutingClient(delegatingOnce.orElse {
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
@@ -101,7 +101,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val ran = new AtomicInteger(0)
     val shared = AgentTool(SpecText.spec("shared")) { (_, _) =>
       ran.incrementAndGet()
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("ran")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("ran")))
     }
     // the parent's validator refuses one value the default accepts
     val strict = new org.llm4s.agent.graph.tool.ToolArgumentValidator {
@@ -128,7 +128,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val ownRan = new AtomicInteger(0)
     val own = AgentTool(SpecText.spec("own")) { (_, _) =>
       ownRan.incrementAndGet()
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("own ran")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("own ran")))
     }
     val result = lead(client)
       .withTools(ToolSet.of(strict, shared).value)
@@ -152,7 +152,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
       val id: MiddlewareId = MiddlewareId("contributing")
       override val tools: Vector[AgentTool[?]] = Vector(AgentTool(SpecText.spec("mtool")) { (_, _) =>
         ran.incrementAndGet()
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("ran")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("ran")))
       })
     }
     val strict = new org.llm4s.agent.graph.tool.ToolArgumentValidator {
@@ -217,7 +217,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val ran = new AtomicInteger(0)
     val tool = AgentTool(SpecText.spec("child_tool")) { (_, _) =>
       ran.incrementAndGet()
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("ran")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("ran")))
     }
     val client = RoutingClient(delegatingOnce.orElse {
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
@@ -247,7 +247,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val ran = new AtomicInteger(0)
     val tool = AgentTool(SpecText.spec("child_tool")) { (_, _) =>
       ran.incrementAndGet()
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("ran")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("ran")))
     }
     val client = RoutingClient(delegatingOnce.orElse {
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
@@ -277,7 +277,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val ran = new AtomicInteger(0)
     val tool = AgentTool(SpecText.spec("child_tool")) { (_, _) =>
       ran.incrementAndGet()
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("ran")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("ran")))
     }
     val client = RoutingClient(delegatingOnce.orElse {
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
@@ -303,7 +303,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
 
     ran.get shouldBe 0
     val suspended = first.status match {
-      case s: AgentStatus.Suspended => s
+      case AgentStatus.Suspended(s) => s
       case other                    => fail(s"expected Suspended, got $other")
     }
     val (id, request) = suspended.delegated.loneElement
@@ -419,7 +419,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val seen = new AtomicReference[(Int, Option[Instant])]((0, None))
     val peek = AgentTool(SpecText.spec("peek")) { (_, ctx) =>
       seen.set(ctx.run.config.budgets.maxConcurrency -> ctx.run.deadline)
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("peeked")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("peeked")))
     }
     def run(grant: TaskBudget): (Int, Option[Instant]) = {
       val client = RoutingClient(delegatingOnce.orElse {
@@ -571,7 +571,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val probe = AgentTool(SpecText.spec("probe")) { (_, ctx) =>
       seen.set(ctx.run.config.budgets.maxConcurrency)
       if (fails.getAndSet(false)) ToolOutcome.Fatal(ProcessingError("probe", "probe failed"))
-      else ToolOutcome.Success(ToolContent.Json(ujson.Str("probed")))
+      else ToolOutcome.success(ToolContent.Json(ujson.Str("probed")))
     }
     val client = RoutingClient(delegatingOnce.orElse {
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
@@ -689,7 +689,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
   private def askingFamily(client: RoutingClient, ran: AtomicInteger, grant: TaskBudget, runtime: GraphRuntime) = {
     val probe = AgentTool(SpecText.spec("probe")) { (_, _) =>
       ran.incrementAndGet()
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("probed")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("probed")))
     }
     lead(client)
       .withRuntime(runtime)
@@ -704,7 +704,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
   }
 
   private def delegatedId(result: org.llm4s.agent.AgentResult) = result.status match {
-    case s: AgentStatus.Suspended => s.delegated.loneElement._1
+    case AgentStatus.Suspended(s) => s.delegated.loneElement._1
     case other                    => fail(s"expected Suspended, got $other")
   }
 
@@ -774,7 +774,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val seen = new java.util.concurrent.CopyOnWriteArrayList[Int]()
     val probe = AgentTool(SpecText.spec("probe")) { (_, ctx) =>
       seen.add(ctx.run.config.budgets.maxConcurrency)
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("probed")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("probed")))
     }
     val client = RoutingClient(delegatingOnce.orElse(looping("probe")))
     val agent = lead(client)
@@ -1112,7 +1112,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     val seen = new AtomicReference[Option[Int]](None)
     val peek = AgentTool(SpecText.spec("peek")) { (_, ctx) =>
       seen.set(ctx.run.remainingSteps)
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("peeked")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("peeked")))
     }
     val client = RoutingClient {
       case Lead(messages) if toolResults(messages).isEmpty =>
@@ -1225,7 +1225,7 @@ object InheritanceSpec {
   def failingOnce(name: String, fails: AtomicBoolean): AgentTool[SpecText] =
     AgentTool(SpecText.spec(name)) { (_, _) =>
       if (fails.getAndSet(false)) ToolOutcome.Fatal(ProcessingError(name, s"$name failed"))
-      else ToolOutcome.Success(ToolContent.Json(ujson.Str("probed")))
+      else ToolOutcome.success(ToolContent.Json(ujson.Str("probed")))
     }
 
   /** Records the agent of each `AgentRunEnded`. */

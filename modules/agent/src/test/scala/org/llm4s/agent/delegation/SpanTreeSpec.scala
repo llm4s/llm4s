@@ -110,7 +110,7 @@ class SpanTreeSpec
   it should "give a call id the provider reuses in a later request a span of its own" in {
     val tracing = new Recording
     val calls   = new AtomicInteger(0)
-    val probe   = AgentTool(SpecText.spec("probe"))((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("ok"))))
+    val probe   = AgentTool(SpecText.spec("probe"))((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("ok"))))
     val client = RoutingClient { case Lead(_) =>
       calls.incrementAndGet() match
         case 1 => Right(calling(call("same", "probe", ujson.Obj("text" -> "a"))))
@@ -322,7 +322,7 @@ class SpanTreeSpec
           case 2 => Left(ProcessingError("provider", "the provider is down"))
           case _ => Right(CompletionFixture.simple("""{"summary":"recovered","sources":1}"""))
     }
-    val probe = AgentTool(SpecText.spec("probe"))((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("probed"))))
+    val probe = AgentTool(SpecText.spec("probe"))((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("probed"))))
     val agent = lead(client)
       .withTracing(tracing)
       .withSubagents(researcher.withTools(ToolSet.of(probe).value).withFailure(ChildFailure.Fail))

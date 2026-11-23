@@ -1,6 +1,6 @@
 package org.llm4s.agent.delegation
 
-import org.llm4s.agent.{ AgentId, AgentResult, AgentStatus, CompletionFixture }
+import org.llm4s.agent.{ Suspension, AgentId, AgentResult, AgentStatus, CompletionFixture }
 import org.llm4s.agent.graph.{
   BreakpointPhase,
   CheckpointStatus,
@@ -82,7 +82,7 @@ class DelegatedSuspensionSpec extends AnyFlatSpec with Matchers with EitherValue
     val client = approvingClient()
     val tool = AgentTool(SpecText.spec("probe")) { (args, _) =>
       seen.add(args.text)
-      ToolOutcome.Success(ToolContent.Json(ujson.Str(s"probed ${args.text}")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str(s"probed ${args.text}")))
     }
     val agent = lead(client).withSubagents(asking(tool)).build().value
     val first = agent.run(ThreadId("t1"), "go").value
@@ -334,7 +334,7 @@ object DelegatedSuspensionSpec extends EitherValues {
   def probe(runs: AtomicInteger): AgentTool[SpecText] =
     AgentTool(SpecText.spec("probe")) { (_, _) =>
       val n = runs.incrementAndGet()
-      ToolOutcome.Success(ToolContent.Json(ujson.Str(if n == 1 then "probed once" else s"probed $n times")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str(if n == 1 then "probed once" else s"probed $n times")))
     }
 
   /** The lead delegates one task; the researcher calls `probe` once, then reports what it saw. */
@@ -349,8 +349,8 @@ object DelegatedSuspensionSpec extends EitherValues {
       Right(CompletionFixture.simple(s"""{"summary":"$seen","sources":1}"""))
   }
 
-  def suspendedOf(result: AgentResult): AgentStatus.Suspended = result.status match {
-    case s: AgentStatus.Suspended => s
+  def suspendedOf(result: AgentResult): Suspension = result.status match {
+    case AgentStatus.Suspended(s) => s
     case other                    => throw new AssertionError(s"expected Suspended, got $other")
   }
 
@@ -361,7 +361,7 @@ object DelegatedSuspensionSpec extends EitherValues {
   final class Convert extends AgentTool.Asking[SpecText, Unit_, Choice](SpecText.spec("convert")) {
     def execute(args: SpecText, context: ToolContext): ToolOutcome = ask(Unit_("which unit?"))
     def resume(args: SpecText, question: Unit_, answer: Choice, context: ToolContext): ToolOutcome =
-      ToolOutcome.Success(ToolContent.Json(ujson.Str(s"${args.text} ${answer.unit}")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str(s"${args.text} ${answer.unit}")))
   }
 
   /** Fails the parent's task call once it has resumed its child: the parent stops before the call commits. */

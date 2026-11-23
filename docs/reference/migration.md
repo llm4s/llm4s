@@ -133,6 +133,52 @@ config.withMaxTokens(8000).withMinRecentTurns(2)
 records.map(_.event).collect { case f: RunEvent.RunFailed => f }
 ```
 
+**Enum cases that hold a growth-safe class (#2781).** An enum case with fields is a case class too, so one that
+may gain a field now holds a single growth-safe class and is read through it by name. `sbt stabilityTierCheck` fails
+for an enum case with fields, in any frozen module, that is neither such a wrapper nor listed as closed.
+
+| Case | Was | Now |
+|---|---|---|
+| `AgentStatus.Suspended` | `(approvals, questions, middlewareQuestions, breakpoints, delegated)` | `(suspension: Suspension)` |
+| `RunEvent.RunStarted` | `(tenantId, principal)` | `(details: RunStartedDetails)` |
+| `RunEvent.RunRecovered` | `(fromCheckpoint, tenantId, principal, takenOverFrom)` | `(details: RunRecoveredDetails)` |
+| `RunEvent.RunResumed` | `(answered, tenantId, principal)` | `(details: RunResumedDetails)` |
+| `RunEvent.RunFailed` | `(message, usage, steps)` | `(details: RunFailedDetails)` |
+| `RunEvent.RunCancelled`, `RunTimedOut` | `(usage, steps)` | `(details: RunStoppedDetails)` |
+| `RunEvent.StateUpdated` | `(fromCheckpoint, asNode, tenantId, principal)` | `(details: StateUpdatedDetails)` |
+| `RunEvent.ThreadForked` | `(fromThread, fromCheckpoint, tenantId, principal)` | `(details: ThreadForkedDetails)` |
+| `StreamEvent.Live` | `(threadId, runId, token, taskId, nodeId, name, version, payload)` | `(event: LiveEvent)` |
+| `ToolOutcome.Success` | `(content, update)` | `(result: ToolSuccess)`, built with `ToolOutcome.success(content, update)` |
+
+The field names are unchanged, one level down. A stored event log is unchanged too: a `RunEvent` is still written
+flat, its fields beside its `$type`, and every log already written reads. The other cases of these enums, and the
+cases with fields of the other `@Stable` enums (`RunResult`, `NodeResult`, `Route`, `ThinkingBlock`, ...), are closed
+and keep their shape.
+
+```scala
+// before
+status match
+  case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.map((id, _) => result.approve(id))
+events.collect { case RunEvent.RunFailed(message, _, _) => message }
+events.collect { case StreamEvent.Live(_, _, _, _, _, name, _, payload) => name -> payload }
+AgentTool(spec)((args, context) => ToolOutcome.Success(ToolContent.Json(ujson.Str("done"))))
+next() match
+  case ToolOutcome.Success(content, update) => ToolOutcome.Success(redact(content), update)
+// after
+status match
+  case AgentStatus.Suspended(suspension) => suspension.approvals.map((id, _) => result.approve(id))
+events.collect { case RunEvent.RunFailed(details) => details.message }
+events.collect { case StreamEvent.Live(live) => live.name -> live.payload }
+AgentTool(spec)((args, context) => ToolOutcome.success(ToolContent.Json(ujson.Str("done"))))
+next() match
+  case ToolOutcome.Success(result) => ToolOutcome.Success(result.withContent(redact(result.content)))
+```
+
+There is no Scalafix rewrite for these patterns: `PositionalPatternsGainFields` no longer pads
+`AgentStatus.Suspended` or the `RunEvent` cases, so the compiler reports each pattern to rewrite. From Java and
+Kotlin, `ToolOutcome.Success.apply(content, update)` becomes `ToolOutcome.success(content, update)`; `JAgentResult`
+is unchanged.
+
 **No longer public.** None was used outside `llm4s-agent`:
 
 | Was | Now |
@@ -148,7 +194,7 @@ records.map(_.event).collect { case f: RunEvent.RunFailed => f }
 `OutputFormat` and core's `ToolHints` (the tool contract); `EffectKey`, `EffectRecord`, `RunOrigin`, `RunOutcome`,
 `ChildThread`, `ThreadStatus`, `ThreadMetadata`, `ThreadCursor`, `ThreadQuery`, `ThreadSummary`, `ThreadPage`,
 `SweepPolicy`, `SweepGuard`, `SweepPage` (the `Checkpointer` contract); `ChildRef`, `ChildInterrupt`,
-`DelegatedRequest` (`AgentStatus.Suspended.delegated`, `StreamEvent.Nested`). `@Experimental` members of Stable
+`DelegatedRequest` (`Suspension.delegated`, `StreamEvent.Nested`). `@Experimental` members of Stable
 types: `AgentBuilder.withHarness`, `withSubagents`, `withDelegation`, `Agent.delegation`, and
 `InMemoryCheckpointer.runQueue`. The RAG
 guardrails (`org.llm4s.agent.guardrails.rag`) are `@Experimental`: an agent gives them the turn's `RAGContext` only
@@ -710,12 +756,12 @@ In 0.5.1. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/issues/1913)
   ```
 
   The two are no longer case classes and have no extractor, so every positional pattern is a compile error: an extractor of the parts would have kept `s"$content"` compiling and printing the parts, and one of the text would have kept a client compiling that drops media. `msg.copy(content = ...)` becomes `msg.withParts(...)`.
-- **`ToolOutcome.Success(content: ToolContent, update)`**, with `ToolContent.Json(value)` for the JSON result a tool returned before and `ToolContent.Parts(parts)` for images and documents:
+- **`ToolOutcome.success(content: ToolContent, update)`**, with `ToolContent.Json(value)` for the JSON result a tool returned before and `ToolContent.Parts(parts)` for images and documents:
 
   ```scala
   ToolOutcome.Success(ujson.Str("done"))                    // before
-  ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))  // after
-  ToolOutcome.Success(ToolContent.Parts(Vector(ContentPart.Text("The chart:"), chart)))
+  ToolOutcome.success(ToolContent.Json(ujson.Str("done")))  // after
+  ToolOutcome.success(ToolContent.Parts(Vector(ContentPart.Text("The chart:"), chart)))
   ```
 
   `Parts` with no content, or with more than `ContentPart.MaxInlineBytes` of inline bytes in total, is the call's error result.
@@ -2423,7 +2469,7 @@ Experimental, so these are source breaks with no shims. Design:
   final case class SearchArgs(query: String) derives ReadWriter
   val schema = Schema.`object`[SearchArgs]("Search arguments").withRequiredField("query", Schema.string("Query"))
   val spec   = AgentToolSpec[SearchArgs]("search", "Search the index", schema)
-  val search = AgentTool(spec)((args, context) => ToolOutcome.Success(ToolContent.Json(ujson.Str(run(args.query)))))
+  val search = AgentTool(spec)((args, context) => ToolOutcome.success(ToolContent.Json(ujson.Str(run(args.query)))))
   ```
 
   `LoopTool.fromToolFunction(f)` becomes `AgentTool.fromToolFunction(f)`; its arguments are now

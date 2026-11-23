@@ -112,7 +112,7 @@ object ExecuteTool:
           .execute(args.command, workdir, timeout, FileContext(context))
           .fold(
             BackendRefused.toolOutcome,
-            r => ToolOutcome.Success(ToolContent.Json(ujson.Str(render(r, backend.maxOutputBytes))))
+            r => ToolOutcome.success(ToolContent.Json(ujson.Str(render(r, backend.maxOutputBytes))))
           )
 
   /** The result as the model reads it. */

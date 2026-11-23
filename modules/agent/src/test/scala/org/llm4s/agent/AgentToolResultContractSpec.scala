@@ -254,7 +254,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
 
     s"[$name] A parallel batch" should "answer success, error, throw, unknown tool and invalid arguments, one result each" in {
       val keys = new Keys
-      val ok   = tool("ok", keys)((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("fine"))))
+      val ok   = tool("ok", keys)((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("fine"))))
       val err  = tool("err", keys)((_, _) => ToolOutcome.Error("broken"))
       val boom = tool("boom", keys)((_, _) => throw new RuntimeException("boom"))
       scripted(
@@ -284,9 +284,9 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       val ran  = new ConcurrentLinkedQueue[String]()
       val deploy = tool("deploy", keys) { (args, _) =>
         ran.add(args.text)
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("deployed")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("deployed")))
       }
-      val danger = tool("danger", keys)((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("never"))))
+      val danger = tool("danger", keys)((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("never"))))
       scripted(
         wire,
         Reply.Calls(
@@ -305,8 +305,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
         )
         val parked = agent.run("ship it").value
         val approvals = parked.status match {
-          case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.map((id, r) => r.call.id -> (id, r)).toMap
-          case other                                        => fail(s"expected Suspended, got $other")
+          case AgentStatus.Suspended(suspension) => suspension.approvals.map((id, r) => r.call.id -> (id, r)).toMap
+          case other                             => fail(s"expected Suspended, got $other")
         }
         approvals.keySet shouldBe Set("a1", "r1", "e1")
         approvals.values.map(_._2.idempotencyKey).toSet should have size 3
@@ -344,17 +344,17 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
         }
         def resume(args: Text, question: Confirm, answer: Answer, context: ToolContext): ToolOutcome = {
           keys.record(context)
-          ToolOutcome.Success(ToolContent.Json(ujson.Str(s"${question.prompt} ${answer.ok}")))
+          ToolOutcome.success(ToolContent.Json(ujson.Str(s"${question.prompt} ${answer.ok}")))
         }
       }
-      val ok = tool("ok", keys)((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("fine"))))
+      val ok = tool("ok", keys)((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("fine"))))
       scripted(wire, Reply.Calls(toolCall("q1", "confirm"), toolCall("k1", "ok")), Reply.Says("confirmed")) {
         (client, requests) =>
           val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(asker, ok)))
           val parked = agent.run("ask").value
           val (id, question) = parked.status match {
-            case AgentStatus.Suspended(_, questions, _, _, _) => questions.head
-            case other                                        => fail(s"expected Suspended, got $other")
+            case AgentStatus.Suspended(suspension) => suspension.questions.head
+            case other                             => fail(s"expected Suspended, got $other")
           }
           requests() shouldBe 1
           val done = agent.resume(parked.threadId, Map(parked.reply(id, Answer(true)))).value
@@ -366,8 +366,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
 
     it should "answer every call of a refused handoff batch, then hand off" in {
       val keys    = new Keys
-      val lookup  = tool("lookup", keys)((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("found"))))
-      val refund  = tool("refund", keys)((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("refunded"))))
+      val lookup  = tool("lookup", keys)((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("found"))))
+      val refund  = tool("refund", keys)((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("refunded"))))
       val handoff = ujson.Obj("reason" -> "refund")
       scripted(
         wire,
@@ -395,7 +395,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
     it should "pair results with calls when the provider reuses call ids, and give each call its own key" in {
       val keys = new Keys
       val lookup =
-        tool("lookup", keys)((args, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(s"found ${args.text}"))))
+        tool("lookup", keys)((args, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(s"found ${args.text}"))))
       scripted(
         wire,
         Reply.Calls(toolCall("call_0", "lookup", text("one"))),
@@ -423,14 +423,14 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       val started = new CountDownLatch(1)
       val fast = tool("fast", keys) { (_, _) =>
         fastRan.incrementAndGet()
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("fast")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("fast")))
       }
       val slow = tool("slow", keys) { (_, _) =>
         if (block.get) {
           started.countDown()
           Thread.sleep(60_000) // interrupted by cancel
         }
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("slow")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("slow")))
       }
       val store = new ProbeCheckpointer(new InMemoryCheckpointer)
       scripted(wire, Reply.Calls(toolCall("f1", "fast"), toolCall("s1", "slow")), Reply.Says("recovered")) {
@@ -463,11 +463,11 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       val goodRan = new AtomicInteger()
       val good = tool("good", keys) { (_, _) =>
         goodRan.incrementAndGet()
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("good")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("good")))
       }
       val flaky = tool("flaky", keys) { (_, _) =>
         if (broken.get) ToolOutcome.Fatal(ValidationError("flaky", "backend down"))
-        else ToolOutcome.Success(ToolContent.Json(ujson.Str("fixed")))
+        else ToolOutcome.success(ToolContent.Json(ujson.Str("fixed")))
       }
       scripted(wire, Reply.Calls(toolCall("g1", "good"), toolCall("x1", "flaky")), Reply.Says("all done")) {
         (client, requests) =>
@@ -493,7 +493,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       val dying   = new ProbeCheckpointer(healthy)
       val done = tool("done", keys) { (_, _) =>
         doneRan.incrementAndGet()
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("done")))
       }
       // the first time, waits for its sibling's result to be stored, then the process "dies"
       val crashed = new AtomicBoolean(false)
@@ -502,7 +502,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
           await(dying.toolWrites.get >= 1)
           dying.dead.set(true)
         }
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("crashed once")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("crashed once")))
       }
       scripted(wire, Reply.Calls(toolCall("d1", "done"), toolCall("k1", "crasher")), Reply.Says("after the crash")) {
         (client, requests) =>
@@ -540,12 +540,12 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       val started = new CountDownLatch(1)
       val fast = tool("fast", keys) { (_, _) =>
         fastRan.incrementAndGet()
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("fast")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("fast")))
       }
       val slow = tool("slow", keys) { (_, _) =>
         started.countDown()
         Thread.sleep(60_000) // interrupted by cancel
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("slow")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("slow")))
       }
       val store = new ProbeCheckpointer(new InMemoryCheckpointer)
       scripted(wire, Reply.Calls(toolCall("f1", "fast"), toolCall("s1", "slow")), Reply.Says("moved on")) {
@@ -578,7 +578,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       val goodRan = new AtomicInteger()
       val good = tool("good", keys) { (_, _) =>
         goodRan.incrementAndGet()
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("good")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("good")))
       }
       val flaky = tool("flaky", keys)((_, _) => ToolOutcome.Fatal(ValidationError("flaky", "backend down")))
       scripted(wire, Reply.Calls(toolCall("g1", "good"), toolCall("x1", "flaky")), Reply.Says("without flaky")) {
@@ -607,13 +607,13 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       val dying   = new ProbeCheckpointer(healthy)
       val done = tool("done", keys) { (_, _) =>
         doneRan.incrementAndGet()
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("done")))
       }
       // waits for its sibling's result to be stored, then the process "dies"
       val crasher = tool("crasher", keys) { (_, _) =>
         await(dying.toolWrites.get >= 1)
         dying.dead.set(true)
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("lost with the process")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("lost with the process")))
       }
       scripted(wire, Reply.Calls(toolCall("d1", "done"), toolCall("k1", "crasher")), Reply.Says("after the crash")) {
         (client, requests) =>

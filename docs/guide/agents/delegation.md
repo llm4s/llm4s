@@ -179,8 +179,8 @@ Answer them with the usual helpers, by the composite id, and resume the parent:
 ```scala
 agent.run(threadId, "research tides").flatMap { result =>
   result.status match
-    case AgentStatus.Suspended(_, _, _, _, delegated) =>
-      val answers = delegated.map {
+    case AgentStatus.Suspended(suspension) =>
+      val answers = suspension.delegated.map {
         case (id, DelegatedRequest(_, _: ChildInterrupt.Approval))   => result.approve(id)
         case (id, DelegatedRequest(_, _: ChildInterrupt.Breakpoint)) => result.proceed(id)
         // a tool's or a middleware's question: reply with its answer type (here a tool's `UnitChoice`)

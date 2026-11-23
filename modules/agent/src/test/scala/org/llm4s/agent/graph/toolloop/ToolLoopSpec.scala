@@ -107,7 +107,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
   private def bare(name: String)(run: ToolContext => ToolOutcome): AgentTool[ujson.Value] =
     tool[ujson.Value](name)((_, context) => run(context))
 
-  private def text(s: String): ToolOutcome = ToolOutcome.Success(ToolContent.Json(ujson.Str(s)))
+  private def text(s: String): ToolOutcome = ToolOutcome.success(ToolContent.Json(ujson.Str(s)))
 
   final private class Tools {
     val deploys = new CopyOnWriteArrayList[String]()
@@ -602,7 +602,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val counter = AgentTool(AgentToolSpec[ujson.Value]("count", "Counts", strings[ujson.Value]("c")), Set(hits)) {
       (_, context) =>
         val seen = context.state.get(hits).getOrElse(0)
-        ToolOutcome.Success(ToolContent.Json(ujson.Obj("hits" -> (seen + 1))), StateUpdate.update(hits, seen + 1))
+        ToolOutcome.success(ToolContent.Json(ujson.Obj("hits" -> (seen + 1))), StateUpdate.update(hits, seen + 1))
     }
     val model           = ScriptedModel(calls(("h1", "count", ujson.Obj())), summarise)
     val l               = buildSingle(model, set(counter)).value
@@ -614,7 +614,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
   it should "fail the run when a tool updates a key it does not declare" in {
     val hits = StateKey.replace[Int]("hits", 0)
     val sneaky =
-      bare("sneaky")(_ => ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")), StateUpdate.update(hits, 1)))
+      bare("sneaky")(_ => ToolOutcome.success(ToolContent.Json(ujson.Str("ok")), StateUpdate.update(hits, 1)))
     val honest =
       AgentTool(AgentToolSpec[ujson.Value]("honest", "Honest", strings[ujson.Value]("h")), Set(hits))((_, _) =>
         text("ok")
@@ -1026,12 +1026,12 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val writer = AgentTool(AgentToolSpec[ujson.Value]("writer", "Writes", strings[ujson.Value]("w")), Set(attempts)) {
       (_, _) =>
         val n = runs.incrementAndGet()
-        ToolOutcome.Success(ToolContent.Json(ujson.Str(s"attempt $n")), StateUpdate.update(attempts, n))
+        ToolOutcome.success(ToolContent.Json(ujson.Str(s"attempt $n")), StateUpdate.update(attempts, n))
     }
     val retry = wrapper("retry") { (_, _, next) =>
       next() match {
-        case ToolOutcome.Success(ToolContent.Json(ujson.Str("attempt 1")), _) => next()
-        case other                                                            => other
+        case ToolOutcome.Success(result) if result.content == ToolContent.Json(ujson.Str("attempt 1")) => next()
+        case other                                                                                     => other
       }
     }
     val model           = ScriptedModel(calls(("r1", "writer", ujson.Obj())), summarise)
@@ -1051,8 +1051,8 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       )
     val adding = wrapper("adding") { (_, _, next) =>
       next() match {
-        case ToolOutcome.Success(content, update) =>
-          ToolOutcome.Success(content, update.combine(StateUpdate.update(hits, 1)))
+        case ToolOutcome.Success(success) =>
+          ToolOutcome.success(success.content, success.update.combine(StateUpdate.update(hits, 1)))
         case other => other
       }
     }
@@ -1770,8 +1770,8 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       declares = Set(audits),
       wrapTool = (request, _, next) =>
         next() match {
-          case ToolOutcome.Success(content, update) =>
-            ToolOutcome.Success(content, update.combine(StateUpdate.update(audits, request.call.id)))
+          case ToolOutcome.Success(success) =>
+            ToolOutcome.success(success.content, success.update.combine(StateUpdate.update(audits, request.call.id)))
           case other => other
         }
     )

@@ -97,7 +97,7 @@ trait DelegationContract extends AnyFlatSpecLike with Matchers with EitherValues
     })
     val probe = AgentTool(textSpec("probe")) { (_, _) =>
       probes.incrementAndGet()
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("probed")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("probed")))
     }
     val agent = lead(client, store)
       .withSubagents(worker.withTools(ToolSet.of(probe).value).withFailure(ChildFailure.Fail))
@@ -148,7 +148,7 @@ trait DelegationContract extends AnyFlatSpecLike with Matchers with EitherValues
         Right(calling(ToolCall("p1", "probe", ujson.Obj("text" -> "x"))))
       case m if isWorker(m) => Right(text("probed"))
     })
-    val probe = AgentTool(textSpec("probe"))((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("probed"))))
+    val probe = AgentTool(textSpec("probe"))((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("probed"))))
     val asking = worker
       .withTools(ToolSet.of(probe).value)
       .withMiddleware(new PermissionMiddleware(Seq(PermissionRule.ask(Operation.Invoke, "probe"))))
@@ -161,8 +161,8 @@ trait DelegationContract extends AnyFlatSpecLike with Matchers with EitherValues
     client.callsTo(WorkerPrompt) shouldBe 1
     agent.children(parent).value.loneElement.status shouldBe CheckpointStatus.Suspended
     val pending = surfaced.status match
-      case suspended: AgentStatus.Suspended => suspended.delegated.loneElement._1
-      case other                            => fail(s"expected the parent suspended, got $other")
+      case AgentStatus.Suspended(suspension) => suspension.delegated.loneElement._1
+      case other                             => fail(s"expected the parent suspended, got $other")
 
     agent.resume(parent, Map(surfaced.approve(pending))).value.answer.value shouldBe "lead read: probed"
     client.callsTo(WorkerPrompt) shouldBe 2

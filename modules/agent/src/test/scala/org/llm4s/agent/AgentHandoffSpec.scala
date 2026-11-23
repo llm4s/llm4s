@@ -202,7 +202,7 @@ class AgentHandoffSpec extends AnyFlatSpec with Matchers {
       SpecTools.calling(SpecTools.call("p1", "gravity", "g")),
       CompletionFixture.simple("9.8")
     )
-    val gravity = SpecTools.tool("gravity")((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("9.8 m/s2"))))
+    val gravity = SpecTools.tool("gravity")((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("9.8 m/s2"))))
     val physics =
       Agent
         .builder("physics", physicsClient)

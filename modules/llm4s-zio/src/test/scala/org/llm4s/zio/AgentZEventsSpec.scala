@@ -77,7 +77,7 @@ object AgentZEventsSpec extends ZIOSpecDefault {
           context => {
             Pings.Pinged.emit(context.run, Ping(1))
             release.await(5, TimeUnit.SECONDS)
-            ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+            ToolOutcome.success(ToolContent.Json(ujson.Str("ok")))
           },
           "ze4"
         )

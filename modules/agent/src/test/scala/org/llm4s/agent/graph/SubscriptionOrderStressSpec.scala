@@ -89,7 +89,7 @@ class SubscriptionOrderStressSpec extends AnyFlatSpec with TestTimeLimit with Ma
 
   private def key(e: StreamEvent): String = e match {
     case StreamEvent.Durable(r) => s"d${r.seq}"
-    case l: StreamEvent.Live    => s"l${l.runId}:${l.payload}"
+    case StreamEvent.Live(l)    => s"l${l.runId}:${l.payload}"
     case other                  => other.toString
   }
 

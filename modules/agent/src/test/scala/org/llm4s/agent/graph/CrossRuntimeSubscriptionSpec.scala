@@ -194,7 +194,7 @@ class CrossRuntimeSubscriptionSpec
     eventually(seen.seqs shouldBe logOf(store, thread))
     seen.seqs shouldBe contiguous(seen.seqs.size)
     // live progress is never stored, so another runtime's does not arrive
-    seen.all.collect { case l: StreamEvent.Live => l } shouldBe empty
+    seen.all.collect { case StreamEvent.Live(l) => l } shouldBe empty
     sub.cancel()
   }
 
@@ -403,7 +403,7 @@ class CrossRuntimeSubscriptionSpec
     val held = heldSeqs.asScala.toVector
     held should not be empty
     def isB(event: StreamEvent) = event match
-      case l: StreamEvent.Live => l.name == "held.b"
+      case StreamEvent.Live(l) => l.name == "held.b"
       case _                   => false
     // B's live event is sent while A's commit is in the store but not yet handed over
     bGo.countDown()

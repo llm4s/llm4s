@@ -307,7 +307,7 @@ final private[graph] class EventHub(
       // a child running now has sent live events this subscription never gets: its start, then a gap (#2074)
       if nested then
         running.getOrElse(threadId.value, Map.empty).values.foreach { (started, child) =>
-          dispatcher.offerPair(started, StreamEvent.Nested(child, StreamEvent.LiveGap(0)), started.token)
+          dispatcher.offerPair(started, StreamEvent.Nested(child, StreamEvent.LiveGap(0)), started.event.token)
         }
     }
     Try(dispatcher.start()).toResult.left
@@ -328,7 +328,7 @@ final private[graph] class EventHub(
    * [[EventRecord.token]]) is handed to it, the dispatcher skips every commit, and every live event,
    * which no node of the run can have sent yet: it delivers what a subscription from just before the
    * claim ([[RunHandle.subscribe]]) does. After that it still skips a live event of an older claim than
-   * its run's ([[StreamEvent.Live.token]]), which a node of a lost run that ignores the interrupt could
+   * its run's ([[LiveEvent.token]]), which a node of a lost run that ignores the interrupt could
    * send under the same `RunId` - [[live]] refuses one sent once the loss is found, as every in-runtime
    * successor's claim is. A later run's, of a newer claim, it delivers. [[Observation.start]] starts it; [[Observation.abandon]]
    * removes it, delivering nothing.
@@ -533,7 +533,8 @@ final private[graph] class EventHub(
    */
   def live(threadId: ThreadId, event: StreamEvent.Live, current: () => Boolean = () => true): Unit =
     withLock(hubLock) {
-      if current() then subscribers.getOrElse(threadId.value, Vector.empty).foreach(_.offerLive(event, event.token))
+      if current() then
+        subscribers.getOrElse(threadId.value, Vector.empty).foreach(_.offerLive(event, event.event.token))
     }
 
   /**
@@ -555,7 +556,7 @@ final private[graph] class EventHub(
   def childStarted(threadId: ThreadId, child: ChildRef, started: StreamEvent.Live, current: () => Boolean): Unit =
     withLock(hubLock) {
       if current() then
-        subscribers.getOrElse(threadId.value, Vector.empty).foreach(_.offerLive(started, started.token))
+        subscribers.getOrElse(threadId.value, Vector.empty).foreach(_.offerLive(started, started.event.token))
         val children = running.getOrElse(threadId.value, Map.empty).updated(child.threadId.value, started -> child)
         running = running.updated(threadId.value, children)
     }
@@ -571,7 +572,7 @@ final private[graph] class EventHub(
         val child = ended.child.threadId.value
         running = running.updatedWith(threadId.value)(
           _.map(children =>
-            if children.get(child).exists(_._1.token == record.token) then children - child else children
+            if children.get(child).exists(_._1.event.token == record.token) then children - child else children
           ).filter(_.nonEmpty)
         )
       }
@@ -1412,12 +1413,12 @@ private[graph] object EventHub:
    * state update - each records the tenant it was made for ([[RunEvent]]); `None` for any other event.
    */
   def tenantNamed(event: RunEvent): Option[Option[String]] = event match
-    case RunEvent.RunStarted(tenant, _)         => Some(tenant)
-    case RunEvent.RunRecovered(_, tenant, _, _) => Some(tenant)
-    case RunEvent.RunResumed(_, tenant, _)      => Some(tenant)
-    case RunEvent.StateUpdated(_, _, tenant, _) => Some(tenant)
-    case RunEvent.ThreadForked(_, _, tenant, _) => Some(tenant)
-    case _                                      => None
+    case RunEvent.RunStarted(details)   => Some(details.tenantId)
+    case RunEvent.RunRecovered(details) => Some(details.tenantId)
+    case RunEvent.RunResumed(details)   => Some(details.tenantId)
+    case RunEvent.StateUpdated(details) => Some(details.tenantId)
+    case RunEvent.ThreadForked(details) => Some(details.tenantId)
+    case _                              => None
 
   /** How a failed read of the store ends a subscription: `ThreadDeleted` for a deleted thread's log. */
   def disconnectFor(error: LLMError): DisconnectReason = error match

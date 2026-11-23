@@ -82,7 +82,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
         "Echo",
         Schema.`object`[Echo]("echo").withRequiredField("text", Schema.string("text"))
       )
-    )((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+    )((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
 
   "SummarizationMiddleware" should "fold all but keepRecent messages into a summary sent in the same request (rule 3)" in {
     given store: InMemoryCheckpointer = new InMemoryCheckpointer

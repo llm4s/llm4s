@@ -432,7 +432,7 @@ class DelegationSpec
     }
     val probe = AgentTool(SpecText.spec("probe")) { (_, _) =>
       probes.incrementAndGet()
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("probed")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("probed")))
     }
     val agent = lead(client)
       .withSubagents(researcher.withTools(ToolSet.of(probe).value).withFailure(ChildFailure.Fail))
@@ -467,7 +467,7 @@ class DelegationSpec
     val result = agent.run(ThreadId("t1"), "go").value
 
     result.status match
-      case suspended: org.llm4s.agent.AgentStatus.Suspended =>
+      case org.llm4s.agent.AgentStatus.Suspended(suspended) =>
         suspended.delegated.loneElement._2.request.id shouldBe a[org.llm4s.agent.graph.InterruptId]
         suspended.questions shouldBe empty
       case other => fail(s"expected Suspended, got $other")
@@ -740,12 +740,12 @@ class DelegationSpec
     bound.run(node, Question("tides")).value match
       case TaskOutcome.Suspended(child, again) =>
         child shouldBe ref
-        again.approvals.map(_._1) shouldBe status.approvals.map(_._1)
+        again.suspension.approvals.map(_._1) shouldBe status.suspension.approvals.map(_._1)
       case other => fail(s"expected a suspension, got $other")
     client.calls should have size sent
     runs.get shouldBe 0
 
-    val resumed = bound.resume(ref, Map(approve(status.approvals.loneElement._1))).value
+    val resumed = bound.resume(ref, Map(approve(status.suspension.approvals.loneElement._1))).value
     resumed shouldBe a[TaskOutcome.Reported[?]]
     bound.run(node, Question("tides")).value shouldBe resumed
     runs.get shouldBe 1
@@ -837,7 +837,7 @@ class DelegationSpec
     ref.depth shouldBe 0
     runs.get shouldBe 0
 
-    val id = status.approvals.loneElement._1
+    val id = status.suspension.approvals.loneElement._1
     bound.resume(ref, Map(approve(id))).value match
       case TaskOutcome.Reported(report, child, usage) =>
         report shouldBe Findings("probed once", 1)
@@ -861,7 +861,7 @@ class DelegationSpec
       case other                                => fail(s"expected a suspension, got $other")
 
     val resumed = RunConfig().withRunId(org.llm4s.agent.graph.RunId("resume-1"))
-    bound.resume(ref, Map(approve(status.approvals.loneElement._1)), resumed).value match
+    bound.resume(ref, Map(approve(status.suspension.approvals.loneElement._1)), resumed).value match
       case TaskOutcome.Refused(child, TaskRefusal.OutputInvalid(errors), usage) =>
         errors should not be empty
         usage.requestCount shouldBe 3 // the probe call, the answer and its retry
@@ -882,7 +882,9 @@ class DelegationSpec
 
     bound.resume(ref, Map(approve(InterruptId("not-pending")))).left.value shouldBe a[GraphError.InvalidResume]
     runs.get shouldBe 0
-    bound.resume(ref, Map(approve(status.approvals.loneElement._1))).value shouldBe a[TaskOutcome.Reported[?]]
+    bound
+      .resume(ref, Map(approve(status.suspension.approvals.loneElement._1)))
+      .value shouldBe a[TaskOutcome.Reported[?]]
   }
 
   "BoundAgent.resume and recover" should "refuse a delegated child's ref, which only its parent continues (rule 19)" in {
@@ -1044,8 +1046,9 @@ class DelegationSpec
         context: org.llm4s.agent.graph.tool.ToolContext
       )(next: () => ToolOutcome): ToolOutcome =
         next() match
-          case ToolOutcome.Success(_, update) => ToolOutcome.Success(ToolContent.Json(ujson.Str("y" * 500)), update)
-          case other                          => other
+          case ToolOutcome.Success(success) =>
+            ToolOutcome.Success(success.withContent(ToolContent.Json(ujson.Str("y" * 500))))
+          case other => other
     }
     val agent = lead(client)
       .withMiddleware(inflating)
@@ -1066,7 +1069,7 @@ class DelegationSpec
         UsageSummary()
       )
     DelegationMiddleware.toolOutcome("general", ChildFailure.Report, 64, report, None) shouldBe
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("a" * 64)))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("a" * 64)))
   }
 
   it should "refuse media a wrapper put in a task result" in {
@@ -1273,7 +1276,7 @@ object DelegationSpec {
   }
 
   def echo(name: String): AgentTool[SpecText] =
-    AgentTool(SpecText.spec(name))((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+    AgentTool(SpecText.spec(name))((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
 
   def call(id: String, name: String, args: ujson.Value): ToolCall = ToolCall(id, name, args)
 

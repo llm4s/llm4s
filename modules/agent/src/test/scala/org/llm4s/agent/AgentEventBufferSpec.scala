@@ -15,7 +15,7 @@ class AgentEventBufferSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     StreamEvent.Durable(EventRecord("t", seq, "r", FencingToken(1L), None, None, None, Instant.EPOCH, event))
 
   private def live(n: Int): StreamEvent =
-    StreamEvent.Live("t", "r", FencingToken(1L), "task", "node", "agent.text_delta", 1, ujson.Num(n))
+    StreamEvent.Live(LiveEvent("t", "r", FencingToken(1L), "task", "node", "agent.text_delta", 1, ujson.Num(n)))
 
   /** Calls the listener on another thread, failing if it has not returned within a second: it never blocks. */
   private def offer(buffer: AgentEventBuffer, event: StreamEvent): Unit =
@@ -31,7 +31,7 @@ class AgentEventBufferSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   "AgentEventBuffer" should "hand over events in order and end after the terminal event" in {
     val buffer   = AgentEventBuffer(8)
-    val started  = durable(1, RunEvent.RunStarted(None, None))
+    val started  = durable(1, RunEvent.RunStarted(RunStartedDetails(None, None)))
     val finished = durable(2, RunEvent.RunCompleted)
     buffer.listener(started)
     buffer.listener(finished)
@@ -48,13 +48,13 @@ class AgentEventBufferSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   it should "never block the listener: live events past capacity are dropped and reported as a LiveGap where they were dropped" in {
     val buffer = AgentEventBuffer(2)
-    offer(buffer, durable(1, RunEvent.RunStarted(None, None)))
+    offer(buffer, durable(1, RunEvent.RunStarted(RunStartedDetails(None, None))))
     (1 to 5).foreach(i => offer(buffer, live(i)))
     offer(buffer, durable(2, RunEvent.TaskCompleted))
     offer(buffer, live(6)) // still full: nothing has been taken
     offer(buffer, durable(3, RunEvent.RunCompleted))
     takeAll(buffer) shouldBe Vector(
-      durable(1, RunEvent.RunStarted(None, None)),
+      durable(1, RunEvent.RunStarted(RunStartedDetails(None, None))),
       live(1),
       live(2),
       StreamEvent.LiveGap(3),
@@ -73,8 +73,8 @@ class AgentEventBufferSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   it should "end with a Left naming the last seq taken once more durable events wait than its durable capacity" in {
     val buffer = AgentEventBuffer(1, durableCapacity = 3)
-    offer(buffer, durable(1, RunEvent.RunStarted(None, None)))
-    buffer.take() shouldBe Right(Some(durable(1, RunEvent.RunStarted(None, None))))
+    offer(buffer, durable(1, RunEvent.RunStarted(RunStartedDetails(None, None))))
+    buffer.take() shouldBe Right(Some(durable(1, RunEvent.RunStarted(RunStartedDetails(None, None)))))
     (2 to 4).foreach(i => offer(buffer, durable(i.toLong, RunEvent.TaskCompleted)))
     offer(buffer, durable(5, RunEvent.TaskCompleted)) // a fourth waiting: never blocks, ends the hand-over
     offer(buffer, durable(6, RunEvent.RunCompleted))  // ignored after the end
@@ -163,7 +163,7 @@ class AgentEventBufferSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   it should "end without a terminal event once ended, after what was queued before the end" in {
     val buffer  = AgentEventBuffer(4)
-    val started = durable(1, RunEvent.RunStarted(None, None))
+    val started = durable(1, RunEvent.RunStarted(RunStartedDetails(None, None)))
     buffer.listener(started)
     buffer.end()
     buffer.take() shouldBe Right(Some(started))
@@ -183,7 +183,7 @@ class AgentEventBufferSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   it should "end the stream with a Left after a ListenerFailed disconnect, once the queue is taken" in {
     val buffer  = AgentEventBuffer(4)
-    val started = durable(1, RunEvent.RunStarted(None, None))
+    val started = durable(1, RunEvent.RunStarted(RunStartedDetails(None, None)))
     buffer.listener(started)
     buffer.listener(StreamEvent.Disconnected(1L, DisconnectReason.ListenerFailed(new RuntimeException("x"))))
     buffer.take() shouldBe Right(Some(started))
@@ -196,7 +196,7 @@ class AgentEventBufferSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     failed.close()
     failed.take().isLeft shouldBe true
     val closed = AgentEventBuffer(4)
-    closed.listener(durable(1, RunEvent.RunStarted(None, None)))
+    closed.listener(durable(1, RunEvent.RunStarted(RunStartedDetails(None, None))))
     closed.close()
     closed.take() shouldBe Right(None)
   }

@@ -774,10 +774,10 @@ private[agent] object ChildRunner:
           case Right(page) =>
             val terminals = page.flatMap { record =>
               val lost = record.event match
-                case RunEvent.RunFailed(_, lost, steps) => Some(lost -> steps)
-                case RunEvent.RunCancelled(lost, steps) => Some(lost -> steps)
-                case RunEvent.RunTimedOut(lost, steps)  => Some(lost -> steps)
-                case _                                  => None
+                case RunEvent.RunFailed(details)    => Some(details.usage -> details.steps)
+                case RunEvent.RunCancelled(details) => Some(details.usage -> details.steps)
+                case RunEvent.RunTimedOut(details)  => Some(details.usage -> details.steps)
+                case _                              => None
               lost.map((l, steps) => (record.seq, l.getOrElse(UsageSummary()), steps))
             }
             if page.size < EventPage then Right(found ++ terminals)

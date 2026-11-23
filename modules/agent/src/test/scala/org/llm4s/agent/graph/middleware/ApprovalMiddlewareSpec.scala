@@ -55,7 +55,7 @@ class ApprovalMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues
         .withHints(hints)
     ) { (a, _) =>
       runs.add(s"$name:${a.env}")
-      ToolOutcome.Success(ToolContent.Json(ujson.Str(s"ran $name")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str(s"ran $name")))
     }
 
   private val lookup = tool("lookup", ToolHints().withReadOnly(true))

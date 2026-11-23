@@ -523,6 +523,6 @@ class BreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers with E
     runtime.resume(thread, chain.graph, proceed("2.0"), config).awaited.value.completed
     val events = cp.eventsAfter(thread, 0L, 100).value.map(_.event)
     events should contain(RunEvent.RunSuspended(Vector("2.0")))
-    events.collect { case r: RunEvent.RunResumed => r.answered } shouldBe Vector(Vector("2.0"))
+    events.collect { case RunEvent.RunResumed(r) => r.answered } shouldBe Vector(Vector("2.0"))
   }
 }

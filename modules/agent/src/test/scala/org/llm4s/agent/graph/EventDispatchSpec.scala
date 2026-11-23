@@ -46,8 +46,8 @@ class EventDispatchSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
   }
 
   private def isEnd(r: EventRecord): Boolean = r.event match {
-    case RunEvent.RunCompleted | RunEvent.RunFailed(_, _, _) => true
-    case _                                                   => false
+    case RunEvent.RunCompleted | RunEvent.RunFailed(_) => true
+    case _                                             => false
   }
 
   private def durableSeqs(events: Vector[StreamEvent]): Vector[Long] =
@@ -192,11 +192,11 @@ class EventDispatchSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       .subscribe(thread, capacity = 4) { event =>
         collector.listener(event)
         event match {
-          case StreamEvent.Live(_, _, _, _, _, _, _, payload) if payload("kind").str == "burst" =>
+          case StreamEvent.Live(live) if live.payload("kind").str == "burst" =>
             if blocked.compareAndSet(false, true) then burstDone.await(10, TimeUnit.SECONDS): Unit
-          case StreamEvent.Live(_, _, _, _, _, _, _, payload) =>
-            lastTick.set(payload("i").num.toInt)
-            tickSignal.put(payload("i").num.toInt)
+          case StreamEvent.Live(live) =>
+            lastTick.set(live.payload("i").num.toInt)
+            tickSignal.put(live.payload("i").num.toInt)
           case _: StreamEvent.LiveGap => sawGap.set(true)
           case _                      => ()
         }
@@ -224,7 +224,7 @@ class EventDispatchSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
 
     val received = collector.untilRunEnds()
     received.collect { case d: StreamEvent.Disconnected => d } shouldBe empty
-    val lives = received.collect { case l: StreamEvent.Live => l.payload }
+    val lives = received.collect { case StreamEvent.Live(l) => l.payload }
     val burst = lives.filter(_("kind").str == "burst").map(_("i").num.toInt)
     val ticks = lives.count(_("kind").str == "tick")
     val gaps  = received.collect { case StreamEvent.LiveGap(d) => d }
@@ -235,7 +235,7 @@ class EventDispatchSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
     (burst.size + ticks + gaps.sum) shouldBe (50 + ticksSent.get)
     // the gap marker precedes the next accepted event
     received.indexWhere(_.isInstanceOf[StreamEvent.LiveGap]) should be > received.indexWhere {
-      case StreamEvent.Live(_, _, _, _, _, _, _, p) => p("kind").str == "burst"; case _ => false
+      case StreamEvent.Live(live) => live.payload("kind").str == "burst"; case _ => false
     }
   }
 
@@ -309,8 +309,8 @@ class EventDispatchSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       case other                  => fail(s"expected RunStarted, got $other")
     }
     received.drop(3) match {
-      case Vector(StreamEvent.Live(_, _, _, _, _, _, _, payload), gap, disconnected) =>
-        payload("i").num.toInt shouldBe 1
+      case Vector(StreamEvent.Live(live), gap, disconnected) =>
+        live.payload("i").num.toInt shouldBe 1
         gap shouldBe StreamEvent.LiveGap(2) // 1 delivered + 2 reported = 3 sent
         disconnected shouldBe StreamEvent.Disconnected(3L, DisconnectReason.Lagging)
       case other => fail(s"expected the first live event, a gap and the disconnect, got $other")
@@ -388,7 +388,7 @@ class EventDispatchSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
     release.countDown()
 
     val received = collector.untilRunEnds()
-    received.collect { case StreamEvent.Live(_, _, _, _, _, _, _, p) => p("i").num.toInt } shouldBe Vector(1, 2, 3)
+    received.collect { case StreamEvent.Live(live) => live.payload("i").num.toInt } shouldBe Vector(1, 2, 3)
     received.collect { case StreamEvent.Durable(r) => r.event }.collect { case RunEvent.Custom(_, _, p) =>
       p("i").num.toInt
     } shouldBe Vector(1, 2, 3)
@@ -410,7 +410,7 @@ class EventDispatchSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
     kept.get.progress("late", 1, ujson.Null)
     runtime.start(thread, graph, "second").awaited.value.completed
     val received = collector.untilRunEnds(runs = 2)
-    received.collect { case l: StreamEvent.Live => l.name } shouldBe Vector("during")
+    received.collect { case StreamEvent.Live(l) => l.name } shouldBe Vector("during")
     durableSeqs(received) shouldBe (1L to store.eventsAfter(thread, 0L, 1000).value.size.toLong).toVector
     sub.cancel()
   }

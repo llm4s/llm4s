@@ -11,7 +11,7 @@ class ToolSetSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def tool(name: String): AgentTool[Search] =
     AgentTool(AgentToolSpec[Search](name, s"Tool $name", searchSchema))((_, _) =>
-      ToolOutcome.Success(ToolContent.Json(ujson.Null))
+      ToolOutcome.success(ToolContent.Json(ujson.Null))
     )
 
   private def badlyNamed(name: String): AgentTool[ujson.Value] =
@@ -74,7 +74,7 @@ class ToolSetSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "refuse a tool whose argument schema is not an object" in {
     val scalar = AgentTool(AgentToolSpec[String]("scalar", "Takes a string", Schema.string("s"))) { (_, _) =>
-      ToolOutcome.Success(ToolContent.Json(ujson.Null))
+      ToolOutcome.success(ToolContent.Json(ujson.Null))
     }
     val listing = AgentTool.fromToolFunction(
       ToolFunction[Seq[String], String]("listing", "d", Schema.array("l", Schema.string("s")), _ => Right("x"))

@@ -52,8 +52,9 @@ import org.llm4s.agent.AgentStatus
 
 agent.run(threadId, "Deploy the release").flatMap { result =>
   result.status match
-    case AgentStatus.Suspended(approvals, questions, asked, held, delegated) =>
-      val answers = approvals.map((id, _) => result.approve(id)) ++ held.map((id, _) => result.proceed(id))
+    case AgentStatus.Suspended(suspension) =>
+      val answers = suspension.approvals.map((id, _) => result.approve(id)) ++
+        suspension.breakpoints.map((id, _) => result.proceed(id))
       agent.resume(threadId, answers.toMap) // questions, middleware questions and delegated stay pending
     case _ => Right(result)
 }
@@ -84,7 +85,7 @@ val agent = Agent
 | `Finish` | `<id>/finish` | the answer is stored; its `afterAgent` hooks (guardrails) have not run | the answer is guarded; the turn ends once answered |
 
 Each held task is an interrupt of its own. The tool calls of one message are held one per call, so a
-reviewer can let them through one at a time. `AgentStatus.Suspended.breakpoints` lists them as
+reviewer can let them through one at a time. `Suspension.breakpoints` (`AgentStatus.Suspended(suspension)`) lists them as
 `BreakpointRequest(node, phase, call)`; `call` is the tool call, for a call held before it runs.
 `result.proceed(id)` continues one: a task held before it runs is run, and the same breakpoint does not
 hold it again; a task held after it ran is not run again - what follows it is released. A breakpoint

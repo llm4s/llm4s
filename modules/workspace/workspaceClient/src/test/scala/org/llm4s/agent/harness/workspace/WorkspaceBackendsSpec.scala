@@ -56,7 +56,7 @@ class WorkspaceBackendsSpec extends AnyFlatSpec with Matchers with EitherValues 
     ) { (e, context) =>
       backend
         .edit(p(e.path), e.old, e.next, replaceAll = false, FileContext(context))
-        .fold(BackendRefused.toolOutcome, _ => ToolOutcome.Success(ToolContent.Json(ujson.Str("edited"))))
+        .fold(BackendRefused.toolOutcome, _ => ToolOutcome.success(ToolContent.Json(ujson.Str("edited"))))
     }
 
   /** `body` with the context of one tool call of a real run. */
@@ -67,7 +67,7 @@ class WorkspaceBackendsSpec extends AnyFlatSpec with Matchers with EitherValues 
       AgentToolSpec[Go]("go", "go", Schema.`object`[Go]("go").withRequiredField("x", Schema.string("x")))
     ) { (_, context) =>
       out.set(body(FileContext(context)))
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("ok")))
     }
     runs(Seq("go" -> ujson.Obj("x" -> "")), ToolSet.of(tool).value)
     out.get

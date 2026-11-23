@@ -212,7 +212,7 @@ class CheckpointHistorySpec extends AnyFlatSpec with TestTimeLimit with Matchers
     forked.fencingToken shouldBe defined
     runtime.history(other).value shouldBe Vector(forked)
     store.eventsAfter(other, 0L, 10).value.map(e => e.seq -> e.event) shouldBe
-      Vector(1L -> RunEvent.ThreadForked("t", afterA.id, None, None))
+      Vector(1L -> RunEvent.ThreadForked(ThreadForkedDetails("t", afterA.id, None, None)))
 
     val (_, output) = runtime.start(other, n.graph, "c").awaited.value.completed
     output shouldBe Vector("a", "after", "c", "after")
@@ -315,7 +315,7 @@ class CheckpointHistorySpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val events = store.eventsAfter(thread, seq, 10).value
     events should have size 1
     val event = events.head
-    event.event shouldBe RunEvent.StateUpdated(latest.id, Some("write"), None, None)
+    event.event shouldBe RunEvent.StateUpdated(StateUpdatedDetails(latest.id, Some("write"), None, None))
     event.nodeId shouldBe Some("write")
     event.checkpointId shouldBe Some(updated.id)
 

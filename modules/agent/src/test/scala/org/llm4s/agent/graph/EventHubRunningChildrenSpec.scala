@@ -24,7 +24,9 @@ class EventHubRunningChildrenSpec extends AnyFlatSpec with Matchers with EitherV
   private def ref(run: String): ChildRef = ChildRef(child, RunId(run), AgentId.unsafe("worker"), None, 1)
 
   private def started(run: String, token: Long): StreamEvent.Live =
-    StreamEvent.Live(parent.value, run, FencingToken(token), "1.0", "tools", "agent.task_started", 1, ujson.Obj())
+    StreamEvent.Live(
+      LiveEvent(parent.value, run, FencingToken(token), "1.0", "tools", "agent.task_started", 1, ujson.Obj())
+    )
 
   /**
    * Run `run`'s commit of the call's `TaskEnded` to `store` under a new claim - the store's first is token 1 - handed
