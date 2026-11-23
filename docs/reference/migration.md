@@ -370,7 +370,9 @@ defaulted field, so only a positional pattern on them changes:
 - `ModelPricing` gains `cacheCreationInputTokenCostAbove1hr: Option[Double]` as its last field.
 - `CompletionOptions` gains `promptCache` and then `serviceTier` (#2726) as its last fields:
   `case CompletionOptions(t, _, _, _, _, _, _, _, _)` gains two `_`. `Completion` and `ModelCallCompleted` gain
-  `servedTier: Option[ServiceTier]` (#2746), the tier that served the call, as theirs.
+  `servedTier: Option[ServiceTier]` (#2746), the tier that served the call, as theirs, and so does
+  `TraceEvent.CompletionReceived` (#2750): `case TraceEvent.CompletionReceived(...)` with 0.6.0's fourteen binders
+  gains a `_`.
 - Java and Kotlin see no Scala defaults, so a call to `TokenUsage.apply`, `ModelPricing.apply` or
   `CompletionOptions.apply` from them passes the new arguments too (`Option.empty()`).
 

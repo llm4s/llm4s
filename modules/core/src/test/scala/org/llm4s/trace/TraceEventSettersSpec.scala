@@ -1,6 +1,6 @@
 package org.llm4s.trace
 
-import org.llm4s.llmconnect.model.{ EmbeddingUsage, TokenUsage, UsageSummary, UserMessage }
+import org.llm4s.llmconnect.model.{ EmbeddingUsage, ServiceTier, TokenUsage, UsageSummary, UserMessage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -35,6 +35,14 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
     val e = TraceEvent.CompletionReceived("id", "m", 0, "c", t0)
     e.withId("id2").withModel("m2").withToolCalls(2).withContent("c2").withTimestamp(t1) shouldBe
       TraceEvent.CompletionReceived("id2", "m2", 2, "c2", t1)
+    e.servedTier shouldBe None
+    e.withServedTier(ServiceTier.Default) shouldBe
+      TraceEvent.CompletionReceived("id", "m", 0, "c", t0, servedTier = Some(ServiceTier.Default))
+  }
+
+  "TraceEvent.serviceTierName" should "write the named tiers lower case and Other as the provider wrote it" in {
+    Seq(ServiceTier.Auto, ServiceTier.Default, ServiceTier.Flex, ServiceTier.Priority, ServiceTier.Other("scale"))
+      .map(TraceEvent.serviceTierName) shouldBe Seq("auto", "default", "flex", "priority", "scale")
   }
 
   "ToolExecuted" should "default its timestamp and set every field" in {

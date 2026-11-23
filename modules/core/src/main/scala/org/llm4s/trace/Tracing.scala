@@ -326,7 +326,8 @@ private class CompositeTracing(tracers: Vector[Tracing]) extends Tracing {
       id = completion.id,
       model = model,
       toolCalls = completion.message.toolCalls.size,
-      content = completion.message.content
+      content = completion.message.content,
+      servedTier = completion.servedTier
     )
     traceEvent(event)
   }

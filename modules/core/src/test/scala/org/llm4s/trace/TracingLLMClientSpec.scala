@@ -83,6 +83,22 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       e.input shouldBe conversation.messages
       e.finishReasons shouldBe Seq("stop") // the Completion's reason; Stop by default
       e.content shouldBe "answer"
+      e.servedTier shouldBe None
+    }
+
+    "trace the tier that served a call, plain or streamed (#2750)" in {
+      val served = completion.withServedTier(ServiceTier.Priority)
+      val plain  = new Recording
+      TracingLLMClient(new Stub(Right(served)), plain).complete(conversation, options)
+      plain.events.loneElement.asInstanceOf[TraceEvent.CompletionReceived].servedTier shouldBe Some(
+        ServiceTier.Priority
+      )
+      val streamed = new Recording
+      TracingLLMClient(new Stub(Right(completion.withServedTier(ServiceTier.Other("scale")))), streamed)
+        .streamComplete(conversation, options, _ => ())
+      streamed.events.loneElement.asInstanceOf[TraceEvent.CompletionReceived].servedTier shouldBe Some(
+        ServiceTier.Other("scale")
+      )
     }
 
     // RFC 0009: a non-streamed call reports its reason too, as the mapped name; an unknown one is left out
@@ -270,6 +286,10 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       json("response_model").str shouldBe "m-1"
       json("finish_reasons").arr.map(_.str) shouldBe Seq("stop")
       json("completion_tokens").num shouldBe 2
+      json.obj.keySet should not contain "served_tier"
+      received.withServedTier(ServiceTier.Flex).toJson("served_tier").str shouldBe "flex"
+      received.withServedTier(ServiceTier.Flex).withServedTier(None).servedTier shouldBe None
+      received.withServedTier(Some(ServiceTier.Other("scale"))).toJson("served_tier").str shouldBe "scale"
       received.input shouldBe conversation.messages
       received
         .withProvider(None)

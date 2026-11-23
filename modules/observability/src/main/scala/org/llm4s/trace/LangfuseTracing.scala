@@ -343,10 +343,15 @@ class LangfuseTracing(
               "role"    -> "assistant",
               "content" -> e.content
             ),
-            "metadata" -> ujson.Obj(
-              "completion_id" -> e.id,
-              "tool_calls"    -> e.toolCalls
-            )
+            "metadata" -> {
+              val metadata = ujson.Obj(
+                "completion_id" -> e.id,
+                "tool_calls"    -> e.toolCalls
+              )
+              // the tier the provider served the call at (#2750)
+              e.servedTier.foreach(t => metadata("service_tier") = TraceEvent.serviceTierName(t))
+              metadata
+            }
           )
         )
 
@@ -746,7 +751,8 @@ class LangfuseTracing(
       id = completion.id,
       model = model,
       toolCalls = completion.message.toolCalls.size,
-      content = completion.message.content
+      content = completion.message.content,
+      servedTier = completion.servedTier
     )
     traceEvent(event)
   }

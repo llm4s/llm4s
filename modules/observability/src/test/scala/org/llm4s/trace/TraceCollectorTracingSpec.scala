@@ -356,4 +356,22 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     span1.spanId shouldBe spanId
     span1 shouldBe span2
   }
+
+  it should "keep a completion's served tier as its span's service_tier (#2750)" in {
+    import org.llm4s.llmconnect.model.{ Completion, ServiceTier }
+    import org.llm4s.trace.model.SpanValue
+    val completion = Completion("c-1", java.time.Instant.EPOCH, "hi", "m", AssistantMessage("hi"))
+    collector.traceEvent(
+      TraceEvent.CompletionReceived("c-1", "m", 0, "hi", servedTier = Some(ServiceTier.Flex))
+    ) shouldBe Right(())
+    collector.traceEvent(TraceEvent.CompletionReceived("c-2", "m", 0, "hi")) shouldBe Right(())
+    collector.traceCompletion(completion.withServedTier(ServiceTier.Other("scale")), "m") shouldBe Right(())
+    collector.traceCompletion(completion, "m") shouldBe Right(())
+    store.getSpans(collector.traceId).map(_.attributes.get("service_tier")) should contain theSameElementsAs Seq(
+      Some(SpanValue.StringValue("flex")),
+      None,
+      Some(SpanValue.StringValue("scale")),
+      None
+    )
+  }
 }

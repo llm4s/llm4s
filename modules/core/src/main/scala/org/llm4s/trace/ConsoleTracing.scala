@@ -110,6 +110,7 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
           println(s"${GREEN}Model: ${e.model}$RESET")
           println(s"${GREEN}ID: ${e.id}$RESET")
           println(s"${GREEN}Tool Calls: ${e.toolCalls}$RESET")
+          e.servedTier.foreach(t => println(s"${GREEN}Served Tier: ${TraceEvent.serviceTierName(t)}$RESET"))
           println(s"${GREEN}${content("Content", e.content, 200)}$RESET")
           println()
 
@@ -255,7 +256,8 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
       id = completion.id,
       model = model,
       toolCalls = completion.message.toolCalls.size,
-      content = completion.message.content
+      content = completion.message.content,
+      servedTier = completion.servedTier
     )
     traceEvent(event)
   }

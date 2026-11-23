@@ -1,7 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.annotation.Stable
-import org.llm4s.llmconnect.model.{ CompletionOptions, EmbeddingUsage, Message, TokenUsage, UsageSummary }
+import org.llm4s.llmconnect.model.{ CompletionOptions, EmbeddingUsage, Message, ServiceTier, TokenUsage, UsageSummary }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import java.time.Instant
@@ -94,6 +94,8 @@ object TraceEvent {
    * @param options       the options the request was sent with
    * @param input         the request's messages: message content, which backends record only when told to; not
    *                      included in [[toJson]]
+   * @param servedTier    the tier the provider reports serving the call at (`Completion.servedTier`, #2750), when it
+   *                      reported one
    */
   final case class CompletionReceived private (
     id: String,
@@ -109,7 +111,8 @@ object TraceEvent {
     finishReasons: Seq[String],
     usage: Option[TokenUsage],
     options: Option[CompletionOptions],
-    input: Seq[Message]
+    input: Seq[Message],
+    servedTier: Option[ServiceTier]
   ) extends TraceEvent {
     def withId(id: String): CompletionReceived                               = copy(id = id)
     def withModel(model: String): CompletionReceived                         = copy(model = model)
@@ -131,6 +134,8 @@ object TraceEvent {
     def withOptions(options: CompletionOptions): CompletionReceived          = copy(options = Some(options))
     def withOptions(options: Option[CompletionOptions]): CompletionReceived  = copy(options = options)
     def withInput(input: Seq[Message]): CompletionReceived                   = copy(input = input)
+    def withServedTier(servedTier: ServiceTier): CompletionReceived          = copy(servedTier = Some(servedTier))
+    def withServedTier(servedTier: Option[ServiceTier]): CompletionReceived  = copy(servedTier = servedTier)
 
     def eventType: String = "completion_received"
     def toJson: ujson.Value = {
@@ -153,6 +158,7 @@ object TraceEvent {
         json("completion_tokens") = u.completionTokens
         u.thinkingTokens.foreach(t => json("thinking_tokens") = t)
       }
+      servedTier.foreach(t => json("served_tier") = TraceEvent.serviceTierName(t))
       json
     }
   }
@@ -172,7 +178,8 @@ object TraceEvent {
       finishReasons: Seq[String] = Seq.empty,
       usage: Option[TokenUsage] = None,
       options: Option[CompletionOptions] = None,
-      input: Seq[Message] = Seq.empty
+      input: Seq[Message] = Seq.empty,
+      servedTier: Option[ServiceTier] = None
     ): CompletionReceived =
       new CompletionReceived(
         id,
@@ -188,7 +195,8 @@ object TraceEvent {
         finishReasons,
         usage,
         options,
-        input
+        input,
+        servedTier
       )
 
   }
@@ -662,6 +670,18 @@ object TraceEvent {
   /** Stage durations as a JSON object of milliseconds, by stage name in order. */
   private[llm4s] def stageDurationsJson(stageDurations: Map[String, FiniteDuration]): ujson.Obj =
     ujson.Obj.from(stageDurations.toSeq.sortBy(_._1).map { case (k, d) => k -> ujson.Num(d.toMillis.toDouble) })
+
+  /**
+   * A served tier as backends write it: `auto`, `default`, `flex` or `priority`, and an `Other` as the provider wrote
+   * it (#2750).
+   */
+  private[llm4s] def serviceTierName(tier: ServiceTier): String = tier match {
+    case ServiceTier.Auto       => "auto"
+    case ServiceTier.Default    => "default"
+    case ServiceTier.Flex       => "flex"
+    case ServiceTier.Priority   => "priority"
+    case ServiceTier.Other(raw) => raw
+  }
 
   object RAGOperationCompleted {
     def apply(

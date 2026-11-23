@@ -10,11 +10,13 @@ import org.llm4s.llmconnect.model.{
   Completion,
   EmbeddingUsage,
   FinishReason,
+  ServiceTier,
   TokenUsage,
   ToolCall,
   ToolMessage,
   UserMessage
 }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -146,6 +148,30 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
       val (_, attributes) = mapped(event)
       long(attributes, "gen_ai.usage.input_tokens") shouldBe 81L
       long(attributes, "gen_ai.usage.output_tokens") shouldBe 64L
+    }
+
+    // #2750: the conventions' openai.response.service_tier on OpenAI's spans only, llm4s.service_tier on every one
+    "record the served tier, as openai.response.service_tier for OpenAI and Azure OpenAI" in {
+      def tiers(provider: Option[String], tier: Option[ServiceTier]) = {
+        val event = TraceEvent
+          .CompletionReceived("chatcmpl-1", "gpt-4o", 0, "hi", at)
+          .withProvider(provider.map(ProviderId(_)))
+          .withServedTier(tier)
+        val (_, attributes) = mapped(event)
+        (Option(str(attributes, "llm4s.service_tier")), Option(str(attributes, "openai.response.service_tier")))
+      }
+      tiers(Some("openai"), Some(ServiceTier.Flex)) shouldBe ((Some("flex"), Some("flex")))
+      tiers(Some("azure"), Some(ServiceTier.Other("scale"))) shouldBe ((Some("scale"), Some("scale")))
+      tiers(Some("bedrock"), Some(ServiceTier.Priority)) shouldBe ((Some("priority"), None))
+      tiers(None, Some(ServiceTier.Default)) shouldBe ((Some("default"), None))
+      tiers(Some("openai"), None) shouldBe ((None, None))
+    }
+
+    "record the served tier traceCompletion is given" in withTracing() { (tracing, spans) =>
+      val completion = Completion("chatcmpl-1", at, "hi", "gpt-4o", AssistantMessage("hi"))
+        .withServedTier(ServiceTier.Auto)
+      tracing.traceCompletion(completion, "gpt-4o") shouldBe Right(())
+      spans().loneElement.getAttributes.get(AttributeKey.stringKey("llm4s.service_tier")) shouldBe "auto"
     }
   }
 

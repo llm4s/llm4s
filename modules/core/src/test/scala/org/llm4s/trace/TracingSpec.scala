@@ -200,6 +200,14 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     combined.traceEvent(event).isLeft shouldBe true
   }
 
+  it should "trace a completion's served tier to each tracer (#2750)" in {
+    val events   = mutable.Buffer.empty[TraceEvent]
+    val combined = TracingComposer.combine(new TestTracing(events), new FailingTracing())
+
+    combined.traceCompletion(createTestCompletion().withServedTier(ServiceTier.Flex), "gpt-4") shouldBe Right(())
+    events.collect { case e: TraceEvent.CompletionReceived => e.servedTier } shouldBe Seq(Some(ServiceTier.Flex))
+  }
+
   "TracingComposer.filter" should "only trace events matching predicate" in {
     val events   = mutable.Buffer.empty[TraceEvent]
     val tracer   = new TestTracing(events)

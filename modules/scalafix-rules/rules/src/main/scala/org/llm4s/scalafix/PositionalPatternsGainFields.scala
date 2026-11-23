@@ -13,8 +13,8 @@ import scalafix.v1._
  * `case AgentStatus.Suspended(a, q, m, b)` gains `delegated` (#2050). A pattern with 0.6.0's arity gets a `_` for each
  * field added since 0.6.0: `Completion`'s ten fields gain `finishReason` (#2613) and `servedTier` (#2746),
  * `ModelCapabilities` gains the five thinking and effort fields (#2115), `TraceEvent.ErrorOccurred`'s nine gain `usage`
- * (#2676), `TokenUsage`'s six gain `longCacheCreationTokens` and `ModelPricing`'s fifteen
- * `cacheCreationInputTokenCostAbove1hr` (#2115),
+ * (#2676), `TraceEvent.CompletionReceived`'s fourteen gain `servedTier` (#2750), `TokenUsage`'s six gain
+ * `longCacheCreationTokens` and `ModelPricing`'s fifteen `cacheCreationInputTokenCostAbove1hr` (#2115),
  * `CompletionOptions`'s nine gain `promptCache` (#2115) and `serviceTier` (#2726; its eighth, `budgetTokens`, is now
  * `thinking`, which `ThinkingReplacesBudgetTokens` reports), `TurnState` gains `cut` (#2613) and `RAGConfig`
  * `completionOptions` (#2715) and `documentRegistry` (#2714). A pattern with any other number of arguments is left
@@ -91,7 +91,7 @@ object PositionalPatternsGainFields {
     "org/llm4s/toolapi/SafeParameterExtractor"                      -> (1  -> 2),
     "org/llm4s/toolapi/ToolRetryPolicy"                             -> (3  -> 4),
     "org/llm4s/trace/TraceEvent.AgentRunEnded"                      -> (7  -> 11),
-    "org/llm4s/trace/TraceEvent.CompletionReceived"                 -> (5  -> 14),
+    "org/llm4s/trace/TraceEvent.CompletionReceived"                 -> (5  -> 15),
     "org/llm4s/trace/TraceEvent.CustomEvent"                        -> (3  -> 4),
     "org/llm4s/trace/TraceEvent.EmbeddingUsageRecorded"             -> (5  -> 7),
     "org/llm4s/trace/TraceEvent.ErrorOccurred"                      -> (3  -> 10),
@@ -104,9 +104,10 @@ object PositionalPatternsGainFields {
    * 0.6.0 does not have 0.5.1's arity, so the two maps never both match.
    */
   val arity06: Map[String, (Int, Int)] = Map(
-    "org/llm4s/llmconnect/model/Completion"     -> (10 -> 12),
-    "org/llm4s/agent/events/ModelCallCompleted" -> (8  -> 10),
-    "org/llm4s/trace/TraceEvent.ErrorOccurred"  -> (9  -> 10)
+    "org/llm4s/llmconnect/model/Completion"         -> (10 -> 12),
+    "org/llm4s/agent/events/ModelCallCompleted"     -> (8  -> 10),
+    "org/llm4s/trace/TraceEvent.ErrorOccurred"      -> (9  -> 10),
+    "org/llm4s/trace/TraceEvent.CompletionReceived" -> (14 -> 15)
   )
 
   /** The number of fields a pattern of `size` arguments on `owner` lacks, if it has 0.5.1's or 0.6.0's arity. */

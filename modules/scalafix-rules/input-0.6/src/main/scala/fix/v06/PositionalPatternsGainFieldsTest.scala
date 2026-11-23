@@ -38,6 +38,12 @@ object PositionalPatternsGainFieldsTest {
     case _ => None
   }
 
+  // gained servedTier since 0.6.0 (#2750)
+  def completionModel(event: TraceEvent): Option[String] = event match {
+    case TraceEvent.CompletionReceived(_, model, _, _, _, _, _, _, _, _, _, _, _, _) => Some(model)
+    case _ => None
+  }
+
   // gained longCacheCreationTokens since 0.6.0 (RFC 0008 PR 6, #2115)
   def prompt(usage: TokenUsage): Int = usage match {
     case TokenUsage(promptTokens, _, _, _, _, _) => promptTokens

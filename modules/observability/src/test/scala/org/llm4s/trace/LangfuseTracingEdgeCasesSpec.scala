@@ -62,6 +62,22 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     event("type").str shouldBe "generation-create"
     event("body")("model").str shouldBe "gpt-4"
     event("body")("metadata")("completion_id").str shouldBe "comp-1"
+    event("body")("metadata").obj.contains("service_tier") shouldBe false
+  }
+
+  it should "carry the served tier in the generation's metadata (#2750)" in {
+    def tierOf(tracing: LangfuseTracing => Unit): String = {
+      val mock = new MockHttpClient(HttpResponse(200, ""))
+      tracing(makeTracing(mock))
+      ujson.read(mock.lastBody.get)("batch")(0)("body")("metadata")("service_tier").str
+    }
+    tierOf(
+      _.traceEvent(TraceEvent.CompletionReceived("c", "m", 0, "x", servedTier = Some(ServiceTier.Priority)))
+    ) shouldBe
+      "priority"
+    val completion = Completion("c", Instant.EPOCH, "x", "m", AssistantMessage("x"))
+      .withServedTier(ServiceTier.Other("scale"))
+    tierOf(_.traceCompletion(completion, "m")) shouldBe "scale"
   }
 
   // =========================================================================
