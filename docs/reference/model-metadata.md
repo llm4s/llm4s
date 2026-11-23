@@ -59,7 +59,7 @@ windows, prices per token and capability flags.
 ### Embedded overrides
 
 Upstream occasionally drops or mis-shapes entries llm4s relies on (a chat model regressing to an `embedding` row, or a
-canonical alias being removed so a substring fallback resolves to a third-party-hosted variant). So that the vendored
+canonical id being removed, so a lookup of it fails). So that the vendored
 snapshot stays a clean, refreshable copy, llm4s layers a small curated corrections file over it:
 `modules/core/src/main/resources/modeldata/llm4s_model_overrides.json`. Its entries take precedence over the snapshot
 and survive refreshes. The overlay is applied **only** to the bundled default resource; a file, URL or other resource
@@ -108,7 +108,7 @@ def describe(registry: ModelRegistryService): Unit =
 | `contextWindow: Option[Int]` | `maxInputTokens`, else `maxOutputTokens` |
 | `reserveCompletion: Option[Int]` | `maxOutputTokens` |
 | `supports(capability: String): Boolean` | A capability flag; see below |
-| `isDeprecated: Boolean` | `deprecationDate` is today or earlier |
+| `isDeprecated: Boolean` / `isDeprecatedOn(date)` | `deprecationDate` (a `LocalDate`) is today, or the given date, or earlier |
 | `description: String` | One line: id, provider, context window and capabilities |
 
 `supports` takes `function_calling` (or `tools`), `parallel_function_calling`, `vision` (or `images`),
@@ -139,13 +139,13 @@ def survey(registry: ModelRegistryService): Unit = {
   registry.findByCapability("vision").foreach(models => println(s"${models.size} vision models"))
   registry.listByProvider("openai").foreach(models => models.take(5).foreach(m => println(m.modelId)))
   registry.listByMode(ModelMode.Embedding).foreach(models => println(s"${models.size} embedding models"))
-  registry.listProviders().foreach(providers => println(providers.mkString(", ")))
-  registry.statistics().foreach(stats => println(s"${stats("totalModels")} models, ${stats("providers")} providers"))
+  println(registry.listProviders().mkString(", "))
+  registry.search("sonnet").foreach(m => println(m.modelId))
 }
 ```
 
-`statistics()` reports `totalModels`, `providers`, `chatModels`, `embeddingModels`, `imageGenerationModels` and
-`deprecatedModels`.
+`lookup` matches an exact id, ignoring case and a `provider/` prefix, and never a model whose id only contains the
+text; `search` returns every model whose id contains it, for a picker or a "did you mean".
 
 ## Your own metadata
 
@@ -169,8 +169,6 @@ val inHouse = ModelMetadata(
   mode = ModelMode.Chat,
   maxInputTokens = Some(32000),
   maxOutputTokens = Some(8000),
-  inputCostPerToken = Some(1e-6),
-  outputCostPerToken = Some(3e-6),
   capabilities = ModelCapabilities(supportsFunctionCalling = Some(true)),
   pricing = ModelPricing(inputCostPerToken = Some(1e-6), outputCostPerToken = Some(3e-6)),
   deprecationDate = None
@@ -232,8 +230,8 @@ Exactly one source is used; set one key, or none for the bundled catalogue.
 | `listByProvider(provider: String): Result[List[ModelMetadata]]` | Every model of a provider |
 | `listByMode(mode: ModelMode): Result[List[ModelMetadata]]` | Every model of a mode |
 | `findByCapability(capability: String): Result[List[ModelMetadata]]` | Every model with a capability |
-| `listProviders(): Result[List[String]]` | The providers present |
-| `statistics(): Result[Map[String, Any]]` | Counts, as above |
+| `listProviders(): List[String]` | The providers present |
+| `search(query: String): List[ModelMetadata]` | Every model whose id contains `query` |
 
 | `ModelRegistryService` companion | Description |
 |---|---|

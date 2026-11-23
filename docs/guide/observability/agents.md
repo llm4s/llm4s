@@ -72,7 +72,7 @@ val service = for {
 ```
 
 Every runtime and worker of the process must use `metered`, not `store.checkpointer`, or their runs go uncounted. At
-shutdown call `tracing.shutdown()` after the worker has drained: the OpenTelemetry backend batches spans and flushes
+shutdown call `tracing.close()` after the worker has drained: the OpenTelemetry backend batches spans and flushes
 them then. A Micrometer registry takes `new MicrometerMetrics(meterRegistry)` in place of the loader's collector
 ([Micrometer metrics](micrometer)).
 

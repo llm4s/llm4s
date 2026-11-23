@@ -21,6 +21,10 @@ import org.slf4j.LoggerFactory
  * what each model supports, as LiteLLM does. Rules a vendor knows but the registry does not
  * record live in that vendor's provider module, layered on with [[RequestTransformer.adjusted]].
  *
+ * The trait is sealed: build one with [[RequestTransformer.default]] or [[RequestTransformer.adjusted]]. A rule of
+ * your own is an `adjust` function over the registry's [[ModelCapabilities]], so the adjustments it causes are
+ * reported like the built-in ones.
+ *
  * Example usage:
  * {{{
  *   val transformer = RequestTransformer.default(registryService)
@@ -32,7 +36,7 @@ import org.slf4j.LoggerFactory
  * }}}
  */
 @Stable
-trait RequestTransformer {
+sealed trait RequestTransformer {
 
   /**
    * Validate and transform completion options for a specific model.
@@ -49,25 +53,19 @@ trait RequestTransformer {
   def transformOptions(
     modelId: String,
     options: CompletionOptions,
-    dropUnsupported: Boolean = false
+    dropUnsupported: Boolean
   ): Result[CompletionOptions]
 
   /**
    * The options with everything `modelId` cannot take dropped or adjusted, as
    * `transformOptions(modelId, options, dropUnsupported = true)` returns them, and a
    * [[org.llm4s.llmconnect.model.RequestAdjustment]] for each change. [[TransformationResult.transform]]
-   * calls it. A `Left` from `transformOptions` is returned as it is, so a transformer can still refuse a
-   * request outright.
-   *
-   * This hook is `private[llm4s]`: only llm4s's own transformers report adjustments. A transformer
-   * written outside llm4s cannot override it, so the default applies, which reports none. Whether to
-   * make the hook public is left to a later change under RFC 0008.
+   * calls it.
    */
   private[llm4s] def adjustOptions(
     modelId: String,
     options: CompletionOptions
-  ): Result[(CompletionOptions, List[RequestAdjustment])] =
-    transformOptions(modelId, options, dropUnsupported = true).map(_ -> List.empty)
+  ): Result[(CompletionOptions, List[RequestAdjustment])]
 
   /**
    * Transform messages for model-specific requirements.
@@ -94,14 +92,6 @@ trait RequestTransformer {
    * @return true if the model requires fake streaming
    */
   def requiresFakeStreaming(modelId: String): Boolean
-
-  /**
-   * Get the set of parameters that are not supported by this model.
-   *
-   * @param modelId The model identifier
-   * @return Set of disallowed parameter names, empty if all are allowed
-   */
-  def disallowedParams(modelId: String): Set[String]
 }
 
 object RequestTransformer {
@@ -112,11 +102,11 @@ object RequestTransformer {
   def default(service: ModelRegistryService): RequestTransformer =
     new DefaultRequestTransformer(Map.empty, service, (_, capabilities) => capabilities)
 
-  /**
-   * Create a transformer with custom model overrides.
-   * Useful for testing or for models not yet in the registry.
-   */
-  def withOverrides(overrides: Map[String, ModelCapabilities], service: ModelRegistryService): RequestTransformer =
+  /** A transformer whose capabilities for the ids in `overrides` replace the registry's; llm4s's own tests use it. */
+  private[llm4s] def withOverrides(
+    overrides: Map[String, ModelCapabilities],
+    service: ModelRegistryService
+  ): RequestTransformer =
     new DefaultRequestTransformer(overrides, service, (_, capabilities) => capabilities)
 
   /**
@@ -284,11 +274,6 @@ final private[model] class DefaultRequestTransformer(
   override def requiresFakeStreaming(modelId: String): Boolean = {
     val capabilities = getCapabilities(modelId)
     !capabilities.supportsNativeStreaming.getOrElse(true)
-  }
-
-  override def disallowedParams(modelId: String): Set[String] = {
-    val capabilities = getCapabilities(modelId)
-    capabilities.disallowedParams.getOrElse(Set.empty)
   }
 
   /** Capabilities for a model: overrides first, then the registry, then none; then `adjust`. */

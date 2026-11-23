@@ -63,6 +63,8 @@ final private[agent] class AgentTracing(
   private val usage = new AtomicReference(UsageSummary())
   // the provider of the run's first model call that reported one: the run span's gen_ai.provider.name (#2275)
   private val provider = new AtomicReference[Option[ProviderId]](None)
+  // who the run is for: the principal its RunConfig named, which the event that began the run records (#2828)
+  private val principal = new AtomicReference[Option[String]](None)
 
   // ends - once - after the terminal event is traced, after a Disconnected, or when the run lacks a terminal event
   private val scope = RunScope(handle.runId, onEvent, () => scopeEnded())
@@ -83,6 +85,11 @@ final private[agent] class AgentTracing(
       if incarnated.compareAndSet(false, true) then
         runSpan = AgentTraceSpans.run(handle.threadId, handle.runId, Some(record.token), continues)
       trace(AgentTracing.toTrace(record).withSpan(placement(event, record)))
+      record.event match
+        case RunEvent.RunStarted(d)   => principal.set(d.principal)
+        case RunEvent.RunRecovered(d) => principal.set(d.principal)
+        case RunEvent.RunResumed(d)   => principal.set(d.principal)
+        case _                        => ()
       event match
         case AgentEvents.ModelCallCompleted(m) =>
           if m.provider.isDefined then provider.compareAndSet(None, m.provider): Unit
@@ -163,7 +170,8 @@ final private[agent] class AgentTracing(
         parentThreadId = parent.map(_._1.value),
         parentRunId = parent.map(_._2.value),
         span = Some(TraceSpan(runSpan, continues, startedAt.get.getOrElse(attachedAt))),
-        provider = provider.get
+        provider = provider.get,
+        userId = principal.get
       )
     )
 

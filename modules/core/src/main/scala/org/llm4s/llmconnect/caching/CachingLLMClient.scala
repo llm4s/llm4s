@@ -2,9 +2,10 @@
 package org.llm4s.llmconnect.caching
 
 import org.llm4s.annotation.Stable
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.types.Result
 import java.time.Instant
 import org.llm4s.trace.{ TraceEvent, Tracing }
@@ -19,15 +20,13 @@ import org.slf4j.LoggerFactory
  *
  * == Usage ==
  * {{{
- * val cachingClient = new CachingLLMClient(
+ * for {
+ *   config <- CacheConfig.create(similarityThreshold = 0.95, ttl = 1.hour, maxSize = 1000)
+ * } yield new CachingLLMClient(
  *   baseClient = openAIClient,
  *   embeddingClient = embeddingClient,
  *   embeddingModel = EmbeddingModelConfig("text-embedding-3-small", 1536),
- *   config = CacheConfig(
- *     similarityThreshold = 0.95,
- *     ttl = 1.hour,
- *     maxSize = 1000
- *   ),
+ *   config = config,
  *   tracing = tracing
  * )
  * }}}
@@ -46,12 +45,15 @@ import org.slf4j.LoggerFactory
  * - `streamComplete` requests bypass the cache entirely.
  * - A conversation with an image or a document part bypasses it too: the prompt is embedded as
  *   text, so two requests differing only in their media would otherwise share an answer.
+ * - A conversation with a tool turn (an assistant message with tool calls, or a tool message) bypasses
+ *   it: only user and system text is embedded, so each step of a tool loop would otherwise be served
+ *   the first step's tool-call completion.
  * - Cache is in-memory and lost on restart.
  * - Cache lookup involves a linear scan (O(n)) of all entries to calculate cosine similarity.
  *   Performance may degrade with very large `maxSize`.
  *
  * @param baseClient The underlying LLM client to delegate to on cache miss.
- * @param embeddingClient Client to generate embeddings for prompts.
+ * @param embeddingClient Generates embeddings for prompts: an `EmbeddingClient`, or any `EmbeddingProvider`.
  * @param embeddingModel Configuration for the embedding model used.
  * @param config Cache configuration (threshold, TTL, max size).
  * @param tracing Tracing instance for observability.
@@ -60,7 +62,7 @@ import org.slf4j.LoggerFactory
 @Stable
 class CachingLLMClient(
   baseClient: LLMClient,
-  embeddingClient: EmbeddingClient,
+  embeddingClient: EmbeddingProvider,
   embeddingModel: EmbeddingModelConfig,
   config: CacheConfig,
   tracing: Tracing,
@@ -80,13 +82,21 @@ class CachingLLMClient(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions()
   ): Result[Completion] =
-    if (Message.hasMedia(conversation.messages)) baseClient.complete(conversation, options)
+    if (Message.hasMedia(conversation.messages) || hasToolTurn(conversation.messages))
+      baseClient.complete(conversation, options)
     else completeCached(conversation, options)
 
+  // The prompt embeds user and system text only, so a tool loop's steps would all look like its first.
+  private def hasToolTurn(messages: Seq[Message]): Boolean =
+    messages.exists {
+      case am: AssistantMessage => am.toolCalls.nonEmpty
+      case _: ToolMessage       => true
+      case _                    => false
+    }
+
   private def completeCached(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
-    // SECURITY: Only include User and System messages in the embedding prompt.
-    // Exclude Assistant messages (which may contain tool calls) and Tool messages (outputs)
-    // to prevent leaking sensitive information found in tool arguments or outputs.
+    // SECURITY: Only include User and System messages in the embedding prompt; assistant text is left out.
+    // A conversation with tool calls or tool output never gets here.
     val promptText = conversation.messages
       .collect {
         case m: UserMessage   => s"${m.role}: ${m.content}"

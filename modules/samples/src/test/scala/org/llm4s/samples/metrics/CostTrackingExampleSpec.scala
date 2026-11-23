@@ -138,8 +138,6 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = None,
       maxOutputTokens = None,
-      inputCostPerToken = None,
-      outputCostPerToken = None,
       capabilities = ModelCapabilities(),
       pricing = pricing,
       deprecationDate = None

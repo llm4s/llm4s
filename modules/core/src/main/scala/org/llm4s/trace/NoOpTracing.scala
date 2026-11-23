@@ -1,13 +1,12 @@
 package org.llm4s.trace
 
 import org.llm4s.annotation.Stable
-import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
 import org.llm4s.types.Result
 
 /**
  * No-operation [[Tracing]] implementation that silently discards all events.
  *
- * All methods return `Right(())` immediately without performing any operations.
+ * Every method returns `Right(())` immediately without performing any operation.
  * Use this implementation when tracing is disabled or not needed.
  *
  * == Usage ==
@@ -34,16 +33,4 @@ class NoOpTracing extends Tracing {
 
   /** Always returns `Right(())` without side effects. */
   def traceEvent(event: TraceEvent): Result[Unit] = Right(())
-
-  /** Always returns `Right(())` without side effects. */
-  def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())
-
-  /** Always returns `Right(())` without side effects. */
-  def traceError(error: Throwable, context: String): Result[Unit] = Right(())
-
-  /** Always returns `Right(())` without side effects. */
-  def traceCompletion(completion: Completion, model: String): Result[Unit] = Right(())
-
-  /** Always returns `Right(())` without side effects. */
-  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
 }

@@ -230,7 +230,13 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockHttpClient(HttpResponse(200, ""))
     val tracing    = makeTracing(mockClient)
 
-    val result = tracing.traceToolCall("calculator", """{"expr":"2+2"}""", "4")
+    val result = tracing.traceToolCall(
+      "calculator",
+      """{"expr":"2+2"}""",
+      "4",
+      scala.concurrent.duration.Duration.Zero,
+      success = true
+    )
 
     result.isRight shouldBe true
     mockClient.postCallCount shouldBe 1

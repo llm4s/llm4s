@@ -1,51 +1,50 @@
 package org.llm4s.llmconnect.caching
 
 import org.llm4s.annotation.Stable
+import org.llm4s.error.ValidationError
+import org.llm4s.types.Result
 
+import java.time.{ Clock, Instant }
 import java.util.concurrent.atomic.AtomicLong
 import java.util.Collections
 import java.util.LinkedHashMap
 import scala.concurrent.duration.FiniteDuration
 
 /**
- * Thread-safe in-memory implementation of EmbeddingCache with LRU eviction.
- * @param maxSize The maximum number of embeddings to store before evicting the oldest.
- * @param ttl     Optional Time-To-Live for cache entries. Expired entries are lazily evicted on access.
- * @tparam Embedding The embedding type (usually Seq[Double]).
+ * Thread-safe in-memory [[EmbeddingCache]] with LRU eviction and an optional TTL. Its operations never fail.
+ *
+ * Build one with [[InMemoryEmbeddingCache.create]], which checks its arguments.
+ *
+ * @param maxSize the maximum number of embeddings to store before evicting the least recently used
+ * @param ttl     how long an entry stays valid; an expired entry is evicted when it is next looked up. An entry
+ *                exactly `ttl` old is still valid.
+ * @param clock   the clock the TTL is measured with
  */
 @Stable
-class InMemoryEmbeddingCache[Embedding](
-  maxSize: Int = 10000,
-  ttl: Option[FiniteDuration] = None,
-  clock: () => Long = () => System.currentTimeMillis()
-) extends EmbeddingCache[Embedding] {
+final class InMemoryEmbeddingCache private (
+  maxSize: Int,
+  ttl: Option[FiniteDuration],
+  clock: Clock
+) extends EmbeddingCache {
 
-  /** Binary-compatible auxiliary constructor matching the pre-clock 2-param signature. */
-  def this(maxSize: Int, ttl: Option[FiniteDuration]) = this(maxSize, ttl, () => System.currentTimeMillis())
-
-  private case class CacheEntry(embedding: Embedding, timestamp: Long)
+  private case class Entry(embedding: Seq[Double], storedAt: Instant)
   private val ttlMillis = ttl.map(_.toMillis)
   private val hits      = new AtomicLong(0L)
   private val misses    = new AtomicLong(0L)
 
-  /**
-   * Internal store using LinkedHashMap with accessOrder = true.
-   * Wrapped in synchronizedMap to ensure thread safety.
-   */
+  // LinkedHashMap in access order is the LRU; synchronizedMap makes it thread-safe.
   private val store = Collections.synchronizedMap(
-    new LinkedHashMap[String, CacheEntry](maxSize, 0.75f, true) {
-      override def removeEldestEntry(eldest: java.util.Map.Entry[String, CacheEntry]): Boolean =
+    new LinkedHashMap[String, Entry](math.min(maxSize, 1024), 0.75f, true) {
+      override def removeEldestEntry(eldest: java.util.Map.Entry[String, Entry]): Boolean =
         size() > maxSize
     }
   )
 
-  /** Retrieves an embedding and updates hit/miss counters. */
-  def get(key: String): Option[Embedding] =
-    store.synchronized {
-      val entryOpt = Option(store.get(key))
-
-      val validEntry = entryOpt.filter { entry =>
-        val isExpired = ttlMillis.exists(limit => (clock() - entry.timestamp) > limit)
+  /** Retrieves an embedding and updates the hit and miss counters. */
+  override def get(key: String): Result[Option[Seq[Double]]] =
+    Right(store.synchronized {
+      val validEntry = Option(store.get(key)).filter { entry =>
+        val isExpired = ttlMillis.exists(limit => (clock.millis() - entry.storedAt.toEpochMilli) > limit)
         if (isExpired) store.remove(key)
         !isExpired
       }
@@ -54,33 +53,46 @@ class InMemoryEmbeddingCache[Embedding](
       else misses.incrementAndGet()
 
       validEntry.map(_.embedding)
-    }
+    })
 
-  /** Stores an embedding, potentially triggering LRU eviction. */
-  def put(key: String, embedding: Embedding): Unit =
-    store.put(key, CacheEntry(embedding, clock()))
+  /** Stores an embedding, evicting the least recently used entry when full. */
+  override def put(key: String, embedding: Seq[Double]): Result[Unit] = {
+    store.put(key, Entry(embedding, clock.instant()))
+    Right(())
+  }
 
-  /** Clears all cached entries and resets statistics. */
-  override def clear(): Unit = {
+  /** Clears all cached entries and resets the statistics. */
+  override def clear(): Result[Unit] = {
     store.clear()
     hits.set(0L)
     misses.set(0L)
+    Right(())
   }
 
-  /** Returns type-safe cache statistics. */
-  override def stats(): CacheStats = {
-    val h     = hits.get()
-    val m     = misses.get()
-    val total = h + m
+  /** Always defined: the in-memory cache counts its hits and misses. */
+  override def stats(): Option[CacheStats] =
+    Some(CacheStats(size = store.size(), hits = hits.get(), misses = misses.get()))
+}
 
-    val hitRate = if (total > 0) (h.toDouble / total) * 100 else 0.0
+object InMemoryEmbeddingCache {
 
-    CacheStats(
-      size = store.size(),
-      hits = h,
-      misses = m,
-      totalRequests = total,
-      hitRatePercent = hitRate
-    )
+  /**
+   * An in-memory cache, or a `ValidationError` naming every invalid argument.
+   *
+   * @param maxSize must be positive; defaults to 10 000
+   * @param ttl     when given, must be positive; defaults to no expiry
+   * @param clock   defaults to the system clock in UTC; tests pass a fixed, movable one
+   */
+  def create(
+    maxSize: Int = 10000,
+    ttl: Option[FiniteDuration] = None,
+    clock: Clock = Clock.systemUTC()
+  ): Result[InMemoryEmbeddingCache] = {
+    val errors = List(
+      Option.when(maxSize <= 0)("maxSize must be positive"),
+      Option.when(ttl.exists(_.length <= 0))("ttl must be positive")
+    ).flatten
+    if (errors.nonEmpty) Left(ValidationError(errors.mkString("; "), "InMemoryEmbeddingCache"))
+    else Right(new InMemoryEmbeddingCache(maxSize, ttl, clock))
   }
 }

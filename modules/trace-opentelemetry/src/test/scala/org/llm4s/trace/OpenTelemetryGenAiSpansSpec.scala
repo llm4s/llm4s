@@ -44,7 +44,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
     val exporter = new Collecting
     val tracing  = OpenTelemetryTracing.exportingTo("genai-spec", exporter, captureContent)
     try body(tracing, () => exporter.spans.asScala.toVector)
-    finally tracing.shutdown()
+    finally tracing.close()
 
   private val Prompt = "What is the capital of France? My key is sk-abcdefghijklmnopqrstuvwxyz0123456789ABCD"
   private val Answer = "Paris is the capital of France."
