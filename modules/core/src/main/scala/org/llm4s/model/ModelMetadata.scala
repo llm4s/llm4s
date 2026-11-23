@@ -6,6 +6,8 @@ import org.llm4s.types.Result
 import org.llm4s.error.ValidationError
 import upickle.default._
 
+import java.time.LocalDate
+
 /**
  * Comprehensive metadata for an LLM model.
  * Based on litellm's model_prices_and_context_window.json schema.
@@ -18,24 +20,20 @@ import upickle.default._
  * @param mode The model mode (chat, embedding, image_generation, etc.)
  * @param maxInputTokens Maximum input tokens supported
  * @param maxOutputTokens Maximum output tokens supported
- * @param inputCostPerToken Cost per input token (in dollars)
- * @param outputCostPerToken Cost per output token (in dollars)
  * @param capabilities Model capabilities and features
- * @param pricing Detailed pricing information
- * @param deprecationDate Optional deprecation date (YYYY-MM-DD)
+ * @param pricing Prices, among them the per-token input and output costs
+ * @param deprecationDate The date the model is deprecated from, when known
  */
 @Stable
 final case class ModelMetadata private (
   modelId: String,
   provider: String,
-  mode: ModelMode,
-  maxInputTokens: Option[Int],
-  maxOutputTokens: Option[Int],
-  inputCostPerToken: Option[Double],
-  outputCostPerToken: Option[Double],
-  capabilities: ModelCapabilities,
-  pricing: ModelPricing,
-  deprecationDate: Option[String]
+  mode: ModelMode = ModelMode.Chat,
+  maxInputTokens: Option[Int] = None,
+  maxOutputTokens: Option[Int] = None,
+  capabilities: ModelCapabilities = ModelCapabilities(),
+  pricing: ModelPricing = ModelPricing(),
+  deprecationDate: Option[LocalDate] = None
 ) {
   def withModelId(modelId: String): ModelMetadata                      = copy(modelId = modelId)
   def withProvider(provider: String): ModelMetadata                    = copy(provider = provider)
@@ -44,18 +42,10 @@ final case class ModelMetadata private (
   def withMaxInputTokens(maxInputTokens: Option[Int]): ModelMetadata   = copy(maxInputTokens = maxInputTokens)
   def withMaxOutputTokens(maxOutputTokens: Int): ModelMetadata         = copy(maxOutputTokens = Some(maxOutputTokens))
   def withMaxOutputTokens(maxOutputTokens: Option[Int]): ModelMetadata = copy(maxOutputTokens = maxOutputTokens)
-  def withInputCostPerToken(inputCostPerToken: Double): ModelMetadata =
-    copy(inputCostPerToken = Some(inputCostPerToken))
-  def withInputCostPerToken(inputCostPerToken: Option[Double]): ModelMetadata =
-    copy(inputCostPerToken = inputCostPerToken)
-  def withOutputCostPerToken(outputCostPerToken: Double): ModelMetadata =
-    copy(outputCostPerToken = Some(outputCostPerToken))
-  def withOutputCostPerToken(outputCostPerToken: Option[Double]): ModelMetadata =
-    copy(outputCostPerToken = outputCostPerToken)
   def withCapabilities(capabilities: ModelCapabilities): ModelMetadata = copy(capabilities = capabilities)
   def withPricing(pricing: ModelPricing): ModelMetadata                = copy(pricing = pricing)
-  def withDeprecationDate(deprecationDate: String): ModelMetadata      = copy(deprecationDate = Some(deprecationDate))
-  def withDeprecationDate(deprecationDate: Option[String]): ModelMetadata = copy(deprecationDate = deprecationDate)
+  def withDeprecationDate(deprecationDate: LocalDate): ModelMetadata   = copy(deprecationDate = Some(deprecationDate))
+  def withDeprecationDate(deprecationDate: Option[LocalDate]): ModelMetadata = copy(deprecationDate = deprecationDate)
 
   /**
    * Get the effective context window size.
@@ -90,18 +80,11 @@ final case class ModelMetadata private (
     case _                                => false
   }
 
-  /**
-   * Check if the model is deprecated.
-   */
-  def isDeprecated: Boolean = deprecationDate.exists { date =>
-    scala.util
-      .Try {
-        val deprecation = java.time.LocalDate.parse(date)
-        val now         = java.time.LocalDate.now()
-        !now.isBefore(deprecation)
-      }
-      .getOrElse(false)
-  }
+  /** Whether the model is deprecated today, in the system clock's time zone. */
+  def isDeprecated: Boolean = isDeprecatedOn(LocalDate.now())
+
+  /** Whether the model is deprecated on `date`: its deprecation date is `date` or earlier. */
+  def isDeprecatedOn(date: LocalDate): Boolean = deprecationDate.exists(d => !date.isBefore(d))
 
   /**
    * Get a human-readable description of the model.
@@ -123,18 +106,16 @@ final case class ModelMetadata private (
 
 object ModelMetadata {
 
-  /** Creates a [[ModelMetadata]]. Named arguments are the supported way to construct one. */
+  /** Creates a [[ModelMetadata]]: a chat model with no limits, capabilities, prices or deprecation unless given. */
   def apply(
     modelId: String,
     provider: String,
-    mode: ModelMode,
-    maxInputTokens: Option[Int],
-    maxOutputTokens: Option[Int],
-    inputCostPerToken: Option[Double],
-    outputCostPerToken: Option[Double],
-    capabilities: ModelCapabilities,
-    pricing: ModelPricing,
-    deprecationDate: Option[String]
+    mode: ModelMode = ModelMode.Chat,
+    maxInputTokens: Option[Int] = None,
+    maxOutputTokens: Option[Int] = None,
+    capabilities: ModelCapabilities = ModelCapabilities(),
+    pricing: ModelPricing = ModelPricing(),
+    deprecationDate: Option[LocalDate] = None
   ): ModelMetadata =
     new ModelMetadata(
       modelId,
@@ -142,17 +123,20 @@ object ModelMetadata {
       mode,
       maxInputTokens,
       maxOutputTokens,
-      inputCostPerToken,
-      outputCostPerToken,
       capabilities,
       pricing,
       deprecationDate
     )
 
+  // ISO-8601 (YYYY-MM-DD), as litellm writes it
+  implicit private val localDateRw: ReadWriter[LocalDate] =
+    readwriter[String].bimap[LocalDate](_.toString, LocalDate.parse)
+
   implicit val rw: ReadWriter[ModelMetadata] = macroRW
 
   /**
-   * Create ModelMetadata from raw JSON values.
+   * Create ModelMetadata from raw JSON values. An entry whose `deprecation_date` is not a `YYYY-MM-DD` date is an
+   * error, as is one whose fields have the wrong JSON type.
    */
   def fromJson(modelId: String, data: ujson.Value): Result[ModelMetadata] = {
     import org.llm4s.syntax.toResult
@@ -165,14 +149,13 @@ object ModelMetadata {
         val maxInputTokens  = obj.get("max_input_tokens").flatMap(v => if (v.isNull) None else Some(v.num.toInt))
         val maxOutputTokens = obj.get("max_output_tokens").flatMap(v => if (v.isNull) None else Some(v.num.toInt))
 
-        val inputCost  = obj.get("input_cost_per_token").flatMap(v => if (v.isNull) None else Some(v.num))
-        val outputCost = obj.get("output_cost_per_token").flatMap(v => if (v.isNull) None else Some(v.num))
-
         val capabilities = ModelCapabilities.fromJson(data)
         val pricing      = ModelPricing.fromJson(data)
 
         val deprecationDate =
-          obj.get("deprecation_date").flatMap(v => if (v.isNull || v.str.isEmpty) None else Some(v.str))
+          obj
+            .get("deprecation_date")
+            .flatMap(v => if (v.isNull || v.str.isEmpty) None else Some(LocalDate.parse(v.str)))
 
         ModelMetadata(
           modelId = modelId,
@@ -180,8 +163,6 @@ object ModelMetadata {
           mode = mode,
           maxInputTokens = maxInputTokens,
           maxOutputTokens = maxOutputTokens,
-          inputCostPerToken = inputCost,
-          outputCostPerToken = outputCost,
           capabilities = capabilities,
           pricing = pricing,
           deprecationDate = deprecationDate
@@ -255,7 +236,7 @@ object ModelMode {
  * @param supportsOutputConfig Whether the model takes an effort level in `output_config` (litellm
  *   `supports_output_config`)
  * @param supportedReasoningEfforts The [[org.llm4s.llmconnect.model.ReasoningEffort]] levels the model accepts; see
- *   [[ModelCapabilities.fromJson]] for how they are read
+ *   litellm's `supports_<level>_reasoning_effort` keys, read as the parser in this file documents
  * @param supportsThinkingOff Whether the model accepts a request to not think (litellm
  *   `supports_none_reasoning_effort`)
  * @param supportsBudgetThinking Whether the model accepts a manual thinking budget. `Some(false)` for a model that
@@ -444,7 +425,7 @@ object ModelCapabilities {
    * `xhigh` and `max` only when its entry says `supports_<level>_reasoning_effort: true`. It is `None` when
    * `supports_reasoning` is absent, and empty when it is `false`. `none` is not a level: it is `supportsThinkingOff`.
    */
-  def fromJson(data: ujson.Value): ModelCapabilities = {
+  private[model] def fromJson(data: ujson.Value): ModelCapabilities = {
     val obj = data.obj
 
     def getBool(key: String): Option[Boolean] =
@@ -729,7 +710,7 @@ object ModelPricing {
 
   implicit val rw: ReadWriter[ModelPricing] = macroRW
 
-  def fromJson(data: ujson.Value): ModelPricing = {
+  private[model] def fromJson(data: ujson.Value): ModelPricing = {
     val obj = data.obj
 
     def getDouble(key: String): Option[Double] =

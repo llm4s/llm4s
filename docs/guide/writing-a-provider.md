@@ -531,11 +531,11 @@ no native streaming - before you encode a request:
 
 ```scala
 RequestTransformer.default(service: ModelRegistryService): RequestTransformer
-RequestTransformer.withOverrides(overrides: Map[String, ModelCapabilities], service): RequestTransformer
 RequestTransformer.adjusted(service)(adjust: (String, ModelCapabilities) => ModelCapabilities): RequestTransformer
 ```
 
-Use `adjusted` for vendor rules the registry does not record: you receive the model id and the
+`RequestTransformer` is sealed: these factories are the only way to build one, so every transformer
+reports the options it drops or adjusts. Use `adjusted` for vendor rules the registry does not record: you receive the model id and the
 registry's capabilities and return the ones to apply. `llm4s-openai`'s `OpenAIModelRules` is the
 example - the o-series take temperature 1 only and no system message, whatever the registry says:
 

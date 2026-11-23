@@ -19,24 +19,22 @@ This system addresses [Issue #233](https://github.com/llm4s/llm4s/issues/233) by
 The `ModelMetadata` case class represents comprehensive information about a model:
 
 ```scala
-case class ModelMetadata(
+final case class ModelMetadata private (
   modelId: String,
   provider: String,
-  mode: ModelMode,
-  maxInputTokens: Option[Int],
-  maxOutputTokens: Option[Int],
-  inputCostPerToken: Option[Double],
-  outputCostPerToken: Option[Double],
-  capabilities: ModelCapabilities,
-  pricing: ModelPricing,
-  deprecationDate: Option[String]
+  mode: ModelMode = ModelMode.Chat,
+  maxInputTokens: Option[Int] = None,
+  maxOutputTokens: Option[Int] = None,
+  capabilities: ModelCapabilities = ModelCapabilities(),
+  pricing: ModelPricing = ModelPricing(),         // the per-token prices are pricing.inputCostPerToken etc.
+  deprecationDate: Option[java.time.LocalDate] = None
 )
 ```
 
 Key methods:
 - `contextWindow: Option[Int]` - Get the effective context window size
 - `supports(capability: String): Boolean` - Check if a capability is supported
-- `isDeprecated: Boolean` - Check if the model is deprecated
+- `isDeprecated: Boolean` / `isDeprecatedOn(date)` - Check if the model is deprecated
 - `description: String` - Get a human-readable description
 
 ### ModelRegistryService
@@ -48,8 +46,11 @@ and pass it down through the stack:
 ```scala
 val service = Llm4sConfig.modelRegistryService().toOption.get
 
-// Lookup a model
+// Lookup a model: an exact id, ignoring case and a `provider/` prefix; never a model whose id only contains it
 val metadata = service.lookup("gpt-4o")
+
+// Search ids for discovery (a picker, a "did you mean")
+val sonnets = service.search("sonnet")
 
 // Lookup by provider and model name
 val metadata = service.lookup("openai", "gpt-4o")
@@ -60,7 +61,7 @@ val openaiModels = service.listByProvider("openai")
 // Find models by capability
 val visionModels = service.findByCapability("vision")
 
-// Get all providers
+// Get all providers (a List[String])
 val providers = service.listProviders()
 ```
 
@@ -80,7 +81,7 @@ The metadata file is:
 
 ### Embedded overrides
 
-The vendored LiteLLM file is a verbatim upstream copy, refreshed periodically. Upstream occasionally drops or mis-shapes entries llm4s relies on (e.g. a chat model regressing to an `embedding` row, or a canonical alias being removed so a substring fallback resolves to a third-party-hosted variant).
+The vendored LiteLLM file is a verbatim upstream copy, refreshed periodically. Upstream occasionally drops or mis-shapes entries llm4s relies on (e.g. a chat model regressing to an `embedding` row, or a canonical alias being removed, so the model is no longer found).
 
 To keep the vendored snapshot a clean, refreshable copy, llm4s layers a small curated corrections file on top of it: `modules/core/src/main/resources/modeldata/llm4s_model_overrides.json`. Entries there take precedence over the snapshot and survive future refreshes. The overlay is applied **only** when loading the embedded default resource — explicit file/URL/resource sources are loaded verbatim with no overlay. A missing or unparseable overrides file is non-fatal: the base snapshot is used as-is.
 
@@ -105,7 +106,7 @@ ModelRegistry.lookup("gpt-4o") match {
   case Right(metadata) =>
     println(s"Context window: ${metadata.contextWindow.getOrElse("unknown")}")
     println(s"Supports vision: ${metadata.supports("vision")}")
-    println(s"Input cost: ${metadata.inputCostPerToken.getOrElse("unknown")}")
+    println(s"Input cost: ${metadata.pricing.inputCostPerToken.getOrElse("unknown")}")
   case Left(error) =>
     println(s"Model not found: $error")
 }
@@ -204,8 +205,6 @@ val customModel = ModelMetadata(
   mode = ModelMode.Chat,
   maxInputTokens = Some(32000),
   maxOutputTokens = Some(8000),
-  inputCostPerToken = Some(1e-6),
-  outputCostPerToken = Some(3e-6),
   capabilities = ModelCapabilities(
     supportsFunctionCalling = Some(true),
     supportsVision = Some(false)
@@ -240,7 +239,7 @@ val customJson = """{
 val customService = ModelRegistryService.fromJsonString(customJson).toOption.get
 ```
 
-If you prefer to drive this from configuration or environment variables, configure the metadata source at the application edge via `llm4s.modelRegistry.resourcePath`, `llm4s.modelRegistry.filePath`, or `llm4s.modelRegistry.url`, then build a `ModelRegistryService` with `org.llm4s.config.Llm4sConfig.modelRegistryService()` during startup. The metadata is loaded once at boot and then passed through the application as an immutable service.
+If you prefer to drive this from configuration or environment variables, configure the metadata source at the application edge via one of `llm4s.modelRegistry.resourcePath`, `llm4s.modelRegistry.filePath` or `llm4s.modelRegistry.url` (setting more than one is an error; in code, `ModelRegistryConfig.default.withFilePath(...)` and the other setters replace the source), then build a `ModelRegistryService` with `org.llm4s.config.Llm4sConfig.modelRegistryService()` during startup. The metadata is loaded once at boot and then passed through the application as an immutable service.
 
 **Custom Metadata Format**
 
@@ -337,21 +336,6 @@ object ModelMode {
 }
 ```
 
-## Statistics and Monitoring
-
-Get statistics about the loaded metadata:
-
-```scala
-val stats = ModelRegistry.statistics()
-
-println(s"Total models: ${stats("totalModels")}")
-println(s"Embedded models: ${stats("embeddedModels")}")
-println(s"Custom models: ${stats("customModels")}")
-println(s"Providers: ${stats("providers")}")
-println(s"Chat models: ${stats("chatModels")}")
-println(s"Deprecated models: ${stats("deprecatedModels")}")
-```
-
 ## Running the Example
 
 To see the model metadata system in action:
@@ -380,13 +364,13 @@ This example demonstrates:
 | `listByProvider(provider: String): Result[List[ModelMetadata]]` | Get all models for a provider |
 | `listByMode(mode: ModelMode): Result[List[ModelMetadata]]` | Get all models of a specific mode |
 | `findByCapability(capability: String): Result[List[ModelMetadata]]` | Find models with a capability |
-| `listProviders(): Result[List[String]]` | Get all available providers |
+| `listProviders(): List[String]` | Get all available providers |
+| `search(query: String): List[ModelMetadata]` | Models whose id contains `query`, for discovery |
 | `register(metadata: ModelMetadata): Unit` | Register a custom model |
 | `registerAll(models: List[ModelMetadata]): Unit` | Register multiple models |
 | `loadCustomMetadata(filePath: String): Result[Unit]` | Load custom metadata from file |
 | `loadCustomMetadataFromString(json: String): Result[Unit]` | Load from JSON string |
 | `updateFromUrl(url: String): Result[Unit]` | Update from external source |
-| `statistics(): Map[String, Any]` | Get registry statistics |
 | `reset(): Unit` | Clear all metadata (for testing) |
 
 ### ModelMetadata
@@ -407,6 +391,8 @@ This example demonstrates:
 | `estimateCostWithCaching(inputTokens: Int, cachedTokens: Int, outputTokens: Int): Option[Double]` | Estimate cost with caching |
 
 ## Configuration
+
+Set at most one of these; with none, the bundled catalogue is used.
 
 | Key / Variable | Description | Example |
 |----------------|-------------|---------|

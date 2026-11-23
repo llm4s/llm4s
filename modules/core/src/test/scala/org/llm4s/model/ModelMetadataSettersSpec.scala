@@ -4,6 +4,8 @@ import org.llm4s.llmconnect.model.ReasoningEffort
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.time.LocalDate
+
 /** Each metadata and capability setter changes its own field and leaves the original unchanged. */
 class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
 
@@ -13,19 +15,15 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
     mode: ModelMode = ModelMode.Chat,
     maxInputTokens: Option[Int] = None,
     maxOutputTokens: Option[Int] = None,
-    inputCostPerToken: Option[Double] = None,
-    outputCostPerToken: Option[Double] = None,
     capabilities: ModelCapabilities = ModelCapabilities(),
     pricing: ModelPricing = ModelPricing(),
-    deprecationDate: Option[String] = None
+    deprecationDate: Option[LocalDate] = None
   ): ModelMetadata = ModelMetadata(
     modelId = modelId,
     provider = provider,
     mode = mode,
     maxInputTokens = maxInputTokens,
     maxOutputTokens = maxOutputTokens,
-    inputCostPerToken = inputCostPerToken,
-    outputCostPerToken = outputCostPerToken,
     capabilities = capabilities,
     pricing = pricing,
     deprecationDate = deprecationDate
@@ -89,49 +87,26 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
     baseMetadata shouldBe metadata()
   }
 
-  it should "set, replace and clear inputCostPerToken" in {
-    val populated = metadata(inputCostPerToken = Some(0.001))
-
-    baseMetadata.withInputCostPerToken(0.001) shouldBe populated
-    baseMetadata.withInputCostPerToken(Some(0.001)) shouldBe populated
-    populated.withInputCostPerToken(0.002) shouldBe metadata(inputCostPerToken = Some(0.002))
-    populated.withInputCostPerToken(Some(0.002)) shouldBe metadata(inputCostPerToken = Some(0.002))
-    populated.withInputCostPerToken(None) shouldBe baseMetadata
-    baseMetadata.withInputCostPerToken(0.001).withInputCostPerToken(None) shouldBe baseMetadata
-    populated shouldBe metadata(inputCostPerToken = Some(0.001))
-    baseMetadata shouldBe metadata()
-  }
-
-  it should "set, replace and clear outputCostPerToken" in {
-    val populated = metadata(outputCostPerToken = Some(0.003))
-
-    baseMetadata.withOutputCostPerToken(0.003) shouldBe populated
-    baseMetadata.withOutputCostPerToken(Some(0.003)) shouldBe populated
-    populated.withOutputCostPerToken(0.004) shouldBe metadata(outputCostPerToken = Some(0.004))
-    populated.withOutputCostPerToken(Some(0.004)) shouldBe metadata(outputCostPerToken = Some(0.004))
-    populated.withOutputCostPerToken(None) shouldBe baseMetadata
-    baseMetadata.withOutputCostPerToken(0.003).withOutputCostPerToken(None) shouldBe baseMetadata
-    populated shouldBe metadata(outputCostPerToken = Some(0.003))
-    baseMetadata shouldBe metadata()
-  }
-
   it should "set, replace and clear deprecationDate" in {
-    val populated = metadata(deprecationDate = Some("2099-12-31"))
+    val populated = metadata(deprecationDate = Some(LocalDate.parse("2099-12-31")))
 
-    baseMetadata.withDeprecationDate("2099-12-31") shouldBe populated
-    baseMetadata.withDeprecationDate(Some("2099-12-31")) shouldBe populated
-    populated.withDeprecationDate("2098-01-01") shouldBe metadata(deprecationDate = Some("2098-01-01"))
-    populated.withDeprecationDate(Some("2098-01-01")) shouldBe metadata(deprecationDate = Some("2098-01-01"))
+    baseMetadata.withDeprecationDate(LocalDate.parse("2099-12-31")) shouldBe populated
+    baseMetadata.withDeprecationDate(Some(LocalDate.parse("2099-12-31"))) shouldBe populated
+    populated.withDeprecationDate(LocalDate.parse("2098-01-01")) shouldBe metadata(deprecationDate =
+      Some(LocalDate.parse("2098-01-01"))
+    )
+    populated.withDeprecationDate(Some(LocalDate.parse("2098-01-01"))) shouldBe metadata(deprecationDate =
+      Some(LocalDate.parse("2098-01-01"))
+    )
     populated.withDeprecationDate(None) shouldBe baseMetadata
-    baseMetadata.withDeprecationDate("2099-12-31").withDeprecationDate(None) shouldBe baseMetadata
-    populated shouldBe metadata(deprecationDate = Some("2099-12-31"))
+    baseMetadata.withDeprecationDate(LocalDate.parse("2099-12-31")).withDeprecationDate(None) shouldBe baseMetadata
+    populated shouldBe metadata(deprecationDate = Some(LocalDate.parse("2099-12-31")))
     baseMetadata shouldBe metadata()
   }
 
   it should "chain distinct fields in either order and preserve populated fields" in {
     val original = metadata(
       maxInputTokens = Some(4096),
-      inputCostPerToken = Some(0.001),
       capabilities = ModelCapabilities(supportsVision = Some(false)),
       pricing = ModelPricing(outputCostPerToken = Some(0.003))
     )
@@ -139,7 +114,6 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
       provider = "replacement-provider",
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(1024),
-      inputCostPerToken = Some(0.001),
       capabilities = ModelCapabilities(supportsVision = Some(false)),
       pricing = ModelPricing(outputCostPerToken = Some(0.003))
     )
@@ -148,7 +122,6 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
     original.withMaxOutputTokens(Some(1024)).withProvider("replacement-provider") shouldBe expected
     original shouldBe metadata(
       maxInputTokens = Some(4096),
-      inputCostPerToken = Some(0.001),
       capabilities = ModelCapabilities(supportsVision = Some(false)),
       pricing = ModelPricing(outputCostPerToken = Some(0.003))
     )

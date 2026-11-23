@@ -34,8 +34,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     mode = ModelMode.Chat,
     maxInputTokens = Some(4096),
     maxOutputTokens = Some(4096),
-    inputCostPerToken = Some(0.00001),
-    outputCostPerToken = Some(0.00002),
     capabilities = ModelCapabilities(),
     pricing = ModelPricing(
       inputCostPerToken = Some(0.00001),
@@ -50,8 +48,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     mode = ModelMode.Chat,
     maxInputTokens = Some(4096),
     maxOutputTokens = Some(4096),
-    inputCostPerToken = None,
-    outputCostPerToken = None,
     capabilities = ModelCapabilities(),
     pricing = ModelPricing(),
     deprecationDate = None
@@ -104,8 +100,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
-      inputCostPerToken = pricing.inputCostPerToken,
-      outputCostPerToken = pricing.outputCostPerToken,
       capabilities = ModelCapabilities(),
       pricing = pricing,
       deprecationDate = None
@@ -138,8 +132,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
-      inputCostPerToken = pricing.inputCostPerToken,
-      outputCostPerToken = pricing.outputCostPerToken,
       capabilities = ModelCapabilities(),
       pricing = pricing,
       deprecationDate = None
@@ -177,8 +169,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
-      inputCostPerToken = pricing.inputCostPerToken,
-      outputCostPerToken = pricing.outputCostPerToken,
       capabilities = ModelCapabilities(),
       pricing = pricing,
       deprecationDate = None
@@ -216,8 +206,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
-      inputCostPerToken = pricing.inputCostPerToken,
-      outputCostPerToken = pricing.outputCostPerToken,
       capabilities = ModelCapabilities(),
       pricing = pricing,
       deprecationDate = None
@@ -257,8 +245,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
-      inputCostPerToken = pricing.inputCostPerToken,
-      outputCostPerToken = pricing.outputCostPerToken,
       capabilities = ModelCapabilities(),
       pricing = pricing,
       deprecationDate = None
@@ -298,8 +284,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
-      inputCostPerToken = Some(0.000001),
-      outputCostPerToken = Some(0.000002),
       capabilities = ModelCapabilities(),
       pricing = pricingWithReasoning,
       deprecationDate = None
@@ -333,8 +317,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
-      inputCostPerToken = Some(0.000001),
-      outputCostPerToken = Some(0.000002),
       capabilities = ModelCapabilities(),
       pricing = ModelPricing(
         inputCostPerToken = Some(0.000001),

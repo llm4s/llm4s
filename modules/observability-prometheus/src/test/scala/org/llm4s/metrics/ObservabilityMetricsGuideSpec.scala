@@ -1,5 +1,6 @@
 package org.llm4s.metrics
 
+import org.llm4s.reliability.ReliabilityMetrics
 import com.typesafe.config.ConfigFactory
 import io.prometheus.metrics.model.registry.PrometheusRegistry
 import org.llm4s.config.{ Llm4sConfig, MetricsConfigLoader }
@@ -291,13 +292,21 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
 
   // ---- "Limits" -------------------------------------------------------------------------------
 
-  "retry attempts, circuit-breaker transitions and ReliableClient's error events" should "not appear in the Prometheus series" in
+  "retry attempts, circuit-breaker transitions and ReliableClient's error events" should "appear in the Prometheus series (#2801)" in
     withEndpoint { (metrics, endpoint) =>
-      metrics.recordRetryAttempt("openai", 2)
-      metrics.recordCircuitBreakerTransition("openai", "open")
-      metrics.recordError(ErrorKind.RateLimit, "openai")
+      metrics.increment(ReliabilityMetrics.Retries, Seq("openai"))
+      metrics.increment(ReliabilityMetrics.CircuitBreakerTransitions, Seq("openai", "open"))
+      metrics.increment(
+        ReliabilityMetrics.Errors,
+        Seq("openai", ReliabilityMetrics.errorTypeLabel(ErrorKind.RateLimit))
+      )
 
-      samples(scrape(endpoint)) shouldBe empty
+      val lines = samples(scrape(endpoint))
+      lines should contain("llm4s_retries_total{provider=\"openai\"} 1.0")
+      lines should contain("llm4s_circuit_breaker_transitions_total{provider=\"openai\",state=\"open\"} 1.0")
+      exactly(1, lines) should (startWith("llm4s_reliability_errors_total{")
+        .and(include("error_type=\"rate_limit\""))
+        .and(endWith(" 1.0")))
     }
 
   "MetricsCollector.compose" should "send every call to every collector it was given" in {

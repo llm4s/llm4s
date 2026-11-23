@@ -1,5 +1,6 @@
 package org.llm4s.metrics
 
+import org.llm4s.reliability.ReliabilityMetrics
 import io.micrometer.prometheusmetrics.{ PrometheusConfig, PrometheusMeterRegistry }
 import io.prometheus.metrics.expositionformats.PrometheusTextFormatWriter
 import io.prometheus.metrics.model.registry.PrometheusRegistry
@@ -57,6 +58,10 @@ class MicrometerPrometheusSeriesSpec extends AnyFlatSpec with Matchers {
     metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 4.seconds, 2)
     metrics.observeImageGeneration("openai", "dall-e-3", "edit", Outcome.Error(ErrorKind.Network), 500.millis, 1)
     metrics.recordImageGenerationCost("openai", "dall-e-3", 0.5, 2)
+    // what ReliableClient records: generic metrics core declares, which both collectors export (#2801)
+    metrics.increment(ReliabilityMetrics.Retries, Seq("openai"))
+    metrics.increment(ReliabilityMetrics.CircuitBreakerTransitions, Seq("openai", "open"))
+    metrics.increment(ReliabilityMetrics.Errors, Seq("openai", ReliabilityMetrics.errorTypeLabel(ErrorKind.Timeout)))
     // generic metrics, as a module above core declares them (design 4.59)
     val things = Metric.counter("llm4s.test.things", "Things counted", "kind")
     metrics.increment(things, Seq("a"))
@@ -74,10 +79,6 @@ class MicrometerPrometheusSeriesSpec extends AnyFlatSpec with Matchers {
     val registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
     val metrics  = new MicrometerMetrics(registry)
     exercise(metrics)
-    // Extras the Prometheus collector leaves as no-ops: they must appear, but only as the documented series.
-    metrics.recordRetryAttempt("openai", 1)
-    metrics.recordCircuitBreakerTransition("openai", "open")
-    metrics.recordError(ErrorKind.Timeout, "openai")
     comparable(parse(registry.scrape()))
   }
 
@@ -89,21 +90,22 @@ class MicrometerPrometheusSeriesSpec extends AnyFlatSpec with Matchers {
     comparable(parse(new String(out.toByteArray, StandardCharsets.UTF_8)))
   }
 
+  /** `ReliabilityMetrics`, as Prometheus names them: once Micrometer-only, now in both (#2801). */
   private val Extras =
     Set("llm4s_retries_total", "llm4s_circuit_breaker_transitions_total", "llm4s_reliability_errors_total")
 
-  "The Micrometer collector, exported as Prometheus," should "expose the series of the Prometheus module and nothing else but the documented extras" in {
+  "The Micrometer collector, exported as Prometheus," should "expose the series of the Prometheus module and nothing else" in {
     val micrometer = micrometerSamples()
     val prometheus = prometheusSamples()
 
     prometheus should not be empty
-    micrometer.filterNot(s => Extras(s.name)).map(key).toSet shouldBe prometheus.map(key).toSet
-    micrometer.filter(s => Extras(s.name)).map(_.name).toSet shouldBe Extras
+    micrometer.map(key).toSet shouldBe prometheus.map(key).toSet
+    prometheus.map(_.name).toSet should contain allElementsOf Extras
   }
 
   it should "expose the same values for the same calls" in {
     val expected = prometheusSamples().map(s => key(s) -> s.value).toMap
-    val actual   = micrometerSamples().filterNot(s => Extras(s.name)).map(s => key(s) -> s.value).toMap
+    val actual   = micrometerSamples().map(s => key(s) -> s.value).toMap
 
     actual.keySet shouldBe expected.keySet
     expected.foreach { case (k, v) =>
@@ -128,7 +130,7 @@ class MicrometerPrometheusSeriesSpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  it should "name the extras and give them only the documented labels" in {
+  it should "name ReliableClient's metrics and give them only the documented labels" in {
     val extras = micrometerSamples().filter(s => Extras(s.name))
     extras.find(_.name == "llm4s_retries_total").map(_.labels.keySet) shouldBe Some(Set("provider"))
     extras.find(_.name == "llm4s_circuit_breaker_transitions_total").map(_.labels.keySet) shouldBe Some(
