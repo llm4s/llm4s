@@ -66,9 +66,9 @@ final class StubHttpClient(
   override def send(request: HttpRequest): Result[StreamingHttpResponse] = {
     val method = request.method.name
     val unreadable = request.body match {
-      case HttpBody.Text(text)   => record(method, request.url, request.headers, text.getBytes("UTF-8")); None
-      case HttpBody.Bytes(bytes) => record(method, request.url, request.headers, bytes); None
-      case HttpBody.Empty        => record(method, request.url, request.headers); None
+      case HttpBody.Text(text)       => record(method, request.url, request.headers, text.getBytes("UTF-8")); None
+      case HttpBody.Bytes(bytes)     => record(method, request.url, request.headers, bytes); None
+      case HttpBody.Empty            => record(method, request.url, request.headers); None
       case HttpBody.Multipart(parts) =>
         // As the JDK client does, an unreadable file part is a ValidationError, not an exception.
         val missing = parts.collectFirst {

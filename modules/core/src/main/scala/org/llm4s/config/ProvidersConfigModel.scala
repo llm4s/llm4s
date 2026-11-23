@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.auth.AuthConfig
 import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.types.Result
+import org.llm4s.util.Redaction
 
 import java.nio.file.Path
 
@@ -13,6 +14,10 @@ import java.nio.file.Path
 @Stable
 object ProvidersConfigModel:
   export org.llm4s.types.ProviderModelTypes.*
+
+  /** A map with its values hidden: the names are what a user needs to debug a section. */
+  private def redactedValues(values: Map[String, String]): String =
+    values.keys.map(k => s"$k -> ***").mkString("Map(", ", ", ")")
 
   /**
    * Raw, unvalidated provider section as read directly from the configuration source.
@@ -44,16 +49,23 @@ object ProvidersConfigModel:
     auth: Option[Map[String, String]] = None,
     http: Option[com.typesafe.config.ConfigObject] = None,
     apiKeyFile: Option[String] = None
-  )
+  ):
+    // As NamedProviderConfig.toString: header, extra and auth values may be credentials (a literal
+    // `identityToken`, a gateway token), and so may the userinfo of the base URL or a proxy password in
+    // the `http` block, so only their names are shown.
+    override def toString: String =
+      s"RawNamedProviderSection($provider,$model,${baseUrl.map(Redaction.url)},${apiKey.map(_ => "***")}," +
+        s"${headers.map(redactedValues)},${redactedValues(extras)},$timeouts,${auth.map(redactedValues)}," +
+        s"${http.map(block => redactedValues(block.keySet.toArray.map(_.toString -> "").toMap))},$apiKeyFile)"
 
   /**
    * Raw top-level providers configuration as read from the configuration source.
    *
-   *  @param selectedProvider the name of the default provider, if set
+   *  @param defaultProvider the name of the default provider, if set
    *  @param namedProviders   map of provider name to its raw section
    */
   final private[llm4s] case class RawProvidersConfig(
-    selectedProvider: Option[ProviderName],
+    defaultProvider: Option[ProviderName],
     namedProviders: Map[ProviderName, RawNamedProviderSection]
   )
 
@@ -118,12 +130,11 @@ object ProvidersConfigModel:
     // The API key, header values and extra values may be credentials (`x-api-key`, a gateway
     // token, a provider-declared secret), so all are redacted; names are kept because they are
     // what a user needs to debug a section.
+    // The base URL is shown without its userinfo, query or fragment, any of which may hold a credential.
     override def toString: String =
-      s"NamedProviderConfig($provider,$model,$baseUrl,${apiKey.map(_ => "***")},${redacted(headers)}," +
-        s"${redacted(extras)},$auth${apiKeyFile.fold("")(p => s",apiKeyFile=$p")})"
-
-    private def redacted(values: Map[String, String]): String =
-      values.keys.map(k => s"$k -> ***").mkString("Map(", ", ", ")")
+      s"NamedProviderConfig($provider,$model,${baseUrl.map(url => Redaction.url(url.asUrl))}," +
+        s"${apiKey.map(_ => "***")},${redactedValues(headers)},${redactedValues(extras)},$auth" +
+        s"${apiKeyFile.fold("")(p => s",apiKeyFile=$p")})"
 
     /**
      * The value of a provider-specific key, as validation left it.
@@ -191,13 +202,14 @@ object ProvidersConfigModel:
   }
 
   /**
-   * Validated top-level providers configuration, including all named provider entries.
+   * Validated top-level providers configuration, including all named provider entries. Internal: an
+   * application reads sections one at a time (`Llm4sConfig.provider`, `providerConfigs`).
    *
-   *  @param selectedProvider the name of the default provider, if configured
+   *  @param defaultProvider the name of the default provider, if configured
    *  @param namedProviders   map of provider name to validated `NamedProviderConfig`
    */
-  final case class ProvidersConfig private (
-    selectedProvider: Option[ProviderName],
+  final private[llm4s] case class ProvidersConfig private (
+    defaultProvider: Option[ProviderName],
     namedProviders: Map[ProviderName, NamedProviderConfig]
   ):
     /**
@@ -206,27 +218,27 @@ object ProvidersConfigModel:
      *  @return `Right(ProviderName)` when a default is configured, or `Left` with an error
      */
     def defaultProviderName: Result[ProviderName] =
-      selectedProvider.toRight(
+      defaultProvider.toRight(
         ConfigurationError(ProviderSections.noDefaultMessage)
       )
 
     /** Sets the default provider's name. */
-    def withSelectedProvider(selectedProvider: ProviderName): ProvidersConfig =
-      copy(selectedProvider = Some(selectedProvider))
+    def withDefaultProvider(defaultProvider: ProviderName): ProvidersConfig =
+      copy(defaultProvider = Some(defaultProvider))
 
     /** Sets the default provider's name, or clears it with `None`. */
-    def withSelectedProvider(selectedProvider: Option[ProviderName]): ProvidersConfig =
-      copy(selectedProvider = selectedProvider)
+    def withDefaultProvider(defaultProvider: Option[ProviderName]): ProvidersConfig =
+      copy(defaultProvider = defaultProvider)
 
     /** Sets the named provider sections. */
     def withNamedProviders(namedProviders: Map[ProviderName, NamedProviderConfig]): ProvidersConfig =
       copy(namedProviders = namedProviders)
 
-  object ProvidersConfig:
+  private[llm4s] object ProvidersConfig:
 
     /** Creates a [[ProvidersConfig]]. */
     def apply(
-      selectedProvider: Option[ProviderName],
+      defaultProvider: Option[ProviderName],
       namedProviders: Map[ProviderName, NamedProviderConfig]
     ): ProvidersConfig =
-      new ProvidersConfig(selectedProvider, namedProviders)
+      new ProvidersConfig(defaultProvider, namedProviders)

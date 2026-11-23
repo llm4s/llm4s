@@ -1,14 +1,18 @@
 // scalafix:off DisableSyntax.NoConfigFactory, DisableSyntax.NoSysEnv, DisableSyntax.NoSystemGetenv, DisableSyntax.NoPureConfigDefault
 package org.llm4s.config
 
-import org.llm4s.annotation.{ Experimental, Stable }
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.*
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
-import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProvidersConfig }
-import org.llm4s.error.LLMError
-import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
+import org.llm4s.config.ProvidersConfigModel.{
+  NamedProviderConfig,
+  ProviderName,
+  ProvidersConfig,
+  RawNamedProviderSection
+}
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import com.typesafe.config.{ Config, ConfigFactory }
 import pureconfig.ConfigSource
@@ -73,7 +77,8 @@ import scala.util.Try
  * `com.typesafe.config.Config` the application loaded itself - Play's
  * `Configuration.underlying`, a Pekko `ActorSystem.settings.config`, a config parsed
  * per test or per tenant - call [[from]] and use the returned [[Llm4sSettings]], which
- * has the same methods.
+ * has the same methods: each method here calls the one of the same name on the [[Llm4sSettings]] of the
+ * process-wide configuration.
  *
  * @see [[org.llm4s.config.ConfigKeys]] for the environment variables core's
  *      `reference.conf` binds.
@@ -103,41 +108,26 @@ object Llm4sConfig {
    *   client   <- LLMConnect.getClient(cfg)(using registry)
    * } yield client
    * }}}
-   *
-   * Experimental: it takes a Typesafe `Config`, a third-party type, so whether that is the
-   * entry point to freeze is open until the API baseline (#2340, #1281).
    */
-  @Experimental
   def from(config: Config): Result[Llm4sSettings] =
     Try(ConfigFactory.load(config)).toEither.left
       .map(e => org.llm4s.error.ConfigurationError(s"Cannot resolve the given configuration: ${e.getMessage}"))
       .map(loaded => new Llm4sSettings(ConfigSource.fromConfig(loaded)))
 
-  def modelRegistryConfig(): Result[ModelRegistryConfig] =
-    modelRegistryConfig(ConfigSource.default)
+  /** The process-wide configuration: what every method here without a `source` reads. */
+  private val default: Llm4sSettings = new Llm4sSettings(ConfigSource.default)
 
-  private[config] def modelRegistryConfig(source: ConfigSource): Result[ModelRegistryConfig] = {
-    val modelRegistrySource = source.at("llm4s.modelRegistry")
-    val resourcePath       = modelRegistrySource.at("resourcePath").load[String].toOption.map(_.trim).filter(_.nonEmpty)
-    val filePathFromConfig = modelRegistrySource.at("filePath").load[String].toOption.map(_.trim).filter(_.nonEmpty)
-    val urlFromConfig      = modelRegistrySource.at("url").load[String].toOption.map(_.trim).filter(_.nonEmpty)
-    val useDefaultResource = resourcePath.isEmpty && filePathFromConfig.isEmpty && urlFromConfig.isEmpty
+  /** The settings of `source`: `llm4s-provider-testkit`, config-policy and the Spring starter read through it. */
+  private[llm4s] def of(source: ConfigSource): Llm4sSettings = new Llm4sSettings(source)
 
-    Right(
-      ModelRegistryConfig(
-        resourcePath =
-          resourcePath.orElse(if useDefaultResource then Some(ModelRegistryConfig.DefaultResourcePath) else None),
-        filePath = filePathFromConfig,
-        url = urlFromConfig
-      )
-    )
-  }
+  /** As [[Llm4sSettings.modelRegistryConfig]]: the `llm4s.modelRegistry` block. */
+  def modelRegistryConfig(): Result[ModelRegistryConfig] = default.modelRegistryConfig()
 
-  def modelRegistryService(): Result[ModelRegistryService] =
-    modelRegistryConfig().flatMap(ModelRegistryService.fromConfig)
+  /** As [[Llm4sSettings.modelRegistryService]]: the model registry `llm4s.modelRegistry` selects. */
+  def modelRegistryService(): Result[ModelRegistryService] = default.modelRegistryService()
 
-  private[config] def modelRegistryService(source: ConfigSource): Result[ModelRegistryService] =
-    modelRegistryConfig(source).flatMap(ModelRegistryService.fromConfig)
+  private[llm4s] def modelRegistryService(source: ConfigSource): Result[ModelRegistryService] =
+    of(source).modelRegistryService()
 
   /**
    * Loads a named provider from `llm4s.providers.<name>`.
@@ -145,217 +135,124 @@ object Llm4sConfig {
    * Useful for applications that need to resolve multiple configured provider
    * instances, including multiple accounts for the same provider type.
    */
-  def provider(name: String)(using ProviderRegistry): Result[ProviderConfig] =
-    for
-      service <- modelRegistryService()
-      given ContextWindowResolver = ContextWindowResolver(service)
-      config <- org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name)
-    yield config
+  def provider(name: String)(using ProviderRegistry): Result[ProviderConfig] = default.provider(name)
 
-  def providerConfigs()(using
+  /**
+   * Every section of `llm4s.providers`, each loaded or failed on its own: a section with no key available, or
+   * whose provider module is absent, is a `Left` under its name and does not stop the others loading.
+   *
+   * @return each section's config or error by name; a `Left` only when the providers block itself, or the model
+   *         registry, cannot be read
+   */
+  def providerConfigs()(using ProviderRegistry): Result[Map[ProviderName, Result[ProviderConfig]]] =
+    default.providerConfigs()
+
+  private[llm4s] def providerConfigs(source: ConfigSource)(using
     ProviderRegistry
-  ): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
-    providerConfigs(ConfigSource.default)
+  ): Result[Map[ProviderName, Result[ProviderConfig]]] =
+    of(source).providerConfigs()
 
-  private[config] def providerConfigs(source: ConfigSource)(using
+  /** As [[Llm4sSettings.providerFromSection]], for the process-wide configuration. */
+  private[llm4s] def providerFromSection(name: ProviderName, section: NamedProviderConfig)(using
     ProviderRegistry
-  ): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
-    for
-      service <- modelRegistryService(source)
-      given ContextWindowResolver = ContextWindowResolver(service)
-      result <- org.llm4s.config.NamedProviderLoader.loadProviderConfigs(source)
-    yield result
-
-  def providerConfigs(
-    map: Map[ProviderName, ProvidersConfigModel.NamedProviderConfig]
-  )(using ProviderRegistry): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
-    modelRegistryService() match
-      case Right(service) =>
-        given ContextWindowResolver = ContextWindowResolver(service)
-        org.llm4s.config.NamedProviderLoader.getProviderConfigs(map)
-      case Left(err) =>
-        val errors = map.map { case (name, _) => name -> (err: LLMError) }
-        (errors, Map.empty)
+  ): Result[ProviderConfig] =
+    default.providerFromSection(name, section)
 
   // `private[llm4s]`, not `private[config]`: `llm4s-provider-testkit` loads a provider module's
   // section through it from a HOCON string and an injected environment. `ConfigSource` stays out
   // of every public signature.
   private[llm4s] def provider(source: ConfigSource, name: String)(using ProviderRegistry): Result[ProviderConfig] =
-    for
-      service <- modelRegistryService(source)
-      given ContextWindowResolver = ContextWindowResolver(service)
-      config <- org.llm4s.config.NamedProviderLoader.load(source, name)
-    yield config
+    of(source).provider(name)
 
-  /**
-   * The named chat section `name` as validation leaves it - shared credentials applied, extras
-   * defaulted - without building the provider's config. Only that section is validated.
-   */
+  /** As [[Llm4sSettings.providerSection]]. */
   private[llm4s] def providerSection(source: ConfigSource, name: String)(using
     ProviderRegistry
-  ): Result[ProvidersConfigModel.NamedProviderConfig] =
-    org.llm4s.config.ProvidersConfigLoader.loadSections(source).flatMap(_.validated(ProviderName(name)))
+  ): Result[NamedProviderConfig] =
+    of(source).providerSection(name)
 
-  /**
-   * The `llm4s.providers` block as read, before any section is validated: the default section's
-   * name (`llm4s.providers.provider`, if set) and each section, or the error reading it.
-   *
-   * For diagnostics that must describe a broken configuration rather than fail on it (the
-   * config-policy doctor). A configuration with no `llm4s.providers` block at all reads as no
-   * default and no sections; one that cannot be parsed, or whose block has the wrong shape, is
-   * a `Left`.
-   */
+  /** As [[Llm4sSettings.providerBlock]]. */
   private[llm4s] def providerBlock(source: ConfigSource): Result[
-    (Option[ProviderName], Map[ProviderName, Result[ProvidersConfigModel.RawNamedProviderSection]])
+    (Option[ProviderName], Map[ProviderName, Result[RawNamedProviderSection]])
   ] =
-    source.value() match
-      case Left(failures) =>
-        Left(
-          org.llm4s.error.ConfigurationError(
-            failures.prettyPrint().linesIterator.map(_.trim).filter(_.nonEmpty).mkString(" ")
-          )
-        )
-      case Right(_) if source.at("llm4s.providers").value().isLeft => Right((None, Map.empty))
-      case Right(_) =>
-        org.llm4s.config.ProvidersConfigLoader.loadSections(source).map(s => (s.selectedProvider, s.sections))
+    of(source).providerBlock()
 
-  /**
-   * Loads the full validated named-providers configuration from `llm4s.providers`.
-   *
-   * Every section is validated, so this fails if any one of them is invalid - a `${?VAR}` key
-   * left unset, a provider whose module is not on the classpath. Resolving one provider with
-   * [[provider(name)*]] or [[defaultProvider()*]] validates only that provider's section, and
-   * [[providerConfigs()*]] reports each section's problem separately.
-   */
-  def providers()(using ProviderRegistry): Result[ProvidersConfig] =
-    org.llm4s.config.ProvidersConfigLoader.load(ConfigSource.default)
-
-  private[config] def providers(source: ConfigSource)(using ProviderRegistry): Result[ProvidersConfig] =
-    org.llm4s.config.ProvidersConfigLoader.load(source)
+  /** As [[Llm4sSettings.providers]]: every section validated, for core's own specs. */
+  private[llm4s] def providers(source: ConfigSource)(using ProviderRegistry): Result[ProvidersConfig] =
+    of(source).providers()
 
   /**
    * Loads the configured default provider name from `llm4s.providers.provider`.
    *
    * Fails if no default is set or no section has that name. No section is validated.
    */
-  def defaultProviderName(): Result[ProviderName] =
-    defaultProviderName(ConfigSource.default)
+  def defaultProviderName(): Result[ProviderName] = default.defaultProviderName()
 
-  private[config] def defaultProviderName(source: ConfigSource): Result[ProviderName] =
-    org.llm4s.config.ProvidersConfigLoader.loadSections(source).flatMap(_.defaultProviderName)
+  private[llm4s] def defaultProviderName(source: ConfigSource): Result[ProviderName] =
+    of(source).defaultProviderName()
 
   /**
    * Loads the configured default named provider as a runtime [[org.llm4s.llmconnect.config.ProviderConfig ProviderConfig]].
    *
    * Only the default section is validated: another section's problem does not fail this.
    */
-  def defaultProvider()(using ProviderRegistry): Result[ProviderConfig] =
-    defaultProvider(ConfigSource.default)
+  def defaultProvider()(using ProviderRegistry): Result[ProviderConfig] = default.defaultProvider()
 
-  // The providers block is read once, and both the default name and its section come from that
-  // one result. Only the default section is validated (#1132), so only its deprecated-alias and
-  // unknown-key warnings are logged, and a problem in any other section does not fail this.
-  private[config] def defaultProvider(source: ConfigSource)(using ProviderRegistry): Result[ProviderConfig] =
-    for
-      service <- modelRegistryService(source)
-      given ContextWindowResolver = ContextWindowResolver(service)
-      sections <- org.llm4s.config.ProvidersConfigLoader.loadSections(source)
-      name     <- sections.defaultProviderName
-      config   <- org.llm4s.config.NamedProviderLoader.select(sections, name.asName)
-    yield config
+  private[llm4s] def defaultProvider(source: ConfigSource)(using ProviderRegistry): Result[ProviderConfig] =
+    of(source).defaultProvider()
 
   /**
    * The proxy and TLS settings of the `llm4s.http` block: what every provider client loaded through this
    * object uses, unless its section's own `http` block overrides it. Pass them to
-   * `Llm4sHttpClient.create(HttpClientOptions(network))` for an HTTP client of your own - a tool, a vector store - that should
-   * take the same route.
+   * `Llm4sHttpClient.create(HttpClientOptions(network))` for an HTTP client of your own - a tool, a vector
+   * store - that should take the same route.
    *
    * A missing trust or key store, or a wrong password, is a `ConfigurationError` naming the key.
    */
-  def httpNetwork(): Result[org.llm4s.http.HttpNetworkSettings] =
-    httpNetwork(ConfigSource.default)
+  def httpNetwork(): Result[org.llm4s.http.HttpNetworkSettings] = default.httpNetwork()
 
   private[llm4s] def httpNetwork(source: ConfigSource): Result[org.llm4s.http.HttpNetworkSettings] =
-    HttpNetworkReader.load(source)
+    of(source).httpNetwork()
 
   /**
    * Lists models for the configured default named provider.
    */
-  def listModels()(using ProviderRegistry): Result[List[DiscoveredModel]] =
-    listModels(ConfigSource.default)
+  def listModels()(using ProviderRegistry): Result[List[DiscoveredModel]] = default.listModels()
 
-  private[config] def listModels(source: ConfigSource)(using ProviderRegistry): Result[List[DiscoveredModel]] =
-    for
-      sections    <- org.llm4s.config.ProvidersConfigLoader.loadSections(source)
-      defaultName <- sections.defaultProviderName
-      models      <- listModelsThroughNetwork(defaultName.asName, sections)
-    yield models
+  private[llm4s] def listModels(source: ConfigSource)(using ProviderRegistry): Result[List[DiscoveredModel]] =
+    of(source).listModels()
 
-  private[config] def listModels(
+  private[llm4s] def listModels(
     source: ConfigSource,
     httpClient: Llm4sHttpClient
   )(using ProviderRegistry): Result[List[DiscoveredModel]] =
-    for
-      sections    <- org.llm4s.config.ProvidersConfigLoader.loadSections(source)
-      defaultName <- sections.defaultProviderName
-      models      <- listModels(defaultName.asName, sections, httpClient)
-    yield models
+    of(source).listModels(httpClient)
 
   /**
    * Lists models for a named provider configured under `llm4s.providers.<name>`.
    */
-  def listModels(name: String)(using ProviderRegistry): Result[List[DiscoveredModel]] =
-    listModels(ConfigSource.default, name)
+  def listModels(name: String)(using ProviderRegistry): Result[List[DiscoveredModel]] = default.listModels(name)
 
-  private[config] def listModels(source: ConfigSource, name: String)(using
+  private[llm4s] def listModels(source: ConfigSource, name: String)(using
     ProviderRegistry
   ): Result[List[DiscoveredModel]] =
-    org.llm4s.config.ProvidersConfigLoader.loadSections(source).flatMap(listModelsThroughNetwork(name, _))
+    of(source).listModels(name)
 
-  /** Lists `name`'s models with a client routed by the section's proxy and TLS settings, closed afterwards. */
-  private def listModelsThroughNetwork(name: String, sections: ProviderSections)(using
-    ProviderRegistry
-  ): Result[List[DiscoveredModel]] =
-    sections
-      .network(ProviderName(name))
-      .flatMap(network => scala.util.Using.resource(Llm4sHttpClient.create(HttpClientOptions(network)))(listModels(name, sections, _)))
-
-  private[config] def listModels(
+  private[llm4s] def listModels(
     name: String,
     source: ConfigSource,
     httpClient: Llm4sHttpClient
   )(using ProviderRegistry): Result[List[DiscoveredModel]] =
-    org.llm4s.config.ProvidersConfigLoader.loadSections(source).flatMap(listModels(name, _, httpClient))
-
-  private def listModels(
-    name: String,
-    sections: ProviderSections,
-    httpClient: Llm4sHttpClient
-  )(using ProviderRegistry): Result[List[DiscoveredModel]] =
-    for
-      namedProvider <- sections.validated(ProviderName(name))
-      descriptor <- summon[ProviderRegistry].resolve(
-        namedProvider.provider,
-        Some(s"llm4s.providers.$name.provider")
-      )
-      lister <- descriptor.modelLister
-        .toRight(
-          org.llm4s.error.ConfigurationError(
-            s"Model discovery is not supported yet for provider '${namedProvider.provider.asString}'"
-          )
-        )
-      models <- lister.listModels(namedProvider, httpClient)
-    yield models
+    of(source).listModels(name, httpClient)
 
   /**
    * Loads the default LLM provider configuration from a custom PureConfig source.
    *
    * Useful for policy checks and validation workflows that need to evaluate a
    * specific config source (for example, file overlays in CI). The source must
-   * define named providers under `llm4s.providers` with a selected default.
+   * define named providers under `llm4s.providers` with a default.
    */
   private[llm4s] def providerFrom(source: ConfigSource)(using ProviderRegistry): Result[ProviderConfig] =
-    defaultProvider(source)
+    of(source).defaultProvider()
 
   /**
    * Where each named chat section's API key comes from: its own `apiKey`, or its vendor's
@@ -366,14 +263,13 @@ object Llm4sConfig {
    * key. The config-policy `prod` preset uses this to require explicit keys. Only sections whose
    * provider requires a key are listed; no section is validated.
    */
-  def apiKeySources()(using ProviderRegistry): Result[Map[ProviderName, ApiKeySource]] =
-    apiKeySourcesFrom(ConfigSource.default)
+  def apiKeySources()(using ProviderRegistry): Result[Map[ProviderName, ApiKeySource]] = default.apiKeySources()
 
   /** [[apiKeySources()*]] for a custom PureConfig source, as [[providerFrom]] is for the default provider. */
   private[llm4s] def apiKeySourcesFrom(source: ConfigSource)(using
     ProviderRegistry
   ): Result[Map[ProviderName, ApiKeySource]] =
-    org.llm4s.config.ProvidersConfigLoader.loadSections(source).map(_.apiKeySources)
+    of(source).apiKeySources()
 
   /**
    * Loads tracing configuration from the current environment.
@@ -390,12 +286,10 @@ object Llm4sConfig {
    *         mode's `llm4s.tracing.<mode>` is present but is not an object (an absent
    *         block is fine: the backend applies its defaults).
    */
-  def tracing(): Result[TracingSettings] =
-    org.llm4s.config.TracingConfigLoader.load(ConfigSource.default)
+  def tracing(): Result[TracingSettings] = default.tracing()
 
   /** [[tracing()*]] for a given source; `llm4s-spring-boot-starter` reads `llm4s.tracing.*` properties through it. */
-  private[llm4s] def tracing(source: ConfigSource): Result[TracingSettings] =
-    org.llm4s.config.TracingConfigLoader.load(source)
+  private[llm4s] def tracing(source: ConfigSource): Result[TracingSettings] = of(source).tracing()
 
   /**
    * Loads provider exchange logging configuration from the current environment.
@@ -404,8 +298,7 @@ object Llm4sConfig {
    * exchange logging remains off. When enabled, a JSONL sink is constructed
    * from a configured directory and writes to a new per-run file.
    */
-  def exchangeLogging(): Result[ProviderExchangeLogging] =
-    org.llm4s.config.ProviderExchangeLoggingConfigLoader.load(ConfigSource.default)
+  def exchangeLogging(): Result[ProviderExchangeLogging] = default.exchangeLogging()
 
   /**
    * The active embedding model, as [[textEmbeddingModel]] resolves it.
@@ -453,31 +346,25 @@ object Llm4sConfig {
    *         [[org.llm4s.error.ConfigurationError]] when `EMBEDDING_MODEL` is
    *         absent or the provider is unrecognised.
    */
-  def embeddings()(using ProviderRegistry): Result[(String, EmbeddingProviderConfig)] =
-    org.llm4s.config.EmbeddingsConfigLoader.loadProvider(ConfigSource.default)
+  def embeddings()(using ProviderRegistry): Result[(String, EmbeddingProviderConfig)] = default.embeddings()
 
   /** [[embeddings()*]] for a given source; `llm4s-provider-testkit` reads embedding blocks through it. */
   private[llm4s] def embeddings(source: ConfigSource)(using
     ProviderRegistry
   ): Result[(String, EmbeddingProviderConfig)] =
-    org.llm4s.config.EmbeddingsConfigLoader.loadProvider(source)
+    of(source).embeddings()
 
-  /**
-   * [[embeddings()*]] for the model `modelSpec` names, `provider/model`, instead of the one
-   * `llm4s.embeddings.model` selects: the provider's `llm4s.embeddings.<provider>` block and its
-   * key are read as they are for that one. `llm4s-java-api`'s `Llm4s.createEmbeddingClient` loads
-   * through it.
-   */
+  /** As [[Llm4sSettings.embeddingsFor]], for the process-wide configuration. */
   private[llm4s] def embeddingsFor(modelSpec: String)(using
     ProviderRegistry
   ): Result[(String, EmbeddingProviderConfig)] =
-    embeddingsFor(ConfigSource.default, modelSpec)
+    default.embeddingsFor(modelSpec)
 
   /** [[embeddingsFor(modelSpec:String)*]] for a given source. */
   private[llm4s] def embeddingsFor(source: ConfigSource, modelSpec: String)(using
     ProviderRegistry
   ): Result[(String, EmbeddingProviderConfig)] =
-    org.llm4s.config.EmbeddingsConfigLoader.loadProviderFor(source, modelSpec)
+    of(source).embeddingsFor(modelSpec)
 
   /**
    * Loads and resolves the active embedding model, including its output dimensions.
@@ -492,16 +379,10 @@ object Llm4sConfig {
    * @return the resolved settings, or a [[org.llm4s.error.ConfigurationError]]
    *         when `EMBEDDING_MODEL` is absent or unrecognised.
    */
-  def textEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings] =
-    textEmbeddingModel(ConfigSource.default)
+  def textEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings] = default.textEmbeddingModel()
 
-  private[config] def textEmbeddingModel(source: ConfigSource)(using
+  private[llm4s] def textEmbeddingModel(source: ConfigSource)(using
     ProviderRegistry
   ): Result[TextEmbeddingModelSettings] =
-    embeddings(source).flatMap { case (provider, cfg) =>
-      val p = provider.toLowerCase
-      ModelDimensionRegistry.getDimension(p, cfg.model).map { dims =>
-        TextEmbeddingModelSettings(provider = p, modelName = cfg.model, dimensions = dims)
-      }
-    }
+    of(source).textEmbeddingModel()
 }

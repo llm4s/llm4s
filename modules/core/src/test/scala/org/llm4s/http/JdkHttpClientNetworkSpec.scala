@@ -24,13 +24,14 @@ class JdkHttpClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValu
 
   "A client with a proxy" should "send every request to the proxy, in absolute form" in {
     Using.resource(RecordingProxy.start(body = """{"ok":true}""")) { proxy =>
-      Using.resource(Llm4sHttpClient.create(HttpClientOptions(through(HttpProxy("127.0.0.1", proxy.port).withNonProxyHosts(Nil))))) {
-        client =>
-          val response = client.post(Target, Map("Content-Type" -> "application/json"), """{"q":1}""").value
-          response.statusCode shouldBe 200
-          response.body shouldBe """{"ok":true}"""
-          proxy.requests.map(r => (r.method, r.target)) shouldBe Vector(("POST", Target))
-          proxy.requests.head.body shouldBe """{"q":1}"""
+      Using.resource(
+        Llm4sHttpClient.create(HttpClientOptions(through(HttpProxy("127.0.0.1", proxy.port).withNonProxyHosts(Nil))))
+      ) { client =>
+        val response = client.post(Target, Map("Content-Type" -> "application/json"), """{"q":1}""").value
+        response.statusCode shouldBe 200
+        response.body shouldBe """{"ok":true}"""
+        proxy.requests.map(r => (r.method, r.target)) shouldBe Vector(("POST", Target))
+        proxy.requests.head.body shouldBe """{"q":1}"""
       }
     }
   }
@@ -49,10 +50,11 @@ class JdkHttpClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValu
 
   it should "get the proxy's 407 back when it has no credentials" in {
     Using.resource(RecordingProxy.start(credentials = Some(("alice", "s3cret")))) { proxy =>
-      Using.resource(Llm4sHttpClient.create(HttpClientOptions(through(HttpProxy("127.0.0.1", proxy.port).withNonProxyHosts(Nil))))) {
-        client =>
-          client.get(Target).value.statusCode shouldBe 407
-          proxy.authorized shouldBe empty
+      Using.resource(
+        Llm4sHttpClient.create(HttpClientOptions(through(HttpProxy("127.0.0.1", proxy.port).withNonProxyHosts(Nil))))
+      ) { client =>
+        client.get(Target).value.statusCode shouldBe 407
+        proxy.authorized shouldBe empty
       }
     }
   }

@@ -22,10 +22,11 @@ final class StubHttp(
 ) extends Llm4sHttpClient {
   private val log = new ConcurrentLinkedQueue[Seen]()
 
-  def requests: Seq[Seen]          = log.asScala.toSeq
-  def lastBody: ujson.Value        = ujson.read(requests.last.body)
-  @volatile var closed: Boolean    = false
-  override def close(): Unit       = closed = true
+  def requests: Seq[Seen]       = log.asScala.toSeq
+  def lastBody: ujson.Value     = ujson.read(requests.last.body)
+  @volatile var closed: Boolean = false
+  override def close(): Unit    = closed = true
+
   /** A request that asks for `text/event-stream` is answered from the stream script, any other from the reply script. */
   override def send(request: HttpRequest): Result[StreamingHttpResponse] = {
     val streaming = request.headers.get("Accept").contains("text/event-stream")

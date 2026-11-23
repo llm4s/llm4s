@@ -31,10 +31,9 @@ object ParallelNamedProviderModelListingExample:
       case Left(err) =>
         logger.error("Could not read llm4s.providers: {}", err.formatted)
 
-      case Right((errors, configs)) =>
+      case Right(loaded) =>
         val sections: List[(String, Result[ProviderConfig])] =
-          (errors.toList.map((name, err) => name.asName -> Left(err)) ++
-            configs.toList.map((name, config) => name.asName -> Right(config))).sortBy(_._1)
+          loaded.toList.map((name, section) => name.asName -> section).sortBy(_._1)
         logger.info("Configured sections: {}", sections.map(_._1).mkString(", "))
 
         val blocksFuture: Future[Seq[String]] =

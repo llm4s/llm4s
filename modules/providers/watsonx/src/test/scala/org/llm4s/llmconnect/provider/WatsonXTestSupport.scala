@@ -32,12 +32,13 @@ final class StubHttp(
 ) extends Llm4sHttpClient {
   private val log = new ConcurrentLinkedQueue[Seen]()
 
-  def requests: Seq[Seen]          = log.asScala.toSeq
-  def iamRequests: Seq[Seen]       = requests.filter(_.url.contains("/identity/token"))
-  def modelRequests: Seq[Seen]     = requests.filterNot(_.url.contains("/identity/token"))
-  private val closedFlag           = new AtomicBoolean(false)
-  def closed: Boolean              = closedFlag.get()
-  override def close(): Unit       = closedFlag.set(true)
+  def requests: Seq[Seen]      = log.asScala.toSeq
+  def iamRequests: Seq[Seen]   = requests.filter(_.url.contains("/identity/token"))
+  def modelRequests: Seq[Seen] = requests.filterNot(_.url.contains("/identity/token"))
+  private val closedFlag       = new AtomicBoolean(false)
+  def closed: Boolean          = closedFlag.get()
+  override def close(): Unit   = closedFlag.set(true)
+
   /** A request that asks for `text/event-stream` is answered from the stream script, any other from the reply script. */
   override def send(request: HttpRequest): Result[StreamingHttpResponse] = {
     val streaming = request.headers.get("Accept").contains("text/event-stream")

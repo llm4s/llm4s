@@ -675,7 +675,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
     var closed = false
     val http = new Llm4sHttpClient {
       override def send(request: org.llm4s.http.HttpRequest) = fail("unused")
-      override def close(): Unit = closed = true
+      override def close(): Unit                             = closed = true
     }
 
     JevClient.withHttp(JevConfig(Secret(secret)), http, new JevRetry(JevRetryPolicy.none)).value.close()

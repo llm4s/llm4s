@@ -146,10 +146,10 @@ trait StubbedHttpCalls extends Llm4sHttpClient {
       result.map(r => StubbedHttpCalls.streaming(r.statusCode, r.body.getBytes(StandardCharsets.UTF_8), r.headers))
 
     (request.method, request.body) match {
-      case (HttpMethod.Get, _)                          => text(onGet(url, headers, request.queryParams, timeout))
-      case (HttpMethod.Delete, _)                       => text(onDelete(url, headers, timeout))
-      case (HttpMethod.Put, body)                       => text(onPut(url, headers, StubbedHttpCalls.textOf(body), timeout))
-      case (HttpMethod.Post, HttpBody.Bytes(data))      => text(onPostBytes(url, headers, data, timeout))
+      case (HttpMethod.Get, _)                     => text(onGet(url, headers, request.queryParams, timeout))
+      case (HttpMethod.Delete, _)                  => text(onDelete(url, headers, timeout))
+      case (HttpMethod.Put, body)                  => text(onPut(url, headers, StubbedHttpCalls.textOf(body), timeout))
+      case (HttpMethod.Post, HttpBody.Bytes(data)) => text(onPostBytes(url, headers, data, timeout))
       case (HttpMethod.Post, HttpBody.Multipart(parts)) => text(onPostMultipart(url, headers, parts, timeout))
       case (HttpMethod.Post, body) =>
         val sent = StubbedHttpCalls.textOf(body)

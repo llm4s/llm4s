@@ -210,7 +210,9 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
 
     // The store creates the collection first, since the mocked existence check 404s.
     (mockClient.onPut _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(200, """{"result": "ok"}""")))
-    (mockClient.onPut _).when(s"$pointsUrl?wait=true", *, *, *).returns(Right(httpResponse(200, """{"result": "ok"}""")))
+    (mockClient.onPut _)
+      .when(s"$pointsUrl?wait=true", *, *, *)
+      .returns(Right(httpResponse(200, """{"result": "ok"}""")))
 
     store.upsert(VectorRecord("test-1", Array(0.1f, 0.2f, 0.3f), Some("Test content"))) shouldBe Right(())
 
@@ -584,7 +586,9 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     // Mock collection creation PUT
     (mockClient.onPut _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(200, """{"result": true}""")))
     // Mock successful PUT for upsert
-    (mockClient.onPut _).when(s"$pointsUrl?wait=true", *, *, *).returns(Right(httpResponse(200, """{"result": "ok"}""")))
+    (mockClient.onPut _)
+      .when(s"$pointsUrl?wait=true", *, *, *)
+      .returns(Right(httpResponse(200, """{"result": "ok"}""")))
 
     val record = VectorRecord("test-1", Array(0.1f, 0.2f, 0.3f), Some("Test content"))
     val result = store.upsert(record)

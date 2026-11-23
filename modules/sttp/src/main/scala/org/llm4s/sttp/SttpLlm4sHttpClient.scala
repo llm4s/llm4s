@@ -2,14 +2,7 @@ package org.llm4s.sttp
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NetworkError, TimeoutError, UnknownError, ValidationError }
-import org.llm4s.http.{
-  HttpBody,
-  HttpFailures,
-  HttpRequest,
-  Llm4sHttpClient,
-  MultipartEncoding,
-  StreamingHttpResponse
-}
+import org.llm4s.http.{ HttpBody, HttpFailures, HttpRequest, Llm4sHttpClient, MultipartEncoding, StreamingHttpResponse }
 import org.llm4s.types.Result
 import sttp.client4.*
 import sttp.model.{ Header, Method, Part, Uri }

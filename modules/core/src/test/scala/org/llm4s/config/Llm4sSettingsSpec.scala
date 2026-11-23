@@ -89,9 +89,9 @@ class Llm4sSettingsSpec extends AnyWordSpec with Matchers with EitherValues:
       fixture(s.provider("other").value).model shouldBe "m2"
       s.defaultProviderName().value shouldBe ProviderName("main")
       s.providers().value.namedProviders.keySet shouldBe Set(ProviderName("main"), ProviderName("other"))
-      val (errors, configs) = s.providerConfigs().value
-      errors shouldBe empty
-      configs.keySet shouldBe Set(ProviderName("main"), ProviderName("other"))
+      val sections = s.providerConfigs().value
+      sections.keySet shouldBe Set(ProviderName("main"), ProviderName("other"))
+      sections.values.forall(_.isRight) shouldBe true
     }
 
     "fall back to the vendor's shared llm4s.credentials key, as the default source does" in {
@@ -147,6 +147,27 @@ class Llm4sSettingsSpec extends AnyWordSpec with Matchers with EitherValues:
     "fail with a ConfigurationError, not an exception, when the config cannot be resolved" in {
       val result = Llm4sConfig.from(parse("llm4s.providers.main.model = ${LLM4S_2340_SURELY_UNSET_VARIABLE}"))
       result.left.value shouldBe a[ConfigurationError]
+    }
+
+    "report a modelRegistry key that is not a string, instead of quietly using the bundled registry (#2804)" in {
+      settings("llm4s.modelRegistry.filePath = [1, 2]").modelRegistryConfig().left.value shouldBe a[ConfigurationError]
+      settings("llm4s.modelRegistry.url = { a = 1 }").modelRegistryService().left.value shouldBe a[ConfigurationError]
+      val read = settings("""llm4s.modelRegistry.filePath = " /tmp/models.json " """).modelRegistryConfig().value
+      read.filePath shouldBe Some("/tmp/models.json")
+      read.resourcePath shouldBe None
+    }
+
+    "route a section built in code by llm4s.http, as it routes a configured one (#2804)" in {
+      import org.llm4s.config.ProvidersConfigModel.{ ApiKey, ModelName, NamedProviderConfig, ProviderId }
+      val section = NamedProviderConfig(ProviderId("fixturechat"), ModelName("m"), None, Some(ApiKey("k")))
+      val built = settings("""llm4s.http.proxy.url = "http://proxy.corp:3128" """)
+        .providerFromSection(ProviderName("built"), section)
+        .value
+      built.network.proxy.map(_.host) shouldBe Some("proxy.corp")
+      // and the process-wide configuration, which is what llm4s-repl reads
+      withSystemProperty("llm4s.http.proxy.url", "http://proxy.corp:3128") {
+        Llm4sConfig.providerFromSection(ProviderName("built"), section).value.network.proxy.map(_.host)
+      } shouldBe Some("proxy.corp")
     }
 
     "honour an explicit ProviderRegistry" in {

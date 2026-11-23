@@ -129,8 +129,7 @@ Other `Llm4sConfig` calls read the same sections:
 ```scala
 Llm4sConfig.provider("openai-main")   // any section, by name
 Llm4sConfig.defaultProviderName()     // the value of llm4s.providers.provider
-Llm4sConfig.providers()               // every section, validated - fails if any one is invalid
-Llm4sConfig.providerConfigs()         // every section, each loaded or failed on its own
+Llm4sConfig.providerConfigs()         // every section by name, each a Right(config) or the Left(error) loading it
 Llm4sConfig.listModels()              // model discovery for the default section
 Llm4sConfig.listModels("openai-main") // ... or for a named one
 ```
@@ -510,9 +509,9 @@ whose provider module is not on the classpath, fails when it is loaded - by
 `provider("<name>")`, or by `defaultProvider()` when it is the default - and not otherwise.
 With the example above and `ANTHROPIC_API_KEY` alone set, `defaultProvider()` loads `claude`
 while `provider("gemini-main")` fails with a `ConfigurationError` naming `GOOGLE_API_KEY`,
-`GEMINI_API_KEY` and `gemini-main`'s `apiKey`. The exception is `Llm4sConfig.providers()`, which returns every section and so
-validates them all; `Llm4sConfig.providerConfigs()` instead reports each section's error
-separately. (Up to 0.4.1 every section was validated on every load.)
+`GEMINI_API_KEY` and `gemini-main`'s `apiKey`. `Llm4sConfig.providerConfigs()` loads every section and
+reports each one's error separately, as a `Left` under the section's name. (Up to 0.4.1 every section was
+validated on every load.)
 
 ---
 
@@ -693,8 +692,8 @@ and resolved is accepted as is. Two `Llm4sSettings` in one JVM never see each ot
 configuration. `from` returns a `Left(ConfigurationError)` when the config cannot be resolved,
 such as a `${VAR}` substitution with no value.
 
-`Llm4sConfig.from` and `Llm4sSettings` are `@Experimental`: their shape may still change before
-1.0.
+`Llm4sSettings` is the one implementation of every read: each `Llm4sConfig` method calls the method of the same
+name on the `Llm4sSettings` of the process-wide configuration, so the two cannot differ. Both are `@Stable`.
 
 To skip HOCON altogether - values from ciris, zio-config or your own code - see
 [Configuration in Code](configuration-in-code): each provider's `fromValues` and
@@ -1373,7 +1372,7 @@ ConfigurationError: Provider 'openai-main' (provider = openai) is missing requir
 The error names the section it is about, and only a section being loaded is validated. If it
 names a section you did not ask for, check `llm4s.providers.provider` (and any
 `-Dllm4s.providers.provider` override): that is the section `defaultProvider()` loads. The one
-call that validates every section is `Llm4sConfig.providers()`.
+call that validates every section is `Llm4sConfig.providerConfigs()`, which reports each separately.
 
 **Debug steps:**
 ```bash

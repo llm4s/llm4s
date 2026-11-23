@@ -652,7 +652,9 @@ final case class HttpRequest private (
         val boundary = UUID.randomUUID().toString
         MultipartEncoding.encode(parts, boundary).map { bytes =>
           copy(
-            headers = headers.filterNot { case (name, _) => name.equalsIgnoreCase("Content-Type") } +
+            headers = headers.filterNot { case (name, _) =>
+              name.equalsIgnoreCase("Content-Type")
+            } +
               ("Content-Type" -> s"multipart/form-data; boundary=$boundary"),
             body = HttpBody.Bytes(bytes)
           )
@@ -949,7 +951,7 @@ object Llm4sHttpClient {
  * One shared daemon thread watches every open body. It holds each only weakly, so a body dropped without
  * being closed stops being watched once it is collected.
  */
-private[llm4s] final class IdleTimeoutInputStream(underlying: java.io.InputStream, idle: FiniteDuration)
+final private[llm4s] class IdleTimeoutInputStream(underlying: java.io.InputStream, idle: FiniteDuration)
     extends java.io.InputStream {
   import IdleTimeoutInputStream.*
 

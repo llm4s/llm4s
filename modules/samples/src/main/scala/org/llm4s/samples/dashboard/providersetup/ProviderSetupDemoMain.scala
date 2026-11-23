@@ -24,7 +24,8 @@ def ProviderSetupDemoMain(): Unit =
       registryService <- Llm4sConfig.modelRegistryService()
       given org.llm4s.model.ModelRegistryService = registryService
       loaded <- Llm4sConfig.providerConfigs()
-      (errors, configs) = loaded
+      errors  = loaded.collect { case (name, Left(err)) => name -> err }
+      configs = loaded.collect { case (name, Right(config)) => name -> config }
       _ = errors.toSeq
         .sortBy(_._1.asName)
         .foreach((name, err) => System.err.println(s"Provider section '${name.asName}' did not load: ${err.formatted}"))

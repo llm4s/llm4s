@@ -286,7 +286,7 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   }
 
   "Llm4sHttpClient.send" should "send a method the conveniences do not cover, and leave the body open to read" in {
-    val request = HttpRequest(HttpMethod.Patch, s"$baseUrl/echo").withTextBody("""{"a":1}""")
+    val request  = HttpRequest(HttpMethod.Patch, s"$baseUrl/echo").withTextBody("""{"a":1}""")
     val response = client.send(request).ok
     response.statusCode shouldBe 200
     val text = scala.util.Using.resource(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8))

@@ -133,7 +133,7 @@ private[config] object RawProvidersConfigLoader:
 
   /** The block as read, each section's read failure kept to that section. */
   final private case class RawSections(
-    selectedProvider: Option[ProviderName],
+    defaultProvider: Option[ProviderName],
     sections: Map[ProviderName, Either[ConfigReaderFailures, RawNamedProviderSection]]
   )
 
@@ -147,7 +147,7 @@ private[config] object RawProvidersConfigLoader:
     PureConfigReader.fromCursor { cursor =>
       cursor.asObjectCursor.flatMap { objCursor =>
         val selectedKey = objCursor.atKeyOrUndefined("provider")
-        val selectedProvider =
+        val defaultProvider =
           if selectedKey.isUndefined then Right(None)
           else selectedKey.asString.map(value => Option(value.trim).filter(_.nonEmpty).map(ProviderName.apply))
 
@@ -160,7 +160,7 @@ private[config] object RawProvidersConfigLoader:
             .map(key => ProviderName(key) -> objCursor.atKey(key).flatMap(namedProviderSectionReader.from))
             .toMap
 
-        selectedProvider.map(RawSections(_, sections))
+        defaultProvider.map(RawSections(_, sections))
       }
     }
 
@@ -180,7 +180,7 @@ private[config] object RawProvidersConfigLoader:
         case None =>
           Right(
             RawProvidersConfig(
-              selectedProvider = raw.selectedProvider,
+              defaultProvider = raw.defaultProvider,
               namedProviders = raw.sections.collect { case (name, Right(section)) => name -> section }
             )
           )
@@ -196,7 +196,7 @@ private[config] object RawProvidersConfigLoader:
   def loadSections(source: ConfigSource): Result[ProviderSections] =
     read(source).flatMap(raw => HttpNetworkReader.globalBlock(source).map(raw -> _)).map { (raw, http) =>
       ProviderSections(
-        selectedProvider = raw.selectedProvider,
+        defaultProvider = raw.defaultProvider,
         sections = raw.sections.map { case (name, section) =>
           name -> section.left.map { failures =>
             ConfigurationError(

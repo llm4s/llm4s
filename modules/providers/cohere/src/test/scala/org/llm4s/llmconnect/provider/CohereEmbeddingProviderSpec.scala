@@ -340,7 +340,7 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
     (authErr.message should not).include(secretKey)
 
     val failing = new ScriptedPost(_ => Left(NetworkError("connect timed out", None, "http://cohere-test/v2/embed")))
-    val err = embed(failing, Seq("a")).left.toOption.get
+    val err     = embed(failing, Seq("a")).left.toOption.get
     err shouldBe a[NetworkError]
     (err.toString should not).include(secretKey)
     (err.message should not).include(secretKey)

@@ -3,7 +3,7 @@ package org.llm4s.repl
 import org.llm4s.annotation.Experimental
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.error.{ ConfigurationError, LLMError }
+import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Message }
@@ -145,11 +145,7 @@ object Session {
   private[repl] def ollama(model: String, baseUrl: Option[String])(using ProviderRegistry): Session = {
     val name    = ProviderName("repl-ollama")
     val section = NamedProviderConfig(ProviderId("ollama"), ModelName(model), baseUrl.map(BaseUrl(_)), apiKey = None)
-    val (errors, configs) = Llm4sConfig.providerConfigs(Map(name -> section))
-    val config = configs
-      .get(name)
-      .toRight(errors.getOrElse(name, ConfigurationError(s"Could not build an Ollama provider for '$model'")))
-    fromProvider("ollama", config)
+    fromProvider("ollama", Llm4sConfig.providerFromSection(name, section))
   }
 
   /** A session on a client built elsewhere. */

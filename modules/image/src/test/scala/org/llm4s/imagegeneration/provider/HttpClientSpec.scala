@@ -241,7 +241,9 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       val mockLlm4s = stub[StubbedHttpCalls]
       val client    = new SimpleHttpClient(mockLlm4s)
 
-      (mockLlm4s.onPostBytes _).when(*, *, *, *).returns(Left(transportFailure(new java.io.IOException("Upload failed"))))
+      (mockLlm4s.onPostBytes _)
+        .when(*, *, *, *)
+        .returns(Left(transportFailure(new java.io.IOException("Upload failed"))))
 
       val result = client.postBytes("https://api.example.com", Map.empty, Array[Byte](1, 2, 3), 10000.millis)
 

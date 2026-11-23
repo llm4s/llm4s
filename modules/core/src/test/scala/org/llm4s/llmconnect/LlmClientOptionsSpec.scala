@@ -132,7 +132,7 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
     var closed = 0
     val supplied = new Llm4sHttpClient {
       def send(request: org.llm4s.http.HttpRequest) = ???
-      override def close(): Unit                   = closed += 1
+      override def close(): Unit                    = closed += 1
     }
 
     val chosen = Llm4sHttpClient.suppliedOrFromConfig(Some(supplied))

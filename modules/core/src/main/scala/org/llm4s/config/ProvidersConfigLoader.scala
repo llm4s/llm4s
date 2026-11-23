@@ -16,14 +16,14 @@ import pureconfig.ConfigSource
  * provider whose module is not on the classpath - failed every lookup, so a config holding
  * `openai-main` and `anthropic-main` could not load either with only `OPENAI_API_KEY` set.
  *
- *  @param selectedProvider the default section's name (`llm4s.providers.provider`), if set
+ *  @param defaultProvider the default section's name (`llm4s.providers.provider`), if set
  *  @param sections         each section as read, or the error reading it
  *  @param credentials      the `llm4s.credentials` block, which a section without an `apiKey`
  *                          of its own falls back to
  *  @param http             the `llm4s.http` block, which a section's own `http` block overrides
  */
 final private[config] case class ProviderSections(
-  selectedProvider: Option[ProviderName],
+  defaultProvider: Option[ProviderName],
   sections: Map[ProviderName, Result[RawNamedProviderSection]],
   credentials: SharedCredentials = SharedCredentials.empty,
   http: Option[com.typesafe.config.ConfigObject] = None
@@ -46,7 +46,7 @@ final private[config] case class ProviderSections(
    * Whether that section is valid is left to [[validated]]: the name alone does not need it.
    */
   def defaultProviderName: Result[ProviderName] =
-    selectedProvider match
+    defaultProvider match
       case None =>
         Left(ConfigurationError(ProviderSections.noDefaultMessage))
       case Some(name) if !sections.contains(name) =>
@@ -152,9 +152,9 @@ private[config] object ProvidersConfigLoader:
   )(using ProviderRegistry): Result[ProvidersConfig] =
     for
       namedProviders <- validateNamedProviders(raw.namedProviders, credentials)
-      _              <- validateSelectedProvider(raw.selectedProvider, namedProviders)
+      _              <- validateDefaultProvider(raw.defaultProvider, namedProviders)
     yield ProvidersConfig(
-      selectedProvider = raw.selectedProvider,
+      defaultProvider = raw.defaultProvider,
       namedProviders = namedProviders,
     )
 
@@ -169,11 +169,11 @@ private[config] object ProvidersConfigLoader:
           normalized <- NamedProviderConfigValidator.validate(providerName, rawSection, credentials)
         yield acc.updated(providerName, normalized)
 
-  private def validateSelectedProvider(
-    selectedProvider: Option[ProviderName],
+  private def validateDefaultProvider(
+    defaultProvider: Option[ProviderName],
     namedProviders: Map[ProviderName, NamedProviderConfig]
   ): Result[Unit] =
-    selectedProvider match
+    defaultProvider match
       case Some(providerName) if !namedProviders.contains(providerName) =>
         Left(ConfigurationError(ProviderSections.notFoundMessage(providerName)))
       case _ =>
