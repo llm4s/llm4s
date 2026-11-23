@@ -139,6 +139,8 @@ val config = ContextWindowConfig(
 ### 3. RecentTurnsOnly (For strict turn-based systems)
 
 **How it works:** Keeps only the last N complete conversation turns (user message + assistant response + tool calls).
+The turn count is a limit of its own: a longer history is pruned with or without `maxTokens` or `maxMessages`. When
+one of those is set and the N turns exceed it, the oldest of them are dropped until they fit.
 
 **Best for:**
 - ✅ Turn-based games or dialogues
@@ -160,7 +162,7 @@ val config = ContextWindowConfig(
   pruningStrategy = PruningStrategy.RecentTurnsOnly(5)
 )
 
-// Keeps exactly the last 5 user/assistant turn pairs
+// Sends at most the last 5 turns, however long the conversation
 // A "turn" = [User message] → [Assistant response] + optional [Tool messages]
 
 // Turn 1: User asks → Assistant responds (+ tool calls)
@@ -396,8 +398,8 @@ val config = ContextWindowConfig(
   minRecentTurns = 3,                    // Always keep last 3 turns
   pruningStrategy = PruningStrategy.RecentTurnsOnly(5)
 )
-// The last 3 turns are always sent, even past maxMessages;
-// up to 5 turns are sent when over it
+// At most 5 turns are sent, fewer when they exceed maxMessages;
+// the last 3 are always sent, even past it
 ```
 
 ### Pattern 5: Adaptive Mode (Multi-model)

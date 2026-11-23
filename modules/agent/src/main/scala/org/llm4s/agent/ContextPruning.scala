@@ -24,8 +24,9 @@ private[agent] object ContextPruning {
    * included, sees only the earlier history, with the budget the protected turns leave; what it
    * returns is then repaired so the result is a valid conversation: no tool call is separated from
    * its results ([[keepToolPairs]]), and (after any leading system messages) the result starts with
-   * a `UserMessage`. The result exceeds the limits only when the protected turns alone do, or under
-   * a `RecentTurnsOnly` or `Custom` strategy, which choose what to keep without reading them.
+   * a `UserMessage`. `RecentTurnsOnly`'s turn count is a limit too, applied whether or not the other
+   * two are set. The result exceeds the limits only when the protected turns alone do, or under a
+   * `Custom` strategy, which chooses what to keep without reading them.
    */
   def prune(messages: Seq[Message], config: ContextWindowConfig, tokenCounter: Message => Int): Seq[Message] = {
     val adaptiveWindow = config.pruningStrategy match {
@@ -37,11 +38,17 @@ private[agent] object ContextPruning {
     def tokens(ms: Seq[Message]): Long = if (tokenLimit.isEmpty) 0L else ms.foldLeft(0L)(_ + tokenCounter(_))
     val budget                         = Budget(tokenLimit.map(_.toLong), config.maxMessages)
 
-    if (budget.fits(messages.length, tokens(messages))) {
+    val userAt = messages.indices.filter(i => messages(i).role == MessageRole.User)
+    // `RecentTurnsOnly`'s turn count is a limit of its own, with or without the other two
+    val withinTurns = config.pruningStrategy match {
+      case PruningStrategy.RecentTurnsOnly(n) => userAt.length <= n
+      case _                                  => true
+    }
+
+    if (withinTurns && budget.fits(messages.length, tokens(messages))) {
       messages
     } else {
       // the last `minRecentTurns` turns are never pruned: the strategy runs on what precedes them, by position
-      val userAt  = messages.indices.filter(i => messages(i).role == MessageRole.User)
       val turns   = math.min(math.max(1, config.minRecentTurns), userAt.length)
       val cut     = if (userAt.isEmpty) messages.length else userAt(userAt.length - turns)
       val earlier = messages.take(cut)
@@ -53,7 +60,9 @@ private[agent] object ContextPruning {
         case PruningStrategy.MiddleOut =>
           pruneMiddleOut(earlier, left, config.preserveSystemMessage, tokenCounter)
         case PruningStrategy.RecentTurnsOnly(n) =>
-          pruneRecentTurnsOnly(earlier, math.max(0, n - turns), config.preserveSystemMessage)
+          // at most `n` turns, the protected ones included, and of those the most recent that fit the limits
+          val recent = pruneRecentTurnsOnly(earlier, math.max(0, n - turns), config.preserveSystemMessage)
+          pruneOldestFirst(recent, left, config.preserveSystemMessage, tokenCounter)
         case PruningStrategy.Custom(fn) =>
           fn(earlier)
       }
