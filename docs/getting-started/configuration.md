@@ -693,7 +693,8 @@ configuration. `from` returns a `Left(ConfigurationError)` when the config canno
 such as a `${VAR}` substitution with no value.
 
 `Llm4sSettings` is the one implementation of every read: each `Llm4sConfig` method calls the method of the same
-name on the `Llm4sSettings` of the process-wide configuration, so the two cannot differ. Both are `@Stable`.
+name on the `Llm4sSettings` of the process-wide configuration, so the two cannot differ. Both are `@Stable`;
+`Llm4sConfig.from` itself is `@Experimental`, because it takes a Typesafe `Config`, a third-party type.
 
 To skip HOCON altogether - values from ciris, zio-config or your own code - see
 [Configuration in Code](configuration-in-code): each provider's `fromValues` and
