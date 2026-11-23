@@ -373,19 +373,48 @@ private[springai] object SpringAiMapping {
           }
     }
 
-  /** Spring AI's usage as llm4s's; none when the model reported none (Spring AI's empty usage is all zeros). */
+  /**
+   * Spring AI's usage as llm4s's; none when the model reported none (Spring AI's empty usage is all zeros).
+   *
+   * llm4s's `promptTokens` is the whole input, prompt-cache reads and writes included (#2745). Spring AI leaves the
+   * meaning of `getPromptTokens` to each model (#2765): OpenAI's (`prompt_tokens`) and Gemini's (`promptTokenCount`)
+   * already include their cache reads, but Anthropic's is its `input_tokens` and Bedrock Converse's its `inputTokens`,
+   * both the input neither read from nor written to the cache. For those the cache counts are added to the prompt, and
+   * the total is at least prompt plus completion. See [[cacheExcludedFromPrompt]] for how they are recognised.
+   */
   def tokenUsage(usage: Usage): Option[TokenUsage] = {
     val prompt     = Option(usage.getPromptTokens).map(_.intValue).getOrElse(0)
     val completion = Option(usage.getCompletionTokens).map(_.intValue).getOrElse(0)
     val total      = Option(usage.getTotalTokens).map(_.intValue).getOrElse(prompt + completion)
+    val reads      = Option(usage.getCacheReadInputTokens).map(_.intValue)
+    val writes     = Option(usage.getCacheWriteInputTokens).map(_.intValue)
+    val wholeInput =
+      if (cacheExcludedFromPrompt(usage, prompt)) prompt + reads.getOrElse(0) + writes.getOrElse(0) else prompt
     Option.when(prompt != 0 || completion != 0 || total != 0)(
       TokenUsage(
-        promptTokens = prompt,
+        promptTokens = wholeInput,
         completionTokens = completion,
-        totalTokens = total,
-        cachedTokens = Option(usage.getCacheReadInputTokens).map(_.intValue),
-        cacheCreationTokens = Option(usage.getCacheWriteInputTokens).map(_.intValue)
+        totalTokens = math.max(total, wholeInput + completion),
+        cachedTokens = reads,
+        cacheCreationTokens = writes
       )
     )
   }
+
+  /**
+   * Whether `usage`'s prompt count leaves the cache reads and writes out, so they must be added to it:
+   *  - its native usage is the Anthropic SDK's (`com.anthropic`) or Bedrock Runtime's (`software.amazon.awssdk.services
+   *    .bedrockruntime`), the two Spring AI models whose prompt count excludes the cache;
+   *  - it has no native usage (Spring AI's sum over a tool-calling loop drops it) but reports cache writes, which only
+   *    those two models do (OpenAI's and Gemini's report reads alone);
+   *  - or its cache reads exceed its prompt, which a count that includes them cannot.
+   */
+  private def cacheExcludedFromPrompt(usage: Usage, prompt: Int): Boolean = {
+    val native = Option(usage.getNativeUsage).map(_.getClass.getName)
+    native.exists(n => CacheExcludingPackages.exists(n.startsWith)) ||
+    (native.isEmpty && usage.getCacheWriteInputTokens != null) ||
+    Option(usage.getCacheReadInputTokens).exists(_ > prompt)
+  }
+
+  private val CacheExcludingPackages = Seq("com.anthropic.", "software.amazon.awssdk.services.bedrockruntime.")
 }

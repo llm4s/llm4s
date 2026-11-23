@@ -3073,7 +3073,10 @@ lazy val springAi = (project in file("modules/spring-ai"))
       Deps.scalatest                % Test,
       Deps.springAiClientChat       % Test,
       Deps.springAiOpenAi           % Test,
-      Deps.reactorTest              % Test
+      Deps.reactorTest              % Test,
+      // The native usages Spring AI's Anthropic and Bedrock models report, for SpringAiUsageSpec (#2765)
+      Deps.anthropic         % Test,
+      Deps.awsBedrockRuntime % Test
     ) ++ Deps.springBoot4.map(_ % Test)
   )
 

@@ -122,10 +122,28 @@ A runnable example of both directions, with no API key, is
 | `ChatOptions` model | the llm4s client's configured model | Not sent: the response metadata names the model that answered |
 | `ChatOptions` stop sequences, top-k | — | Refused with a `VALIDATION` error: no llm4s client sends them |
 | `ToolCallingChatOptions` tool callbacks | `ToolFunction`s | Name, description and input schema (object, string with `enum`, number, integer, boolean, array) |
-| `ChatResponseMetadata` id, model, usage | `Completion` id, model, `TokenUsage` | Prompt, completion and total tokens; cache read and write tokens |
+| `ChatResponseMetadata` id, model, usage | `Completion` id, model, `TokenUsage` | Prompt, completion and total tokens; cache read and write tokens. See [Token usage](#token-usage) |
 | `ChatGenerationMetadata` finish reason | `Completion.finishReason` | `ToolCalls`, or an unmapped reason on a reply with calls, is `TOOL_CALLS`; `Length` is `LENGTH`; another raw reason passes through; none read is `STOP`. A Spring AI model's reason comes back as `Other(raw)` |
 | `EmbeddingRequest` texts | one llm4s embedding request | Texts in order; the request's options are not read |
 | Advisors, memory advisors, `VectorStore`, evaluators | — | Stay on the Spring AI side, over the adapted model |
+
+## Token usage
+
+llm4s's `TokenUsage.promptTokens` is the whole input, prompt-cache reads and writes included, with the cache counts
+also in `cachedTokens` and `cacheCreationTokens`, so `CostEstimator` prices each token once. Spring AI leaves the
+meaning of `Usage.getPromptTokens` to each model. OpenAI's (`prompt_tokens`) and Gemini's (`promptTokenCount`) already
+include the cache reads. Anthropic's is its `input_tokens`, and Bedrock Converse's its `inputTokens`: the input that was
+neither read from nor written to the cache. `SpringAiLlmClient` adds the cache reads and writes to the prompt (and the
+total, when it lacks them) when:
+
+- the usage's `getNativeUsage()` is the Anthropic SDK's or Bedrock Runtime's;
+- it has no native usage, as after Spring AI's own tool-calling loop, but reports cache writes, which only those two
+  models report;
+- or its cache reads exceed its prompt.
+
+Otherwise the prompt is taken as it is. A `ChatModel` of your own that reports cache counts outside its prompt should
+also report cache writes (even 0) so that they are added. In the other direction, `Llm4sChatModel` reports llm4s's
+whole input as Spring AI's prompt tokens, with the cache counts beside it.
 
 ## Where next
 
