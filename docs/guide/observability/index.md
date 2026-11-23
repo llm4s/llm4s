@@ -180,7 +180,7 @@ val embeddings = EmbeddingClient.from("openai", embeddingConfig).map(_.withTraci
 
 A `RAG` built `withTracing(tracing)` traces every model call it makes the same way, with the call's usage also
 recorded as a `TokenUsageRecorded` tagged with its operation: `rag.answer` (the answer), `rag.rerank` (the LLM
-reranker) and `rag.rewrite` (an `LLMQueryRewriter`). Each `query`, `queryWithAnswer`, their permission and streaming
+reranker), `rag.rewrite` (an `LLMQueryRewriter`) and `rag.condense` (a `QuestionCondenser.llm`). Each `query`, `queryWithAnswer`, their permission and streaming
 variants ends with one `RAGOperationCompleted` (`query` or `answer`) carrying the total duration, the stage durations
 (`rewrite`, `embedding`, `search`, `rerank`, `answer`), the embedding and answer tokens and the answer's estimated cost.
 The same numbers are on every `RAGAnswerResult` as `metrics` (`RAGQueryMetrics`), with or without a tracer, along with

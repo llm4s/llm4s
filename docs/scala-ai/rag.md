@@ -87,9 +87,29 @@ the model writes it; the call returns the whole answer when the stream ends.
 For a chat, pass the conversation so far as `history`: `rag.queryWithAnswer(question, history = Seq(UserMessage(...),
 AssistantMessage(...)))`, and likewise on the permission and streaming variants. The model sees it between the system
 prompt and the passages with the question; a `SystemMessage` in it is a `ValidationError`, since the pipeline sends its
-own. A follow-up such as "what about the second one?" retrieves poorly on its own, so
-`RAGConfig.withQuestionCondenser((question, history) => ...)` can return the standalone question to search with (for
-example by asking a model to rewrite it); the answer is still to the question asked. Instead
+own.
+
+A follow-up such as "what about the second one?" retrieves poorly on its own, so a question condenser can turn it into
+the standalone question to search with; the answer is still to the question asked, and the condenser runs only when
+the history is non-empty. The built-in one asks a model:
+
+```scala
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.rag.{ QuestionCondenser, RAGConfig }
+
+def chatConfig(client: LLMClient, smallClient: LLMClient): RAGConfig =
+  RAGConfig.default
+    .withLLM(client)
+    .withQuestionCondenser(QuestionCondenser.llm(smallClient, maxHistoryMessages = 6))
+```
+
+It sends the latest `maxHistoryMessages` user and assistant messages (10 by default; tool messages are left out) as a
+transcript with the follow-up, under `QuestionCondenser.DefaultSystemPrompt` (override it with `systemPrompt = ...`), at
+temperature 0 unless `options` says otherwise. If the call fails the query fails with a `ProcessingError`
+(`question-condense`); a blank reply searches with the original question. To search with the original question
+whenever the condenser fails, wrap it: `QuestionCondenser((q, h) => condenser.condense(q, h).orElse(Right(q)))`. With
+`withTracing` its calls are traced and tagged `rag.condense`. Any function `(question, history) => Result[String]` is a
+condenser too: `withQuestionCondenser((question, history) => ...)`. Instead
 of text, `rag.ingest(path)` reads a file or a whole directory, and `rag.query(question)` returns the passages without
 asking the model. Retrieval is hybrid: vector similarity and keyword (BM25) search, fused, with optional reranking by
 Cohere or by a model ([vector store guide](../guide/vector-store#hybrid-search)).

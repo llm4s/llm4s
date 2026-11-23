@@ -10,7 +10,7 @@ import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model.{ Conversation, MessageRole }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.rag.{ RAG, RAGAnswerResult, RAGConfig }
+import org.llm4s.rag.{ QuestionCondenser, RAG, RAGAnswerResult, RAGConfig }
 import org.llm4s.rag.RAG.RAGConfigOps
 import org.llm4s.samples.cookbook.BagOfWordsEmbeddings
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
@@ -157,6 +157,13 @@ class ScalaAiPagesSpec extends AnyFlatSpec with Matchers with EitherValues {
   } yield answer
   // end snippet
 
+  // snippet: rag/condenser
+  def chatConfig(client: LLMClient, smallClient: LLMClient): RAGConfig =
+    RAGConfig.default
+      .withLLM(client)
+      .withQuestionCondenser(QuestionCondenser.llm(smallClient, maxHistoryMessages = 6))
+  // end snippet
+
   "The RAG page's pipeline" should "ingest, retrieve the matching passage and answer from it" in {
     val client = ScriptedLLMClient.respondingTo {
       case c if c.messages.exists(_.content.contains("Opaque types hide")) => Reply.text("Their representation.")
@@ -179,6 +186,13 @@ class ScalaAiPagesSpec extends AnyFlatSpec with Matchers with EitherValues {
     answer.value.contexts.map(_.content) shouldBe Seq(
       "Opaque types hide their representation outside the defining scope."
     )
+  }
+
+  "The RAG page's question condenser" should "ask the small model for the standalone question" in {
+    val small     = ScriptedLLMClient.always(Reply.text("What do opaque types hide?"))
+    val condenser = chatConfig(ScriptedLLMClient.always(Reply.text("unused")), small).questionCondenser
+    condenser.map(_.condense("And them?", Seq(org.llm4s.llmconnect.model.UserMessage("Opaque types?")))) shouldBe
+      Some(Right("What do opaque types hide?"))
   }
 
   "The configuration snippets" should "compile against the public API" in {

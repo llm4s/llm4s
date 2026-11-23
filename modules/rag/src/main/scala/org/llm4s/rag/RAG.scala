@@ -101,6 +101,10 @@ final class RAG private (
   private lazy val queryTransformers: Seq[QueryTransformer] =
     tracer.fold(config.queryTransformers)(t => config.queryTransformers.map(_.withTracing(t)))
 
+  // The question condenser, traced (QuestionCondenser.llm's calls tagged `rag.condense`) when there is a tracer
+  private lazy val questionCondenser: Option[QuestionCondenser] =
+    tracer.fold(config.questionCondenser)(t => config.questionCondenser.map(_.withTracing(t)))
+
   // ========== Ingestion API ==========
 
   /**
@@ -1882,9 +1886,9 @@ final class RAG private (
         )
       )
     else
-      config.questionCondenser match {
-        case Some(condense) if history.nonEmpty => condense(question, history)
-        case _                                  => Right(question)
+      questionCondenser match {
+        case Some(condenser) if history.nonEmpty => condenser.condense(question, history)
+        case _                                   => Right(question)
       }
 
   /**
