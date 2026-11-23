@@ -1,44 +1,14 @@
 package org.llm4s.agent.guardrails.builtin
 
-import org.llm4s.agent.guardrails.LLMGuardrail
+import org.llm4s.agent.guardrails.{ LLMGuardrail, ScoringJudgeClient }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model._
-import org.llm4s.types.Result
+import org.llm4s.llmconnect.model.UserMessage
 import org.scalatest.Assertion
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.time.Instant
-
 class LLMGuardrailPresetsSpec extends AnyFlatSpec with Matchers {
-
-  final private class MockLLMClient(scoreToReturn: String) extends LLMClient {
-    var lastConversation: Option[Conversation] = None
-
-    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
-      lastConversation = Some(conversation)
-      Right(
-        Completion(
-          id = "test-id",
-          created = Instant.EPOCH,
-          content = scoreToReturn,
-          model = "test-model",
-          message = AssistantMessage(scoreToReturn),
-          usage = None
-        )
-      )
-    }
-
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): Result[Completion] = complete(conversation, options)
-
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
-  }
 
   final private case class Preset(
     label: String,
@@ -53,6 +23,9 @@ class LLMGuardrailPresetsSpec extends AnyFlatSpec with Matchers {
   private val referenceContext = "Earth's shadow falls on the Moon during a lunar eclipse."
   private val content          = "Sample response."
 
+  // the first of the five criteria every safety judge is given, whatever a preset adds
+  private val baseSafetyCriterion = "1. Harmful or dangerous content"
+
   private def checkAllowedTones(prompt: String, expectedTones: Set[String]): Assertion = {
     val toneList = prompt.linesIterator
       .find(_.contains("one of these tones: "))
@@ -62,14 +35,6 @@ class LLMGuardrailPresetsSpec extends AnyFlatSpec with Matchers {
   }
 
   private val presets = Seq(
-    Preset(
-      "LLMQualityGuardrail.apply",
-      client => LLMQualityGuardrail(client, originalQuery),
-      0.70,
-      "0.71",
-      "0.69",
-      prompt => prompt should include(originalQuery)
-    ),
     Preset(
       "LLMQualityGuardrail.highQuality",
       client => LLMQualityGuardrail.highQuality(client, originalQuery),
@@ -85,9 +50,27 @@ class LLMGuardrailPresetsSpec extends AnyFlatSpec with Matchers {
       "0.96",
       "0.94",
       prompt =>
-        prompt should (include("6. Age-inappropriate themes")
+        prompt should (include(baseSafetyCriterion)
+          .and(include("Additional criteria:"))
+          .and(include("6. Age-inappropriate themes"))
           .and(include("7. Scary or disturbing content"))
           .and(include("8. Complex adult topics")))
+    ),
+    Preset(
+      "LLMSafetyGuardrail.strict",
+      LLMSafetyGuardrail.strict,
+      0.95,
+      "0.96",
+      "0.94",
+      prompt => prompt should (include(baseSafetyCriterion).and(not(include("Additional criteria:"))))
+    ),
+    Preset(
+      "LLMToneGuardrail.professional",
+      client => LLMToneGuardrail.professional(client),
+      0.70,
+      "0.71",
+      "0.69",
+      prompt => checkAllowedTones(prompt, Set("professional", "formal", "business-appropriate"))
     ),
     Preset(
       "LLMToneGuardrail.friendly",
@@ -106,6 +89,14 @@ class LLMGuardrailPresetsSpec extends AnyFlatSpec with Matchers {
       prompt => checkAllowedTones(prompt, Set("professional", "friendly", "warm", "approachable"))
     ),
     Preset(
+      "LLMFactualityGuardrail.strict",
+      client => LLMFactualityGuardrail.strict(client, referenceContext),
+      0.90,
+      "0.91",
+      "0.89",
+      prompt => prompt should include(referenceContext)
+    ),
+    Preset(
       "LLMFactualityGuardrail.lenient",
       client => LLMFactualityGuardrail.lenient(client, referenceContext),
       0.50,
@@ -115,19 +106,28 @@ class LLMGuardrailPresetsSpec extends AnyFlatSpec with Matchers {
     )
   )
 
+  // The tone presets take a threshold; the table above builds them with the default, which is also the class's.
+  private val tonePresets: Seq[(String, (LLMClient, Double) => LLMGuardrail)] = Seq(
+    "LLMToneGuardrail.professional" -> ((client, threshold) => LLMToneGuardrail.professional(client, threshold)),
+    "LLMToneGuardrail.friendly"     -> ((client, threshold) => LLMToneGuardrail.friendly(client, threshold)),
+    "LLMToneGuardrail.professionalOrFriendly" -> ((client, threshold) =>
+      LLMToneGuardrail.professionalOrFriendly(client, threshold)
+    )
+  )
+
   presets.foreach { preset =>
     preset.label should "use the expected threshold" in {
-      val guardrail = preset.build(new MockLLMClient(preset.above))
+      val guardrail = preset.build(new ScoringJudgeClient(preset.above))
       guardrail.threshold shouldBe preset.threshold
     }
 
     it should "include the preset criteria in the evaluation prompt" in {
-      val guardrail = preset.build(new MockLLMClient(preset.above))
+      val guardrail = preset.build(new ScoringJudgeClient(preset.above))
       preset.checkPrompt(guardrail.evaluationPrompt)
     }
 
     it should s"pass a score of ${preset.above} and send the evaluation prompt to the judge" in {
-      val client    = new MockLLMClient(preset.above)
+      val client    = new ScoringJudgeClient(preset.above)
       val guardrail = preset.build(client)
       guardrail.validate(content) shouldBe Right(content)
 
@@ -138,8 +138,19 @@ class LLMGuardrailPresetsSpec extends AnyFlatSpec with Matchers {
     }
 
     it should s"reject a score of ${preset.below} as below the threshold" in {
-      val guardrail = preset.build(new MockLLMClient(preset.below))
+      val guardrail = preset.build(new ScoringJudgeClient(preset.below))
       guardrail.validate(content) match {
+        case Left(error: ValidationError) => error.field shouldBe "output"
+        case other                        => fail(s"Expected a below-threshold ValidationError, got $other")
+      }
+    }
+  }
+
+  tonePresets.foreach { case (label, build) =>
+    label should "use a threshold the caller gives in place of the default" in {
+      build(new ScoringJudgeClient("0.91"), 0.9).threshold shouldBe 0.9
+      build(new ScoringJudgeClient("0.91"), 0.9).validate(content) shouldBe Right(content)
+      build(new ScoringJudgeClient("0.89"), 0.9).validate(content) match {
         case Left(error: ValidationError) => error.field shouldBe "output"
         case other                        => fail(s"Expected a below-threshold ValidationError, got $other")
       }

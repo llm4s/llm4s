@@ -7,7 +7,6 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import java.time.Instant
 
 /**
  * Unit tests for LLM-as-Judge guardrails.
@@ -16,40 +15,6 @@ import java.time.Instant
  * without making actual API calls.
  */
 class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
-
-  /**
-   * Mock LLM client that returns a configurable score.
-   */
-  class MockLLMClient(scoreToReturn: String) extends LLMClient {
-    var lastConversation: Option[Conversation] = None
-
-    override def complete(
-      conversation: Conversation,
-      options: CompletionOptions
-    ): Result[Completion] = {
-      lastConversation = Some(conversation)
-      Right(
-        Completion(
-          id = "test-id",
-          created = Instant.now(),
-          content = scoreToReturn,
-          model = "test-model",
-          message = AssistantMessage(scoreToReturn),
-          usage = Some(TokenUsage(promptTokens = 10, completionTokens = 1, totalTokens = 11))
-        )
-      )
-    }
-
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): Result[Completion] =
-      complete(conversation, options)
-
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
-  }
 
   /**
    * Mock LLM client that returns an error.
@@ -77,7 +42,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "LLMGuardrail" should "pass when score is above threshold" in {
-    val mockClient = new MockLLMClient("0.85")
+    val mockClient = new ScoringJudgeClient("0.85")
     val guardrail = LLMGuardrail(
       client = mockClient,
       prompt = "Rate quality",
@@ -90,7 +55,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail when score is below threshold" in {
-    val mockClient = new MockLLMClient("0.4")
+    val mockClient = new ScoringJudgeClient("0.4")
     val guardrail = LLMGuardrail(
       client = mockClient,
       prompt = "Rate quality",
@@ -106,7 +71,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "pass when score equals threshold" in {
-    val mockClient = new MockLLMClient("0.70")
+    val mockClient = new ScoringJudgeClient("0.70")
     val guardrail = LLMGuardrail(
       client = mockClient,
       prompt = "Rate quality",
@@ -119,7 +84,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "parse scores with extra whitespace" in {
-    val mockClient = new MockLLMClient("  0.9  \n")
+    val mockClient = new ScoringJudgeClient("  0.9  \n")
     val guardrail = LLMGuardrail(
       client = mockClient,
       prompt = "Rate quality",
@@ -133,7 +98,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
 
   it should "refuse a score above 1.0 instead of clamping it into range" in {
     // A clamped 1.5 would read as 1.0 and pass any threshold; see LLMGuardrailScoreParsingSpec for the full rules.
-    val mockClient = new MockLLMClient("1.5")
+    val mockClient = new ScoringJudgeClient("1.5")
     val guardrail = LLMGuardrail(
       client = mockClient,
       prompt = "Rate quality",
@@ -148,7 +113,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
 
   it should "refuse a negative score instead of dropping its sign" in {
     // The sign used to be stripped, so "-0.5" read as 0.5 and passed a threshold of 0.4.
-    val mockClient = new MockLLMClient("-0.5")
+    val mockClient = new ScoringJudgeClient("-0.5")
     val guardrail = LLMGuardrail(
       client = mockClient,
       prompt = "Rate quality",
@@ -162,7 +127,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail gracefully when LLM returns unparseable response" in {
-    val mockClient = new MockLLMClient("I cannot provide a score for this.")
+    val mockClient = new ScoringJudgeClient("I cannot provide a score for this.")
     val guardrail = LLMGuardrail(
       client = mockClient,
       prompt = "Rate quality",
@@ -189,7 +154,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "include content and prompt in LLM request" in {
-    val mockClient = new MockLLMClient("0.9")
+    val mockClient = new ScoringJudgeClient("0.9")
     val guardrail = LLMGuardrail(
       client = mockClient,
       prompt = "Check for professionalism",
@@ -210,7 +175,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "LLMToneGuardrail" should "pass for matching tone" in {
-    val mockClient = new MockLLMClient("0.9")
+    val mockClient = new ScoringJudgeClient("0.9")
     val guardrail  = LLMToneGuardrail(mockClient, Set("professional", "formal"))
 
     val result = guardrail.validate("Professional content")
@@ -218,7 +183,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail for mismatching tone" in {
-    val mockClient = new MockLLMClient("0.3")
+    val mockClient = new ScoringJudgeClient("0.3")
     val guardrail  = LLMToneGuardrail(mockClient, Set("professional"))
 
     val result = guardrail.validate("Casual content")
@@ -226,7 +191,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "include allowed tones in evaluation prompt" in {
-    val mockClient = new MockLLMClient("0.9")
+    val mockClient = new ScoringJudgeClient("0.9")
     val guardrail  = LLMToneGuardrail(mockClient, Set("friendly", "warm"))
 
     guardrail.validate("Test")
@@ -237,7 +202,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   "LLMToneGuardrail.professional" should "create professional tone guardrail" in {
-    val mockClient = new MockLLMClient("0.9")
+    val mockClient = new ScoringJudgeClient("0.9")
     val guardrail  = LLMToneGuardrail.professional(mockClient)
 
     guardrail.validate("Test")
@@ -251,7 +216,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "LLMFactualityGuardrail" should "pass for factually accurate content" in {
-    val mockClient = new MockLLMClient("0.95")
+    val mockClient = new ScoringJudgeClient("0.95")
     val guardrail = LLMFactualityGuardrail(
       mockClient,
       "Paris is the capital of France.",
@@ -263,7 +228,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail for factually inaccurate content" in {
-    val mockClient = new MockLLMClient("0.2")
+    val mockClient = new ScoringJudgeClient("0.2")
     val guardrail = LLMFactualityGuardrail(
       mockClient,
       "Paris is the capital of France.",
@@ -275,7 +240,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "include reference context in evaluation prompt" in {
-    val mockClient       = new MockLLMClient("0.9")
+    val mockClient       = new ScoringJudgeClient("0.9")
     val referenceContext = "The sky is blue during clear days."
     val guardrail        = LLMFactualityGuardrail(mockClient, referenceContext)
 
@@ -286,7 +251,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   "LLMFactualityGuardrail.strict" should "use higher threshold" in {
-    val mockClient = new MockLLMClient("0.85")
+    val mockClient = new ScoringJudgeClient("0.85")
     val guardrail  = LLMFactualityGuardrail.strict(mockClient, "Reference")
 
     // 0.85 < 0.9 (strict threshold)
@@ -299,7 +264,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "LLMSafetyGuardrail" should "pass for safe content" in {
-    val mockClient = new MockLLMClient("0.95")
+    val mockClient = new ScoringJudgeClient("0.95")
     val guardrail  = LLMSafetyGuardrail(mockClient)
 
     val result = guardrail.validate("Safe and appropriate content")
@@ -307,7 +272,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail for unsafe content" in {
-    val mockClient = new MockLLMClient("0.2")
+    val mockClient = new ScoringJudgeClient("0.2")
     val guardrail  = LLMSafetyGuardrail(mockClient)
 
     val result = guardrail.validate("Potentially unsafe content")
@@ -315,7 +280,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "use higher default threshold than other guardrails" in {
-    val mockClient = new MockLLMClient("0.75")
+    val mockClient = new ScoringJudgeClient("0.75")
     val guardrail  = LLMSafetyGuardrail(mockClient) // Default threshold is 0.8
 
     val result = guardrail.validate("Content")
@@ -323,7 +288,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   "LLMSafetyGuardrail.strict" should "use even higher threshold" in {
-    val mockClient = new MockLLMClient("0.9")
+    val mockClient = new ScoringJudgeClient("0.9")
     val guardrail  = LLMSafetyGuardrail.strict(mockClient) // Threshold is 0.95
 
     val result = guardrail.validate("Content")
@@ -331,7 +296,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   "LLMSafetyGuardrail.withCustomCriteria" should "include custom criteria" in {
-    val mockClient = new MockLLMClient("0.9")
+    val mockClient = new ScoringJudgeClient("0.9")
     val guardrail = LLMSafetyGuardrail.withCustomCriteria(
       mockClient,
       "Must not discuss competitors"
@@ -348,7 +313,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "LLMQualityGuardrail" should "pass for high quality responses" in {
-    val mockClient = new MockLLMClient("0.9")
+    val mockClient = new ScoringJudgeClient("0.9")
     val guardrail  = LLMQualityGuardrail(mockClient, "What is Scala?")
 
     val result = guardrail.validate("Scala is a programming language...")
@@ -356,7 +321,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail for low quality responses" in {
-    val mockClient = new MockLLMClient("0.3")
+    val mockClient = new ScoringJudgeClient("0.3")
     val guardrail  = LLMQualityGuardrail(mockClient, "What is Scala?")
 
     val result = guardrail.validate("IDK")
@@ -364,7 +329,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "include original query in evaluation prompt" in {
-    val mockClient    = new MockLLMClient("0.9")
+    val mockClient    = new ScoringJudgeClient("0.9")
     val originalQuery = "Explain machine learning"
     val guardrail     = LLMQualityGuardrail(mockClient, originalQuery)
 
@@ -379,7 +344,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "LLM guardrails" should "compose with function-based guardrails" in {
-    val mockClient   = new MockLLMClient("0.9")
+    val mockClient   = new ScoringJudgeClient("0.9")
     val llmGuardrail = LLMSafetyGuardrail(mockClient)
     val lengthCheck  = new LengthCheck(1, 1000)
 
@@ -390,9 +355,9 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail composite if any guardrail fails" in {
-    val mockClient   = new MockLLMClient("0.2") // LLM says unsafe
+    val mockClient   = new ScoringJudgeClient("0.2") // LLM says unsafe
     val llmGuardrail = LLMSafetyGuardrail(mockClient)
-    val lengthCheck  = new LengthCheck(1, 1000) // Length is fine
+    val lengthCheck  = new LengthCheck(1, 1000)      // Length is fine
 
     val composite = CompositeGuardrail.all(Seq(lengthCheck, llmGuardrail))
 
@@ -401,8 +366,8 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "chain with andThen" in {
-    val mockClient1 = new MockLLMClient("0.9")
-    val mockClient2 = new MockLLMClient("0.95")
+    val mockClient1 = new ScoringJudgeClient("0.9")
+    val mockClient2 = new ScoringJudgeClient("0.95")
 
     val safetyGuardrail = LLMSafetyGuardrail(mockClient1)
     val toneGuardrail   = LLMToneGuardrail.professional(mockClient2)
