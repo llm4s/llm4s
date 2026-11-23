@@ -71,7 +71,7 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
       chunks: Seq[ChunkWithEmbedding],
       metadata: Map[String, String],
       readableBy: Set[PrincipalId]
-    ): Result[Int] = Right(0)
+    ): Result[Seq[String]] = Right(Seq.empty)
     def deleteDocument(collectionPath: CollectionPath, documentId: String): Result[Long] = Right(0L)
     def clearCollection(collectionPath: CollectionPath): Result[Long]                    = Right(0L)
     def initializeSchema(): Result[Unit]                                                 = Right(())

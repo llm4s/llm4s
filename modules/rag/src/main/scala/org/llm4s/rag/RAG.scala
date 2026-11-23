@@ -1,8 +1,8 @@
 package org.llm4s.rag
 
-import org.llm4s.chunking.{ ChunkerFactory, DocumentChunk, DocumentChunker }
+import org.llm4s.chunking.{ ChunkMetadata, ChunkerFactory, DocumentChunk, DocumentChunker }
 import org.llm4s.core.safety.Safety
-import org.llm4s.error.{ ConfigurationError, LLMError, ProcessingError }
+import org.llm4s.error.{ ConfigurationError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.security.Secret
 import org.llm4s.knowledgegraph.graphrag.{ GraphRAG, GraphRAGAnswer, GraphRAGMode }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
@@ -150,24 +150,39 @@ final class RAG private (
     content: String,
     documentId: String,
     metadata: Map[String, String] = Map.empty
-  ): Result[Int] = {
-    val chunks = chunker.chunk(content, config.chunkingConfig)
-    indexChunks(documentId, chunks, metadata)
-  }
+  ): Result[Int] =
+    indexChunks(documentId, chunk(content), metadata).map(_.size)
 
   /**
-   * Ingest pre-chunked content (for advanced use cases).
+   * Split text into chunks with this pipeline's chunker and chunking config: the chunks [[ingestText]] and
+   * [[ingestWithPermissions]] would index. Chunk once with this, keep the chunks, and hand them to [[ingestChunks]]
+   * or [[ingestChunksWithPermissions]] to know exactly what was indexed without chunking the text twice.
+   *
+   * @param content the text to split
+   * @return the chunks, indexed from 0
+   */
+  def chunk(content: String): Seq[DocumentChunk] =
+    chunker.chunk(content, config.chunkingConfig)
+
+  /**
+   * Ingest a document that is already chunked.
+   *
+   * Each chunk's [[org.llm4s.chunking.ChunkMetadata ChunkMetadata]] is stored in its record's metadata next to the
+   * document's `metadata` (see [[org.llm4s.chunking.ChunkMetadata.toRecordMetadata ChunkMetadata.toRecordMetadata]]),
+   * so a search result carries it. Ingesting an id that is already indexed replaces it, as [[ingestText]] does.
+   *
+   * @param documentId unique identifier for this document
+   * @param chunks     the document's chunks, whose indices must run `0, 1, 2, ...` in order
+   * @param metadata   metadata attached to every chunk of the document
+   * @return the chunks as indexed, with the ids their records are stored under, in chunk order; a
+   *         `ValidationError` if the chunk indices are not `0, 1, 2, ...`
    */
   def ingestChunks(
     documentId: String,
-    chunks: Seq[String],
+    chunks: Seq[DocumentChunk],
     metadata: Map[String, String] = Map.empty
-  ): Result[Int] = {
-    val docChunks = chunks.zipWithIndex.map { case (content, idx) =>
-      DocumentChunk(content, idx)
-    }
-    indexChunks(documentId, docChunks, metadata)
-  }
+  ): Result[Seq[IndexedChunk]] =
+    RAG.sequentialIndices(chunks).flatMap(_ => indexChunks(documentId, chunks, metadata))
 
   // ========== Byte-Based Ingestion API ==========
 
@@ -195,6 +210,31 @@ final class RAG private (
       extracted =>
         val enrichedMetadata = metadata ++ extracted.metadata + ("format" -> extracted.format.name)
         ingestText(extracted.text, documentId, enrichedMetadata)
+    }
+
+  /**
+   * Ingest a document from raw bytes into a collection with permission control: [[ingestBytes]]'s extraction, then
+   * [[ingestWithPermissions]].
+   *
+   * @param collectionPath target collection (must be a leaf collection)
+   * @param content        raw document bytes
+   * @param filename       filename for format detection (e.g., "report.pdf")
+   * @param documentId     unique document identifier
+   * @param metadata       additional document metadata
+   * @param readableBy     principal IDs that can read this document (empty = inherit from collection)
+   * @return number of chunks indexed
+   */
+  def ingestBytesWithPermissions(
+    collectionPath: CollectionPath,
+    content: Array[Byte],
+    filename: String,
+    documentId: String,
+    metadata: Map[String, String] = Map.empty,
+    readableBy: Set[PrincipalId] = Set.empty
+  ): Result[Int] =
+    permissionIndex.flatMap(_ => TikaDocumentExtractor.extract(content, filename)).flatMap { extracted =>
+      val enrichedMetadata = metadata ++ extracted.metadata + ("format" -> extracted.format.name)
+      ingestWithPermissions(collectionPath, documentId, extracted.text, enrichedMetadata, readableBy)
     }
 
   /**
@@ -873,7 +913,7 @@ final class RAG private (
     }
 
     val chunks = effectiveChunker.chunk(doc.content, effectiveConfig)
-    val result = indexChunks(doc.id, chunks, doc.metadata)
+    val result = indexChunks(doc.id, chunks, doc.metadata).map(_.size)
 
     // Register version if enabled - only once it is indexed: a document that failed keeps its previous
     // version, and registering the new one would make the next sync skip it as unchanged.
@@ -1260,7 +1300,8 @@ final class RAG private (
           ConfigurationError(
             s"$operation is not available on a RAG built with .withSearchIndex: documents it ingested would belong " +
               "to no collection, so queryWithPermissions could never return them. Ingest with " +
-              "ingestWithPermissions(collectionPath, documentId, content, ...) instead. deleteDocument still " +
+              "ingestWithPermissions(collectionPath, documentId, content, ...) or ingestChunksWithPermissions instead. " +
+              "deleteDocument still " +
               "deletes a document from every collection."
           )
         )
@@ -1356,34 +1397,78 @@ final class RAG private (
     metadata: Map[String, String] = Map.empty,
     readableBy: Set[PrincipalId] = Set.empty
   ): Result[Int] =
-    config.searchIndex match {
-      case None =>
-        Left(
-          ConfigurationError(
-            "SearchIndex required for permission-aware ingestion. Use .withSearchIndex(index) when building RAG."
-          )
-        )
-      case Some(index) =>
-        val docChunks = chunker.chunk(content, config.chunkingConfig)
-        for {
-          embeddings <- embedBatch(docChunks.map(_.content))
-          chunksWithEmbeddings = docChunks.zip(embeddings).map { case (chunk, embedding) =>
-            ChunkWithEmbedding(
-              content = chunk.content,
-              embedding = embedding,
-              chunkIndex = chunk.index,
-              metadata = metadata
-            )
-          }
-          count <- index.ingest(
-            collectionPath = collectionPath,
-            documentId = documentId,
-            chunks = chunksWithEmbeddings,
-            metadata = metadata,
-            readableBy = readableBy
-          )
-        } yield count
+    permissionIndex.flatMap { index =>
+      indexWithPermissions(index, collectionPath, documentId, chunk(content), metadata, readableBy).map(_.size)
     }
+
+  /**
+   * Ingest an already chunked document into a collection with permission control: [[ingestChunks]] for a `RAG` built
+   * with `.withSearchIndex`. Each chunk's [[org.llm4s.chunking.ChunkMetadata ChunkMetadata]] is stored in its record's
+   * metadata next to the document's `metadata`.
+   *
+   * @param collectionPath target collection (must be a leaf collection)
+   * @param documentId     unique document identifier
+   * @param chunks         the document's chunks, whose indices must run `0, 1, 2, ...` in order
+   * @param metadata       additional document metadata
+   * @param readableBy     principal IDs that can read this document (empty = inherit from collection)
+   * @return the chunks as indexed, with the ids the `SearchIndex` stored them under, in chunk order; a
+   *         `ValidationError` if the chunk indices are not `0, 1, 2, ...`
+   */
+  def ingestChunksWithPermissions(
+    collectionPath: CollectionPath,
+    documentId: String,
+    chunks: Seq[DocumentChunk],
+    metadata: Map[String, String] = Map.empty,
+    readableBy: Set[PrincipalId] = Set.empty
+  ): Result[Seq[IndexedChunk]] =
+    for {
+      index   <- permissionIndex
+      _       <- RAG.sequentialIndices(chunks)
+      indexed <- indexWithPermissions(index, collectionPath, documentId, chunks, metadata, readableBy)
+    } yield indexed
+
+  private def permissionIndex: Result[SearchIndex] =
+    config.searchIndex.toRight(
+      ConfigurationError(
+        "SearchIndex required for permission-aware ingestion. Use .withSearchIndex(index) when building RAG."
+      )
+    )
+
+  private def indexWithPermissions(
+    index: SearchIndex,
+    collectionPath: CollectionPath,
+    documentId: String,
+    chunks: Seq[DocumentChunk],
+    metadata: Map[String, String],
+    readableBy: Set[PrincipalId]
+  ): Result[Seq[IndexedChunk]] =
+    for {
+      embeddings <- if (chunks.isEmpty) Right(Seq.empty[Array[Float]]) else embedBatch(chunks.map(_.content))
+      chunksWithEmbeddings = chunks.zip(embeddings).map { case (chunk, embedding) =>
+        ChunkWithEmbedding(
+          content = chunk.content,
+          embedding = embedding,
+          chunkIndex = chunk.index,
+          metadata = ChunkMetadata.toRecordMetadata(chunk.metadata)
+        )
+      }
+      ids <- index.ingest(
+        collectionPath = collectionPath,
+        documentId = documentId,
+        chunks = chunksWithEmbeddings,
+        metadata = metadata,
+        readableBy = readableBy
+      )
+      _ <-
+        if (ids.size == chunks.size) Right(())
+        else
+          Left(
+            ProcessingError(
+              "rag-ingest-permissions",
+              s"SearchIndex.ingest returned ${ids.size} chunk ids for the ${chunks.size} chunks of $documentId"
+            )
+          )
+    } yield chunks.zip(ids).map { case (chunk, id) => IndexedChunk(id, chunk.index, chunk.content) }
 
   /**
    * Delete a document from a collection.
@@ -1497,7 +1582,7 @@ final class RAG private (
       case Right(document) =>
         val fullMetadata = metadata + ("source" -> file.getName) + ("path" -> file.getAbsolutePath)
         val chunks       = chunker.chunkWithSource(document.text, file.getName, config.chunkingConfig)
-        indexChunks(docId, chunks, fullMetadata)
+        indexChunks(docId, chunks, fullMetadata).map(_.size)
     }
   }
 
@@ -1505,7 +1590,7 @@ final class RAG private (
     docId: String,
     chunks: Seq[DocumentChunk],
     metadata: Map[String, String]
-  ): Result[Int] = {
+  ): Result[Seq[IndexedChunk]] = {
     // Replace, don't merge (#1318): the stores upsert by chunk id, so a document that now has fewer
     // chunks would otherwise keep its old tail and keep matching queries. Embed, read the previous
     // version, write the new chunks over it, then remove its tail. Nothing is deleted before the write,
@@ -1518,25 +1603,25 @@ final class RAG private (
       _          <- plainIngestAllowed("ingest")
       embeddings <- if (chunks.isEmpty) Right(Seq.empty[Array[Float]]) else embedBatch(chunks.map(_.content))
       previous   <- storedVersion(docId)
-      vectorRecords = chunks.zip(embeddings).map { case (chunk, embedding) =>
+      recordMetadata = chunks.map { chunk =>
+        metadata ++ ChunkMetadata.toRecordMetadata(chunk.metadata) + ("docId" -> docId) +
+          ("chunkIndex"                                                       -> chunk.index.toString)
+      }
+      vectorRecords = chunks.zip(embeddings).zip(recordMetadata).map { case ((chunk, embedding), meta) =>
         VectorRecord(
           id = chunkId(docId, chunk.index),
           embedding = embedding,
           content = Some(chunk.content),
-          metadata = metadata + ("docId" -> docId) + ("chunkIndex" -> chunk.index.toString)
+          metadata = meta
         )
       }
-      keywordDocs = chunks.map { chunk =>
-        KeywordDocument(
-          id = chunkId(docId, chunk.index),
-          content = chunk.content,
-          metadata = metadata + ("docId" -> docId) + ("chunkIndex" -> chunk.index.toString)
-        )
+      keywordDocs = chunks.zip(recordMetadata).map { case (chunk, meta) =>
+        KeywordDocument(id = chunkId(docId, chunk.index), content = chunk.content, metadata = meta)
       }
       _ <- replaceVersion(docId, previous, vectorRecords, keywordDocs, newIds)
     } yield {
       if (chunks.isEmpty) indexedChunkCounts.remove(docId) else indexedChunkCounts.update(docId, chunks.size)
-      chunks.size
+      chunks.zip(newIds).map { case (chunk, id) => IndexedChunk(id, chunk.index, chunk.content) }
     }
   }
 
@@ -1867,6 +1952,21 @@ object RAG {
       resolveRerankerConfig,
       hybridSearcher
     )
+
+  /** A `ValidationError` unless the chunks' indices are `0, 1, 2, ...` in order: their ids are built from them. */
+  private def sequentialIndices(chunks: Seq[DocumentChunk]): Result[Unit] =
+    chunks.iterator.zipWithIndex.collectFirst {
+      case (chunk, position) if chunk.index != position => (chunk, position)
+    } match {
+      case None => Right(())
+      case Some((chunk, position)) =>
+        Left(
+          ValidationError(
+            "chunks",
+            s"chunk indices must run 0, 1, 2, ... in order, but the chunk at position $position has index ${chunk.index}"
+          )
+        )
+    }
 
   private def build(
     config: RAGConfig,

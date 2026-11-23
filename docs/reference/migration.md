@@ -43,8 +43,31 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [a RAG with a `SearchIndex` ingests only with permissions](#a-rag-with-a-searchindex-ingests-only-with-permissions-2716),
 [the forwarding `apply` overloads are removed](#the-forwarding-apply-overloads-are-removed-1281),
 [`CompressionRule`'s `apply` field is `transform`](#compressionrules-apply-field-is-transform-1281),
-[`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714)
-and [RAG tracing covers every model call and each query's stages](#rag-tracing-covers-every-model-call-and-each-querys-stages-2734).
+[`DocumentRegistry` is source-scoped](#documentregistry-is-source-scoped-2714),
+[RAG tracing covers every model call and each query's stages](#rag-tracing-covers-every-model-call-and-each-querys-stages-2734)
+and [`RAG.ingestChunks` takes `DocumentChunk`s](#ragingestchunks-takes-documentchunks-2732).
+
+## `RAG.ingestChunks` takes `DocumentChunk`s (#2732)
+
+`RAG.ingestChunks` dropped each chunk's metadata and returned only a count, so an application that keeps its own
+view of what was indexed had to re-chunk the text and rebuild the ids. Now:
+
+- **`ingestChunks(documentId, chunks: Seq[DocumentChunk], metadata)`** replaces the `Seq[String]` form (the two
+  cannot both exist: they erase to the same JVM signature). Each chunk's `ChunkMetadata` is stored in its record's
+  metadata under `chunk.`-prefixed keys (`ChunkMetadata.toRecordMetadata`), so search results carry it and
+  `ChunkMetadata.fromRecordMetadata(result.metadata)` reads it back. Plain texts become chunks with
+  `DocumentChunk.fromTexts(texts)`. The indices must run `0, 1, 2, ...` in order, or the call is a
+  `ValidationError` and writes nothing.
+- **It returns `Result[Seq[IndexedChunk]]`**, each chunk's stored `id`, `index` and `content`, not `Result[Int]`:
+  `.map(_.size)` for the count.
+- **`SearchIndex.ingest` returns the stored ids**, `Result[Seq[String]]` one per chunk in order, not a count. A
+  `SearchIndex` of your own returns the ids its `query` reports for those chunks.
+- Every ingest path (`ingestText`, files, loaders, `ingestWithPermissions`) now stores the chunker's `ChunkMetadata`
+  in the record metadata too: a `chunk.`-prefixed key is new in a search result's `metadata`.
+
+New, with nothing to migrate: `RAG.chunk(text)` (the pipeline's own chunker and config),
+`ingestChunksWithPermissions(collectionPath, documentId, chunks, metadata, readableBy)` and
+`ingestBytesWithPermissions(collectionPath, content, filename, documentId, metadata, readableBy)`.
 
 ## RAG tracing covers every model call and each query's stages (#2734)
 
@@ -152,7 +175,8 @@ case now either works or fails:
   `RAG` with a `SearchIndex`, before reading the loader or clearing anything, and so does `build` when the config
   also names document loaders (`withDocuments`). They used to write chunks with no collection (`collection_id NULL`
   in a `PgSearchIndex`'s table), which `queryWithPermissions` never returns. Ingest with
-  `ingestWithPermissions(collectionPath, documentId, content, ...)`. Plain ingest is not routed to a default
+  `ingestWithPermissions(collectionPath, documentId, content, ...)`, `ingestChunksWithPermissions` or
+  `ingestBytesWithPermissions`. Plain ingest is not routed to a default
   collection: `PgSchemaManager`'s default collection is public, so a document ingested without naming its readers
   would become readable by every principal. Rows a plain ingest wrote before can be moved to that collection,
   if that is what you want, with `PgSchemaManager.migrateExistingVectors`, or deleted with `deleteDocument`.
