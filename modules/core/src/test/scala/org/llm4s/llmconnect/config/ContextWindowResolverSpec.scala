@@ -57,8 +57,6 @@ class ContextWindowResolverSpec extends AnyFlatSpec with Matchers:
       mode = ModelMode.Chat,
       maxInputTokens = Some(77000),
       maxOutputTokens = Some(3500),
-      inputCostPerToken = None,
-      outputCostPerToken = None,
       capabilities = ModelCapabilities(),
       pricing = ModelPricing(),
       deprecationDate = None
@@ -84,8 +82,6 @@ class ContextWindowResolverSpec extends AnyFlatSpec with Matchers:
       mode = ModelMode.Chat,
       maxInputTokens = None,
       maxOutputTokens = None,
-      inputCostPerToken = None,
-      outputCostPerToken = None,
       capabilities = ModelCapabilities(),
       pricing = ModelPricing(),
       deprecationDate = None
@@ -115,8 +111,6 @@ class ContextWindowResolverSpec extends AnyFlatSpec with Matchers:
       mode = ModelMode.Chat,
       maxInputTokens = maxInput,
       maxOutputTokens = Some(4096),
-      inputCostPerToken = None,
-      outputCostPerToken = None,
       capabilities = ModelCapabilities(),
       pricing = ModelPricing(),
       deprecationDate = None

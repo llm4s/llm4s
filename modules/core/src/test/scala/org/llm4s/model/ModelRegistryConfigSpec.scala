@@ -3,42 +3,33 @@ package org.llm4s.model
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-/** `ModelRegistryConfig` as a growth-prone type (#2346). */
+/** `ModelRegistryConfig` names exactly one source (#2823), and is a growth-prone type (#2346). */
 class ModelRegistryConfigSpec extends AnyFunSuite with Matchers {
 
-  test("ModelRegistryConfig.default loads the bundled resource and nothing else") {
+  test("ModelRegistryConfig.default loads the bundled resource") {
     ModelRegistryConfig.default shouldBe ModelRegistryConfig()
-    ModelRegistryConfig.default.resourcePath shouldBe Some(ModelRegistryConfig.DefaultResourcePath)
-    ModelRegistryConfig.default.filePath shouldBe None
-    ModelRegistryConfig.default.url shouldBe None
+    ModelRegistryConfig.default.source shouldBe ModelRegistrySource.Resource(ModelRegistryConfig.DefaultResourcePath)
   }
 
-  test("ModelRegistryConfig's setters each change one field") {
-    val adjusted = ModelRegistryConfig.default
-      .withResourcePath("/other.json")
-      .withFilePath("/tmp/models.json")
-      .withUrl("https://example.invalid/models.json")
-
-    adjusted shouldBe ModelRegistryConfig(
-      resourcePath = Some("/other.json"),
-      filePath = Some("/tmp/models.json"),
-      url = Some("https://example.invalid/models.json")
-    )
+  test("each setter replaces the source, so a config never names two") {
+    ModelRegistryConfig.default.withResourcePath("/other.json").source shouldBe
+      ModelRegistrySource.Resource("/other.json")
+    ModelRegistryConfig.default.withFilePath("/tmp/models.json").source shouldBe
+      ModelRegistrySource.File("/tmp/models.json")
+    ModelRegistryConfig.default.withUrl("https://example.invalid/models.json").source shouldBe
+      ModelRegistrySource.Url("https://example.invalid/models.json")
+    ModelRegistryConfig.default.withFilePath("/f.json").withUrl("https://u.invalid") shouldBe
+      ModelRegistryConfig(ModelRegistrySource.Url("https://u.invalid"))
+    ModelRegistryConfig.default.withSource(ModelRegistrySource.File("/f.json")) shouldBe
+      ModelRegistryConfig.default.withFilePath("/f.json")
   }
 
-  test("ModelRegistryConfig's Option setters set or clear a field") {
-    val all = ModelRegistryConfig(Some("/r.json"), Some("/f.json"), Some("https://u.invalid"))
-
-    all.withResourcePath(None).resourcePath shouldBe None
-    all.withFilePath(None).filePath shouldBe None
-    all.withUrl(None).url shouldBe None
-    ModelRegistryConfig(resourcePath = None).withResourcePath(Some("/r.json")).resourcePath shouldBe Some("/r.json")
-    ModelRegistryConfig.default.withFilePath(Some("/f.json")).filePath shouldBe Some("/f.json")
-    ModelRegistryConfig.default.withUrl(Some("https://u.invalid")).url shouldBe Some("https://u.invalid")
+  test("a blank source is refused when the registry is loaded") {
+    ModelRegistryService.fromConfig(ModelRegistryConfig.default.withFilePath("  ")).isLeft shouldBe true
   }
 
   test("ModelRegistryConfig keeps its constructor and copy private") {
-    assertTypeError("new ModelRegistryConfig(None, None, None)")
-    assertTypeError("ModelRegistryConfig.default.copy(url = None)")
+    assertTypeError("new ModelRegistryConfig(ModelRegistrySource.Url(\"u\"))")
+    assertTypeError("ModelRegistryConfig.default.copy(source = ModelRegistrySource.Url(\"u\"))")
   }
 }
