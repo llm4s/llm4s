@@ -52,22 +52,7 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
 [`ProviderRegistry` lookups accept aliases](#providerregistry-lookups-accept-aliases-2812),
 [`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
-[context trimming fails when nothing fits, and externalizes only into a store](#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817),
-and [a guardrail block's message names only the guardrail](#a-guardrail-blocks-message-names-only-the-guardrail-2793).
-
-## A guardrail block's message names only the guardrail (#2793)
-
-`GuardrailBlocked.message` was `Guardrail '<name>' blocked: <reason>` and is now `Guardrail '<name>' blocked`. A
-reason can quote the text the guardrail refused, and the message is what the durable `TaskFailed` and `RunFailed`
-events, a run queue entry's failure, logs and traces record.
-
-| Before | After |
-|---|---|
-| `error.message` of a `GuardrailBlocked`, for the reason | `error.reason` (`case blocked: GuardrailBlocked => blocked.reason`) |
-| the reason parsed out of a stored `RunFailed` or `TaskFailed` message | `AgentStatus.Blocked(guardrail, reason)` from the run; the event names the guardrail only |
-
-`AgentStatus.Blocked`, `RunOutcome.Blocked` and `TaskRefusal.Blocked` are unchanged and still carry the reason. Events
-already stored keep the message they were written with.
+and [context trimming fails when nothing fits, and externalizes only into a store](#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817).
 
 ## Context trimming fails when nothing fits, and externalizes only into a store (#2817)
 

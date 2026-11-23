@@ -794,34 +794,67 @@ tenant id is ever a label, and no metric carries message content. Every backend 
 
 ### Startup Validation
 
-Use `client.validate()` during application startup to fail fast on misconfiguration:
+`client.validate()` sends the provider one cheap request, with the client's credentials, and no completion: it uses
+no tokens. `Right(())` means the provider accepted that request. A client never returns it without having checked.
+
+| Provider | The request | A wrong key | A model that does not exist |
+|---|---|---|---|
+| `openai` | `GET /models/<model>` | `AuthenticationError` | `ServiceError` 404 |
+| `anthropic` | `GET /v1/models/<model>` | `AuthenticationError` | `ServiceError` 404 |
+| `gemini` | `GET /models/<model>` | `AuthenticationError` | `ServiceError` 404 |
+| `ollama` | `POST /api/show` | no key | `ServiceError` 404, with the `ollama pull` hint |
+| `openai-compatible`, `deepseek`, `mistral`, `xai`, `requesty` | `GET /models` | `AuthenticationError` | not checked |
+| `openrouter` | `GET /key` | `AuthenticationError` | not checked |
+| `azure`, `vertexai`, `bedrock`, `zai`, `cohere`, `watsonx`, `perplexity`, `jlama` | none | `Left(ValidationUnsupportedError)` | |
+
+A provider in the last row has no cheap authenticated request, so its client returns
+`Left(ValidationUnsupportedError)`: nothing was checked, and the client may well work. So does a client that does not
+implement the check, such as a test double. An endpoint that does not answer is a `NetworkError` or `TimeoutError`
+(the request waits ten seconds at most). Wrappers (`ReliableClient`, `CachingLLMClient`, a traced client) return what
+the client they wrap returns.
+
+Use it at startup to fail fast on misconfiguration, treating "cannot check" as its own case:
 
 ```scala
+import org.llm4s.error.ValidationUnsupportedError
+
 val clientResult = for {
   config   <- Llm4sConfig.defaultProvider()
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
   client   <- LLMConnect.getClient(config)
-  _        <- client.validate()
+  _ <- client.validate() match {
+    case Left(_: ValidationUnsupportedError) => Right(()) // this provider has no validation request
+    case checked                             => checked
+  }
 } yield client
 
 clientResult match {
   case Left(error) =>
-    logger.error(s"LLM client validation failed: $error")
+    logger.error(s"LLM client validation failed: ${error.formatted}")
     System.exit(1)
   case Right(client) =>
     logger.info("LLM client ready")
 }
 ```
 
+To check a provider in the last row, or that a model answers, send a small completion once at startup, or run
+[`llm4s-doctor` with `--live`](../../getting-started/installation#checking-your-setup-the-doctor), which does that
+and says what to change.
+
 ### Readiness Probes
 
-For Kubernetes deployments, include LLM connectivity in readiness checks:
+For Kubernetes deployments, include LLM connectivity in readiness checks. `validate()` is a network call, so cache
+its result for a few seconds rather than calling the provider on every probe:
 
 ```scala
 // Integrate with your framework's health check mechanism
 def isLLMReady(): Boolean =
-  client.validate().isRight
+  client.validate() match {
+    case Right(())                           => true
+    case Left(_: ValidationUnsupportedError) => true // nothing to check with: do not fail the pod for it
+    case Left(_)                             => false
+  }
 ```
 
 ### Liveness vs Readiness

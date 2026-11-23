@@ -70,7 +70,8 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
     (SimpleError("plain"), LlmErrorKind.OTHER, false),
     (SystemError("disk full"), LlmErrorKind.OTHER, true),
     (TokenizerError.notFound("cl100k"), LlmErrorKind.OTHER, false),
-    (UnknownError("what", new RuntimeException("x")), LlmErrorKind.OTHER, false)
+    (UnknownError("what", new RuntimeException("x")), LlmErrorKind.OTHER, false),
+    (ValidationUnsupportedError("BedrockClient"), LlmErrorKind.OTHER, false)
   )
 
   /** Provider error responses whose status gives them a kind other than their class's `SERVICE`. */
