@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.guardrails.{ GuardrailAction, InputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
@@ -50,7 +50,7 @@ import scala.util.matching.Regex
  * @param sensitivity Detection sensitivity level
  * @param onFail Action to take when injection is detected (default: Block)
  */
-@Stable
+@Experimental
 class PromptInjectionDetector(
   val patterns: Seq[InjectionPattern] = InjectionPattern.default,
   val sensitivity: InjectionSensitivity = InjectionSensitivity.High,
@@ -122,12 +122,13 @@ class PromptInjectionDetector(
  *
  * Higher sensitivity catches more attacks but may have more false positives.
  */
-@Stable
+@Experimental
 sealed trait InjectionSensitivity {
   def name: String
   def threshold: Int // Minimum severity to trigger (1-3)
 }
 
+@Experimental
 object InjectionSensitivity {
 
   /**
@@ -162,11 +163,12 @@ object InjectionSensitivity {
 /**
  * Categories of prompt injection attacks.
  */
-@Stable
+@Experimental
 sealed trait InjectionCategory {
   def name: String
 }
 
+@Experimental
 object InjectionCategory {
   case object InstructionOverride extends InjectionCategory { val name = "Instruction Override" }
   case object RoleManipulation    extends InjectionCategory { val name = "Role Manipulation"    }
@@ -186,7 +188,7 @@ object InjectionCategory {
  * @param category Type of injection attack
  * @param severity Severity level (1=low, 2=medium, 3=high)
  */
-@Stable
+@Experimental
 final case class InjectionPattern private (
   name: String,
   regex: Regex,
@@ -208,6 +210,7 @@ final private[builtin] case class InjectionMatch(
   severity: Int
 )
 
+@Experimental
 object InjectionPattern {
 
   def apply(name: String, regex: Regex, category: InjectionCategory, severity: Int): InjectionPattern =
@@ -422,6 +425,7 @@ object InjectionPattern {
   val jailbreak: Seq[InjectionPattern] = jailbreakPatterns ++ roleManipulationPatterns
 }
 
+@Experimental
 object PromptInjectionDetector {
 
   /**

@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.model.UsageSummary
@@ -14,7 +14,7 @@ import java.time.Instant
  * The three events that begin a run record the run's `tenantId` and `principal` (as supplied in its
  * [[RunConfig]]); the log reads events written before they existed as having neither.
  */
-@Stable
+@Experimental
 enum RunEvent:
   case RunStarted(tenantId: Option[String], principal: Option[String])
 
@@ -93,7 +93,7 @@ enum RunEvent:
   case Custom(name: String, version: Int, payload: ujson.Value)
 
 /** A durable event before its commit assigns it a sequence number. */
-@Stable
+@Experimental
 final case class EventDraft private (
   runId: String,
   checkpointId: Option[String],
@@ -112,6 +112,7 @@ final case class EventDraft private (
   def withTimestamp(value: Instant): EventDraft           = copy(timestamp = value)
   def withEvent(value: RunEvent): EventDraft              = copy(event = value)
 
+@Experimental
 object EventDraft:
   def apply(
     runId: String,
@@ -133,7 +134,7 @@ object EventDraft:
  * store issues each claim a token above every earlier one. A record written before tokens were
  * recorded reads as `FencingToken(0)`, which no store issues.
  */
-@Stable
+@Experimental
 final case class EventRecord private (
   threadId: String,
   seq: Long,
@@ -158,6 +159,7 @@ final case class EventRecord private (
   def withTimestamp(value: Instant): EventRecord           = copy(timestamp = value)
   def withEvent(value: RunEvent): EventRecord              = copy(event = value)
 
+@Experimental
 object EventRecord:
 
   def apply(
@@ -227,7 +229,7 @@ object EventRecord:
  * a snapshot taken when the node emitted it, and one value may be shared by every subscriber: a
  * listener must not mutate it, and copies it (`ujson.copy`) to change it.
  */
-@Stable
+@Experimental
 enum StreamEvent:
   /** A committed durable event, in ascending `seq` order. */
   case Durable(record: EventRecord)
@@ -275,7 +277,7 @@ enum StreamEvent:
   case Disconnected(lastSeq: Long, reason: DisconnectReason)
 
 /** Why a subscription ended with [[StreamEvent.Disconnected]]. */
-@Stable
+@Experimental
 enum DisconnectReason:
   /** A durable event did not fit in the subscriber's queue: the listener fell too far behind. */
   case Lagging
@@ -319,7 +321,7 @@ enum DisconnectReason:
  * latter it reads from the store as they land ([[WatchPolicy]]). Live progress events reach it only
  * from runs of its own runtime, because they are never stored.
  */
-@Stable
+@Experimental
 trait Subscription:
   /**
    * Stops the subscription's dispatcher. A listener call already running is interrupted and
@@ -331,6 +333,7 @@ trait Subscription:
    */
   def cancel(): Unit
 
+@Experimental
 object RunEvent:
   private val derivedCodec: ReadWriter[RunEvent] = ReadWriter.derived
 

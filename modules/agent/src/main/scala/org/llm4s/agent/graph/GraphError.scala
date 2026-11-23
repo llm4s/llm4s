@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
 
 import scala.concurrent.duration.FiniteDuration
@@ -10,9 +10,10 @@ import scala.concurrent.duration.FiniteDuration
  * [[org.llm4s.error.NonRecoverableError NonRecoverableError]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
  * continues that run - and [[GraphError.ThreadBusy]], which a retry may get past once the thread is free.
  */
-@Stable
+@Experimental
 sealed trait GraphError extends LLMError
 
+@Experimental
 object GraphError:
 
   /** The builder found one or more structural problems; every problem is listed. */

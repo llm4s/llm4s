@@ -16,6 +16,9 @@ start, follow, cancel or delete any thread, a run whose machine dies is picked u
 whole deployment.
 {: .fs-6 .fw-300 }
 
+{: .note }
+> **Experimental at 1.0.** The API on this page (shared checkpointers, run claims, the run queue and worker in `agent.service`) is `@Experimental`: usable, but outside the 1.x compatibility promise, so it can change in a minor release, with a migration note. The stable core of `llm4s-agent` - building an agent, running, continuing and recovering a thread, handoffs and guardrails - is listed in [API Stability](../../reference/api-stability#tiers-in-the-code).
+
 ## Table of contents
 {: .no_toc .text-delta }
 

@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.types.{ Result, TryOps }
 
@@ -40,7 +40,7 @@ import scala.util.Try
  * only for arrivals that parked continuations can make keeps the run suspended; a join waiting for
  * an arrival nothing can make fails the run with [[GraphError.UnsatisfiedJoin]].
  */
-@Stable
+@Experimental
 final class CompiledGraph[I, O] private[graph] (
   val id: String,
   val version: String,

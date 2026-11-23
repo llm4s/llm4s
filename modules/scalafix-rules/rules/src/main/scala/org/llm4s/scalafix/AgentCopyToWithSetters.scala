@@ -22,7 +22,7 @@ class AgentCopyToWithSetters extends CopyToSetters("AgentCopyToWithSetters") {
 
 object AgentCopyToWithSetters {
 
-  val guide: String = Migration.guide10("llm4s-agent-types-are-tiered-and-growth-safe-2778")
+  val guide: String = Migration.guide10("llm4s-agent-has-a-small-stable-core-2778-2785")
 
   /**
    * The types, as 0.6.0 named them. Every field of each type's 0.6.0 constructor has a `with` setter of the same name

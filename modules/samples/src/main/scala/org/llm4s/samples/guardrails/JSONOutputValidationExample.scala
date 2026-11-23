@@ -1,7 +1,6 @@
 package org.llm4s.samples.guardrails
 
 import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
@@ -31,7 +30,7 @@ object JSONOutputValidationExample extends App {
   ): org.llm4s.types.Result[AgentResult] =
     Agent
       .builder(id, client)
-      .withMiddleware(GuardrailMiddleware(Seq.empty, guardrails))
+      .withOutputGuardrails(guardrails*)
       .build()
       .flatMap(_.run(query))
 
@@ -44,7 +43,7 @@ object JSONOutputValidationExample extends App {
     client <- LLMConnect.getClient(providerCfg)
     // Define output guardrails
     outputGuardrails = Seq(
-      new JSONValidator()
+      JSONValidator()
     )
 
     // Request JSON output with validation

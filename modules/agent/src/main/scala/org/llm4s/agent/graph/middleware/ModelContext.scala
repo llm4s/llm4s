@@ -5,7 +5,7 @@ import org.llm4s.agent.events
 import org.llm4s.agent.events.AgentEvents
 import org.llm4s.agent.graph.{ RunContext, ThreadState }
 import org.llm4s.agent.graph.toolloop.ToolLoop
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.context.ConversationTokenCounter
 import org.llm4s.error.{ LLMError, NonRecoverableError }
 import org.llm4s.llmconnect.LLMClient
@@ -47,7 +47,7 @@ import scala.util.Try
  * it as any failed call (an LLM guardrail blocks). A completion that reports no usage is charged an
  * estimate (the request's messages in, the completion out), never zero, so the budget still advances.
  */
-@Stable
+@Experimental
 final class ModelContext private[agent] (val run: RunContext, val state: ThreadState, agent: AgentId):
 
   /**
@@ -150,7 +150,7 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
       )
     )
 
-@Stable
+@Experimental
 object ModelContext:
 
   private val logger = LoggerFactory.getLogger(getClass)

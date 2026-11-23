@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import upickle.default.ReadWriter
 
 /**
@@ -14,12 +14,12 @@ import upickle.default.ReadWriter
  * suspended - one interrupt per task, keyed by its task id - and the run pauses at the end of the
  * superstep, so breakpoints and typed interrupts are answered together, any non-empty subset at a time.
  */
-@Stable
+@Experimental
 enum BreakpointPhase derives ReadWriter:
   case Before
   case After
 
-@Stable
+@Experimental
 object Breakpoint:
 
   /**

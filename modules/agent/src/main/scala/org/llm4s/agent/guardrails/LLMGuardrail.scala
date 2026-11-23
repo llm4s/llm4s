@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -99,7 +99,7 @@ import org.llm4s.util.Redaction
  * }
  * }}}
  */
-@Stable
+@Experimental
 trait LLMGuardrail extends OutputGuardrail {
 
   /**
@@ -233,6 +233,7 @@ Score (0-1):"""
       )
 }
 
+@Experimental
 object LLMGuardrail {
 
   /**

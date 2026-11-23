@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.{ Experimental, Stable }
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
@@ -96,11 +96,11 @@ private[graph] object KeyDigest:
  * effect, without revealing it (the SHA-256 of its id): a `Transactional` target fences its keys per
  * scope, because a thread's claim tokens only grow ([[AppliedKeys]]).
  */
-@Stable
+@Experimental
 final case class EffectKey private (value: String, operation: String, scope: String):
   override def toString: String = s"EffectKey($operation, $value)"
 
-@Stable
+@Experimental
 object EffectKey:
 
   /** The key of `operation` on `discriminator`, by thread `threadId`, under `base`. */
@@ -188,7 +188,7 @@ trait AppliedKeys:
  * continuation, the task it stands in for - by its id and a digest of what scheduled it; they decide when a commit releases it ([[Commit.releasesEffect]]). A store persists
  * [[EffectRecord.toJson]] and reads it back with [[EffectRecord.fromJson]]; the body is the guard's.
  */
-@Stable
+@Experimental
 final class EffectRecord private[graph] (
   val key: EffectKey,
   val taskId: TaskId,
@@ -209,7 +209,7 @@ final class EffectRecord private[graph] (
 
   override def toString: String = s"EffectRecord(${ujson.write(EffectRecord.toJson(this))})"
 
-@Stable
+@Experimental
 object EffectRecord:
 
   /** The format this build writes; [[fromJson]] refuses a newer one. */

@@ -244,7 +244,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         new Setup(
           delegating("a task far too long"),
           answers(),
-          child = _.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 3)), Seq.empty))
+          child = _.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 3)), Seq.empty))
         ),
       {
         case ChildEnd.Ended(r, _) => r.status shouldBe a[AgentStatus.Blocked]

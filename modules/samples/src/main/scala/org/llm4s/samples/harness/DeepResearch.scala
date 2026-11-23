@@ -2,7 +2,7 @@ package org.llm4s.samples.harness
 
 import org.llm4s.agent.Agent
 import org.llm4s.agent.graph._
-import org.llm4s.agent.graph.middleware.{ GuardrailMiddleware, PermissionRule }
+import org.llm4s.agent.graph.middleware.PermissionRule
 import org.llm4s.agent.graph.tool._
 import org.llm4s.agent.guardrails.builtin.SecretLeakGuardrail
 import org.llm4s.agent.harness._
@@ -206,8 +206,9 @@ object DeepResearch {
         .builder(AgentName, client)
         .withHarness(profile)
         .withTools(tools)
-        // memory outside the guardrail, so a blocked answer is never recorded (build() checks it)
-        .withMiddleware(memory, new GuardrailMiddleware(Nil, Seq(SecretLeakGuardrail())))
+        // the builder's guardrails run innermost, so memory is outside them and never records a blocked answer
+        .withMiddleware(memory)
+        .withOutputGuardrails(SecretLeakGuardrail())
         .withOutput(briefSchema)
         .withStreaming()
         .withMaxSteps(20)

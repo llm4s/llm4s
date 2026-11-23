@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.tool
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.delegation.TimedOutChild
 import org.llm4s.agent.graph.{ EffectKey, IdempotencyKey, RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
 import org.llm4s.error.LLMError
@@ -34,7 +34,7 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
  * @param resourcesOf what a call touches, from its decoded arguments; see [[withResources]]
  * @param locksOf the locks a call holds, from its decoded arguments, when the tool declares any; see [[withLocks]]
  */
-@Stable
+@Experimental
 final case class AgentToolSpec[A] private (
   name: String,
   description: String,
@@ -152,6 +152,7 @@ final case class AgentToolSpec[A] private (
       )
     )
 
+@Experimental
 object AgentToolSpec:
   private val ValidName = "[a-zA-Z0-9_-]{1,64}".r
 
@@ -222,7 +223,7 @@ final private[agent] class CallTimeout:
   override def hashCode: Int               = 0
 
 /** The codecs of a tool's question and of the answer it takes. */
-@Stable
+@Experimental
 final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec: ReadWriter[Ans])
 
 /**
@@ -239,7 +240,7 @@ final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec:
  * `run.position.fencingToken` is the run's claim token, which grows with every claim on the thread,
  * so the system keeps the highest token it has seen and refuses a lower one.
  */
-@Stable
+@Experimental
 final case class ToolContext private (
   run: RunContext,
   toolCallId: ToolCallId,
@@ -272,6 +273,7 @@ final case class ToolContext private (
   def effectKey(operation: String, discriminator: String*): EffectKey =
     run.effectKeyUnder(phase.getOrElse(idempotencyKey), operation, discriminator)
 
+@Experimental
 object ToolContext:
   def apply(
     run: RunContext,
@@ -307,13 +309,13 @@ object ToolContext:
  * replay it, parts and all: its inline media is base64 in the record, and counts towards the guard's
  * `maxOutcomeBytes` at that encoded size.
  */
-@Stable
+@Experimental
 enum ToolContent derives ReadWriter:
   case Json(value: ujson.Value)
   case Parts(parts: Vector[ContentPart])
 
 /** What a tool call produced, as data. */
-@Stable
+@Experimental
 enum ToolOutcome:
 
   /** The call's result for the model, and an update to keys the tool declares in `writes`. */
@@ -335,7 +337,7 @@ enum ToolOutcome:
  * A tool the agent loop can call: typed arguments, validated against [[AgentToolSpec.argumentSchema]]
  * and decoded with its codec before `execute` runs. A tool writes only the state keys in `writes`.
  */
-@Stable
+@Experimental
 trait AgentTool[A]:
   def spec: AgentToolSpec[A]
 
@@ -353,6 +355,7 @@ trait AgentTool[A]:
   ): ToolOutcome =
     ToolOutcome.Error(s"tool '${spec.name}' does not take answers")
 
+@Experimental
 object AgentTool:
 
   /** A tool from a spec and a function; it never asks questions. */

@@ -51,13 +51,49 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
-and [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778).
+and [`llm4s-agent` has a small stable core](#llm4s-agent-has-a-small-stable-core-2778-2785).
 
-## `llm4s-agent` types are tiered and growth-safe (#2778)
+## `llm4s-agent` has a small stable core (#2778, #2785)
 
 Every public top-level type of `llm4s-agent` now carries `@Stable` or `@Experimental`
-([Tiers in the Code](api-stability#tiers-in-the-code)), and `sbt stabilityTierCheck` covers the module. A `@Stable`
-case class that may gain a field has a private constructor and `copy`, as core's do. There is no shim.
+([Tiers in the Code](api-stability#tiers-in-the-code)), and `sbt stabilityTierCheck` covers the module. Only a small
+core is `@Stable`: `Agent`, `AgentBuilder`, `AgentResult`, `AgentStatus`, `AgentRun`, `Handoff`, `AgentId`; in
+`agent.graph`, `ThreadId`, `RunId`, `InterruptId`, `NodeId`, `TenantId`, `Principal`, `RunConfig`, `RunBudgets`,
+`RetentionPolicy`, `RunStatus`; `Guardrail`, `InputGuardrail`, `OutputGuardrail`, and `LengthCheck`,
+`ProfanityFilter`, `JSONValidator`, `RegexValidator`. Everything else - the graph runtime, checkpointers, events and
+streaming, middleware, tools and the tool loop, human review, delegation, the harness, `agent.service`, encryption,
+metrics, the other guardrails and `org.llm4s.assistant` - is `@Experimental`, and so are the members of the Stable
+types that name it (`withMiddleware`, `withRuntime`, `withStreaming`, `stream`, `resume`, `AgentStatus.Suspended`
+and the others listed in [Tiers in the Code](api-stability#tiers-in-the-code)). Nothing changes for code that uses
+them; they may change in a 1.x minor release. Case classes that may gain a field have a private constructor and
+`copy`, as core's do. There is no shim.
+
+**Guardrails attach through the builder.** `withInputGuardrails` and `withOutputGuardrails` are the Stable way;
+`withMiddleware(new GuardrailMiddleware(...))` still works and is the Experimental form for choosing the position in
+the stack ([Guardrails](../guide/agents/guardrails)). The builder's guardrails run innermost, closest to the model.
+
+```scala
+// before
+Agent.builder("assistant", client)
+  .withMiddleware(new GuardrailMiddleware(input = Seq(LengthCheck(1, 10000)), output = Seq(JSONValidator())))
+// after
+Agent.builder("assistant", client)
+  .withInputGuardrails(LengthCheck(1, 10000))
+  .withOutputGuardrails(JSONValidator())
+```
+
+**The four validators are built through their companions.** `LengthCheck`, `ProfanityFilter`, `JSONValidator` and
+`RegexValidator` are final with private constructors:
+
+| Was | Now |
+|---|---|
+| `new LengthCheck(min, max)` | `LengthCheck(min, max)` (or `LengthCheck.maxOnly`, `minOnly`) |
+| `new ProfanityFilter()`, `new ProfanityFilter(customBadWords = ws)`, `..., caseSensitive = true)` | `ProfanityFilter()`, `ProfanityFilter.withCustomWords(ws)`, `ProfanityFilter.caseSensitive(ws)` |
+| `new JSONValidator()`, `new JSONValidator(Some(schema))` | `JSONValidator()`, `JSONValidator.withSchema(schema)` |
+| `new RegexValidator(regex)`, `new RegexValidator(regex, Some(message))` | `RegexValidator(regex)`, `RegexValidator(regex, message)` |
+
+**`ThreadId.child` is internal.** It named `IdempotencyKey`, an Experimental type; a child thread's id is the one
+`Agent.children` and the delegation events report.
 
 **Growth-safe types.** `X(...)` still builds each one; `new X(...)` and `.copy(...)` no longer compile.
 
@@ -94,16 +130,9 @@ records.map(_.event).collect { case f: RunEvent.RunFailed => f }
 | `guardrails.rag.GroundingResult`, `ContextRelevanceResult`, `SourceAttributionResult`, `TopicBoundaryResult`, `guardrails.builtin.InjectionMatch` | internal: each guardrail's parsed verdict |
 | `org.llm4s.assistant.Command` | internal to `AssistantAgent` |
 
-**Tiers that moved.** Now `@Stable`, because a Stable signature names them: `ModelContext`, `ModelResponse`,
-`BoundaryResult`, `PromptSection`, `Placement` (the `AgentMiddleware` hooks); `ToolResource`, `Operation`, `LockKey`,
-`OutputFormat` and core's `ToolHints` (the tool contract); `EffectKey`, `EffectRecord`, `RunOrigin`, `RunOutcome`,
-`ChildThread`, `ThreadStatus`, `ThreadMetadata`, `ThreadCursor`, `ThreadQuery`, `ThreadSummary`, `ThreadPage`,
-`SweepPolicy`, `SweepGuard`, `SweepPage` (the `Checkpointer` contract); `ChildRef`, `ChildInterrupt`,
-`DelegatedRequest` (`AgentStatus.Suspended.delegated`, `StreamEvent.Nested`). `@Experimental` members of Stable
-types: `AgentBuilder.withHarness`, `withSubagents`, `withDelegation`, `Agent.delegation`, and
-`InMemoryCheckpointer.runQueue`. The RAG
-guardrails (`org.llm4s.agent.guardrails.rag`) are `@Experimental`: the agent runtime does not yet hand them a
-`RAGContext`.
+**Tiers that moved.** Core's `ToolHints` is now `@Stable` (the tool contract). `Agent.loop` is now an `@Experimental`
+`def` rather than a constructor `val`, so `agent.loop.graph` reads as before. The RAG guardrails
+(`org.llm4s.agent.guardrails.rag`) are `@Experimental`: the agent runtime does not yet hand them a `RAGContext`.
 
 ## Context pruning enforces both limits and `minRecentTurns` (#2728, #2729)
 

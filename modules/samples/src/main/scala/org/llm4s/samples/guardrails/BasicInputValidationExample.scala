@@ -1,7 +1,6 @@
 package org.llm4s.samples.guardrails
 
 import org.llm4s.agent.{ Agent, AgentStatus }
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
@@ -31,14 +30,14 @@ object BasicInputValidationExample extends App {
     client <- LLMConnect.getClient(providerCfg)
     // Define input guardrails
     inputGuardrails = Seq(
-      new LengthCheck(min = 1, max = 10000),
-      new ProfanityFilter()
+      LengthCheck(min = 1, max = 10000),
+      ProfanityFilter()
     )
 
     // Run agent with input validation
     agent <- Agent
       .builder("basic-input-validation", client)
-      .withMiddleware(GuardrailMiddleware(inputGuardrails, Seq.empty))
+      .withInputGuardrails(inputGuardrails*)
       .build()
     state <- agent.run("What is Scala and why is it useful for functional programming?")
   } yield state

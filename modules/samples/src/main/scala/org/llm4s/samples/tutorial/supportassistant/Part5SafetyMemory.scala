@@ -19,17 +19,14 @@ object Part5SafetyMemory {
   // format: off
   // snippet: guardrails
   import org.llm4s.agent.Agent
-  import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+  import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
   import org.llm4s.agent.guardrails.builtin.{ LengthCheck, PIIMasker, PromptInjectionDetector }
   import org.llm4s.llmconnect.LLMClient
   import org.llm4s.toolapi.ToolRegistry
   import org.llm4s.types.Result
 
-  val guardrails: GuardrailMiddleware =
-    new GuardrailMiddleware(
-      input = Seq(LengthCheck(1, 2000), PromptInjectionDetector(), PIIMasker()),
-      output = Seq(PIIMasker())
-    )
+  val inputGuardrails: Seq[InputGuardrail]   = Seq(LengthCheck(1, 2000), PromptInjectionDetector(), PIIMasker())
+  val outputGuardrails: Seq[OutputGuardrail] = Seq(PIIMasker())
 
   def safeAgent(client: LLMClient): Result[Agent] =
     for {
@@ -39,7 +36,8 @@ object Part5SafetyMemory {
         .builder("support", client)
         .withSystemPrompt("You are the support assistant of Acme Shop. Use the tools; never guess an order's status.")
         .withTools(new ToolRegistry(Seq(order, policy)))
-        .withMiddleware(guardrails)
+        .withInputGuardrails(inputGuardrails*)
+        .withOutputGuardrails(outputGuardrails*)
         .build()
     } yield agent
   // end snippet

@@ -1,6 +1,6 @@
 package org.llm4s.agent
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.agent.delegation.{ DelegatedQuestion, DelegatedRequest }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
@@ -107,6 +107,7 @@ final class AgentRun private[agent] (
    * With `nested`, it also receives every event of each child the turn delegates to after this call, as
    * `StreamEvent.Nested` (design 4.47; see [[Agent.stream]]).
    */
+  @Experimental
   def subscribe(capacity: Int = Agent.StreamCapacity, nested: Boolean = false)(
     listener: StreamEvent => Unit
   ): Result[Subscription] =

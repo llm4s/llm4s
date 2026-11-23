@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
@@ -27,12 +27,13 @@ import scala.concurrent.duration.FiniteDuration
  * @param ttl how long an entry is served after it was stored; `None` means until evicted
  * @param maxEntries the most results kept for the node
  */
-@Stable
+@Experimental
 final case class CachePolicy private (ttl: Option[FiniteDuration], maxEntries: Int):
   def withTtl(t: FiniteDuration): CachePolicy         = CachePolicy(Some(t), maxEntries)
   def withTtl(t: Option[FiniteDuration]): CachePolicy = CachePolicy(t, maxEntries)
   def withMaxEntries(n: Int): CachePolicy             = CachePolicy(ttl, n)
 
+@Experimental
 object CachePolicy:
   private def problems(ttl: Option[FiniteDuration], maxEntries: Int): List[String] =
     List(

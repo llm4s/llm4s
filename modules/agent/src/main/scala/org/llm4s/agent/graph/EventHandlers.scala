@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.delegation.ChildRef
 
 /**
@@ -30,7 +30,7 @@ import org.llm4s.agent.delegation.ChildRef
  * A delegated child's events, which a subscription made with `nested = true` receives as [[StreamEvent.Nested]]
  * (design 4.47), are matched with [[onChild]]: `on` never takes one, nor `onChild` a parent's own event.
  */
-@Stable
+@Experimental
 final class EventHandlers[+R] private (
   handlers: Map[(String, Int), ujson.Value => Option[R]],
   fallback: Option[StreamEvent => R],
@@ -105,6 +105,7 @@ final class EventHandlers[+R] private (
     (handlers.keys.toVector.sorted.map((n, v) => s"$n v$v") ++
       children.keys.toVector.sorted.map((n, v) => s"child $n v$v")).mkString("EventHandlers(", ", ", ")")
 
+@Experimental
 object EventHandlers:
 
   /** Handlers with `handler` for events of `eventType`; add more with [[EventHandlers.on]]. */

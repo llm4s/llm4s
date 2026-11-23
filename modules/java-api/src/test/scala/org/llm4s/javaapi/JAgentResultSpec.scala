@@ -315,7 +315,7 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "read a turn a guardrail blocked" in {
-    val agent = jAgentOf(answering("never"))(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 3)), Nil)))
+    val agent = jAgentOf(answering("never"))(_.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 3)), Nil)))
     val r     = agent.run("far too long a query").get()
     r.status.kind shouldBe AgentStatusKind.BLOCKED
     r.status.guardrail.isPresent shouldBe true
@@ -351,7 +351,7 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   it should "read a blocked turn's guardrail and reason, and a step limit, through the same switch" in {
     val blocked =
-      jAgentOf(answering("x"))(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 3)), Nil)))
+      jAgentOf(answering("x"))(_.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 3)), Nil)))
         .run("toolong")
     JavaInteropCheck.reading(blocked.get()).asScala.head should startWith("blocked:")
     val looping = new Scripted(_ => Right(toolCall), () => Right(toolCall))

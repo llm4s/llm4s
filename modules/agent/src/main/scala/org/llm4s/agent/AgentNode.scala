@@ -1,6 +1,6 @@
 package org.llm4s.agent
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 
 /**
  * A node of an agent's loop that a static breakpoint can hold: see [[AgentBuilder.withInterruptBefore]]
@@ -13,7 +13,7 @@ import org.llm4s.annotation.Stable
  * at `<id>/asked/<middleware>/afterAgent`. A breakpoint after a node holds these too, so nothing the step
  * does escapes it; a breakpoint before one does not, since the reviewer has just seen the step.
  */
-@Stable
+@Experimental
 enum AgentNode:
   /**
    * Each model call (`<id>/model`). Held before, the model is not called yet; held after, the model's

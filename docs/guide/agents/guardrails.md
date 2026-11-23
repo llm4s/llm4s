@@ -31,24 +31,48 @@ Guardrails are validation functions that run before (input) and after (output) a
 - **Compliance** - Meet business requirements
 - **Security** - Detect prompt injection and PII
 
-Guardrails belong to the agent, not to a run: give them to the builder in a `GuardrailMiddleware`. The examples on
-this page assume an `LLMClient` named `client`, a `ToolRegistry` named `tools`, and the user's text as `userInput` or
-`query`; the shorter ones also assume the imports of the examples before them.
+Guardrails belong to the agent, not to a run: give them to the builder with `withInputGuardrails` and
+`withOutputGuardrails`. The examples on this page assume an `LLMClient` named `client`, a `ToolRegistry` named
+`tools`, and the user's text as `userInput` or `query`; the shorter ones also assume the imports of the examples
+before them.
+
+```scala
+import org.llm4s.agent.Agent
+
+val agent = Agent.builder("assistant", client)
+  .withTools(tools)
+  .withInputGuardrails(...)    // Validate each query before the LLM call
+  .withOutputGuardrails(...)   // Validate each final answer
+  .build()
+```
+
+Each call appends to the list set before. The builder runs both lists as one middleware placed closest to the model,
+after any you add with `withMiddleware`: its input checks run after their `beforeAgent` hooks and its output checks
+before their `afterAgent` hooks, so a middleware that must never see a blocked answer, such as semantic memory, works
+with them as it is.
+
+### `GuardrailMiddleware`: choosing the position
+
+`withInputGuardrails` and `withOutputGuardrails` are `@Stable`. Underneath they install a `GuardrailMiddleware`
+(`org.llm4s.agent.graph.middleware`), which you can also add yourself with `withMiddleware` when the guardrails must
+sit at another point in the middleware stack - outside a middleware that should only see checked input, say, or
+ordered against another one with `runsBefore` / `runsAfter`. Middleware is `@Experimental` at 1.0 (see
+[API Stability](/reference/api-stability)), so this form can change in a minor release.
 
 ```scala
 import org.llm4s.agent.Agent
 import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+import org.llm4s.agent.guardrails.builtin.SecretLeakGuardrail
 
+// a middleware given before it (memory, say) runs outside it, so it sees only answers the guardrail let through
 val agent = Agent.builder("assistant", client)
-  .withTools(tools)
-  .withMiddleware(
-    GuardrailMiddleware(
-      input = Seq(...),   // Validate each query before the LLM call
-      output = Seq(...)   // Validate each final answer
-    )
-  )
+  .withMiddleware(GuardrailMiddleware(input = Nil, output = Seq(SecretLeakGuardrail())))
   .build()
 ```
+
+Both forms can be used together and both run, yours outside the builder's: your input guardrails first, your output
+guardrails last. A `GuardrailMiddleware` you add keeps its own id (`guardrails` by default); the builder's is
+`agent-guardrails`.
 
 A guardrail that refuses does not make `run` return a `Left`: the turn ends with
 `AgentStatus.Blocked(guardrail, reason)` - the first failing guardrail's name, and every failure's
@@ -93,18 +117,19 @@ These guardrails run locally without LLM calls:
 
 | Guardrail | Purpose | Use as | Example |
 |-----------|---------|--------|---------|
-| `LengthCheck` | Enforce min/max length | input or output | `new LengthCheck(1, 10000)` |
-| `ProfanityFilter` | Block profane content | input | `new ProfanityFilter()` |
-| `JSONValidator` | Ensure valid JSON output | output | `new JSONValidator()` |
+| `LengthCheck` | Enforce min/max length | input or output | `LengthCheck(1, 10000)` |
+| `ProfanityFilter` | Block profane content | input | `ProfanityFilter()` |
+| `JSONValidator` | Ensure valid JSON output | output | `JSONValidator()` |
 | `RegexValidator` | Pattern matching | input or output | `RegexValidator("\\d{3}-\\d{4}")` |
 | `ToneValidator` | Simple tone detection | output | `new ToneValidator(Set(Tone.Professional))` |
 | `PIIDetector` | Detect PII (email, SSN, etc.) | input | `new PIIDetector()` |
 | `PIIMasker` | Mask detected PII | input or output | `new PIIMasker()` |
 | `PromptInjectionDetector` | Detect injection attempts | input | `new PromptInjectionDetector()` |
 
-`GuardrailMiddleware` takes `Seq[InputGuardrail]` for `input` and `Seq[OutputGuardrail]` for `output`, so a guardrail
-in the wrong list does not compile. `RegexValidator` takes its pattern as a `String` through its companion
-(`RegexValidator("...")`), or as a `Regex` through its constructor (`new RegexValidator("...".r)`).
+`withInputGuardrails` takes `InputGuardrail`s and `withOutputGuardrails` `OutputGuardrail`s, so a guardrail in the
+wrong list does not compile. `LengthCheck`, `ProfanityFilter`, `JSONValidator` and `RegexValidator` are built
+through their companions; `RegexValidator` takes its pattern as a `String` (`RegexValidator("...")`, pre-screened
+by the regex safety manager) or as a `Regex` (`RegexValidator("...".r)`, used as given).
 
 ### LLM-as-Judge Guardrails
 
@@ -141,21 +166,15 @@ The first three need the retrieved chunks, which an agent's guardrail middleware
 
 ```scala
 import org.llm4s.agent.{ Agent, AgentStatus }
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 
 val result = for {
   agent <- Agent.builder("assistant", client)
     .withTools(tools)
-    .withMiddleware(
-      GuardrailMiddleware(
-        input = Seq(
-          new LengthCheck(min = 1, max = 10000),
-          new ProfanityFilter(),
-          new PromptInjectionDetector()
-        ),
-        output = Nil
-      )
+    .withInputGuardrails(
+      LengthCheck(min = 1, max = 10000),
+      ProfanityFilter(),
+      new PromptInjectionDetector()
     )
     .build()
   result <- agent.run(userInput)
@@ -178,7 +197,7 @@ result match {
 ```scala
 val agent = Agent.builder("assistant", client)
   .withTools(tools)
-  .withMiddleware(GuardrailMiddleware(input = Nil, output = Seq(new JSONValidator(), new PIIMasker())))
+  .withOutputGuardrails(JSONValidator(), new PIIMasker())
   .build()
 
 val result = agent.flatMap(_.run("Generate a JSON response with user data"))
@@ -189,17 +208,13 @@ val result = agent.flatMap(_.run("Generate a JSON response with user data"))
 ```scala
 val agent = Agent.builder("assistant", client)
   .withTools(tools)
-  .withMiddleware(
-    GuardrailMiddleware(
-      input = Seq(
-        new LengthCheck(1, 5000),
-        new ProfanityFilter()
-      ),
-      output = Seq(
-        new LLMSafetyGuardrail(client),
-        new ToneValidator(Set(Tone.Professional))
-      )
-    )
+  .withInputGuardrails(
+    LengthCheck(1, 5000),
+    ProfanityFilter()
+  )
+  .withOutputGuardrails(
+    new LLMSafetyGuardrail(client),
+    new ToneValidator(Set(Tone.Professional))
   )
   .build()
 
@@ -218,7 +233,7 @@ import org.llm4s.agent.guardrails.builtin.LLMSafetyGuardrail
 val safetyGuardrail = new LLMSafetyGuardrail(client)
 
 val agent = Agent.builder("storyteller", client)
-  .withMiddleware(GuardrailMiddleware(input = Nil, output = Seq(safetyGuardrail)))
+  .withOutputGuardrails(safetyGuardrail)
   .build()
 
 agent.flatMap(_.run("Write a story"))
@@ -237,7 +252,7 @@ val factualityGuardrail = LLMFactualityGuardrail.strict(
 )
 
 val agent = Agent.builder("geography", client)
-  .withMiddleware(GuardrailMiddleware(input = Nil, output = Seq(factualityGuardrail)))
+  .withOutputGuardrails(factualityGuardrail)
   .build()
 
 agent.flatMap(_.run("What is the capital of France?"))
@@ -254,7 +269,7 @@ val toneGuardrail = new LLMToneGuardrail(
 )
 
 val agent = Agent.builder("support", client)
-  .withMiddleware(GuardrailMiddleware(input = Nil, output = Seq(toneGuardrail)))
+  .withOutputGuardrails(toneGuardrail)
   .build()
 
 agent.flatMap(_.run("Help with customer complaint"))
@@ -272,8 +287,8 @@ Combine multiple guardrails with different strategies:
 import org.llm4s.agent.guardrails.CompositeGuardrail
 
 val strictValidation = CompositeGuardrail.all(Seq(
-  new LengthCheck(1, 5000),
-  new ProfanityFilter(),
+  LengthCheck(1, 5000),
+  ProfanityFilter(),
   new PIIDetector()
 ))
 
@@ -295,8 +310,8 @@ val flexibleValidation = CompositeGuardrail.any(Seq(
 
 ```scala
 val sequentialValidation = CompositeGuardrail.sequential(Seq(
-  new LengthCheck(1, 10000),  // Check length first
-  new ProfanityFilter(),      // Then profanity
+  LengthCheck(1, 10000),  // Check length first
+  ProfanityFilter(),      // Then profanity
   new PIIDetector()           // Then PII
 ))
 
@@ -305,17 +320,16 @@ val sequentialValidation = CompositeGuardrail.sequential(Seq(
 
 ### Using a composite in an agent
 
-A composite is a `Guardrail[String]`, while `GuardrailMiddleware` takes `InputGuardrail`s and
-`OutputGuardrail`s, so adapt it with `InputGuardrail.from` or `OutputGuardrail.from`. A cast does not work: it
+A composite is a `Guardrail[String]`, while `withInputGuardrails` and `withOutputGuardrails` take `InputGuardrail`s
+and `OutputGuardrail`s, so adapt it with `InputGuardrail.from` or `OutputGuardrail.from`. A cast does not work: it
 throws a `ClassCastException`.
 
 ```scala
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.InputGuardrail
 
 val agent = Agent
   .builder("assistant", client)
-  .withMiddleware(GuardrailMiddleware(Seq(InputGuardrail.from(sequentialValidation)), Seq.empty))
+  .withInputGuardrails(InputGuardrail.from(sequentialValidation))
   .build()
 ```
 
@@ -403,10 +417,10 @@ class CustomLLMGuardrail(client: LLMClient) extends LLMGuardrail {
 
 `GroundingGuardrail`, `ContextRelevanceGuardrail` and `SourceAttributionGuardrail` are `RAGGuardrail`s: they judge an
 answer against the chunks a retrieval returned, and they check only through
-`validateWithContext(answer, RAGContext(query, chunks, sources))`. `GuardrailMiddleware` has no retrieval to give them:
+`validateWithContext(answer, RAGContext(query, chunks, sources))`. An agent's guardrails have no retrieval to give them:
 it calls each output guardrail's `validate`, with the answer and the model context but no chunks, and for these three
 `validate` passes every answer unchanged. **A
-`RAGGuardrail` in an agent's `output` list checks nothing.** Call `validateWithContext` yourself, where your code has
+`RAGGuardrail` among an agent's output guardrails checks nothing.** Call `validateWithContext` yourself, where your code has
 the chunks the answer was written from:
 
 ```scala
@@ -420,16 +434,15 @@ def checkedAnswer(question: String, chunks: Seq[String], answer: String): Result
 ```
 
 `TopicBoundaryGuardrail` is different: it is an `InputGuardrail` that judges the query on its own, so it works in an
-agent's `input` list like any other.
+agent's input guardrails like any other.
 
 ### Preset Configurations
 
 `RAGGuardrails` presets return a `GuardrailConfig` of three lists: `inputGuardrails` and `outputGuardrails`, which go to
-`GuardrailMiddleware`, and `ragGuardrails`, which you run with `validateWithContext` as above.
+the builder's `withInputGuardrails` and `withOutputGuardrails`, and `ragGuardrails`, which you run with `validateWithContext` as above.
 
 ```scala
 import org.llm4s.agent.Agent
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.rag.{ RAGContext, RAGGuardrail, RAGGuardrails }
 import org.llm4s.types.Result
 
@@ -438,7 +451,8 @@ val config = RAGGuardrails.standard(client)
 val agent = Agent
   .builder("rag", client)
   .withTools(tools)
-  .withMiddleware(GuardrailMiddleware(config.inputGuardrails, config.outputGuardrails))
+  .withInputGuardrails(config.inputGuardrails*)
+  .withOutputGuardrails(config.outputGuardrails*)
   .build()
 
 // the retrieval-aware checks, on an answer and the chunks it was given
@@ -475,7 +489,7 @@ val relevance = ContextRelevanceGuardrail.balanced(client)
 // Does the answer cite its sources? `Warn` logs an unattributed answer and passes it
 val attribution = new SourceAttributionGuardrail(llmClient = client, onFail = GuardrailAction.Warn)
 
-// Is the query about one of these topics? (an InputGuardrail: give it to GuardrailMiddleware's `input`)
+// Is the query about one of these topics? (an InputGuardrail: give it to `withInputGuardrails`)
 val topicBoundary = TopicBoundaryGuardrail(client, Seq("programming", "software engineering"))
 ```
 
@@ -493,7 +507,7 @@ val piiDetector = new PIIDetector()
 // Detects: emails, SSNs, credit cards, phone numbers, etc.
 val agent = Agent.builder("assistant", client)
   .withTools(tools)
-  .withMiddleware(GuardrailMiddleware(input = Seq(piiDetector), output = Nil))
+  .withInputGuardrails(piiDetector)
   .build()
 
 agent.flatMap(_.run(userInput))
@@ -509,7 +523,7 @@ val piiMasker = new PIIMasker()
 // Replaces PII with [REDACTED_EMAIL], [REDACTED_SSN], etc. - the stored answer is the masked one
 val agent = Agent.builder("assistant", client)
   .withTools(tools)
-  .withMiddleware(GuardrailMiddleware(input = Nil, output = Seq(piiMasker)))
+  .withOutputGuardrails(piiMasker)
   .build()
 
 agent.flatMap(_.run("Get user details"))
@@ -546,7 +560,7 @@ val injectionDetector = new PromptInjectionDetector()
 
 val agent = Agent.builder("assistant", client)
   .withTools(tools)
-  .withMiddleware(GuardrailMiddleware(input = Seq(injectionDetector), output = Nil))
+  .withInputGuardrails(injectionDetector)
   .build()
 
 agent.flatMap(_.run(userInput))
@@ -620,20 +634,21 @@ The other built-in guardrails always block on a failed check; wrap one in your o
 ```scala
 // Fast, local checks first
 val input = Seq(
-  new LengthCheck(1, 10000),        // Cheapest first
-  new ProfanityFilter(),             // Still fast
+  LengthCheck(1, 10000),        // Cheapest first
+  ProfanityFilter(),             // Still fast
   new PromptInjectionDetector(),     // Pattern matching
   new PIIDetector()                  // More complex but local
 )
 
 // LLM checks for output only (expensive)
 val output = Seq(
-  new JSONValidator(),               // Fast, local
+  JSONValidator(),               // Fast, local
   new LLMSafetyGuardrail(client)    // Expensive, last
 )
 
 val agent = Agent.builder("assistant", client)
-  .withMiddleware(GuardrailMiddleware(input, output))
+  .withInputGuardrails(input*)
+  .withOutputGuardrails(output*)
   .build()
 ```
 
@@ -655,12 +670,12 @@ import org.scalatest.matchers.should.Matchers
 
 class GuardrailSpec extends AnyFlatSpec with Matchers {
   "LengthCheck" should "reject empty input" in {
-    val guardrail = new LengthCheck(min = 1, max = 100)
+    val guardrail = LengthCheck(min = 1, max = 100)
     guardrail.validate("") shouldBe a[Left[?, ?]]
   }
 
   it should "accept valid input" in {
-    val guardrail = new LengthCheck(min = 1, max = 100)
+    val guardrail = LengthCheck(min = 1, max = 100)
     guardrail.validate("Hello") shouldBe Right("Hello")
   }
 }

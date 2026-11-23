@@ -290,7 +290,7 @@ class PromptInjectionSpec extends AnyFlatSpec with Matchers {
   "PromptInjectionDetector" should "work with CompositeGuardrail.all" in {
     val composite = CompositeGuardrail.all(
       Seq(
-        new builtin.LengthCheck(1, 10000),
+        builtin.LengthCheck(1, 10000),
         PromptInjectionDetector()
       )
     )

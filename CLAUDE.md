@@ -394,21 +394,19 @@ BuiltinTools.developmentSafe() // All tools (use with caution)
 
 ### Guardrails
 
-Guardrails are middleware on the agent, not per-run arguments.
+Guardrails are set on the agent, not per-run arguments.
 
 ```scala
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 
 val agent = Agent.builder("assistant", client)
-  .withMiddleware(
-    new GuardrailMiddleware(
-      input = Seq(new LengthCheck(1, 10000), new ProfanityFilter()),
-      output = Seq(new JSONValidator())
-    )
-  )
+  .withInputGuardrails(LengthCheck(1, 10000), ProfanityFilter())
+  .withOutputGuardrails(JSONValidator())
   .build()
 ```
+
+The builder installs them as one `GuardrailMiddleware`; `withMiddleware(new GuardrailMiddleware(...))` (Experimental)
+is for another position in the stack.
 
 A block ends the run `AgentStatus.Blocked(guardrail, reason)`; an output block replaces the stored
 answer with a refusal. `new ContextWindowMiddleware(config)` prunes what is sent to the model, never

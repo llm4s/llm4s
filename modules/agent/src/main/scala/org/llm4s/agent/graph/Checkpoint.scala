@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
@@ -8,7 +8,7 @@ import java.time.Instant
 import scala.util.Try
 
 /** Whether a thread's latest checkpoint is mid-execution or finished its run. */
-@Stable
+@Experimental
 enum CheckpointStatus derives ReadWriter:
   /** Work is scheduled, or the run stopped before completing; continue with `recover`. */
   case Running
@@ -39,7 +39,7 @@ enum CheckpointStatus derives ReadWriter:
  * Persist with [[Checkpoint.toJson]] and read with [[Checkpoint.fromJson]], which migrates older
  * `formatVersion`s and refuses newer ones.
  */
-@Stable
+@Experimental
 final case class Checkpoint private (
   formatVersion: Int,
   id: String,
@@ -92,6 +92,7 @@ final case class Checkpoint private (
   def withTrace(t: org.llm4s.trace.TraceContext): Checkpoint         = copy(trace = Some(t))
   def withTrace(t: Option[org.llm4s.trace.TraceContext]): Checkpoint = copy(trace = t)
 
+@Experimental
 object Checkpoint:
 
   def apply(
@@ -235,7 +236,7 @@ object Checkpoint:
  * A completed (or suspended) task's result, recorded against the checkpoint whose frontier it ran in, before the
  * superstep commits. On recovery the task is not run again: its command is decoded from here.
  */
-@Stable
+@Experimental
 final case class PendingWrite private (
   checkpointId: String,
   taskId: String,
@@ -262,6 +263,7 @@ final case class PendingWrite private (
   def withResultDigest(value: String): PendingWrite                  = copy(resultDigest = Some(value))
   def withResultDigest(value: Option[String]): PendingWrite          = copy(resultDigest = value)
 
+@Experimental
 object PendingWrite:
   def apply(
     checkpointId: String,
@@ -275,24 +277,24 @@ object PendingWrite:
     new PendingWrite(checkpointId, taskId, nodeId, operations, routes, suspension, resultDigest)
 
 /** A suspended task's parked continuation: where it resumes and the question, as data. */
-@Stable
+@Experimental
 final case class EncodedSuspension(resumeNode: String, question: VersionedJson) derives ReadWriter
 
 /** A state operation as data: updates are encoded with the key's update codec. */
-@Stable
+@Experimental
 enum EncodedOperation derives ReadWriter:
   case Update(keyId: String, update: VersionedJson)
   case Remove(keyId: String)
 
 /** A route as data: payloads are encoded with the target node's input codec. */
-@Stable
+@Experimental
 enum EncodedRoute derives ReadWriter:
   case Goto(nodeId: String)
   case Send(nodeId: String, payload: VersionedJson)
   case FanOut(joinId: String, nodeId: String, payloads: Vector[VersionedJson])
 
 /** A thread's latest checkpoint with the pending writes recorded against it. */
-@Stable
+@Experimental
 final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[PendingWrite])
 
 /**
@@ -300,13 +302,14 @@ final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[
  * (#2642): that checkpoint's [[Checkpoint!.tenantId Checkpoint.tenantId]], and the parent its
  * [[Checkpoint!.origin Checkpoint.origin]] names - `None` for a top-level thread.
  */
-@Stable
+@Experimental
 final case class ThreadOwner private (tenantId: Option[String], parent: Option[ThreadId]):
   def withTenantId(value: String): ThreadOwner         = copy(tenantId = Some(value))
   def withTenantId(value: Option[String]): ThreadOwner = copy(tenantId = value)
   def withParent(value: ThreadId): ThreadOwner         = copy(parent = Some(value))
   def withParent(value: Option[ThreadId]): ThreadOwner = copy(parent = value)
 
+@Experimental
 object ThreadOwner:
 
   def apply(tenantId: Option[String], parent: Option[ThreadId]): ThreadOwner =
@@ -349,7 +352,7 @@ object ThreadOwner:
  *    commit; `None` leaves it as it is. A thread keeps its metadata across commits until another replaces it, and
  *    loses it only with the thread ([[Checkpointer.deleteThread]]).
  */
-@Stable
+@Experimental
 final case class Commit private (
   token: FencingToken,
   checkpoint: Option[Checkpoint],
@@ -406,6 +409,7 @@ final case class Commit private (
   private def settled(c: Checkpoint): Boolean =
     c.status == CheckpointStatus.Completed || c.status == CheckpointStatus.Failed
 
+@Experimental
 object Commit:
   def apply(
     token: FencingToken,

@@ -187,7 +187,7 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
   "A blocked answer" should "never be recorded when the memory middleware runs outside the guardrails" in {
     val (stores, _) = perTenant()
     val m           = new SemanticMemoryMiddleware(stores, simple, answering())
-    val guard       = new GuardrailMiddleware(Nil, Seq(new LengthCheck(0, 3)))
+    val guard       = new GuardrailMiddleware(Nil, Seq(LengthCheck(0, 3)))
     val agent       = built(Agent.builder("assistant", answering("far too long")).withMiddleware(m, guard))
     agent.run("question").value.status shouldBe a[AgentStatus.Blocked]
     contents(held(m, None)) shouldBe empty
@@ -196,7 +196,7 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
   "The memory middleware inside guardrail middleware" should "be refused when the agent is built (design 4.37)" in {
     val (stores, _) = perTenant()
     val m           = new SemanticMemoryMiddleware(stores, simple, answering())
-    val guard       = new GuardrailMiddleware(Nil, Seq(new LengthCheck(0, 3)))
+    val guard       = new GuardrailMiddleware(Nil, Seq(LengthCheck(0, 3)))
     val review      = new org.llm4s.agent.graph.middleware.GuardrailReviewMiddleware(Nil, Nil)
     val error       = Agent.builder("assistant", answering()).withMiddleware(guard, review, m).build().left.value
     error.message should include("'semantic-memory' must run outside 'guardrails'")
@@ -212,7 +212,7 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
       Agent.builder("target", answering()).withMiddleware(new SemanticMemoryMiddleware(stores, simple, answering()))
     val error = Agent
       .builder("root", answering())
-      .withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(0, 3))))
+      .withMiddleware(new GuardrailMiddleware(Nil, Seq(LengthCheck(0, 3))))
       .withHandoffs(org.llm4s.agent.Handoff.to("target", target, "delegate"))
       .build()
       .left
@@ -385,7 +385,7 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
   "An output Block" should "restore the recalled key to its value before the turn (C1)" in {
     val store      = InMemoryStore.withMemories(Seq(Memory.userFact("apples are red"))).value
     val m          = new SemanticMemoryMiddleware(_ => Right(store), simple, answering(), record = None)
-    val guard      = new GuardrailMiddleware(Nil, Seq(new LengthCheck(0, 5)))
+    val guard      = new GuardrailMiddleware(Nil, Seq(LengthCheck(0, 5)))
     val checkpoint = new InMemoryCheckpointer
     val peek       = new Peek
     val agent = built(

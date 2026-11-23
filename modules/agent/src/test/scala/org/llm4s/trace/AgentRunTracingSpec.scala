@@ -362,7 +362,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
   it should "trace a blocked turn with no messages and status blocked:<guardrail>" in {
     val marker  = "SECRET-42"
     val tracing = Recording()
-    val guard   = new LengthCheck(1, 3)
+    val guard   = LengthCheck(1, 3)
     val agent = Agent
       .builder("assistant", Scripted(Right(answer(s"leaking $marker"))))
       .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(guard)))

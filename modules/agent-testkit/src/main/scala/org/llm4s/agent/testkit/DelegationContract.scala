@@ -129,7 +129,7 @@ trait DelegationContract extends AnyFlatSpecLike with Matchers with EitherValues
   "DelegationContract: a call whose child Failed" should "return the child's refusal with no child run" in {
     val store   = newCheckpointer()
     val client  = Routing(leadRoute.orElse { case m if isWorker(m) => Right(text("a report far too long")) })
-    val blocked = worker.withMiddleware(new GuardrailMiddleware(Seq.empty, Seq(new LengthCheck(0, 5))))
+    val blocked = worker.withMiddleware(new GuardrailMiddleware(Seq.empty, Seq(LengthCheck(0, 5))))
     val agent   = lead(client, store).withMiddleware(new CrashOnce).withSubagents(blocked).build().value
 
     agent.run(parent, "go").isLeft shouldBe true

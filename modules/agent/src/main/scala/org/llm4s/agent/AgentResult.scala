@@ -1,6 +1,6 @@
 package org.llm4s.agent
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.agent.delegation.DelegatedRequest
 import org.llm4s.agent.graph.{ Breakpoint, InterruptId, RunId, ThreadId }
 import org.llm4s.agent.graph.toolloop.{
@@ -64,7 +64,7 @@ enum AgentStatus:
    * same helpers answer them by that id, encoding the answer the child expects, and [[Agent.resume]] routes each to
    * its child through the parent. A `task` call waiting on its child is listed only here, never in `questions`.
    */
-  case Suspended(
+  @Experimental case Suspended(
     approvals: Vector[(InterruptId, ApprovalRequest)],
     questions: Vector[(InterruptId, ToolQuestionRequest)],
     middlewareQuestions: Vector[(InterruptId, MiddlewareQuestionRequest)] = Vector.empty,
@@ -112,20 +112,25 @@ final case class AgentResult private (
       .flatMap(OutputFormat.decode[O])
 
   /** Approves the pending tool call `id`, for [[Agent.resume]]. */
+  @Experimental
   def approve(id: InterruptId): (InterruptId, ujson.Value) = decide(id, ApprovalDecision.Approve)
 
   /** Rejects the pending tool call `id`: the model sees `Rejected: <reason>` as its result. */
+  @Experimental
   def reject(id: InterruptId, reason: String): (InterruptId, ujson.Value) = decide(id, ApprovalDecision.Reject(reason))
 
   /** Approves the pending tool call `id` with new `arguments`, which replace the call's in the history. */
+  @Experimental
   def edit(id: InterruptId, arguments: ujson.Value): (InterruptId, ujson.Value) =
     decide(id, ApprovalDecision.Edit(arguments))
 
   /** Answers the question `id` - a tool's or a middleware's - with `value`, of the asker's answer type. */
+  @Experimental
   def reply[Ans: ReadWriter](id: InterruptId, value: Ans): (InterruptId, ujson.Value) =
     id -> upickle.default.writeJs(value)
 
   /** Continues the task the breakpoint `id` holds. */
+  @Experimental
   def proceed(id: InterruptId): (InterruptId, ujson.Value) = id -> Breakpoint.proceed
 
   private def decide(id: InterruptId, decision: ApprovalDecision): (InterruptId, ujson.Value) =

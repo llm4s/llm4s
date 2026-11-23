@@ -329,7 +329,7 @@ class HarnessProfileSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
       Agent
         .builder("writer", client)
         .withHarness(HarnessProfile(backend = backend).withTodos(TodoConfig()))
-        .withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(1, 5))))
+        .withMiddleware(new GuardrailMiddleware(Nil, Seq(LengthCheck(1, 5))))
         .withRuntime(GraphRuntime(store))
     )
     agent.run(ThreadId("blocked"), "write").value.status shouldBe a[AgentStatus.Blocked]

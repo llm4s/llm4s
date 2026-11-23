@@ -106,7 +106,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
       },
       test("run applies input guardrails before any model call and reports the turn Blocked") {
         val client = new Recording(_ => text("done"))
-        z(client)(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 5)), Nil)))
+        z(client)(_.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 5)), Nil)))
           .run("this query is far too long")
           .map(result =>
             assertTrue(result.status.isInstanceOf[AgentStatus.Blocked]) && assertTrue(client.calls.get() == 0)
@@ -114,7 +114,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
       },
       test("run applies output guardrails to the answer") {
         val client = new Recording(_ => text("ok"))
-        z(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(10, 100)))))
+        z(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(LengthCheck(10, 100)))))
           .run("q")
           .map(result =>
             assertTrue(result.status.isInstanceOf[AgentStatus.Blocked]) && assertTrue(client.calls.get() == 1)
@@ -153,7 +153,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
       },
       test("continueConversation applies input guardrails to the new message and does not call the model") {
         val client = new Recording(_ => text("first"))
-        val agent  = z(client)(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 20)), Nil)))
+        val agent  = z(client)(_.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 20)), Nil)))
         for {
           first  <- agent.run("q1")
           result <- agent.continueConversation(first, "far too long a follow up for the guardrail")
@@ -161,7 +161,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
       },
       test("continueConversation applies output guardrails to the new answer") {
         val client = new Recording(i => if (i == 0) text("a long enough first answer") else text("ok"))
-        val agent  = z(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(10, 100)))))
+        val agent  = z(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(LengthCheck(10, 100)))))
         for {
           first <- agent.run("q1")
           next  <- agent.continueConversation(first, "q2")

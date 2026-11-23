@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.tool
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 
 /**
  * Checks raw tool-call arguments against the JSON Schema a tool sent to the provider.
@@ -15,7 +15,7 @@ import org.llm4s.annotation.Stable
  * is not an object), is reported by [[unsupported]] so a tool set can refuse it when it is built,
  * rather than silently skip the constraint on every call.
  */
-@Stable
+@Experimental
 trait ToolArgumentValidator {
 
   /**
@@ -32,6 +32,7 @@ trait ToolArgumentValidator {
   def validate(schema: ujson.Value, arguments: ujson.Value): Vector[String]
 }
 
+@Experimental
 object ToolArgumentValidator {
 
   /** The in-house validator for the JSON Schema subset core emits. */

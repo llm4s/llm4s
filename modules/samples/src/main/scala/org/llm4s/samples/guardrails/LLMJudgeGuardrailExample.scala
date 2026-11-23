@@ -1,7 +1,6 @@
 package org.llm4s.samples.guardrails
 
 import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.LLMGuardrail
 import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
@@ -42,7 +41,7 @@ object LLMJudgeGuardrailExample extends App {
   ): org.llm4s.types.Result[AgentResult] =
     Agent
       .builder(id, client)
-      .withMiddleware(GuardrailMiddleware(Seq.empty, guardrails))
+      .withOutputGuardrails(guardrails*)
       .build()
       .flatMap(_.run(query))
 
@@ -117,8 +116,8 @@ object LLMJudgeGuardrailExample extends App {
 
     // Use fast function-based guardrails first, then LLM for nuanced checks
     combinedGuardrails = Seq(
-      new LengthCheck(min = 10, max = 5000), // Fast: Check length first
-      safetyGuardrail                        // Slow: Then check safety with LLM
+      LengthCheck(min = 10, max = 5000), // Fast: Check length first
+      safetyGuardrail                    // Slow: Then check safety with LLM
     )
 
     state5 <- guarded(client, "llm-judge-state5", combinedGuardrails, "Describe the water cycle in nature.")

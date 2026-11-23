@@ -15,7 +15,7 @@ import org.llm4s.types.Result
  * @param max Maximum length (inclusive)
  */
 @Stable
-class LengthCheck(min: Int, max: Int) extends InputGuardrail with OutputGuardrail {
+final class LengthCheck private (min: Int, max: Int) extends InputGuardrail with OutputGuardrail {
   require(min >= 0, "Minimum length must be non-negative")
   require(max >= min, "Maximum length must be >= minimum length")
 

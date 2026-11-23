@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.guardrails.{ GuardrailAction, InputGuardrail, OutputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
@@ -50,7 +50,7 @@ import org.slf4j.LoggerFactory
  * @param secretTypes Secret types to detect (default: all common provider keys)
  * @param onFail      Action to take when a secret is detected (default: Block)
  */
-@Stable
+@Experimental
 class SecretLeakGuardrail(
   val secretTypes: Seq[SecretType] = SecretType.default,
   val onFail: GuardrailAction = GuardrailAction.Block
@@ -122,6 +122,7 @@ class SecretLeakGuardrail(
     SecretPatterns.summarize(text, secretTypes)
 }
 
+@Experimental
 object SecretLeakGuardrail {
 
   /** Create a guardrail with default secret types and Block behaviour. */

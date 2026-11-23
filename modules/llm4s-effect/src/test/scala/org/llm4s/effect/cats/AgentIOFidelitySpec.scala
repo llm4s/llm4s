@@ -109,7 +109,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   it should "apply input guardrails before any model call and report the turn Blocked" in {
     val client = new Recording(_ => text("done"))
-    val result = io(client)(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 5)), Nil)))
+    val result = io(client)(_.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 5)), Nil)))
       .run("this query is far too long")
       .unsafeRunSync()
     result.status shouldBe a[AgentStatus.Blocked]
@@ -118,7 +118,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   it should "apply output guardrails to the answer" in {
     val client = new Recording(_ => text("ok"))
-    val result = io(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(10, 100)))))
+    val result = io(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(LengthCheck(10, 100)))))
       .run("q")
       .unsafeRunSync()
     result.status shouldBe a[AgentStatus.Blocked]
@@ -154,7 +154,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   it should "apply input guardrails to the new message and not call the model" in {
     val client = new Recording(_ => text("first"))
-    val agent  = io(client)(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 20)), Nil)))
+    val agent  = io(client)(_.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 20)), Nil)))
     val first  = agent.run("q1").unsafeRunSync()
     val result = agent.continueConversation(first, "far too long a follow up for the guardrail").unsafeRunSync()
     result.status shouldBe a[AgentStatus.Blocked]
@@ -163,7 +163,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   it should "apply output guardrails to the new answer" in {
     val client = new Recording(i => if (i == 0) text("a long enough first answer") else text("ok"))
-    val agent  = io(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(10, 100)))))
+    val agent  = io(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(LengthCheck(10, 100)))))
     val first  = agent.run("q1").unsafeRunSync()
     first.status shouldBe AgentStatus.Completed("a long enough first answer")
     val next = agent.continueConversation(first, "q2").unsafeRunSync()

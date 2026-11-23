@@ -256,7 +256,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   "A guardrail" should "send GuardrailBlocked(Input) for an input block" in {
     val builder = Agent
       .builder("assistant", Scripted(Right(answer("never"))))
-      .withMiddleware(new GuardrailMiddleware(input = Seq(new LengthCheck(1, 3)), output = Nil))
+      .withMiddleware(new GuardrailMiddleware(input = Seq(LengthCheck(1, 3)), output = Nil))
     val (result, c) = collect(builder, "far too long")
     result.map(_.status) should matchPattern { case Right(AgentStatus.Blocked("LengthCheck", _)) => }
     c.durable.collect { case AgentEvents.GuardrailBlocked(b) => b } shouldBe
@@ -266,7 +266,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   it should "send GuardrailBlocked(Output) for an output block" in {
     val builder = Agent
       .builder("assistant", Scripted(Right(answer("much too long"))))
-      .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(new LengthCheck(1, 3))))
+      .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(LengthCheck(1, 3))))
     val (result, c) = collect(builder, "hi")
     result.map(_.status) should matchPattern { case Right(AgentStatus.Blocked("LengthCheck", _)) => }
     c.durable.collect { case AgentEvents.GuardrailBlocked(b) => b } shouldBe
@@ -277,7 +277,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val builder = Agent
       .builder("assistant", Scripted(Right(answer("ok"))))
       .withMiddleware(
-        new GuardrailMiddleware(input = Seq(new LengthCheck(1, 30)), output = Seq(new LengthCheck(1, 30)))
+        new GuardrailMiddleware(input = Seq(LengthCheck(1, 30)), output = Seq(LengthCheck(1, 30)))
       )
     val (_, c) = collect(builder, "hi")
     c.all.collect { case AgentEvents.GuardrailBlocked(b) => b } shouldBe empty
@@ -362,7 +362,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val runtime = GraphRuntime(store)
     val agent = Agent
       .builder("assistant", Scripted(Right(answer(s"leaking $marker"))))
-      .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(new LengthCheck(1, 3))))
+      .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(LengthCheck(1, 3))))
       .withRuntime(runtime)
       .build()
       .fold(e => fail(e.message), identity)

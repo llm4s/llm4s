@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError }
 
 /**
@@ -8,7 +8,7 @@ import org.llm4s.error.{ LLMError, NonRecoverableError }
  * and `reason` every failing guardrail's error, joined with `"; "`. The tool loop blocks the run with
  * it (`RunResult.Failed`, the thread usable), and `Agent` reports it as `AgentStatus.Blocked`.
  */
-@Stable
+@Experimental
 final case class GuardrailBlocked(guardrail: String, reason: String) extends LLMError with NonRecoverableError:
   val message: String                       = s"Guardrail '$guardrail' blocked: $reason"
   override val context: Map[String, String] = Map("guardrail" -> guardrail)

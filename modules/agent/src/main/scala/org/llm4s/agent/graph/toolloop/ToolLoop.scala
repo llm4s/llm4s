@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.toolloop
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.{ AgentId, AgentNode }
 import org.llm4s.agent.delegation.{
   ChildRef,
@@ -51,7 +51,7 @@ import scala.concurrent.duration.{ Duration, DurationLong, FiniteDuration }
 import scala.util.{ Failure, Success, Try }
 
 /** Who asked for an approval: the tool itself, or a middleware's tool wrapper. All resume at the same approval node. */
-@Stable
+@Experimental
 enum ApprovalSource derives ReadWriter:
   case Tool
   case Middleware(id: MiddlewareId)
@@ -62,7 +62,7 @@ enum ApprovalSource derives ReadWriter:
  * `answered` carries the answers middleware questions of the call were given before it asked, so its
  * chain runs again with them once it is approved.
  */
-@Stable
+@Experimental
 final case class ApprovalRequest private (
   assistantMessageId: String,
   call: ToolCall,
@@ -84,6 +84,7 @@ final case class ApprovalRequest private (
   def withAnswered(a: Vector[GivenAnswer]): ApprovalRequest =
     ApprovalRequest(assistantMessageId, call, reason, source, idempotencyKey, a)
 
+@Experimental
 object ApprovalRequest:
   def apply(
     assistantMessageId: String,
@@ -95,7 +96,7 @@ object ApprovalRequest:
   ): ApprovalRequest = new ApprovalRequest(assistantMessageId, call, reason, source, idempotencyKey, answered)
 
 /** A reviewer's answer. `Edit` runs the call with new arguments, recording them in the assistant message first. */
-@Stable
+@Experimental
 enum ApprovalDecision derives ReadWriter:
   case Approve
   case Edit(arguments: ujson.Value)
@@ -107,13 +108,14 @@ enum ApprovalDecision derives ReadWriter:
  * the call rather than derived again where it runs, because `recover` runs the call at a new
  * checkpoint: every run of the call reads the same key from here.
  */
-@Stable
+@Experimental
 final case class ToolTask private (assistantMessageId: String, call: ToolCall, idempotencyKey: IdempotencyKey)
     derives ReadWriter:
   def withAssistantMessageId(value: String): ToolTask     = copy(assistantMessageId = value)
   def withCall(value: ToolCall): ToolTask                 = copy(call = value)
   def withIdempotencyKey(value: IdempotencyKey): ToolTask = copy(idempotencyKey = value)
 
+@Experimental
 object ToolTask:
   def apply(assistantMessageId: String, call: ToolCall, idempotencyKey: IdempotencyKey): ToolTask =
     new ToolTask(assistantMessageId, call, idempotencyKey)
@@ -156,7 +158,7 @@ private[agent] object LockSchedule:
  * [[ToolLoop.questions]], read its question as the tool's type with [[ToolLoop.question]], and
  * answer it with [[ToolLoop.answer]].
  */
-@Stable
+@Experimental
 final case class ToolQuestionRequest private (
   assistantMessageId: String,
   call: ToolCall,
@@ -182,6 +184,7 @@ final case class ToolQuestionRequest private (
   def withPhase(p: Option[IdempotencyKey]): ToolQuestionRequest =
     ToolQuestionRequest(assistantMessageId, call, question, idempotencyKey, approved, answered, p)
 
+@Experimental
 object ToolQuestionRequest:
   def apply(
     assistantMessageId: String,
@@ -195,7 +198,7 @@ object ToolQuestionRequest:
     new ToolQuestionRequest(assistantMessageId, call, question, idempotencyKey, approved, answered, phase)
 
 /** The hook a middleware asked its question from. */
-@Stable
+@Experimental
 enum MiddlewareHook derives ReadWriter:
   case BeforeAgent, WrapModelCall, WrapToolCall, AfterAgent
 
@@ -203,7 +206,7 @@ enum MiddlewareHook derives ReadWriter:
  * The answer a middleware question was given: kept while the hook's stack runs again, so that the
  * middleware - `middleware` of agent `agent`'s stack - finds it with `AgentMiddleware.Asking.answered`.
  */
-@Stable
+@Experimental
 final case class GivenAnswer private (
   agent: AgentId,
   middleware: MiddlewareId,
@@ -215,6 +218,7 @@ final case class GivenAnswer private (
   def withQuestion(q: ujson.Value): GivenAnswer    = GivenAnswer(agent, middleware, q, answer)
   def withAnswer(a: ujson.Value): GivenAnswer      = GivenAnswer(agent, middleware, question, a)
 
+@Experimental
 object GivenAnswer:
   def apply(agent: AgentId, middleware: MiddlewareId, question: ujson.Value, answer: ujson.Value): GivenAnswer =
     new GivenAnswer(agent, middleware, question, answer)
@@ -229,7 +233,7 @@ object GivenAnswer:
  * `call` and whether it was `approved` (`WrapToolCall`); and the answers other questions of the same
  * hook run were `answered` with.
  */
-@Stable
+@Experimental
 final case class MiddlewareQuestionRequest private (
   agent: AgentId,
   middleware: MiddlewareId,
@@ -259,6 +263,7 @@ final case class MiddlewareQuestionRequest private (
   def withAnswered(a: Vector[GivenAnswer]): MiddlewareQuestionRequest =
     MiddlewareQuestionRequest(agent, middleware, hook, question, input, call, approved, a)
 
+@Experimental
 object MiddlewareQuestionRequest:
   def apply(
     agent: AgentId,
@@ -278,13 +283,14 @@ object MiddlewareQuestionRequest:
  * nodes that continue those steps; or any other a run's `RunConfig` names), the `phase`, and - for a tool
  * call held before it runs - the `call`. Answer it with `org.llm4s.agent.graph.Breakpoint.proceed`.
  */
-@Stable
+@Experimental
 final case class BreakpointRequest private (node: NodeId, phase: BreakpointPhase, call: Option[ToolCall]):
   def withNode(n: NodeId): BreakpointRequest           = BreakpointRequest(n, phase, call)
   def withPhase(p: BreakpointPhase): BreakpointRequest = BreakpointRequest(node, p, call)
   def withCall(c: ToolCall): BreakpointRequest         = withCall(Some(c))
   def withCall(c: Option[ToolCall]): BreakpointRequest = BreakpointRequest(node, phase, c)
 
+@Experimental
 object BreakpointRequest:
   def apply(node: NodeId, phase: BreakpointPhase, call: Option[ToolCall] = None): BreakpointRequest =
     new BreakpointRequest(node, phase, call)
@@ -301,14 +307,14 @@ final private[agent] case class ToolResult(
 ) derives ReadWriter
 
 /** One invocation of an agent's model: the task's [[org.llm4s.agent.graph.RunContext RunContext]], the agent, and this attempt's number (from 1). */
-@Stable
+@Experimental
 final class ModelCall private[toolloop] (val context: RunContext, val agent: AgentId, val attempt: Int):
   def textDelta(text: String): Unit = AgentEvents.TextDelta.progress(context, events.TextDelta(attempt, text))
   def thinkingDelta(text: String): Unit =
     AgentEvents.ThinkingDelta.progress(context, events.ThinkingDelta(attempt, text))
 
 /** The model call: the conversation so far, and the tools on offer, to the model's completion. */
-@Stable
+@Experimental
 trait ModelStep:
   def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion]
 
@@ -324,6 +330,7 @@ trait ModelStep:
    */
   def providerId: Option[ProviderId] = None
 
+@Experimental
 object ModelStep:
 
   /**
@@ -463,7 +470,7 @@ object ModelStep:
  *    the transfer's assistant message onwards; the history itself is untouched. A non-root agent
  *    with no recorded transfer to it fails the call rather than being sent the full history.
  */
-@Stable
+@Experimental
 final class ToolLoop private (
   val graph: CompiledGraph[AgentInput, TurnOutput],
   approval: ResumeRef[ApprovalRequest, ApprovalDecision],
@@ -561,6 +568,7 @@ final class ToolLoop private (
         acc.flatMap(found => Try(upickle.default.read[Q](i.question)).toResult.map(r => found :+ (i.id -> r)))
       }
 
+@Experimental
 object ToolLoop:
 
   /** How a turn that completed with `output` settled, as its terminal checkpoint records it (design 4.41). */

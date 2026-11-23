@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 
 /**
  * A listener subscribed to a run's thread during admission - before the run's claim commits, with
@@ -17,12 +17,13 @@ import org.llm4s.annotation.Stable
  * refused admission abandons it, and its listener is never called. With `nested`, it also receives the events of the
  * children the run delegates to, as [[StreamEvent.Nested]] (design 4.47).
  */
-@Stable
+@Experimental
 final case class Observer private (capacity: Int, listener: StreamEvent => Unit, nested: Boolean):
   def withCapacity(value: Int): Observer                 = copy(capacity = value)
   def withListener(value: StreamEvent => Unit): Observer = copy(listener = value)
   def withNested(value: Boolean): Observer               = copy(nested = value)
 
+@Experimental
 object Observer:
   def apply(capacity: Int, listener: StreamEvent => Unit, nested: Boolean = false): Observer =
     new Observer(capacity, listener, nested)

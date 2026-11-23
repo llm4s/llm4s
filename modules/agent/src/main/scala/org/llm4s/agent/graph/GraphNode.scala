@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.LLMError
 import org.llm4s.types.{ Result, TryOps }
@@ -16,7 +16,7 @@ import scala.annotation.unused
  * compile. A handle from another builder is rejected when the graph compiles, or when a node
  * returns it at run time.
  */
-@Stable
+@Experimental
 final class NodeRef[I] private[graph] (
   val id: NodeId,
   private[graph] val owner: GraphOwner,
@@ -29,7 +29,7 @@ final class NodeRef[I] private[graph] (
  * A barrier that schedules `target` once every source node has completed a task since its last
  * release. Each source counts once per activation, however many of its tasks complete.
  */
-@Stable
+@Experimental
 final class StaticJoin private[graph] (
   val id: JoinId,
   val sources: Set[NodeId],
@@ -43,7 +43,7 @@ final class StaticJoin private[graph] (
  * of every child it schedules; `target` is scheduled once all of them have completed. An empty
  * fan-out releases immediately.
  */
-@Stable
+@Experimental
 final class DynamicJoin private[graph] (
   val id: JoinId,
   val target: NodeRef[Unit],
@@ -55,7 +55,7 @@ final class DynamicJoin private[graph] (
 final private[graph] class GraphOwner(val graphId: String)
 
 /** A routing decision returned by a node; scheduled for the next superstep. */
-@Stable
+@Experimental
 enum Route:
   case Goto(target: NodeRef[Unit])
   case Send[I](target: NodeRef[I], payload: I) extends Route
@@ -68,7 +68,7 @@ enum Route:
  * scheduled before the command's routes. A command with no routes and no outgoing edges ends
  * that branch; the run completes when no branch has work left.
  */
-@Stable
+@Experimental
 final case class Command private (update: StateUpdate, routes: List[Route]):
   def withUpdate(value: StateUpdate): Command = copy(update = value)
   def withRoutes(value: List[Route]): Command = copy(routes = value)
@@ -80,6 +80,7 @@ final case class Command private (update: StateUpdate, routes: List[Route]):
   def fanOut[I](join: DynamicJoin, target: NodeRef[I], payloads: Vector[I]): Command =
     copy(routes = routes :+ Route.FanOut(join, target, payloads))
 
+@Experimental
 object Command:
 
   def apply(update: StateUpdate, routes: List[Route]): Command =
@@ -88,7 +89,7 @@ object Command:
   val empty: Command = Command(StateUpdate.empty, Nil)
 
 /** What a node task produced. */
-@Stable
+@Experimental
 enum NodeResult:
   case Continue(command: Command)
 
@@ -114,6 +115,7 @@ enum NodeResult:
    */
   case Block(update: StateUpdate, error: LLMError)
 
+@Experimental
 object NodeResult:
   def fromResult(result: Result[Command]): NodeResult = result.fold(Fail(_), Continue(_))
 
@@ -161,12 +163,12 @@ private[graph] object NodeEventSink:
  * A node's behaviour. It reads the superstep's committed snapshot - never another task's
  * uncommitted writes - and returns its effects as data.
  */
-@Stable
+@Experimental
 trait GraphNode[I]:
   def run(input: I, state: ThreadState, context: RunContext): NodeResult
 
 /** A suspended task's question with the answer it was resumed with. */
-@Stable
+@Experimental
 final case class Resumed[Q, A](question: Q, answer: A)
 
 /**
@@ -175,7 +177,7 @@ final case class Resumed[Q, A](question: Q, answer: A)
  * answer codecs belong to the graph - a checkpoint stores the question as JSON and a resume
  * supplies the answer as JSON, and both are decoded here.
  */
-@Stable
+@Experimental
 final class ResumeRef[Q, A] private[graph] (
   val node: NodeRef[Resumed[Q, A]],
   private[graph] val questionCodec: ReadWriter[Q],
@@ -213,7 +215,7 @@ private[graph] object ResumeRef:
  * `breakpoint` is its phase, `resumeNode` is the held task's own node, and `question` is the task's
  * input before it ran, or JSON `null` after; answer it with [[Breakpoint.proceed]].
  */
-@Stable
+@Experimental
 final case class PendingInterrupt private (
   id: InterruptId,
   resumeNode: NodeId,
@@ -226,6 +228,7 @@ final case class PendingInterrupt private (
   def withBreakpoint(value: BreakpointPhase): PendingInterrupt         = copy(breakpoint = Some(value))
   def withBreakpoint(value: Option[BreakpointPhase]): PendingInterrupt = copy(breakpoint = value)
 
+@Experimental
 object PendingInterrupt:
   def apply(
     id: InterruptId,

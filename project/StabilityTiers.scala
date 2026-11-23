@@ -22,7 +22,9 @@ import scala.util.Using
  * signature, so the promise would not hold. The member is a `def`, `val`, `var`, `given`, `type`, an enum
  * `case`, a nested type's header or the type's own constructor parameters; its signature is its text up to
  * the `=` or the end of its header, and a member that is `private`, `protected` or itself `@Experimental` is
- * skipped, as are bodies and comments. `selfTest` runs the check against fixtures first, so a change that
+ * skipped, as are bodies and comments. A simple name counts only in a file that can see that type (its package, or an
+ * import of it); elsewhere only its qualified name does, so two types of one name in different packages do not
+ * collide. `selfTest` runs the check against fixtures first, so a change that
  * stops it finding a leak fails the build instead of passing everything.
  *
  * And it fails for such a member whose signature names a third-party type from `ThirdPartyDenied` that no
@@ -64,6 +66,7 @@ object StabilityTiers {
     "private|protected)(?:\\[\\w+\\])?\\s+)*)" +
     "(def|val|var|given|type|case|class|trait|object|enum)\\b").r
   private val Hidden = "\\b(?:private|protected)\\b".r
+  private val TopLevelAlias = "^(?:(?:private|protected)(?:\\[\\w+\\])?\\s+)?(?:opaque\\s+)?type\\s+[A-Za-z_]".r
 
   private def sources(dir: File): Seq[File] =
     if (!dir.exists) Nil else (dir ** "*.scala").get.sortBy(_.getPath)
@@ -171,9 +174,12 @@ object StabilityTiers {
     val stableT = decls.collect {
       case (i, k, n) if k != "object" && (annotated(lines, i, StableAnn) || tierless(i)) => n
     }.toSet
-    val extents = decls.zip(decls.drop(1).map(_._1) :+ lines.length)
+    // a top-level (opaque) type alias ends the extent of the type before it, so it is not read as that type's member
+    val aliases = lines.zipWithIndex.collect { case (l, i) if TopLevelAlias.findFirstIn(l).nonEmpty => (i, "type", "") }
+    val bounds  = (decls ++ aliases).sortBy(_._1)
+    val extents = bounds.zip(bounds.drop(1).map(_._1) :+ lines.length)
     extents.flatMap { case ((start, kind, name), end) =>
-      val stable =
+      val stable = kind != "type" &&
         NonPublic.findFirstIn(lines(start)).isEmpty && !annotated(lines, start, ExperimentalAnn) &&
           (annotated(lines, start, StableAnn) || tierless(start) || (kind == "object" && stableT.contains(name)))
       if (!stable) Nil
@@ -227,17 +233,52 @@ object StabilityTiers {
   /**
    * Public members of `@Stable` types whose signatures name a type in `experimental`.
    *
+   * A name counts only where it can mean the `@Experimental` type: the file is in that type's package (or one of its
+   * chained `package` clauses is) or imports it by name or with a wildcard; elsewhere only its qualified name
+   * (`pkg.Name`) counts. So an `@Experimental`
+   * `org.llm4s.agent.graph.RetryPolicy` does not make core's `@Stable` `org.llm4s.reliability.RetryPolicy` a leak.
+   *
    * @param lines        one source file
-   * @param experimental the names of the frozen modules' `@Experimental` top-level types
+   * @param experimental the simple names of the frozen modules' `@Experimental` top-level types, each with the
+   *                     packages that declare it
    */
-  private[this] def leaks(lines: Vector[String], experimental: Set[String]): Seq[(Int, String)] =
-    if (experimental.isEmpty) Nil
+  private[this] def leaks(lines: Vector[String], experimental: Map[String, Set[String]]): Seq[(Int, String)] = {
+    import java.util.regex.Pattern.quote
+    // a name visible unqualified matches alone; otherwise only written out with its package
+    val alternatives = experimental.toSeq.sortBy(_._1).flatMap { case (n, pkgs) =>
+      if (pkgs.exists(p => visibleIn(lines, p, n))) Seq(quote(n))
+      else pkgs.toSeq.sorted.map(p => quote(s"$p.$n"))
+    }
+    if (alternatives.isEmpty) Nil
     else {
-      val names = ("\\b(" + experimental.toSeq.sorted.map(java.util.regex.Pattern.quote).mkString("|") + ")\\b").r
+      val names = ("\\b(" + alternatives.mkString("|") + ")\\b").r
       stableMembers(lines).flatMap { member =>
-        member.visible.iterator.flatMap { case (l, t) => names.findFirstMatchIn(t).map(n => (l, n.group(1))) }.take(1)
+        member.visible.iterator.flatMap { case (l, t) =>
+          names.findFirstMatchIn(t).map(n => (l, n.group(1).split('.').last))
+        }.take(1)
       }
     }
+  }
+
+  private val ImportClause = "(?s)\\bimport\\s+([\\w.]+)\\.(\\{[^}]*\\}|[\\w*]+)".r
+
+  /** Whether `name`, a top-level type of package `pkg`, can be referred to by its simple name in this file. */
+  private def visibleIn(lines: Vector[String], pkg: String, name: String): Boolean = {
+    val clauses = lines.map(l => code(l).trim.stripSuffix(";").trim).collect { case PackageLine(p) => p }
+    val visible = clauses.scanLeft("")((acc, p) => if (acc.isEmpty) p else s"$acc.$p").drop(1).toSet
+    val text    = lines.filterNot(isComment).map(code).mkString("\n")
+    def selects(sel: String): Boolean =
+      if (sel.startsWith("{"))
+        sel
+          .stripPrefix("{")
+          .stripSuffix("}")
+          .split(",")
+          .map(_.trim.split("\\s+")(0))
+          .exists(s => s == name || s == "_" || s == "*")
+      else sel == name || sel == "_" || sel == "*"
+    val imported = ImportClause.findAllMatchIn(text).exists(m => m.group(1) == pkg && selects(m.group(2)))
+    visible(pkg) || imported
+  }
 
   // ---- third-party types in @Stable signatures (RFC 0004, #2357) ----
 
@@ -404,151 +445,6 @@ object StabilityTiers {
    * cannot leave its entry behind.
    */
   val GrowthExempted: Seq[GrowthExempt] = Seq(
-    GrowthExempt("org.llm4s.agent.PruningStrategy.Custom", "a strategy case holding only its pruning function"),
-    GrowthExempt("org.llm4s.agent.PruningStrategy.RecentTurnsOnly", "a strategy case holding only its turn count"),
-    GrowthExempt("org.llm4s.agent.delegation.DelegatedRequest", "exactly a child run and the interrupt it waits on"),
-    GrowthExempt("org.llm4s.agent.graph.EncodedSuspension", "exactly the node to resume and its encoded question"),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.Cancelled",
-      "an error case holding only its thread id and last checkpoint"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.CheckpointConflict",
-      "an error case holding only its thread id, expected and actual"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.CheckpointNotFound",
-      "an error case holding only its thread id and checkpoint id"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.ChildThread",
-      "an error case holding only its thread id and parent"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.ClaimLost",
-      "an error case holding only its thread id, token and current"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.CommitTimedOut",
-      "an error case holding only its thread id and after"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.DeadlineExceeded",
-      "an error case holding only its thread id and last checkpoint"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.EffectReplayRefused",
-      "an error case holding only its operation and reason"
-    ),
-    GrowthExempt("org.llm4s.agent.graph.GraphError.ForeignExecution", "an error case holding only its graph id"),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.IncompleteRun",
-      "an error case holding only its thread id and checkpoint id"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.InvalidCommit",
-      "an error case holding only its thread id and reason"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.InvalidGraph",
-      "an error case holding only its graph id and problems"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.InvalidResume",
-      "an error case holding only its graph id and problems"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.InvalidRoute",
-      "an error case holding only its node id, task id and reason"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.MiddlewareFailed",
-      "an error case holding only its middleware and cause"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.NodeFailed",
-      "an error case holding only its node id, task id and cause"
-    ),
-    GrowthExempt("org.llm4s.agent.graph.GraphError.NotSuspended", "an error case holding only its thread id"),
-    GrowthExempt("org.llm4s.agent.graph.GraphError.NothingToRecover", "an error case holding only its thread id"),
-    GrowthExempt("org.llm4s.agent.graph.GraphError.OutputInvalid", "an error case holding only its errors"),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.PendingInterrupts",
-      "an error case holding only its thread id and interrupts"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.ReplayUnavailable",
-      "an error case holding only its thread id and earliest seq"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.RestoreRejected",
-      "an error case holding only its graph id and problems"
-    ),
-    GrowthExempt("org.llm4s.agent.graph.GraphError.RunCrashed", "an error case holding only its thread id and cause"),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.StaleClaim",
-      "an error case holding only its thread id, token and current"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.StateUpdateFailed",
-      "an error case holding only its key id and cause"
-    ),
-    GrowthExempt("org.llm4s.agent.graph.GraphError.SuperstepLimitExceeded", "an error case holding only its limit"),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.TenantMismatch",
-      "an error case holding only its thread id and requested"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.ThreadDeleted",
-      "an error case holding only its thread id, after seq and first seq"
-    ),
-    GrowthExempt("org.llm4s.agent.graph.GraphError.ThreadDeleting", "an error case holding only its thread id"),
-    GrowthExempt("org.llm4s.agent.graph.GraphError.ThreadExists", "an error case holding only its thread id"),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.UndeclaredWrite",
-      "an error case holding only its node id, task id and key id"
-    ),
-    GrowthExempt("org.llm4s.agent.graph.GraphError.UnknownStateKey", "an error case holding only its key id"),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.UnsatisfiedJoin",
-      "an error case holding only its join id and missing"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.UnsupportedCheckpointFormat",
-      "an error case holding only its found and supported"
-    ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.UnsupportedStoreSchema",
-      "an error case holding only its store, found and supported"
-    ),
-    GrowthExempt("org.llm4s.agent.graph.GraphShape.StaticJoin", "exactly a static join's id, sources and target"),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphSnapshot.StaticArrivals",
-      "exactly a static join and the sources that have arrived at it"
-    ),
-    GrowthExempt("org.llm4s.agent.graph.Resumed", "exactly a question and its answer"),
-    GrowthExempt("org.llm4s.agent.graph.StoredCheckpoint", "exactly a checkpoint and the writes pending on it"),
-    GrowthExempt(
-      "org.llm4s.agent.graph.ThreadCursor",
-      "a keyset cursor: exactly the two columns the thread registry orders by"
-    ),
-    GrowthExempt("org.llm4s.agent.graph.ThreadPage", "exactly a page's threads and the cursor after them"),
-    GrowthExempt("org.llm4s.agent.graph.VersionedJson", "exactly a schema version and the JSON at that version"),
-    GrowthExempt(
-      "org.llm4s.agent.graph.middleware.GuardrailBlocked",
-      "an error case holding only the guardrail's name and its reason"
-    ),
-    GrowthExempt("org.llm4s.agent.graph.tool.ToolQuestion", "exactly the question's codec and the answer's"),
-    GrowthExempt("org.llm4s.agent.graph.tool.ToolResource", "exactly an operation and its target"),
-    GrowthExempt(
-      "org.llm4s.agent.graph.toolloop.PriorValue",
-      "exactly a key's value before the turn and the fingerprint of what the turn last wrote"
-    ),
-    GrowthExempt("org.llm4s.agent.graph.toolloop.StoredMessage", "exactly a message and its id"),
-    GrowthExempt(
-      "org.llm4s.agent.guardrails.patterns.PIIPatterns.PIIMatch",
-      "exactly the PII type, the matched text and its span"
-    ),
     GrowthExempt("org.llm4s.context.tokens.Token", "a single token id"),
     GrowthExempt(
       "org.llm4s.context.tokens.TokenizerAccuracy.Approximate",
@@ -682,15 +578,17 @@ object StabilityTiers {
     }
   }
 
-  /** The names of the `@Experimental` top-level types of these modules. */
-  private def experimentalNames(modules: Seq[File]): Set[String] =
+  /** The simple names of the `@Experimental` top-level types of these modules, each with its declaring packages. */
+  private def experimentalNames(modules: Seq[File]): Map[String, Set[String]] =
     modules
       .flatMap(m => sources(m / "src" / "main" / "scala"))
       .flatMap { file =>
         val lines = read(file)
-        topLevel(lines).collect { case (i, _, n) if annotated(lines, i, ExperimentalAnn) => n }
+        val pkg   = packageOf(lines)
+        topLevel(lines).collect { case (i, _, n) if annotated(lines, i, ExperimentalAnn) => n -> pkg }
       }
-      .toSet
+      .groupBy(_._1)
+      .map { case (n, found) => n -> found.map(_._2).toSet }
 
   /**
    * @param modules         the frozen modules' base directories (`modules/<name>`)
@@ -1000,6 +898,42 @@ object StabilityTiers {
         |""".stripMargin
     )
     IO.write(
+      pkg / "Shadow.scala",
+      """package fixture.shadow
+        |
+        |import org.llm4s.annotation.Experimental
+        |
+        |@Experimental
+        |final class Dial
+        |
+        |@Experimental
+        |final class Lever
+        |""".stripMargin
+    )
+    IO.write(
+      pkg / "Scoped.scala",
+      """package fixture.scoped
+        |
+        |import org.llm4s.annotation.Stable
+        |import fixture.shadow.Lever
+        |
+        |@Stable
+        |final class Dial private ()
+        |
+        |@Stable
+        |object Ids:
+        |  def make(): String = "x"
+        |
+        |opaque type Raw = fixture.shadow.Dial
+        |
+        |@Stable
+        |trait Panel:
+        |  def dial: Dial
+        |  def lever: Lever // leak
+        |  def other: fixture.shadow.Dial // leak
+        |""".stripMargin
+    )
+    IO.write(
       pkg / "Untiered.scala",
       """package fixture.untiered
         |
@@ -1030,7 +964,13 @@ object StabilityTiers {
         (reported -- expected).toSeq.sorted.map(l => s"$file:$l is not a violation but the check reported it")
     val foreign     = found.filter(isForeign)
     val unexercised = ThirdPartyDenied.map(_.pkg).filterNot(p => foreign.exists(_.problem.contains(s"($p is deny")))
-    compare("Api.scala", marked("Api.scala", "// leak"), found.filter(isLeak).map(_.line).toSet) ++
+    def leaksIn(file: String) = found.filter(isLeak).filter(_.file.getName == file).map(_.line).toSet
+    compare("Api.scala", marked("Api.scala", "// leak"), leaksIn("Api.scala")) ++
+      compare("Scoped.scala", marked("Scoped.scala", "// leak"), leaksIn("Scoped.scala")) ++
+      found
+        .filter(isLeak)
+        .filterNot(v => Set("Api.scala", "Scoped.scala")(v.file.getName))
+        .map(v => s"${v.file.getName}:${v.line} unexpected leak: ${v.problem}") ++
       compare("ThirdParty.scala", marked("ThirdParty.scala", "// third-party"), foreign.map(_.line).toSet) ++
       unexercised.map(p => s"deny-listed $p has no fixture in ThirdParty.scala that the check reports") ++
       compare(

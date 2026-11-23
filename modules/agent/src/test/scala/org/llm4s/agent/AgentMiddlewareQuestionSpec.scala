@@ -388,7 +388,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
   }
 
   "GuardrailReviewMiddleware" should "ask a reviewer about a refused answer instead of blocking, and allow it" in {
-    val tooLong: OutputGuardrail = new LengthCheck(1, 5)
+    val tooLong: OutputGuardrail = LengthCheck(1, 5)
     val client                   = ScriptedLLMClient.of(CompletionFixture.simple("far too long"))
     val agent =
       built(Agent.builder("assistant", client).withMiddleware(new GuardrailReviewMiddleware(Nil, Seq(tooLong))))
@@ -404,7 +404,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "use the reviewer's edit, or block as GuardrailMiddleware would" in {
-    val tooLong: OutputGuardrail = new LengthCheck(1, 5)
+    val tooLong: OutputGuardrail = LengthCheck(1, 5)
     def agentOver(client: ScriptedLLMClient) =
       built(Agent.builder("assistant", client).withMiddleware(new GuardrailReviewMiddleware(Nil, Seq(tooLong))))
 
@@ -428,7 +428,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "review a refused query before anything is stored, and pass text the guardrails accept" in {
-    val short  = new LengthCheck(1, 5)
+    val short  = LengthCheck(1, 5)
     val client = ScriptedLLMClient.of(CompletionFixture.simple("ok"), CompletionFixture.simple("fine"))
     val agent = built(Agent.builder("assistant", client).withMiddleware(new GuardrailReviewMiddleware(Seq(short), Nil)))
     val parked        = agent.run("a very long query").value
@@ -475,7 +475,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "run the guardrails again, and ask again, when the hook runs on different text" in {
-    val tooLong: OutputGuardrail = new LengthCheck(1, 5)
+    val tooLong: OutputGuardrail = LengthCheck(1, 5)
     val review                   = new GuardrailReviewMiddleware(Nil, Seq(tooLong))
     val verdict                  = upickle.default.writeJs[GuardrailVerdict](GuardrailVerdict.Allow)
     val asked = upickle.default.writeJs(GuardrailReview(GuardrailPhase.Output, tooLong.name, "r", "far too long"))
