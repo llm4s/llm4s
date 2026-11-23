@@ -154,7 +154,7 @@ object ReliableClientExample {
       result match {
         case Right(_) =>
           logger.info("Result: SUCCESS")
-        case Left(error: ServiceError) if error.provider == "circuit-breaker" =>
+        case Left(error: CircuitOpenError) =>
           logger.warn(s"Result: FAILED (Circuit Breaker Intercepted) - ${error.message}")
         case Left(error) =>
           logger.error(s"Result: FAILED (Base Error) - ${error.message}")

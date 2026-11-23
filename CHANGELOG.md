@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `ReliableClient` refuses a call on an open circuit with `CircuitOpenError`, not `ServiceError(503, "circuit-breaker")`; `RateLimitConfig.default` is disabled like `RateLimitConfig()`; `ReliabilityConfig.withoutDeadline` and the instance `disabled` are removed
+  ([migration](docs/reference/migration.md#an-open-circuit-is-a-circuitopenerror-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
 - `RegexSafetyManager.safeCompile` and `safeFind` return `Result` (a `ValidationError`), not `Either[String, _]`; `safeFind`'s `maxSteps`, `safeMatches`, `compileLiteralCaseInsensitive`, `replaceAllLiteral`, `replaceFirstLiteral` and `RegexComplexityException` are removed
   ([migration](docs/reference/migration.md#regexsafetymanager-returns-result-2825)) [#2825](https://github.com/llm4s/llm4s/issues/2825).
 - `SecretPatterns` (`SecretType`, `SecretMatch`) moved from `org.llm4s.util` in `llm4s-core` to `org.llm4s.agent.guardrails.patterns` in `llm4s-agent`; `redactAllWithPlaceholder` and `SecretMatch`'s setters are removed, and `SecretType.PrivateKeyPem` matches the whole key
@@ -118,6 +120,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
+- **Fixed** `ReliableClient`'s fast-fail on an open circuit was a retryable 503, so an outer retry repeated it, and several callers arriving after the recovery time all probed the service; it is a `CircuitOpenError` carrying `retryAfter` that no retry rule repeats, and exactly one caller probes
+  ([migration](docs/reference/migration.md#an-open-circuit-is-a-circuitopenerror-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- **Added** `ReliabilityConfig.validate` (and `CircuitBreakerConfig.validate`, `RateLimitConfig.validate`): a `failureThreshold` or `burstCapacity` below 1 or a negative `requestsPerMinute` is a `ValidationError`, which a `ReliableClient` returns from every call [#2797](https://github.com/llm4s/llm4s/issues/2797).
 - **Fixed** `RegexSafetyManager.safeCompile` refused every quantified alternation, so `RegexValidator("(foo|bar)+")` failed every value and a `FileBackend`'s or the workspace's regex search for `(jpg|png)*` was refused or run as a literal; only overlapping alternatives such as `(a|ab)*` are refused now
   ([migration](docs/reference/migration.md#regexsafetymanager-returns-result-2825)) [#2825](https://github.com/llm4s/llm4s/issues/2825).
 - **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in

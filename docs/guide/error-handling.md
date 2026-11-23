@@ -121,6 +121,7 @@ is not recoverable, since nothing says a retry can help.
 | `APIError` | yes | Only `llm4s-image`'s vision clients (OpenAI, Anthropic, Gemini), through `LLMError.apiCallFailed`, when the vision API call fails or returns no text; it carries the provider and, optionally, a status code. Image generation has its own errors (see below). |
 | `ExecutionError` | yes | Only `ErrorRecovery.recoverWithBackoff`, when it runs out of attempts ([section 9](#9-recovering-from-failures)). Tool and MCP failures are other types; see the note below. |
 | `SystemError` | yes | Not raised by the library; available for your own code, for an unexpected failure that may be transient. |
+| `CircuitOpenError` | yes | A `ReliableClient` refused the call without making it: its circuit is open, or half-open with a probe in flight. `retryAfter` is the time left before a probe is let through. |
 | `OptimisticLockFailure` | yes | Only `llm4s-memory-postgres`'s `PostgresMemoryStore`, when another writer updated the same memory record first; re-read it and try again. |
 | `CancelledError` | no | The thread was interrupted. Interruption is how llm4s cancels work, and a cancelled call is never retried. |
 | `ProcessingError` | no | A storage, parsing or processing step fails: a vector-store, keyword-index or memory-store operation, RAG document loading, extraction or permissions, knowledge-graph storage, extraction or queries, speech audio processing, image encoding or saving. |
@@ -147,9 +148,10 @@ going to fix itself. When it matters, look at `httpStatus`: `error.isRecoverable
 **Recoverable is not the same as retried automatically.** Every retry in the library -
 `recoverWithBackoff`, `ReliableClient`'s `RetryPolicy`, `LLMClientRetry` and the agent graph's default node
 retry - uses one rule, `RetryPolicy.isRetryable`: it resends the identical request with nobody in the loop,
-so it retries a recoverable error unless repeating the request cannot help. That leaves out two recoverable
+so it retries a recoverable error unless repeating the request cannot help. That leaves out three recoverable
 cases: a `ServiceError` or an `APIError` with a client-error status (any 4xx but 408 and 429), because the
-request itself is wrong, and an `OptimisticLockFailure`, because you must re-read the record first. An
+request itself is wrong, an `OptimisticLockFailure`, because you must re-read the record first, and a
+`CircuitOpenError`, because repeating the call at once is what an open circuit prevents. An
 `APIError` with no status is retried. A non-recoverable error is never retried, and neither is an error that
 carries no marker.
 
@@ -358,7 +360,8 @@ exponential:
 
 Every other error comes back unchanged straight away, whichever attempt it happens on: a
 `ValidationError` on the last attempt, after a retried timeout, is still a `ValidationError`. That
-includes a `ServiceError` or an `APIError` with any other status and an `OptimisticLockFailure`. A
+includes a `ServiceError` or an `APIError` with any other status, an `OptimisticLockFailure` and a
+`CircuitOpenError`. A
 `CancelledError` is never retried or wrapped, and an interrupt during a wait returns one.
 
 When the last attempt fails with a retried error, you get an `ExecutionError` whose
@@ -414,7 +417,8 @@ See the [Testing Guide](../getting-started/testing-guide).
 - Match on specific types first, then on `RecoverableError`, then a catch-all. `LLMError.isRecoverable`
   asks the same question of any error.
 - Retry only what is recoverable, with a limit and a delay; never retry a `CancelledError`. The
-  library's own retries also leave out a client-error status and an `OptimisticLockFailure`.
+  library's own retries also leave out a client-error status, an `OptimisticLockFailure` and a
+  `CircuitOpenError`.
 - Log `error.formatted`, show `error.message`, and never put an API key in either.
 
 ## See also

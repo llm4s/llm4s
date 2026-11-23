@@ -51,7 +51,40 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
 [`SecretPatterns` is in `llm4s-agent`](#secretpatterns-is-in-llm4s-agent-2824),
-and [`RegexSafetyManager` returns `Result`](#regexsafetymanager-returns-result-2825).
+[`RegexSafetyManager` returns `Result`](#regexsafetymanager-returns-result-2825),
+and [an open circuit is a `CircuitOpenError`](#an-open-circuit-is-a-circuitopenerror-2797).
+
+## An open circuit is a `CircuitOpenError` (#2797)
+
+While its circuit is open, or half-open with a probe in flight, `ReliableClient` returned
+`ServiceError(503, "circuit-breaker", ...)`. A 503 is retryable, so an outer retry (`LLMClientRetry`, an agent
+node's retry policy, a second `ReliableClient`) repeated the fast-fail. It now returns
+`org.llm4s.error.CircuitOpenError`, which `RetryPolicy.isRetryable` does not retry:
+
+```scala
+client.complete(conversation) match
+  case Left(e: CircuitOpenError) => fallBack(after = e.retryAfter) // was: Left(e: ServiceError) if e.provider == "circuit-breaker"
+  case other                     => other
+```
+
+`provider` is the name the `ReliableClient` was given, `retryAfter` the time left before a probe is let through
+(zero when `probing`), and `ErrorKind.fromLLMError` still reports it as `ServiceError`. Code that sent a retryable
+error back to a queue, as the Kafka sample does, adds `CircuitOpenError` to that branch, or it dead-letters during
+an outage.
+
+Also in `org.llm4s.reliability`:
+
+- **`RateLimitConfig.default` is `RateLimitConfig()`**, which is disabled, like every other `default`. It was the
+  one enabled value: write `RateLimitConfig(enabled = true)` or `RateLimitConfig.default.withEnabled(true)`.
+- **Removed:** `ReliabilityConfig.withoutDeadline` (`withDeadline(None)`) and the instance method
+  `config.disabled` (`config.withEnabled(false)`). `ReliabilityConfig.disabled`, the preset, is unchanged.
+- **A configuration a client cannot run with is an error, not a silent oddity.** `ReliabilityConfig.validate`
+  (and `CircuitBreakerConfig.validate`, `RateLimitConfig.validate`) return a `ValidationError` for a
+  `failureThreshold` or `successThreshold` below 1, a negative `recoveryTimeout`, a `burstCapacity` below 1 or a
+  negative `requestsPerMinute` on an enabled rate limit. A `ReliableClient` built with one returns that error
+  from every call and from `validate()`.
+- **Only a probe's success closes a half-open circuit.** A call that began before the circuit opened and
+  succeeds after it went half-open no longer counts towards `successThreshold`.
 
 ## `RegexSafetyManager` returns `Result` (#2825)
 

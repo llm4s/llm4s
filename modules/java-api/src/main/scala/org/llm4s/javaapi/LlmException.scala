@@ -92,6 +92,7 @@ private[javaapi] object LlmErrorKinds {
     classOf[ExecutionError]              -> LlmErrorKind.OTHER,
     classOf[NotFoundError]               -> LlmErrorKind.OTHER,
     classOf[OptimisticLockFailure]       -> LlmErrorKind.OTHER,
+    classOf[CircuitOpenError]            -> LlmErrorKind.OTHER,
     classOf[ProcessingError]             -> LlmErrorKind.OTHER,
     classOf[SimpleError]                 -> LlmErrorKind.OTHER,
     classOf[SystemError]                 -> LlmErrorKind.OTHER,

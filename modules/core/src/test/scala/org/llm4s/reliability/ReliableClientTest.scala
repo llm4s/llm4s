@@ -207,7 +207,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     val result          = reliableClient.complete(testConversation)
 
     result match {
-      case Left(e: ServiceError) if e.httpStatus == 503 && e.provider == "circuit-breaker" => succeed
+      case Left(e: org.llm4s.error.CircuitOpenError) if e.provider == "test" && !e.probing => succeed
       case _ => fail("Expected circuit breaker error")
     }
 
@@ -414,7 +414,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     val config = ReliabilityConfig.default
       .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
       .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1))
-      .withoutDeadline
+      .withDeadline(None)
     val client = new ReliableClient(mockClient, "test-provider", config)
     val result = client.complete(testConversation)
     val flag   = Thread.interrupted()

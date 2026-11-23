@@ -64,6 +64,7 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
       recoverable = false,
       retried = false
     ),
+    Row("CircuitOpenError", CircuitOpenError.open("anthropic", 30.seconds), recoverable = true, retried = false),
     Row("NetworkError", NetworkError("refused", None, "https://llm.example/v1"), recoverable = true, retried = true),
     Row("NotFoundError", NotFoundError("missing", "key-1"), recoverable = false, retried = false),
     Row("OptimisticLockFailure", OptimisticLockFailure("conflict", "mem-1", 3L), recoverable = true, retried = false),
@@ -94,6 +95,8 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
       Some("a client-error response means the request itself is wrong: repeating it unchanged cannot succeed")
     case _: OptimisticLockFailure =>
       Some("the caller must re-read the record first; the same update fails again until it does")
+    case _: CircuitOpenError =>
+      Some("a circuit breaker refused the call; repeating it at once is what the open circuit prevents")
     case _ => None
   }
 
