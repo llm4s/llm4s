@@ -18,16 +18,39 @@ import scala.jdk.CollectionConverters.*
  * an hour. These pin that a logged payload is cut to `PayloadLog.MaxChars` and has its secrets redacted.
  */
 class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
+  import PayloadLogSpec.exchangeTimeout
 
   "PayloadLog.preview" should "pass a short payload through unchanged" in {
     PayloadLog.preview("""{"jsonrpc":"2.0","id":"1"}""") shouldBe """{"jsonrpc":"2.0","id":"1"}"""
   }
 
   it should "cut a long payload to MaxChars and say how much it omitted" in {
-    val preview = PayloadLog.preview("x" * (1024 * 1024))
+    val preview = PayloadLog.preview("x" * PayloadLog.RedactWholeLimit)
     preview should startWith("x" * PayloadLog.MaxChars)
     preview.length should be < PayloadLog.MaxChars + 100
-    preview should include(s"${1024 * 1024 - PayloadLog.MaxChars} chars omitted")
+    preview should include(s"${PayloadLog.RedactWholeLimit - PayloadLog.MaxChars} chars omitted")
+  }
+
+  // Redacting a payload whole costs about a second per megabyte, on the thread whose exchange is running against
+  // its deadline. Past RedactWholeLimit only a prefix is redacted, which the suffix says: no timing is asserted.
+  it should "preview a payload over RedactWholeLimit from a redacted prefix of it, not from the whole" in {
+    val line = """the quick \"brown\" fox's jumps, over (lazy) dogs\n"""
+    val head =
+      """{"jsonrpc":"2.0","id":"9","result":{"api_key":"hunter2-SENTINEL","content":[{"type":"text","text":""""
+    val payload = head + line * (1024 * 1024 / line.length) + """"}],"token":"late-SENTINEL"}}"""
+    val preview = PayloadLog.preview(payload)
+
+    preview should startWith("""{"jsonrpc":"2.0","id":"9","result":{"api_key":"[REDACTED]","content":""")
+    preview should include(s"original length: ${payload.length}, redacted from its first ")
+    preview.length should be < PayloadLog.MaxChars + 200
+    (preview should not).include("SENTINEL")
+  }
+
+  it should "show nothing of a payload over RedactWholeLimit that has no prefix it can redact safely" in {
+    val preview = PayloadLog.preview("x" * (1024 * 1024))
+    (preview should not).include("xxxx")
+    preview should include(s"original length: ${1024 * 1024}")
+    preview.length should be < 200
   }
 
   it should "redact a secret in the payload" in {
@@ -90,12 +113,13 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
   Seq[(String, Llm4sHttpClient => MCPTransportImpl, Class[?])](
     (
       "StreamableHTTPTransportImpl",
-      http => new StreamableHTTPTransportImpl("http://localhost/mcp", "sse-log", 5.seconds, WholeBodyReplies(http)),
+      http =>
+        new StreamableHTTPTransportImpl("http://localhost/mcp", "sse-log", exchangeTimeout, WholeBodyReplies(http)),
       classOf[StreamableHTTPTransportImpl]
     ),
     (
       "SSETransportImpl",
-      http => new SSETransportImpl("http://localhost/mcp", "sse-log", 5.seconds, http),
+      http => new SSETransportImpl("http://localhost/mcp", "sse-log", exchangeTimeout, http),
       classOf[SSETransportImpl]
     )
   ).foreach { case (transportName, newTransport, source) =>
@@ -136,4 +160,15 @@ class PayloadLogSpec extends AnyFlatSpec with Matchers with MockFactory {
       }
     (result, appender.list.asScala.toSeq.map(_.getFormattedMessage))
   }
+}
+
+object PayloadLogSpec {
+
+  /**
+   * The HTTP transports' timeout. The reply is a stub's, so nothing waits on a server and the timeout is never what
+   * is tested. It is the deadline of the whole exchange all the same, and logging the skipped event counts against
+   * it: at 5 seconds, a Windows runner that took over 5 seconds to redact the event whole timed the request out.
+   * Generous, so that no runner's speed decides the result.
+   */
+  private val exchangeTimeout: FiniteDuration = 10.minutes
 }

@@ -159,6 +159,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `file_info` describes the filesystem root instead of throwing, and its `sizeHuman` is `1.5 KB` under every
   default locale [#2670](https://github.com/llm4s/llm4s/issues/2670), [#2669](https://github.com/llm4s/llm4s/issues/2669).
 
+### MCP
+
+- **Fixed** DEBUG logging of an MCP payload over 128 KiB no longer redacts it whole (about a second per megabyte,
+  counted against the request's timeout): the preview is redacted from a prefix, or omitted where none is safe [#2774](https://github.com/llm4s/llm4s/pull/2774).
+
 ### Embeddings & RAG
 
 - **Fixed** `RAGConfig.withTracing` traces the answer, LLM-rerank and `LLMQueryRewriter` calls, tagged `rag.answer`,
