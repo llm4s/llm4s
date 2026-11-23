@@ -179,14 +179,15 @@ final private[rag] class QueryMeter {
 /** Tracing for the LLM calls a `RAG` makes. */
 private[rag] object RAGTracing {
 
-  val Answer  = "rag.answer"
-  val Rerank  = "rag.rerank"
-  val Rewrite = "rag.rewrite"
+  val Answer   = "rag.answer"
+  val Rerank   = "rag.rerank"
+  val Rewrite  = "rag.rewrite"
+  val Condense = "rag.condense"
 
   /**
    * `client`, traced: each call as `TracingLLMClient` traces it (a `CompletionReceived` or an `ErrorOccurred`), and
-   * its usage as a `TokenUsageRecorded` tagged with `operation`, so a backend can tell the answer from the rerank
-   * and rewrite calls.
+   * its usage as a `TokenUsageRecorded` tagged with `operation`, so a backend can tell the answer from the rerank,
+   * rewrite and condense calls.
    */
   def llm(client: LLMClient, tracing: Tracing, operation: String): LLMClient =
     new OperationTracedClient(client, tracing, operation)

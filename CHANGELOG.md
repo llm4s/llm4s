@@ -167,7 +167,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RAGAnswerResult` [#2717](https://github.com/llm4s/llm4s/issues/2717).
 - **Added** an optional `history: Seq[Message]` on `queryWithAnswer`, `queryWithPermissionsAndAnswer` and their
   streaming forms, sent before the context and question, and `RAGConfig.withQuestionCondenser` to retrieve with a
-  standalone question built from it [#2733](https://github.com/llm4s/llm4s/issues/2733).
+  standalone question built from it, by a function or the built-in `QuestionCondenser.llm` (traced `rag.condense`)
+  [#2733](https://github.com/llm4s/llm4s/issues/2733), [#2767](https://github.com/llm4s/llm4s/issues/2767).
 - **Fixed** a `RAG` with a `SearchIndex` refuses plain ingest and sync (a `ConfigurationError`) instead of writing rows
   no permission query finds, and plain `query`, `queryWithAnswer(Streaming)`, GraphRAG's Hybrid mode and `clear`
   instead of searching or deleting every collection unfiltered; `deleteDocument` deletes from every collection;
