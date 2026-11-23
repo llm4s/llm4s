@@ -67,6 +67,11 @@ import org.llm4s.util.Redaction
  * @param environment Environment name (e.g., "production", "staging")
  * @param release Release/version identifier
  * @param version API version
+ * @param publicTraces whether each trace is created `public`. Langfuse serves a public trace to anyone holding its
+ *                     URL, signed in or not, and an agent run's trace carries the turn's messages, so this is false
+ *                     unless `llm4s.tracing.langfuse.public` is `true`. A trace's `userId` is the run's
+ *                     (`TraceEvent.AgentRunEnded.userId`, which the agent takes from `RunConfig.principal`); a
+ *                     trace of a run without one names no user (#2828)
  *
  * @see [[ConsoleTracing]] for local development
  * @see [[NoOpTracing]] for disabled tracing
@@ -80,7 +85,8 @@ class LangfuseTracing(
   release: String,
   version: String,
   httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
-  restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
+  restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt(),
+  publicTraces: Boolean = false
 ) extends Tracing {
 
   private val logger         = LoggerFactory.getLogger(getClass)
@@ -238,16 +244,16 @@ class LangfuseTracing(
           "environment" -> environment,
           "release"     -> release,
           "version"     -> version,
-          "public"      -> true,
+          "public"      -> publicTraces,
           "name"        -> "LLM4S Agent Run",
           "input"       -> input,
           "output"      -> output,
-          "userId"      -> "llm4s-user",
           "sessionId"   -> run.threadId,
           "metadata"    -> metadata,
           "tags"        -> ujson.Arr("llm4s", "agent", "conversation")
         )
       )
+    if (!isChild) run.userId.foreach(id => events.last("body")("userId") = id)
 
     // a top-level run's parent, if any, is its submitter's span, which this trace does not hold
     val runBody = LangfuseTracing.placed(
@@ -312,11 +318,10 @@ class LangfuseTracing(
             "environment" -> environment,
             "release"     -> release,
             "version"     -> version,
-            "public"      -> true,
+            "public"      -> publicTraces,
             "name"        -> "LLM4S Agent Run",
             "input"       -> e.query,
             "output"      -> s"Tools: ${e.tools.mkString(", ")}",
-            "userId"      -> "llm4s-user",
             "sessionId"   -> s"session-${System.currentTimeMillis()}",
             "metadata" -> ujson.Obj(
               "framework" -> "llm4s",
@@ -678,16 +683,16 @@ class LangfuseTracing(
         "environment" -> environment,
         "release"     -> release,
         "version"     -> version,
-        "public"      -> true,
+        "public"      -> publicTraces,
         "name"        -> "LLM4S Agent Run",
         "input"       -> ujson.Str(firstUserMessage.map(_.content).getOrElse("")),
         "output"      -> ujson.Str(lastAssistantMessage.map(_.content).getOrElse("")),
-        "userId"      -> "llm4s-user",
         "sessionId"   -> sessionId,
         "metadata"    -> LangfuseTracing.runMetadata(run),
         "tags"        -> ujson.Arr("llm4s", "agent", "conversation")
       )
     )
+    run.userId.foreach(id => mainTrace("body")("userId") = id)
     batchEvents += mainTrace
 
     // 2. Create child spans for each message
@@ -819,13 +824,18 @@ object LangfuseTracing {
    * @param cfg Langfuse configuration with URL, keys, and metadata
    * @return Configured LangfuseTracing instance
    */
-  def from(cfg: org.llm4s.llmconnect.config.LangfuseConfig): LangfuseTracing =
+  def from(
+    cfg: org.llm4s.llmconnect.config.LangfuseConfig,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
+  ): LangfuseTracing =
     new LangfuseTracing(
       langfuseUrl = cfg.url,
       publicKey = cfg.publicKey.getOrElse(Secret("")),
       secretKey = cfg.secretKey.getOrElse(Secret("")),
       environment = cfg.env,
       release = cfg.release,
-      version = cfg.version
+      version = cfg.version,
+      httpClient = httpClient,
+      publicTraces = cfg.publicTraces
     )
 }

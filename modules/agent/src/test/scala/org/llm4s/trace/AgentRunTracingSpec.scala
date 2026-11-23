@@ -9,6 +9,8 @@ import org.llm4s.agent.graph.{
   EventRecord,
   GraphRuntime,
   InMemoryCheckpointer,
+  Principal,
+  RunConfig,
   RunEvent,
   StoredCheckpoint,
   ThreadId
@@ -120,6 +122,17 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     tracing.custom.map(_.data("runId").str).toSet shouldBe Set(result.runId.value)
     tracing.custom.map(_.data("threadId").str).toSet shouldBe Set(result.threadId.value)
     tracing.custom.map(_.data("seq").num) shouldBe sorted
+  }
+
+  it should "name the run's principal as the ended run's user, and no user for a run without one (#2828)" in {
+    val tracing = new Recording()
+    val agent   = traced(new Scripted(Right(answer("hello")), Right(answer("again"))), tracing)
+    ok(agent.run("hi", RunConfig().withPrincipal(Principal("alice"))))
+    ok(agent.run("hi"))
+
+    eventually {
+      tracing.all.collect { case e: TraceEvent.AgentRunEnded => e.userId } shouldBe Vector(Some("alice"), None)
+    }
   }
 
   it should "record the client's provider on its model calls and the run (#2275)" in {

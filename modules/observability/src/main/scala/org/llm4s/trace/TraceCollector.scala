@@ -249,38 +249,28 @@ class TraceCollectorTracing[F[_]](
           )
         )
 
-      case TraceEvent.AgentRunEnded(
-            threadId,
-            runId,
-            agent,
-            status,
-            messages,
-            usage,
-            ts,
-            parentThread,
-            parentRun,
-            _,
-            _
-          ) =>
+      // by field, never by position: the event grows
+      case run: TraceEvent.AgentRunEnded =>
         Span(
           spanId = spanId,
           traceId = traceId,
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.AgentCall,
-          startTime = ts,
-          endTime = Some(ts),
+          startTime = run.timestamp,
+          endTime = Some(run.timestamp),
           status = SpanStatus.Ok,
           attributes = Map(
-            "thread_id"     -> SpanValue.StringValue(threadId),
-            "run_id"        -> SpanValue.StringValue(runId),
-            "agent"         -> SpanValue.StringValue(agent),
-            "status"        -> SpanValue.StringValue(status),
-            "message_count" -> SpanValue.LongValue(messages.size.toLong),
-            "input_tokens"  -> SpanValue.LongValue(usage.inputTokens),
-            "output_tokens" -> SpanValue.LongValue(usage.outputTokens)
-          ) ++ parentThread.map(id => "parent_thread_id" -> SpanValue.StringValue(id)) ++
-            parentRun.map(id => "parent_run_id" -> SpanValue.StringValue(id))
+            "thread_id"     -> SpanValue.StringValue(run.threadId),
+            "run_id"        -> SpanValue.StringValue(run.runId),
+            "agent"         -> SpanValue.StringValue(run.agent),
+            "status"        -> SpanValue.StringValue(run.status),
+            "message_count" -> SpanValue.LongValue(run.messages.size.toLong),
+            "input_tokens"  -> SpanValue.LongValue(run.usage.inputTokens),
+            "output_tokens" -> SpanValue.LongValue(run.usage.outputTokens)
+          ) ++ run.parentThreadId.map(id => "parent_thread_id" -> SpanValue.StringValue(id)) ++
+            run.parentRunId.map(id => "parent_run_id" -> SpanValue.StringValue(id)) ++
+            run.userId.map(id => "user_id" -> SpanValue.StringValue(id))
         )
 
       case TraceEvent.CustomEvent(name, data, ts, _) =>

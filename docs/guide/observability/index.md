@@ -471,8 +471,9 @@ An agent built with `Agent.builder(...).withTracing(tracing)` sends, for each ru
 - one `TraceEvent.AgentRunEnded` when the run ends: thread id, run id, the active agent, a status
   (`completed`, `suspended`, `step_limit_reached`, `blocked:<guardrail>`, `cancelled`, `timed_out`,
   `failed`), this turn's messages (from its user message on; empty when blocked, cancelled, timed
-  out or failed) and the run's own `UsageSummary` - the model calls this run made, summed from its
-  `agent.model_call_completed` events, not the thread's total, so per-run figures add up.
+  out or failed), the run's own `UsageSummary` - the model calls this run made, summed from its
+  `agent.model_call_completed` events, not the thread's total, so per-run figures add up - and
+  `userId`, the run's `RunConfig.principal` (`None` when the run names none).
 
 A run that crashes without a terminal event is traced as `ErrorOccurred`, with a WARN, and has no
 `AgentRunEnded`; it is traced as soon as the run's last event has been, with no fixed delay.
@@ -496,7 +497,7 @@ no context continues the trace its work started in, which the thread's checkpoin
 
 | Backend | What `AgentRunEnded` shows |
 |---------|----------------------------|
-| Langfuse | One trace per top-level run (trace id = the run's 32-hex trace id, the OpenTelemetry one; `run_id` in its metadata), grouped in a session per thread (session id = thread id); input is the first user message, output the last assistant message; metadata holds the agent, status and usage. The run is an `invoke_agent <agent>` observation over its model calls (generations `chat <model>`), tool calls (spans `execute_tool <tool>`), other events and one span per message; a subagent's run creates no trace and nests under the `execute_tool task` that started it |
+| Langfuse | One trace per top-level run (trace id = the run's 32-hex trace id, the OpenTelemetry one; `run_id` in its metadata), grouped in a session per thread (session id = thread id); input is the first user message, output the last assistant message; metadata holds the agent, status and usage; `userId` is the run's `userId`, and is not sent for a run without one; `public` is `false` unless `llm4s.tracing.langfuse.public = true`. The run is an `invoke_agent <agent>` observation over its model calls (generations `chat <model>`), tool calls (spans `execute_tool <tool>`), other events and one span per message; a subagent's run creates no trace and nests under the `execute_tool task` that started it |
 | OpenTelemetry | An `INTERNAL` span `invoke_agent <agent>` with `gen_ai.operation.name`, `gen_ai.agent.name`, `gen_ai.conversation.id`, thread, run, status (`ERROR` when failed, cancelled or timed out), message count, `gen_ai.usage.*` totals and, for a subagent's run, `llm4s.parent.thread_id` / `llm4s.parent.run_id`; it is the parent of the run's `chat <model>` (`CLIENT`, per-call `gen_ai.usage.*`) and `execute_tool <tool>` (`INTERNAL`) spans and its other events, and a subagent's `invoke_agent` is under its `execute_tool task`. No attribute carries message content |
 | `TraceCollector` | A `SpanKind.AgentCall` span with the same attributes, token totals as `input_tokens`/`output_tokens`, and no cost; like every event of the run it is stored in the run's own trace, with its span id, parent and start |
 | Console | A multi-line "Agent Run Ended" block: agent, status, thread, run, message count, token totals |
@@ -520,6 +521,19 @@ Both keys are required. With either missing, `Tracing.fromSettings` returns a
 `ConfigurationError` naming what is unset - e.g. `llm4s.tracing.langfuse.publicKey
 (LANGFUSE_PUBLIC_KEY)` - and `Tracing.create` logs that error and falls back to `NoOpTracing`.
 Without `llm4s-observability` on the classpath, the error names the artifact to add instead.
+**Traces are private.** Every trace is created with `public: false`, so only members of your Langfuse project can
+open it. Langfuse serves a *public* trace to anyone holding its URL, without signing in, and an agent run's trace
+holds the turn's messages; to share traces by link all the same, set it in `application.conf`:
+
+```hocon
+llm4s.tracing.langfuse.public = true
+```
+
+Only `true` turns it on. A trace's user is the run's `RunConfig.principal`
+(`agent.run(query, RunConfig().withPrincipal(Principal("user-42")))`), which Langfuse's per-user views and costs
+group by; a run without a principal sends no `userId`. Send an id you are content for Langfuse to hold - an opaque
+one, not an email address.
+
 To read the Langfuse settings whatever `TRACING_MODE` selects (for example to combine Langfuse with
 another tracer), use `LangfuseConfigLoader.default()` from `org.llm4s.config`.
 

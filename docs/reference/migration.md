@@ -49,7 +49,24 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
-and [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778).
+[`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
+and [Langfuse traces are private and name the run's user](#langfuse-traces-are-private-and-name-the-runs-user-2828).
+
+## Langfuse traces are private and name the run's user (#2828)
+
+`LangfuseTracing` created every trace with `public: true` and `userId: "llm4s-user"`. Langfuse serves a public trace
+to anyone holding its URL, without signing in, and an agent run's trace holds the turn's messages. Traces are now
+created `public: false`, and nothing is hard-coded as the user.
+
+- **Shared links stop working for new traces.** If you relied on opening a trace's URL without signing in, set
+  `llm4s.tracing.langfuse.public = true` in `application.conf` (`LangfuseConfig.publicTraces`, or
+  `publicTraces = true` on `new LangfuseTracing(...)`). Traces already sent stay as they are: make one private in
+  Langfuse's UI, or delete it.
+- **`userId` is the run's.** The agent's tracing sets the new `TraceEvent.AgentRunEnded.userId` from
+  `RunConfig.principal`, and Langfuse receives it as the trace's `userId`; a run without a principal sends none. A
+  dashboard filtered on the user `llm4s-user` matches nothing from this version on.
+- `AgentRunEnded` has a twelfth field, so a positional pattern on it no longer compiles: match `case e:
+  TraceEvent.AgentRunEnded` and read its fields. `LangfuseConfig`'s `toString` and equality include `publicTraces`.
 
 ## `llm4s-agent` types are tiered and growth-safe (#2778)
 
