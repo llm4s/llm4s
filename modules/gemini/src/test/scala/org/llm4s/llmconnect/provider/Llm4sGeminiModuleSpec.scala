@@ -209,6 +209,31 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
       assertModelCallContract(GeminiContractFixtures.replies)(geminiClientAt)
     }
 
+    "validate by looking its model up with the key (#2830)" in {
+      def geminiError(exchange: com.sun.net.httpserver.HttpExchange, status: Int, message: String): Unit =
+        sendJsonResponse(
+          exchange,
+          status,
+          ujson.Obj("error" -> ujson.Obj("code" -> status, "message" -> message, "status" -> "ERROR")).render()
+        )
+      assertValidates(sendJsonResponse(_, 200, """{"name":"models/test-model"}"""), geminiError)(geminiClientAt)
+
+      val seen = new java.util.concurrent.ConcurrentLinkedQueue[String]()
+      withServer("/") { exchange =>
+        seen.add(s"${exchange.getRequestMethod} ${exchange.getRequestURI.getPath}")
+        geminiError(exchange, 404, "models/nope is not found")
+      } { baseUrl =>
+        val client = geminiClientAt(baseUrl)
+        client.validate() should matchPattern {
+          case Left(error: org.llm4s.error.ServiceError) if error.httpStatus == 404 =>
+        }
+        client.close()
+      }
+      val model = section(GeminiProvider).model.asString
+      // under the API version the config adds to the base URL, as a completion's request is
+      seen.toArray.toSeq shouldBe Seq(s"GET /v1beta/models/$model")
+    }
+
     "return CancelledError when a call is interrupted" in {
       withServer("/")(holdOpen)(baseUrl => assertCancelsWhenInterrupted(geminiClientAt(baseUrl)))
     }
@@ -237,6 +262,10 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
 
     "report how each reply ended, on complete and on a stream alike, and really stream (RFC 0009)" in {
       assertModelCallContract(GeminiContractFixtures.replies)(vertexClientAt)
+    }
+
+    "say that validate() checks nothing: it has no validation request (#2830)" in {
+      assertValidationUnsupported(vertexClientAt("http://localhost:1"))
     }
 
     "return CancelledError when a call is interrupted" in {

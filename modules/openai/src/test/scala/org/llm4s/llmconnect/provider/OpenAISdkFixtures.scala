@@ -38,6 +38,8 @@ object OpenAISdkFixtures {
   ): OpenAIClientTransport =
     new OpenAIClientTransport {
       override def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion = complete(params)
+      override def retrieveModel(model: String): Unit = throw new UnsupportedOperationException("not used in this test")
+      override def listModels(): Unit                 = throw new UnsupportedOperationException("not used in this test")
       override def createChatCompletionStream(params: ChatCompletionCreateParams): StreamResponse[ChatCompletionChunk] =
         streaming(params)
     }

@@ -412,11 +412,19 @@ written in code.
 
 ### Validate on Startup
 
-Call `client.validate()` during application startup to fail fast on misconfiguration:
+Call `client.validate()` during application startup to fail fast on misconfiguration. It sends the provider one
+cheap authenticated request (a model lookup or listing, never a completion). A provider with no such request returns
+`Left(ValidationUnsupportedError)`, which means nothing was checked, not that the client is broken; the
+[observability guide](guide/observability/#startup-validation) lists what each provider checks.
 
 ```scala
+import org.llm4s.error.ValidationUnsupportedError
+
 val client = LLMConnect.getClient(config).flatMap { c =>
-  c.validate().map(_ => c)
+  c.validate() match {
+    case Left(_: ValidationUnsupportedError) => Right(c) // this provider has no validation request
+    case checked                             => checked.map(_ => c)
+  }
 }
 
 client match {
@@ -621,8 +629,14 @@ Expose health endpoints that verify LLM connectivity:
 ```scala
 // Integrate with your framework's health check mechanism
 def isLLMHealthy(): Boolean =
-  client.validate().isRight
+  client.validate() match {
+    case Right(())                           => true
+    case Left(_: ValidationUnsupportedError) => true // nothing to check with
+    case Left(_)                             => false
+  }
 ```
+
+`validate()` is a network call: cache its result for a few seconds rather than calling the provider on every probe.
 
 ---
 

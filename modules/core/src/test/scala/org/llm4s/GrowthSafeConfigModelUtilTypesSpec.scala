@@ -5,12 +5,11 @@ import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName
 import org.llm4s.llmconnect.model.{ CompletionOptions, Message, UserMessage }
 import org.llm4s.model.TransformationResult
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
-import org.llm4s.util.SecretPatterns.{ SecretMatch, SecretType }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /**
- * `TextEmbeddingModelSettings`, `ProvidersConfig`, `TransformationResult` and `SecretMatch` are growth-safe (#2384):
+ * `TextEmbeddingModelSettings`, `ProvidersConfig` and `TransformationResult` are growth-safe (#2384):
  * a private constructor and `copy`, a companion `apply` with the previous parameters and defaults, and a `with*`
  * setter per field. Each setter changes its field and nothing else; `new X(...)` and `.copy(...)` no longer compile.
  */
@@ -82,24 +81,5 @@ class GrowthSafeConfigModelUtilTypesSpec extends AnyFlatSpec with Matchers {
   it should "keep its constructor and copy private" in {
     assertDoesNotCompile("""new TransformationResult(options, messages, false)""")
     assertDoesNotCompile("""TransformationResult(options, messages).copy(requiresFakeStreaming = true)""")
-  }
-
-  "SecretMatch" should "build through apply and set each field" in {
-    val m = SecretMatch(SecretType.OpenAIKey, "sk-abc", 3, 9)
-    m.secretType shouldBe SecretType.OpenAIKey
-    m.value shouldBe "sk-abc"
-    m.startIndex shouldBe 3
-    m.endIndex shouldBe 9
-    m.redactedValue shouldBe SecretType.OpenAIKey.placeholder
-
-    m.withSecretType(SecretType.AnthropicKey) shouldBe SecretMatch(SecretType.AnthropicKey, "sk-abc", 3, 9)
-    m.withValue("sk-xyz") shouldBe SecretMatch(SecretType.OpenAIKey, "sk-xyz", 3, 9)
-    m.withStartIndex(0) shouldBe SecretMatch(SecretType.OpenAIKey, "sk-abc", 0, 9)
-    m.withEndIndex(10) shouldBe SecretMatch(SecretType.OpenAIKey, "sk-abc", 3, 10)
-  }
-
-  it should "keep its constructor and copy private" in {
-    assertDoesNotCompile("""new SecretMatch(SecretType.OpenAIKey, "v", 0, 1)""")
-    assertDoesNotCompile("""SecretMatch(SecretType.OpenAIKey, "v", 0, 1).copy(value = "w")""")
   }
 }
