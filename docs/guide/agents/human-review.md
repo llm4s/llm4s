@@ -21,12 +21,15 @@ look at what a step did before the next one runs.
 1. TOC
 {:toc}
 
+The examples assume an `LLMClient` named `client`, a `ToolRegistry` named `tools`, and, where they use them, an
+`agent` already built and a `threadId` (a `ThreadId`).
+
 ---
 
-## Four ways a turn waits
+## Five ways a turn waits
 
 A turn that waits for a person ends `AgentStatus.Suspended`. Everything it waits for is an
-*interrupt* with its own `InterruptId`, in one of four lists:
+*interrupt* with its own `InterruptId`, in one of five lists:
 
 | List | Raised by | Answer with |
 |---|---|---|
@@ -34,6 +37,7 @@ A turn that waits for a person ends `AgentStatus.Suspended`. Everything it waits
 | `questions` | a tool extending `AgentTool.Asking[A, Q, Ans]` | `result.reply(id, answer)`, the tool's `Ans` |
 | `middlewareQuestions` | a middleware extending `AgentMiddleware.Asking[Q, Ans]` | `result.reply(id, answer)`, the middleware's `Ans` |
 | `breakpoints` | a static breakpoint on one of the agent's nodes | `result.proceed(id)` |
+| `delegated` | a [subagent](delegation#approvals-and-questions-through-the-parent)'s own interrupt, under a composite id `<parent interrupt>~<child interrupt>` | the helper for the child's interrupt: `approve`, `reject`, `edit`, `reply` or `proceed` |
 
 `agent.resume(threadId, answers)` takes any non-empty subset of them. The ones you do not answer stay
 pending, so the result can be `Suspended` again with what is left: this is incremental approval. An
@@ -44,11 +48,13 @@ error result (`Invalid answer for '<tool>': ...`), which the model sees. While a
 `recover` on it are refused with `PendingInterrupts`.
 
 ```scala
+import org.llm4s.agent.AgentStatus
+
 agent.run(threadId, "Deploy the release").flatMap { result =>
   result.status match
-    case AgentStatus.Suspended(approvals, questions, asked, held) =>
+    case AgentStatus.Suspended(approvals, questions, asked, held, delegated) =>
       val answers = approvals.map((id, _) => result.approve(id)) ++ held.map((id, _) => result.proceed(id))
-      agent.resume(threadId, answers.toMap) // questions and middleware questions stay pending
+      agent.resume(threadId, answers.toMap) // questions, middleware questions and delegated stay pending
     case _ => Right(result)
 }
 ```
@@ -61,6 +67,8 @@ with the same agent and checkpointer can resume it.
 A breakpoint holds a task of one of the agent's nodes, before it runs or after it ran:
 
 ```scala
+import org.llm4s.agent.{ Agent, AgentNode }
+
 val agent = Agent
   .builder("assistant", client)
   .withTools(tools)
@@ -133,6 +141,10 @@ returning `ask(question)` (from `beforeAgent`, `afterAgent` or `wrapModelCall`) 
 again:
 
 ```scala
+import org.llm4s.agent.graph.middleware.{ AgentMiddleware, BoundaryResult, MiddlewareId, ModelContext }
+import org.llm4s.types.Result
+import upickle.default.ReadWriter
+
 final case class Need(what: String) derives ReadWriter
 final case class Info(value: String) derives ReadWriter
 
@@ -176,7 +188,8 @@ not called again.
 ## From Java and Kotlin
 
 `JAgentStatus.pending()` lists every interrupt as a `PendingInterrupt`, approvals first, then tool
-questions, middleware questions and breakpoints. `kind()` is the Java enum `InterruptKind`: `APPROVAL`,
+questions, middleware questions, breakpoints and last a subagent's interrupts, each under its composite id
+and with the kind it has in the child. `kind()` is the Java enum `InterruptKind`: `APPROVAL`,
 `QUESTION`, `MIDDLEWARE_QUESTION` or `BREAKPOINT`. A field that only some kinds have is an `Optional`:
 `toolName()` and `argumentsJson()` when a tool call waits; `reason()` for an approval; `questionJson()`
 for a question; `middleware()` for a middleware question; `node()` and `phase()` (the Java enum

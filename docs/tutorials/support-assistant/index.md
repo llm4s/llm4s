@@ -27,9 +27,6 @@ keeps personal data out of the model's sight.
 | [4. Help-centre answers](part-4-help-centre) | Answer from the help-centre articles, citing them | RAG: ingest, embed, retrieve, cite |
 | [5. Safety and memory](part-5-safety-memory) | Mask personal data, refuse prompt injection, remember the turn before | guardrails, `PIIMasker`, `continueConversation` |
 
-Still to come, tracked in [#2292](https://github.com/llm4s/llm4s/issues/2292): testing with `llm4s-testkit` and a
-judge, and serving and observing the assistant.
-
 ## How the series works
 
 The code of every part is in

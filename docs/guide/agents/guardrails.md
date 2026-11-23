@@ -31,7 +31,9 @@ Guardrails are validation functions that run before (input) and after (output) a
 - **Compliance** - Meet business requirements
 - **Security** - Detect prompt injection and PII
 
-Guardrails belong to the agent, not to a run: give them to the builder in a `GuardrailMiddleware`.
+Guardrails belong to the agent, not to a run: give them to the builder in a `GuardrailMiddleware`. The examples on
+this page assume an `LLMClient` named `client`, a `ToolRegistry` named `tools`, and the user's text as `userInput` or
+`query`; the shorter ones also assume the imports of the examples before them.
 
 ```scala
 import org.llm4s.agent.Agent
@@ -89,16 +91,20 @@ every final answer, whichever agent is active after a handoff. See
 
 These guardrails run locally without LLM calls:
 
-| Guardrail | Purpose | Example |
-|-----------|---------|---------|
-| `LengthCheck` | Enforce min/max length | `new LengthCheck(1, 10000)` |
-| `ProfanityFilter` | Block profane content | `new ProfanityFilter()` |
-| `JSONValidator` | Ensure valid JSON output | `new JSONValidator()` |
-| `RegexValidator` | Pattern matching | `new RegexValidator("\\d{3}-\\d{4}")` |
-| `ToneValidator` | Simple tone detection | `new ToneValidator(Tone.Professional)` |
-| `PIIDetector` | Detect PII (email, SSN, etc.) | `new PIIDetector()` |
-| `PIIMasker` | Mask detected PII | `new PIIMasker()` |
-| `PromptInjectionDetector` | Detect injection attempts | `new PromptInjectionDetector()` |
+| Guardrail | Purpose | Use as | Example |
+|-----------|---------|--------|---------|
+| `LengthCheck` | Enforce min/max length | input or output | `new LengthCheck(1, 10000)` |
+| `ProfanityFilter` | Block profane content | input | `new ProfanityFilter()` |
+| `JSONValidator` | Ensure valid JSON output | output | `new JSONValidator()` |
+| `RegexValidator` | Pattern matching | input or output | `RegexValidator("\\d{3}-\\d{4}")` |
+| `ToneValidator` | Simple tone detection | output | `new ToneValidator(Set(Tone.Professional))` |
+| `PIIDetector` | Detect PII (email, SSN, etc.) | input | `new PIIDetector()` |
+| `PIIMasker` | Mask detected PII | input or output | `new PIIMasker()` |
+| `PromptInjectionDetector` | Detect injection attempts | input | `new PromptInjectionDetector()` |
+
+`GuardrailMiddleware` takes `Seq[InputGuardrail]` for `input` and `Seq[OutputGuardrail]` for `output`, so a guardrail
+in the wrong list does not compile. `RegexValidator` takes its pattern as a `String` through its companion
+(`RegexValidator("...")`), or as a `Regex` through its constructor (`new RegexValidator("...".r)`).
 
 ### LLM-as-Judge Guardrails
 
@@ -107,9 +113,9 @@ These use an LLM to evaluate subjective qualities:
 | Guardrail | Purpose | Example |
 |-----------|---------|---------|
 | `LLMSafetyGuardrail` | Content safety check | `new LLMSafetyGuardrail(client)` |
-| `LLMFactualityGuardrail` | Verify factual accuracy | `new LLMFactualityGuardrail(client)` |
-| `LLMQualityGuardrail` | Assess response quality | `new LLMQualityGuardrail(client)` |
-| `LLMToneGuardrail` | Validate tone compliance | `new LLMToneGuardrail(client, "professional")` |
+| `LLMFactualityGuardrail` | Verify factual accuracy against a reference text | `new LLMFactualityGuardrail(client, referenceContext)` |
+| `LLMQualityGuardrail` | Assess how well a response answers a query | `new LLMQualityGuardrail(client, originalQuery)` |
+| `LLMToneGuardrail` | Validate tone compliance | `new LLMToneGuardrail(client, Set("professional"))` |
 
 Each judge scores the content and passes it when the score reaches its `threshold`. The threshold must be between 0.0 and 1.0: for any other value, or NaN, `validate` returns a `ValidationError` on the field `threshold` without calling the judge.
 
@@ -117,12 +123,15 @@ Each judge scores the content and passes it when the score reaches its `threshol
 
 For retrieval-augmented generation:
 
-| Guardrail | Purpose |
-|-----------|---------|
-| `GroundingGuardrail` | Verify answers are grounded in retrieved context |
-| `ContextRelevanceGuardrail` | Check context relevance to query |
-| `SourceAttributionGuardrail` | Ensure sources are cited |
-| `TopicBoundaryGuardrail` | Prevent off-topic responses |
+| Guardrail | Purpose | Checks |
+|-----------|---------|--------|
+| `GroundingGuardrail` | Verify answers are grounded in retrieved context | an answer, with `validateWithContext` |
+| `ContextRelevanceGuardrail` | Check context relevance to query | an answer, with `validateWithContext` |
+| `SourceAttributionGuardrail` | Ensure sources are cited | an answer, with `validateWithContext` |
+| `TopicBoundaryGuardrail` | Prevent off-topic queries | a query: an `InputGuardrail` |
+
+The first three need the retrieved chunks, which an agent's guardrail middleware does not have: see
+[RAG Guardrails](#rag-guardrails) before you add one to an agent.
 
 ---
 
@@ -275,8 +284,8 @@ val strictValidation = CompositeGuardrail.all(Seq(
 
 ```scala
 val flexibleValidation = CompositeGuardrail.any(Seq(
-  new RegexValidator("^[A-Z].*"),  // Starts with capital
-  new RegexValidator("^\\d.*")     // Starts with digit
+  RegexValidator("^[A-Z].*"),  // Starts with capital
+  RegexValidator("^\\d.*")     // Starts with digit
 ))
 
 // At least one guardrail must pass
@@ -390,63 +399,84 @@ class CustomLLMGuardrail(client: LLMClient) extends LLMGuardrail {
 
 ## RAG Guardrails
 
-### Basic RAG Setup
+### What an agent runs, and what it does not
+
+`GroundingGuardrail`, `ContextRelevanceGuardrail` and `SourceAttributionGuardrail` are `RAGGuardrail`s: they judge an
+answer against the chunks a retrieval returned, and they check only through
+`validateWithContext(answer, RAGContext(query, chunks, sources))`. `GuardrailMiddleware` has no retrieval to give them:
+it calls each output guardrail's `validate`, with the answer and the model context but no chunks, and for these three
+`validate` passes every answer unchanged. **A
+`RAGGuardrail` in an agent's `output` list checks nothing.** Call `validateWithContext` yourself, where your code has
+the chunks the answer was written from:
 
 ```scala
-import org.llm4s.agent.guardrails.rag._
+import org.llm4s.agent.guardrails.rag.{ GroundingGuardrail, RAGContext }
+import org.llm4s.types.Result
 
-val ragGuardrails = RAGGuardrails.standard(client)
+val grounding = GroundingGuardrail.balanced(client)
 
-val agent = Agent.builder("rag", client)
-  .withTools(tools)
-  .withMiddleware(GuardrailMiddleware(ragGuardrails.inputGuardrails, ragGuardrails.outputGuardrails))
-  .build()
-
-agent.flatMap(_.run(question))
+def checkedAnswer(question: String, chunks: Seq[String], answer: String): Result[String] =
+  grounding.validateWithContext(answer, RAGContext(question, chunks))
 ```
+
+`TopicBoundaryGuardrail` is different: it is an `InputGuardrail` that judges the query on its own, so it works in an
+agent's `input` list like any other.
 
 ### Preset Configurations
 
+`RAGGuardrails` presets return a `GuardrailConfig` of three lists: `inputGuardrails` and `outputGuardrails`, which go to
+`GuardrailMiddleware`, and `ragGuardrails`, which you run with `validateWithContext` as above.
+
 ```scala
-// Minimal - basic safety only
-val minimal = RAGGuardrails.minimal()
+import org.llm4s.agent.Agent
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+import org.llm4s.agent.guardrails.rag.{ RAGContext, RAGGuardrail, RAGGuardrails }
+import org.llm4s.types.Result
 
-// Standard - balanced for production
-val standard = RAGGuardrails.standard(client)
+val config = RAGGuardrails.standard(client)
 
-// Strict - maximum safety
-val strict = RAGGuardrails.strict(client)
+val agent = Agent
+  .builder("rag", client)
+  .withTools(tools)
+  .withMiddleware(GuardrailMiddleware(config.inputGuardrails, config.outputGuardrails))
+  .build()
 
-// Monitoring - warn mode, doesn't block
-val monitoring = RAGGuardrails.monitoring(client)
+// the retrieval-aware checks, on an answer and the chunks it was given
+def grounded(question: String, chunks: Seq[String], answer: String): Result[String] =
+  RAGGuardrail.all(config.ragGuardrails).validateWithContext(answer, RAGContext(question, chunks))
 ```
+
+| Preset | Input | Output | RAG |
+|--------|-------|--------|-----|
+| `RAGGuardrails.minimal` | PII detection, prompt injection | PII masking | none |
+| `RAGGuardrails.standard(client)` | PII detection, prompt injection | PII masking | grounding, context relevance |
+| `RAGGuardrails.standardWithTopics(client, topics)` | as `standard`, plus a topic boundary | PII masking | grounding, context relevance |
+| `RAGGuardrails.strict(client, topics)` | strict PII, high-sensitivity injection, strict topic boundary | PII masking | strict grounding, context relevance and source attribution |
+| `RAGGuardrails.monitoring(client)` | every check with `GuardrailAction.Warn`: logs, never blocks | | |
+
+`customerSupport`, `softwareDocumentation`, `research` and `financial` are domain presets, and `custom(...)` takes the
+three lists yourself.
 
 ### Individual RAG Guardrails
 
+Each takes the judge's `llmClient`, a threshold and an `onFail` action, and has `strict`, `balanced`, `lenient` and
+`monitoring` factories:
+
 ```scala
-// Verify answer is grounded in retrieved context
-val grounding = new GroundingGuardrail(
-  client = client,
-  retrievedContext = retrievedDocuments
-)
+import org.llm4s.agent.guardrails.GuardrailAction
+import org.llm4s.agent.guardrails.rag._
 
-// Check retrieved context is relevant to query
-val relevance = new ContextRelevanceGuardrail(
-  client = client,
-  query = userQuery
-)
+// Is every claim of the answer supported by the retrieved chunks?
+val grounding = new GroundingGuardrail(llmClient = client, threshold = 0.8)
 
-// Ensure sources are properly cited
-val attribution = new SourceAttributionGuardrail(
-  client = client,
-  sourceDocuments = sources
-)
+// Are the retrieved chunks relevant to the query?
+val relevance = ContextRelevanceGuardrail.balanced(client)
 
-// Prevent off-topic responses
-val topicBoundary = new TopicBoundaryGuardrail(
-  client = client,
-  allowedTopics = Set("programming", "software engineering")
-)
+// Does the answer cite its sources? `Warn` logs an unattributed answer and passes it
+val attribution = new SourceAttributionGuardrail(llmClient = client, onFail = GuardrailAction.Warn)
+
+// Is the query about one of these topics? (an InputGuardrail: give it to GuardrailMiddleware's `input`)
+val topicBoundary = TopicBoundaryGuardrail(client, Seq("programming", "software engineering"))
 ```
 
 ---
@@ -556,22 +586,30 @@ agent.run(query) match {
 }
 ```
 
-### Validation Mode
+### What a Failing Check Does: `GuardrailAction`
 
-Control how guardrail results are handled:
+A guardrail that takes an `onFail` parameter - `PIIDetector`, `PromptInjectionDetector`, `SecretLeakGuardrail` and the
+RAG guardrails - decides with it what a failed check does:
+
+| `GuardrailAction` | On a failed check |
+|-------------------|-------------------|
+| `Block` (the default) | `validate` returns a `Left`: in an agent, the turn ends `AgentStatus.Blocked` |
+| `Fix` | the guardrail repairs the value where it can (`PIIDetector` masks the PII) and passes it on; where it cannot, it falls back to blocking (`PromptInjectionDetector`) or to warning (the RAG guardrails) |
+| `Warn` | the guardrail logs a warning and passes the value unchanged |
 
 ```scala
-import org.llm4s.agent.guardrails.ValidationMode
+import org.llm4s.agent.guardrails.GuardrailAction
+import org.llm4s.agent.guardrails.builtin.{ PIIDetector, PromptInjectionDetector }
 
-// Block on failure (default)
-val blocking = ValidationMode.Block
-
-// Warn only, continue processing
-val warn = ValidationMode.Warn
-
-// Log and continue
-val log = ValidationMode.Log
+val maskInput       = new PIIDetector(onFail = GuardrailAction.Fix)            // mask PII in the query, never block
+val watchInjections = new PromptInjectionDetector(onFail = GuardrailAction.Warn) // log suspected injections only
 ```
+
+The other built-in guardrails always block on a failed check; wrap one in your own guardrail to change that.
+
+`ValidationMode` is something else: the mode of a `CompositeGuardrail` - `All` (every guardrail must pass) and `Any`
+(one must), which `CompositeGuardrail.all` and `.any` choose for you, or `First` (only the first guardrail runs). See
+[Composite Guardrails](#composite-guardrails).
 
 ---
 
@@ -605,7 +643,7 @@ val agent = Agent.builder("assistant", client)
 |----------|------------------------|
 | Customer support | `ProfanityFilter`, `ToneValidator`, `LLMSafetyGuardrail` |
 | Code generation | `LengthCheck`, `JSONValidator` (for structured output) |
-| RAG application | `GroundingGuardrail`, `SourceAttributionGuardrail` |
+| RAG application | `TopicBoundaryGuardrail` on input; `GroundingGuardrail`, `SourceAttributionGuardrail` through `validateWithContext` ([RAG Guardrails](#rag-guardrails)) |
 | Content moderation | `PIIDetector`, `ProfanityFilter`, `LLMSafetyGuardrail` |
 | Form processing | `RegexValidator`, `LengthCheck` |
 
@@ -618,7 +656,7 @@ import org.scalatest.matchers.should.Matchers
 class GuardrailSpec extends AnyFlatSpec with Matchers {
   "LengthCheck" should "reject empty input" in {
     val guardrail = new LengthCheck(min = 1, max = 100)
-    guardrail.validate("") shouldBe a[Left[_, _]]
+    guardrail.validate("") shouldBe a[Left[?, ?]]
   }
 
   it should "accept valid input" in {
