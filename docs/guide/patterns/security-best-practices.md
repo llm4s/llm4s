@@ -1,385 +1,139 @@
 ---
 layout: page
 title: Security Best Practices
-description: "Security patterns for LLM applications: API key management and rotation, input validation, prompt injection defence, PII redaction and audit logging."
+description: "Secure LLM4S applications: API keys from files, Vault or AWS Secrets Manager, prompt injection and PII guardrails, encrypted checkpoints and the sandbox."
 search_title: "LLM application security: prompt injection, keys and PII"
 parent: Real-World Application Patterns
+grand_parent: User Guide
 nav_order: 6
 ---
 
 # Security Best Practices
+{: .no_toc }
 
-> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](https://github.com/llm4s/llm4s/tree/main/modules/samples).
+Most of what secures an LLM application is already in LLM4S: credentials that never appear in code or logs, guardrails
+on what goes in and comes out, encryption of what an agent stores, and limits on what its tools may touch. This page
+maps each concern to the component and the guide that covers it.
+{: .fs-6 .fw-300 }
 
-Comprehensive security patterns for protecting sensitive data, managing credentials, and maintaining audit trails in production LLM systems.
+1. TOC
+{:toc}
 
-## API Key Management
+---
 
-> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](https://github.com/llm4s/llm4s/tree/main/modules/samples).
+## API keys
 
-### Configuration-Based Access
+Keep keys out of code and out of checked-in files. In order of preference:
 
-```text
-object SecureKeyManagement {
-  
-  import org.llm4s.config.Llm4sConfig
-  
-  def loadApiKey(provider: String): Result[String] = {
-    Llm4sConfig.provider(provider).apiKey match {
-      case Some(key) if key.nonEmpty => Result.success(key)
-      case _ => Result.failure(
-        s"API key for provider '$provider' not configured. " +
-        s"Set it in your configuration file or environment."
+1. **A file the platform mounts and rotates.** A provider section's `apiKeyFile` names a file holding the key; the
+   client re-reads it when it changes, so a rotated key is used from the next request with no restart. Mount it with
+   mode `0400`: a file readable by its group or others is logged as a warning.
+2. **Read from the secret store by llm4s.** `VaultApiKeyProvider` (`llm4s-secrets-vault`, HashiCorp Vault's KV engine)
+   and `AwsSecretsManagerApiKeyProvider` (`llm4s-secrets-aws`) fetch, cache and refresh the key over HTTP, with no
+   vendor SDK; set one with `withApiKeyProvider` on the provider config. For another secret store, implement
+   `ApiKeyProvider` yourself.
+3. **An environment variable**, bound by the provider module's `reference.conf` to `llm4s.credentials.<id>.apiKey`
+   (for example `OPENAI_API_KEY`). Never read it with `sys.env` yourself.
+
+```hocon
+llm4s.providers.openai-main {
+  provider   = "openai"
+  model      = "gpt-4o-mini"
+  apiKeyFile = "/var/run/secrets/llm4s/openai-api-key"   # instead of apiKey
+}
+```
+
+Whichever `ApiKeyProvider` you use, it goes on the provider config the same way:
+
+```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
+import org.llm4s.llmconnect.auth.ApiKeyProvider
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.Result
+
+// keys: for example, from llm4s-secrets-vault,
+//   VaultApiKeyProvider(VaultSettings("https://vault.internal:8200", Secret(vaultToken), "llm4s/openai", "apiKey"))
+// which returns a Result[VaultApiKeyProvider]
+def clientWithKeysFrom(keys: ApiKeyProvider): Result[LLMClient] = for {
+  registry <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
+  config <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+  client <- LLMConnect.getClient(config)
+} yield client
+```
+
+Keys are wrapped in `ApiKey` and `Secret`, whose `toString` is redacted, and llm4s's errors never include them. Do not
+log a key, or any part of one, yourself. The full rules, the Kubernetes, Vault Agent and CSI driver setups, and the
+AWS example are in [Production Deployment](../production-deployment#secrets-and-key-rotation) and
+[Rotating keys](../../getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider). A second account's
+section sets its own key; the config policy's `prod` preset flags one that does not.
+
+## Untrusted input and output
+
+Guardrails are middleware on the agent (`GuardrailMiddleware(input, output)`); a block ends the turn
+`AgentStatus.Blocked` and stores nothing of it. The built-in ones that matter for security:
+
+| Concern | Guardrail |
+|---|---|
+| Prompt injection and jailbreak attempts in user input | `PromptInjectionDetector` (input) |
+| Personal data in prompts or answers | `PIIDetector` to block, `PIIMasker` to mask (input and output) |
+| A key, token or other secret in a prompt or answer | `SecretLeakGuardrail` (input and output) |
+| Oversized input | `LengthCheck` |
+| A judgement a pattern cannot make | `LLMSafetyGuardrail` |
+
+```scala
+import org.llm4s.agent.Agent
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+import org.llm4s.agent.guardrails.builtin.{ LengthCheck, PIIMasker, PromptInjectionDetector, SecretLeakGuardrail }
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.types.Result
+
+def guardedAgent(client: LLMClient): Result[Agent] =
+  Agent.builder("assistant", client)
+    .withMiddleware(
+      new GuardrailMiddleware(
+        input = Seq(new LengthCheck(1, 10000), PromptInjectionDetector(), PIIMasker()),
+        output = Seq(SecretLeakGuardrail(), PIIMasker())
       )
-    }
-  }
-  
-  // Safe logging (don't log keys!)
-  def logApiUsage(key: String, provider: String): Unit = {
-    val maskedKey = key.take(5) + "..." + key.takeRight(5)
-    println(s"Using provider: $provider with key: $maskedKey")
-  }
-}
+    )
+    .build()
 ```
 
-### Key vaults and key rotation
+Pattern-based detection is a filter, not a proof. Tool output is untrusted input too (indirect prompt injection), and
+the strongest defence is to give an agent only the tools and permissions its task needs. See
+[Guardrails](../agents/guardrails) and the [Security Reference](../../reference/security#known-risks-and-mitigations).
 
-Keep provider keys in a secret manager (HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager,
-Azure Key Vault) and rotate them without restarting the application:
+## What tools may touch
 
-- **Mounted as a file** (Vault Agent, the Secrets Store CSI driver, External Secrets Operator): set
-  `apiKeyFile` in the provider section instead of `apiKey`. The client re-reads the file when it
-  changes, so the next request after a rotation sends the new key.
-- **Fetched by your code**: implement `ApiKeyProvider` and give it to the config with
-  `withApiKeyProvider`; the client asks it for the key on every request.
+- **Tool permissions**: `PermissionMiddleware` with `PermissionRule.allow`, `deny` and `ask` decides per resource a
+  tool call touches, and denies what no rule matches; `ask` suspends the turn for a person's approval. See
+  [tool permissions](../agents/#tool-permissions-timeouts-and-locks) and [Human Review](../agents/human-review).
+- **Commands and files**: run them in the workspace container, whose command policy, confinement and egress rules are
+  in [Workspace Sandbox](../../reference/workspace-sandbox).
+- **HTTP and loaders**: the HTTP tool and the URL loaders refuse private and link-local addresses by default; see
+  [SSRF](../../reference/security#4-server-side-request-forgery-ssrf-via-http-tool).
 
-Both are described, with examples that compile, in
-[Rotating keys](../../getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider) and
-[Secrets and key rotation](../../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation) (#2313).
+## Data at rest and data retention
 
----
+- **Encrypt what an agent stores.** `EncryptingCheckpointer`, `EncryptingRunQueue` and `EncryptingLongTermStore`
+  (`org.llm4s.agent.encryption`, experimental) wrap any store with per-tenant keys. See
+  [encrypting what the store holds](../agents/durable-checkpointers#encrypting-what-the-store-holds).
+- **Delete on request.** `Agent.forget(threadId)` removes a thread; memories and vector stores delete by id or
+  metadata filter. `RetentionPolicy` prunes old history. See
+  [deleting a user's data](../data-protection#deleting-a-users-data).
+- **Keep content out of telemetry.** The default console tracer and the durable agent events carry no message
+  content; see [logging and tracing defaults](../data-protection#logging-and-tracing-defaults).
 
-## Input Validation
+## Audit
 
-### Query Validation
+A durable agent thread is an ordered log of its runs: model calls, tool executions, handoffs and guardrail blocks are
+stored as events (without content), with the checkpoints of each step. Together with tracing to Langfuse or
+OpenTelemetry, that is the audit trail; who asked is your application's to record beside the thread id. See
+[Streaming](../agents/streaming) for the event types and [Production Monitoring](production-monitoring).
 
-```text
-object InputValidation {
-  
-  case class ValidationRule(
-    name: String,
-    validate: String => Boolean,
-    errorMessage: String
-  )
-  
-  class InputValidator {
-    private val rules = scala.collection.mutable.ListBuffer[ValidationRule]()
-    
-    def addRule(rule: ValidationRule): Unit = {
-      rules += rule
-    }
-    
-    def validate(input: String): Result[String] = {
-      rules.find(!_.validate(input)) match {
-        case Some(failedRule) => 
-          Result.failure(failedRule.errorMessage)
-        case None => 
-          Result.success(input)
-      }
-    }
-  }
-  
-  // Common validation rules
-  def setupCommonValidations(): InputValidator = {
-    val validator = new InputValidator()
-    
-    // Length check
-    validator.addRule(ValidationRule(
-      name = "length",
-      validate = _.length <= 10000,
-      errorMessage = "Input exceeds maximum length of 10000 characters"
-    ))
-    
-    // No injection patterns
-    validator.addRule(ValidationRule(
-      name = "no_injection",
-      validate = !containsSQLInjectionPattern(_),
-      errorMessage = "Input contains potentially harmful patterns"
-    ))
-    
-    // No excessive special characters
-    validator.addRule(ValidationRule(
-      name = "no_spam",
-      validate = countSpecialChars(_) < 0.5,
-      errorMessage = "Input contains too many special characters"
-    ))
-    
-    validator
-  }
-  
-  private def containsSQLInjectionPattern(input: String): Boolean = {
-    val sqlPatterns = List("';", "--", "/*", "*/", "xp_", "sp_")
-    sqlPatterns.exists(input.toLowerCase.contains(_))
-  }
-  
-  private def countSpecialChars(input: String): Double = {
-    val specialCount = input.count(!_.isLetterOrDigit)
-    specialCount.toDouble / input.length
-  }
-}
-```
+## See also
 
-### Prompt Injection Protection
-
-```text
-object PromptInjectionProtection {
-  
-  def detectPromptInjection(userInput: String): Boolean = {
-    val injectionIndicators = List(
-      "ignore all previous instructions",
-      "forget everything",
-      "system prompt",
-      "you are now",
-      "instead please",
-      "role play as",
-      "pretend you are"
-    )
-    
-    val lowerInput = userInput.toLowerCase
-    injectionIndicators.exists(lowerInput.contains(_))
-  }
-  
-  def sanitizePrompt(userInput: String): Result[String] = {
-    if (detectPromptInjection(userInput)) {
-      Result.failure(
-        "Your input was flagged as potentially malicious. " +
-        "Please rephrase your request without system instructions."
-      )
-    } else {
-      Result.success(userInput)
-    }
-  }
-  
-  // Use prompt templating to separate user input
-  def safePromptTemplate(
-    userQuery: String,
-    systemPrompt: String
-  ): String = {
-    s"""$systemPrompt
-
-User Query:
-[BEGIN USER INPUT]
-$userQuery
-[END USER INPUT]
-
-Please answer based only on the user's question above."""
-  }
-}
-```
-
----
-
-## Output Sanitization
-
-### PII Redaction
-
-Use the built-in `PIIMasker` and `PIIDetector` guardrails rather than hand-written patterns: they run before a query
-reaches the model and before an answer is returned, and are covered by tests. What they detect, how to attach them and
-their limits are in [Data Protection: personal data in prompts](../data-protection#personal-data-in-prompts).
-
----
-
-## Audit Logging
-
-### Comprehensive Audit Trail
-
-```text
-object AuditLogging {
-  
-  import org.slf4j.LoggerFactory
-  import java.time.Instant
-  
-  val auditLogger = LoggerFactory.getLogger("AUDIT")
-  
-  case class AuditEvent(
-    timestamp: Instant,
-    userId: String,
-    action: String,
-    resource: String,
-    details: Map[String, String],
-    success: Boolean,
-    errorMessage: Option[String] = None
-  )
-  
-  def logAPICall(
-    userId: String,
-    provider: String,
-    model: String,
-    inputTokens: Int,
-    outputTokens: Int
-  ): Unit = {
-    val event = AuditEvent(
-      timestamp = Instant.now(),
-      userId = userId,
-      action = "API_CALL",
-      resource = s"$provider/$model",
-      details = Map(
-        "input_tokens" -> inputTokens.toString,
-        "output_tokens" -> outputTokens.toString
-      ),
-      success = true
-    )
-    
-    auditLogger.info(
-      s"${event.timestamp} | User: ${event.userId} | " +
-      s"Action: ${event.action} | Resource: ${event.resource}"
-    )
-  }
-  
-  def logAccessToSensitiveData(
-    userId: String,
-    dataType: String,
-    recordCount: Int,
-    accessReason: String
-  ): Unit = {
-    auditLogger.info(
-      s"${Instant.now()} | User: $userId | " +
-      s"Accessed: $dataType ($recordCount records) | " +
-      s"Reason: $accessReason"
-    )
-  }
-  
-  def logAuthenticationAttempt(
-    userId: String,
-    success: Boolean,
-    method: String
-  ): Unit = {
-    auditLogger.info(
-      s"${Instant.now()} | User: $userId | " +
-      s"Authentication: ${if (success) "SUCCESS" else "FAILED"} via $method"
-    )
-  }
-}
-```
-
-### Compliance Logging
-
-```text
-object ComplianceLogging {
-  
-  case class DataProcessingLog(
-    timestamp: Long,
-    userId: String,
-    dataCategory: String,
-    operation: String, // PROCESS, STORE, SHARE, DELETE
-    retentionDays: Int,
-    userConsent: Boolean
-  )
-  
-  class ComplianceLogger {
-    private val logs = scala.collection.mutable.ListBuffer[DataProcessingLog]()
-    
-    def logDataProcessing(
-      userId: String,
-      dataCategory: String,
-      operation: String,
-      retentionDays: Int
-    ): Unit = {
-      logs += DataProcessingLog(
-        timestamp = System.currentTimeMillis(),
-        userId = userId,
-        dataCategory = dataCategory,
-        operation = operation,
-        retentionDays = retentionDays,
-        userConsent = true
-      )
-    }
-    
-    def getComplianceReport(days: Int = 30): String = {
-      val cutoff = System.currentTimeMillis() - (days * 24 * 60 * 60 * 1000L)
-      val recent = logs.filter(_.timestamp > cutoff)
-      
-      val operationCounts = recent.groupBy(_.operation).mapValues(_.length)
-      val dataCategoryCounts = recent.groupBy(_.dataCategory).mapValues(_.length)
-      
-      s"""Compliance Report (last $days days):
-        |Operations: $operationCounts
-        |Data Categories: $dataCategoryCounts
-        |Total Records Processed: ${recent.length}""".stripMargin
-    }
-  }
-}
-```
-
----
-
-## Data Retention
-
-### Automatic Data Expiration
-
-Agent thread history is pruned with a `RetentionPolicy` (`maxAge`, `maxCheckpoints`, `maxEvents`) and a store sweep,
-and a user's threads, memories and indexed documents are erased with `Agent.forget`, `MemoryStore.deleteMatching` and
-`VectorStore.deleteByFilter`. See [Data Protection: deleting a user's data](../data-protection#deleting-a-users-data).
-
----
-
-## Best Practices
-
-### ✅ Do's
-
-- **Never log API keys**: Even in debug mode
-- **Rotate keys regularly**: At least every 30 days
-- **Use key vaults**: Don't hardcode secrets
-- **Validate all input**: Both user queries and system inputs
-- **Sanitize all output**: Remove PII before returning
-- **Keep audit trails**: For compliance and debugging
-- **Use HTTPS only**: For all API communication
-- **Implement rate limiting**: To prevent abuse
-- **Monitor suspicious patterns**: Unusual access or usage
-- **Use least privilege**: Grant minimal required permissions
-
-### ❌ Don'ts
-
-- **Don't store keys in code**: Use environment variables or vaults
-- **Don't trust user input**: Always validate and sanitize
-- **Don't output sensitive data**: Check for PII before returning
-- **Don't log full queries**: Log only hashed or redacted version
-- **Don't skip authentication**: Verify user identity
-- **Don't use weak passwords**: Enforce strong credential policies
-- **Don't ignore security updates**: Keep dependencies patched
-- **Don't expose error details**: Log full errors, show generic messages to users
-- **Don't test in production**: Use staging for security tests
-- **Don't assume perimeter security**: Defense in depth required
-
----
-
-## Security Checklist
-
-### ✅ Before Production
-
-- [ ] API keys loaded from secure vault, not code
-- [ ] HTTPS/TLS enforced for all API calls
-- [ ] Input validation on all user-facing endpoints
-- [ ] Output sanitization removes PII
-- [ ] Audit logging enabled for sensitive operations
-- [ ] Rate limiting configured
-- [ ] Authentication required for all endpoints
-- [ ] Data retention policy defined and enforced
-- [ ] Error messages don't expose system details
-- [ ] Secrets not logged anywhere
-- [ ] Security tests included in test suite
-- [ ] Penetration testing scheduled
-- [ ] Incident response plan documented
-
----
-
-## See Also
-
-- [Production Monitoring](./production-monitoring) - Monitor security events
-- [Multi-Agent Orchestration](./multi-agent-orchestration) - Secure agent communication
-- [OWASP Top 10](https://owasp.org/www-project-top-ten/) - Web application security
-
----
-
-**Last Updated:** February 2026  
-**Status:** Production Ready
+- [Data Protection](../data-protection): egress destinations, residency, personal data in prompts
+- [Security Reference](../../reference/security)
+- [Permission-based RAG](../permission-based-rag): retrieval limited to what the asking user may see
