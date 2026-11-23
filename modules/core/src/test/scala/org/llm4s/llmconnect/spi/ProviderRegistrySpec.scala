@@ -37,12 +37,12 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
   "ProviderRegistry.of" should {
     "resolve a descriptor by its id" in {
       val provider = new StubProvider("acme")
-      ProviderRegistry.of(provider).get(ProviderId("acme")) shouldBe Right(provider)
+      ProviderRegistry.of(provider).resolve(ProviderId("acme")) shouldBe Right(provider)
     }
 
     "resolve an id in any spelling, because ProviderId canonicalises" in {
       val provider = new StubProvider("acme")
-      ProviderRegistry.of(provider).get(ProviderId("  ACME ")) shouldBe Right(provider)
+      ProviderRegistry.of(provider).resolve(ProviderId("  ACME ")) shouldBe Right(provider)
     }
 
     "list registered ids in sorted canonical spelling" in {
@@ -54,7 +54,7 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
       val second = new StubProvider("acme")
 
       val registry = ProviderRegistry.of(first, second)
-      registry.get(ProviderId("acme")) shouldBe Right(second)
+      registry.resolve(ProviderId("acme")) shouldBe Right(second)
       registry.ids shouldBe Seq("acme")
     }
   }
@@ -69,7 +69,7 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
       // The test fixture provider is discovered through core's test META-INF/services, the same
       // path every provider module takes, so it stands in for any provider already on the classpath.
       val replacement = new StubProvider("fixturechat")
-      ProviderRegistry.default.withProvider(replacement).get(ProviderId("fixturechat")) shouldBe Right(replacement)
+      ProviderRegistry.default.withProvider(replacement).resolve(ProviderId("fixturechat")) shouldBe Right(replacement)
     }
   }
 
@@ -112,7 +112,7 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
     "omit the config path when the lookup did not come from config" in {
       val message = ProviderRegistry
         .of()
-        .get(ProviderId("moonbeam"))
+        .resolve(ProviderId("moonbeam"))
         .left
         .toOption
         .getOrElse(fail("Expected an unresolved-provider error"))

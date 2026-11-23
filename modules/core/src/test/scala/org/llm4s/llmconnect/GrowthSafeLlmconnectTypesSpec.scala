@@ -163,10 +163,10 @@ class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
     val empty = SSEEvent()
     empty.isEmpty shouldBe true
 
-    val set = empty.withData("d").withEvent("e").withId("i").withRetry(5)
-    set shouldBe SSEEvent(Some("d"), Some("e"), Some("i"), Some(5))
+    val set = empty.withData("d").withEvent("e").withId("i").withRetry(5.millis)
+    set shouldBe SSEEvent(Some("d"), Some("e"), Some("i"), Some(5.millis))
     set.withData(None).withEvent(None).withId(None).withRetry(None) shouldBe empty
-    empty.withData(Some("x")).withEvent(Some("y")).withId(Some("z")).withRetry(Some(1)) shouldBe
-      SSEEvent(data = Some("x"), event = Some("y"), id = Some("z"), retry = Some(1))
+    empty.withData(Some("x")).withEvent(Some("y")).withId(Some("z")).withRetry(Some(1.second)) shouldBe
+      SSEEvent(data = Some("x"), event = Some("y"), id = Some("z"), retry = Some(1.second))
   }
 }

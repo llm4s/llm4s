@@ -101,7 +101,7 @@ trait ProviderModuleChecks extends Assertions:
 
   /**
    * No module but `module` supplies any of its chat or embedding ids on the test classpath, and
-   * discovery recorded no collision on them.
+   * discovery recorded no collision on them or on their aliases.
    *
    * Every id has exactly one owner: two modules registering `acme` means one silently wins.
    */
@@ -116,11 +116,10 @@ trait ProviderModuleChecks extends Assertions:
       }
     suppliers("chat", module.chatProviders.map(_.id.asString), _.providerIds)
     suppliers("embedding", module.embeddingProviders.map(_.id.asString), _.embeddingProviderIds)
-    val ids = (module.chatProviders.map(_.id.asString) ++ module.embeddingProviders.map(_.id.asString)).toSet
-    report.collisions.find(c => ids.contains(c.id)).foreach { c =>
-      failAt(
-        s"${c.kind} id '${c.id}' collides: ${c.droppedModule.getOrElse("an earlier registration")} and ${c.keptModule}"
-      )
+    val names = (module.chatProviders.flatMap(d => d.aliases.map(ProviderId(_).asString) + d.id.asString) ++
+      module.embeddingProviders.flatMap(d => d.aliases.map(ProviderId(_).asString) + d.id.asString)).toSet
+    report.collisions.find(c => names.contains(c.id)).foreach { c =>
+      failAt(s"${c.subject} collides: ${c.droppedModule.getOrElse("an earlier registration")} and ${c.keptModule}")
     }
     succeed
 
@@ -149,7 +148,7 @@ trait ProviderModuleChecks extends Assertions:
     val className = module.getClass.getName
     module.chatProviders.foreach { descriptor =>
       val id = descriptor.id.asString
-      registry.get(descriptor.id) match
+      registry.resolve(descriptor.id) match
         case Right(found) if found == descriptor => ()
         case Right(other) => failAt(s"chat id '$id' resolves to $other, not $className's $descriptor, when $how")
         case Left(error)  => failAt(s"chat id '$id' from $className does not resolve when $how: ${error.message}")

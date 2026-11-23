@@ -31,7 +31,7 @@ import org.llm4s.toolapi.ToolFunction
  * // Enable high reasoning for complex tasks
  * val options = CompletionOptions()
  *   .withReasoning(ReasoningEffort.High)
- *   .copy(maxTokens = Some(4096))
+ *   .withMaxTokens(4096)
  *
  * // Let the model decide how much to think, at low effort
  * val adaptiveOptions = CompletionOptions()

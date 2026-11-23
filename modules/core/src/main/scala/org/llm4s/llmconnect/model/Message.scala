@@ -34,7 +34,7 @@ sealed trait Message {
    */
   def validate: Result[Message] =
     if (content.trim.isEmpty) {
-      Left(ValidationError(s"$role message content cannot be empty", "content"))
+      Left(ValidationError("content", s"$role message content cannot be empty"))
     } else {
       Right(this)
     }
@@ -170,10 +170,7 @@ object Message {
 
     if (validationErrors.nonEmpty) {
       Left(
-        ValidationError(
-          s"Conversation validation failed: ${validationErrors.mkString("; ")}",
-          "conversation"
-        ).withViolations(validationErrors.toList)
+        ValidationError("conversation", validationErrors.toList)
       )
     } else {
       Right(())
@@ -270,14 +267,14 @@ object Message {
   // Individual message constructors with validation
   def system(content: String): Result[SystemMessage] =
     if (content.trim.isEmpty) {
-      Left(ValidationError("System message content cannot be empty", "content"))
+      Left(ValidationError("content", "System message content cannot be empty"))
     } else {
       Right(SystemMessage(content = content))
     }
 
   def user(content: String): Result[UserMessage] =
     if (content.trim.isEmpty) {
-      Left(ValidationError("User message content cannot be empty", "content"))
+      Left(ValidationError("content", "User message content cannot be empty"))
     } else {
       Right(UserMessage(content = content))
     }
@@ -285,10 +282,7 @@ object Message {
   def assistant(content: String, toolCalls: List[ToolCall] = List.empty): Result[AssistantMessage] =
     if (content.trim.isEmpty && toolCalls.isEmpty) {
       Left(
-        ValidationError(
-          "Assistant message must have either content or tool calls",
-          "content"
-        )
+        ValidationError("content", "Assistant message must have either content or tool calls")
       )
     } else {
       Right(AssistantMessage(content = content, toolCalls = toolCalls))
@@ -296,9 +290,9 @@ object Message {
 
   def tool(content: String, toolCallId: String): Result[ToolMessage] =
     if (content.trim.isEmpty) {
-      Left(ValidationError("Tool message content cannot be empty", "content"))
+      Left(ValidationError("content", "Tool message content cannot be empty"))
     } else if (toolCallId.trim.isEmpty) {
-      Left(ValidationError("Tool call ID cannot be empty", "toolCallId"))
+      Left(ValidationError("toolCallId", "Tool call ID cannot be empty"))
     } else {
       Right(ToolMessage(content = content, toolCallId = toolCallId))
     }
@@ -532,7 +526,7 @@ final case class AssistantMessage private (
 
   override def validate: Result[Message] =
     if (content.trim.isEmpty && toolCalls.isEmpty) {
-      Left(ValidationError("Assistant message must have either content or tool calls", "content"))
+      Left(ValidationError("content", "Assistant message must have either content or tool calls"))
     } else if (
       thinking.exists {
         case ThinkingBlock.Text(text, signature)  => text.isEmpty && !signature.exists(_.nonEmpty)
@@ -659,10 +653,7 @@ final class ToolMessage(
 
     if (validations.nonEmpty) {
       Left(
-        ValidationError(
-          validations.mkString("; "),
-          "toolMessage"
-        ).withViolations(validations)
+        ValidationError("toolMessage", validations)
       )
     } else {
       Right(this)

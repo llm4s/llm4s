@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.streaming
 import org.llm4s.annotation.Stable
 
 import scala.collection.mutable
+import scala.concurrent.duration.*
 import scala.util.Try
 
 /**
@@ -13,33 +14,37 @@ import scala.util.Try
  * - data: <json content>
  * - event: <event type>
  * - id: <event id>
- * - retry: <retry time>
+ * - retry: <reconnection time, in milliseconds>
  * - : <comment>
+ *
+ * Lines may end in LF, CRLF or CR, as the SSE specification allows.
  */
 @Stable
 object SSEParser {
 
   /**
-   * Represents a parsed SSE event
+   * Represents a parsed SSE event.
+   *
+   * @param retry the reconnection time the server asked for, from a `retry` field of ASCII digits
    */
   final case class SSEEvent private (
     data: Option[String],
     event: Option[String],
     id: Option[String],
-    retry: Option[Int]
+    retry: Option[FiniteDuration]
   ) {
     def isEmpty: Boolean = data.isEmpty && event.isEmpty && id.isEmpty && retry.isEmpty
 
     def isComplete: Boolean = data.isDefined || event.isDefined
 
-    def withData(data: String): SSEEvent           = copy(data = Some(data))
-    def withData(data: Option[String]): SSEEvent   = copy(data = data)
-    def withEvent(event: String): SSEEvent         = copy(event = Some(event))
-    def withEvent(event: Option[String]): SSEEvent = copy(event = event)
-    def withId(id: String): SSEEvent               = copy(id = Some(id))
-    def withId(id: Option[String]): SSEEvent       = copy(id = id)
-    def withRetry(retry: Int): SSEEvent            = copy(retry = Some(retry))
-    def withRetry(retry: Option[Int]): SSEEvent    = copy(retry = retry)
+    def withData(data: String): SSEEvent                   = copy(data = Some(data))
+    def withData(data: Option[String]): SSEEvent           = copy(data = data)
+    def withEvent(event: String): SSEEvent                 = copy(event = Some(event))
+    def withEvent(event: Option[String]): SSEEvent         = copy(event = event)
+    def withId(id: String): SSEEvent                       = copy(id = Some(id))
+    def withId(id: Option[String]): SSEEvent               = copy(id = id)
+    def withRetry(retry: FiniteDuration): SSEEvent         = copy(retry = Some(retry))
+    def withRetry(retry: Option[FiniteDuration]): SSEEvent = copy(retry = retry)
   }
 
   object SSEEvent {
@@ -49,16 +54,19 @@ object SSEParser {
       data: Option[String] = None,
       event: Option[String] = None,
       id: Option[String] = None,
-      retry: Option[Int] = None
+      retry: Option[FiniteDuration] = None
     ): SSEEvent = new SSEEvent(data, event, id, retry)
   }
 
+  /** An SSE line ending: CRLF, LF or a lone CR. */
+  private val LineEnding = "\r\n|\r|\n"
+
   /**
-   * Parse a single SSE event from a string.
-   * An event is terminated by a double newline.
+   * Parse a single SSE event from a string, the event's lines without the blank line that ends it.
+   * Lines may end in LF, CRLF or CR.
    */
   def parseEvent(eventString: String): SSEEvent = {
-    val lines = eventString.split("\n").filter(_.nonEmpty)
+    val lines = eventString.split(LineEnding).filter(_.nonEmpty)
     var event = SSEEvent()
 
     lines.foreach { line =>
@@ -84,7 +92,9 @@ object SSEParser {
             case "id" =>
               event = event.withId(value)
             case "retry" =>
-              Try(value.toInt).toOption.foreach(retryTime => event = event.withRetry(retryTime))
+              // the specification ignores a value that is not all ASCII digits
+              if (value.nonEmpty && value.forall(c => c >= '0' && c <= '9'))
+                Try(value.toLong).toOption.foreach(millis => event = event.withRetry(millis.millis))
             case _ =>
             // Unknown field, ignore
           }
@@ -96,52 +106,25 @@ object SSEParser {
   }
 
   /**
-   * Parse a stream of SSE data into individual events.
-   * Returns an iterator of SSEEvents.
-   */
-  def parseStream(stream: String): Iterator[SSEEvent] = {
-    val events      = mutable.ArrayBuffer[SSEEvent]()
-    val eventBuffer = new StringBuilder()
-
-    stream.split("\n").foreach { line =>
-      if (line.isEmpty) {
-        // Double newline indicates end of event
-        if (eventBuffer.nonEmpty) {
-          val event = parseEvent(eventBuffer.toString)
-          if (!event.isEmpty) {
-            events += event
-          }
-          eventBuffer.clear()
-        }
-      } else {
-        eventBuffer.append(line).append("\n")
-      }
-    }
-
-    // Parse any remaining content
-    if (eventBuffer.nonEmpty) {
-      val event = parseEvent(eventBuffer.toString)
-      if (!event.isEmpty) {
-        events += event
-      }
-    }
-
-    events.iterator
-  }
-
-  /**
    * Parse streaming data with a buffer for incomplete events.
    * This is useful for parsing data as it arrives from a network stream.
+   *
+   * A chunk may end anywhere, between the CR and LF of a CRLF included. Mutable and not
+   * thread-safe: one parser per stream. Created by [[SSEParser.createStreamingParser]].
    */
-  class StreamingParser {
+  final class StreamingParser private[SSEParser] () {
     private val buffer = new StringBuilder()
     private val events = mutable.Queue[SSEEvent]()
+    // the previous chunk ended in CR, so an LF starting this one finishes that CRLF
+    private var afterCR = false
 
     /**
      * Add chunk of data to the parser
      */
     def addChunk(chunk: String): Unit = {
-      buffer.append(chunk)
+      val rest = if (afterCR && chunk.startsWith("\n")) chunk.substring(1) else chunk
+      if (chunk.nonEmpty) afterCR = chunk.endsWith("\r")
+      buffer.append(rest.replace("\r\n", "\n").replace('\r', '\n'))
       extractEvents()
     }
 
@@ -150,34 +133,23 @@ object SSEParser {
      */
     private def extractEvents(): Unit = {
       val content = buffer.toString
-      val lines   = content.split("\n", -1) // -1 to keep empty strings
-
-      var i                    = 0
-      var eventStart           = 0
-      var lastCompleteEventEnd = -1
-
-      while (i < lines.length) {
-        if (lines(i).isEmpty && i > eventStart) {
-          // Found end of event
-          val eventLines = lines.slice(eventStart, i)
-          if (eventLines.nonEmpty) {
-            val eventString = eventLines.mkString("\n")
-            val event       = parseEvent(eventString)
-            if (!event.isEmpty) {
-              events.enqueue(event)
-            }
+      val lastEnd = content.lastIndexOf('\n')
+      if (lastEnd >= 0) {
+        // only the lines before the last line ending are complete; the rest may still grow
+        val tail    = content.substring(lastEnd + 1)
+        val pending = mutable.ArrayBuffer[String]()
+        content.substring(0, lastEnd).split("\n", -1).foreach { line =>
+          if (line.nonEmpty) pending += line
+          else if (pending.nonEmpty) {
+            // a blank line ends the event
+            val event = parseEvent(pending.mkString("\n"))
+            if (!event.isEmpty) events.enqueue(event)
+            pending.clear()
           }
-          lastCompleteEventEnd = i
-          eventStart = i + 1
         }
-        i += 1
-      }
-
-      // Keep incomplete event in buffer
-      if (lastCompleteEventEnd >= 0) {
-        val remaining = lines.drop(lastCompleteEventEnd + 1).mkString("\n")
         buffer.clear()
-        buffer.append(remaining)
+        pending.foreach(line => buffer.append(line).append('\n'))
+        buffer.append(tail)
       }
     }
 
@@ -193,26 +165,19 @@ object SSEParser {
     def hasEvents: Boolean = events.nonEmpty
 
     /**
-     * Get all available events
-     */
-    def getEvents(): Seq[SSEEvent] = {
-      val result = events.toSeq
-      events.clear()
-      result
-    }
-
-    /**
      * Clear the parser state
      */
     def clear(): Unit = {
       buffer.clear()
       events.clear()
+      afterCR = false
     }
 
     /**
      * Flush any remaining buffered data as an event
      */
-    def flush(): Option[SSEEvent] =
+    def flush(): Option[SSEEvent] = {
+      afterCR = false
       if (buffer.nonEmpty) {
         val event = parseEvent(buffer.toString)
         buffer.clear()
@@ -220,6 +185,7 @@ object SSEParser {
       } else {
         None
       }
+    }
   }
 
   /**

@@ -18,7 +18,7 @@ import org.slf4j.LoggerFactory
  *
  * 1. '''Tool Compaction''' (always applied):
  *    - Compresses large JSON/YAML tool outputs
- *    - Externalizes binary content
+ *    - Externalizes large and binary content, when an [[ArtifactStore]] is given
  *    - Truncates verbose logs and error traces
  *
  * 2. '''Subjective Edits''' (optional, requires `enableSubjectiveEdits`):
@@ -29,7 +29,8 @@ import org.slf4j.LoggerFactory
  * ==Safety Guarantees==
  *
  * The compressor is designed to be '''safe''' and '''conservative''':
- *  - User messages are '''never''' modified
+ *  - User messages are '''never''' modified, by any rule this compressor applies
+ *  - Nothing is externalized without an [[ArtifactStore]]: a pointer to content nobody kept could not be resolved
  *  - Code blocks and JSON are preserved verbatim
  *  - Filler word removal only applies to "transcript-like" content
  *  - Truncation preserves first and last sentences
@@ -60,7 +61,8 @@ object DeterministicCompressor {
    * @param messages The messages to compress
    * @param tokenCounter Token counter for measuring compression progress
    * @param capTokens Target maximum token count
-   * @param artifactStore Optional store for externalized content (defaults to in-memory)
+   * @param artifactStore Store for externalized content. With `None` nothing is externalized: oversized tool output
+   *                      is compressed inline and binary content is left as it is
    * @param enableSubjectiveEdits Whether to apply filler word removal and truncation
    * @return Compressed messages, or an error if compression fails
    */
@@ -71,12 +73,11 @@ object DeterministicCompressor {
     artifactStore: Option[ArtifactStore] = None,
     enableSubjectiveEdits: Boolean = false
   ): Result[Seq[Message]] = {
-    val store = artifactStore.getOrElse(ArtifactStore.inMemory())
     val start = countTokens(messages, tokenCounter)
     logger.debug(s"Starting compression to cap=$capTokens (start=$start)")
 
     for {
-      afterTool       <- toolCompaction(messages, store)
+      afterTool       <- toolCompaction(messages, artifactStore)
       afterSubjective <- subjectivePassIfNeeded(afterTool, tokenCounter, capTokens, enableSubjectiveEdits)
     } yield {
       val end = countTokens(afterSubjective, tokenCounter)
@@ -88,10 +89,10 @@ object DeterministicCompressor {
   /** Step 1: single tool-output compaction pass (schema/log/binary aware). */
   private def toolCompaction(
     messages: Seq[Message],
-    store: ArtifactStore
+    store: Option[ArtifactStore]
   ): Result[Seq[Message]] =
     ToolOutputCompressor
-      .compressToolOutputs(messages, store)
+      .compress(messages, store)
       .map { out =>
         logger.debug("Tool compaction done")
         out
@@ -176,6 +177,8 @@ final case class CompressionRule private (name: String, transform: Seq[Message] 
  *
  * ==Available Rules==
  *
+ * The text rules leave user messages alone: they rewrite assistant text only.
+ *
  *  - '''removeRedundantPhrases''': Removes "as I mentioned before", "like I said"
  *  - '''compressRepetitiveContent''': Deduplicates repeated sentences with "×N" markers
  *  - '''truncateVerboseResponses''': Summarizes very long assistant responses
@@ -227,14 +230,12 @@ object CompressionRule {
 
   private def compressRedundantPhrases(message: Message): Message =
     message match {
-      case msg: UserMessage      => msg.withParts(ContentPart.mapText(msg.parts)(cleanupRedundancy))
       case msg: AssistantMessage => msg.withContent(cleanupRedundancy(msg.content))
       case other                 => other
     }
 
   private def compressRepetitiveText(message: Message): Message =
     message match {
-      case msg: UserMessage      => msg.withParts(ContentPart.mapText(msg.parts)(reduceRepetition))
       case msg: AssistantMessage => msg.withContent(reduceRepetition(msg.content))
       case other                 => other
     }

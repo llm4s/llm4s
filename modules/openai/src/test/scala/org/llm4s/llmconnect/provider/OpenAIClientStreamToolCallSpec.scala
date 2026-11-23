@@ -82,7 +82,7 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
     // The caller's chunks reassemble too: each fragment reaches it verbatim, so `"Paris"` keeps
     // its quotes (#1212, PR #1406 review).
     toolChunks.map(_.arguments).collect { case ujson.Str(s) => s }.mkString shouldBe """{"city":"Paris"}"""
-    val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator.create()
+    val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator("test-model")
     chunks.foreach(accumulator.addChunk)
     accumulator.currentToolCalls shouldBe completion.toolCalls
   }
