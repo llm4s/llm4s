@@ -258,7 +258,8 @@ already there is reattached, never run twice - a settled one returns its stored 
 or crashed one is recovered without repeating completed tool effects, a suspended one returns `Suspended` again, and
 one another caller is running is waited on. `bound.resume(outcome.child, answers)` continues
 a run that came back `Suspended`, taking the same answers as `Agent.resume`, and `bound.recover(outcome.child)` one that
-came back `Refused(TaskRefusal.Failed(_))`; both return a `TaskOutcome` too. Only a standalone run's ref is accepted: a
+came back `Refused(TaskRefusal.Failed(_))`; both return a `TaskOutcome` too. `bound.abandon(outcome.child, reason)`
+closes such a failed run instead of continuing it, as `Agent.abandon` does. Only a standalone run's ref is accepted: a
 delegated child is continued through its parent.
 
 ## A worked example

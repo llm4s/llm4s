@@ -44,6 +44,15 @@ trait AgentIO[F[_]] {
   /** Continues `threadId`'s failed or interrupted run; see [[org.llm4s.agent.Agent.recover Agent.recover]]. */
   def recover(threadId: ThreadId, config: RunConfig = RunConfig()): F[AgentResult]
 
+  /**
+   * Closes `threadId`'s failed or interrupted run without continuing it: each tool call left without a result gets
+   * `reason`, nothing runs again, and the thread is at rest for its next turn; see
+   * [[org.llm4s.agent.Agent.abandon Agent.abandon]]. Fails as it refuses - `GraphError.NothingToRecover`,
+   * `GraphError.PendingInterrupts`, `GraphError.ThreadBusy` - with the thread unchanged. It runs no turn, so there is nothing to cancel: the effect is
+   * uncancelable.
+   */
+  def abandon(threadId: ThreadId, reason: String = Agent.AbandonedResult, config: RunConfig = RunConfig()): F[Unit]
+
   /** Answers pending approvals and questions and continues; see [[org.llm4s.agent.Agent.resume Agent.resume]]. */
   def resume(
     threadId: ThreadId,
@@ -125,6 +134,9 @@ object AgentIO {
 
     def recover(threadId: ThreadId, config: RunConfig): F[AgentResult] =
       awaiting(agent.startRecover(threadId, config))
+
+    def abandon(threadId: ThreadId, reason: String, config: RunConfig): F[Unit] =
+      F.blocking(agent.abandon(threadId, reason, config)).flatMap(raised)
 
     def resume(threadId: ThreadId, answers: Map[InterruptId, ujson.Value], config: RunConfig): F[AgentResult] =
       awaiting(agent.startResume(threadId, answers, config))

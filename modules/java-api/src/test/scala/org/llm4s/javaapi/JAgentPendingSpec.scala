@@ -233,6 +233,8 @@ class JAgentPendingSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val broken = new JAgent(FacadeToken.INSTANCE, Left(ValidationError("agent", "broken")))
     broken.resume("t", java.util.List.of()).getError().getMessage should include("broken")
     broken.recover("t").getError().getMessage should include("broken")
+    broken.abandon("t").getError().getMessage should include("broken")
+    broken.abandon("t", "why").getError().getMessage should include("broken")
   }
 
   "JAgent.recover" should "continue a resumed turn that failed, re-running only what did not finish" in {
@@ -268,7 +270,45 @@ class JAgentPendingSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     agent.recover(threadId).get().answer() shouldBe Optional.of("recovered")
   }
 
-  it should "fail for a thread with nothing to recover, and refuse a null thread id" in {
+  "JAgent.abandon" should "close a resumed turn that failed, running nothing, and let the conversation go on" in {
+    ran.clear()
+    val down  = NetworkError("down", None, "http://x")
+    val agent = agentOver(scripted(Right(calling(call("c1", "deploy", "prod"))), Left(down), Right(completion("on"))))
+    val first = agent.run("deploy").get()
+    agent
+      .resume(first.threadId, java.util.List.of(Answer.approve(JAgent.pending(first).get(0).id)))
+      .isFailure shouldBe true
+
+    agent.abandon(first.threadId).isSuccess shouldBe true
+    // closed, not continued: nothing is left to recover or to abandon, and the approved call did not run again
+    agent.recover(first.threadId).getError().error shouldBe a[GraphError]
+    agent.abandon(first.threadId).getError().error shouldBe a[GraphError]
+    ran.asScala.toList shouldBe List("prod")
+    agent.continueConversation(first, "next").get().answer() shouldBe Optional.of("on")
+  }
+
+  it should "record the reason it is given, and refuse a blank or null one and a null thread id" in {
+    val down  = NetworkError("down", None, "http://x")
+    val agent = agentOver(scripted(Right(completion("hello")), Left(down), Right(completion("again"))))
+    val first = agent.run("hi").get()
+    agent.continueConversation(first, "more").isFailure shouldBe true
+
+    agent.abandon(first.threadId, " ").getError().error shouldBe a[ValidationError]
+    agent.abandon(first.threadId, null).getError().error shouldBe a[ValidationError]
+    agent.abandon(null).getError().error shouldBe a[ValidationError]
+    agent.abandon(null, "why").getError().error shouldBe a[ValidationError]
+    agent.abandon(first.threadId, "abandoned: the provider was down").isSuccess shouldBe true
+    agent.continueConversation(first, "more").get().answer() shouldBe Optional.of("again")
+  }
+
+  it should "fail for a thread with no turn to close" in {
+    val agent = agentOver(scripted(Right(completion("hi"))))
+    val first = agent.run("hi").get()
+    agent.abandon(first.threadId).getError().error shouldBe a[GraphError]
+    agent.abandon("no-such-thread").isFailure shouldBe true
+  }
+
+  "JAgent.recover" should "fail for a thread with nothing to recover, and refuse a null thread id" in {
     val agent = agentOver(scripted(Right(completion("hi"))))
     val first = agent.run("hi").get()
     agent.recover(first.threadId).getError().error shouldBe a[GraphError]

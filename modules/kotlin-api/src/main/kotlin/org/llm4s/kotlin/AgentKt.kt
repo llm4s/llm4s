@@ -157,6 +157,19 @@ class AgentKt internal constructor(private val underlying: JAgent) {
     suspend fun recover(threadId: String): JAgentResult = resultOf(streamRecover(threadId))
 
     /**
+     * Closes [threadId]'s failed or cancelled turn without continuing it - the other answer to [recover], for a turn
+     * that would only fail again: each tool call the turn left without a result is recorded as abandoned, or with
+     * [reason] when you give one (the model reads it on the thread's next turn), no tool runs and no model is called,
+     * and the thread is left at rest for its next turn. A thread with no such turn, one waiting on approvals, one
+     * whose turn is still running, or a blank [reason] throws [LLMException], the thread unchanged.
+     */
+    suspend fun abandon(threadId: String, reason: String? = null): Unit = runInterruptible(Dispatchers.IO) {
+        val abandoned = if (reason == null) underlying.abandon(threadId) else underlying.abandon(threadId, reason)
+        abandoned.unwrap("Agent abandon failed")
+        Unit
+    }
+
+    /**
      * The result of [turn]'s collection, its last item: the flow ends with [AgentStreamItem.Done] or throws.
      * Collected on [Dispatchers.IO], so the discarded events never hop to the caller's dispatcher;
      * `withContext` waits for the collection - and so the turn's cancellation - to end before it returns.

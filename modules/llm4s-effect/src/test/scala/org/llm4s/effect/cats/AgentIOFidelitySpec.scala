@@ -251,4 +251,31 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     Fixtures.causeOf(failed.left.toOption.get.asInstanceOf[LLMException].error) shouldBe SimpleError("provider down")
     agent.recover(thread.get().get).unsafeRunSync().status shouldBe AgentStatus.Completed("recovered")
   }
+
+  "AgentIO.abandon" should "close a run that failed with a provider error, leaving nothing to recover" in {
+    val calls = new AtomicInteger(0)
+    val client = new LLMClient {
+      def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
+        calls.getAndIncrement() match {
+          case 0 => Right(toolCall(0))
+          case _ => Left(SimpleError("provider down"))
+        }
+      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+        complete(c, o)
+      def getContextWindow(): Int     = 8192
+      def getReserveCompletion(): Int = 512
+    }
+    val (capture, thread) = Fixtures.threadCapture()
+    val agent             = io(client)(_.withTools(tools).withMiddleware(capture))
+    agent.run("go").attempt.unsafeRunSync().isLeft shouldBe true
+    val threadId = thread.get().get
+    agent.abandon(threadId, "abandoned: the provider is down").unsafeRunSync() shouldBe (())
+    // the run is closed, not continued: no model call was made, and neither recover nor abandon finds one to act on
+    calls.get shouldBe 2
+    Seq(agent.recover(threadId).void, agent.abandon(threadId)).foreach { refused =>
+      val error = refused.attempt.unsafeRunSync().left.toOption.get.asInstanceOf[LLMException].error
+      Fixtures.causeOf(error) shouldBe GraphError.NothingToRecover(threadId.value)
+    }
+    calls.get shouldBe 2
+  }
 }

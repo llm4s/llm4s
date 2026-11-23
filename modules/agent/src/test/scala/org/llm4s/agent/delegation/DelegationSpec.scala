@@ -623,6 +623,31 @@ class DelegationSpec
     client.calls should have size 2
   }
 
+  it should "abandon a run that failed, closing it with no model call and nothing left to recover (#1750)" in {
+    val client  = RoutingClient { case Child("researcher", _) => Left(ValidationError("provider", "down")) }
+    val runtime = GraphRuntime.inMemory()
+    val bound   = researcher.bind(client, runtime).value
+    val ref = bound.run(Question("x")).value match
+      case TaskOutcome.Refused(child, TaskRefusal.Failed(_), _) => child
+      case other                                                => fail(s"expected a Failed refusal, got $other")
+
+    bound.abandon(ref, "abandoned: the provider is down") shouldBe Right(())
+    bound.recover(ref).left.value shouldBe GraphError.NothingToRecover(ref.threadId.value)
+    bound.abandon(ref).left.value shouldBe GraphError.NothingToRecover(ref.threadId.value)
+    bound.abandon(ref, " ").left.value shouldBe a[ValidationError]
+    client.calls should have size 1
+  }
+
+  it should "refuse abandoning a run that did not fail, the thread unchanged" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"s","sources":1}"""))
+    }
+    val bound = researcher.bind(client, GraphRuntime.inMemory()).value
+    val ref   = bound.run(Question("x")).value.asInstanceOf[TaskOutcome.Reported[Findings]].child
+    bound.abandon(ref).left.value shouldBe GraphError.NothingToRecover(ref.threadId.value)
+    client.calls should have size 1
+  }
+
   it should "refuse recovering a run that did not fail, the thread unchanged" in {
     val client = RoutingClient { case Child("researcher", _) =>
       Right(CompletionFixture.simple("""{"summary":"s","sources":1}"""))
@@ -879,6 +904,7 @@ class DelegationSpec
     delegated.foreach { child =>
       bound.resume(child, Map(approve(InterruptId("any")))).left.value shouldBe a[ValidationError]
       bound.recover(child).left.value shouldBe a[ValidationError]
+      bound.abandon(child).left.value shouldBe a[ValidationError]
     }
     client.calls should have size sent
     runs.get shouldBe 0

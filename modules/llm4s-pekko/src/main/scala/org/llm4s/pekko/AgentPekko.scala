@@ -51,6 +51,17 @@ trait AgentPekko {
   /** Continues `threadId`'s failed or interrupted run; see [[org.llm4s.agent.Agent.recover Agent.recover]]. */
   def recover(threadId: ThreadId, config: RunConfig = RunConfig())(using ec: ExecutionContext): Future[AgentResult]
 
+  /**
+   * Closes `threadId`'s failed or interrupted run without continuing it: each tool call left without a result gets
+   * `reason`, nothing runs again, and the thread is at rest for its next turn; see
+   * [[org.llm4s.agent.Agent.abandon Agent.abandon]]. Fails as it refuses - `GraphError.NothingToRecover`,
+   * `GraphError.PendingInterrupts`, `GraphError.ThreadBusy` - with the thread unchanged. The `Future` fails with an [[LLMException]] carrying the
+   * refusal.
+   */
+  def abandon(threadId: ThreadId, reason: String = Agent.AbandonedResult, config: RunConfig = RunConfig())(using
+    ec: ExecutionContext
+  ): Future[Unit]
+
   /** Answers pending approvals and questions and continues; see [[org.llm4s.agent.Agent.resume Agent.resume]]. */
   def resume(threadId: ThreadId, answers: Map[InterruptId, ujson.Value], config: RunConfig = RunConfig())(using
     ec: ExecutionContext
@@ -155,6 +166,12 @@ object AgentPekko {
 
     def recover(threadId: ThreadId, config: RunConfig)(using ec: ExecutionContext): Future[AgentResult] =
       awaiting(agent.startRecover(threadId, config))
+
+    def abandon(threadId: ThreadId, reason: String, config: RunConfig)(using ec: ExecutionContext): Future[Unit] =
+      Future(blocking(agent.abandon(threadId, reason, config))).flatMap {
+        case Right(_)    => Future.unit
+        case Left(error) => Future.failed(new LLMException(error))
+      }
 
     def resume(threadId: ThreadId, answers: Map[InterruptId, ujson.Value], config: RunConfig)(using
       ec: ExecutionContext

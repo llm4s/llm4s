@@ -513,7 +513,8 @@ cause is that `LlmException`. A future you cancel throws `CancellationException`
 
 `cancel(true)` interrupts the call in flight, which is how llm4s providers stop; an agent turn cancelled this way ends
 as the blocking call interrupted does: cancelled, the conversation of a continued, resumed or recovered turn left for
-`recover`. Completing the future yourself - `orTimeout`,
+`recover` - or for `abandon(threadId)`, which closes that turn without running anything again and returns at once, so
+it has no `Async` form. Completing the future yourself - `orTimeout`,
 `completeOnTimeout`, `complete` - interrupts the call too, since its answer can no longer be delivered. `cancel(false)`
 lets the call finish and discards its answer. Cancel the future the method returned: a future derived from it with
 `thenApply` does not pass its cancellation back.

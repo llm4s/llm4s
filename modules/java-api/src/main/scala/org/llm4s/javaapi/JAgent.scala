@@ -178,6 +178,26 @@ final class JAgent private[javaapi] (
     else turn("JAgent.recover")(_.recover(ThreadId(threadId)))
 
   /**
+   * Closes `threadId`'s failed or cancelled turn without continuing it - the other answer to [[recover]], for a turn
+   * that would only fail again: each tool call the turn left without a result is recorded as abandoned, no tool runs
+   * and no model is called, and the thread is left at rest, so its next `stream` or `continueConversation` works. A
+   * thread with no such turn (at rest, or unknown), one waiting on approvals (answer it with [[resume]]) and one whose
+   * turn is still running are failed results, the thread unchanged. Never throws.
+   */
+  def abandon(threadId: String): LlmResult[Void] =
+    if (threadId == null) LlmResult.failure(ValidationError.required("threadId"))
+    else call("JAgent.abandon")(_.abandon(ThreadId(threadId)).map(_ => null))
+
+  /**
+   * `abandon(threadId)`, recording `reason` as the result of each tool call left without one. The model reads it on
+   * the thread's next turn, so say what it should conclude. A blank reason is a failed result.
+   */
+  def abandon(threadId: String, reason: String): LlmResult[Void] =
+    if (threadId == null) LlmResult.failure(ValidationError.required("threadId"))
+    else if (reason == null) LlmResult.failure(ValidationError.required("reason"))
+    else call("JAgent.abandon")(_.abandon(ThreadId(threadId), reason).map(_ => null))
+
+  /**
    * `run(query)` on another thread: returns at once with a future of the turn's result. The future completes
    * exceptionally with the [[LlmException]] the blocking call's failed result would hold - of the same
    * [[LlmErrorKind]] - and never with another exception, except the `CancellationException` of a future cancelled

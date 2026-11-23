@@ -67,7 +67,8 @@ object PlayTestAgents {
     def continueConversation(previous: AgentResult, query: String, config: RunConfig)(using
       ec: ExecutionContext
     ): Future[AgentResult] = no
-    def recover(threadId: ThreadId, config: RunConfig)(using ec: ExecutionContext): Future[AgentResult] = no
+    def recover(threadId: ThreadId, config: RunConfig)(using ec: ExecutionContext): Future[AgentResult]          = no
+    def abandon(threadId: ThreadId, reason: String, config: RunConfig)(using ec: ExecutionContext): Future[Unit] = no
     def resume(threadId: ThreadId, answers: Map[InterruptId, ujson.Value], config: RunConfig)(using
       ec: ExecutionContext
     ): Future[AgentResult] = no

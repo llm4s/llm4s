@@ -42,6 +42,7 @@ object TestAgents {
     def run(query: String, config: RunConfig): IO[AgentResult] = no
     def continueConversation(previous: AgentResult, query: String, config: RunConfig): IO[AgentResult]         = no
     def recover(threadId: ThreadId, config: RunConfig): IO[AgentResult]                                        = no
+    def abandon(threadId: ThreadId, reason: String, config: RunConfig): IO[Unit]                               = no
     def resume(threadId: ThreadId, answers: Map[InterruptId, ujson.Value], config: RunConfig): IO[AgentResult] = no
     def stream(threadId: ThreadId, query: String, config: RunConfig): Stream[IO, AgentStreamItem] = Stream.eval(no)
     def streamResume(threadId: ThreadId, answers: Map[InterruptId, ujson.Value], config: RunConfig) =

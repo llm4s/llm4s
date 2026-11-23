@@ -1,6 +1,7 @@
 package org.llm4s.agent.service
 
-import org.llm4s.agent.graph.{ Checkpoint, CheckpointStatus }
+import org.llm4s.agent.Agent
+import org.llm4s.agent.graph.{ Checkpoint, CheckpointStatus, RunOutcome }
 import org.llm4s.annotation.Experimental
 
 /**
@@ -15,7 +16,9 @@ import org.llm4s.annotation.Experimental
  *  - `Close`: the entry's input was admitted and the thread has moved on - its run reached rest, or the thread moved
  *    on through a direct `recover`, which applied the input once - so the attempt closes the entry with `outcome`,
  *    running nothing. That includes an admitted entry ([[QueueEntry.admitted]]) whose checkpoints the lookup no longer
- *    finds: a direct run's blocked turn retracted them (`Commit.retractTurn`), so the input must not run again.
+ *    finds: a direct run's blocked turn retracted them (`Commit.retractTurn`), so the input must not run again. And an
+ *    entry whose run the thread's owner abandoned (`Agent.abandon`): the settlement is that run's own newest
+ *    checkpoint, so the entry closes `Failed(Abandoned)` whatever the thread has done since.
  */
 @Experimental
 enum AttemptPlan:
@@ -43,12 +46,22 @@ object AttemptPlan:
         entry.input match
           case QueuedInput.Recover => Recover
           case _                   => Start
+      // its run was abandoned by the thread's owner: the settlement is the run's own checkpoint, so this holds however
+      // far direct runs have taken the thread on since
+      case Some(own) if abandoned(own) && latest.isDefined => Close(EntryOutcome.Failed(FailureReason.Abandoned))
       case Some(own) =>
         latest match
           case Some(now) if now.id == own.id && now.status == CheckpointStatus.Running => Recover
           case Some(now)                                                               => Close(closedFrom(now))
           // admitted, and the thread is gone: deleted after the attempt was recorded
           case None => Close(EntryOutcome.Cancelled(CancelReason.ThreadDeleted))
+
+  /** Whether `checkpoint` is the `Failed` one `Agent.abandon` settles a run with. */
+  private def abandoned(checkpoint: Checkpoint): Boolean =
+    checkpoint.status == CheckpointStatus.Failed && checkpoint.outcome.exists {
+      case RunOutcome.Failed(Agent.AbandonedKind, _) => true
+      case _                                         => false
+    }
 
   /** The outcome of an entry closed from the thread's state `latest`, without running anything. */
   def closedFrom(latest: Checkpoint): EntryOutcome =

@@ -230,11 +230,15 @@ final class Agent private[agent] (
    * (answer it with [[resume]]), one a run still holds - in this runtime, or by a live claim in any runtime sharing
    * the store, a crashed process's until it lapses - `GraphError.ThreadBusy`, another tenant's
    * `GraphError.TenantMismatch`, and a child thread `GraphError.ChildThread`. So after [[AgentRun.cancel]], await the
-   * run before abandoning its thread. The edit is made under the thread's claim, as run `config.runId`, so it cannot
-   * interleave with a run; a subagent the turn left running is settled as abandoned when the thread's next turn starts.
+   * run before abandoning its thread. The edit is made under the thread's claim, taken as `config.runId`, so it cannot
+   * interleave with a run, and is committed as the run it closes: that run's last checkpoint and its `RunFailed` event.
+   * A subagent the turn left running is settled as abandoned when the thread's next turn starts.
    *
-   * A queued run is stopped through its queue, which settles the turn itself; abandoning a thread a queue entry was
-   * still to recover closes that entry as failed.
+   * A run a queue's worker started is abandoned the same way, once its worker has died and its claim has lapsed -
+   * while the worker runs it the thread is `ThreadBusy`, and the queue's own cancel
+   * ([[org.llm4s.agent.service.RunSubmitter.cancel RunSubmitter.cancel]]) is what stops it. The entry is then closed
+   * by the next worker to take it, `EntryOutcome.Failed(FailureReason.Abandoned)`, with nothing run again - also when
+   * the thread has taken other turns in between - and the entries queued behind it on the thread run after it.
    */
   def abandon(
     threadId: ThreadId,
@@ -247,7 +251,7 @@ final class Agent private[agent] (
       runtime.abandon(
         threadId,
         loop.graph,
-        RunOutcome.Failed("Abandoned", Agent.AbandonedMessage),
+        RunOutcome.Failed(Agent.AbandonedKind, Agent.AbandonedMessage),
         Agent.AbandonedMessage,
         settled,
         amend = state => SettledTurn.closing(state, s"${settled.runId.value}/abandoned", reason)
@@ -579,6 +583,9 @@ object Agent:
   /** The result [[Agent.abandon]] records for a tool call that had none, unless the caller gives its own. */
   val AbandonedResult: String =
     "abandoned: the run stopped before this tool call returned a result, and the call was not run again"
+
+  /** The kind of the `RunOutcome.Failed` an abandoned run is settled with ([[Agent.abandon]]). */
+  val AbandonedKind: String = "Abandoned"
 
   /** The failure an abandoned run is settled with: its `RunFailed` event's and its `RunOutcome.Failed`'s message. */
   private val AbandonedMessage: String = "abandoned: the run was closed by its thread's owner rather than recovered"

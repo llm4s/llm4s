@@ -327,6 +327,26 @@ class AgentKtPendingTest {
     }
 
     @Test
+    fun `abandon closes a resumed turn that failed, running nothing, and the conversation goes on`() = runBlocking<Unit> {
+        ran.clear()
+        val down = NetworkError.apply("down", Option.empty(), "http://x")
+        val agent = agentOf(
+            { completion("", listOf(call("c1", "deploy", "prod"))) },
+            { Left(down) },
+            { completion("on") },
+        )
+        val first = agent.run("deploy")
+        assertFailsWith<LLMException> { agent.resume(first.threadId(), listOf(Answer.approve(AgentKt.pending(first).single().id()))) }
+        assertFailsWith<LLMException> { agent.abandon(first.threadId(), " ") }
+        agent.abandon(first.threadId(), "abandoned: the provider was down")
+        // closed, not continued: nothing is left to recover or to abandon, and the approved call did not run again
+        assertFailsWith<LLMException> { agent.recover(first.threadId()) }
+        assertFailsWith<LLMException> { agent.abandon(first.threadId()) }
+        assertEquals(listOf("""{"text":"prod"}"""), ran.toList())
+        assertEquals(Optional.of("on"), agent.continueConversation(first, "next").answer())
+    }
+
+    @Test
     fun `cancelling a resume cancels the turn, and recover then completes it`() = runBlocking {
         val parked = CountDownLatch(1)
         val agent = agentOf(

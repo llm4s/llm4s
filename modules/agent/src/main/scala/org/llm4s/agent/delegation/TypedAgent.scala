@@ -519,6 +519,18 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
     standalone(ref).flatMap(_ => continued(ref, config)(agent.startRecover(ref.threadId, config)))
 
   /**
+   * Closes the failed or interrupted standalone run `ref` names - a `Refused(Failed)`'s `child` - without continuing
+   * it, as `Agent.abandon` does: the other answer to [[recover]], for a run that would only fail again. Each tool call
+   * the turn left without a result gets `reason` (model-visible; blank is a `ValidationError`), nothing runs and no
+   * model is called, and the thread is at rest, settled as a failure, with nothing left to recover. A delegated child's
+   * ref is refused, as for [[resume]]; the runtime's refusals come back unchanged with the thread as it was -
+   * `GraphError.NothingToRecover` for a run that did not stop mid-turn, `GraphError.PendingInterrupts` for a suspended
+   * one, `GraphError.ThreadBusy` for one still running.
+   */
+  def abandon(ref: ChildRef, reason: String = Agent.AbandonedResult, config: RunConfig = RunConfig()): Result[Unit] =
+    standalone(ref).flatMap(_ => agent.abandon(ref.threadId, reason, config))
+
+  /**
    * `ref` itself when it names a standalone run of this subagent: no parent tool call and depth 0. A delegated child
    * is continued only through its parent (rule 19), and the runtime would refuse its thread too.
    */

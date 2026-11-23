@@ -886,6 +886,7 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
       EntryOutcome.Failed(FailureReason.AttemptsExhausted(3)),
       EntryOutcome.Failed(FailureReason.RunFailed("it failed")),
       EntryOutcome.Failed(FailureReason.Unrunnable("no worker")),
+      EntryOutcome.Failed(FailureReason.Abandoned),
       EntryOutcome.Cancelled(CancelReason.ThreadDeleted),
       EntryOutcome.Cancelled(CancelReason.Requested(Some("stop"))),
       EntryOutcome.Cancelled(CancelReason.Requested(None)),
