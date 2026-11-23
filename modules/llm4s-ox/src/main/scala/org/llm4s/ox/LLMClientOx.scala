@@ -81,7 +81,7 @@ object LLMClientOx {
      * [[LLMException]] returns its `LLMError` as a `Left`; any other exception, an interrupt included, propagates.
      */
     def accumulate: Result[Completion] = {
-      val accumulator = StreamingAccumulator.create()
+      val accumulator = StreamingAccumulator("")
       Try(flow.runForeach(accumulator.addChunk)) match {
         case Success(())              => accumulator.toCompletion
         case Failure(e: LLMException) => Left(e.error)

@@ -595,11 +595,13 @@ for both purposes against a local server, as `VoyageAIInputTypeSpec` does.
 ### Streaming: `SSEParser`, `StreamingAccumulator`, `StreamingToolArgumentParser`
 
 - `SSEParser.createStreamingParser()` returns an incremental parser: `addChunk(text)`, then drain
-  `nextEvent()` / `hasEvents`, and `flush()` at end of stream. Each `SSEEvent` has `data`,
-  `event`, `id` and `retry`. `SSEParser.parseEvent` / `parseStream` handle whole strings.
-- `StreamingAccumulator.create()` folds `StreamedChunk`s into a final `Completion`:
-  `addChunk(chunk)`, `updateTokens(prompt, completion)` (or `updateTokensWithThinking`) when usage
-  arrives, then `toCompletion: Result[Completion]`. It keys tool calls by id, so **every
+  `nextEvent()` / `hasEvents`, and `flush()` at end of stream. Feed it the body as it arrives, in
+  chunks of any size: lines may end in LF, CRLF or CR, split anywhere. Each `SSEEvent` has `data`,
+  `event`, `id` and `retry` (a `FiniteDuration`). `SSEParser.parseEvent` reads one event's lines.
+- `StreamingAccumulator(model)` folds `StreamedChunk`s into a final `Completion` whose `model` is
+  `model`: `addChunk(chunk)`, `updateUsage(usage)` with each `TokenUsage` the stream reports
+  (thinking and cache counts included; a field a later report leaves at zero or `None` keeps its
+  earlier value), then `toCompletion: Result[Completion]`. It keys tool calls by id, so **every
   tool-call chunk must carry its call's id** - if the wire format identifies continuations only
   by index, map index to id yourself; a chunk with an empty id is skipped. It is mutable: one per
   request.
@@ -667,7 +669,7 @@ final class AcmeClient(
     options: CompletionOptions,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
-    completeWithMetrics(...) // postStream + SSEParser + StreamingAccumulator, as Ollama's client does
+    completeWithMetrics(...) // postStream + SSEParser + StreamingAccumulator, as OpenAICompatibleClient does
 
   def getContextWindow(): Int     = config.contextWindow
   def getReserveCompletion(): Int = config.reserveCompletion

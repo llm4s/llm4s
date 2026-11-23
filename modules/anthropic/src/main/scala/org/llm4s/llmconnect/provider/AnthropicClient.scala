@@ -372,7 +372,7 @@ curl https://api.anthropic.com/v1/messages \
         val requestBody   = serializeRequestBody(messageParams)
 
         // Create accumulator for building the final completion
-        val accumulator = StreamingAccumulator.create()
+        val accumulator = StreamingAccumulator(config.model)
         // the sources the streamed text blocks cite, each once, in order
         val citations                        = mutable.LinkedHashSet.empty[Citation]
         var currentMessageId: Option[String] = None
@@ -574,7 +574,7 @@ curl https://api.anthropic.com/v1/messages \
               val message =
                 if (thinkingBlocks.isEmpty) c.message
                 else c.message.withThinking(thinkingBlocks.values.map(_.toBlock).toSeq)
-              c.withModel(config.model)
+              c
                 .withMessage(ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options))
                 .withEstimatedCost(cost)
                 .withCitations(citations.toList)

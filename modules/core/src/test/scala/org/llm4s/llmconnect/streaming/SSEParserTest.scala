@@ -3,6 +3,8 @@ package org.llm4s.llmconnect.streaming
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
+import scala.concurrent.duration._
+
 class SSEParserTest extends AnyFunSuite with Matchers {
 
   test("parseEvent should parse simple SSE event") {
@@ -27,7 +29,7 @@ class SSEParserTest extends AnyFunSuite with Matchers {
     event.event shouldBe Some("message")
     event.data shouldBe Some("{\"content\": \"hello\"}")
     event.id shouldBe Some("msg-123")
-    event.retry shouldBe Some(1000)
+    event.retry shouldBe Some(1000.millis)
   }
 
   test("parseEvent should handle comments") {
@@ -51,26 +53,6 @@ class SSEParserTest extends AnyFunSuite with Matchers {
     val event = SSEParser.parseEvent(eventString)
 
     event.data shouldBe Some("line 1\nline 2\nline 3")
-  }
-
-  test("parseStream should parse multiple events") {
-    val stream = """data: event 1
-                   |
-                   |data: event 2
-                   |event: test
-                   |
-                   |data: event 3
-                   |id: 123
-                   |""".stripMargin
-
-    val events = SSEParser.parseStream(stream).toList
-
-    (events should have).length(3)
-    events(0).data shouldBe Some("event 1")
-    events(1).data shouldBe Some("event 2")
-    events(1).event shouldBe Some("test")
-    events(2).data shouldBe Some("event 3")
-    events(2).id shouldBe Some("123")
   }
 
   test("StreamingParser should accumulate chunks") {
@@ -121,5 +103,71 @@ class SSEParserTest extends AnyFunSuite with Matchers {
     val flushed = parser.flush()
     flushed.isDefined shouldBe true
     flushed.get.data shouldBe Some("incomplete")
+  }
+
+  private val threeEvents = List(
+    "event: message\ndata: {\"a\":1}\nid: 1\n\n",
+    ": keep-alive\ndata: line 1\ndata: line 2\n\n",
+    "data: [DONE]\n\n"
+  ).mkString
+
+  private def eventsOf(stream: String, chunkSizes: Iterator[Int]): Vector[SSEParser.SSEEvent] = {
+    val parser = SSEParser.createStreamingParser()
+    val out    = Vector.newBuilder[SSEParser.SSEEvent]
+    var rest   = stream
+    while (rest.nonEmpty) {
+      val (chunk, tail) = rest.splitAt(chunkSizes.next())
+      parser.addChunk(chunk)
+      while (parser.hasEvents) parser.nextEvent().foreach(out += _)
+      rest = tail
+    }
+    parser.flush().foreach(out += _)
+    out.result()
+  }
+
+  private val expected = eventsOf(threeEvents, Iterator.continually(threeEvents.length))
+
+  test("StreamingParser should read the three events of an LF stream") {
+    expected.map(_.data) shouldBe Vector(Some("{\"a\":1}"), Some("line 1\nline 2"), Some("[DONE]"))
+    expected.head.event shouldBe Some("message")
+    expected.head.id shouldBe Some("1")
+  }
+
+  test("StreamingParser should end an event only at a blank line, however an LF stream is chunked") {
+    (1 to threeEvents.length).foreach(size => eventsOf(threeEvents, Iterator.continually(size)) shouldBe expected)
+  }
+
+  test("StreamingParser should read a CRLF stream fed in arbitrary chunks as the LF stream") {
+    val crlf = threeEvents.replace("\n", "\r\n")
+    val rnd  = new scala.util.Random(2813)
+    (1 to crlf.length).foreach(size => eventsOf(crlf, Iterator.continually(size)) shouldBe expected)
+    (1 to 50).foreach(_ => eventsOf(crlf, Iterator.continually(1 + rnd.nextInt(7))) shouldBe expected)
+  }
+
+  test("StreamingParser should read a CR-only stream fed in arbitrary chunks as the LF stream") {
+    val cr = threeEvents.replace("\n", "\r")
+    (1 to cr.length).foreach(size => eventsOf(cr, Iterator.continually(size)) shouldBe expected)
+  }
+
+  test("StreamingParser should emit each CRLF event as soon as its blank line arrives") {
+    val parser = SSEParser.createStreamingParser()
+    parser.addChunk("data: one\r\n\r")
+    parser.nextEvent().flatMap(_.data) shouldBe Some("one")
+    parser.addChunk("\ndata: two\r\n\r\n")
+    parser.nextEvent().flatMap(_.data) shouldBe Some("two")
+    parser.hasEvents shouldBe false
+    parser.flush() shouldBe None
+  }
+
+  test("parseEvent should read CRLF and CR line endings") {
+    SSEParser.parseEvent("event: e\r\ndata: a\r\ndata: b\r\n").data shouldBe Some("a\nb")
+    SSEParser.parseEvent("event: e\rdata: a\rdata: b\r").event shouldBe Some("e")
+    SSEParser.parseEvent("event: e\rdata: a\rdata: b\r").data shouldBe Some("a\nb")
+  }
+
+  test("parseEvent should read retry as a duration in milliseconds") {
+    SSEParser.parseEvent("retry: 1500\n").retry shouldBe Some(1500.millis)
+    SSEParser.parseEvent("retry: soon\n").retry shouldBe None
+    SSEParser.parseEvent("retry: -5\n").retry shouldBe None
   }
 }
