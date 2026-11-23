@@ -39,8 +39,7 @@ object WorkspaceRegexSafetyManager {
 
   private val DangerousPatternShapes = List(
     "\\(\\([^)]*[+*][^)]*\\)[+*][^)]*\\)[+*]",
-    "\\([^)]*[+*][^)]*\\)[+*]",
-    "\\([^)]*\\|[^)]*\\)[+*]"
+    "\\([^)]*[+*][^)]*\\)[+*]"
   ).map(_.r)
 
   /** Raised when an operation exceeds its step budget (likely catastrophic backtracking). */
@@ -102,7 +101,7 @@ object WorkspaceRegexSafetyManager {
     else if (pattern.length > MaxPatternLength)
       Left(s"Pattern too long: ${pattern.length} > $MaxPatternLength")
     else if (DangerousPatternShapes.exists(_.findFirstIn(pattern).isDefined))
-      Left("Regex pattern contains nested quantifiers/overlap and may cause ReDoS")
+      Left("Regex pattern contains nested quantifiers and may cause ReDoS")
     else if (hasOverlappingAlternationWithQuantifier(pattern))
       Left("Regex pattern contains quantified overlapping alternation and may cause ReDoS")
     else Right(())
@@ -139,7 +138,9 @@ object WorkspaceRegexSafetyManager {
   private def hasOverlappingAlternationWithQuantifier(pattern: String): Boolean = {
     val quantifiedAlt = "\\(([^)]*\\|[^)]*)\\)([+*])".r
     quantifiedAlt.findAllMatchIn(pattern).exists { m =>
-      val alternatives = m.group(1).split("\\|").map(_.trim).filter(_.nonEmpty)
+      // without the `?:` or `?<name>` that opens a non-capturing or named group, which is not part of an alternative
+      val body         = m.group(1).replaceFirst("^\\?(?::|<[A-Za-z][A-Za-z0-9]*>)", "")
+      val alternatives = body.split("\\|").map(_.trim).filter(_.nonEmpty)
       alternatives.combinations(2).exists {
         case Array(a, b) => a.startsWith(b) || b.startsWith(a)
         case _           => false

@@ -66,6 +66,7 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
     (ExecutionError("exit 1", "shell"), LlmErrorKind.OTHER, true),
     (NotFoundError("Memory not found", "m1"), LlmErrorKind.OTHER, false),
     (OptimisticLockFailure("stale", "m1", 2L), LlmErrorKind.OTHER, true),
+    (CircuitOpenError.open("openai", 30.seconds), LlmErrorKind.OTHER, true),
     (ProcessingError("parse", "bad json"), LlmErrorKind.OTHER, false),
     (SimpleError("plain"), LlmErrorKind.OTHER, false),
     (SystemError("disk full"), LlmErrorKind.OTHER, true),

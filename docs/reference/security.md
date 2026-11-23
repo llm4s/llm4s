@@ -64,7 +64,7 @@ Limits:
 
 **Mitigation (implemented):**
 - `HttpErrorMapper.sanitize()` runs `Redaction.redact()` on the raw provider error body before constructing any `LLMError`. This strips OpenAI, Anthropic, Google, Voyage, Langfuse, AWS, and JWT patterns.
-- `Redaction.scala` and `SecretPatterns.scala` maintain the canonical set of credential regexes used across the codebase.
+- `Redaction.scala` and `SecretPatterns.scala` (`org.llm4s.util`, internal) maintain the canonical set of credential regexes used across the codebase; `org.llm4s.agent.guardrails.patterns.SecretPatterns` in `llm4s-agent` publishes them as the `SecretType`s of `SecretLeakGuardrail`.
 - Provider `ProviderConfig` `toString` implementations mask API keys with `***`.
 
 **Residual risk:** Plain-text secrets not matching any known regex pattern would not be redacted.
