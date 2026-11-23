@@ -155,4 +155,109 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
     // Assert
     result.isLeft shouldBe true
   }
+
+  // A property's schema is converted as it is, never to a string it is not (#2814)
+
+  private def toolWithProperties(properties: ujson.Obj, required: Seq[String]): ToolFunction[?, ?] = {
+    val client        = new MCPClientImpl(config)
+    val mockTransport = mock[MCPTransportImpl]
+    val initResponse  = JsonRpcResponse("2.0", "1", Some(ujson.Obj("protocolVersion" -> "2025-06-18")))
+    val toolsResponse = JsonRpcResponse(
+      "2.0",
+      "2",
+      Some(
+        ujson.Obj(
+          "tools" -> ujson.Arr(
+            ujson.Obj(
+              "name"        -> "shaped",
+              "description" -> "A tool with structured arguments",
+              "inputSchema" -> ujson.Obj(
+                "type"       -> "object",
+                "properties" -> properties,
+                "required"   -> ujson.Arr.from(required.map(ujson.Str(_)))
+              )
+            )
+          )
+        )
+      )
+    )
+    (mockTransport.sendRequest _)
+      .expects(where((req: JsonRpcRequest) => req.method == "initialize"))
+      .returning(Right(initResponse))
+    (mockTransport.sendNotification _)
+      .expects(where((notif: JsonRpcNotification) => notif.method == "notifications/initialized"))
+      .returning(Right(()))
+    (mockTransport.sendRequest _)
+      .expects(JsonRpcRequest("2.0", "2", "tools/list", None))
+      .returning(Right(toolsResponse))
+    client.transport = Some(mockTransport)
+    client.getTools().toOption.get.head
+  }
+
+  private def propertiesOf(tool: ToolFunction[?, ?]): ujson.Value =
+    tool.schema.toJsonSchema(strict = false)("properties")
+
+  "MCPClientImpl" should "describe a nested object property as an object with its own properties" in {
+    val tool = toolWithProperties(
+      ujson.Obj(
+        "filter" -> ujson.Obj(
+          "type"        -> "object",
+          "description" -> "What to match",
+          "properties"  -> ujson.Obj("status" -> ujson.Obj("type" -> "string", "enum" -> ujson.Arr("open", "done"))),
+          "required"    -> ujson.Arr("status")
+        )
+      ),
+      Seq("filter")
+    )
+
+    val filter = propertiesOf(tool)("filter")
+    filter("type").str shouldBe "object"
+    filter("description").str shouldBe "What to match"
+    filter("properties")("status")("enum").arr.map(_.str).toSeq shouldBe Seq("open", "done")
+    filter("required").arr.map(_.str).toSeq shouldBe Seq("status")
+  }
+
+  it should "describe an anyOf property as a union of its alternatives" in {
+    val tool = toolWithProperties(
+      ujson.Obj(
+        "id" -> ujson.Obj(
+          "description" -> "A number or a name",
+          "anyOf"       -> ujson.Arr(ujson.Obj("type" -> "integer"), ujson.Obj("type" -> "string"))
+        )
+      ),
+      Seq("id")
+    )
+
+    val id = propertiesOf(tool)("id")
+    id("description").str shouldBe "A number or a name"
+    id("anyOf").arr.map(_("type").str).toSeq shouldBe Seq("integer", "string")
+    id.obj.contains("type") shouldBe false
+  }
+
+  it should "describe a type that allows null as nullable, and array items by their own schema" in {
+    val tool = toolWithProperties(
+      ujson.Obj(
+        "note" -> ujson.Obj("type" -> ujson.Arr("string", "null")),
+        "rows" -> ujson.Obj(
+          "type"  -> "array",
+          "items" -> ujson.Obj("type" -> "object", "properties" -> ujson.Obj("n" -> ujson.Obj("type" -> "integer")))
+        )
+      ),
+      Seq.empty
+    )
+
+    val properties = propertiesOf(tool)
+    properties("note")("type") shouldBe ujson.Arr("string", "null")
+    properties("rows")("items")("type").str shouldBe "object"
+    properties("rows")("items")("properties")("n")("type").str shouldBe "integer"
+  }
+
+  it should "keep a schema the model has no case for as the server wrote it" in {
+    val reference = ujson.Obj("$ref" -> "#/$defs/Address")
+    val freeForm  = ujson.Obj("type" -> "object", "description" -> "Any headers", "additionalProperties" -> true)
+    val tool      = toolWithProperties(ujson.Obj("address" -> reference, "headers" -> freeForm), Seq.empty)
+
+    propertiesOf(tool)("address") shouldBe reference
+    propertiesOf(tool)("headers") shouldBe freeForm
+  }
 }

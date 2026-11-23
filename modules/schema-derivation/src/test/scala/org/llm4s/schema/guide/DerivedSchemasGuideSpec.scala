@@ -235,7 +235,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     }
 
     def supportTools(service: CustomerService): Result[ToolRegistry] =
-      Tools.derive[CustomerService](service).map(tools => ToolRegistry.of(tools).toOption.get)
+      Tools.derive[CustomerService](service).flatMap(ToolRegistry.of)
 
     def cancelTool(service: CustomerService): Result[ToolFunction[?, Cancellation]] =
       Tool.fromMethod(service.cancelOrder)

@@ -457,20 +457,33 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "refuse a sum type with fields, and a case class holding one, saying why" in {
+  it should "refuse a sum type as a tool's arguments, which must be a JSON object" in {
     import SumFixtures.*
-    for (
-      refused <- List(
-        Tool.of[Action, String]("act", "A sum type")(_ => Right("unused")),
-        Tool.of[Drawing, String]("draw", "Holds sum types")(_ => Right("unused"))
+    Tool.of[Action, String]("act", "A sum type")(_ => Right("unused")).left.map(_.message) match {
+      case Left(message) => message should include("Action is not a JSON object")
+      case Right(_)      => fail("a sum type was taken as a tool's arguments")
+    }
+  }
+
+  it should "take a case class that holds sum types, and check each against its alternatives (#2814)" in {
+    import SumFixtures.*
+    val draw = Tool
+      .of[Drawing, String]("draw", "Holds sum types")(d =>
+        Right(s"${d.title}: ${d.shapes.size} shapes, then ${d.last}")
       )
-    )
-      refused.left.map(_.message) match {
-        case Left(message) =>
-          message should include("is a sum type with fields")
-          message should include("a tool's arguments cannot hold a sum type")
-        case Right(_) => fail("a sum type was taken as a tool's arguments")
-      }
+      .fold(e => fail(e.formatted), identity)
+    val drawing = Drawing("t", List(Circle(1.5), Dot, Rectangle(1, 2)), Some(Blank()), Click(1, 2))
+    val sent    = upickle.default.writeJs(drawing)
+
+    draw.schema.toJsonSchema(strict = false)("properties")("last")("anyOf").arr should have size 3
+    draw.execute(sent) shouldBe Right(ujson.Str("t: 3 shapes, then Click(1,2)"))
+
+    val notAShape = ujson.copy(sent)
+    notAShape("shapes")(0) = 5
+    draw.execute(notAShape).left.map(_.message) match {
+      case Left(message) => message should include("shapes[0]")
+      case Right(value)  => fail(s"a number was taken as a shape: $value")
+    }
   }
 
   it should "refuse arguments whose schema cannot be built, with the reason" in {

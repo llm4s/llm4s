@@ -52,7 +52,7 @@ def temperatureTool: Result[ToolFunction[Map[String, Any], String]] = {
     .withProperty(
       Schema.property(
         "precision",
-        Schema.integer("Digits after the decimal point, 0 to 4 (default 1)").withRange(Some(0), Some(4)),
+        Schema.integer("Digits after the decimal point, 0 to 4 (default 1)").withMinimum(0).withMaximum(4),
         required = false
       )
     )
@@ -91,11 +91,13 @@ throws.
 | You need | Use |
 |---|---|
 | text | `Schema.string("...")`, with `.withEnum(Seq("a", "b"))` for a fixed set of values |
-| a whole number | `Schema.integer("...")`, with `.withRange(Some(min), Some(max))` |
+| a whole number | `Schema.integer("...")`, with `.withMinimum(min).withMaximum(max)` |
 | a decimal number | `Schema.number("...")` |
 | true or false | `Schema.boolean("...")` |
 | a list | `Schema.array("...", itemSchema)` |
 | a value that may be `null` | `Schema.nullable(schema)` |
+| one of several shapes | `Schema.anyOf("...", first, second)` |
+| a JSON Schema keyword `Schema` has no setter for | `Schema.raw(ujson.Obj(...))`, sent as written |
 | a nested object | ``Schema.`object` `` with a type parameter and a description, plus its own properties |
 
 An object schema adds fields with `withProperty`, or with `withRequiredField(name, schema)` and
@@ -122,10 +124,10 @@ def country(params: SafeParameterExtractor): Either[ToolParameterError, Option[S
   params.getOptionalString("location.country")
 ```
 
-Optional fields have a catch: `toolDefinition(strict = true)`, which the OpenAI-compatible clients send,
-lists every property as required in the JSON schema it sends. Read an optional parameter with `getOptional*` either
-way, so the handler copes whether or not the model sent it, and call `toolDefinition(strict = false)` where a provider
-should see the `required = false` flag.
+An optional field reaches the model in one of two ways. `toolDefinition(strict = false)` leaves it out of
+`required`, and the model omits it. `toolDefinition(strict = true)`, which the OpenAI-compatible clients send, must
+list every property as required, so it marks the optional ones as nullable and the model sends `null` instead. Read
+an optional parameter with `getOptional*`: it returns `None` for both.
 
 ## 3. Reading arguments
 

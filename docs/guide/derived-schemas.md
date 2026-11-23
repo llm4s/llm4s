@@ -338,7 +338,7 @@ Sum types nest: a case class field, a `List` or an `Option` of a sum type is des
 
 OpenAI's strict mode refuses an `anyOf` at the root of a schema, so `completeStructuredOf` asks for a sum type wrapped in an object, `{"value": <the case>}`, sends that schema as a `ResponseFormat.JsonSchema`, and reads the reply's `value` into the type: the caller never sees the wrapper. A case class that holds a sum type is an object already and is sent as it is. A case class without one goes through `completeStructured` as before. The wrapped schema is within the subset OpenAI's strict mode accepts (`anyOf` below the root, `additionalProperties: false` and every property required on each object), and Gemini accepts it too; the module's tests check both the subset and the round trip with uPickle for every case.
 
-A sum type has no schema in `llm4s-core`'s model, which has no union node: `SchemaOf[Action].toJsonSchema()` is its schema, while `SchemaOf[Action].definition` throws an `UnsupportedOperationException`. So a tool's parameters cannot hold a sum type yet, and `Tool.of` returns a `Left` for one.
+In `llm4s-core`'s schema model a sum type is an `AnyOfSchema`: `SchemaOf[Action].definition` is one, and writes the same JSON as `SchemaOf[Action].toJsonSchema()`. A tool's parameters may hold a sum type (a field, a `List` or an `Option` of one), and each value is checked against the cases. They cannot be one: a tool's arguments are a JSON object, so `Tool.of[Action, R]` returns a `Left`.
 
 ## Named tuples
 

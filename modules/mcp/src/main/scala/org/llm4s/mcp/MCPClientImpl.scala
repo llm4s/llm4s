@@ -357,39 +357,59 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
     )
   }
 
-  // Converts individual JSON Schema property to llm4s SchemaDefinition
-  private def convertJsonSchemaToSchemaDefinition(jsonSchema: Value): SchemaDefinition[_] = {
-    val schemaType  = jsonSchema.obj.get("type").flatMap(_.strOpt).getOrElse("string")
-    val description = jsonSchema.obj.get("description").flatMap(_.strOpt).getOrElse("Parameter")
+  /**
+   * A property's JSON Schema as the schema model: an object with its own properties, an array with its items, an
+   * `anyOf` with its alternatives, and a type that also allows `null` as nullable. A schema the model has no case
+   * for (no `type`, a `$ref`, a `oneOf`) is kept as the JSON the server sent, so the model is told what the server
+   * expects and never that an object is a string.
+   */
+  private def convertJsonSchemaToSchemaDefinition(jsonSchema: Value): SchemaDefinition[_] =
+    jsonSchema.objOpt match {
+      case None => RawJsonSchema(ujson.Obj())
+      case Some(fields) =>
+        val description = fields.get("description").flatMap(_.strOpt).getOrElse("Parameter")
+        val anyOf       = fields.get("anyOf").flatMap(_.arrOpt).map(_.toList).filter(_.nonEmpty)
+        val types = fields.get("type") match {
+          case Some(ujson.Str(name))  => List(name)
+          case Some(ujson.Arr(names)) => names.toList.flatMap(_.strOpt)
+          case _                      => Nil
+        }
+        (anyOf, types.filterNot(_ == "null")) match {
+          case (Some(alternatives), _) =>
+            val converted = alternatives.map(convertJsonSchemaToSchemaDefinition)
+            AnyOfSchema[Value](description, converted.head, converted.tail: _*)
+          case (None, List(single)) =>
+            val typed = convertTypedSchema(single, description, fields, jsonSchema)
+            if (types.contains("null")) NullableSchema(typed) else typed
+          case _ => RawJsonSchema(ujson.Obj.from(fields))
+        }
+    }
 
+  private def convertTypedSchema(
+    schemaType: String,
+    description: String,
+    fields: scala.collection.Map[String, Value],
+    jsonSchema: Value
+  ): SchemaDefinition[_] =
     schemaType match {
       case "string" =>
-        val enumValues = jsonSchema.obj
-          .get("enum")
-          .flatMap(_.arrOpt)
-          .map(_.value.flatMap(_.strOpt).toSeq)
+        val enumValues = fields.get("enum").flatMap(_.arrOpt).map(_.value.flatMap(_.strOpt).toSeq)
         StringSchema(description, enumValues)
-
-      case "number" =>
-        NumberSchema(description)
-
-      case "integer" =>
-        IntegerSchema(description)
-
-      case "boolean" =>
-        BooleanSchema(description)
-
+      case "number"  => NumberSchema(description)
+      case "integer" => IntegerSchema(description)
+      case "boolean" => BooleanSchema(description)
       case "array" =>
-        val itemSchema = jsonSchema.obj
+        val itemSchema = fields
           .get("items")
           .map(convertJsonSchemaToSchemaDefinition)
           .getOrElse(StringSchema("Array item"))
-        ArraySchema("Array parameter", itemSchema)
-
-      case _ =>
-        StringSchema(description)
+        ArraySchema(fields.get("description").flatMap(_.strOpt).getOrElse("Array parameter"), itemSchema)
+      case "object" if fields.get("properties").exists(_.objOpt.isDefined) =>
+        val nested = convertMCPSchemaToObjectSchema(description, jsonSchema)
+        nested.withDescription(description)
+      // a free-form object (no declared properties), and any type this model does not know: as the server wrote it
+      case _ => RawJsonSchema(ujson.Obj.from(fields))
     }
-  }
 
   // Creates tool execution handler that delegates to MCP server
   private def createMCPToolHandler(toolName: String): SafeParameterExtractor => Either[String, Value] = { params =>

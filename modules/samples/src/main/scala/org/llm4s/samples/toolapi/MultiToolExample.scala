@@ -73,7 +73,8 @@ object MultiToolExample {
           "limit",
           Schema
             .integer("Maximum number of results")
-            .withRange(Some(1), Some(10))
+            .withMinimum(1)
+            .withMaximum(10)
         )
       )
 

@@ -3,12 +3,14 @@ package org.llm4s.schema
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
 import org.llm4s.toolapi.{
+  AnyOfSchema,
   ArraySchema,
   BooleanSchema,
   IntegerSchema,
   NullableSchema,
   NumberSchema,
   ObjectSchema,
+  RawJsonSchema,
   SchemaDefinition,
   StringSchema,
   ToolFunction,
@@ -280,6 +282,13 @@ object Tool {
       case _: BooleanSchema   => expect(value.boolOpt.isDefined, "boolean")
       case a: ArraySchema[?]  => checkArray(a.itemSchema, value, path)
       case o: ObjectSchema[?] => checkObject(o, value, path)
+      // the first alternative the value satisfies; with none, what was expected of it
+      case a: AnyOfSchema[?] =>
+        a.alternatives.iterator
+          .map(check(_, value, path))
+          .find(_._1.isEmpty)
+          .getOrElse(expect(ok = false, expectedType(a)))
+      case _: RawJsonSchema => (Nil, value)
     }
   }
 
@@ -315,6 +324,8 @@ object Tool {
     case _: BooleanSchema               => "boolean"
     case _: ArraySchema[?]              => "array"
     case _: ObjectSchema[?]             => "object"
+    case a: AnyOfSchema[?]              => a.alternatives.map(expectedType).distinct.mkString(" or ")
+    case _: RawJsonSchema               => "value"
   }
 
   private def jsonType(value: ujson.Value): String = value match {

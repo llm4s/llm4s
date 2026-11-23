@@ -23,14 +23,14 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
   private val everything: ObjectSchema[Params] =
     Schema
       .`object`[Params]("Everything")
-      .withRequiredField("name", Schema.string("The user's name").withLengthConstraints(Some(1), Some(80)))
+      .withRequiredField("name", Schema.string("The user's name").withMinLength(1).withMaxLength(80))
       .withRequiredField("color", Schema.string("A colour").withEnum(Seq("red", "green", "blue")))
-      .withRequiredField("count", Schema.integer("Number of items").withRange(Some(0), Some(100)))
-      .withRequiredField("ratio", Schema.number("A ratio").withRange(Some(0.5), Some(1.5)))
+      .withRequiredField("count", Schema.integer("Number of items").withMinimum(0).withMaximum(100))
+      .withRequiredField("ratio", Schema.number("A ratio").withMinimum(0.5).withMaximum(1.5))
       .withRequiredField("enabled", Schema.boolean("Whether to enable"))
       .withRequiredField(
         "tags",
-        Schema.array("Tags", Schema.string("A tag")).withSizeConstraints(Some(1), Some(5)).withUniqueItems()
+        Schema.array("Tags", Schema.string("A tag")).withMinItems(1).withMaxItems(5).withUniqueItems()
       )
       .withRequiredField("home", address)
       .withOptionalField("previous", Schema.array("Earlier addresses", address))

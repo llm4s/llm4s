@@ -37,7 +37,7 @@ object StructuredOutputRecipe extends RecipeApp {
   val ticketSchema = Schema
     .`object`[Ticket]("A customer support ticket")
     .withRequiredField("category", Schema.string("The kind of ticket").withEnum(categories))
-    .withRequiredField("urgency", Schema.integer("From 1 (can wait) to 5 (urgent)").withRange(Some(1), Some(5)))
+    .withRequiredField("urgency", Schema.integer("From 1 (can wait) to 5 (urgent)").withMinimum(1).withMaximum(5))
     .withRequiredField("summary", Schema.string("One sentence describing the problem"))
 
   def classify(client: LLMClient, text: String): Result[Ticket] =
