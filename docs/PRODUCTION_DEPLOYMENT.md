@@ -415,7 +415,7 @@ written in code.
 Call `client.validate()` during application startup to fail fast on misconfiguration. It sends the provider one
 cheap authenticated request (a model lookup or listing, never a completion). A provider with no such request returns
 `Left(ValidationUnsupportedError)`, which means nothing was checked, not that the client is broken; the
-[observability guide](guide/observability/index.md#startup-validation) lists what each provider checks.
+[observability guide](guide/observability/#startup-validation) lists what each provider checks.
 
 ```scala
 import org.llm4s.error.ValidationUnsupportedError
