@@ -23,7 +23,7 @@ import java.util.concurrent.{ CountDownLatch, TimeUnit }
  */
 class AgentAbandonSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
-  private def ok(text: String) = ToolOutcome.Success(ToolContent.Json(ujson.Str(text)))
+  private def ok(text: String) = ToolOutcome.success(ToolContent.Json(ujson.Str(text)))
 
   private def results(messages: Seq[Message]): Vector[(String, String)] =
     messages.collect { case t: ToolMessage => t.toolCallId -> ContentPart.text(t.parts) }.toVector
@@ -155,8 +155,8 @@ class AgentAbandonSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     )
     val parked = agent.run("ship it").value
     val approval = parked.status match {
-      case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
-      case other                                        => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(suspension) => suspension.approvals.head._1
+      case other                             => fail(s"expected Suspended, got $other")
     }
 
     agent.abandon(parked.threadId) match {

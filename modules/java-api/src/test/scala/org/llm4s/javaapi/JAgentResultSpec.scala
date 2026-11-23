@@ -2,7 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.testutil.TestTimeLimit
 
-import org.llm4s.agent.AgentStatus
+import org.llm4s.agent.{ AgentStatus, Suspension }
 import org.llm4s.agent.graph.{ IdempotencyKey, InterruptId }
 import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.graph.toolloop.{ ApprovalRequest, ApprovalSource, ToolQuestionRequest }
@@ -91,8 +91,10 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   it should "list a suspended turn's interrupts as FacadeInternals.pending does, approvals first" in {
     val c = SuspensionFixtures.call("c1", "deploy", "x")
     val suspended = AgentStatus.Suspended(
-      Vector(InterruptId("a1") -> ApprovalRequest("m1", c, "why", ApprovalSource.Tool, IdempotencyKey("k1"))),
-      Vector(InterruptId("q1") -> ToolQuestionRequest("m1", c, ujson.Obj("q" -> 1), IdempotencyKey("q1")))
+      Suspension(
+        Vector(InterruptId("a1") -> ApprovalRequest("m1", c, "why", ApprovalSource.Tool, IdempotencyKey("k1"))),
+        Vector(InterruptId("q1") -> ToolQuestionRequest("m1", c, ujson.Obj("q" -> 1), IdempotencyKey("q1")))
+      )
     )
     val s = FacadeInternals.agentStatus(suspended)
     s.kind shouldBe AgentStatusKind.SUSPENDED

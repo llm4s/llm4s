@@ -44,8 +44,10 @@ import scala.util.Using
  * Finally it fails for a growth-unsafe case class (RFC 0002, #2369): a `case class` in a `@Stable` (or untiered)
  * public type, top-level or nested, whose primary constructor is not `private` / `private[x]` and has fields, and a
  * public `copy` defined in one. Adding a field to either would break binary compatibility after the baseline.
- * `GrowthExempted` lists the deliberately closed types; an entry that matches nothing is itself reported. The
- * cases of a `@Stable` `enum` are not checked.
+ * The same holds for a case with fields of an `enum` in such a type (#2781): `case Done(output: O)` compiles to a
+ * case class with a public constructor, `apply` and `copy`, and is matched positionally. A case that may grow holds
+ * one growth-safe payload class instead, and is listed as the wrapper it then is.
+ * `GrowthExempted` lists the deliberately closed types and cases; an entry that matches nothing is itself reported.
  */
 object StabilityTiers {
 
@@ -391,7 +393,10 @@ object StabilityTiers {
 
   // ---- growth safety of @Stable case classes (RFC 0002, #2369) ----
 
-  /** A `@Stable` case class (by fully qualified name) that may keep a public constructor and `copy`, and why. */
+  /**
+   * A `@Stable` case class or enum case (by fully qualified name) that may keep a public constructor and `copy`,
+   * and why.
+   */
   final case class GrowthExempt(name: String, reason: String)
 
   /**
@@ -400,14 +405,77 @@ object StabilityTiers {
    * public constructor or `copy` breaks binary compatibility once the MiMa baseline exists. An entry here is a type
    * that is deliberately closed (a single-value wrapper, a fixed record, an error case whose fields are exactly what
    * went wrong), with the reason it stays closed. The types that predated the check were converted or given a reason
-   * before the baseline (#2377-#2384). An entry that matches no failing type fails the check, so a converted type
+   * before the baseline (#2377-#2384). An enum case with fields is held to the same rule (#2781): a case that may
+   * grow holds a single growth-safe payload class, and is then listed here as the wrapper over it. An entry that matches no failing type fails the check, so a converted type
    * cannot leave its entry behind.
    */
   val GrowthExempted: Seq[GrowthExempt] = Seq(
+    GrowthExempt(
+      "org.llm4s.agent.AgentStatus.Blocked",
+      "a status case that is exactly the refusing guardrail's name and its reason"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.AgentStatus.Completed",
+      "a status case holding only the answer; anything more about the turn is on AgentResult"
+    ),
+    GrowthExempt("org.llm4s.agent.AgentStatus.Suspended", "a status case holding only its growth-safe Suspension"),
+    GrowthExempt(
+      "org.llm4s.agent.AgentStatus.Truncated",
+      "a status case holding only the partial answer; anything more about the turn is on AgentResult"
+    ),
     GrowthExempt("org.llm4s.agent.PruningStrategy.Custom", "a strategy case holding only its pruning function"),
     GrowthExempt("org.llm4s.agent.PruningStrategy.RecentTurnsOnly", "a strategy case holding only its turn count"),
+    GrowthExempt(
+      "org.llm4s.agent.delegation.ChildInterrupt.Approval",
+      "exactly an interrupt id and its request; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.delegation.ChildInterrupt.Breakpoint",
+      "exactly an interrupt id and its request; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.delegation.ChildInterrupt.Delegated",
+      "exactly an interrupt id and its request; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.delegation.ChildInterrupt.MiddlewareQuestion",
+      "exactly an interrupt id and its request; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.delegation.ChildInterrupt.Question",
+      "exactly an interrupt id and its request; its codec is a stored format"
+    ),
     GrowthExempt("org.llm4s.agent.delegation.DelegatedRequest", "exactly a child run and the interrupt it waits on"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.DisconnectReason.ListenerFailed",
+      "a reason case holding only what the listener threw"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.DisconnectReason.ReplayFailed",
+      "a reason case holding only the error reading the log"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.EncodedOperation.Remove",
+      "the stored form of a state removal: exactly its key; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.EncodedOperation.Update",
+      "the stored form of a state update: exactly a key and its encoded update; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.EncodedRoute.FanOut",
+      "the stored Route.FanOut: exactly its join, node and encoded payloads; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.EncodedRoute.Goto",
+      "the stored Route.Goto: exactly its node; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.EncodedRoute.Send",
+      "the stored Route.Send: exactly its node and encoded payload; its codec is a stored format"
+    ),
     GrowthExempt("org.llm4s.agent.graph.EncodedSuspension", "exactly the node to resume and its encoded question"),
+    GrowthExempt("org.llm4s.agent.graph.GraphError.BusyHolder.Run", "a holder case holding only the run id"),
     GrowthExempt(
       "org.llm4s.agent.graph.GraphError.Cancelled",
       "an error case holding only its thread id and last checkpoint"
@@ -420,10 +488,7 @@ object StabilityTiers {
       "org.llm4s.agent.graph.GraphError.CheckpointNotFound",
       "an error case holding only its thread id and checkpoint id"
     ),
-    GrowthExempt(
-      "org.llm4s.agent.graph.GraphError.ChildThread",
-      "an error case holding only its thread id and parent"
-    ),
+    GrowthExempt("org.llm4s.agent.graph.GraphError.ChildThread", "an error case holding only its thread id and parent"),
     GrowthExempt(
       "org.llm4s.agent.graph.GraphError.ClaimLost",
       "an error case holding only its thread id, token and current"
@@ -526,8 +591,104 @@ object StabilityTiers {
       "org.llm4s.agent.graph.GraphSnapshot.StaticArrivals",
       "exactly a static join and the sources that have arrived at it"
     ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.NodeResult.Block",
+      "exactly the update to commit and the error the run ends with"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.NodeResult.Continue", "a result case holding only its growth-safe Command"),
+    GrowthExempt("org.llm4s.agent.graph.NodeResult.Fail", "a result case holding only the error"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.NodeResult.Suspend",
+      "exactly what parking a task takes: its update, the question and where to resume"
+    ),
     GrowthExempt("org.llm4s.agent.graph.Resumed", "exactly a question and its answer"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.Route.FanOut",
+      "a routing instruction that is exactly its join, target and payloads"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.Route.Goto", "a routing instruction that is exactly its target"),
+    GrowthExempt("org.llm4s.agent.graph.Route.Send", "a routing instruction that is exactly its target and payload"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunEvent.CheckpointCommitted",
+      "an event case holding only the superstep; its EventRecord carries the rest"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunEvent.Custom",
+      "exactly a name, a version and the payload they identify, which is where a node's event grows"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunEvent.RunCancelled",
+      "an event case holding only its growth-safe RunStoppedDetails"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunEvent.RunFailed",
+      "an event case holding only its growth-safe RunFailedDetails"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunEvent.RunRecovered",
+      "an event case holding only its growth-safe RunRecoveredDetails"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunEvent.RunResumed",
+      "an event case holding only its growth-safe RunResumedDetails"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunEvent.RunStarted",
+      "an event case holding only its growth-safe RunStartedDetails"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.RunEvent.RunSuspended", "an event case holding only the pending interrupt ids"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunEvent.RunTimedOut",
+      "an event case holding only its growth-safe RunStoppedDetails"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunEvent.StateUpdated",
+      "an event case holding only its growth-safe StateUpdatedDetails"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunEvent.TaskFailed",
+      "an event case holding only the failure message; its EventRecord carries the rest"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunEvent.TaskSuspended",
+      "an event case holding only the interrupt id; its EventRecord carries the rest"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunEvent.ThreadForked",
+      "an event case holding only its growth-safe ThreadForkedDetails"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunOutcome.Blocked",
+      "an outcome case that is exactly the guardrail and its reason; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunOutcome.Failed",
+      "an outcome case that is exactly the error's kind and message; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunOutcome.OutputInvalid",
+      "an outcome case holding only the validation errors; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunResult.Completed",
+      "exactly the final ThreadState, the output and the superstep count; more about the thread goes on ThreadState"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.RunResult.Failed", "exactly the last committed ThreadState and the error"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.RunResult.Suspended",
+      "exactly the committed ThreadState, the pending interrupts and the execution to resume"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.Step.Done", "a single-value wrapper over the run's result"),
+    GrowthExempt("org.llm4s.agent.graph.Step.Next", "a single-value wrapper over the next execution"),
     GrowthExempt("org.llm4s.agent.graph.StoredCheckpoint", "exactly a checkpoint and the writes pending on it"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.StreamEvent.Disconnected",
+      "exactly the last sequence number delivered and why the subscription ended"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.StreamEvent.Durable", "a stream case holding only its growth-safe EventRecord"),
+    GrowthExempt("org.llm4s.agent.graph.StreamEvent.Live", "a stream case holding only its growth-safe LiveEvent"),
+    GrowthExempt("org.llm4s.agent.graph.StreamEvent.LiveGap", "a stream case holding only the count of dropped events"),
+    GrowthExempt("org.llm4s.agent.graph.StreamEvent.Nested", "exactly a child run and one event of its stream"),
     GrowthExempt(
       "org.llm4s.agent.graph.ThreadCursor",
       "a keyset cursor: exactly the two columns the thread registry orders by"
@@ -538,8 +699,75 @@ object StabilityTiers {
       "org.llm4s.agent.graph.middleware.GuardrailBlocked",
       "an error case holding only the guardrail's name and its reason"
     ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.middleware.GuardrailVerdict.Edit",
+      "a verdict case holding only the replacement text; its codec is a stored format"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.middleware.Placement.Outside", "a placement case holding only its reason"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.middleware.Placement.OutsideAtBoundary",
+      "a placement case holding only its reason"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.tool.ToolContent.Json",
+      "a single-value wrapper over the JSON result; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.tool.ToolContent.Parts",
+      "a single-value wrapper over the content parts; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.tool.ToolOutcome.Ask",
+      "a single-value wrapper over the question, of the type the tool declares"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.tool.ToolOutcome.Error",
+      "an outcome case holding only the message the model sees"
+    ),
+    GrowthExempt("org.llm4s.agent.graph.tool.ToolOutcome.Fatal", "an outcome case holding only the error"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.tool.ToolOutcome.NeedsApproval",
+      "an outcome case holding only the reason approval is needed"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.tool.ToolOutcome.Success",
+      "an outcome case holding only its growth-safe ToolSuccess"
+    ),
     GrowthExempt("org.llm4s.agent.graph.tool.ToolQuestion", "exactly the question's codec and the answer's"),
     GrowthExempt("org.llm4s.agent.graph.tool.ToolResource", "exactly an operation and its target"),
+    GrowthExempt(
+      "org.llm4s.agent.graph.toolloop.ApprovalDecision.Edit",
+      "a decision case holding only the replacement arguments; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.toolloop.ApprovalDecision.Reject",
+      "a decision case holding only the reason; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.toolloop.ApprovalSource.Middleware",
+      "a source case holding only the middleware's id; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.toolloop.MessageUpdate.Append",
+      "a message operation holding only the message to append; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.toolloop.MessageUpdate.EditToolCall",
+      "a message operation that is exactly the message, the tool call and its new arguments; its codec is a " +
+        "stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.toolloop.MessageUpdate.RemoveThrough",
+      "a message operation holding only the id to remove through; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.toolloop.MessageUpdate.RemoveTurn",
+      "a message operation holding only the id of the turn to remove; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.graph.toolloop.MessageUpdate.Replace",
+      "a message operation that is exactly an id and its replacement; its codec is a stored format"
+    ),
     GrowthExempt(
       "org.llm4s.agent.graph.toolloop.PriorValue",
       "exactly a key's value before the turn and the fingerprint of what the turn last wrote"
@@ -548,6 +776,18 @@ object StabilityTiers {
     GrowthExempt(
       "org.llm4s.agent.guardrails.patterns.PIIPatterns.PIIMatch",
       "exactly the PII type, the matched text and its span"
+    ),
+    GrowthExempt(
+      "org.llm4s.config.ApiKeySource.Credentials",
+      "a key source case holding only the config path the key was read from"
+    ),
+    GrowthExempt(
+      "org.llm4s.config.ApiKeySource.Section",
+      "a key source case holding only the config path the key was read from"
+    ),
+    GrowthExempt(
+      "org.llm4s.config.ApiKeySource.WorkloadIdentity",
+      "a key source case holding only the config path that set it up"
     ),
     GrowthExempt("org.llm4s.context.tokens.Token", "a single token id"),
     GrowthExempt(
@@ -568,7 +808,63 @@ object StabilityTiers {
     ),
     GrowthExempt("org.llm4s.http.MultipartPart.TextField", "a multipart text field is exactly a name and a value"),
     GrowthExempt("org.llm4s.identity.TokenizerId", "a single-name identifier"),
+    GrowthExempt("org.llm4s.llmconnect.ProviderExchangeLogging.Enabled", "a single-value wrapper over the sink"),
+    GrowthExempt(
+      "org.llm4s.llmconnect.auth.IdentitySource.File",
+      "an identity source case holding only the token file's path"
+    ),
+    GrowthExempt("org.llm4s.llmconnect.auth.IdentitySource.Literal", "an identity source case holding only the token"),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.FinishReason.Other",
+      "a single-value wrapper over a finish reason llm4s has no case for"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.RequestAdjustment.Adjusted",
+      "exactly the option, what was asked, what was sent and why; a new kind of adjustment is a new case; its " +
+        "codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.RequestAdjustment.Dropped",
+      "exactly the option and why it was not sent; a new kind of adjustment is a new case; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.RequestAdjustment.NotNeeded",
+      "exactly the option and why it was not needed; a new kind of adjustment is a new case; its codec is a " +
+        "stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.ServiceTier.Other",
+      "a single-value wrapper over a service tier llm4s has no case for"
+    ),
     GrowthExempt("org.llm4s.llmconnect.model.TextChunkInput", "a single-value wrapper over the text chunks"),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.ThinkingBlock.Opaque",
+      "exactly a provider id and that provider's own encoding, which is where a new shape goes"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.ThinkingBlock.Redacted",
+      "a single-value wrapper over the provider's encrypted payload"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.ThinkingBlock.Text",
+      "exactly the reasoning text and the provider's signature over it; any other provider shape is an Opaque block"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.provider.OpenAICompatibleClient.Credential.Dynamic",
+      "a credential case holding only its token provider"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.provider.OpenAICompatibleClient.Credential.Exchange",
+      "a credential case holding only its growth-safe TokenExchangeConfig"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.provider.OpenAICompatibleClient.Credential.Rotating",
+      "a credential case holding only its key provider"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.provider.OpenAICompatibleClient.Credential.Static",
+      "a credential case holding only its key"
+    ),
     GrowthExempt("org.llm4s.metrics.Outcome.Error", "an outcome case holding only its ErrorKind"),
     GrowthExempt("org.llm4s.toolapi.NullableSchema", "a single-value wrapper over the schema it makes nullable"),
     GrowthExempt("org.llm4s.toolapi.ToolCallError.Cancelled", "an error case holding only the tool name"),
@@ -634,11 +930,11 @@ object StabilityTiers {
   }
 
   /**
-   * A case class header's primary constructor: whether it is `private` / `private[x]`, and the text of its first
+   * A case class header's (or, with `keyword = "case"`, an enum case's) primary constructor: whether it is `private` / `private[x]`, and the text of its first
    * parameter list (empty for `case class X()`).
    */
-  private def constructor(header: String, name: String): (Boolean, String) =
-    ("\\bclass\\s+" + java.util.regex.Pattern.quote(name) + "\\b").r.findFirstMatchIn(header) match {
+  private def constructor(header: String, name: String, keyword: String = "class"): (Boolean, String) =
+    ("\\b" + keyword + "\\s+" + java.util.regex.Pattern.quote(name) + "\\b").r.findFirstMatchIn(header) match {
       case None => (false, "")
       case Some(m) =>
         def ws(j: Int): Int = { var k = j; while (k < header.length && header.charAt(k).isWhitespace) k += 1; k }
@@ -656,8 +952,8 @@ object StabilityTiers {
 
   /**
    * Case classes of the file's `@Stable` (or untiered) public types, nested ones included, whose constructor is not
-   * private and whose first parameter list is not empty, and public `copy` methods defined in such a type's case
-   * classes, as (zero-based line, fully qualified type name, problem).
+   * private and whose first parameter list is not empty, the cases with fields of such a type's enums, and public
+   * `copy` methods defined in such a type's case classes, as (zero-based line, fully qualified type name, problem).
    */
   private[this] def growthUnsafe(lines: Vector[String]): Seq[(Int, String, String)] = {
     val pkg                           = packageOf(lines)
@@ -672,6 +968,17 @@ object StabilityTiers {
               f.header.head._1,
               qualified(f.owners.map(_._1) :+ f.name),
               "is a @Stable case class whose constructor is public, so a field cannot be added after the baseline"
+            )
+          )
+      } else if (f.keyword == "case" && f.owners.lastOption.exists(_._2 == "enum") && f.header.nonEmpty) {
+        val (isPrivate, params) = constructor(f.header.map(_._2).mkString(" "), f.name, "case")
+        if (isPrivate || params.trim.isEmpty) None
+        else
+          Some(
+            (
+              f.header.head._1,
+              qualified(f.owners.map(_._1) :+ f.name),
+              "is a @Stable enum case with fields, so a field cannot be added after the baseline"
             )
           )
       } else if (f.keyword == "def" && f.name == "copy" && f.owners.lastOption.exists(_._3))
@@ -767,7 +1074,7 @@ object StabilityTiers {
         stableTiersFile,
         0,
         s"GrowthExempt(${e.name})",
-        "is a GrowthExempted entry that matches no @Stable case class with a public constructor or copy; remove it"
+        "is a GrowthExempted entry that matches no @Stable case class or enum case with a public constructor or copy; remove it"
       )
     }
     (perModule.flatMap(_._2._3) ++ stale, perModule.map { case (m, (s, e, _)) => m -> (s -> e) }.toMap)
@@ -997,6 +1304,38 @@ object StabilityTiers {
         |  @Experimental case class Exp(x: Int)
         |  def make(x: Int): Deep = Deep(x)
         |}
+        |
+        |@Stable
+        |enum Outcome[+O]:
+        |  case Pending, Dropped
+        |  case Done(output: O) // growth
+        |  case Failed[E <: Throwable]( // growth
+        |    error: E,
+        |    retryable: Boolean = false
+        |  ) extends Outcome[Nothing]
+        |  case Wrapped(payload: Safe)
+        |  case Sealed private (x: Int)
+        |  case Unit() extends Outcome[Nothing]
+        |  @Experimental case Trial(x: Int)
+        |
+        |  def describe: String = this match
+        |    case Done(o)      => "done"
+        |    case Wrapped(p) if p.b > 0 =>
+        |      "wrapped"
+        |    case _            => "other"
+        |
+        |object Outcome:
+        |  enum Inner:
+        |    case Leaf(x: Int) // growth
+        |
+        |@Experimental
+        |enum Loose:
+        |  case Any(x: Int)
+        |
+        |@Stable
+        |enum Coded(val code: Int):
+        |  case Ok extends Coded(0)
+        |  case Custom(c: Int) extends Coded(c) // growth
         |""".stripMargin
     )
     IO.write(
@@ -1015,13 +1354,17 @@ object StabilityTiers {
     val fixtureExempt = Seq(
       GrowthExempt("fixture.Closed", "fixture: a deliberately closed wrapper"),
       GrowthExempt("fixture.Holder.Nested.Allowed", "fixture: a nested exemption"),
+      GrowthExempt("fixture.Outcome.Wrapped", "fixture: an enum case holding only its growth-safe payload"),
       GrowthExempt("fixture.Factory.Nested", "fixture: Api.scala's leak fixture, not under test here"),
+      GrowthExempt("fixture.Credential.Static", "fixture: Api.scala's leak fixture, not under test here"),
+      GrowthExempt("fixture.Credential.Dynamic", "fixture: Api.scala's leak fixture, not under test here"),
       GrowthExempt("fixture.Settings", "fixture: ThirdParty.scala's fixture, not under test here"),
       GrowthExempt("fixture.Gone", "fixture: matches nothing, so it is reported as stale")
     )
-    val (found, _)               = violations(Seq(module), Nil, ThirdPartyDenied, fixtureAllowed, fixtureExempt)
-    def isStale(v: Violation)    = v.problem.contains("GrowthExempted entry")
-    def isGrowth(v: Violation)   = v.problem.contains("@Stable case class") && !isStale(v)
+    val (found, _)            = violations(Seq(module), Nil, ThirdPartyDenied, fixtureAllowed, fixtureExempt)
+    def isStale(v: Violation) = v.problem.contains("GrowthExempted entry")
+    def isGrowth(v: Violation) =
+      (v.problem.contains("@Stable case class") || v.problem.contains("@Stable enum case")) && !isStale(v)
     def isUntiered(v: Violation) = v.file.getName == "Untiered.scala" && v.problem.contains("carries neither")
     def isLeak(v: Violation)     = v.problem.contains("signature names")
     def isForeign(v: Violation)  = v.problem.contains("signature exposes third-party")
@@ -1090,6 +1433,9 @@ object StabilityTiers {
            |project/StabilityTiers.scala. A @Stable case class with fields needs a private constructor
            |(RFC 0002): `final case class X private (...)` with a companion `apply` and `with*` setters, and
            |no public `copy`; a type that is deliberately closed goes in GrowthExempted with its reason.
+           |An enum case with fields is held to the same rule: one that may grow holds a single such
+           |payload class (`case Suspended(suspension: Suspension)`) and is listed in GrowthExempted as the
+           |wrapper it then is; one that is closed by definition is listed with that reason.
            |See docs/reference/api-stability.md.""".stripMargin
       )
     }

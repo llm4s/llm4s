@@ -39,8 +39,8 @@ class ExampleAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   "the pause tool" should "wait its delay, and end early with an error when interrupted" in {
     val tool = ExampleAgent.pauseTool(10.millis)
     tool.execute(ExampleAgent.NoArgs(), null) match {
-      case ToolOutcome.Success(ToolContent.Json(json), _) => json("paused").num shouldBe 10
-      case other                                          => fail(s"unexpected $other")
+      case ToolOutcome.Success(result) => result.content shouldBe ToolContent.Json(ujson.Obj("paused" -> 10.0))
+      case other                       => fail(s"unexpected $other")
     }
 
     val slow = ExampleAgent.pauseTool(1.minute)

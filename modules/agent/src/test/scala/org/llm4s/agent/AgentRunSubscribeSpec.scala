@@ -59,8 +59,8 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
       e match
         case StreamEvent.Durable(record) =>
           record.event match
-            case RunEvent.RunCompleted | RunEvent.RunFailed(_, _, _) | RunEvent.RunSuspended(_) |
-                RunEvent.RunCancelled(_, _) | RunEvent.RunTimedOut(_, _) =>
+            case RunEvent.RunCompleted | RunEvent.RunFailed(_) | RunEvent.RunSuspended(_) | RunEvent.RunCancelled(_) |
+                RunEvent.RunTimedOut(_) =>
               terminal.set(true)
             case _ => ()
         case _ => ()
@@ -101,7 +101,9 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     run.await().isRight shouldBe true
     c.terminalSeen shouldBe true // await drained the listener
     durableRuns(c).distinct shouldBe Vector(run.runId.value)
-    c.all.collectFirst { case StreamEvent.Durable(r) => r.event } shouldBe Some(RunEvent.RunStarted(None, None))
+    c.all.collectFirst { case StreamEvent.Durable(r) => r.event } shouldBe Some(
+      RunEvent.RunStarted(RunStartedDetails(None, None))
+    )
     lastIsTerminal(c, RunEvent.RunCompleted)
   }
 
@@ -179,7 +181,9 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     gate.countDown()
     ok(run.await())
     c.terminalSeen shouldBe true // await drained the listener
-    c.all.collectFirst { case StreamEvent.Durable(r) => r.event } shouldBe Some(RunEvent.RunStarted(None, None))
+    c.all.collectFirst { case StreamEvent.Durable(r) => r.event } shouldBe Some(
+      RunEvent.RunStarted(RunStartedDetails(None, None))
+    )
     val seqs = c.all.collect { case StreamEvent.Durable(r) => r.seq }
     seqs shouldBe sorted
     seqs.distinct shouldBe seqs
@@ -210,15 +214,15 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     )
     val first = ok(agent.run(ThreadId("s4"), "go"))
     val id = first.status match
-      case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
-      case other                                        => fail(s"expected a suspension, got $other")
+      case AgentStatus.Suspended(suspension) => suspension.approvals.head._1
+      case other                             => fail(s"expected a suspension, got $other")
     val c       = Received()
     val resumed = ok(agent.streamResume(ThreadId("s4"), Map(first.approve(id)))(c.listener))
     ok(resumed.await()).answer shouldBe Some("fine")
     c.terminalSeen shouldBe true // await drained the listener
     durableRuns(c).distinct shouldBe Vector(resumed.runId.value)
     c.all.collectFirst { case StreamEvent.Durable(r) => r.event } should matchPattern {
-      case Some(RunEvent.RunResumed(_, _, _)) =>
+      case Some(RunEvent.RunResumed(_)) =>
     }
     lastIsTerminal(c, RunEvent.RunCompleted)
   }
@@ -232,7 +236,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     c.terminalSeen shouldBe true // await drained the listener
     durableRuns(c).distinct shouldBe Vector(recovered.runId.value)
     c.all.collectFirst { case StreamEvent.Durable(r) => r.event } should matchPattern {
-      case Some(RunEvent.RunRecovered(_, _, _, _)) =>
+      case Some(RunEvent.RunRecovered(_)) =>
     }
     lastIsTerminal(c, RunEvent.RunCompleted)
   }
@@ -267,7 +271,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     )
 
   private def live(run: String, name: String, token: Long = 1L): StreamEvent =
-    StreamEvent.Live("t", run, FencingToken(token), "x", "n", name, 1, ujson.Null)
+    StreamEvent.Live(LiveEvent("t", run, FencingToken(token), "x", "n", name, 1, ujson.Null))
 
   "RunScope" should "cancel its subscription on the run's terminal event, once, and then pass on nothing" in {
     val c     = Received()
@@ -276,20 +280,20 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val sub   = CountingSubscription()
     scope.attach(sub)
     scope(record("r0", 1, RunEvent.RunCompleted))
-    scope(record("r1", 2, RunEvent.RunStarted(None, None)))
+    scope(record("r1", 2, RunEvent.RunStarted(RunStartedDetails(None, None))))
     scope(live("r0", "other.run"))
     scope(live("r1", "this.run"))
     scope(StreamEvent.LiveGap(2))
     sub.cancels.get shouldBe 0
     scope(record("r1", 3, RunEvent.RunCompleted))
-    scope(record("r2", 4, RunEvent.RunStarted(None, None)))
+    scope(record("r2", 4, RunEvent.RunStarted(RunStartedDetails(None, None))))
     scope(StreamEvent.LiveGap(1))
     sub.cancels.get shouldBe 1
     ends.get shouldBe 1
     c.all.map {
-      case StreamEvent.Durable(r)                   => r.seq.toString
-      case StreamEvent.Live(_, _, _, _, _, n, _, _) => n
-      case other                                    => other.toString
+      case StreamEvent.Durable(r) => r.seq.toString
+      case StreamEvent.Live(live) => live.name
+      case other                  => other.toString
     } shouldBe Vector("2", "this.run", "LiveGap(2)", "3")
   }
 
@@ -300,7 +304,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     // before the run's claim no node of the run has run: a live event of its id is another incarnation's
     scope(live("r1", "before.claim", token = 2L))
     // a subscription made for the run starts at its claim: the run's first event fixes its token
-    scope(record("r1", 2, RunEvent.RunRecovered("c1", None, None, Some("r1")), token = 3L))
+    scope(record("r1", 2, RunEvent.RunRecovered(RunRecoveredDetails("c1", None, None, Some("r1"))), token = 3L))
     // a write of the lost run it took over, under the same id: never this run's
     scope(record("r1", 3, RunEvent.TaskCompleted, token = 2L))
     // nor progress from a node of that lost run, still running after this run's claim
@@ -308,13 +312,13 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     scope(live("r1", "this.run", token = 3L))
     scope(record("r1", 4, RunEvent.TaskCompleted, token = 3L))
     // a later run under the same id - replayed to a scope whose run ended without a terminal event
-    scope(record("r1", 5, RunEvent.RunStarted(None, None), token = 4L))
+    scope(record("r1", 5, RunEvent.RunStarted(RunStartedDetails(None, None)), token = 4L))
     scope(live("r1", "later.run", token = 4L))
     scope(record("r1", 6, RunEvent.RunCompleted, token = 4L))
     scope.isEnded shouldBe false
     c.all.collect {
-      case StreamEvent.Durable(r)                   => r.seq.toString
-      case StreamEvent.Live(_, _, _, _, _, n, _, _) => n
+      case StreamEvent.Durable(r) => r.seq.toString
+      case StreamEvent.Live(live) => live.name
     } shouldBe Vector("2", "this.run", "4")
   }
 
@@ -332,7 +336,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val scope = RunScope(RunId("r1"), c.listener, () => ends.incrementAndGet(): Unit)
     val sub   = CountingSubscription()
     scope.attach(sub)
-    scope(record("r1", 1, RunEvent.RunStarted(None, None)))
+    scope(record("r1", 1, RunEvent.RunStarted(RunStartedDetails(None, None))))
     scope.cancel()
     scope.isEnded shouldBe true
     scope.awaitEnd(Duration.Zero) shouldBe Right(true)
@@ -342,7 +346,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     scope.cancel()
     scope.runEnded(RunId("r1"))
     ends.get shouldBe 1
-    c.all shouldBe Vector(record("r1", 1, RunEvent.RunStarted(None, None)))
+    c.all shouldBe Vector(record("r1", 1, RunEvent.RunStarted(RunStartedDetails(None, None))))
   }
 
   it should "end once when the caller cancels after the terminal event, still cancelling the subscription" in {
@@ -380,7 +384,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
         listenerDone.await(10, TimeUnit.SECONDS): Unit
     })
     val listening =
-      Thread.ofVirtual().start(() => scope(record("r1", 1, RunEvent.RunStarted(None, None))))
+      Thread.ofVirtual().start(() => scope(record("r1", 1, RunEvent.RunStarted(RunStartedDetails(None, None)))))
     entered.await(5, TimeUnit.SECONDS) shouldBe true // the listener call is in progress
     val cancelling = Thread.ofVirtual().start(() => scope.cancel())
     cancelling.join(java.time.Duration.ofSeconds(2)) shouldBe true
@@ -415,14 +419,14 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val scope = RunScope(RunId("r1"), c.listener, () => ends.incrementAndGet(): Unit)
     val sub   = CountingSubscription()
     scope.attach(sub)
-    scope(record("r1", 1, RunEvent.RunStarted(None, None)))
+    scope(record("r1", 1, RunEvent.RunStarted(RunStartedDetails(None, None))))
     scope(StreamEvent.Disconnected(1, DisconnectReason.Lagging))
     scope(StreamEvent.Disconnected(1, DisconnectReason.Lagging))
     scope(record("r1", 2, RunEvent.RunCompleted))
     ends.get shouldBe 1
     sub.cancels.get shouldBe 1
     c.all shouldBe Vector(
-      record("r1", 1, RunEvent.RunStarted(None, None)),
+      record("r1", 1, RunEvent.RunStarted(RunStartedDetails(None, None))),
       StreamEvent.Disconnected(1, DisconnectReason.Lagging)
     )
   }
@@ -440,7 +444,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val order = new CopyOnWriteArrayList[String]()
     val scope = RunScope(RunId("r1"), c.listener, () => order.add("onEnd"): Unit)
     scope.attach(new Subscription { def cancel(): Unit = order.add("cancel"): Unit })
-    scope(record("r1", 1, RunEvent.RunStarted(None, None)))
+    scope(record("r1", 1, RunEvent.RunStarted(RunStartedDetails(None, None))))
     scope.runEnded(RunId("r1"))
     scope.isEnded shouldBe true
     scope.awaitEnd(Duration.Zero) shouldBe Right(true)
@@ -449,7 +453,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     scope.runEnded(RunId("r1")) // already ended: ends nothing again
     scope(record("r1", 2, RunEvent.RunCompleted))
     order.asScala.toVector shouldBe Vector("onEnd", "cancel")
-    c.all shouldBe Vector(record("r1", 1, RunEvent.RunStarted(None, None)))
+    c.all shouldBe Vector(record("r1", 1, RunEvent.RunStarted(RunStartedDetails(None, None))))
   }
 
   it should "complete its end, cancelling its subscription, when onEnd throws at the barrier" in {

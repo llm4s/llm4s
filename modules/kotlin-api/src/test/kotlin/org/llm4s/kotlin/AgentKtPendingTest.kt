@@ -102,7 +102,7 @@ class AgentKtPendingTest {
             json,
         )
 
-    private fun success(text: String): ToolOutcome = ToolOutcome.Success.apply(ToolContent.Json.apply(ujson.Str(text)), StateUpdate.empty())
+    private fun success(text: String): ToolOutcome = ToolOutcome.success(ToolContent.Json.apply(ujson.Str(text)), StateUpdate.empty())
 
     /** Approval before it runs, from the agent's middleware; records each run. */
     private val ran = CopyOnWriteArrayList<String>()

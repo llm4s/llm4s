@@ -359,8 +359,8 @@ for {
 ```
 
 `AgentResult` carries `threadId`, `runId`, `activeAgent`, `status`, `messages` and `usage`.
-`AgentStatus` is `Completed(answer)`, `Blocked(guardrail, reason)`, `StepLimitReached` or
-`Suspended(approvals, questions)`; a guardrail block is an outcome, not a `Left`. Provider, tool and
+`AgentStatus` is `Completed(answer)`, `Truncated(partialAnswer)`, `Blocked(guardrail, reason)`, `StepLimitReached` or
+`Suspended(suspension)` (a `Suspension`: approvals, questions, breakpoints, delegated); a guardrail block is an outcome, not a `Left`. Provider, tool and
 middleware failures are `Left(GraphError...)`. `agent.start(...)` returns an `AgentRun` with
 `await()` and `cancel()`; `recover(threadId)` and `resume(threadId, answers)` continue a thread
 that failed or suspended.

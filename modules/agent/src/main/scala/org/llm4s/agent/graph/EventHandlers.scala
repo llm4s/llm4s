@@ -81,9 +81,9 @@ final class EventHandlers[+R] private (
         record.event match
           case RunEvent.Custom(name, version, payload) => handlers.get((name, version)).flatMap(_(payload))
           case _                                       => None
-      case StreamEvent.Live(_, _, _, _, _, name, version, payload) => handlers.get((name, version)).flatMap(_(payload))
-      case nested: StreamEvent.Nested                              => child(nested)
-      case _                                                       => None
+      case StreamEvent.Live(live)     => handlers.get((live.name, live.version)).flatMap(_(live.payload))
+      case nested: StreamEvent.Nested => child(nested)
+      case _                          => None
     typed.orElse(fallback.map(_(event)))
 
   /** The child handler's result for the innermost event of `nested`, with the child that sent it. */
@@ -94,8 +94,8 @@ final class EventHandlers[+R] private (
       record.event match
         case RunEvent.Custom(name, version, payload) => children.get((name, version)).flatMap(_(nested.child, payload))
         case _                                       => None
-    case StreamEvent.Live(_, _, _, _, _, name, version, payload) =>
-      children.get((name, version)).flatMap(_(nested.child, payload))
+    case StreamEvent.Live(live) =>
+      children.get((live.name, live.version)).flatMap(_(nested.child, live.payload))
     case _ => None
 
   /** Runs [[dispatch]], discarding its result. */

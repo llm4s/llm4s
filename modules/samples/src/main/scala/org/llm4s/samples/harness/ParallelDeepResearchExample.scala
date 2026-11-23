@@ -106,8 +106,8 @@ object ParallelDeepResearchExample {
   @annotation.tailrec
   private def answering(agent: Agent, result: AgentResult): Result[AgentResult] =
     result.status match {
-      case s: AgentStatus.Suspended if s.delegated.nonEmpty =>
-        val answers = s.delegated.map { (id, request) =>
+      case AgentStatus.Suspended(suspension) if suspension.delegated.nonEmpty =>
+        val answers = suspension.delegated.map { (id, request) =>
           request.request match {
             case ChildInterrupt.Approval(_, approval) =>
               // the person decides: Ask is a review, never an allow

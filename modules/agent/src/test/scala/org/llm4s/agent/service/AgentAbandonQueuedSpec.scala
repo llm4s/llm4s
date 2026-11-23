@@ -78,7 +78,7 @@ class AgentAbandonQueuedSpec
       ran.incrementAndGet()
       entered.release()
       release.await(60, TimeUnit.SECONDS) // interrupted by a cancel: the call then has no result
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("late")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("late")))
     }
     val agent: Agent =
       Agent

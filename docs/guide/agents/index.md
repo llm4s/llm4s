@@ -151,7 +151,7 @@ result.map { r =>
     case AgentStatus.Blocked(guardrail, why)   => println(s"Blocked by $guardrail: $why")
     case AgentStatus.StepLimitReached          => println("Hit the step limit")
     case AgentStatus.TokenLimitReached         => println("Hit the run's token budget")
-    case AgentStatus.Suspended(approvals, qs, asked, held) => println("Waiting for a person")
+    case AgentStatus.Suspended(suspension) => println("Waiting for a person")
   }
 }
 ```
@@ -411,7 +411,7 @@ import org.llm4s.agent.graph.tool.{AgentTool, ToolContent, ToolOutcome}
 
 val charge = AgentTool(chargeSpec) { (args, context) =>
   payments.charge(args.amount, idempotencyKey = context.idempotencyKey.value) match
-    case Right(receipt) => ToolOutcome.Success(ToolContent.Json(ujson.Str(receipt.id)))
+    case Right(receipt) => ToolOutcome.success(ToolContent.Json(ujson.Str(receipt.id)))
     case Left(error)    => ToolOutcome.Error(error.message)
 }
 ```
@@ -518,7 +518,7 @@ val append = AgentTool(appendSpec) { (args, context) =>
       writeIfUnchanged(args.path, StateCheck.of(before), after).map(_ => after.length)
     })
   } match
-    case Right(length)                           => ToolOutcome.Success(ToolContent.Json(ujson.Num(length)))
+    case Right(length)                           => ToolOutcome.success(ToolContent.Json(ujson.Num(length)))
     case Left(r: GraphError.EffectReplayRefused) => ToolOutcome.Error(r.message)
     case Left(other)                             => ToolOutcome.Fatal(other) // outcome unknown: recover replays it
 }

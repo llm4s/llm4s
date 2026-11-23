@@ -312,12 +312,17 @@ enum ToolContent derives ReadWriter:
   case Json(value: ujson.Value)
   case Parts(parts: Vector[ContentPart])
 
-/** What a tool call produced, as data. */
+/**
+ * What a tool call produced, as data.
+ *
+ * `Success` holds a [[ToolSuccess]], which can gain a field without breaking a tool; build one with
+ * [[ToolOutcome.success]]. `Error`, `NeedsApproval`, `Ask` and `Fatal` are closed: each is exactly its one value.
+ */
 @Stable
 enum ToolOutcome:
 
-  /** The call's result for the model, and an update to keys the tool declares in `writes`. */
-  case Success(content: ToolContent, update: StateUpdate = StateUpdate.empty)
+  /** The call succeeded: `result` is its content for the model and its state update. */
+  case Success(result: ToolSuccess)
 
   /** A tool-level failure: the model sees `message`; the run continues. */
   case Error(message: String)
@@ -330,6 +335,27 @@ enum ToolOutcome:
 
   /** An infrastructure failure: the run fails with `GraphError.ToolFailed`. */
   case Fatal(error: LLMError)
+
+object ToolOutcome:
+
+  /** A `Success` with `content` for the model and `update` to keys the tool declares in `writes`. */
+  def success(content: ToolContent, update: StateUpdate = StateUpdate.empty): ToolOutcome =
+    Success(ToolSuccess(content, update))
+
+/**
+ * A successful tool call ([[ToolOutcome.Success]]).
+ *
+ * @param content the call's result for the model
+ * @param update an update to keys the tool declares in `writes`
+ */
+@Stable
+final case class ToolSuccess private (content: ToolContent, update: StateUpdate):
+  def withContent(value: ToolContent): ToolSuccess = copy(content = value)
+  def withUpdate(value: StateUpdate): ToolSuccess  = copy(update = value)
+
+object ToolSuccess:
+  def apply(content: ToolContent, update: StateUpdate = StateUpdate.empty): ToolSuccess =
+    new ToolSuccess(content, update)
 
 /**
  * A tool the agent loop can call: typed arguments, validated against [[AgentToolSpec.argumentSchema]]
@@ -423,7 +449,7 @@ object AgentTool:
     // the call's id and idempotency key reach the handler as `SafeParameterExtractor.call` (#1740)
     def execute(args: ujson.Value, context: ToolContext): ToolOutcome =
       function.execute(args, ToolCallInfo(context.toolCallId.value, context.idempotencyKey.value)) match
-        case Right(json) => ToolOutcome.Success(ToolContent.Json(json))
+        case Right(json) => ToolOutcome.success(ToolContent.Json(json))
         case Left(error) => ToolOutcome.Error(error.getFormattedMessage)
 
   /**

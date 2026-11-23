@@ -59,7 +59,7 @@ class RunOutcomeRebuildSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "rebuild TokenLimitReached" in {
     val call = SpecTools.calling(SpecTools.call("c1", "echo"))
     val echo =
-      SpecTools.tool("echo")((a, _) => graph.tool.ToolOutcome.Success(graph.tool.ToolContent.Json(ujson.Str(a.text))))
+      SpecTools.tool("echo")((a, _) => graph.tool.ToolOutcome.success(graph.tool.ToolContent.Json(ujson.Str(a.text))))
     val client = ScriptedLLMClient.of(call, CompletionFixture.simple("never sent"))
     val budget = RunConfig().withBudgets(RunBudgets.default.withMaxTokens(30L))
     val (live, rebuilt, outcome) =

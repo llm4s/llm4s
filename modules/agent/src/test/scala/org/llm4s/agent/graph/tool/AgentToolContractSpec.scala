@@ -129,9 +129,9 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
   "AgentTool.apply" should "run its function and declare its writes" in {
     val key = StateKey.replace[Int]("count", 0)
     val tool =
-      AgentTool(spec("search"), Set(key))((args, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(args.query))))
+      AgentTool(spec("search"), Set(key))((args, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(args.query))))
     tool.writes shouldBe Set(key)
-    tool.execute(Search("hi"), context) shouldBe ToolOutcome.Success(ToolContent.Json(ujson.Str("hi")))
+    tool.execute(Search("hi"), context) shouldBe ToolOutcome.success(ToolContent.Json(ujson.Str("hi")))
   }
 
   it should "refuse answers when it does not ask" in {
@@ -145,13 +145,13 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     val tool = new AgentTool.Asking[Search, Confirm, Reply](spec("search")) {
       def execute(args: Search, context: ToolContext): ToolOutcome = ask(Confirm(args.query))
       def resume(args: Search, question: Confirm, answer: Reply, context: ToolContext): ToolOutcome =
-        ToolOutcome.Success(ToolContent.Json(ujson.Str(s"${question.prompt}:${answer.ok}")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str(s"${question.prompt}:${answer.ok}")))
     }
     tool.spec.question shouldBe Some(ToolQuestion(summon[ReadWriter[Confirm]], summon[ReadWriter[Reply]]))
     tool.spec.name shouldBe "search"
     tool.execute(Search("go"), context) shouldBe ToolOutcome.Ask(Confirm("go"))
     tool.resumeErased(Search("go"), Confirm("go"), Reply(true), context) shouldBe
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("go:true")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("go:true")))
   }
 
   "AgentTool.fromToolFunction" should "use the function's name, description and schema" in {
@@ -166,7 +166,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     tool.spec.argumentSchema shouldBe schema.toJsonSchema(false)
     tool.spec.toolDefinition shouldBe function.toOpenAITool(true)
     tool.writes shouldBe Set.empty
-    tool.execute(ujson.Obj("message" -> "hi"), context) shouldBe ToolOutcome.Success(
+    tool.execute(ujson.Obj("message" -> "hi"), context) shouldBe ToolOutcome.success(
       ToolContent.Json(ujson.Obj("query" -> "hi"))
     )
     tool.execute(ujson.Obj(), context) match {
@@ -196,9 +196,9 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "be kept by an Asking tool's spec" in {
     val hinted = spec("search").withHints(ToolHints(readOnly = true))
     val tool = new AgentTool.Asking[Search, Confirm, Reply](hinted) {
-      def execute(args: Search, context: ToolContext): ToolOutcome = ToolOutcome.Success(ToolContent.Json(ujson.Null))
+      def execute(args: Search, context: ToolContext): ToolOutcome = ToolOutcome.success(ToolContent.Json(ujson.Null))
       def resume(args: Search, question: Confirm, answer: Reply, context: ToolContext): ToolOutcome =
-        ToolOutcome.Success(ToolContent.Json(ujson.Null))
+        ToolOutcome.success(ToolContent.Json(ujson.Null))
     }
     tool.spec.hints shouldBe hinted.hints
     tool.spec.question should not be empty

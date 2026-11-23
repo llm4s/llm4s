@@ -40,7 +40,9 @@ class ObserverAdmissionSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     handle.await().isRight shouldBe true
     rec.ended.await(5, TimeUnit.SECONDS) shouldBe true
     val seen = rec.events.asScala.toVector
-    seen.collectFirst { case StreamEvent.Durable(r) => r.event } shouldBe Some(RunEvent.RunStarted(None, None))
+    seen.collectFirst { case StreamEvent.Durable(r) => r.event } shouldBe Some(
+      RunEvent.RunStarted(RunStartedDetails(None, None))
+    )
     seen.collect { case Tick(n) => n } shouldBe Vector(1)
     handle.observation.isDefined shouldBe true
     handle.observation.foreach(_.cancel())
@@ -72,7 +74,7 @@ class ObserverAdmissionSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     rec.ended.await(5, TimeUnit.SECONDS) shouldBe true
     val durable = rec.events.asScala.collect { case StreamEvent.Durable(r) => r }.toVector
     durable.map(_.runId).distinct shouldBe Vector(handle.runId.value)
-    durable.head.event shouldBe RunEvent.RunStarted(None, None)
+    durable.head.event shouldBe RunEvent.RunStarted(RunStartedDetails(None, None))
     rec.events.asScala.collect { case Tick(n) => n }.toVector shouldBe Vector(1)
     handle.observation.foreach(_.cancel())
   }

@@ -5,7 +5,7 @@ import org.llm4s.annotation.Stable
 /**
  * A node of an agent's loop that a static breakpoint can hold: see [[AgentBuilder.withInterruptBefore]]
  * and [[AgentBuilder.withInterruptAfter]]. Each task the breakpoint holds is an interrupt of its own,
- * reported in `AgentStatus.Suspended.breakpoints` and continued with `AgentResult.proceed`.
+ * reported in `Suspension.breakpoints` and continued with `AgentResult.proceed`.
  *
  * A step continued after a review runs at another node: a model call after a `wrapModelCall` question at
  * `<id>/asked/<middleware>/wrapModelCall`, a tool call after an approval or a question at `<id>/approval`,

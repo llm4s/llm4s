@@ -134,9 +134,9 @@ class TenantSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eithe
       .completed
 
     val events = store.eventsAfter(thread, 0L, 1000).value.map(_.event)
-    events should contain(RunEvent.RunStarted(Some("a"), Some("alice")))
+    events should contain(RunEvent.RunStarted(RunStartedDetails(Some("a"), Some("alice"))))
     events.collect { case r: RunEvent.RunResumed => r }.loneElement shouldBe
-      RunEvent.RunResumed(Vector("0.0"), Some("a"), Some("bob"))
+      RunEvent.RunResumed(RunResumedDetails(Vector("0.0"), Some("a"), Some("bob")))
   }
 
   it should "refuse another tenant before revealing the thread's state" in {
@@ -421,16 +421,20 @@ class TenantSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eithe
         s"""{"threadId":"t","seq":1,"runId":"r","checkpointId":null,"taskId":null,"nodeId":null,""" +
           s""""timestamp":"2026-10-02T12:00:00Z","event":$event}"""
       )
-    record("\"RunStarted\"").event shouldBe RunEvent.RunStarted(None, None)
-    record("""{"$type":"RunRecovered","fromCheckpoint":"c1"}""").event shouldBe RunEvent.RunRecovered("c1", None, None)
-    record("""{"$type":"RunResumed","answered":["i"]}""").event shouldBe RunEvent.RunResumed(Vector("i"), None, None)
+    record("\"RunStarted\"").event shouldBe RunEvent.RunStarted(RunStartedDetails(None, None))
+    record("""{"$type":"RunRecovered","fromCheckpoint":"c1"}""").event shouldBe RunEvent.RunRecovered(
+      RunRecoveredDetails("c1", None, None)
+    )
+    record("""{"$type":"RunResumed","answered":["i"]}""").event shouldBe RunEvent.RunResumed(
+      RunResumedDetails(Vector("i"), None, None)
+    )
     record("\"RunCompleted\"").event shouldBe RunEvent.RunCompleted
   }
 
   it should "round-trip events with identity" in {
     val events = Seq[RunEvent](
-      RunEvent.RunStarted(Some("a"), Some("p")),
-      RunEvent.RunRecovered("c", None, Some("p")),
+      RunEvent.RunStarted(RunStartedDetails(Some("a"), Some("p"))),
+      RunEvent.RunRecovered(RunRecoveredDetails("c", None, Some("p"))),
       RunEvent.RunCompleted
     )
     events.foreach(e => upickle.default.read[RunEvent](upickle.default.write(e)) shouldBe e)

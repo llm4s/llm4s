@@ -19,13 +19,13 @@ class FromToolFunctionCallSpec extends AnyFlatSpec with Matchers {
 
   "AgentTool.fromToolFunction" should "pass the call's id and idempotency key to the handler" in {
     AgentTool.fromToolFunction(function).execute(ujson.Obj(), context("key-a")) shouldBe
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("call_7|key-a")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("call_7|key-a")))
   }
 
   it should "pass the key of the context it runs with, which the runtime keeps across runs of one call" in {
     val tool = AgentTool.fromToolFunction(function)
     tool.execute(ujson.Obj(), context("key-a")) shouldBe tool.execute(ujson.Obj(), context("key-a"))
-    tool.execute(ujson.Obj(), context("key-b")) shouldBe ToolOutcome.Success(
+    tool.execute(ujson.Obj(), context("key-b")) shouldBe ToolOutcome.success(
       ToolContent.Json(ujson.Str("call_7|key-b"))
     )
   }

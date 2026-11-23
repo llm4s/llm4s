@@ -2821,9 +2821,10 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.claim(secret, stalled, Some("b")).value
     s.advance(ttl)
     completed(owner.recover(stalled, graph, mine("a7")).value) shouldBe Vector("x")
-    val recovered = s.store.eventsAfter(stalled, 0L, 1000).value.map(_.event).collect { case r: RunEvent.RunRecovered =>
-      r.takenOverFrom
-    }
+    val recovered =
+      s.store.eventsAfter(stalled, 0L, 1000).value.map(_.event).collect { case RunEvent.RunRecovered(details) =>
+        details.takenOverFrom
+      }
     recovered shouldBe Vector(None)
 
     // ClaimLost: tenant b's claim takes over the owner's live run, whose next commit is then refused
@@ -2885,7 +2886,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     def apply(event: StreamEvent): Unit = events.add(event): Unit
     def all: Vector[StreamEvent]        = events.asScala.toVector
     def durable: Vector[EventRecord]    = all.collect { case StreamEvent.Durable(record) => record }
-    def live: Vector[StreamEvent.Live]  = all.collect { case live: StreamEvent.Live => live }
+    def live: Vector[LiveEvent]         = all.collect { case StreamEvent.Live(live) => live }
 
     /** Waits until the subscription has delivered `log`'s last event, then checks it delivered exactly `log`. */
     def deliveredExactly(log: Vector[EventRecord]): Assertion =

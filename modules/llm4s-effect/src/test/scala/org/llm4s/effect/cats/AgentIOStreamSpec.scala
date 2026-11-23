@@ -5,6 +5,7 @@ import org.llm4s.testutil.TestTimeLimit
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.llm4s.agent.graph.{
+  RunStartedDetails,
   Checkpointer,
   Commit,
   EventRecord,
@@ -151,7 +152,7 @@ class AgentIOStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       case other                   => fail(s"last item was $other")
     }
     items.init.forall { case AgentStreamItem.Event(_) => true; case _ => false } shouldBe true
-    durableEvents(items).head shouldBe RunEvent.RunStarted(None, None)
+    durableEvents(items).head shouldBe RunEvent.RunStarted(RunStartedDetails(None, None))
     durableEvents(items).last shouldBe RunEvent.RunCompleted
   }
 

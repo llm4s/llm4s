@@ -62,7 +62,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
   private def outcome(setup: Setup, ended: Result[ChildEnd]): ToolOutcome = ended match {
     case Right(ChildEnd.Ended(r, _)) =>
       r.status match {
-        case AgentStatus.Completed(answer) => ToolOutcome.Success(ToolContent.Json(ujson.Str(answer)))
+        case AgentStatus.Completed(answer) => ToolOutcome.success(ToolContent.Json(ujson.Str(answer)))
         case other                         => ToolOutcome.Error(s"refused: $other")
       }
     case Right(ChildEnd.Failed(e, _)) if setup.settle => ToolOutcome.Error(e.message)
@@ -121,7 +121,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
   private def flaky(failing: AtomicBoolean): AgentTool[SpecTools.Text] =
     SpecTools.tool("flaky")((_, _) =>
       if (failing.get) ToolOutcome.Fatal(ProcessingError("flaky", "down"))
-      else ToolOutcome.Success(ToolContent.Json(ujson.Str("up")))
+      else ToolOutcome.success(ToolContent.Json(ujson.Str("up")))
     )
 
   /** A tool that, while `blocking` is set, sleeps until interrupted, counting down `entered` first. */
@@ -132,7 +132,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         try Thread.sleep(60_000)
         catch { case _: InterruptedException => Thread.currentThread().interrupt() }
       }
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("hung")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("hung")))
     }
 
   /** Waits for `latch`, ignoring interrupts, as a tool that will not be stopped does. */
@@ -167,7 +167,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     setup.childClient.callCount shouldBe 1
     // the child's call is counted once, by the replay that committed it, never as the failed attempt's lost usage
     tokens(recovered.usage) shouldBe ((3L, 30L, 60L))
-    events(open(), thread).collect { case RunEvent.RunFailed(_, lost, _) => lost } shouldBe Vector(None)
+    events(open(), thread).collect { case RunEvent.RunFailed(details) => details.usage } shouldBe Vector(None)
     setup.allEnds should have size 2
     setup.allEnds(1) shouldBe setup.allEnds(0)
     setup.allEnds(0).ok shouldBe a[ChildEnd.Ended]
@@ -489,8 +489,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         case 1 =>
           entered.countDown()
           release.await(30, TimeUnit.SECONDS)
-          ToolOutcome.Success(ToolContent.Json(ujson.Str("open")))
-        case _ => ToolOutcome.Success(ToolContent.Json(ujson.Str("open")))
+          ToolOutcome.success(ToolContent.Json(ujson.Str("open")))
+        case _ => ToolOutcome.success(ToolContent.Json(ujson.Str("open")))
       }
     }
     val setup = new Setup(
@@ -672,8 +672,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       val thread  = ThreadId(s"timed-out-suspended-$rerun")
       val parked  = parent.run(thread, "go").ok
       val id = parked.status match {
-        case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
-        case other                                        => fail(s"unexpected $other")
+        case AgentStatus.Suspended(suspension) => suspension.approvals.head._1
+        case other                             => fail(s"unexpected $other")
       }
       val childId = onlyChild(runtime, thread).threadId
       // suspended: the call may run again, so its child is not settled yet
@@ -731,8 +731,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val thread  = ThreadId("timed-out-asked-again")
     val parked  = parent.run(thread, "go").ok
     val id = parked.status match {
-      case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
-      case other                                        => fail(s"unexpected $other")
+      case AgentStatus.Suspended(suspension) => suspension.approvals.head._1
+      case other                             => fail(s"unexpected $other")
     }
     val childId = onlyChild(runtime, thread).threadId
     unsettled(open(), childId)
@@ -769,8 +769,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
           .keySet
       val parked = parent.run(thread, "go").ok
       val id = parked.status match {
-        case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
-        case other                                        => fail(s"unexpected $other")
+        case AgentStatus.Suspended(suspension) => suspension.approvals.head._1
+        case other                             => fail(s"unexpected $other")
       }
       val childId = onlyChild(runtime, thread).threadId
       unsettled(open(), childId)
@@ -804,7 +804,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       def resume(args: SpecTools.Text, question: Confirm, answer: Boolean, ctx: ToolContext): ToolOutcome = {
         val origin = RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, child.id, Instant.now(), 1)
         ChildRunner.run(child, origin, AgentInput(args.text, Vector.empty), RunConfig(), ctx) match {
-          case Right(_)    => ToolOutcome.Success(ToolContent.Json(ujson.Str("report")))
+          case Right(_)    => ToolOutcome.success(ToolContent.Json(ujson.Str("report")))
           case Left(error) => ToolOutcome.Fatal(error)
         }
       }
@@ -829,8 +829,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val thread = ThreadId("timed-out-tool-question")
     val parked = parent.run(thread, "go").ok
     val id = parked.status match {
-      case AgentStatus.Suspended(_, Vector((id, _)), _, _, _) => id
-      case other                                              => fail(s"expected a tool question, got $other")
+      case AgentStatus.Suspended(s) if s.questions.sizeIs == 1 => s.questions.head._1
+      case other                                               => fail(s"expected a tool question, got $other")
     }
     val done = parent.resume(thread, Map(parked.reply(id, true))).ok
     done.answer shouldBe Some("moved on")
@@ -847,7 +847,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       ): ToolOutcome =
         next() match {
           case ToolOutcome.Error(message) if message.contains("timed out") =>
-            ToolOutcome.Success(ToolContent.Json(ujson.Str("fine")), StateUpdate.update(undeclared, "x"))
+            ToolOutcome.success(ToolContent.Json(ujson.Str("fine")), StateUpdate.update(undeclared, "x"))
           case other => other
         }
     }
@@ -877,7 +877,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         entered.countDown()
         awaitIgnoringInterrupts(release)
       }
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("done")))
     }
     val runtime = new GraphRuntime(open())
     val child = Agent
@@ -909,7 +909,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         }
       if (relayed) Thread.currentThread().interrupt()
       ended.get match {
-        case Right(ChildEnd.Ended(r, _))  => ToolOutcome.Success(ToolContent.Json(ujson.Str(r.answer.getOrElse(""))))
+        case Right(ChildEnd.Ended(r, _))  => ToolOutcome.success(ToolContent.Json(ujson.Str(r.answer.getOrElse(""))))
         case Right(ChildEnd.Failed(e, _)) => ToolOutcome.Error(e.message)
         case Left(e)                      => ToolOutcome.Fatal(e)
       }
@@ -979,7 +979,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val seen = new AtomicReference[Option[Instant]](None)
     val peek = SpecTools.tool("peek") { (_, ctx) =>
       seen.set(ctx.run.deadline)
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("peeked")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("peeked")))
     }
     val setup = new Setup(
       delegating(),
@@ -1233,7 +1233,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       case other => other.ok.map(_.event)
     }
     kept.head shouldBe RunEvent.RunCompleted
-    kept.collect { case started: RunEvent.RunStarted => started } should have size 1
+    kept.collect { case RunEvent.RunStarted(started) => started } should have size 1
   }
 
   /** A wrapper that runs the call, then asks for approval; approved, it runs the call again or answers itself. */
@@ -1246,7 +1246,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         next(): Unit
         ToolOutcome.NeedsApproval("check the report")
       } else if (rerun) next()
-      else ToolOutcome.Success(ToolContent.Json(ujson.Str("approved as it was")))
+      else ToolOutcome.success(ToolContent.Json(ujson.Str("approved as it was")))
   }
 
   Seq(true -> "runs the call again", false -> "answers without running it").foreach { case (rerun, how) =>
@@ -1258,8 +1258,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       val thread  = ThreadId(s"approved-after-child-$rerun")
       val parked  = parent.run(thread, "go").ok
       val id = parked.status match {
-        case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
-        case other                                        => fail(s"unexpected $other")
+        case AgentStatus.Suspended(suspension) => suspension.approvals.head._1
+        case other                             => fail(s"unexpected $other")
       }
       val done = parent.resume(thread, Map(parked.approve(id))).ok
       done.answer shouldBe Some("composed")
@@ -1277,8 +1277,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val thread  = ThreadId("edited-after-child")
     val parked  = parent.run(thread, "go").ok
     val id = parked.status match {
-      case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
-      case other                                        => fail(s"unexpected $other")
+      case AgentStatus.Suspended(suspension) => suspension.approvals.head._1
+      case other                             => fail(s"unexpected $other")
     }
     parent.resume(thread, Map(parked.edit(id, ujson.Obj("text" -> "another task")))).isLeft shouldBe true
     setup.allEnds.last.left.toOption.get.message should include("started with other input")
@@ -1299,8 +1299,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val thread  = ThreadId(name)
     val parked  = parent.run(thread, "go").ok
     val id = parked.status match {
-      case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
-      case other                                        => fail(s"unexpected $other")
+      case AgentStatus.Suspended(suspension) => suspension.approvals.head._1
+      case other                             => fail(s"unexpected $other")
     }
     val child = onlyChild(runtime, thread)
     child.status shouldBe CheckpointStatus.Running

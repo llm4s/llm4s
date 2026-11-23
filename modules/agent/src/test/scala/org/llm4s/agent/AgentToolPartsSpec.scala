@@ -25,7 +25,7 @@ class AgentToolPartsSpec extends AnyFlatSpec with Matchers {
 
   /** Runs one call of a tool returning `content`; the tool message the model is sent next. */
   private def resultOf(content: ToolContent): ToolMessage = {
-    val tool   = SpecTools.tool("render")((_, _) => ToolOutcome.Success(content))
+    val tool   = SpecTools.tool("render")((_, _) => ToolOutcome.success(content))
     val client = ScriptedLLMClient.of(calling(call("c1", "render")), CompletionFixture.simple("done"))
     val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(tool)))
     agent.run(ThreadId("parts"), "go").value.answer shouldBe Some("done")
@@ -42,7 +42,7 @@ class AgentToolPartsSpec extends AnyFlatSpec with Matchers {
   "An agent with a response format" should "check the text answer of a turn that carried media, and keep the media through the retry" in {
     import AgentOutputSpec.{ invoiceSchema, Invoice }
     val chartTool =
-      SpecTools.tool("render")((_, _) => ToolOutcome.Success(ToolContent.Parts(Vector(ContentPart.Text("Q3"), chart))))
+      SpecTools.tool("render")((_, _) => ToolOutcome.success(ToolContent.Parts(Vector(ContentPart.Text("Q3"), chart))))
     val client = new ScriptedLLMClient(
       Right(calling(call("c1", "render"))),
       Right(CompletionFixture.simple("""{"customer":"Acme"}""")),

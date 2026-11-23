@@ -2,7 +2,7 @@ package org.llm4s.assistant
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.agent.{ AgentResultFixture, AgentStatus }
+import org.llm4s.agent.{ Suspension, AgentResultFixture, AgentStatus }
 import org.llm4s.agent.graph.{ GraphError, RunConfig }
 import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.LLMClient
@@ -135,7 +135,8 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
       .isLeft shouldBe true
     agent
       .extractFinalResponse(
-        emptySessionState().withResult(AgentResultFixture(AgentStatus.Suspended(Vector.empty, Vector.empty)))
+        emptySessionState()
+          .withResult(AgentResultFixture(AgentStatus.Suspended(Suspension(Vector.empty, Vector.empty))))
       )
       .isLeft shouldBe true
   }

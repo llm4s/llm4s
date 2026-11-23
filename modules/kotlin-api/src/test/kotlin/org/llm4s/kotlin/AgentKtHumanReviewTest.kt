@@ -68,7 +68,7 @@ class AgentKtHumanReviewTest {
         AgentTool.`apply$default$2`<ujson.Value>(),
     ) { args: ujson.Value, _: ToolContext ->
         ran.add(args.toString())
-        ToolOutcome.Success.apply(ToolContent.Json.apply(ujson.Str("deployed")), StateUpdate.empty())
+        ToolOutcome.success(ToolContent.Json.apply(ujson.Str("deployed")), StateUpdate.empty())
     }
 
     /** Asks which environment each call is for, then lets it run. */

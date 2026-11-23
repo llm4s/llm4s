@@ -128,7 +128,7 @@ class SubscribeDuringReplaySpec extends AnyFlatSpec with TestTimeLimit with Matc
     runtime.start(thread, graph, ()).awaited.value
     store.release.countDown()
     val events = recorder.awaitEnd()
-    events.collect { case l: StreamEvent.Live => l.payload } shouldBe Vector(ujson.Str("hello"))
+    events.collect { case StreamEvent.Live(l) => l.payload } shouldBe Vector(ujson.Str("hello"))
   }
 
   Seq(false -> "replayed", true -> "caught up at the switch to live").foreach { (stale, path) =>
@@ -164,7 +164,7 @@ class SubscribeDuringReplaySpec extends AnyFlatSpec with TestTimeLimit with Matc
     runtime.start(thread, chain(steps = 3, live = 10), ()).awaited.value
     store.release.countDown()
     val received = recorder.awaitEnd()
-    val lives    = received.collect { case l: StreamEvent.Live => l.payload }
+    val lives    = received.collect { case StreamEvent.Live(l) => l.payload }
     val gaps     = received.collect { case StreamEvent.LiveGap(n) => n }
     lives.size should be <= 4
     lives.size + gaps.sum shouldBe 30
@@ -227,7 +227,7 @@ class SubscribeDuringReplaySpec extends AnyFlatSpec with TestTimeLimit with Matc
           seqs shouldBe seqs.distinct.sorted
           seqs.headOption shouldBe Some(1L)
           seqs shouldBe (1L to seqs.last).toVector
-          val lives = received.collect { case l: StreamEvent.Live => l.payload }
+          val lives = received.collect { case StreamEvent.Live(l) => l.payload }
           lives shouldBe lives.sortBy(p => (p("node").num, p("n").num))
           lives shouldBe lives.distinct
           // subscribed before the run started: nothing may be missing

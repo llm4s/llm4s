@@ -95,8 +95,8 @@ class RunBudgetsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with E
     LLMError.isRecoverable(result.failed._2) shouldBe true
     f.interrupted.toArray.toSet shouldBe Set("b", "c")
     latest.checkpoint.status shouldBe CheckpointStatus.Running
-    events(store) should contain(RunEvent.RunTimedOut(None))
-    events(store) should not contain RunEvent.RunCancelled(None)
+    events(store) should contain(RunEvent.RunTimedOut(RunStoppedDetails.empty))
+    events(store) should not contain RunEvent.RunCancelled(RunStoppedDetails.empty)
 
     f.blocking.set(false)
     await(runtime.recover(thread, f.graph).value).completed._2.toSet shouldBe Set("A", "B", "C")
@@ -112,7 +112,7 @@ class RunBudgetsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with E
     val result  = await(runtime.start(thread, g, "x", budgets(RunBudgets(timeout = Some(1.nanosecond)))).value)
     result.failed._2 shouldBe a[GraphError.DeadlineExceeded]
     runs.get shouldBe 0
-    events(store) should contain(RunEvent.RunTimedOut(None))
+    events(store) should contain(RunEvent.RunTimedOut(RunStoppedDetails.empty))
     await(runtime.recover(thread, g).value).completed._2 shouldBe "x"
     runs.get shouldBe 1
   }
@@ -132,14 +132,16 @@ class RunBudgetsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with E
       }
       val result = await(handle)
       canceller.join(5_000)
-      val stops = events(store).filter(e => e == RunEvent.RunCancelled(None) || e == RunEvent.RunTimedOut(None))
+      val stops = events(store).filter(e =>
+        e == RunEvent.RunCancelled(RunStoppedDetails.empty) || e == RunEvent.RunTimedOut(RunStoppedDetails.empty)
+      )
       result.failed._2 match {
         case _: GraphError.Cancelled =>
           cancelled += 1
-          stops shouldBe Vector(RunEvent.RunCancelled(None))
+          stops shouldBe Vector(RunEvent.RunCancelled(RunStoppedDetails.empty))
         case _: GraphError.DeadlineExceeded =>
           expired += 1
-          stops shouldBe Vector(RunEvent.RunTimedOut(None))
+          stops shouldBe Vector(RunEvent.RunTimedOut(RunStoppedDetails.empty))
         case other => fail(s"iteration $i: $other")
       }
     }
@@ -152,7 +154,7 @@ class RunBudgetsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with E
     // the exit commit holding RunCancelled outlasts the deadline; an interrupt would throw out of it
     val slow = new Checkpointer {
       def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = {
-        if commit.events.exists(_.event == RunEvent.RunCancelled(None)) then Thread.sleep(300)
+        if commit.events.exists(_.event == RunEvent.RunCancelled(RunStoppedDetails.empty)) then Thread.sleep(300)
         underlying.commit(threadId, commit)
       }
       def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
@@ -198,8 +200,10 @@ class RunBudgetsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with E
     val config = budgets(RunBudgets(timeout = Some(100.millis)))
     val result = await(GraphRuntime(slow).start(thread, g, (), config, Durability.OnExit).value)
     result.failed._2 shouldBe a[GraphError.Cancelled]
-    val stops = events(underlying).filter(e => e == RunEvent.RunCancelled(None) || e == RunEvent.RunTimedOut(None))
-    stops shouldBe Vector(RunEvent.RunCancelled(None))
+    val stops = events(underlying).filter(e =>
+      e == RunEvent.RunCancelled(RunStoppedDetails.empty) || e == RunEvent.RunTimedOut(RunStoppedDetails.empty)
+    )
+    stops shouldBe Vector(RunEvent.RunCancelled(RunStoppedDetails.empty))
   }
 
   /** A one-node graph whose node records the `RunContext.deadline` it saw, then fails while `failing` is set. */

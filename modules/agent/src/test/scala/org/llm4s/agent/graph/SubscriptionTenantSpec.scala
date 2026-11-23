@@ -73,7 +73,7 @@ class SubscriptionTenantSpec extends AnyFlatSpec with TestTimeLimit with Matcher
           case RunEvent.Custom(_, _, payload) => payload.str
           case _                              => ""
         }
-      case l: StreamEvent.Live => l.payload.str
+      case StreamEvent.Live(l) => l.payload.str
     }
     .filter(_.nonEmpty)
 

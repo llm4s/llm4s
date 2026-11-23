@@ -162,7 +162,7 @@ object FileTools:
 
     /** A tool's text result, cut at `maxResultChars`. */
     private def text(s: String): ToolOutcome =
-      ToolOutcome.Success(ToolContent.Json(ujson.Str(Bounded.cap(s, maxResultChars))))
+      ToolOutcome.success(ToolContent.Json(ujson.Str(Bounded.cap(s, maxResultChars))))
 
     /** A backend error: a refusal the model sees, cut at `maxResultChars`; anything else is `Fatal`. */
     private def failed(error: LLMError): ToolOutcome =
@@ -175,7 +175,7 @@ object FileTools:
     private def mutated[A](result: Result[(A, StateUpdate)])(render: A => String): ToolOutcome =
       result.fold(
         failed,
-        (a, update) => ToolOutcome.Success(ToolContent.Json(ujson.Str(Bounded.cap(render(a), maxResultChars))), update)
+        (a, update) => ToolOutcome.success(ToolContent.Json(ujson.Str(Bounded.cap(render(a), maxResultChars))), update)
       )
 
     private def stopped(listing: Listing[?]): Option[String] =
