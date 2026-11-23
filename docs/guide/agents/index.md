@@ -376,8 +376,26 @@ for {
 - An abandoned call may still have had its effect: a tool cut short is not known to have done
   nothing. Say so in the reason if the model should check before acting again.
 
-A queued run does not need this: cancelling it through its queue settles the turn the same way
-(see [Durable Checkpointers](durable-checkpointers)).
+**A queued run** is normally stopped through its queue: `RunSubmitter.cancel` settles the turn the
+same way and closes the entry `cancelled` (see [Multiple machines](multiple-machines)). `abandon`
+works on its thread too, on the same terms as any other:
+
+- While a worker runs the entry, the thread is `ThreadBusy`: cancel it through the queue.
+- Once the worker has died and its claim has lapsed, `abandon` settles the thread at once. The
+  entry is closed by the next worker to take it - when the dead worker's lease expires -
+  `EntryOutcome.Failed(FailureReason.Abandoned)`, which is what the ticket's `await` answers. No
+  tool or model call runs again, the entry closes once, and it closes `Abandoned` even if the thread
+  has taken other turns in between.
+- Entries queued behind it on the thread run after it, and their model reads the reason as the
+  abandoned calls' results.
+- A queued `QueuedInput.Recover` that finds its thread abandoned has nothing to recover and closes
+  `Failed(RunFailed)` saying so.
+
+The settlement is committed as the run it closes - that run's last checkpoint and `RunFailed`
+event carry its `RunId` - which is how the queue finds it.
+
+`abandon` is on the wrappers wherever `recover` is: `BoundAgent.abandon(ref)`, `JAgent.abandon`,
+Kotlin's `AgentKt.abandon`, `AgentIO.abandon`, `AgentZ.abandon` and `AgentPekko.abandon`.
 
 **Tools run at least once, so pass the idempotency key on.** A call can run again: a retrying
 `wrapToolCall` middleware, `recover` after a cancellation, failure or crash, and an approval each

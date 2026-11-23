@@ -227,6 +227,36 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
         } yield assertTrue(Fixtures.causeOf(err) == SimpleError("provider down")) &&
           assertTrue(recovered.status == AgentStatus.Completed("recovered"))
       },
+      test("abandon closes a run that failed with a provider error, leaving nothing to recover") {
+        val calls = new AtomicInteger(0)
+        val client = new LLMClient {
+          def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
+            calls.getAndIncrement() match {
+              case 0 => Right(toolCall(0))
+              case _ => Left(SimpleError("provider down"))
+            }
+          def streamComplete(
+            c: Conversation,
+            o: CompletionOptions,
+            onChunk: StreamedChunk => Unit
+          ): Result[Completion] = complete(c, o)
+          def getContextWindow(): Int     = 8192
+          def getReserveCompletion(): Int = 512
+        }
+        val (capture, thread) = Fixtures.threadCapture()
+        val agent             = z(client)(_.withTools(tools).withMiddleware(capture))
+        for {
+          _ <- agent.run("go").flip
+          threadId = thread.get().get
+          _         <- agent.abandon(threadId, "abandoned: the provider is down")
+          closedAt  <- zio.ZIO.succeed(calls.get)
+          recovered <- agent.recover(threadId).flip
+          again     <- agent.abandon(threadId).flip
+        } yield assertTrue(closedAt == 2) && // the run is closed, not continued: no model call was made
+          assertTrue(Fixtures.causeOf(recovered) == GraphError.NothingToRecover(threadId.value)) &&
+          assertTrue(Fixtures.causeOf(again) == GraphError.NothingToRecover(threadId.value)) &&
+          assertTrue(calls.get == 2)
+      },
       test("agent(id) builds an AgentZ over the same underlying client") {
         val client = new Recording(_ => text("via-client"))
         LLMClientZ(client).agent("assistant")().flatMap(_.run("q")).map { result =>

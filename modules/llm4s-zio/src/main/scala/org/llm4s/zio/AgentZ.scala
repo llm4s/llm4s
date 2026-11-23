@@ -47,6 +47,18 @@ trait AgentZ {
   /** Continues `threadId`'s failed or interrupted run; see [[org.llm4s.agent.Agent.recover Agent.recover]]. */
   def recover(threadId: ThreadId, config: RunConfig = RunConfig()): ZIO[Any, LLMError, AgentResult]
 
+  /**
+   * Closes `threadId`'s failed or interrupted run without continuing it: each tool call left without a result gets
+   * `reason`, nothing runs again, and the thread is at rest for its next turn; see
+   * [[org.llm4s.agent.Agent.abandon Agent.abandon]]. Fails as it refuses - `GraphError.NothingToRecover`,
+   * `GraphError.PendingInterrupts`, `GraphError.ThreadBusy` - with the thread unchanged. It runs no turn, so there is nothing to interrupt.
+   */
+  def abandon(
+    threadId: ThreadId,
+    reason: String = Agent.AbandonedResult,
+    config: RunConfig = RunConfig()
+  ): ZIO[Any, LLMError, Unit]
+
   /** Answers pending approvals and questions and continues; see [[org.llm4s.agent.Agent.resume Agent.resume]]. */
   def resume(
     threadId: ThreadId,
@@ -133,6 +145,9 @@ object AgentZ {
 
     def recover(threadId: ThreadId, config: RunConfig): ZIO[Any, LLMError, AgentResult] =
       awaiting(agent.startRecover(threadId, config))
+
+    def abandon(threadId: ThreadId, reason: String, config: RunConfig): ZIO[Any, LLMError, Unit] =
+      ZIO.attemptBlocking(agent.abandon(threadId, reason, config)).orDie.flatMap(ZIO.fromEither(_))
 
     def resume(
       threadId: ThreadId,

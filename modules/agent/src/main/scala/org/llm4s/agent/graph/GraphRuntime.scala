@@ -942,10 +942,14 @@ final class GraphRuntime(
    * Abandons the incomplete run on the top-level thread `threadId` ([[https://github.com/llm4s/llm4s/issues/1750 #1750]]):
    * what `recover` would continue is instead settled as `outcome`, as [[settleQueued]] settles a queued run's thread - a
    * `Failed` checkpoint over the incomplete latest, with the update `amend` makes to its state and a
-   * [[RunEvent.RunFailed]] carrying `message`, as run `config.runId`, under the thread's claim. For a thread's owner,
-   * after a run it started directly was cancelled, failed or crashed, so three things differ from the worker's settle:
+   * [[RunEvent.RunFailed]] carrying `message`, under a claim taken as `config.runId`. For a thread's owner, after a run
+   * was cancelled, failed or crashed, so four things differ from the worker's settle:
    *
    *  - it is whoever may run the thread that settles it, not the run that stopped, so no run id has to match;
+   *  - the checkpoint and the event are committed as the run they close - the incomplete latest's - not as
+   *    `config.runId`: the settlement is how that run ended, so whatever follows the run finds it however the thread
+   *    moves on afterwards. A queue entry whose attempt the run was reads it through its run-id lookup
+   *    (`Checkpointer.latestOfRuns`) and closes `Failed(Abandoned)`, and the entry's store keeps it through a prune;
    *  - the tasks of the cut superstep that finished and recorded a pending write are not lost: each one's update is
    *    applied to the state before `amend` sees it, as the superstep's commit would have applied it and as `recover`
    *    would reuse it. A task that was suspended, failed or never ran contributes nothing, and the settled checkpoint
@@ -1023,12 +1027,14 @@ final class GraphRuntime(
             settled   <- amended(execution, amend)
             snapshot  <- graph.snapshot(settled)
             now = clock.instant()
+            // an abandoned run is settled as itself, so its queue entry's run-id lookup finds the settlement
+            run = if abandoning then RunId(open.runId) else config.runId
             saved = Checkpoint(
               Checkpoint.CurrentFormat,
-              GraphRuntime.checkpointId(config.runId, GraphRuntime.ordinal(Some(open.id)), 1L),
+              GraphRuntime.checkpointId(run, GraphRuntime.ordinal(Some(open.id)), 1L),
               Some(open.id),
               threadId.value,
-              config.runId.value,
+              run.value,
               CheckpointStatus.Failed,
               now,
               snapshot,
@@ -1037,7 +1043,7 @@ final class GraphRuntime(
               open.origin,
               Some(outcome)
             ).withTrace(open.trace)
-            event  = EventDraft(config.runId.value, Some(saved.id), None, None, now, RunEvent.RunFailed(message))
+            event  = EventDraft(run.value, Some(saved.id), None, None, now, RunEvent.RunFailed(message))
             fence  = parentFenceOf(stored, parentClaim)
             commit = Commit(held.claim.token, Some(saved), Vector.empty, Vector(event)).withFence(fence)
             _ <- held.committing(commit)(commitAndDeliver(threadId, commit).left.map(fenceRefused(threadId, fence)))

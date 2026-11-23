@@ -130,7 +130,8 @@ new thread, and `continueConversation` continues the thread of a previous result
 those, build the `Agent` yourself and call `agent.start(...)` inside `ZIO.attemptBlocking`.
 
 Interrupting the fiber (or a timeout) cancels the run and returns once its turn has ended, so the
-thread can be recovered at once with `recover`.
+thread can be recovered at once with `recover` - or closed without running anything again with
+`abandon(threadId, reason)`, which wraps `Agent.abandon` and returns `ZIO[Any, LLMError, Unit]`.
 
 Errors arrive in the `LLMError` channel: a provider, tool or middleware failure is a `GraphError`
 (a provider error is `GraphError.NodeFailed(cause)`; an exception thrown by user code arrives as a

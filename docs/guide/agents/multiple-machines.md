@@ -165,6 +165,14 @@ one is stopped by the worker holding it, on whichever machine, when it next rene
 own outcome if it finished first. `submitter.deleteThread(runtime, tenant, threadId, timeout)` cancels the thread's
 entries, waits for them to close, and then deletes it.
 
+**Abandon instead of recover.** A run whose worker died is recovered by the next worker to take its entry. If it
+should not be - the tool call it died in would only hang again - cancel the entry, or have the thread's owner call
+`agent.abandon(threadId, reason)` once the dead worker's claim has lapsed (while a worker runs it, the thread is
+`ThreadBusy`). The thread is settled at once and is free for its next turn; the entry closes
+`Failed(FailureReason.Abandoned)` when a worker next takes it, with nothing run again, even if the thread has taken
+other turns by then, and the entries queued behind it run after it. See
+[Tool Side Effects](index#tool-side-effects) in the agents guide.
+
 **A message for a busy thread** - one with an open entry or a live run - follows the submission's `policy`:
 
 | `BusyThreadPolicy` | What happens |
@@ -206,7 +214,7 @@ val runtime      = RuntimeConfigLoader.runtime(checkpointer)
 | Runs | `runs.started`, `runs.ended` (by outcome), `run.duration` |
 | Claims | `claims` (acquired, taken over, busy, failed), `claim.renewals` (renewed, lost, failed) |
 | Commits | `commit.duration` |
-| Queue | `queue.wait`, `queue.depth`, `queue.oldest.seconds`, `queue.attempts`, `queue.plans`, `queue.deferrals`, `queue.lease.expiries`, `queue.lease.lapses`, `queue.lease.losses`, `queue.closed` (by outcome and reason; dead letters are `failed` / `attempts_exhausted`) |
+| Queue | `queue.wait`, `queue.depth`, `queue.oldest.seconds`, `queue.attempts`, `queue.plans`, `queue.deferrals`, `queue.lease.expiries`, `queue.lease.lapses`, `queue.lease.losses`, `queue.closed` (by outcome and reason; dead letters are `failed` / `attempts_exhausted`, abandoned runs `failed` / `abandoned`) |
 | Child tasks | `tasks.started`, `tasks.ended`, `task.duration` |
 | Retention | `sweep.passes`, `sweep.threads.examined`, `sweep.tombstones.reclaimed`, `sweep.entries.reclaimed` |
 | Shutdown | `worker.drained` |

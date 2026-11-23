@@ -49,12 +49,16 @@ final case class Attempt(runId: RunId, startedAt: Instant, holder: String)
  *    resume of a thread that is not waiting - with the error's message.
  *  - `Unrunnable`: no worker could run the entry (no worker has its agent at a graph version that can restore its
  *    thread, W2), with why.
+ *  - `Abandoned`: the entry's run stopped mid-turn - its worker died - and the thread's owner closed it with
+ *    `Agent.abandon` rather than leave it for a worker to recover: every tool call of the turn has a result, nothing
+ *    ran again, and the thread may have taken other turns since.
  */
 @Experimental
 enum FailureReason:
   case AttemptsExhausted(attempts: Int)
   case RunFailed(message: String)
   case Unrunnable(message: String)
+  case Abandoned
 
 /**
  * Why an entry closed `cancelled` (design 4.55). `ThreadDeleted`: the thread was deleted after the entry was
@@ -164,6 +168,7 @@ object EntryOutcome:
           ujson.Obj("state" -> "failed", "reason" -> "runFailed", "message" -> message)
         case FailureReason.Unrunnable(message) =>
           ujson.Obj("state" -> "failed", "reason" -> "unrunnable", "message" -> message)
+        case FailureReason.Abandoned => ujson.Obj("state" -> "failed", "reason" -> "abandoned")
     case Cancelled(CancelReason.ThreadDeleted) => ujson.Obj("state" -> "cancelled", "reason" -> "threadDeleted")
     case Cancelled(CancelReason.Requested(note)) =>
       val json = ujson.Obj("state" -> "cancelled", "reason" -> "requested")
@@ -186,6 +191,7 @@ object EntryOutcome:
         case ("failed", Some("attemptsExhausted")) => Failed(FailureReason.AttemptsExhausted(o("attempts").num.toInt))
         case ("failed", Some("runFailed"))         => Failed(FailureReason.RunFailed(str("message")))
         case ("failed", Some("unrunnable"))        => Failed(FailureReason.Unrunnable(str("message")))
+        case ("failed", Some("abandoned"))         => Failed(FailureReason.Abandoned)
         case ("cancelled", Some("threadDeleted"))  => Cancelled(CancelReason.ThreadDeleted)
         case ("cancelled", Some("requested"))      => Cancelled(CancelReason.Requested(opt("note")))
         case ("interrupted", _)                    => Interrupted(o.get("by").map(b => EntryId.unsafe(b.num.toLong)))

@@ -136,7 +136,8 @@ It does not expose a named `ThreadId` on `run` (each `run` starts a new thread, 
 `Agent` yourself and call `agent.start(...)` inside `IO.blocking`.
 
 Cancelling the fiber cancels the run and returns once its turn has ended, so the thread can be
-recovered at once with `recover`.
+recovered at once with `recover` - or closed without running anything again with
+`abandon(threadId, reason)`, which wraps `Agent.abandon` and returns `F[Unit]`.
 
 Errors arrive as `LLMException` in the effect's error channel: a provider, tool or middleware failure
 is a `GraphError` (a provider error is `GraphError.NodeFailed(cause)`; an exception thrown by user

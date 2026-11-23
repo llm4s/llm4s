@@ -35,7 +35,7 @@ import upickle.default.*
 
 import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.{ Await, ExecutionContext }
+import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.concurrent.duration.*
 import scala.util.Using
 import scala.util.Using.Releasable
@@ -595,6 +595,34 @@ class AgentPekkoSpec extends AnyFlatSpec with TestTimeLimit with Matchers with B
     val failed            = Await.result(agent.run("go").failed, Patience)
     Fixtures.causeOf(failed.asInstanceOf[LLMException].error) shouldBe SimpleError("provider down")
     Await.result(agent.recover(thread.get().get), Patience).status shouldBe AgentStatus.Completed("recovered")
+  }
+
+  "AgentPekko.abandon" should "close a run that failed with a provider error, leaving nothing to recover" in {
+    val calls = new AtomicInteger(0)
+    val client = new LLMClient {
+      def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
+        calls.getAndIncrement() match {
+          case 0 => Right(toolCall(0))
+          case _ => Left(SimpleError("provider down"))
+        }
+      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+        complete(c, o)
+      def getContextWindow(): Int     = 8192
+      def getReserveCompletion(): Int = 512
+    }
+    val (capture, thread) = Fixtures.threadCapture()
+    val agent             = pekko(client)(_.withTools(tools).withMiddleware(capture))
+    Await.result(agent.run("go").failed, Patience) shouldBe a[LLMException]
+    val threadId = thread.get().get
+    Await.result(agent.abandon(threadId, "abandoned: the provider is down"), Patience) shouldBe (())
+    // the run is closed, not continued: no model call was made, and neither recover nor abandon finds one to act on
+    calls.get shouldBe 2
+    // one after the other: two calls at once on one thread would find each other holding it
+    Seq[() => Future[Any]](() => agent.recover(threadId), () => agent.abandon(threadId)).foreach { refused =>
+      Fixtures.causeOf(Await.result(refused().failed, Patience).asInstanceOf[LLMException].error) shouldBe
+        GraphError.NothingToRecover(threadId.value)
+    }
+    calls.get shouldBe 2
   }
 
   "AgentPekko.resume" should "complete a turn parked on an approval once it is approved" in {

@@ -202,6 +202,7 @@ class ZioChatRoutesSpec extends AnyFlatSpec with Matchers {
     def run(query: String, config: RunConfig): IO[LLMError, AgentResult]                                         = no
     def continueConversation(previous: AgentResult, query: String, config: RunConfig): IO[LLMError, AgentResult] = no
     def recover(threadId: ThreadId, config: RunConfig): IO[LLMError, AgentResult]                                = no
+    def abandon(threadId: ThreadId, reason: String, config: RunConfig): IO[LLMError, Unit]                       = no
     def resume(
       threadId: ThreadId,
       answers: Map[InterruptId, ujson.Value],

@@ -153,7 +153,8 @@ completes normally, the `Future[Done]` is already complete.
 ### Futures
 
 `run`, `continueConversation`, `recover` and `resume` return a `Future[AgentResult]`, started and awaited on the
-`ExecutionContext` you pass:
+`ExecutionContext` you pass; `abandon(threadId, reason)`, which closes a failed or cancelled turn instead of
+recovering it (`Agent.abandon`), returns a `Future[Unit]`:
 
 ```scala
 import org.llm4s.agent.AgentResult
