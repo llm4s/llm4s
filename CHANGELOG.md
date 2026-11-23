@@ -12,15 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
-- `MetricsCollector.recordRetryAttempt`, `recordCircuitBreakerTransition` and `recordError` are removed: `ReliableClient` records
-  `ReliabilityMetrics.Retries`, `CircuitBreakerTransitions` and `Errors` through `increment`, so a collector that overrode them overrides `increment`;
-  [migration](docs/reference/migration.md#reliableclients-metrics-are-generic-metrics-2801).
-- `Tracing` has one abstract method, `traceEvent(TraceEvent)`: `traceToolCall`, `traceError`, `traceCompletion` and `traceTokenUsage` are `final`
-  (delete your overrides), `traceToolCall` takes the call's `duration` and `success`, `shutdown()` is `close()` (`Tracing` is `AutoCloseable`), the `TracingComposer`
-  trait is gone (the object stays) and the tracing mode `print` is no longer read; [migration](docs/reference/migration.md#tracing-has-one-abstract-method-2799).
-- Langfuse traces are private: `LangfuseTracing` sent every trace `public: true` and as user `llm4s-user`; it now sends
-  `public: false` unless `llm4s.tracing.langfuse.public = true`, and the run's own user or none;
-  [migration](docs/reference/migration.md#langfuse-traces-are-private-and-name-the-runs-user-2828).
+- `TokenWindow.trimToBudget` (and so `ContextManager`) returns a `ContextError` when the pinned system and digest messages, or they and the newest turn, do not fit, where it returned an empty or digest-only conversation; with no `ArtifactStore`, `DeterministicCompressor` and `ContextManager` no longer externalize ([#2817](https://github.com/llm4s/llm4s/issues/2817)); [migration](docs/reference/migration.md#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817).
+- `StreamingAccumulator.create()` is `StreamingAccumulator(model)`; `updateTokens`, `updateTokensWithThinking` and
+  `addThinkingDelta` are removed for `updateUsage`; `SSEEvent.retry` is a `FiniteDuration`; `SSEParser.parseStream` and
+  `getEvents` are removed; [migration](docs/reference/migration.md#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813).
+- `ProviderRegistry.get` is removed: use `resolve`, which with `find`, `findEmbedding` and `resolveEmbedding` now
+  accepts an alias as well as an id;
+  [migration](docs/reference/migration.md#providerregistry-lookups-accept-aliases-2812).
 - 36 `llm4s-agent` case classes (`ContextWindowConfig`, `Handoff`, the `AgentEvents` payloads, `EventRecord`, `GraphSnapshot`, `Command` and others) have a private constructor and `copy`: use `X(...)` and the `with*` setters. `GuardrailResult` is removed, and `MiddlewareStack`, `ToolLoop.results`/`queue` and nine other internal types are no longer public. `AgentStatus.Suspended`, eight `RunEvent` cases, `StreamEvent.Live` and `ToolOutcome.Success` each hold one growth-safe class (`Suspension`, `RunFailedDetails`, `LiveEvent`, `ToolSuccess`, ...) in place of positional fields, and a tool returns `ToolOutcome.success(content)` ([#2781](https://github.com/llm4s/llm4s/issues/2781));
   [migration](docs/reference/migration.md#llm4s-agent-types-are-tiered-and-growth-safe-2778).
 - `CompletionOptions.budgetTokens` and `withBudgetTokens`, and `ReasoningEffort.None`, are removed: use `thinking`
@@ -75,6 +73,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Fixed** `SSEParser`'s streaming parser reads CRLF and CR line endings, where a CRLF stream fed in raw chunks yielded
+  no event until `flush()`, and ends an event only at a blank line, where a chunk ending at a line break split it; a streamed `Completion.model` is the model the client was created for, never `"unknown"`,
+  and `StreamingAccumulator` reports usage only through `updateUsage`, which keeps cache counts [#2813](https://github.com/llm4s/llm4s/issues/2813).
+- **Fixed** `ProviderRegistry`: an id beats an alias, so another provider's alias can no longer make a provider
+  unreachable; alias collisions are reported like id collisions; a descriptor whose `id` or `aliases` throws is
+  recorded instead of aborting `ProviderRegistry.default`; and `discover()` also scans core's own class loader
+  when the context loader is set [#2812](https://github.com/llm4s/llm4s/issues/2812).
 - **Fixed** watsonx, Perplexity and Jlama leaving options out without reporting them: each now puts on
   `Completion.adjustments` what it does not send as asked (`reasoning` and `thinking`; Perplexity and Jlama also the
   penalties, Jlama also `top_p` and `responseFormat`), on `complete` and streams; watsonx's per-process warnings give way to the reports ([RFC 0008](docs/rfcs/0008-generation-controls.md) decision 15) [#2115](https://github.com/llm4s/llm4s/issues/2115).
@@ -123,9 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
-- **Fixed** `TracingComposer.filter` and `transform` now apply to `traceToolCall`, `traceError`, `traceCompletion` and `traceTokenUsage`, which went
-  straight to the wrapped tracer: those four are `final` and built on `traceEvent`, the one method a `Tracing` implements, and
-  `traceToolCall` records the duration and outcome it is given [#2799](https://github.com/llm4s/llm4s/issues/2799).
+- **Fixed** context compression loses no content it cannot give back: without an `ArtifactStore` nothing is externalized (it went to a throwaway store); binary tool output is detected by content, not the word "base64", and stored whole or left; `TokenWindow` pins every leading system and digest message and trims whole tool-call turns; the subjective rules no longer rewrite user messages; `SemanticBlock.getBlockSummary` no longer throws on an empty block [#2817](https://github.com/llm4s/llm4s/issues/2817).
 - **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
   traces too, and on each agent call's `ModelCallCompleted` (an event stored before reads with none, a reason this version cannot read as `Other(raw)`), mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider, in place of `assertStreams`
   ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1, 2, 5 and 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
@@ -143,6 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   moving every digest to the end of the conversation [#2481](https://github.com/llm4s/llm4s/issues/2481).
 - **Fixed** `HistoryCompressor`, `LLMCompressor` and `TokenWindow` recognise a history digest the same way: a `SystemMessage`
   starting with `[HISTORY_SUMMARY]`, so `TokenWindow` no longer pins a message that merely quotes the marker [#2505](https://github.com/llm4s/llm4s/issues/2505).
+- **Fixed** message and conversation validation name the field they reject (`content`, `toolCallId`, `toolMessage`,
+  `conversation`) and give the reason as the violation, where field and reason were swapped [#2796](https://github.com/llm4s/llm4s/issues/2796).
 
 ### Agent runtime
 
@@ -224,15 +229,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ingestChunksWithPermissions` take `DocumentChunk`s and return the stored ids, with `RAG.chunk` and
   `ingestBytesWithPermissions` [#2732](https://github.com/llm4s/llm4s/issues/2732);
   [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
-
-### Observability
-
-- **Fixed** `PrometheusMetrics` dropped `ReliableClient`'s retries, circuit-breaker transitions and errors: they are now generic metrics
-  (`org.llm4s.reliability.ReliabilityMetrics`) that every backend exports, as `llm4s_retries_total`, `llm4s_circuit_breaker_transitions_total`
-  and `llm4s_reliability_errors_total` [#2801](https://github.com/llm4s/llm4s/issues/2801).
-- **Fixed** Langfuse traces were created public - readable, messages included, by anyone holding a trace's URL - and all as user
-  `llm4s-user`: they are private unless `llm4s.tracing.langfuse.public = true`, and `userId` is the run's `RunConfig.principal`
-  (new `TraceEvent.AgentRunEnded.userId`), or not sent [#2828](https://github.com/llm4s/llm4s/issues/2828).
 
 ### Build & tooling
 

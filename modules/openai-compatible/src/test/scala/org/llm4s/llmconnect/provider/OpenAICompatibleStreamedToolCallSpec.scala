@@ -83,7 +83,7 @@ class OpenAICompatibleStreamedToolCallSpec extends AnyFlatSpec with Matchers wit
     toolCalls shouldBe Seq(ToolCall("call_1", "lookup", ujson.Obj("topic" -> "vault")))
     chunks.flatMap(_.toolCall).map(_.arguments).collect { case ujson.Str(s) => s }.mkString shouldBe
       """{"topic":"vault"}"""
-    val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator.create()
+    val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator("test-model")
     chunks.foreach(accumulator.addChunk)
     accumulator.currentToolCalls shouldBe toolCalls
   }

@@ -50,83 +50,78 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
-[Langfuse traces are private and name the run's user](#langfuse-traces-are-private-and-name-the-runs-user-2828),
-[`Tracing` has one abstract method](#tracing-has-one-abstract-method-2799),
-and [`ReliableClient`'s metrics are generic metrics](#reliableclients-metrics-are-generic-metrics-2801).
+[`ProviderRegistry` lookups accept aliases](#providerregistry-lookups-accept-aliases-2812),
+[`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
+and [context trimming fails when nothing fits, and externalizes only into a store](#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817).
 
-## `ReliableClient`'s metrics are generic metrics (#2801)
+## Context trimming fails when nothing fits, and externalizes only into a store (#2817)
 
-`MetricsCollector` had three methods with no-op defaults that only `ReliableClient` called: `recordRetryAttempt`,
-`recordCircuitBreakerTransition` and `recordError`. A backend that did not override them dropped them silently, and
-`PrometheusMetrics` did not. They are removed. `ReliableClient` records three counters declared in
-`org.llm4s.reliability.ReliabilityMetrics` through `MetricsCollector.increment`, which every backend that exports
-generic metrics already implements.
+In `org.llm4s.context` (`llm4s-core`). No signature changes; behaviour you may rely on changed.
 
-| Before | After |
-|---|---|
-| `override def recordRetryAttempt(provider, attemptNumber)` | In `increment`: `case (ReliabilityMetrics.Retries, Seq(provider))` |
-| `override def recordCircuitBreakerTransition(provider, newState)` | In `increment`: `case (ReliabilityMetrics.CircuitBreakerTransitions, Seq(provider, state))` |
-| `override def recordError(errorKind, provider)` | In `increment`: `case (ReliabilityMetrics.Errors, Seq(provider, errorType))` |
-| `collector.recordRetryAttempt("openai", 1)` | `collector.increment(ReliabilityMetrics.Retries, Seq("openai"))` |
+**`TokenWindow.trimToBudget`** pins every leading `SystemMessage` (the system prompt and all `[HISTORY_SUMMARY]`
+digests, where it pinned only a digest in first position), and drops older history in whole turns: an assistant
+message with tool calls goes with its tool results, so the window never starts at an orphaned `ToolMessage`. It now
+returns `Left(ContextError)` when the pinned messages exceed the budget, or when not even the newest turn fits beside
+them, where it returned `Right` with an empty or pinned-only conversation. `ContextManager.manageContext` returns that
+`Left` from its last step; raise the budget, or trim the system prompt. To leave room for the turns,
+`ContextManager` now caps the history digests at half the budget left after headroom (and at
+`summaryTokenTarget`, as before).
 
-```scala
-override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit =
-  (metric, labelValues) match {
-    case (ReliabilityMetrics.CircuitBreakerTransitions, Seq(provider, state)) => alert(provider, state)
-    case _                                                                    => ()
-  }
-```
+**Externalization needs a store.** With `artifactStore = None` (the default of `DeterministicCompressor.compressToCap`
+and of `ContextManager`), tool output over 8 KB used to become an `[EXTERNALIZED: key ...]` pointer into a store
+created and discarded on each call. Now nothing is externalized: the output is compressed inline. Pass
+`Some(store)` to keep externalizing and be able to `retrieve` the content.
 
-- **Prometheus gains three series**: `llm4s_retries_total{provider}`,
-  `llm4s_circuit_breaker_transitions_total{provider,state}` and `llm4s_reliability_errors_total{provider,error_type}`.
-  Nothing else changes there.
-- **Micrometer keeps its meters** (`llm4s.retries`, `llm4s.circuit.breaker.transitions`, `llm4s.reliability.errors`)
-  and their tags. Their values now pass through the generic label guard: a provider is capped at
-  `MetricsCollector.MaxLabelValues` (256) distinct values per meter, not the collector's 64, and `state` is one of
-  `open`, `closed` and `half-open`, which `ReliableClient` passes from `CircuitState`. `MicrometerMetrics.Names.Retries`,
-  `CircuitBreakerTransitions` and `ReliabilityErrors` are no longer constant expressions.
-- The retry's attempt number is no longer passed: no backend recorded it. `error_type` arrives as its label
-  (`rate_limit`, `timeout`, ...; `ReliabilityMetrics.errorTypeLabel`), not as an `ErrorKind`.
+**Binary content** is a `data:...;base64,` URI, a run of 256 or more base64 characters, or text that is mostly
+control characters; mentioning the word "base64" no longer counts. It is never cut: over 2 KB it is externalized
+whole when there is a store, and otherwise left as it is. The `[BINARY CONTENT - n bytes - externalized: id]`
+placeholder, which stored nothing, is gone.
 
-## `Tracing` has one abstract method (#2799)
+**User messages** are no longer rewritten by `CompressionRule.compressRepetitiveContent` or
+`removeRedundantPhrases`, as `DeterministicCompressor`'s Scaladoc always promised.
 
-`Tracing` declared five abstract methods, four of them wrappers every backend re-implemented. `TracingComposer.filter`
-and `transform` forwarded those four to the wrapped tracer untouched, so a filter or a redacting transform did not
-apply to `traceToolCall`, `traceError`, `traceCompletion` or `traceTokenUsage`. Now `traceEvent(event: TraceEvent)` is
-the only abstract method and the others are `final`: each builds its event and passes it to `traceEvent`.
+## `StreamingAccumulator` takes the model and reports usage one way (#2813)
+
+For provider authors using `org.llm4s.llmconnect.streaming` in `llm4s-core`.
 
 | Before | After |
 |---|---|
-| A `Tracing` overriding `traceToolCall`, `traceError`, `traceCompletion`, `traceTokenUsage` | Delete the four overrides. What they did belongs in `traceEvent`, matching `TraceEvent.ToolExecuted`, `ErrorOccurred`, `CompletionReceived` or `TokenUsageRecorded` |
-| `tracing.traceToolCall(name, input, output)` (recorded zero duration and `success = true`) | `tracing.traceToolCall(name, input, output, duration, success)` |
-| `tracing.shutdown()` | `tracing.close()`; `Tracing` is `AutoCloseable`. A backend overriding `shutdown()` overrides `close()` |
-| `class X extends TracingComposer`, or `TracingComposer` as a type | The `TracingComposer` object: `TracingComposer.combine` / `filter` / `transform` |
-| `TRACING_MODE=print` | `TRACING_MODE=console` |
+| `StreamingAccumulator.create()` | `StreamingAccumulator(model)`; `toCompletion`'s `Completion.model` is `model`, where it was `"unknown"` |
+| `updateTokens(prompt, completion)` | `updateUsage(TokenUsage(prompt, completion, prompt + completion))` |
+| `updateTokensWithThinking(prompt, completion, thinking)` | `updateUsage(TokenUsage(prompt, completion, prompt + completion + thinking, thinkingTokens = Some(thinking)))` |
+| `addThinkingDelta(delta)` | `addChunk` a `StreamedChunk` whose `thinkingDelta` is `Some(delta)` |
+| `SSEEvent.retry: Option[Int]`, `withRetry(Int)` | `Option[FiniteDuration]`, `withRetry(FiniteDuration)`: `retry.map(_.toMillis)` for the number |
+| `SSEParser.parseStream(text)` | a `createStreamingParser()`: `addChunk(text)`, drain `nextEvent()`, then `flush()` |
+| `StreamingParser#getEvents()` | drain `nextEvent()` while `hasEvents` |
+| `new SSEParser.StreamingParser()` | `SSEParser.createStreamingParser()` (the class is `final`) |
 
-- A filter or transform that let those four calls through unchanged now sees them. A predicate written for
-  `traceEvent` calls only may start dropping tool calls, errors, completions and token usage: check it.
-- `TraceCollectorTracing` stored the four calls as spans of their own shape (`tool:<name>`, `llm:<model>`,
-  `tokens:<operation>`, `error`). They are now the spans their events become, as `traceEvent` always made them: named
-  by event type (`tool_executed`, `completion_received`, `token_usage_recorded`, `error_occurred`), a completion's span
-  holding `content` where the old one held `content_length`, and a tool call's `duration_ms` and `success`.
-- A composed tracer's `close()` closes every tracer it wraps, whatever an earlier one throws.
-- Spring Boot: the `llm4sTracing` bean's destroy method is `close`.
+`updateUsage` keeps the cache counts the removed methods dropped. The streaming parser now reads CRLF and CR line
+endings, so a CRLF stream fed in raw chunks yields each event as its blank line arrives, where it yielded nothing until
+`flush()` and then one merged event.
 
-## Langfuse traces are private and name the run's user (#2828)
+## `ProviderRegistry` lookups accept aliases (#2812)
 
-`LangfuseTracing` created every trace with `public: true` and `userId: "llm4s-user"`. Langfuse serves a public trace
-to anyone holding its URL, without signing in, and an agent run's trace holds the turn's messages. Traces are now
-created `public: false`, and nothing is hard-coded as the user.
+`find`, `resolve`, `findEmbedding` and `resolveEmbedding` accept a provider's alias as well as its id, so
+`registry.resolve(registry.canonicalId(raw))` is now `registry.resolve(ProviderId(raw))`. `canonicalId` stays, for
+when you need the canonical id itself.
 
-- **Shared links stop working for new traces.** If you relied on opening a trace's URL without signing in, set
-  `llm4s.tracing.langfuse.public = true` in `application.conf` (`LangfuseConfig.publicTraces`, or
-  `publicTraces = true` on `new LangfuseTracing(...)`). Traces already sent stay as they are: make one private in
-  Langfuse's UI, or delete it.
-- **`userId` is the run's.** The agent's tracing sets the new `TraceEvent.AgentRunEnded.userId` from
-  `RunConfig.principal`, and Langfuse receives it as the trace's `userId`; a run without a principal sends none. A
-  dashboard filtered on the user `llm4s-user` matches nothing from this version on.
-- `AgentRunEnded` has a twelfth field, so a positional pattern on it no longer compiles: match `case e:
-  TraceEvent.AgentRunEnded` and read its fields. `LangfuseConfig`'s `toString` and equality include `publicTraces`.
+| Before | After |
+|---|---|
+| `registry.get(id)` | `registry.resolve(id)` |
+| `registry.resolve(registry.canonicalId(raw), path)` | `registry.resolve(ProviderId(raw), path)` |
+
+Behaviour changes:
+
+- **An id beats an alias.** An alias equal to another provider's id used to win, so that provider could not be
+  reached from config. Now the id wins. The alias is ignored and reported as a collision of kind `chat alias` or
+  `embedding alias`.
+- **Alias collisions are reported.** When two providers declare the same alias, the later one still keeps it, but
+  `report.collisions` now records it, the discovery log warns about it, and `ProviderModuleChecks.assertSoleSupplier`
+  fails a module whose id or alias collides.
+- **A version-skewed descriptor no longer aborts discovery.** A descriptor whose `id` or `aliases` throws is left out
+  and recorded in `report.failures`. The module's other descriptors are kept.
+- **`discover()` scans core's own class loader as well as the context loader.** A module both loaders see counts once.
+  `discover(loader)` scans only the loaders you pass.
 
 ## `llm4s-agent` types are tiered and growth-safe (#2778)
 

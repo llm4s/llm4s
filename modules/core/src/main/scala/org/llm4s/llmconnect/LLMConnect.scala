@@ -40,7 +40,7 @@ object LLMConnect {
     ModelRegistryService,
     ProviderRegistry
   ): Result[LLMClient] =
-    summon[ProviderRegistry].get(config.providerId).flatMap(_.buildClient(config, options))
+    summon[ProviderRegistry].resolve(config.providerId).flatMap(_.buildClient(config, options))
 
   def fromConfig(
     config: ProviderConfig,
@@ -138,7 +138,7 @@ object LLMConnect {
     config: ProviderConfig,
     options: LlmClientOptions = LlmClientOptions.default
   )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
-    summon[ProviderRegistry].get(provider).flatMap(_.buildClient(config, options))
+    summon[ProviderRegistry].resolve(provider).flatMap(_.buildClient(config, options))
 
   /**
    * Constructs an [[LLMClient]], verifying provider/config consistency,
