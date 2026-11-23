@@ -52,7 +52,294 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
 [`ProviderRegistry` lookups accept aliases](#providerregistry-lookups-accept-aliases-2812),
 [`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
-and [context trimming fails when nothing fits, and externalizes only into a store](#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817).
+[context trimming fails when nothing fits, and externalizes only into a store](#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817),
+[Langfuse traces are private and name the run's user](#langfuse-traces-are-private-and-name-the-runs-user-2828),
+[`Tracing` has one abstract method](#tracing-has-one-abstract-method-2799),
+[`ReliableClient`'s metrics are generic metrics](#reliableclients-metrics-are-generic-metrics-2801),
+[`SecretPatterns` is in `llm4s-agent`](#secretpatterns-is-in-llm4s-agent-2824),
+[`RegexSafetyManager` returns `Result`](#regexsafetymanager-returns-result-2825),
+[an open circuit is a `CircuitOpenError`](#an-open-circuit-is-a-circuitopenerror-2797),
+[the caching types report failure, and tool loops bypass the cache](#the-caching-types-report-failure-and-tool-loops-bypass-the-cache-2803),
+[model registry sources, exact lookup and a sealed `RequestTransformer`](#model-registry-sources-exact-lookup-and-a-sealed-requesttransformer-2823),
+[a guardrail block's message names only the guardrail](#a-guardrail-blocks-message-names-only-the-guardrail-2793),
+and [`LLMClient.validate()` checks the provider](#llmclientvalidate-checks-the-provider-2830).
+
+## `LLMClient.validate()` checks the provider (#2830)
+
+`validate()` returned `Right(())` for every provider client, whatever the key, the endpoint or the model. It now
+sends the provider one cheap request, and a client with no such request says so.
+
+| Before | After |
+|---|---|
+| `client.validate()` is `Right(())` for any provider client | `Right(())` only when the provider accepted a request: a model lookup (`openai`, `anthropic`, `gemini`, `ollama`), a model listing (`openai-compatible`, `deepseek`, `mistral`, `xai`, `requesty`) or a key lookup (`openrouter`) |
+| a wrong key or an unreachable endpoint passes | `Left(AuthenticationError)`, `Left(NetworkError)` and the like, as a completion would fail |
+| `azure`, `vertexai`, `bedrock`, `zai`, `cohere`, `watsonx`, `perplexity`, `jlama`: `Right(())` | `Left(ValidationUnsupportedError)`: nothing was checked |
+| your own `LLMClient` that does not override `validate()`: `Right(())` | `Left(ValidationUnsupportedError)`; override `validate()` to check, or to return `Right(())` in a test double whose code under test calls it |
+| `client.validate().isRight` in a startup check or readiness probe | match `Left(_: ValidationUnsupportedError)` as "cannot check", or the probe fails for the providers in the third row |
+
+`validate()` is now a network call with a timeout of ten seconds: do not call it on every readiness probe without
+caching its result. A provider author's own `OpenAICompatibleDialect` validates with `GET /models` unless it
+overrides `validationPath`; the [provider guide](../guide/writing-a-provider#validate) has the rules, and
+`ProviderModuleChecks.assertValidates` / `assertValidationUnsupported` check them.
+
+## A guardrail block's message names only the guardrail (#2793)
+
+`GuardrailBlocked.message` was `Guardrail '<name>' blocked: <reason>` and is now `Guardrail '<name>' blocked`. A
+reason can quote the text the guardrail refused, and the message is what the durable `TaskFailed` and `RunFailed`
+events, a run queue entry's failure, logs and traces record.
+
+| Before | After |
+|---|---|
+| `error.message` of a `GuardrailBlocked`, for the reason | `error.reason` (`case blocked: GuardrailBlocked => blocked.reason`) |
+| the reason parsed out of a stored `RunFailed` or `TaskFailed` message | `AgentStatus.Blocked(guardrail, reason)` from the run; the event names the guardrail only |
+
+`AgentStatus.Blocked`, `RunOutcome.Blocked` and `TaskRefusal.Blocked` are unchanged and still carry the reason. Events
+already stored keep the message they were written with.
+
+## Model registry sources, exact lookup and a sealed `RequestTransformer` (#2823)
+
+In `org.llm4s.model` (`llm4s-core`). There is no shim.
+
+**`ModelRegistryConfig`** holds one `source: ModelRegistrySource`, `Resource(path)`, `File(path)` or `Url(url)`;
+`withResourcePath`, `withFilePath` and `withUrl` replace it, so `ModelRegistryConfig.default.withFilePath(p)` now
+loads `p` (it used to fail, the default resource still being set). The `Option` setters and the `resourcePath`,
+`filePath` and `url` fields are gone:
+
+| Before | After |
+|---|---|
+| `ModelRegistryConfig(resourcePath = None, filePath = Some(p), url = None)` | `ModelRegistryConfig(ModelRegistrySource.File(p))` or `ModelRegistryConfig.default.withFilePath(p)` |
+| `config.filePath` | `config.source match { case ModelRegistrySource.File(p) => ... }` |
+
+`llm4s.modelRegistry` takes at most one of `resourcePath`, `filePath` and `url`; more than one is a
+`ConfigurationError` from `Llm4sConfig.modelRegistryConfig()`.
+
+**`lookup` is exact.** `lookup(modelId)` matches an exact id, ignoring case and a `provider/` prefix; it no longer
+falls back to the one id containing `modelId`. For that, call `search(query): List[ModelMetadata]`, which returns
+every id containing the query, and choose. `lookup(provider, modelName)` keeps its unprefixed attempt, now exact.
+
+**`ModelRegistryService`**: `statistics()` is removed (count `listByMode`/`listByProvider` results if you need
+numbers), and `listProviders()` returns `List[String]`, never having failed.
+
+**`ModelMetadata`** loses `inputCostPerToken`, `outputCostPerToken` and their setters: they duplicated `pricing`,
+which `CostEstimator` always read. Use `metadata.pricing.inputCostPerToken` and set prices with `withPricing`.
+`deprecationDate` is an `Option[java.time.LocalDate]`; `fromJson` refuses an entry whose date is not
+`YYYY-MM-DD` (the registry skips it with a warning) where `isDeprecated` read it as not deprecated, and
+`isDeprecatedOn(date)` is new. `ModelMetadata.apply` defaults everything but `modelId` and `provider`:
+
+```scala
+// before
+ModelMetadata("m", "p", ModelMode.Chat, None, None, None, None, ModelCapabilities(), ModelPricing(), Some("2026-01-01"))
+// after
+ModelMetadata("m", "p", deprecationDate = Some(LocalDate.parse("2026-01-01")))
+```
+
+`ModelCapabilities.fromJson` and `ModelPricing.fromJson`, which threw on malformed JSON, are internal: use
+`ModelMetadata.fromJson(id, json)`, which returns a `Result`, and read `.capabilities` or `.pricing`.
+
+**`RequestTransformer` is sealed**: build one with `RequestTransformer.default` or `RequestTransformer.adjusted`,
+and express a rule of your own as `adjusted`'s capability function, whose adjustments are then reported (an
+implementation outside llm4s reported none). `transformOptions` takes `dropUnsupported` explicitly. `disallowedParams`
+is removed: read `capabilities.disallowedParams` from the registry. `withOverrides` is internal.
+
+## The caching types report failure, and tool loops bypass the cache (#2803)
+
+In `org.llm4s.llmconnect.caching`. There is no shim.
+
+**`EmbeddingCache`** has no type parameter (it only ever held `Seq[Double]`), and a backend reports a failure
+instead of throwing:
+
+| Before | After |
+|---|---|
+| `EmbeddingCache[Seq[Double]]` | `EmbeddingCache` |
+| `get(key): Option[Seq[Double]]` | `get(key): Result[Option[Seq[Double]]]` |
+| `put(key, v): Unit` | `put(key, v): Result[Unit]` |
+| `clear(): Unit = ()` (a default) | `clear(): Result[Unit]` (abstract) |
+| `stats(): CacheStats` (abstract) | `stats(): Option[CacheStats] = None` |
+
+`CachedEmbeddingClient` treats a failed `get` as a miss and a failed `put` as not stored, and logs both. Its
+`cacheStats` is an `Option[CacheStats]` and `clearCache()` returns the backend's `Result[Unit]`.
+
+**`InMemoryEmbeddingCache`** is built with `create`, which refuses a `maxSize` or `ttl` that is not positive (a
+negative `maxSize` used to throw), and takes a `java.time.Clock` in place of `() => Long`:
+
+```scala
+// before
+val cache = new InMemoryEmbeddingCache[Seq[Double]](maxSize = 1000, ttl = Some(1.hour), clock = () => nowMillis)
+// after
+val cache: Result[InMemoryEmbeddingCache] = InMemoryEmbeddingCache.create(maxSize = 1000, ttl = Some(1.hour), clock = clock)
+```
+
+**`CacheStats`** holds `size`, `hits` and `misses`; `totalRequests` and `hitRatePercent` are computed, so
+`CacheStats(size, hits, misses, total, rate)` becomes `CacheStats(size, hits, misses)` and `withTotalRequests` and
+`withHitRatePercent` are gone.
+
+**`CacheEntry`** is internal to `CachingLLMClient`.
+
+**`CacheConfig`** is a `final case class` with `withSimilarityThreshold`, `withTtl` and `withMaxSize`, each returning a
+`Result` because it checks the new value. `CacheConfig.create` is unchanged.
+
+**`CachedEmbeddingClient` is an `EmbeddingProvider`**, and so is `EmbeddingClient`. The wrapper's `baseClient` is an
+`EmbeddingProvider`, so an `EmbeddingClient` still fits; where an `EmbeddingClient` is required, wrap the cache in
+one: `new EmbeddingClient(cached)`. A response that called the base client keeps its `usage`, `metadata` and `dim`;
+one served wholly from the cache has no `usage`. `CachingLLMClient`'s `embeddingClient` is an `EmbeddingProvider` too.
+
+**`CachingLLMClient` no longer caches a conversation with a tool turn** (an assistant message with tool calls, or a
+tool message): such a request goes straight to the base client and is not stored. Only user and system text is
+embedded, so a tool loop's later steps used to be served the first step's tool-call completion.
+
+## An open circuit is a `CircuitOpenError` (#2797)
+
+While its circuit is open, or half-open with a probe in flight, `ReliableClient` returned
+`ServiceError(503, "circuit-breaker", ...)`. A 503 is retryable, so an outer retry (`LLMClientRetry`, an agent
+node's retry policy, a second `ReliableClient`) repeated the fast-fail. It now returns
+`org.llm4s.error.CircuitOpenError`, which `RetryPolicy.isRetryable` does not retry:
+
+```scala
+client.complete(conversation) match
+  case Left(e: CircuitOpenError) => fallBack(after = e.retryAfter) // was: Left(e: ServiceError) if e.provider == "circuit-breaker"
+  case other                     => other
+```
+
+`provider` is the name the `ReliableClient` was given, `retryAfter` the time left before a probe is let through
+(zero when `probing`), and `ErrorKind.fromLLMError` still reports it as `ServiceError`. Code that sent a retryable
+error back to a queue, as the Kafka sample does, adds `CircuitOpenError` to that branch, or it dead-letters during
+an outage.
+
+Also in `org.llm4s.reliability`:
+
+- **`RateLimitConfig.default` is `RateLimitConfig()`**, which is disabled, like every other `default`. It was the
+  one enabled value: write `RateLimitConfig(enabled = true)` or `RateLimitConfig.default.withEnabled(true)`.
+- **Removed:** `ReliabilityConfig.withoutDeadline` (`withDeadline(None)`) and the instance method
+  `config.disabled` (`config.withEnabled(false)`). `ReliabilityConfig.disabled`, the preset, is unchanged.
+- **A configuration a client cannot run with is an error, not a silent oddity.** `ReliabilityConfig.validate`
+  (and `CircuitBreakerConfig.validate`, `RateLimitConfig.validate`) return a `ValidationError` for a
+  `failureThreshold` or `successThreshold` below 1, a negative `recoveryTimeout`, a `burstCapacity` below 1 or a
+  negative `requestsPerMinute` on an enabled rate limit. A `ReliableClient` built with one returns that error
+  from every call and from `validate()`.
+- **Only a probe's success closes a half-open circuit.** A call that began before the circuit opened and
+  succeeds after it went half-open no longer counts towards `successThreshold`.
+
+## `RegexSafetyManager` returns `Result` (#2825)
+
+`RegexSafetyManager.safeCompile` and `safeFind` (`org.llm4s.security`) return `Result`, not `Either[String, _]`: a
+refusal is a `ValidationError` for the field `pattern` or `input`, and the text that was the `Left` is in its
+`message` after `Invalid pattern: ` or `Invalid input: `.
+
+```scala
+RegexSafetyManager.safeCompile(userPattern) match
+  case Right(pattern) => RegexSafetyManager.safeFind(pattern, text) // Result[Boolean]
+  case Left(error)    => refuse(error.message)                      // was: case Left(reason) => refuse(reason)
+```
+
+- **`safeFind` takes no `maxSteps`.** The budget is the documented 10000000 character accesses.
+- **Removed, with no caller in llm4s:** `safeMatches` (anchor the pattern with `^...$` and use `safeFind`),
+  `compileLiteralCaseInsensitive` (`compileLiteral(text, Pattern.CASE_INSENSITIVE)`), `replaceAllLiteral` and
+  `replaceFirstLiteral` (`String.replace`, or `compileLiteral(text).matcher(input).replaceFirst(Matcher.quoteReplacement(r))`),
+  and the `RegexComplexityException` class, which never escaped the object.
+- **A quantified alternation compiles.** `safeCompile`, and so `RegexValidator("...")` and a `FileBackend`'s `grep`,
+  refused every `(x|y)+` and `(x|y)*`, such as `(foo|bar)+` and `^(GET|POST)+$`. They now refuse only one whose
+  alternatives overlap, such as `(a|ab)*`, as documented. A pattern your application relied on being refused may
+  now run, within the step budget.
+
+## `SecretPatterns` is in `llm4s-agent` (#2824)
+
+`SecretPatterns`, with `SecretType` and `SecretMatch`, moved from `org.llm4s.util` in `llm4s-core` to
+`org.llm4s.agent.guardrails.patterns` in `llm4s-agent`, beside `PIIPatterns` and its one consumer,
+`SecretLeakGuardrail`. Change the import; there is no forwarder:
+
+```scala
+import org.llm4s.agent.guardrails.patterns.SecretPatterns            // was org.llm4s.util.SecretPatterns
+import org.llm4s.agent.guardrails.patterns.SecretPatterns.SecretType
+```
+
+- **`SecretType` is open.** It was sealed, so `SecretLeakGuardrail(secretTypes)` could only choose among the built-in
+  types. `new SecretType(name, pattern, placeholder)` adds a credential format of your own. A `match` over the
+  built-in case objects now needs a `case _`.
+- **Group 1 of a pattern is the secret.** `SecretType.JwtToken.pattern` now has a capturing group, and its whole match
+  can start before the token. Code that applied `secretType.pattern` itself reads group 1 when the pattern has one,
+  or calls `secretType.findAll(text)` or the new `secretType.redact(text)`.
+- **`SecretType.PrivateKeyPem` matches the whole key**, from `-----BEGIN ... PRIVATE KEY-----` through
+  `-----END ... PRIVATE KEY-----`, not the header line: `SecretMatch.value` is the block, and `redactAll` leaves no
+  key body behind.
+- **`SecretType.OpenAIKey` and `AnthropicKey` match keys holding `-` and `_`** (`sk-proj-...`, `sk-svcacct-...`,
+  `sk-admin-...`, `sk-ant-...`), which they cut short or missed.
+- **Removed:** `SecretPatterns.redactAllWithPlaceholder` (fold `secretType.findAll` over the text for a placeholder of
+  your own), and `SecretMatch.withSecretType`, `withValue`, `withStartIndex` and `withEndIndex`: a match is a result,
+  built with `SecretMatch(secretType, value, startIndex, endIndex)`.
+
+## `ReliableClient`'s metrics are generic metrics (#2801)
+
+`MetricsCollector` had three methods with no-op defaults that only `ReliableClient` called: `recordRetryAttempt`,
+`recordCircuitBreakerTransition` and `recordError`. A backend that did not override them dropped them silently, and
+`PrometheusMetrics` did not. They are removed. `ReliableClient` records three counters declared in
+`org.llm4s.reliability.ReliabilityMetrics` through `MetricsCollector.increment`, which every backend that exports
+generic metrics already implements.
+
+| Before | After |
+|---|---|
+| `override def recordRetryAttempt(provider, attemptNumber)` | In `increment`: `case (ReliabilityMetrics.Retries, Seq(provider))` |
+| `override def recordCircuitBreakerTransition(provider, newState)` | In `increment`: `case (ReliabilityMetrics.CircuitBreakerTransitions, Seq(provider, state))` |
+| `override def recordError(errorKind, provider)` | In `increment`: `case (ReliabilityMetrics.Errors, Seq(provider, errorType))` |
+| `collector.recordRetryAttempt("openai", 1)` | `collector.increment(ReliabilityMetrics.Retries, Seq("openai"))` |
+
+```scala
+override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit =
+  (metric, labelValues) match {
+    case (ReliabilityMetrics.CircuitBreakerTransitions, Seq(provider, state)) => alert(provider, state)
+    case _                                                                    => ()
+  }
+```
+
+- **Prometheus gains three series**: `llm4s_retries_total{provider}`,
+  `llm4s_circuit_breaker_transitions_total{provider,state}` and `llm4s_reliability_errors_total{provider,error_type}`.
+  Nothing else changes there.
+- **Micrometer keeps its meters** (`llm4s.retries`, `llm4s.circuit.breaker.transitions`, `llm4s.reliability.errors`)
+  and their tags. Their values now pass through the generic label guard: a provider is capped at
+  `MetricsCollector.MaxLabelValues` (256) distinct values per meter, not the collector's 64, and `state` is one of
+  `open`, `closed` and `half-open`, which `ReliableClient` passes from `CircuitState`. `MicrometerMetrics.Names.Retries`,
+  `CircuitBreakerTransitions` and `ReliabilityErrors` are no longer constant expressions.
+- The retry's attempt number is no longer passed: no backend recorded it. `error_type` arrives as its label
+  (`rate_limit`, `timeout`, ...; `ReliabilityMetrics.errorTypeLabel`), not as an `ErrorKind`.
+
+## `Tracing` has one abstract method (#2799)
+
+`Tracing` declared five abstract methods, four of them wrappers every backend re-implemented. `TracingComposer.filter`
+and `transform` forwarded those four to the wrapped tracer untouched, so a filter or a redacting transform did not
+apply to `traceToolCall`, `traceError`, `traceCompletion` or `traceTokenUsage`. Now `traceEvent(event: TraceEvent)` is
+the only abstract method and the others are `final`: each builds its event and passes it to `traceEvent`.
+
+| Before | After |
+|---|---|
+| A `Tracing` overriding `traceToolCall`, `traceError`, `traceCompletion`, `traceTokenUsage` | Delete the four overrides. What they did belongs in `traceEvent`, matching `TraceEvent.ToolExecuted`, `ErrorOccurred`, `CompletionReceived` or `TokenUsageRecorded` |
+| `tracing.traceToolCall(name, input, output)` (recorded zero duration and `success = true`) | `tracing.traceToolCall(name, input, output, duration, success)` |
+| `tracing.shutdown()` | `tracing.close()`; `Tracing` is `AutoCloseable`. A backend overriding `shutdown()` overrides `close()` |
+| `class X extends TracingComposer`, or `TracingComposer` as a type | The `TracingComposer` object: `TracingComposer.combine` / `filter` / `transform` |
+| `TRACING_MODE=print` | `TRACING_MODE=console` |
+
+- A filter or transform that let those four calls through unchanged now sees them. A predicate written for
+  `traceEvent` calls only may start dropping tool calls, errors, completions and token usage: check it.
+- `TraceCollectorTracing` stored the four calls as spans of their own shape (`tool:<name>`, `llm:<model>`,
+  `tokens:<operation>`, `error`). They are now the spans their events become, as `traceEvent` always made them: named
+  by event type (`tool_executed`, `completion_received`, `token_usage_recorded`, `error_occurred`), a completion's span
+  holding `content` where the old one held `content_length`, and a tool call's `duration_ms` and `success`.
+- A composed tracer's `close()` closes every tracer it wraps, whatever an earlier one throws.
+- Spring Boot: the `llm4sTracing` bean's destroy method is `close`.
+
+## Langfuse traces are private and name the run's user (#2828)
+
+`LangfuseTracing` created every trace with `public: true` and `userId: "llm4s-user"`. Langfuse serves a public trace
+to anyone holding its URL, without signing in, and an agent run's trace holds the turn's messages. Traces are now
+created `public: false`, and nothing is hard-coded as the user.
+
+- **Shared links stop working for new traces.** If you relied on opening a trace's URL without signing in, set
+  `llm4s.tracing.langfuse.public = true` in `application.conf` (`LangfuseConfig.publicTraces`, or
+  `publicTraces = true` on `new LangfuseTracing(...)`). Traces already sent stay as they are: make one private in
+  Langfuse's UI, or delete it.
+- **`userId` is the run's.** The agent's tracing sets the new `TraceEvent.AgentRunEnded.userId` from
+  `RunConfig.principal`, and Langfuse receives it as the trace's `userId`; a run without a principal sends none. A
+  dashboard filtered on the user `llm4s-user` matches nothing from this version on.
+- `AgentRunEnded` has a twelfth field, so a positional pattern on it no longer compiles: match `case e:
+  TraceEvent.AgentRunEnded` and read its fields. `LangfuseConfig`'s `toString` and equality include `publicTraces`.
 
 ## Context trimming fails when nothing fits, and externalizes only into a store (#2817)
 
@@ -1680,7 +1967,8 @@ Pattern matching (`case ToolCallRequest(name, args)`) and the fields are unchang
 ### Config, model and util types are growth-safe (#2384)
 
 `Llm4sConfig.TextEmbeddingModelSettings`, `ProvidersConfigModel.ProvidersConfig` (`org.llm4s.config`),
-`TransformationResult` (`org.llm4s.model`) and `SecretPatterns.SecretMatch` (`org.llm4s.util`) follow the growth-prone
+`TransformationResult` (`org.llm4s.model`) and `SecretPatterns.SecretMatch` (now in `llm4s-agent`, without setters:
+[#2824](#secretpatterns-is-in-llm4s-agent-2824)) follow the growth-prone
 pattern ([#2384](https://github.com/llm4s/llm4s/issues/2384)). Each is a `final case class` whose constructor and `copy`
 are private:
 
@@ -1694,7 +1982,6 @@ are private:
   | `TextEmbeddingModelSettings` | `withProvider`, `withModelName`, `withDimensions` |
   | `ProvidersConfig` | `withSelectedProvider` (a `ProviderName` or an `Option`), `withNamedProviders` |
   | `TransformationResult` | `withOptions`, `withMessages`, `withRequiresFakeStreaming` |
-  | `SecretMatch` | `withSecretType`, `withValue`, `withStartIndex`, `withEndIndex` |
 
   ```scala
   val fake = result.withRequiresFakeStreaming(true) // was result.copy(requiresFakeStreaming = true)
