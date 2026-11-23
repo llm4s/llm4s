@@ -80,6 +80,25 @@ class DirectoryLoaderConfinementSpec extends AnyFlatSpec with Matchers with Befo
     loader.estimatedCount shouldBe Some(2)
   }
 
+  it should "read a link's checked target, not a target it was changed to after listing" in {
+    val alias   = link(root.resolve("alias.txt"), root.resolve("inside.txt"))
+    val results = DirectoryLoader(root).load() // listed and checked here, read as the iterator is consumed
+    Files.delete(alias)
+    link(alias, outside.resolve("secret.txt"))
+    val docs = results.collect { case LoadResult.Success(doc) => doc }.toSeq
+    docs.map(_.content.trim) shouldBe Seq("inside", "inside")
+    docs.map(_.id) should contain(alias.toFile.getAbsolutePath) // still named by the link
+  }
+
+  it should "skip a file whose checked path was replaced by a link after listing" in {
+    val results = DirectoryLoader(root).load()
+    Files.delete(root.resolve("inside.txt"))
+    link(root.resolve("inside.txt"), outside.resolve("secret.txt"))
+    val all = results.toSeq
+    all.collect { case LoadResult.Success(doc) => doc } shouldBe empty
+    all should have size 1
+  }
+
   it should "not loop on a link back to the root" in {
     link(root.resolve("loop"), root)
     contents(DirectoryLoader(root)) shouldBe Seq("inside")

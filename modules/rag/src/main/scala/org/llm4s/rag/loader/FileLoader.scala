@@ -4,6 +4,7 @@ import org.llm4s.error.ProcessingError
 import org.llm4s.extract.TikaDocumentExtractor
 
 import java.io.File
+import scala.util.Try
 import java.nio.file.Path
 
 /**
@@ -50,8 +51,30 @@ final case class FileLoader(
     }
   }
 
-  private def loadFile(file: File): LoadResult =
-    TikaDocumentExtractor.extractFromPath(file.getAbsolutePath) match {
+  /**
+   * Loads the document named by `path`, reading its bytes from `real`, the link-free real path a caller has already
+   * checked. Used by [[DirectoryLoader]] so that a link retargeted after the check is never followed again: the
+   * read goes to the checked target, and fails if `real` no longer resolves to itself (a component was replaced by
+   * a link) or is no longer a regular file.
+   */
+  private[loader] def loadFrom(real: Path): Iterator[LoadResult] =
+    if (
+      Try(real.toRealPath()).toOption.contains(real) &&
+      java.nio.file.Files.isRegularFile(real, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+    ) Iterator(loadFile(path.toFile, real.toFile))
+    else
+      Iterator(
+        LoadResult.failure(
+          path.toString,
+          ProcessingError("load", s"Changed since it was listed: $path")
+        )
+      )
+
+  private def loadFile(file: File): LoadResult = loadFile(file, file)
+
+  /** `file` names the document; `content` is where its bytes, size and modification time are read. */
+  private def loadFile(file: File, content: File): LoadResult =
+    TikaDocumentExtractor.extractFromPath(content.getAbsolutePath) match {
       case Left(error) =>
         LoadResult.failure(
           file.getAbsolutePath,
@@ -60,21 +83,21 @@ final case class FileLoader(
         )
 
       case Right(document) =>
-        val content = document.text
+        val text = document.text
         val version = DocumentVersion.fromContent(
-          content,
-          Some(file.lastModified())
+          text,
+          Some(content.lastModified())
         )
 
         val doc = Document(
           id = file.getAbsolutePath, // Use absolute path as stable ID
-          content = content,
+          content = text,
           metadata = metadata ++ Map(
             "source"       -> file.getName,
             "path"         -> file.getAbsolutePath,
             "extension"    -> getExtension(file.getName),
-            "lastModified" -> file.lastModified().toString,
-            "size"         -> file.length().toString
+            "lastModified" -> content.lastModified().toString,
+            "size"         -> content.length().toString
           ),
           hints = Some(detectHints(file)),
           version = Some(version)

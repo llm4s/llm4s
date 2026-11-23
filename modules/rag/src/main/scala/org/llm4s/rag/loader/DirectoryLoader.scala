@@ -18,7 +18,10 @@ import scala.util.{ Try, Using }
  * Only regular files are read: a FIFO, device or socket is skipped, even when a link points to it. With
  * `confineToRoot` (the default), a symbolic link is followed only when its real path is inside the root
  * directory's real path, so a link to `/etc` or to a secret elsewhere is skipped. A directory reached twice through
- * links is listed once.
+ * links is listed once. Each file is read from the real path checked when the directory was listed, not by
+ * following its link again, so a link retargeted afterwards is not followed; a file whose checked path no longer
+ * resolves to itself is a failure. Java cannot open a file relative to a held directory, so a directory inside the
+ * root replaced by a link in the instant between that recheck and the open is the one race left.
  *
  * @param path Path to the directory
  * @param extensions File extensions to include (without leading dot)
@@ -57,14 +60,15 @@ final case class DirectoryLoader(
       )
     }
 
-    listFiles().iterator.flatMap { file =>
+    listFiles().iterator.flatMap { case (file, real) =>
       val fileMetadata = metadata + ("directory" -> dir.getName)
-      FileLoader(file, fileMetadata).load()
+      // Read from the real path checked when listing, never by following `file` again (#2724)
+      FileLoader(file, fileMetadata).loadFrom(real)
     }
   }
 
-  /** Every matching regular file under the root, depth first, entries in name order. */
-  private def listFiles(): Seq[Path] =
+  /** Every matching regular file under the root, depth first, entries in name order, with its checked real path. */
+  private def listFiles(): Seq[(Path, Path)] =
     Try(path.toRealPath()).toOption match {
       case None => Seq.empty
       case Some(rootReal) =>
@@ -95,10 +99,10 @@ final case class DirectoryLoader(
 
         // Depth first, entering a real directory once, at its shallowest depth: link loops end there
         val walked = scala.collection.mutable.Set[Path](rootReal)
-        def walk(dir: Path, depth: Int): Seq[Path] = {
+        def walk(dir: Path, depth: Int): Seq[(Path, Path)] = {
           val resolved = entries(dir)
           val files = resolved.collect {
-            case (entry, real) if Files.isRegularFile(real) && matchesExtension(entry) => entry
+            case (entry, real) if Files.isRegularFile(real) && matchesExtension(entry) => entry -> real
           }
           val subdirFiles = resolved.collect {
             case (entry, real)
