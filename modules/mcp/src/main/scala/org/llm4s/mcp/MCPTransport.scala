@@ -1353,12 +1353,26 @@ private[mcp] object HttpExchanges {
  * How the transports log a JSON-RPC payload or a line from the server: secrets redacted and cut to [[MaxChars]].
  * A tool argument or result can be megabytes, and logging it whole floods the log - a single 1 MB line stalled CI's
  * log processing for half an hour.
+ *
+ * A payload longer than [[RedactWholeLimit]] is not redacted whole to show its first [[MaxChars]] characters:
+ * redaction costs about a second per megabyte, and a transport logs while its exchange's deadline is running, so
+ * one skipped 1 MB SSE event at DEBUG could time the request out. `Redaction.safeBody` previews such a payload from
+ * a prefix of it, at a cost that no longer grows with the payload, and shows nothing of one whose prefix it cannot
+ * redact safely.
  */
 private[mcp] object PayloadLog {
 
   val MaxChars: Int = 2048
 
-  def preview(payload: String): String = Redaction.redactForLogging(payload, MaxChars)
+  /**
+   * The longest payload redacted whole: `Redaction.safeBody`'s own limit, so every longer payload takes its
+   * bounded path and a shorter one keeps the `[truncated, N chars omitted]` suffix.
+   */
+  val RedactWholeLimit: Int = 128 * 1024
+
+  def preview(payload: String): String =
+    if (payload.length <= RedactWholeLimit) Redaction.redactForLogging(payload, MaxChars)
+    else Redaction.safeBody(payload, MaxChars)
 
   extension (logger: Logger)
     /** Logs `message` followed by a preview of `payload`, building the preview only when DEBUG is enabled. */
