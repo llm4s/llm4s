@@ -25,7 +25,7 @@ class CoreOnlyProviderDiscoverySpec extends AnyFunSuite with Matchers with Eithe
       registry.report.failures shouldBe empty
       registry.ids shouldBe empty
       registry.embeddingIds shouldBe empty
-      val message = registry.get(ProviderId("openai")).left.value.message
+      val message = registry.resolve(ProviderId("openai")).left.value.message
       message should include("is not registered")
       message should include("add the dependency that supplies it")
     }

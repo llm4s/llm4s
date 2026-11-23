@@ -49,7 +49,32 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
-and [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778).
+[`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
+and [`ProviderRegistry` lookups accept aliases](#providerregistry-lookups-accept-aliases-2812).
+
+## `ProviderRegistry` lookups accept aliases (#2812)
+
+`find`, `resolve`, `findEmbedding` and `resolveEmbedding` accept a provider's alias as well as its id, so
+`registry.resolve(registry.canonicalId(raw))` is now `registry.resolve(ProviderId(raw))`. `canonicalId` stays, for
+when you need the canonical id itself.
+
+| Before | After |
+|---|---|
+| `registry.get(id)` | `registry.resolve(id)` |
+| `registry.resolve(registry.canonicalId(raw), path)` | `registry.resolve(ProviderId(raw), path)` |
+
+Behaviour changes:
+
+- **An id beats an alias.** An alias equal to another provider's id used to win, so that provider could not be
+  reached from config. Now the id wins. The alias is ignored and reported as a collision of kind `chat alias` or
+  `embedding alias`.
+- **Alias collisions are reported.** When two providers declare the same alias, the later one still keeps it, but
+  `report.collisions` now records it, the discovery log warns about it, and `ProviderModuleChecks.assertSoleSupplier`
+  fails a module whose id or alias collides.
+- **A version-skewed descriptor no longer aborts discovery.** A descriptor whose `id` or `aliases` throws is left out
+  and recorded in `report.failures`. The module's other descriptors are kept.
+- **`discover()` scans core's own class loader as well as the context loader.** A module both loaders see counts once.
+  `discover(loader)` scans only the loaders you pass.
 
 ## `llm4s-agent` types are tiered and growth-safe (#2778)
 

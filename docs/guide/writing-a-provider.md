@@ -181,6 +181,11 @@ required fields are present, the API key has fallen back to `llm4s.credentials.<
 `section.extras` holds exactly your declared extra keys, defaults applied. `buildClient` must
 check the config's type rather than cast - `ProviderDescriptor.expectConfig` does that.
 
+`aliases` are other names a section's `provider` may use: `ProviderRegistry.find` and `resolve` accept an
+alias as they accept the id. An id always wins, so an alias equal to another provider's id is ignored, and of
+two providers declaring one alias the later registered keeps it; both cases appear in
+`ProviderRegistry.report.collisions` (kind `chat alias` or `embedding alias`) and in the discovery log.
+
 ### Workload identity
 
 A provider that can authenticate with a workload identity token (a SPIFFE JWT-SVID, say) declares

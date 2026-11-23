@@ -148,7 +148,7 @@ class AnthropicModelListerSpec extends AnyFunSuite with Matchers:
   }
 
   test("the registered Anthropic provider exposes its model lister") {
-    ProviderRegistry.default.get(ProviderId("anthropic")) match
+    ProviderRegistry.default.resolve(ProviderId("anthropic")) match
       case Right(descriptor) => descriptor.modelLister shouldBe Some(AnthropicModelLister)
       case Left(err)         => fail(s"Expected the Anthropic provider to be registered, got error: ${err.message}")
   }

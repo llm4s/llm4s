@@ -73,17 +73,22 @@ object ProviderDiscoveryFailure:
 
 /**
  * A chat or embedding provider id two descriptors both registered; the later
- * one won.
+ * one won. Or an alias that does not reach the descriptor declaring it,
+ * because it is another provider's id (the id wins) or an earlier descriptor
+ * declared it too (the later one wins).
  *
  * `ProviderRegistry` has always resolved this by keeping the last
  * registration, silently - this is what makes that resolution visible instead
  * of invisible.
  *
- * @param kind          `"chat"` or `"embedding"`.
- * @param id            the id two descriptors both claimed.
+ * @param kind          `"chat"` or `"embedding"` for an id; `"chat alias"` or
+ *                       `"embedding alias"` for an alias.
+ * @param id            the id or alias two descriptors both claimed.
  * @param keptModule    the module (or `"explicit registration"`) whose
- *                       descriptor won.
- * @param droppedModule the module that lost, when discovery can name it.
+ *                       descriptor won; for an alias, the provider that kept
+ *                       it (`"provider 'gemini'"`).
+ * @param droppedModule the module that lost, when discovery can name it; for
+ *                       an alias, the provider that lost it.
  */
 @Stable
 final case class ProviderIdCollision private (
@@ -98,6 +103,10 @@ final case class ProviderIdCollision private (
   def withKeptModule(keptModule: String): ProviderIdCollision               = copy(keptModule = keptModule)
   def withDroppedModule(droppedModule: String): ProviderIdCollision         = copy(droppedModule = Some(droppedModule))
   def withDroppedModule(droppedModule: Option[String]): ProviderIdCollision = copy(droppedModule = droppedModule)
+
+  /** What collided, for a message: `chat id 'acme'` or `chat alias 'google'`. */
+  private[llm4s] def subject: String =
+    if kind.endsWith(" alias") then s"$kind '$id'" else s"$kind id '$id'"
 
 object ProviderIdCollision:
 
@@ -136,7 +145,7 @@ final case class ProviderRegistryReport private (
   /** True when any service entry failed to load. */
   def hasFailures: Boolean = failures.nonEmpty
 
-  /** True when two descriptors registered the same id. */
+  /** True when two descriptors registered the same id, or an alias does not reach its descriptor. */
   def hasCollisions: Boolean = collisions.nonEmpty
 
   /**
@@ -169,7 +178,7 @@ final case class ProviderRegistryReport private (
 
     val collisionLines = collisions.map { collision =>
       val dropped = collision.droppedModule.getOrElse("an earlier registration")
-      s"  * ${collision.kind} id '${collision.id}' registered by both $dropped and ${collision.keptModule}; ${collision.keptModule} won."
+      s"  * ${collision.subject} registered by both $dropped and ${collision.keptModule}; ${collision.keptModule} won."
     }
 
     (header +: (moduleLines ++ failureLines ++ collisionLines)).mkString("\n")
