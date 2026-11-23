@@ -202,7 +202,7 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
         .analyzeImage(imagePath, Some("p"))
         .left
         .getOrElse(fail("expected a failure"))
-      error.formatted should include("OpenAI API call failed")
+      error shouldBe a[org.llm4s.error.NetworkError]
     }
   }
 
@@ -235,7 +235,7 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
         .analyzeImage(imagePath, Some("p"))
         .left
         .getOrElse(fail("expected a failure"))
-      error.formatted should include("Anthropic API call failed")
+      error shouldBe a[org.llm4s.error.NetworkError]
     }
   }
 

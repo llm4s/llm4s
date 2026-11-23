@@ -1,6 +1,6 @@
 package org.llm4s.spring
 
-import org.llm4s.error.APIError
+import org.llm4s.error.ServiceError
 import org.llm4s.javaapi.{ ConversationBuilder, JLlmClientTestFactory, LlmException }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -29,7 +29,7 @@ class LLM4STemplateSpec extends AnyFlatSpec with Matchers {
 
   private val failingTemplate = StarterTestSupport.template(
     JLlmClientTestFactory.create(
-      stubClient(Left(APIError("openai", "service unavailable")))
+      stubClient(Left(ServiceError(503, "openai", "service unavailable")))
     )
   )
 

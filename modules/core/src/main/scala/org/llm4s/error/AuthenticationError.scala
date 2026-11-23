@@ -42,12 +42,4 @@ object AuthenticationError {
   /** Create authentication error with specific code */
   def apply(provider: String, details: String, code: String): AuthenticationError =
     AuthenticationError(s"Authentication failed for $provider: $details", provider, Some(code))
-
-  /** Create from HTTP 401 response */
-  def unauthorized(provider: String): AuthenticationError =
-    apply(provider, "Unauthorized access", "401")
-
-  /** Create for invalid API key */
-  def invalidApiKey(provider: String): AuthenticationError =
-    apply(provider, "Invalid API key", "INVALID_KEY")
 }

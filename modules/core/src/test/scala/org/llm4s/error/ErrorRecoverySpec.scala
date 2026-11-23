@@ -171,10 +171,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     // Any other error RetryPolicy.isRetryable retries waits baseDelay * attempt number (linear)
     delays(NetworkError("down", None, "https://x")) shouldBe List(100.millis, 200.millis, 300.millis)
     delays(ExecutionError("m", "op", None, None)) shouldBe List(100.millis, 200.millis, 300.millis)
-    delays(SystemError("m", None)) shouldBe List(100.millis, 200.millis, 300.millis)
-    delays(APIError("p", "m", Some(502), None)) shouldBe List(100.millis, 200.millis, 300.millis)
     // The rule's two exceptions are not retried, so there is no wait
-    delays(APIError("p", "m", Some(400), None)) shouldBe Nil
     delays(OptimisticLockFailure("m", "id", 1L)) shouldBe Nil
     // A non-recoverable error is not retried
     delays(ValidationError("f", "r")) shouldBe Nil
@@ -189,11 +186,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       ServiceError(503, "p", "d"),
       ServiceError(404, "p", "d"),
       ServiceError(408, "p", "d"),
-      APIError("p", "m", None, None),
-      APIError("p", "m", Some(500), None),
-      APIError("p", "m", Some(404), None),
       ExecutionError("m", "op", None, None),
-      SystemError("m", None),
       OptimisticLockFailure("m", "id", 1L),
       ValidationError("f", "r"),
       AuthenticationError("p", "d"),

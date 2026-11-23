@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `APIError` and `SystemError` are removed (a provider's error response is a `ServiceError`), with the
+  `LLMError.processingFailed` / `invalidImageInput` / `apiCallFailed` shims, `LLMError.correlationId` and `show`,
+  `RecoverableError.maxRetries` and the factories nothing called; `OptimisticLockFailure.memoryId` is `recordId`;
+  `SimpleError`'s extractor binds only the message; [migration](docs/reference/migration.md#error-hierarchy-cleanup-2819).
 - `StreamingAccumulator.create()` is `StreamingAccumulator(model)`; `updateTokens`, `updateTokensWithThinking` and
   `addThinkingDelta` are removed for `updateUsage`; `SSEEvent.retry` is a `FiniteDuration`; `SSEParser.parseStream` and
   `getEvents` are removed; [migration](docs/reference/migration.md#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813).
@@ -127,6 +131,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
+- **Removed** from `org.llm4s.error`: `APIError` (`llm4s-image`'s vision clients return a `ServiceError` with the status, and
+  the HTTP client's own error when the call got no answer), `SystemError`, the `LLMError` shims, `correlationId`, `show`,
+  `maxRetries` and the factories nothing called. **Changed**: every error has an explicit fixed-arity `unapply`, and
+  `OptimisticLockFailure.memoryId` is `recordId`
+  ([migration](docs/reference/migration.md#error-hierarchy-cleanup-2819)) [#2819](https://github.com/llm4s/llm4s/issues/2819).
 - **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
   traces too, and on each agent call's `ModelCallCompleted` (an event stored before reads with none, a reason this version cannot read as `Other(raw)`), mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider, in place of `assertStreams`
   ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1, 2, 5 and 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).

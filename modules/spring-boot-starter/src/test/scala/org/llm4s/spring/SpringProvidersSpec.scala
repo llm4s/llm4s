@@ -1,7 +1,7 @@
 package org.llm4s.spring
 
 import org.llm4s.security.Secret
-import org.llm4s.error.APIError
+import org.llm4s.error.ServiceError
 import org.llm4s.javaapi.JLlmClient
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig }
 import org.llm4s.testkit.LocalProviderTestServer.{ openAICompletion, sendJsonResponse, withServer }
@@ -622,8 +622,9 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
 
   "the health indicator" should "redact a key that came from application.conf out of a failed probe" in {
     // The key does not look like a token, so only the resolved config's own key can redact it.
-    val key      = "plain-conf-held-credential"
-    val provider = new AsyncAndHealthSpec.FakeProvider(_ => Left(APIError("fixturechat", s"rejected credential $key")))
+    val key = "plain-conf-held-credential"
+    val provider =
+      new AsyncAndHealthSpec.FakeProvider(_ => Left(ServiceError(503, "fixturechat", s"rejected credential $key")))
     val settings = HealthSettings
       .from(new Llm4sProperties, env("llm4s.providers.provider" -> "conf-fixture"))
       .copy(probe = true, ttl = Duration.ofSeconds(60), timeout = Duration.ofSeconds(5))
@@ -748,7 +749,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       "conf-gateway" -> Seq("conf-held-header-token", "conf-held-tenant-credential")
     ).foreach { case (section, credentials) =>
       val message  = s"rejected ${credentials.mkString(" and ")}"
-      val provider = new AsyncAndHealthSpec.FakeProvider(_ => Left(APIError("x", message)))
+      val provider = new AsyncAndHealthSpec.FakeProvider(_ => Left(ServiceError(503, "x", message)))
       val settings = HealthSettings
         .from(new Llm4sProperties, env("llm4s.providers.provider" -> section))
         .copy(probe = true, ttl = Duration.ofSeconds(60), timeout = Duration.ofSeconds(5))

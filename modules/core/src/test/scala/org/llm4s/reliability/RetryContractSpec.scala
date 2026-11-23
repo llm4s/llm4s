@@ -29,13 +29,6 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
   final private case class Row(label: String, error: LLMError, recoverable: Boolean, retried: Boolean)
 
   private val rows: Seq[Row] = Seq(
-    Row("APIError, no status", APIError("openai", "failed"), recoverable = true, retried = true),
-    Row("APIError 503", APIError("openai", "unavailable", Some(503)), recoverable = true, retried = true),
-    Row("APIError 502", APIError("openai", "bad gateway", Some(502)), recoverable = true, retried = true),
-    Row("APIError 429", APIError("openai", "slow down", Some(429)), recoverable = true, retried = true),
-    Row("APIError 408", APIError("openai", "request timeout", Some(408)), recoverable = true, retried = true),
-    Row("APIError 400", APIError("openai", "bad request", Some(400)), recoverable = true, retried = false),
-    Row("APIError 404", APIError("openai", "no such model", Some(404)), recoverable = true, retried = false),
     Row(
       "AuthenticationError",
       AuthenticationError("openai", "invalid key", "401"),
@@ -55,7 +48,12 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
       recoverable = false,
       retried = false
     ),
-    Row("ContextError", ContextError.tokenBudgetExceeded(200, 100), recoverable = false, retried = false),
+    Row(
+      "ContextError",
+      ContextError.artifactStoreFailed("store", "key", "disk full"),
+      recoverable = false,
+      retried = false
+    ),
     Row("ExecutionError", ExecutionError("failed", "run", Some(2)), recoverable = true, retried = true),
     Row("InvalidInputError", InvalidInputError("field", "value", "reason"), recoverable = false, retried = false),
     Row(
@@ -76,9 +74,8 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
     Row("ServiceError 400", ServiceError(400, "p", "bad request"), recoverable = true, retried = false),
     Row("ServiceError 404", ServiceError(404, "p", "not found"), recoverable = true, retried = false),
     Row("SimpleError", SimpleError("plain"), recoverable = false, retried = false),
-    Row("SystemError", SystemError("system"), recoverable = true, retried = true),
     Row("TimeoutError", TimeoutError("slow", 5.seconds, "complete"), recoverable = true, retried = true),
-    Row("TokenizerError", TokenizerError.notFound("tok"), recoverable = false, retried = false),
+    Row("TokenizerError", TokenizerError.notAvailable("tok"), recoverable = false, retried = false),
     Row("UnknownError", UnknownError("weird", new RuntimeException("x")), recoverable = false, retried = false),
     Row("ValidationError", ValidationError("field", "reason"), recoverable = false, retried = false)
   )
@@ -89,8 +86,6 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
    */
   private def documentedNotRetried(error: LLMError): Option[String] = error match {
     case s: ServiceError if !isRetryableStatus(s.httpStatus) =>
-      Some("a client-error response means the request itself is wrong: repeating it unchanged cannot succeed")
-    case a: APIError if a.statusCode.exists(!isRetryableStatus(_)) =>
       Some("a client-error response means the request itself is wrong: repeating it unchanged cannot succeed")
     case _: OptimisticLockFailure =>
       Some("the caller must re-read the record first; the same update fails again until it does")

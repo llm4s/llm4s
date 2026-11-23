@@ -55,8 +55,7 @@ final case class RerankError(
   override val message: String,
   provider: String
 ) extends org.llm4s.error.LLMError {
-  override val context: Map[String, String]  = Map("provider" -> provider)
-  override val correlationId: Option[String] = None
+  override val context: Map[String, String] = Map("provider" -> provider)
 }
 
 /**

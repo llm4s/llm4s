@@ -180,9 +180,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
         RateLimitError("p"),
         TimeoutError("m", 1.second, "op"),
         ServiceError(503, "p", "d"),
-        APIError("p", "m", None, None),
         ExecutionError("m", "op", None, None),
-        SystemError("m", None),
         OptimisticLockFailure("m", "id", 1L)
       )
       val permanent: List[LLMError] = List(
@@ -309,8 +307,6 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
         calls
       }
       callsFor(NetworkError("down", None, "https://x")) shouldBe 3
-      callsFor(APIError("p", "m", None, None)) shouldBe 3
-      callsFor(APIError("p", "m", Some(400), None)) shouldBe 1
       callsFor(ServiceError(404, "p", "d")) shouldBe 1
       callsFor(OptimisticLockFailure("m", "id", 1L)) shouldBe 1
     }

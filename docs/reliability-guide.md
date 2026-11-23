@@ -388,16 +388,16 @@ The reliability layer automatically retries these errors:
 
 - ✅ `RateLimitError` - Respects `Retry-After` header
 - ✅ `TimeoutError` - Network timeouts
-- ✅ `ServiceError` and `APIError` with a retryable status - any 5xx, 429 or 408; respects a 503's `Retry-After` header. An `APIError` with no status is retried too
+- ✅ `ServiceError` with a retryable status - any 5xx, 429 or 408; respects a 503's `Retry-After` header
 - ✅ `NetworkError` - Connection failures
-- ✅ `ExecutionError` and `SystemError` - transient execution and system failures
+- ✅ `ExecutionError` - transient execution failures
 
 Non-retryable errors (fail immediately):
 
 - ❌ `AuthenticationError` - Bad API key
 - ❌ `ValidationError` - Invalid input
 - ❌ `ConfigurationError` - Client misconfiguration
-- ❌ `ServiceError` and `APIError` with any other 4xx status - the request itself is wrong, so repeating it cannot succeed
+- ❌ `ServiceError` with any other 4xx status - the request itself is wrong, so repeating it cannot succeed
 - ❌ `OptimisticLockFailure` - recoverable, but the caller must re-read the record first
 - ❌ `CancelledError` - the caller stopped the call
 

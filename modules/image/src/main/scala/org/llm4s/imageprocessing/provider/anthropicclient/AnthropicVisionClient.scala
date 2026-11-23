@@ -4,7 +4,7 @@ import org.llm4s.imageprocessing._
 import org.llm4s.imageprocessing.config.AnthropicVisionConfig
 import org.llm4s.imageprocessing.provider.LocalImageProcessor
 import org.llm4s.media.{ ImageMediaType, MediaType }
-import org.llm4s.error.{ CancelledError, LLMError }
+import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ServiceError }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.types.Result
 import ujson.read
@@ -45,7 +45,7 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
         metadata = basic.metadata
         // Convert image to base64 for API call
         base64Image <- encodeImageToBase64(imagePath).toEither.left
-          .map(e => LLMError.processingFailed("encode", s"Failed to encode image: ${e.getMessage}", Some(e)))
+          .map(e => ProcessingError("encode", s"Failed to encode image: ${e.getMessage}", Some(e)))
 
         // Call Anthropic Vision API
         analysisPrompt = prompt.getOrElse(
@@ -195,53 +195,56 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
         base64Image = base64Image,
         mediaType = mediaType
       )
-    ).toEither.left.map(e => visionFailed(e.getMessage)).flatMap { requestBody =>
-      val headers =
-        Map(
-          "Content-Type"      -> "application/json",
-          "x-api-key"         -> config.apiKey.reveal,
-          "anthropic-version" -> "2023-06-01"
-        )
-      httpClient.post(s"${config.baseUrl}/v1/messages", headers, requestBody, config.requestTimeout) match {
-        case Left(cancelled: CancelledError) => Left(cancelled)
-        case Left(error) =>
-          Left(visionFailed(s"Anthropic API call failed - ${error.message}"))
-        case Right(response) =>
-          // As the `Try(...).flatMap` this replaced did: an exception while reading the reply (a 200
-          // without `choices`, an error body that is not an object) is a failed call, not a throw.
-          Try(response.statusCode match {
-            case 200 =>
-              Right(extractContentFromResponse(response.body))
-            case statusCode =>
-              val responseBody = response.body
-              val errorMessage =
-                Try(read(responseBody)).toOption
-                  .flatMap(js => js.obj.get("error"))
-                  .map { err =>
-                    val message   = err.obj.get("message").flatMap(_.strOpt)
-                    val errorType = err.obj.get("type").flatMap(_.strOpt)
-                    (message, errorType) match {
-                      case (Some(msg), Some(typ)) => s"$typ: $msg"
-                      case (Some(msg), None)      => msg
-                      case _                      => responseBody
+    ).toEither.left
+      .map(e =>
+        ProcessingError("vision-request", s"Anthropic Vision API request could not be built: ${e.getMessage}", Some(e))
+      )
+      .flatMap { requestBody =>
+        val headers =
+          Map(
+            "Content-Type"      -> "application/json",
+            "x-api-key"         -> config.apiKey.reveal,
+            "anthropic-version" -> "2023-06-01"
+          )
+        httpClient.post(s"${config.baseUrl}/v1/messages", headers, requestBody, config.requestTimeout) match {
+          // A failure of the call itself (cancelled, timed out, not connected) is the HTTP client's error, as it is.
+          case Left(error)     => Left(error)
+          case Right(response) =>
+            // As the `Try(...).flatMap` this replaced did: an exception while reading the reply (a 200
+            // without `choices`, an error body that is not an object) is a failed call, not a throw.
+            Try(response.statusCode match {
+              case 200 =>
+                Right(extractContentFromResponse(response.body))
+              case statusCode =>
+                val responseBody = response.body
+                val errorMessage =
+                  Try(read(responseBody)).toOption
+                    .flatMap(js => js.obj.get("error"))
+                    .map { err =>
+                      val message   = err.obj.get("message").flatMap(_.strOpt)
+                      val errorType = err.obj.get("type").flatMap(_.strOpt)
+                      (message, errorType) match {
+                        case (Some(msg), Some(typ)) => s"$typ: $msg"
+                        case (Some(msg), None)      => msg
+                        case _                      => responseBody
+                      }
                     }
-                  }
-                  .map(d => s"Status $statusCode: ${Redaction.safeBody(d)}")
-                  .getOrElse(s"Status $statusCode: ${Redaction.safeBody(responseBody)}")
+                    .map(d => s"Status $statusCode: ${Redaction.safeBody(d)}")
+                    .getOrElse(s"Status $statusCode: ${Redaction.safeBody(responseBody)}")
 
-              // Log a redacted, truncated version to avoid leaking very large or sensitive payloads
-              logger.error(
-                "[AnthropicVisionClient] HTTP error {}: {}",
-                statusCode.asInstanceOf[AnyRef],
-                Redaction.safeBody(responseBody)
-              )
-              Left(visionFailed(s"Anthropic API call failed - $errorMessage"))
-          }).fold(e => Left(visionFailed(e.getMessage)), identity)
+                // Log a redacted, truncated version to avoid leaking very large or sensitive payloads
+                logger.error(
+                  "[AnthropicVisionClient] HTTP error {}: {}",
+                  statusCode.asInstanceOf[AnyRef],
+                  Redaction.safeBody(responseBody)
+                )
+                Left(visionFailed(statusCode, s"Anthropic API call failed - $errorMessage"))
+            }).fold(e => Left(visionFailed(response.statusCode, e.getMessage)), identity)
+        }
       }
-    }
 
-  private def visionFailed(detail: String): LLMError =
-    LLMError.apiCallFailed("Anthropic", s"Anthropic Vision API call failed: $detail")
+  private def visionFailed(statusCode: Int, detail: String): LLMError =
+    ServiceError(statusCode, "Anthropic", s"Anthropic Vision API call failed: $detail")
 
   private def extractContentFromResponse(jsonResponse: String): String =
     Try(read(jsonResponse)).toOption

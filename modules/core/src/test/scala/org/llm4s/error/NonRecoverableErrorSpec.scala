@@ -36,22 +36,6 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     LLMError.isRecoverable(error) shouldBe false
   }
 
-  it should "create unauthorized error" in {
-    val error = AuthenticationError.unauthorized("openai")
-
-    error.provider shouldBe "openai"
-    error.code shouldBe Some("401")
-    error.message should include("Unauthorized access")
-  }
-
-  it should "create invalid API key error" in {
-    val error = AuthenticationError.invalidApiKey("anthropic")
-
-    error.provider shouldBe "anthropic"
-    error.code shouldBe Some("INVALID_KEY")
-    error.message should include("Invalid API key")
-  }
-
   it should "support pattern matching" in {
     val error = AuthenticationError("openai", "invalid key", "401")
 
@@ -325,80 +309,7 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
 
   // ============ ContextError ============
 
-  "ContextError" should "create token budget exceeded error" in {
-    val error = ContextError.tokenBudgetExceeded(5000, 4096)
-
-    error.contextType shouldBe "tokenBudget"
-    error.message should include("5000 tokens > 4096 budget")
-    error.details should contain("currentTokens" -> "5000")
-    error.details should contain("budget" -> "4096")
-  }
-
-  it should "create invalid trimming error" in {
-    val error = ContextError.invalidTrimming("Cannot trim required messages")
-
-    error.contextType shouldBe "trimming"
-    error.message should include("Invalid trimming operation")
-  }
-
-  it should "create conversation too large error" in {
-    val error = ContextError.conversationTooLarge(100, 10)
-
-    error.contextType shouldBe "conversationSize"
-    error.details should contain("messageCount" -> "100")
-    error.details should contain("minRequired" -> "10")
-  }
-
-  it should "create empty result error" in {
-    val error = ContextError.emptyResult("summarization")
-
-    error.contextType shouldBe "emptyResult"
-    error.message should include("empty conversation")
-  }
-
-  it should "create semantic blocking failed error" in {
-    val error = ContextError.semanticBlockingFailed("Too few messages")
-
-    error.contextType shouldBe "semanticBlocking"
-  }
-
-  it should "create summarization failed error" in {
-    val error = ContextError.summarizationFailed(5, "LLM error")
-
-    error.contextType shouldBe "summarization"
-    error.details should contain("blockCount" -> "5")
-  }
-
-  it should "create compression failed error" in {
-    val error = ContextError.compressionFailed("deterministic", "No tool outputs")
-
-    error.contextType shouldBe "compression"
-    error.details should contain("strategy" -> "deterministic")
-  }
-
-  it should "create pipeline failed error" in {
-    val error = ContextError.contextPipelineFailed("step2", "Timeout")
-
-    error.contextType shouldBe "pipeline"
-    error.details should contain("failedStep" -> "step2")
-  }
-
-  it should "create tool compression failed error" in {
-    val error = ContextError.toolCompressionFailed("tool-123", "Invalid JSON")
-
-    error.contextType shouldBe "toolCompression"
-    error.details should contain("toolCallId" -> "tool-123")
-  }
-
-  it should "create externalization failed error" in {
-    val error = ContextError.externalizationFailed("image", 1024000L, "Storage full")
-
-    error.contextType shouldBe "externalization"
-    error.details should contain("contentType" -> "image")
-    error.details should contain("size" -> "1024000")
-  }
-
-  it should "create artifact store failed error" in {
+  "ContextError" should "create artifact store failed error" in {
     val error = ContextError.artifactStoreFailed("write", "key-123", "Permission denied")
 
     error.contextType shouldBe "artifactStore"
@@ -420,27 +331,20 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.details should contain("modelName" -> "gpt-4")
   }
 
-  it should "create token estimation failed error" in {
-    val error = ContextError.tokenEstimationFailed("long content here", "Tokenizer unavailable")
-
-    error.contextType shouldBe "tokenEstimation"
-    (error.details should contain).key("contentLength")
-  }
-
   it should "be a NonRecoverableError" in {
-    val error = ContextError.tokenBudgetExceeded(100, 50)
+    val error = ContextError.artifactStoreFailed("store", "key-1", "disk full")
 
     error shouldBe a[NonRecoverableError]
     LLMError.isRecoverable(error) shouldBe false
   }
 
   it should "support pattern matching" in {
-    val error = ContextError.tokenBudgetExceeded(100, 50)
+    val error = ContextError.artifactStoreFailed("store", "key-1", "disk full")
 
     error match {
       case ContextError(msg, contextType, details) =>
-        msg should include("Token budget exceeded")
-        contextType shouldBe "tokenBudget"
+        msg should include("Artifact store store failed")
+        contextType shouldBe "artifactStore"
         details should not be empty
       case _ => fail("Pattern matching failed")
     }
@@ -455,13 +359,6 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.message should include("Tokenizer not available")
   }
 
-  it should "create not found error" in {
-    val error = TokenizerError.notFound("unknown-tokenizer")
-
-    error.tokenizerId shouldBe "unknown-tokenizer"
-    error.message should include("Tokenizer not found")
-  }
-
   it should "be a NonRecoverableError" in {
     val error = TokenizerError.notAvailable("tokenizer")
 
@@ -470,7 +367,7 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "include tokenizer ID in context" in {
-    val error = TokenizerError.notFound("test-tokenizer")
+    val error = TokenizerError.notAvailable("test-tokenizer")
 
     error.context should contain("tokenizerId" -> "test-tokenizer")
   }
@@ -549,9 +446,8 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
     val error = SimpleError("test message")
 
     error match {
-      case SimpleError(msg, context) =>
+      case SimpleError(msg) =>
         msg shouldBe "test message"
-        context shouldBe empty
       case _ => fail("Pattern matching failed")
     }
   }
@@ -566,8 +462,8 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
       ProcessingError("o", "m"),
       InvalidInputError("f", "v", "r"),
       NotFoundError("m", "k"),
-      ContextError.tokenBudgetExceeded(100, 50),
-      TokenizerError.notFound("t"),
+      ContextError.artifactStoreFailed("store", "key-1", "disk full"),
+      TokenizerError.notAvailable("t"),
       UnknownError("m", new Exception()),
       SimpleError("m")
     )
@@ -579,7 +475,6 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
 
   "LLMError.nonRecoverableErrors" should "filter only non-recoverable errors" in {
     val errors: List[LLMError] = List(
-      APIError("p", "m"),
       AuthenticationError("p", "m"),
       RateLimitError("p"),
       ValidationError("f", "r")
@@ -593,27 +488,4 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
 
   // ============ Smart Constructors ============
 
-  "LLMError smart constructors" should "create processing error" in {
-    val error = LLMError.processingFailed("resize", "Failed", None)
-
-    error shouldBe a[ProcessingError]
-    error.operation shouldBe "resize"
-  }
-
-  it should "create invalid image input error" in {
-    val error = LLMError.invalidImageInput("width", "abc", "must be numeric")
-
-    error shouldBe a[InvalidInputError]
-    error.field shouldBe "width"
-    error.value shouldBe "abc"
-    error.reason shouldBe "must be numeric"
-  }
-
-  it should "create API call failed error" in {
-    val error = LLMError.apiCallFailed("openai", "timeout", Some(504), None)
-
-    error shouldBe a[APIError]
-    error.provider shouldBe "openai"
-    error.statusCode shouldBe Some(504)
-  }
 }

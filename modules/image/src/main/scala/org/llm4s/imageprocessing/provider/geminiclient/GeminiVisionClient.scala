@@ -3,7 +3,7 @@ package org.llm4s.imageprocessing.provider.geminiclient
 import org.llm4s.imageprocessing._
 import org.llm4s.imageprocessing.config.GeminiVisionConfig
 import org.llm4s.imageprocessing.provider.LocalImageProcessor
-import org.llm4s.error.{ ConfigurationError, LLMError }
+import org.llm4s.error.{ ConfigurationError, LLMError, ProcessingError, ServiceError }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.media.{ ImageMediaType, MediaType }
 import ujson.read
@@ -24,12 +24,12 @@ import org.llm4s.util.Redaction
  * The API key is sent in the `x-goog-api-key` request header, never in the URL, so it cannot
  * reach a log line or an error message through the URL.
  *
- * Failures are returned, not thrown: an HTTP error status is an [[org.llm4s.error.APIError]]
+ * Failures are returned, not thrown: an HTTP error status is an [[org.llm4s.error.ServiceError]]
  * carrying the status code; a timeout, connection failure or interruption is the typed
  * [[org.llm4s.error.TimeoutError]], [[org.llm4s.error.NetworkError]] or
  * [[org.llm4s.error.CancelledError]]; a reply that carries no text (a blocked prompt, a
  * candidate stopped for safety or recitation, a body that is not Gemini JSON) is an
- * [[org.llm4s.error.APIError]] too, never a made-up description.
+ * [[org.llm4s.error.ServiceError]] with status 200, never a made-up description.
  *
  * @param config [[org.llm4s.imageprocessing.config.GeminiVisionConfig GeminiVisionConfig]] containing the API key, model, and base URL.
  * @param httpClient the HTTP transport; defaults to the JDK client honouring `config.connectTimeoutSeconds`.
@@ -60,7 +60,7 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
       basic <- localProcessor.analyzeImage(imagePath, None)
       metadata = basic.metadata
       base64Image <- encodeImageToBase64(imagePath).toEither.left
-        .map(e => LLMError.processingFailed("encode", s"Failed to encode image: ${e.getMessage}", Some(e)))
+        .map(e => ProcessingError("encode", s"Failed to encode image: ${e.getMessage}", Some(e)))
       analysisPrompt = prompt.getOrElse(
         "Analyze this image in detail. Describe what you see, identify any objects, text, or people present. " +
           "Provide tags that categorize the image content."
@@ -144,11 +144,7 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
           Redaction.safeBody(response.body)
         )
         Left(
-          LLMError.apiCallFailed(
-            "Gemini",
-            s"Gemini Vision API call failed - $errorMessage",
-            Some(response.statusCode)
-          )
+          ServiceError(response.statusCode, "Gemini", s"Gemini Vision API call failed - $errorMessage")
         )
       }
     }
@@ -179,7 +175,7 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
    */
   private def extractContentFromResponse(jsonResponse: String): Either[LLMError, String] = {
     def fail(why: String): Either[LLMError, String] =
-      Left(LLMError.apiCallFailed("Gemini", s"Gemini Vision API returned no text: $why", Some(200)))
+      Left(ServiceError(200, "Gemini", s"Gemini Vision API returned no text: $why"))
 
     Try(read(jsonResponse)).toOption.flatMap(_.objOpt) match {
       case None => fail("response body is not a JSON object")

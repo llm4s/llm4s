@@ -4,7 +4,6 @@ import org.llm4s.security.Secret
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.error.{
-  APIError,
   AuthenticationError,
   CancelledError,
   LLMError,
@@ -335,15 +334,11 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
         .drop(1) shouldBe List("rate limited; wait a while", "a retry may succeed")
     }
 
-    "print the HTTP status of a provider's error response, or '?' when it has none" in {
+    "print the HTTP status of a provider's error response" in {
       captured(
         GuideSnippets.handlingAFailure(client(failingWith(ServiceError(503, "openai", "overloaded"))))
       ).err.linesIterator.toList
         .drop(1) shouldBe List("the provider answered HTTP 503", "a retry may succeed")
-      captured(
-        GuideSnippets.handlingAFailure(client(failingWith(APIError("openai", "odd reply"))))
-      ).err.linesIterator.toList
-        .drop(1) shouldBe List("the provider answered HTTP ?", "a retry may succeed")
     }
   }
 

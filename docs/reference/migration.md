@@ -51,7 +51,42 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
 [`ProviderRegistry` lookups accept aliases](#providerregistry-lookups-accept-aliases-2812),
-and [`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813).
+[`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
+and the [error hierarchy cleanup](#error-hierarchy-cleanup-2819).
+
+## Error hierarchy cleanup (#2819)
+
+`org.llm4s.error` loses the types, constructors and members nothing in the library used. The `RemovedApis_1_0`
+Scalafix rule reports each use of `APIError`, `SystemError` and the three `LLMError` constructors.
+
+| Before | After |
+|---|---|
+| `APIError(provider, message, Some(status))` | `ServiceError(status, provider, message)`; read `httpStatus`, an `Int`, where you read `statusCode` |
+| `APIError(provider, message)` | the error that fits: a `ServiceError` with the status, a `NetworkError`, or an error of your own |
+| `SystemError(message, cause)` | an error of your own: `final case class MyError(message: String) extends LLMError with RecoverableError` |
+| `LLMError.processingFailed(operation, message, cause)` | `ProcessingError(operation, message, cause)` |
+| `LLMError.invalidImageInput(field, value, reason)` | `InvalidInputError(field, value, reason)` |
+| `LLMError.apiCallFailed(provider, message, Some(status))` | `ServiceError(status, provider, message)` |
+| `LLMError.show(error)` | `error.formatted` |
+| `error.correlationId` | read your own MDC key; `formatted` no longer appends `[correlationId=...]` |
+| `error.maxRetries` (`RecoverableError`) | your retry policy's own limit: nothing read it |
+| `AuthenticationError.unauthorized(p)`, `invalidApiKey(p)` | `AuthenticationError(p, "Unauthorized access", "401")`, `AuthenticationError(p, "Invalid API key", "INVALID_KEY")` |
+| `TokenizerError.notFound(id)` | `TokenizerError.notAvailable(id)` |
+| `ExecutionError(...).withExitCode(1)` | `ExecutionError(message, operation, exitCode = Some(1))` |
+| `OptimisticLockFailure#memoryId`, context key `memoryId` | `recordId` |
+| `case SimpleError(message, _)` | `case SimpleError(message)` |
+| `ProcessingError(operation, message = "...")` (named argument) | `details = "..."`; also on `audioResample`, `audioConversion`, `audioTrimming` and `audioValidation` |
+| `ContextError.tokenBudgetExceeded`, `invalidTrimming`, `conversationTooLarge`, `emptyResult`, `semanticBlockingFailed`, `summarizationFailed`, `compressionFailed`, `contextPipelineFailed`, `toolCompressionFailed`, `externalizationFailed`, `tokenEstimationFailed` | removed: nothing raised them. Define an error of your own |
+
+`llm4s-image`'s vision clients (`OpenAIVisionClient`, `AnthropicVisionClient`, `GeminiVisionClient`) returned an
+`APIError`. A non-2xx answer, or a 200 with no usable text, is now a `ServiceError` carrying the status, so a 4xx is
+no longer retried by `RetryPolicy`; a call that got no answer is the HTTP client's own `NetworkError` or
+`TimeoutError`, where the OpenAI and Anthropic clients wrapped it; and a request that cannot be serialized is a
+`ProcessingError`.
+
+Every error now has an explicit `unapply` of fixed arity: `message`, then its fields in constructor order. No
+pattern changes but `SimpleError`'s. A field added later is read by name, as `RateLimitError.origin` and
+`ContentFilteredError.usage` already are.
 
 ## `StreamingAccumulator` takes the model and reports usage one way (#2813)
 

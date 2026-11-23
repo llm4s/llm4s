@@ -115,12 +115,10 @@ is not recoverable, since nothing says a retry can help.
 | `ContentFilteredError` | no | The provider's content filter stopped the call: Gemini or Vertex AI blocked the prompt (`promptFeedback.blockReason`) or stopped the reply with a filter `finishReason` (`SAFETY`, `RECITATION`, `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, the image ones and others), even after some text. It carries the `provider`, the `reason` and `promptBlocked`. `ReliableClient`'s circuit breaker counts it as neither a success nor a failure. |
 | `InvalidInputError` | no | Only `llm4s-image`'s image processing (`LocalImageProcessor`, saving an image): an unreadable path, a bad resize or crop, a path traversal. It carries the `field`, the `value` and the `reason`. |
 | `RateLimitError` | yes | A provider's rate limit: HTTP 429, or Anthropic's or Bedrock's throttling exception. Also `ReliableClient`'s own limiter, and `DefaultErrorMapper` for an exception whose message names HTTP status 429 (`HTTP 429`, `429 Too Many Requests`, `status code: 429`). It carries `retryAfter` when the provider says how long to wait. |
-| `ServiceError` | yes | Any other non-2xx status from a provider (through `HttpErrorMapper` or `Llm4sHttpClient`, and from Bedrock and watsonx), or a call rejected by an open circuit breaker (`ReliableClient` or `ErrorRecovery.CircuitBreaker`, status 503). It carries `httpStatus`; see the note below. |
+| `ServiceError` | yes | Any other non-2xx status from a provider (through `HttpErrorMapper` or `Llm4sHttpClient`, and from Bedrock and watsonx), or a call rejected by an open circuit breaker (`ReliableClient` or `ErrorRecovery.CircuitBreaker`, status 503). Also `llm4s-image`'s vision clients (OpenAI, Anthropic, Gemini), for a non-2xx answer or a reply with no text. It carries `httpStatus`; see the note below. |
 | `NetworkError` | yes | A connection fails, a host is unknown or I/O breaks, in llm4s's HTTP client or the Bedrock client; `DefaultErrorMapper`, which the OpenAI and Anthropic clients use for I/O failures, gives one for a socket timeout or a refused connection. Also a URL refused by the SSRF check, and a failed `llm4s-rag` URL, web-crawl or S3 load, including a non-2xx answer to `UrlLoader`. |
 | `TimeoutError` | yes | A connect, request or socket timeout elapses in llm4s's own HTTP client, or a `ReliableClient` deadline passes. The vendor-SDK clients map timeouts themselves: OpenAI and Bedrock report a `NetworkError`, and Anthropic maps its exceptions through `DefaultErrorMapper`. |
-| `APIError` | yes | Only `llm4s-image`'s vision clients (OpenAI, Anthropic, Gemini), through `LLMError.apiCallFailed`, when the vision API call fails or returns no text; it carries the provider and, optionally, a status code. Image generation has its own errors (see below). |
 | `ExecutionError` | yes | Only `ErrorRecovery.recoverWithBackoff`, when it runs out of attempts ([section 9](#9-recovering-from-failures)). Tool and MCP failures are other types; see the note below. |
-| `SystemError` | yes | Not raised by the library; available for your own code, for an unexpected failure that may be transient. |
 | `OptimisticLockFailure` | yes | Only `llm4s-memory-postgres`'s `PostgresMemoryStore`, when another writer updated the same memory record first; re-read it and try again. |
 | `CancelledError` | no | The thread was interrupted. Interruption is how llm4s cancels work, and a cancelled call is never retried. |
 | `ProcessingError` | no | A storage, parsing or processing step fails: a vector-store, keyword-index or memory-store operation, RAG document loading, extraction or permissions, knowledge-graph storage, extraction or queries, speech audio processing, image encoding or saving. |
@@ -148,10 +146,9 @@ going to fix itself. When it matters, look at `httpStatus`: `error.isRecoverable
 `recoverWithBackoff`, `ReliableClient`'s `RetryPolicy`, `LLMClientRetry` and the agent graph's default node
 retry - uses one rule, `RetryPolicy.isRetryable`: it resends the identical request with nobody in the loop,
 so it retries a recoverable error unless repeating the request cannot help. That leaves out two recoverable
-cases: a `ServiceError` or an `APIError` with a client-error status (any 4xx but 408 and 429), because the
-request itself is wrong, and an `OptimisticLockFailure`, because you must re-read the record first. An
-`APIError` with no status is retried. A non-recoverable error is never retried, and neither is an error that
-carries no marker.
+cases: a `ServiceError` with a client-error status (any 4xx but 408 and 429), because the
+request itself is wrong, and an `OptimisticLockFailure`, because you must re-read the record first. A
+non-recoverable error is never retried, and neither is an error that carries no marker.
 
 **Which status becomes which error.** The status mapping in the table is `HttpErrorMapper`'s: 401 and
 403 to `AuthenticationError`, 429 to `RateLimitError`, 400 to `ValidationError`, any other non-2xx to
@@ -354,11 +351,11 @@ exponential:
 | `RateLimitError` | Its `retryDelay`: the provider's `retryAfter` when it gave one, else 30 seconds (`RateLimitError.DefaultRetryDelay`). `baseDelay` is not used. |
 | `ServiceError` with a 5xx, 429 or 408 status | The provider's `retryAfter` when it gave one, else `baseDelay` times the number of the attempt that failed: `baseDelay`, then `2 * baseDelay`, and so on. |
 | `TimeoutError` | `baseDelay`, every time. |
-| `NetworkError`, `ExecutionError`, `SystemError`, and an `APIError` with no status or a 5xx, 429 or 408 one | `baseDelay` times the number of the attempt that failed, as for a `ServiceError` without a hint. |
+| `NetworkError`, `ExecutionError` | `baseDelay` times the number of the attempt that failed, as for a `ServiceError` without a hint. |
 
 Every other error comes back unchanged straight away, whichever attempt it happens on: a
 `ValidationError` on the last attempt, after a retried timeout, is still a `ValidationError`. That
-includes a `ServiceError` or an `APIError` with any other status and an `OptimisticLockFailure`. A
+includes a `ServiceError` with any other status and an `OptimisticLockFailure`. A
 `CancelledError` is never retried or wrapped, and an interrupt during a wait returns one.
 
 When the last attempt fails with a retried error, you get an `ExecutionError` whose

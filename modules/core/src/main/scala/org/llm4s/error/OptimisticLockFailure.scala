@@ -10,26 +10,26 @@ import org.llm4s.annotation.Stable
  * retry the operation.
  *
  * @param message          Human-readable error description
- * @param memoryId         The ID of the memory record that was concurrently modified
+ * @param recordId         The ID of the memory record that was concurrently modified
  * @param attemptedVersion The version number that was expected but not found
  */
 @Stable
 final case class OptimisticLockFailure private (
   override val message: String,
-  memoryId: String,
+  recordId: String,
   attemptedVersion: Long
 ) extends LLMError
     with RecoverableError {
   override val context: Map[String, String] = Map(
-    "memoryId"         -> memoryId,
+    "recordId"         -> recordId,
     "attemptedVersion" -> attemptedVersion.toString
   )
 }
 
 object OptimisticLockFailure {
-  def apply(message: String, memoryId: String, attemptedVersion: Long): OptimisticLockFailure =
-    new OptimisticLockFailure(message, memoryId, attemptedVersion)
+  def apply(message: String, recordId: String, attemptedVersion: Long): OptimisticLockFailure =
+    new OptimisticLockFailure(message, recordId, attemptedVersion)
 
   def unapply(error: OptimisticLockFailure): Option[(String, String, Long)] =
-    Some((error.message, error.memoryId, error.attemptedVersion))
+    Some((error.message, error.recordId, error.attemptedVersion))
 }

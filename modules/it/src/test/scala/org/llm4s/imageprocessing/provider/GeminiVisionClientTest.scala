@@ -56,8 +56,8 @@ class GeminiVisionClientTest extends AnyFlatSpec with Matchers with EitherValues
     // Google answers a bad key with 400 (INVALID_ARGUMENT) or 401/403; anything else (a 404
     // for a retired model, a 5xx) is not the failure this test is about.
     val error = result.left.value
-    error shouldBe a[org.llm4s.error.APIError]
-    error.asInstanceOf[org.llm4s.error.APIError].statusCode.exists(Set(400, 401, 403).contains) shouldBe true
+    error shouldBe a[org.llm4s.error.ServiceError]
+    Set(400, 401, 403) should contain(error.asInstanceOf[org.llm4s.error.ServiceError].httpStatus)
     (error.message should not).include("invalid-key-for-testing")
   }
 }

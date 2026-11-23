@@ -40,8 +40,6 @@ final case class RateLimitError private (
 ) extends LLMError
     with RecoverableError {
 
-  override val maxRetries: Int = 5
-
   /** The provider's `retryAfter` hint when it gave one, else [[RateLimitError.DefaultRetryDelay]]. */
   override def retryDelay: Option[FiniteDuration] = retryAfter.orElse(Some(RateLimitError.DefaultRetryDelay))
 
@@ -85,7 +83,9 @@ object RateLimitError {
       origin = RateLimitOrigin.LocalThrottle
     )
 
-  /** Unapply extractor for pattern matching */
+  /**
+   * Extracts the message, `retryAfter` and the provider. The arity is fixed: `origin`, added later, is read by name.
+   */
   def unapply(error: RateLimitError): Option[(String, Option[FiniteDuration], String)] =
     Some((error.message, error.retryAfter, error.provider))
 }

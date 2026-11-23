@@ -2,7 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.testutil.TestTimeLimit
 
-import org.llm4s.error.APIError
+import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
@@ -115,10 +115,10 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     ex.getMessage should include("oops")
   }
 
-  it should "wrap the run's failure, carrying the APIError, in LlmException" in {
+  it should "wrap the run's failure, carrying the ServiceError, in LlmException" in {
     val underlying = new LLMClient {
       override def complete(conv: Conversation, opts: CompletionOptions): Result[Completion] =
-        Left(APIError("test-provider", "rate limited"))
+        Left(ServiceError(503, "test-provider", "rate limited"))
       override def streamComplete(
         conv: Conversation,
         opts: CompletionOptions,
@@ -133,7 +133,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     result.isFailure shouldBe true
     val ex = intercept[LlmException](result.get())
     ex.error match {
-      case org.llm4s.agent.graph.GraphError.NodeFailed(_, _, cause) => cause shouldBe a[APIError]
+      case org.llm4s.agent.graph.GraphError.NodeFailed(_, _, cause) => cause shouldBe a[ServiceError]
       case other                                                    => fail(s"expected NodeFailed, got $other")
     }
   }
