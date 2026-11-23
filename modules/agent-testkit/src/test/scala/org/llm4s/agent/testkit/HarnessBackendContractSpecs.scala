@@ -1,6 +1,6 @@
 package org.llm4s.agent.testkit
 
-import org.llm4s.agent.graph.{ FencingToken, ReplayGuard, ReplayKeys, ReplaySupport, RunContext }
+import org.llm4s.agent.graph.{ FencingToken, ReplayKeys, ReplaySupport, RunContext }
 import org.llm4s.agent.graph.tool.LockKey
 import org.llm4s.agent.harness.*
 import org.llm4s.types.Result
@@ -146,33 +146,16 @@ class StoreFileBackendReplaySpec extends AnyFlatSpec with ReplayContract:
     )
 
 class LongTermStoreReplaySpec extends AnyFlatSpec with ReplayContract:
-  protected def newSubject(): ReplayContract.Subject = new ReplayContract.Subject:
-    private val store          = InMemoryLongTermStore()
-    private val ns             = Namespace(None, Vector("counters"))
-    def name: String           = "a long-term store's transactional modify"
-    def support: ReplaySupport = ReplaySupport.Transactional
-    // each application increments the slot's stored count inside the store's transaction, so a second
-    // application shows, and a replay the store answers from its applied key does not
-    def perform(context: RunContext, slot: Int): Result[ujson.Value] =
-      val ctx    = FileContext.withoutState(context)
-      val effect = ctx.effectKey("store.increment", s"slot-$slot")
-      ReplayGuard
-        .transactional[Int](context, effect, store)(token =>
-          store.modify[Int](ns, s"slot-$slot", effect, token) { view =>
-            val next = view.current.flatMap(_.value.numOpt).fold(1)(_.toInt + 1)
-            Right(StoreChange.Put(ujson.Num(next), next))
-          }
-        )
-        .map(ujson.Num(_))
-    def observe(slot: Int): Result[String] =
-      store
-        .get(ns, s"slot-$slot")
-        .map(_.fold("absent")(i => i.value.numOpt.fold(i.value.toString)(n => n.toInt.toString)))
-    def initial(slot: Int): String = "absent"
-    def once(slot: Int): String    = "1"
-    def interfere(slot: Int): Unit =
-      HarnessBackends.raw(store, ns, s"slot-$slot")(StoreChange.Put(ujson.Str("other"), ()))
-    override def appliedKeys: Int = store.appliedKeys
+  protected def newSubject(): ReplayContract.Subject =
+    val store = InMemoryLongTermStore()
+    LongTermStoreContract.CounterSubject("a long-term store's transactional modify", store, () => store.appliedKeys)
+
+/** The in-memory store passes the contract every `LongTermStore` must (#2453). */
+class InMemoryLongTermStoreContractSpec extends AnyFlatSpec with LongTermStoreContract:
+  protected def newStore(limits: StoreLimits): LongTermStore = InMemoryLongTermStore(limits)
+  protected def appliedKeys(store: LongTermStore): Int = store match
+    case inMemory: InMemoryLongTermStore => inMemory.appliedKeys
+    case other                           => fail(s"not the in-memory store: $other")
 
 class SandboxBackendReplaySpec extends AnyFlatSpec with ReplayContract:
   protected def newSubject(): ReplayContract.Subject = new ReplayContract.Subject:

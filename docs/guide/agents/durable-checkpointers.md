@@ -571,6 +571,44 @@ the newer schema refuses to open with `GraphError.UnsupportedStoreSchema`, and w
 [Running agents on several machines](multiple-machines#upgrades) covers the rest of a rolling upgrade: draining,
 and runs in flight at an older graph version.
 
+### Long-term memory on the same database
+
+`store.longTermStore(limits)` is a `LongTermStore` (`org.llm4s.agent.harness`) in the same schema, over the same
+pool: the `/memories/` files an agent writes on one machine are there on every other, and so is anything else an
+application keeps by `(Namespace, key)`
+([spec](https://github.com/llm4s/llm4s/blob/main/docs/superpowers/specs/2026-11-22-postgres-long-term-store-design.md)).
+
+```scala
+import org.llm4s.agent.harness.{ CompositeBackend, StateFileBackend, StoreFileBackend, StoreLimits, VPath }
+
+for
+  memories <- StoreFileBackend(store.longTermStore(StoreLimits.default), Vector("memories"))
+  mount    <- VPath("/memories")
+  files    <- CompositeBackend(StateFileBackend(), mount -> memories)
+yield files // thread state everywhere else, the shared store under /memories
+```
+
+- **It behaves as `InMemoryLongTermStore` does.** Both pass `LongTermStoreContract` (`llm4s-agent-testkit`), and
+  check `StoreLimits` with the same code: 64 KiB an item, 1000 items and 4 MiB a namespace by default, counted in
+  UTF-8 bytes. Each instance enforces the limits it was given, so give every machine the same.
+- **A write is one transaction**, serialisable within its namespace on every machine (an advisory lock on the
+  namespace), fenced by the run's claim token and recorded under the effect's key, so a run that is recovered on
+  another machine applies each write once. Every call is bounded as the store's other calls are.
+- **A tenant has its own namespaces.** `StoreFileBackend` keeps each run's tenant's files apart; nothing reads
+  across namespaces. To offboard a tenant, delete its rows:
+  `DELETE FROM llm4s.checkpoint_store_items WHERE tenant_key = '=acme'` (an empty `tenant_key` is no tenant).
+- **Items outlive threads.** Deleting a thread, `prune` and the retention sweep never remove an item, and none
+  expires by age; `updated_at` is the database's clock at the last write. What the store keeps per thread - the
+  applied keys of effects in flight, and the newest claim token it has seen - goes with the thread: the keys when
+  the thread is deleted, the token when its row is, tombstone included.
+- **`search` is a keyword match**: the query, case-insensitively, as a substring of a key or of any string in a
+  value. It is not semantic search; for that, use [semantic memory](memory) over `PostgresMemoryStore`.
+- **PostgreSQL text holds no NUL.** A key, or a tenant id, containing NUL is refused.
+
+Opening a build with this store moves the schema to version 6 (three tables added, none changed); an older build
+then refuses the schema, so upgrade every process sharing the database together. To write a store of your own, mix
+`LongTermStoreContract` into a spec and implement `newStore` and `appliedKeys`.
+
 ## Choosing the store in application.conf
 
 `CheckpointerConfigLoader.open()` (`org.llm4s.config`, in `llm4s-agent`) opens the store `llm4s.agent.checkpointer.kind`

@@ -133,6 +133,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent harness
 
+- **Added** `PostgresCheckpointer.longTermStore`: a `LongTermStore` in the checkpoint database, so every machine of an
+  agent service shares `/memories/` files (PostgreSQL schema 6), and `LongTermStoreContract` in `llm4s-agent-testkit`, the suite every store passes
+  [#2453](https://github.com/llm4s/llm4s/issues/2453); [spec](docs/superpowers/specs/2026-11-22-postgres-long-term-store-design.md); [migration](docs/reference/migration.md#the-postgresql-checkpoint-schema-moves-to-version-6-2453).
 - **Added** `ContainerisedWorkspace(commandCgroups = true)`: on Linux each workspace command runs in a cgroup of its own and is
   killed whole, so a daemon it starts cannot outlive it [#2008](https://github.com/llm4s/llm4s/issues/2008); [design §4.39](docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md).
 - **Fixed** cancelling a `ContainerisedWorkspace` command (an interrupted `executeCommand`, as when an agent run is cancelled)

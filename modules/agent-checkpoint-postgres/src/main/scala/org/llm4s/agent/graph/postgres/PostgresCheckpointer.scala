@@ -2,6 +2,7 @@ package org.llm4s.agent.graph.postgres
 
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import org.llm4s.agent.graph.*
+import org.llm4s.agent.harness.{ LongTermStore, StoreLimits }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.security.Secret
@@ -463,6 +464,8 @@ final class PostgresCheckpointer private (
                   query(c, Sql.reclaim(t), threadId.value, cutoff, cutoff)(_.getLong(1)).headOption.map(threadId -> _)
                 }
               }
+              // the long-term store's fence of a reclaimed thread goes with its row (#2453)
+              gone.foreach((threadId, _) => forgetStoreScope(c, threadId))
               // readers of a reclaimed log are still refused: a new thread of the id starts past it
               gone.map(_._2).maxOption.foreach(first => update(c, Sql.raiseReclaimed(t), first))
               Right(gone.map(_._1).toSet)
@@ -521,6 +524,42 @@ final class PostgresCheckpointer private (
    * the store closes it.
    */
   lazy val runQueue: org.llm4s.agent.service.RunQueue = new PostgresRunQueue(this)
+
+  /**
+   * The store's long-term store (#2453), in the same schema and over the same pool as its checkpoints, so every
+   * machine of an agent service shares `/memories/` files (`StoreFileBackend`) and whatever else it keeps by
+   * `(Namespace, key)`. It passes `llm4s-agent-testkit`'s `LongTermStoreContract`, as `InMemoryLongTermStore` does:
+   *
+   *  - `modify` is one transaction, serialisable within its namespace across every instance (an advisory lock on the
+   *    namespace), fenced by the newest claim token seen for the effect's thread, with `(effect, outcome)` recorded
+   *    beside the write;
+   *  - `limits` are checked in that transaction, counted as the in-memory store counts them; each instance enforces
+   *    its own, so give every machine the same;
+   *  - `StoreItem.updated` is the database's clock, and every call is bounded as the store's calls are;
+   *  - `search` is the in-memory store's keyword match (case-insensitive, keys and string values), not a semantic one;
+   *  - a key, or a namespace's tenant, holding NUL or an unpaired surrogate is refused: PostgreSQL text holds neither.
+   *
+   * '''Retention.''' Items belong to no thread: neither [[deleteThread]], [[prune]] nor [[sweep]] removes one, and
+   * none expires by age. What the store keeps per thread goes with the thread: [[deleteThread]] removes the applied
+   * keys of the thread's effects in its own transaction (nothing can replay them once the thread's effect records
+   * are gone), and its fence goes when the thread's row does - at once for a thread that leaves no tombstone, else
+   * when a [[sweep]] reclaims the tombstone.
+   *
+   * Closing the store closes it. A `change` passed to `modify` runs inside the transaction: it must not block.
+   */
+  def longTermStore(limits: StoreLimits = StoreLimits.default): LongTermStore = new PostgresLongTermStore(this, limits)
+
+  // whether this thread is inside a `modify` change of this store's long-term store, which must not call back into it
+  private val storeChange                        = new ThreadLocal[java.lang.Boolean]()
+  private[postgres] def inStoreChange: Boolean   = storeChange.get() != null
+  private[postgres] def enterStoreChange(): Unit = storeChange.set(java.lang.Boolean.TRUE)
+  private[postgres] def leaveStoreChange(): Unit = storeChange.remove()
+
+  /** Removes what the long-term store keeps for a thread whose row is gone: its fence and any applied key left. */
+  private def forgetStoreScope(c: Connection, threadId: ThreadId): Unit =
+    val scope = EffectKey.scopeOf(threadId)
+    update(c, Sql.deleteStoreApplied(t), scope)
+    update(c, Sql.deleteStoreFence(t), scope)
 
   /**
    * [[eventsAfter]], waiting for a commit when there is nothing to return yet (see `Checkpointer.awaitEventsAfter`). The
@@ -635,7 +674,10 @@ final class PostgresCheckpointer private (
         // runs on a new thread of the id, whatever the deleted thread numbered
         update(c, Sql.queueThreadDeleted(t), threadId.value)
         update(c, Sql.tombstone(t), clockNow(c), threadId.value)
-        dropIfEmpty(c, threadId)
+        // the long-term store's applied keys of this thread go with the effect records that could replay them; its
+        // fence stays with a tombstone, and goes with a row that leaves none (#2453)
+        if updated(c, Sql.dropIfEmpty(t), threadId.value) > 0 then forgetStoreScope(c, threadId)
+        else update(c, Sql.deleteStoreApplied(t), EffectKey.scopeOf(threadId))
         // a reader waiting inside the deleted log is told at once
         notifyCommit(c, threadId)
         Right(())

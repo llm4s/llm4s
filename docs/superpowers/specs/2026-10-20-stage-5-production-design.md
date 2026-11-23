@@ -472,7 +472,7 @@ New top-level public types are `@Experimental` (Beta) for this stage; members ad
 10. **`Interrupt` stops at the next superstep boundary** (the user, 2026-10-21): started tool calls finish, unstarted
     ones get synthetic "interrupted" results, the in-flight model call is cancelled, and the interrupting entry runs
     ahead of the thread's queued entries (W3).
-11. **Deferred, as later issues**: a Postgres `LongTermStore`, cron, webhooks, versioned assistants, encryption at
+11. **Deferred, as later issues**: a Postgres `LongTermStore` (since done: `2026-11-22-postgres-long-term-store-design.md`), cron, webhooks, versioned assistants, encryption at
    rest, async subagents, A2A, AG-UI, an external durability engine, compensating tool actions (my calls).
 
 ## Delivery

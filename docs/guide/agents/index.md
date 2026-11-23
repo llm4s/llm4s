@@ -530,7 +530,9 @@ once (`CompositeBackend`), files the application ships, read-only (`StaticFileBa
 and point `SkillsConfig.withSources` and `InstructionsConfig.withPaths` there, since on state files only a tool
 call writes a file), a directory of the host (`HostFileBackend`), or one chosen per run
 (`FileBackend.resolved`). Each backend declares the locks its mutations hold, replays its external
-effects through `ReplayGuard`, and enforces its own size limits.
+effects through `ReplayGuard`, and enforces its own size limits. A `StoreFileBackend` is as shared as its
+`LongTermStore`: `InMemoryLongTermStore` is one process's, and `PostgresCheckpointer.longTermStore()` is every
+machine's ([long-term memory on the same database](durable-checkpointers#long-term-memory-on-the-same-database)).
 
 `HostFileBackend.open(root, lockDirectory)` exposes a trusted directory as `/`
 ([design §4.40](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.40-host-file-backend.md)).
