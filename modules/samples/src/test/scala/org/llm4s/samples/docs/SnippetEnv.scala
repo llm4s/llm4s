@@ -31,7 +31,7 @@ trait SnippetEnv {
   protected def myTools: Seq[ToolFunction[_, _]]     = ???
   protected def tools: ToolRegistry                  = ???
 
-  // reliability-guide.md: the client being wrapped
+  // guide/reliability.md: the client being wrapped
   protected def baseClient: LLMClient = ???
 
   // guide/vector-store.md: a store, records, a query embedding, filters, a hybrid searcher and text to chunk
@@ -45,4 +45,10 @@ trait SnippetEnv {
   protected def complex: MetadataFilter       = ???
   protected def searcher: HybridSearcher      = ???
   protected def documentText: String          = ???
+
+  // guide/agents/index.md, guardrails.md and human-review.md: an agent already built, its thread, the user's text
+  protected def agent: org.llm4s.agent.Agent             = ???
+  protected def threadId: org.llm4s.agent.graph.ThreadId = ???
+  protected def query: String                            = ???
+  protected def userInput: String                        = ???
 }

@@ -29,7 +29,7 @@ import scala.util.Try
  *  - the same calls the script makes (`defaultProvider` section, model registry, `getClient`, `complete`), with the
  *    prompt read out of the script, work end to end against a fake Ollama server, so no key and no network is needed;
  *  - the code blocks on the docs page, rendered for the script's release, are the committed files, so the page cannot
- *    drift from what was run; rendered for 0.5.0 they add the provider modules and a logging backend.
+ *    drift from what was run, and name the provider modules and a logging backend.
  */
 @org.llm4s.tags.DocsSpec
 class ScalaCliQuickstartSpec extends AnyFlatSpec with Matchers {
@@ -204,22 +204,9 @@ class ScalaCliQuickstartSpec extends AnyFlatSpec with Matchers {
     blocks(language).headOption.getOrElse(fail(s"the page has no ```$language block"))
 
   private lazy val releaseTag = "{{ site.data.project.latest_release }}"
-  private lazy val from050    = """{%- unless site.data.project.latest_release contains "0.4." %}"""
-  private lazy val endFrom050 = "{%- endunless %}"
 
-  /**
-   * What Jekyll renders for a release: the version placeholder, and the lines kept only from 0.5.0 on. The `-` in
-   * `{%-` removes the line break before each tag, as Liquid's whitespace control does.
-   */
-  private def render(text: String, release: String): String = {
-    val pattern = ("(?s)\n" + java.util.regex.Pattern.quote(from050) + "(.*?)\n" +
-      java.util.regex.Pattern.quote(endFrom050)).r
-    val kept = pattern.replaceAllIn(
-      text,
-      m => java.util.regex.Matcher.quoteReplacement(if (release.contains("0.4.")) "" else m.group(1))
-    )
-    kept.replace(releaseTag, release)
-  }
+  /** What Jekyll renders for a release: the version placeholder filled in. */
+  private def render(text: String, release: String): String = text.replace(releaseTag, release)
 
   private def usingDeps(text: String): Seq[String] =
     text.linesIterator.map(_.trim).filter(_.startsWith("//> using dep ")).map(_.stripPrefix("//> using dep ")).toSeq
@@ -235,31 +222,28 @@ class ScalaCliQuickstartSpec extends AnyFlatSpec with Matchers {
     text.linesIterator.map(_.stripTrailing()).filterNot(line => line.isBlank || isComment(line.trim)).toSeq
 
   it should "match the page's hello.scala block, rendered for the script's release" in {
-    latestRelease.startsWith("0.4.") shouldBe false
     code(render(block("scala"), latestRelease), scalaComment) shouldBe code(script, scalaComment)
   }
 
-  it should "add the provider modules and a logging backend to the page's script once 0.5.0 is the latest release" in {
-    val deps = usingDeps(render(block("scala"), "0.5.0"))
-
-    deps shouldBe Seq(
-      "org.llm4s::llm4s-core:0.5.0",
-      "org.llm4s::llm4s-openai:0.5.0",
-      "org.llm4s::llm4s-ollama:0.5.0",
+  it should "depend on core, the provider modules and a logging backend in the page's script" in {
+    usingDeps(render(block("scala"), latestRelease)) shouldBe Seq(
+      s"org.llm4s::llm4s-core:$latestRelease",
+      s"org.llm4s::llm4s-openai:$latestRelease",
+      s"org.llm4s::llm4s-ollama:$latestRelease",
       s"ch.qos.logback:logback-classic:$logbackVersion"
     )
-    // Rendered for 0.4.x, the one dependency is core: the provider modules are not published for it.
-    usingDeps(render(block("scala"), "0.4.1")) shouldBe Seq("org.llm4s::llm4s-core:0.4.1")
   }
 
-  it should "add a provider module to the installation page's Scala CLI lines from 0.5.0 on" in {
+  it should "name a provider module in the installation page's Scala CLI lines" in {
     val installation = read(root.resolve("docs").resolve("getting-started").resolve("installation.md"))
     val cli = blocks("scala", installation)
       .find(_.contains("//> using dep org.llm4s::llm4s-core"))
       .getOrElse(fail("installation.md has no Scala CLI block"))
 
-    usingDeps(render(cli, "0.4.1")) shouldBe Seq("org.llm4s::llm4s-core:0.4.1")
-    usingDeps(render(cli, "0.5.0")) shouldBe Seq("org.llm4s::llm4s-core:0.5.0", "org.llm4s::llm4s-openai:0.5.0")
+    usingDeps(render(cli, latestRelease)) shouldBe Seq(
+      s"org.llm4s::llm4s-core:$latestRelease",
+      s"org.llm4s::llm4s-openai:$latestRelease"
+    )
   }
 
   it should "match the page's application.conf and ollama.conf blocks" in {
