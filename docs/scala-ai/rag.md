@@ -105,9 +105,9 @@ def chatConfig(client: LLMClient, smallClient: LLMClient): RAGConfig =
 
 It sends the latest `maxHistoryMessages` user and assistant messages (10 by default; tool messages are left out) as a
 transcript with the follow-up, under `QuestionCondenser.DefaultSystemPrompt` (override it with `systemPrompt = ...`), at
-temperature 0 unless `options` says otherwise. If the call fails the query fails with a `ProcessingError`
-(`question-condense`); a blank reply searches with the original question. To search with the original question
-whenever the condenser fails, wrap it: `QuestionCondenser((q, h) => condenser.condense(q, h).orElse(Right(q)))`. With
+temperature 0 unless `options` says otherwise. If the call fails the query fails with the client's error (a rate
+limit is still a `RateLimitError`); a blank reply searches with the original question. To search with the original
+question whenever the condenser fails, wrap it: `QuestionCondenser((q, h) => condenser.condense(q, h).orElse(Right(q)))`. With
 `withTracing` its calls are traced and tagged `rag.condense`. Any function `(question, history) => Result[String]` is a
 condenser too: `withQuestionCondenser((question, history) => ...)`. Instead
 of text, `rag.ingest(path)` reads a file or a whole directory, and `rag.query(question)` returns the passages without

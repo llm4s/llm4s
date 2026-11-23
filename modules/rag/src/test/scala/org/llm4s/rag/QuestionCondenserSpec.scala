@@ -1,6 +1,6 @@
 package org.llm4s.rag
 
-import org.llm4s.error.{ NetworkError, ProcessingError, ValidationError }
+import org.llm4s.error.{ NetworkError, ValidationError }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -99,12 +99,9 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
     QuestionCondenser.llm(new ScriptedClient(Right("   "))).condense("Q?", history) shouldBe Right("Q?")
   }
 
-  it should "return a ProcessingError carrying the provider's error when the call fails" in {
-    val result =
-      QuestionCondenser.llm(new ScriptedClient(Left(NetworkError("down", None, "test")))).condense("Q?", history)
-    val error = result.left.toOption.get
-    error shouldBe a[ProcessingError]
-    error.message should include("down")
+  it should "return the client's error unchanged when the call fails" in {
+    val down = NetworkError("down", None, "test")
+    QuestionCondenser.llm(new ScriptedClient(Left(down))).condense("Q?", history) shouldBe Left(down)
   }
 
   it should "refuse a history window below 1 without calling the model" in {

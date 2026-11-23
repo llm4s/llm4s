@@ -1,7 +1,7 @@
 package org.llm4s.rag
 
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ ProcessingError, ValidationError }
+import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.trace.Tracing
@@ -61,8 +61,8 @@ object QuestionCondenser {
    * `maxHistoryMessages` user and assistant messages with text (tool messages and tool-call-only assistant messages
    * are left out, as is anything older), each as `User:` or `Assistant:`, then the follow-up question.
    *
-   * Failure: a failed call is a `ProcessingError` (`question-condense`) carrying the provider's error, which fails the
-   * query; a blank reply falls back to the original question. To answer from the original question whenever the call
+   * Failure: a failed call fails the query with the client's error, unchanged, so a rate limit is still a recoverable
+   * `RateLimitError`; a blank reply falls back to the original question. To answer from the original question whenever the call
    * fails, wrap it: `QuestionCondenser((q, h) => condenser.condense(q, h).orElse(Right(q)))`.
    *
    * With a tracer on the `RAG` (`RAGConfig.withTracing`), each call is traced and its usage tagged `rag.condense`.
@@ -111,8 +111,6 @@ object QuestionCondenser {
           )
           .map(_.content.trim)
           .map(standalone => if (standalone.isEmpty) question else standalone)
-          .left
-          .map(error => ProcessingError("question-condense", s"Failed to condense the question: ${error.formatted}"))
 
     private def prompt(question: String, history: Seq[Message]): String = {
       val turns = history
