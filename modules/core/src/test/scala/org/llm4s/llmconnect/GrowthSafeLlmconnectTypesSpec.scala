@@ -84,12 +84,11 @@ class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
       EmbeddingProviderSection(Some(Secret("k2")), Some("http://c"), Some("m2"), timeouts)
   }
 
-  "ProviderConfigKey" should "default to optional with no default, env or aliases" in {
+  "ProviderConfigKey" should "default to optional with no default or env" in {
     val key = ProviderConfigKey("region", "the region")
     key.required shouldBe false
     key.default shouldBe None
     key.env shouldBe None
-    key.deprecatedAliases shouldBe Seq.empty
   }
 
   it should "be changed by its setters" in {
@@ -99,9 +98,8 @@ class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
       .withRequired(true)
       .withDefault("eu")
       .withEnv("ZONE")
-      .withDeprecatedAliases(Seq("area"))
-    key shouldBe ProviderConfigKey("zone", "the zone", true, Some("eu"), Some("ZONE"), Seq("area"))
-    key.withDefault(None).withEnv(None) shouldBe ProviderConfigKey("zone", "the zone", true, None, None, Seq("area"))
+    key shouldBe ProviderConfigKey("zone", "the zone", true, Some("eu"), Some("ZONE"))
+    key.withDefault(None).withEnv(None) shouldBe ProviderConfigKey("zone", "the zone", true, None, None)
     key.withDefault(Some("us")).withEnv(Some("Z")).default shouldBe Some("us")
     ProviderConfigKey.optional("r", "d").withEnv("R").env shouldBe Some("R")
   }

@@ -89,19 +89,18 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
     }
 
     "fall back to the defaults its descriptor declares" in {
-      // The section carries only what the descriptor requires; base URL and model are
-      // its own defaults, which core has no way to know.
+      // The section carries only what the descriptor requires; the base URL is its own
+      // default, which core has no way to know.
       val (_, config) = load(
         """llm4s {
           |  embeddings {
-          |    provider = "fixturecloud"
+          |    model = "fixturecloud/some-model"
           |    fixturecloud { apiKey = "fk-test" }
           |  }
           |}""".stripMargin
       ).value
 
       config.baseUrl shouldBe "https://fixture.example/v1"
-      config.model shouldBe "fixture-default-model"
     }
 
     "prefer the unified EMBEDDING_MODEL over the section's model" in {
@@ -229,15 +228,6 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       error should include("(from llm4s.embeddings.model)")
     }
 
-    "be reported against llm4s.embeddings.provider when selected the legacy way" in {
-      // The two settings are alternatives, so naming the wrong one sends the reader to a key
-      // they never set - and `llm4s.embeddings.model` being absent is exactly why the legacy
-      // path was taken.
-      val error = load("""llm4s { embeddings { provider = "nosuch" } }""").left.value.message
-
-      error should include("(from llm4s.embeddings.provider)")
-      (error should not).include("llm4s.embeddings.model")
-    }
   }
 
   "the defaults that used to be duplicated" should {
@@ -256,10 +246,9 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       // `DefaultOllamaEmbeddingBaseUrl` in the loader - with nothing keeping them in step.
       // Ollama now lives in llm4s-ollama, which checks its own; this is the same property
       // for a provider with no reference.conf block at all.
-      val (_, config) = load("""llm4s { embeddings { provider = "keylessfixture" } }""").value
+      val (_, config) = load("""llm4s { embeddings { model = "keylessfixture/fixture-small" } }""").value
 
       config.baseUrl shouldBe "http://localhost:9999"
-      config.model shouldBe "fixture-default"
       config.apiKey.reveal shouldBe "fixture-not-required"
     }
 

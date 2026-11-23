@@ -308,9 +308,8 @@ object VectorMemoryExample {
         |To use real embeddings in production:
         |
         |  // 1. Configure embeddings provider and model in application.conf / reference.conf:
-        |  //    llm4s.embeddings.provider = "openai"        # or "voyage"
+        |  //    llm4s.embeddings.model = "openai/text-embedding-3-small"   # or "voyage/voyage-3"
         |  //    llm4s.embeddings.openai.baseUrl = "https://api.openai.com/v1"
-        |  //    llm4s.embeddings.openai.model   = "text-embedding-3-small"
         |  //
         |  // 2. Load typed config and wire the client + service explicitly:
         |  //

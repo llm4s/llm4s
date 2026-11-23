@@ -35,11 +35,7 @@ object ConfigKeys {
    * Unified embedding provider and model selector.
    *
    * Format: `provider/model`, e.g. `"openai/text-embedding-3-small"`,
-   * `"voyage/voyage-3"`, `"ollama/nomic-embed-text"`. Takes precedence over
-   * the legacy [[EMBEDDING_PROVIDER]] variable.
+   * `"voyage/voyage-3"`, `"ollama/nomic-embed-text"`.
    */
   val EMBEDDING_MODEL = "EMBEDDING_MODEL"
-
-  /** Legacy embedding provider selector; superseded by [[EMBEDDING_MODEL]]. */
-  val EMBEDDING_PROVIDER = "EMBEDDING_PROVIDER"
 }

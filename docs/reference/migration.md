@@ -50,7 +50,56 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`RAG.ingestChunks` takes `DocumentChunk`s](#ragingestchunks-takes-documentchunks-2732),
 [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
-and [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729).
+[context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
+[the legacy embedding provider selector is removed](#the-legacy-embedding-provider-selector-is-removed),
+and [Vertex AI no longer reads `endpoint` and `organization`](#vertex-ai-no-longer-reads-endpoint-and-organization).
+
+## The legacy embedding provider selector is removed
+
+Embeddings are selected by `EMBEDDING_MODEL` (`llm4s.embeddings.model`) alone, as `provider/model`. The older form,
+`EMBEDDING_PROVIDER` (`llm4s.embeddings.provider`) naming only the provider, is no longer bound or read:
+
+```bash
+# before
+EMBEDDING_PROVIDER=openai
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+
+# after
+EMBEDDING_MODEL=openai/text-embedding-3-small
+```
+
+In HOCON, replace `llm4s.embeddings.provider = "openai"` with
+`llm4s.embeddings.model = "openai/text-embedding-3-small"`. A configuration that still sets
+`llm4s.embeddings.provider` and no model fails to load with
+`llm4s.embeddings.provider ('openai') is no longer read: set EMBEDDING_MODEL (llm4s.embeddings.model) to provider/model, e.g. openai/<model>, and remove llm4s.embeddings.provider`;
+one that sets only the `EMBEDDING_PROVIDER` variable gets `Missing embedding config: set EMBEDDING_MODEL ...`.
+`ConfigKeys.EMBEDDING_PROVIDER` is removed. The model now always comes from `EMBEDDING_MODEL`: a block's own
+`llm4s.embeddings.<id>.model` (and the `<PROVIDER>_EMBEDDING_MODEL` variable bound to it), and a provider's default
+model, applied only to the provider-only form, so move a model set there into `EMBEDDING_MODEL`.
+
+## Vertex AI no longer reads `endpoint` and `organization`
+
+Vertex AI's `endpoint` and `organization` keys, renamed to `project` and `location` in 0.5.0
+([the note](#vertex-ai-endpoint-becomes-project-organization-becomes-location)), are no longer accepted as aliases.
+Rename them:
+
+```hocon
+vertex-main {
+  provider = "vertexai"
+  model    = "gemini-2.0-flash"
+  project  = "my-gcp-project"    # was endpoint
+  location = "europe-west4"      # was organization; optional, default us-central1
+}
+```
+
+They are now unknown keys: logged with a warning that names them and lists the keys Vertex AI accepts, and ignored.
+A section that sets `endpoint` and no `project` fails with
+`- project: the GCP project ID that owns your Vertex AI resources (set it in application.conf under llm4s.providers.<name>.project)`;
+one that sets `organization` and no `location` uses `us-central1`, so check the warning.
+
+For provider authors, the alias mechanism goes with them: `ProviderConfigKey` loses `deprecatedAliases` and
+`withDeprecatedAliases`, and `ProviderConfigSpec.BuiltinAliasKeys` is removed. Before 1.0 a key is renamed outright,
+with a migration note ([compatibility policy](compatibility-policy)).
 
 ## Context pruning enforces both limits and `minRecentTurns` (#2728, #2729)
 
@@ -3510,8 +3559,8 @@ vertex-main {
 }
 ```
 
-The old spellings still work for now, as deprecated aliases: each one logs a warning naming the
-section and the key to rename it to, and will stop working in a later release. Setting both
+The old spellings were kept as deprecated aliases until 0.7.0, which removed them
+([note](#vertex-ai-no-longer-reads-endpoint-and-organization)). Setting both
 `project` and a *different* `endpoint` (or `location` and a different `organization`) is an
 error rather than a guess. A missing project is now reported as
 `- project: the GCP project ID that owns your Vertex AI resources (set it in application.conf under llm4s.providers.<name>.project)`.

@@ -531,7 +531,7 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
   - Non-text stubs: `ENABLE_EXPERIMENTAL_STUBS`, `LLM4S_EMBEDDINGS_LOCAL_{IMAGE,AUDIO,VIDEO}_MODEL` → `EmbeddingSampleConfig.experimentalStubs()`, `.localModels()`
 
 - Embeddings: provider configuration
-  - Key: `EMBEDDING_MODEL` / `llm4s.embeddings.model` as `provider/model` (or legacy `EMBEDDING_PROVIDER` / `llm4s.embeddings.provider`)
+  - Key: `EMBEDDING_MODEL` / `llm4s.embeddings.model` as `provider/model`
   - Supported providers: `openai` (`llm4s-openai`), `voyage` (`llm4s-voyage`), `jina` (`llm4s-jina`), `cohere` (`llm4s-cohere`), `ollama` (`llm4s-ollama`); each registered by its module
   - Type: `(String, EmbeddingProviderConfig)`
   - Loader: `Llm4sConfig.embeddings()`
