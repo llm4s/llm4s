@@ -142,6 +142,8 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("url" -> "http://localhost:8080/test")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => err should include("not allowed"),
               result => fail(s"Expected Left but got Right: $result")
@@ -162,6 +164,8 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
           Seq("http://blocked.invalid./", "https://www.blocked.invalid./path").foreach { url =>
             tool
               .handler(SafeParameterExtractor(ujson.Obj("url" -> url)))
+              .left
+              .map(org.llm4s.toolapi.ToolHandlerError.message)
               .fold(
                 err => err should include("SSRF_BLOCKED"),
                 result => fail(s"Expected $url to be blocked but got Right: $result")
@@ -180,6 +184,8 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("url" -> "https://example.com/api", "method" -> "POST")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => err should include("not allowed"),
               result => fail(s"Expected Left but got Right: $result")
@@ -198,6 +204,8 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("url" -> "not-a-valid-url")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => err should include("Invalid URL"),
               result => fail(s"Expected Left but got Right: $result")
@@ -219,6 +227,8 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("url" -> "https://nonexistent.test/api")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               // Will fail due to connection, but should not fail due to method
               err => (err should not).include("method"),

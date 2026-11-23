@@ -66,7 +66,7 @@ object UUIDTool {
    * UUIDs is never silently given one.
    */
   private def requestedCount(extractor: SafeParameterExtractor): Either[String, Int] =
-    extractor.getIntEnhanced("count") match {
+    extractor.getInt("count") match {
       case Right(count)                                 => Right(count.min(10).max(1))
       case Left(_: ToolParameterError.MissingParameter) => Right(1)
       case Left(error)                                  => Left(error.message)

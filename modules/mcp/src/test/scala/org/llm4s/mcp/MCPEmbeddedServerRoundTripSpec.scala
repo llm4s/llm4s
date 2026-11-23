@@ -23,7 +23,7 @@ class MCPEmbeddedServerRoundTripSpec extends AnyFlatSpec with Matchers with Befo
   private var port: Int         = -1
 
   private def tool(name: String, description: String, schema: ObjectSchema[Map[String, Any]])(
-    handler: SafeParameterExtractor => Either[String, String]
+    handler: SafeParameterExtractor => Either[ToolHandlerError, String]
   ): ToolFunction[_, _] =
     ToolBuilder[Map[String, Any], String](name, description, schema)
       .withHandler(handler)

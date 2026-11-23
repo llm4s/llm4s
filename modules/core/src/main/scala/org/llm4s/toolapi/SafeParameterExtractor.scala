@@ -5,11 +5,15 @@ import org.llm4s.annotation.Stable
 import scala.annotation.tailrec
 
 /**
- * Safe parameter extraction with type checking and path navigation.
+ * Reads a tool call's arguments by name, with type checking and path navigation.
  *
- * This extractor provides two modes of operation:
- * 1. Simple mode: Returns Either[String, T] for backward compatibility
- * 2. Enhanced mode: Returns Either[ToolParameterError, T] for structured error reporting
+ * Every getter returns `Either[ToolParameterError, A]`: the error says which parameter is missing, null or of the
+ * wrong type, and a handler that returns it has the call refused as [[ToolCallError.InvalidArguments]], which
+ * lists each one for the model to correct (see [[ToolHandlerError]]).
+ *
+ * A path is a property name, or several joined by dots to reach into nested objects (`"user.name"`). A property
+ * whose own name contains a dot is found first: `"a.b"` reads the top-level property `a.b` when there is one, and
+ * otherwise `b` inside `a`.
  *
  * @param params The JSON parameters to extract from
  * @param call   The tool call being run, when the caller knows it: an agent sets it for every call, with the call's
@@ -28,16 +32,15 @@ final case class SafeParameterExtractor private (params: ujson.Value, call: Opti
   def withCall(call: Option[ToolCallInfo]): SafeParameterExtractor = copy(call = call)
   // Helper case class to return both the value and available keys from parent
   private case class NavigationResult(value: Option[ujson.Value], availableKeys: List[String])
-  // Simple mode - returns string errors for backward compatibility
 
   /**
    * Extract a required string parameter from the JSON params.
    *
    * @param path Dot-separated path to the parameter (e.g., `"user.name"`)
-   * @return `Right(value)` on success, `Left(errorMessage)` if the parameter is absent or not a string
+   * @return `Right(value)` on success, `Left(ToolParameterError)` if the parameter is absent, null or not a string
    */
-  def getString(path: String): Either[String, String] =
-    extract(path, _.strOpt, "string")
+  def getString(path: String): Either[ToolParameterError, String] =
+    extract(path, _.strOpt, ToolParameterType.String)
 
   /**
    * Extract a required integer parameter from the JSON params.
@@ -48,10 +51,10 @@ final case class SafeParameterExtractor private (params: ujson.Value, call: Opti
    * error it can correct.
    *
    * @param path Dot-separated path to the parameter
-   * @return `Right(value)` on success, `Left(errorMessage)` on failure
+   * @return `Right(value)` on success, `Left(ToolParameterError)` on failure
    */
-  def getInt(path: String): Either[String, Int] =
-    extract(path, SafeParameterExtractor.intOpt, "integer")
+  def getInt(path: String): Either[ToolParameterError, Int] =
+    extract(path, SafeParameterExtractor.intOpt, ToolParameterType.Integer)
 
   /**
    * Extract a required double (number) parameter from the JSON params.
@@ -60,95 +63,39 @@ final case class SafeParameterExtractor private (params: ujson.Value, call: Opti
    * arguments were parsed, so it cannot be recovered here. Declare large identifiers as strings in the tool's schema.
    *
    * @param path Dot-separated path to the parameter
-   * @return `Right(value)` on success, `Left(errorMessage)` on failure
+   * @return `Right(value)` on success, `Left(ToolParameterError)` on failure
    */
-  def getDouble(path: String): Either[String, Double] =
-    extract(path, _.numOpt, "number")
+  def getDouble(path: String): Either[ToolParameterError, Double] =
+    extract(path, _.numOpt, ToolParameterType.Number)
 
   /**
    * Extract a required boolean parameter from the JSON params.
    *
    * @param path Dot-separated path to the parameter
-   * @return `Right(value)` on success, `Left(errorMessage)` on failure
+   * @return `Right(value)` on success, `Left(ToolParameterError)` on failure
    */
-  def getBoolean(path: String): Either[String, Boolean] =
-    extract(path, _.boolOpt, "boolean")
+  def getBoolean(path: String): Either[ToolParameterError, Boolean] =
+    extract(path, _.boolOpt, ToolParameterType.Boolean)
 
   /**
    * Extract a required JSON array parameter from the JSON params.
    *
    * @param path Dot-separated path to the parameter
-   * @return `Right(ujson.Arr)` on success, `Left(errorMessage)` on failure
+   * @return `Right(ujson.Arr)` on success, `Left(ToolParameterError)` on failure
    */
-  def getArray(path: String): Either[String, ujson.Arr] =
-    extract(path, v => Option(v).collect { case arr: ujson.Arr => arr }, "array")
+  def getArray(path: String): Either[ToolParameterError, ujson.Arr] =
+    extract(path, v => Option(v).collect { case arr: ujson.Arr => arr }, ToolParameterType.Array)
 
   /**
    * Extract a required JSON object parameter from the JSON params.
    *
    * @param path Dot-separated path to the parameter
-   * @return `Right(ujson.Obj)` on success, `Left(errorMessage)` on failure
-   */
-  def getObject(path: String): Either[String, ujson.Obj] =
-    extract(path, v => Option(v).collect { case obj: ujson.Obj => obj }, "object")
-
-  // Enhanced mode - returns structured errors
-
-  /**
-   * Extract a required string parameter with structured error reporting.
-   *
-   * @param path Dot-separated path to the parameter
-   * @return `Right(value)` on success, `Left(ToolParameterError)` on failure
-   */
-  def getStringEnhanced(path: String): Either[ToolParameterError, String] =
-    extractEnhanced(path, _.strOpt, "string")
-
-  /**
-   * Extract a required integer parameter with structured error reporting.
-   *
-   * @param path Dot-separated path to the parameter
-   * @return `Right(value)` on success, `Left(ToolParameterError)` on failure
-   */
-  def getIntEnhanced(path: String): Either[ToolParameterError, Int] =
-    extractEnhanced(path, SafeParameterExtractor.intOpt, "integer")
-
-  /**
-   * Extract a required double (number) parameter with structured error reporting.
-   *
-   * @param path Dot-separated path to the parameter
-   * @return `Right(value)` on success, `Left(ToolParameterError)` on failure
-   */
-  def getDoubleEnhanced(path: String): Either[ToolParameterError, Double] =
-    extractEnhanced(path, _.numOpt, "number")
-
-  /**
-   * Extract a required boolean parameter with structured error reporting.
-   *
-   * @param path Dot-separated path to the parameter
-   * @return `Right(value)` on success, `Left(ToolParameterError)` on failure
-   */
-  def getBooleanEnhanced(path: String): Either[ToolParameterError, Boolean] =
-    extractEnhanced(path, _.boolOpt, "boolean")
-
-  /**
-   * Extract a required JSON array parameter with structured error reporting.
-   *
-   * @param path Dot-separated path to the parameter
-   * @return `Right(ujson.Arr)` on success, `Left(ToolParameterError)` on failure
-   */
-  def getArrayEnhanced(path: String): Either[ToolParameterError, ujson.Arr] =
-    extractEnhanced(path, v => Option(v).collect { case arr: ujson.Arr => arr }, "array")
-
-  /**
-   * Extract a required JSON object parameter with structured error reporting.
-   *
-   * @param path Dot-separated path to the parameter
    * @return `Right(ujson.Obj)` on success, `Left(ToolParameterError)` on failure
    */
-  def getObjectEnhanced(path: String): Either[ToolParameterError, ujson.Obj] =
-    extractEnhanced(path, v => Option(v).collect { case obj: ujson.Obj => obj }, "object")
+  def getObject(path: String): Either[ToolParameterError, ujson.Obj] =
+    extract(path, v => Option(v).collect { case obj: ujson.Obj => obj }, ToolParameterType.Object)
 
-  // Optional parameter methods (enhanced mode only)
+  // Optional parameters
 
   /**
    * Extract an optional string parameter. Returns `Right(None)` when the parameter is absent.
@@ -157,7 +104,7 @@ final case class SafeParameterExtractor private (params: ujson.Value, call: Opti
    * @return `Right(Some(value))` if present, `Right(None)` if absent, `Left` on type mismatch
    */
   def getOptionalString(path: String): Either[ToolParameterError, Option[String]] =
-    extractOptional(path, _.strOpt, "string")
+    extractOptional(path, _.strOpt, ToolParameterType.String)
 
   /**
    * Extract an optional integer parameter. Returns `Right(None)` when the parameter is absent.
@@ -166,7 +113,7 @@ final case class SafeParameterExtractor private (params: ujson.Value, call: Opti
    * @return `Right(Some(value))` if present, `Right(None)` if absent, `Left` on type mismatch
    */
   def getOptionalInt(path: String): Either[ToolParameterError, Option[Int]] =
-    extractOptional(path, SafeParameterExtractor.intOpt, "integer")
+    extractOptional(path, SafeParameterExtractor.intOpt, ToolParameterType.Integer)
 
   /**
    * Extract an optional double (number) parameter. Returns `Right(None)` when the parameter is absent.
@@ -175,7 +122,7 @@ final case class SafeParameterExtractor private (params: ujson.Value, call: Opti
    * @return `Right(Some(value))` if present, `Right(None)` if absent, `Left` on type mismatch
    */
   def getOptionalDouble(path: String): Either[ToolParameterError, Option[Double]] =
-    extractOptional(path, _.numOpt, "number")
+    extractOptional(path, _.numOpt, ToolParameterType.Number)
 
   /**
    * Extract an optional boolean parameter. Returns `Right(None)` when the parameter is absent.
@@ -184,57 +131,50 @@ final case class SafeParameterExtractor private (params: ujson.Value, call: Opti
    * @return `Right(Some(value))` if present, `Right(None)` if absent, `Left` on type mismatch
    */
   def getOptionalBoolean(path: String): Either[ToolParameterError, Option[Boolean]] =
-    extractOptional(path, _.boolOpt, "boolean")
+    extractOptional(path, _.boolOpt, ToolParameterType.Boolean)
 
-  // Simple mode extractor - returns string errors
-  private def extract[T](path: String, extractor: ujson.Value => Option[T], expectedType: String): Either[String, T] =
-    extractEnhanced(path, extractor, expectedType).left.map(_.message)
+  // A property whose own name has a dot in it is read by that name; otherwise the dots are steps into nested objects
+  private def steps(path: String): List[String] =
+    params match {
+      case obj: ujson.Obj if obj.value.contains(path) => List(path)
+      case _ if path.contains('.')                    => path.split('.').toList
+      case _                                          => List(path)
+    }
 
-  // Enhanced mode extractor - returns structured errors
-  private def extractEnhanced[T](
+  private def extract[T](
     path: String,
     extractor: ujson.Value => Option[T],
-    expectedType: String
-  ): Either[ToolParameterError, T] = {
-    val pathParts = if (path.contains('.')) path.split('.').toList else List(path)
-
-    navigateToValue(pathParts, params) match {
+    expected: ToolParameterType
+  ): Either[ToolParameterError, T] =
+    navigateToValue(steps(path), params) match {
       case Left(error) => Left(error)
       case Right(NavigationResult(None, availableKeys)) =>
-        Left(ToolParameterError.MissingParameter(path, expectedType, availableKeys))
+        Left(ToolParameterError.MissingParameter(path, expected.name, availableKeys))
       case Right(NavigationResult(Some(ujson.Null), _)) =>
-        Left(ToolParameterError.NullParameter(path, expectedType))
+        Left(ToolParameterError.NullParameter(path, expected.name))
       case Right(NavigationResult(Some(value), _)) =>
         extractor(value) match {
           case Some(result) => Right(result)
-          case None =>
-            val actualType = getValueType(value)
-            Left(ToolParameterError.TypeMismatch(path, expectedType, actualType))
+          case None         => Left(ToolParameterError.TypeMismatch(path, expected.name, getValueType(value)))
         }
     }
-  }
 
   // Optional parameter extraction
   private def extractOptional[T](
     path: String,
     extractor: ujson.Value => Option[T],
-    expectedType: String
-  ): Either[ToolParameterError, Option[T]] = {
-    val pathParts = if (path.contains('.')) path.split('.').toList else List(path)
-
-    navigateToValue(pathParts, params) match {
+    expected: ToolParameterType
+  ): Either[ToolParameterError, Option[T]] =
+    navigateToValue(steps(path), params) match {
       case Left(error)                                  => Left(error)
       case Right(NavigationResult(None, _))             => Right(None) // Optional parameter missing is OK
       case Right(NavigationResult(Some(ujson.Null), _)) => Right(None) // Null for optional is OK
       case Right(NavigationResult(Some(value), _)) =>
         extractor(value) match {
           case Some(result) => Right(Some(result))
-          case None =>
-            val actualType = getValueType(value)
-            Left(ToolParameterError.TypeMismatch(path, expectedType, actualType))
+          case None         => Left(ToolParameterError.TypeMismatch(path, expected.name, getValueType(value)))
         }
     }
-  }
 
   // Navigate to a value in nested JSON
   private def navigateToValue(
@@ -326,33 +266,26 @@ final case class SafeParameterExtractor private (params: ujson.Value, call: Opti
   }
 
   /**
-   * Validate all required parameters at once and collect all errors.
+   * Checks that every listed parameter is present and of its type, and reports all that are not, rather than the
+   * first: useful before any business logic runs.
    *
-   * Useful for upfront validation before any business logic runs.
+   * Each type is checked with the same rules as its getter ([[ToolParameterType.Integer]] is a whole number in the
+   * `Int` range).
    *
-   * `expectedType` is one of `string`, `integer`, `number`, `boolean`, `array` or `object`, checked with the same
-   * rules as the typed getters (`integer` is a whole number in the `Int` range). A type name this method does
-   * not know is checked for presence only.
-   *
-   * @param requirements Pairs of `(path, expectedType)` to validate
-   * @return `Right(())` if all parameters are present and have the correct types,
-   *         `Left(errors)` with the full list of validation failures otherwise
+   * @param requirements Pairs of `(path, type)` to validate
+   * @return `Right(())` if all parameters are present and have the correct types; otherwise the one error, or a
+   *         [[ToolParameterError.MultipleErrors]] holding every one, which a handler can return as it is
    * @example
-   * {{{extractor.validateRequired("name" -> "string", "age" -> "integer")}}}
+   * {{{extractor.validateRequired("name" -> ToolParameterType.String, "age" -> ToolParameterType.Integer)}}}
    */
-  def validateRequired(
-    requirements: (String, String)*
-  ): Either[List[ToolParameterError], Unit] = {
-    val errors = requirements.flatMap { case (path, expectedType) =>
-      extractEnhanced(path, SafeParameterExtractor.typeCheck(expectedType), expectedType) match {
-        case Left(error) => Some(error)
-        case Right(_)    => None
-      }
-    }.toList
-
-    if (errors.isEmpty) Right(())
-    else Left(errors)
-  }
+  def validateRequired(requirements: (String, ToolParameterType)*): Either[ToolParameterError, Unit] =
+    requirements.flatMap { case (path, expected) =>
+      extract(path, expected.read, expected).left.toOption
+    }.toList match {
+      case Nil           => Right(())
+      case single :: Nil => Left(single)
+      case several       => Left(ToolParameterError.MultipleErrors(several))
+    }
 }
 
 object SafeParameterExtractor {
@@ -367,24 +300,45 @@ object SafeParameterExtractor {
   /** A whole number that fits in an `Int`; `None` for a fraction, NaN, an infinity or a value out of range. */
   private[toolapi] def intOpt(value: ujson.Value): Option[Int] =
     value.numOpt.filter(d => d >= Int.MinValue && d <= Int.MaxValue && d == Math.rint(d)).map(_.toInt)
+}
 
-  /** What `validateRequired` checks for a declared type name; an unknown name checks presence only. */
-  private[toolapi] def typeCheck(expectedType: String): ujson.Value => Option[Unit] = {
-    val check: ujson.Value => Boolean = expectedType match {
-      case "string"  => _.strOpt.isDefined
-      case "integer" => intOpt(_).isDefined
-      case "number"  => _.numOpt.isDefined
-      case "boolean" => _.boolOpt.isDefined
-      case "array"   => _.arrOpt.isDefined
-      case "object"  => _.objOpt.isDefined
-      case _         => _ => true
+/**
+ * The JSON type a tool parameter is read as: what [[SafeParameterExtractor.validateRequired]] checks, and the
+ * `expectedType` a [[ToolParameterError]] names.
+ *
+ * @param name the JSON Schema type name, as it appears in an error message
+ */
+@Stable
+enum ToolParameterType(val name: Predef.String) {
+
+  /** A JSON string. */
+  case String extends ToolParameterType("string")
+
+  /** A JSON number with no fractional part that fits in an `Int`. */
+  case Integer extends ToolParameterType("integer")
+
+  /** A JSON number. */
+  case Number extends ToolParameterType("number")
+
+  /** `true` or `false`. */
+  case Boolean extends ToolParameterType("boolean")
+
+  /** A JSON array. */
+  case Array extends ToolParameterType("array")
+
+  /** A JSON object. */
+  case Object extends ToolParameterType("object")
+
+  /** `Some(())` when `value` is of this type, by the rule of the getter for it. */
+  private[toolapi] def read(value: ujson.Value): Option[Unit] = {
+    val ok = this match {
+      case ToolParameterType.String  => value.strOpt.isDefined
+      case ToolParameterType.Integer => SafeParameterExtractor.intOpt(value).isDefined
+      case ToolParameterType.Number  => value.numOpt.isDefined
+      case ToolParameterType.Boolean => value.boolOpt.isDefined
+      case ToolParameterType.Array   => value.arrOpt.isDefined
+      case ToolParameterType.Object  => value.objOpt.isDefined
     }
-    value => if (check(value)) Some(()) else None
+    if (ok) Some(()) else None
   }
-
-  /**
-   * Create an extractor that uses enhanced error reporting by default.
-   * This is a convenience method for code that wants to use structured errors.
-   */
-  def enhanced(params: ujson.Value): SafeParameterExtractor = SafeParameterExtractor(params)
 }

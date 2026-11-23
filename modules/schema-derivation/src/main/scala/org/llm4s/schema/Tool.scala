@@ -71,7 +71,7 @@ object Tool {
         name,
         description,
         parameters,
-        extractor => decode[A](parameters, extractor.params).left.map(message).flatMap(handler)
+        extractor => decode[A](parameters, extractor.params).left.map(refused).flatMap(handler)
       )
     }
 
@@ -109,7 +109,7 @@ object Tool {
         description,
         parameters,
         extractor =>
-          decode[A](parameters, extractor.params).left.map(message).flatMap { arguments =>
+          decode[A](parameters, extractor.params).left.map(refused).flatMap { arguments =>
             val key = extractor.call.fold(ToolScope.fallbackKey(name, extractor.params))(_.idempotencyKey)
             boundary[Either[String, R]] {
               given ToolScope = new ToolScope(extractor.call, key, summon[boundary.Label[Either[String, R]]])
@@ -171,9 +171,11 @@ object Tool {
           )
       }
 
-  private[schema] def message(errors: List[ToolParameterError]): String = errors match {
-    case single :: Nil => single.message
-    case several       => ToolParameterError.MultipleErrors(several).message
+  // The arguments' errors as the one error a handler returns: the call is then refused as InvalidArguments,
+  // with each of them listed, exactly as a hand-written handler's `validateRequired` has it refused.
+  private[schema] def refused(errors: List[ToolParameterError]): ToolParameterError = errors match {
+    case single :: Nil => single
+    case several       => ToolParameterError.MultipleErrors(several)
   }
 
   /**

@@ -57,6 +57,7 @@ final case class ToolExecutionConfig private (
   def withRetryPolicy(retryPolicy: Option[ToolRetryPolicy]): ToolExecutionConfig = copy(retryPolicy = retryPolicy)
 }
 
+@Experimental
 object ToolExecutionConfig {
 
   /**
@@ -150,6 +151,7 @@ final case class ToolRetryPolicy private (
   }
 }
 
+@Experimental
 object ToolRetryPolicy {
 
   /**

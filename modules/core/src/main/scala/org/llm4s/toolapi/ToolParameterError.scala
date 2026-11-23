@@ -3,6 +3,34 @@ package org.llm4s.toolapi
 import org.llm4s.annotation.Stable
 
 /**
+ * What a tool's handler returns when it cannot do what was asked: a [[ToolParameterError]] when the call's arguments
+ * are at fault, which is what [[SafeParameterExtractor]]'s getters return, or a message when the tool itself says
+ * no. A handler reads its arguments and reports its own failures in one `for` comprehension:
+ * {{{
+ * .withHandler { args =>
+ *   for {
+ *     city    <- args.getString("city")                 // Left(ToolParameterError) when missing or mistyped
+ *     weather <- lookup(city).toRight(s"no such city: $city") // Left(String): the tool's own failure
+ *   } yield weather
+ * }
+ * }}}
+ * [[ToolFunction.execute]] turns the first into [[ToolCallError.InvalidArguments]], with every parameter error in
+ * its `parameterErrors`, and the second into [[ToolCallError.HandlerError]].
+ */
+type ToolHandlerError = String | ToolParameterError
+
+/** Reading a [[ToolHandlerError]]. */
+@Stable
+object ToolHandlerError {
+
+  /** The error as text: the handler's own message, or a parameter error's [[ToolParameterError.message]]. */
+  def message(error: ToolHandlerError): String = error match {
+    case text: String              => text
+    case error: ToolParameterError => error.message
+  }
+}
+
+/**
  * Structured error information for tool parameter validation.
  *
  * Represents specific validation failures when parsing tool call arguments,
@@ -122,10 +150,16 @@ object ToolParameterError {
 }
 
 /**
- * Enhanced tool call errors with consistent formatting.
+ * Why a tool call did not return a result.
  *
  * Covers the full lifecycle of a tool invocation: unknown function, null arguments,
- * invalid arguments, handler errors, and execution exceptions.
+ * invalid arguments, handler errors, execution exceptions, a timeout and a cancellation.
+ *
+ * A `ToolCallError` is not an [[org.llm4s.error.LLMError]], on purpose. An `LLMError` is a call into llm4s that
+ * failed, for the program to handle. A tool call's failure is a result: it is sent back to the model, which reads
+ * it and tries again ([[formatted]] as text, [[ToolCallErrorJson.toJson]] as JSON), and the conversation goes on.
+ * Code that must stop on one maps it at that point, for example
+ * `result.left.map(e => ProcessingError("tool", e.formatted))`.
  */
 @Stable
 sealed trait ToolCallError {
@@ -263,8 +297,7 @@ object ToolCallError {
  *       "receivedType": "<string|null>",
  *       "availableParameters": ["<string>", ...]  // optional hint
  *     }
- *   ],
- *   "error": "<legacy error string for older consumers>"
+ *   ]
  * }
  * }}}
  */
@@ -331,20 +364,14 @@ object ToolCallErrorJson {
   /**
    * Convert a ToolCallError to structured JSON for ToolMessage.content.
    *
-   * Always includes the legacy "error" field for backward compatibility
-   * with older consumers that expect the escaped string format.
-   *
    * @param error The tool call error to serialize
    * @return ujson.Obj containing structured error information
    */
   def toJson(error: ToolCallError): ujson.Obj = {
-    val legacyError = error.formatted
-
     val base = ujson.Obj(
       "isError"  -> true,
       "toolName" -> error.toolName,
-      "message"  -> error.message,
-      "error"    -> legacyError // Legacy field for backward compatibility
+      "message"  -> error.message
     )
 
     error match {

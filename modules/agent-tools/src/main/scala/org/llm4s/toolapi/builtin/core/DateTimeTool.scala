@@ -121,8 +121,8 @@ object DateTimeTool {
       schema = schema
     ).withHandler { extractor =>
       for {
-        timezoneParam <- extractor.getOptionalString("timezone").left.map(_.message)
-        formatParam   <- extractor.getOptionalString("format").left.map(_.message)
+        timezoneParam <- extractor.getOptionalString("timezone")
+        formatParam   <- extractor.getOptionalString("format")
         timezone = timezoneParam.getOrElse("UTC")
         format <- parseFormat(formatParam.getOrElse("iso"))
         zoneId <- Try(ZoneId.of(timezone)).toEither.left.map(e => s"Invalid timezone '$timezone': ${e.getMessage}")

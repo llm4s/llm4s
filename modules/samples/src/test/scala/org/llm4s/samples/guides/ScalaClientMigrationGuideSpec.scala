@@ -128,9 +128,10 @@ class ScalaClientMigrationGuideSpec extends AnyFlatSpec with Matchers with Eithe
 
     // snippet: agent-run
     val answer: Result[Option[String]] = for {
-      tool   <- weatherTool
-      agent  <- Agent.builder("weather-agent", client).withTools(ToolRegistry.of(Seq(tool)).toOption.get).build()
-      result <- agent.run("What's the weather in Paris?")
+      tool     <- weatherTool
+      registry <- ToolRegistry.of(Seq(tool))
+      agent    <- Agent.builder("weather-agent", client).withTools(registry).build()
+      result   <- agent.run("What's the weather in Paris?")
     } yield result.answer
     // end snippet
 

@@ -126,7 +126,12 @@ class HttpRedirectAllowlistSpec extends AnyFlatSpec with Matchers with BeforeAnd
     body.foreach(b => params("body") = b)
     contentType.foreach(ct => params("content_type") = ct)
     val result =
-      HTTPTool.createSafe(cfg).fold(e => fail(e.formatted), identity).handler(SafeParameterExtractor(params))
+      HTTPTool
+        .createSafe(cfg)
+        .fold(e => fail(e.formatted), identity)
+        .handler(SafeParameterExtractor(params))
+        .left
+        .map(org.llm4s.toolapi.ToolHandlerError.message)
     val json = ujson.read(result.fold(e => fail(e), _.body))
     (json("headers").obj.map { case (k, v) => k -> v.str }.toMap, json("body").str)
   }
@@ -384,6 +389,8 @@ class HttpRedirectAllowlistSpec extends AnyFlatSpec with Matchers with BeforeAnd
       .createSafe(config.withAllMethods)
       .fold(e => fail(e.formatted), identity)
       .handler(SafeParameterExtractor(params))
+      .left
+      .map(org.llm4s.toolapi.ToolHandlerError.message)
     result.map(_.method) shouldBe Right("OPTIONS")
   }
 }

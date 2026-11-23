@@ -109,7 +109,7 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers {
     json("toolName").str shouldBe "nonexistent_tool"
     json("errorType").str shouldBe "unknown_function"
     json("message").str should include("is not a recognized tool")
-    json("error").str should include("Tool call 'nonexistent_tool'")
+    json.obj.get("error") shouldBe None
     json.obj.get("parameterErrors") shouldBe None
   }
 

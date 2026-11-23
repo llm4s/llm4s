@@ -55,8 +55,9 @@ class TypedCalculatorExampleSpec extends AnyFlatSpec with Matchers {
 
   it should "refuse an operation the built-in one rejects in its handler, before the handler runs" in {
     typed.execute(ujson.Obj("operation" -> "mul", "a" -> 1, "b" -> 2)) match {
-      case Left(ToolCallError.HandlerError("calculator", message)) => message should include("one of add, subtract")
-      case other                                                   => fail(s"unexpected $other")
+      case Left(error @ ToolCallError.InvalidArguments("calculator", List(_))) =>
+        error.message should include("one of add, subtract")
+      case other => fail(s"unexpected $other")
     }
   }
 

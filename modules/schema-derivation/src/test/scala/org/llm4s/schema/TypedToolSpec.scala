@@ -119,7 +119,10 @@ object TypedTools {
 
   // What a hand-written handler that checks every parameter up front reports.
   def handWritten(arguments: ujson.Value) =
-    SafeParameterExtractor(arguments).validateRequired("a" -> "integer", "b" -> "integer")
+    SafeParameterExtractor(arguments)
+      .validateRequired("a" -> ToolParameterType.Integer, "b" -> ToolParameterType.Integer)
+      .left
+      .map(error => ToolCallErrorJson.flattenErrors(List(error)))
 
   val orderParameters = SchemaOf[Order].definition.asInstanceOf[ObjectSchema[Order]]
 }
@@ -331,13 +334,13 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
     val arguments = ujson.read("""{"address": {"zip": "75001"}, "lines": [], "tags": [], "id": 1}""")
     val missing   = MissingParameter("address.city", "string", List("zip"))
     Tool.decode(orderParameters, arguments) shouldBe Left(List(missing))
-    SafeParameterExtractor(arguments).getStringEnhanced("address.city") shouldBe Left(missing)
+    SafeParameterExtractor(arguments).getString("address.city") shouldBe Left(missing)
   }
 
   it should "report a nested object that is not an object as getObject does" in {
     val arguments = ujson.read("""{"address": "Paris", "lines": [], "tags": [], "id": 1}""")
     Tool.decode(orderParameters, arguments) shouldBe
-      SafeParameterExtractor(arguments).getObjectEnhanced("address").map(_ => ()).left.map(List(_))
+      SafeParameterExtractor(arguments).getObject("address").map(_ => ()).left.map(List(_))
     Tool.decode(orderParameters, arguments) shouldBe Left(List(TypeMismatch("address", "object", "string")))
   }
 
@@ -406,7 +409,14 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
       )
     )
     Tool.decode(parameters, sent) shouldBe
-      SafeParameterExtractor(sent).validateRequired("flag" -> "boolean", "ids" -> "array", "id" -> "integer")
+      SafeParameterExtractor(sent)
+        .validateRequired(
+          "flag" -> ToolParameterType.Boolean,
+          "ids"  -> ToolParameterType.Array,
+          "id"   -> ToolParameterType.Integer
+        )
+        .left
+        .map(error => ToolCallErrorJson.flattenErrors(List(error)))
   }
 
   it should "check a Boolean, null items of a list of Options, and Long and Int ranges" in {
@@ -425,10 +435,10 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
     )
     Tool.decode(parameters, wrong) shouldBe Left(
       List(
-        SafeParameterExtractor(wrong).getBooleanEnhanced("flag"),
-        SafeParameterExtractor(ujson.Obj("ids[0]" -> 1.5)).getIntEnhanced("ids[0]"),
-        SafeParameterExtractor(ujson.Obj("ids[1]" -> ujson.Obj())).getIntEnhanced("ids[1]"),
-        SafeParameterExtractor(wrong).getIntEnhanced("id"),
+        SafeParameterExtractor(wrong).getBoolean("flag"),
+        SafeParameterExtractor(ujson.Obj("ids[0]" -> 1.5)).getInt("ids[0]"),
+        SafeParameterExtractor(ujson.Obj("ids[1]" -> ujson.Obj())).getInt("ids[1]"),
+        SafeParameterExtractor(wrong).getInt("id"),
         SafeParameterExtractor(wrong).getOptionalInt("maybe")
       ).flatMap(_.left.toOption)
     )

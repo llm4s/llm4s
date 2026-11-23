@@ -26,9 +26,9 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
     ).withHandler { params =>
       // Use SafeParameterExtractor in enhanced mode for structured errors
       val result = for {
-        item <- params.getStringEnhanced("item")
-        qty  <- params.getDoubleEnhanced("quantity")
-        loc  <- params.getStringEnhanced("location")
+        item <- params.getString("item")
+        qty  <- params.getDouble("quantity")
+        loc  <- params.getString("location")
       } yield TestResult(s"Success: $item, $qty, $loc")
 
       result.left.map(_.message)
@@ -127,7 +127,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
       "Divides 10 by the provided value",
       schema
     ).withHandler { params =>
-      params.getDoubleEnhanced("value") match {
+      params.getDouble("value") match {
         case Right(0)  => Left("cannot divide by zero")
         case Right(v)  => Right(TestResult(s"Result: ${10.0 / v}"))
         case Left(err) => Left(err.message)
@@ -221,7 +221,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
       )
     )
 
-    val result = extractor.getStringEnhanced("username")
+    val result = extractor.getString("username")
 
     (result should be).a(Symbol("left"))
     val error = result.fold(identity, v => fail(s"Expected error but got: $v"))
@@ -241,11 +241,11 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
     )
 
     // Test successful nested access
-    val nameResult = extractor.getStringEnhanced("user.profile.name")
+    val nameResult = extractor.getString("user.profile.name")
     nameResult shouldBe Right("John")
 
     // Test missing nested property
-    val ageResult = extractor.getIntEnhanced("user.profile.age")
+    val ageResult = extractor.getInt("user.profile.age")
     (ageResult should be).a(Symbol("left"))
     val error = ageResult.fold(identity, v => fail(s"Expected error but got: $v"))
     error.message should include("required parameter 'user.profile.age' (type: integer) is missing")

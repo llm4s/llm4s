@@ -43,7 +43,7 @@ object MultiToolExample {
         )
       )
 
-    def calculatorHandler(params: SafeParameterExtractor): Either[String, CalculationResult] =
+    def calculatorHandler(params: SafeParameterExtractor): Either[ToolHandlerError, CalculationResult] =
       for {
         operation <- params.getString("operation")
         a         <- params.getDouble("a")
@@ -78,7 +78,7 @@ object MultiToolExample {
         )
       )
 
-    def searchHandler(params: SafeParameterExtractor): Either[String, SearchResult] =
+    def searchHandler(params: SafeParameterExtractor): Either[ToolHandlerError, SearchResult] =
       for {
         query <- params.getString("query")
         limit <- params.getInt("limit")

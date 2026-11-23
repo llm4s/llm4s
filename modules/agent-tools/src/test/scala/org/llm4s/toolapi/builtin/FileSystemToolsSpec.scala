@@ -116,6 +116,8 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           val params = ujson.Obj("path" -> tempFile.toString)
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               readResult => {
@@ -140,7 +142,10 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
     encoding.foreach(e => params("encoding") = e)
     ReadFileTool
       .createSafe(config)
-      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), _.handler(SafeParameterExtractor(params)))
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        _.handler(SafeParameterExtractor(params)).left.map(org.llm4s.toolapi.ToolHandlerError.message)
+      )
   }
 
   it should "return an error for an unknown encoding" in {
@@ -170,6 +175,8 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           val params = ujson.Obj("path" -> "/etc/passwd")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => err should include("Access denied"),
               result => fail(s"Expected Left but got Right: $result")
@@ -188,6 +195,8 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           val params = ujson.Obj("path" -> (testDir.toString + "/nonexistent_file_12345.txt"))
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => err should include("not found"),
               result => fail(s"Expected Left but got Right: $result")
@@ -209,6 +218,8 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           val params = ujson.Obj("path" -> tempFile.toString, "max_lines" -> 2)
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               readResult => {
@@ -238,6 +249,8 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           val params = ujson.Obj("path" -> subDir.toString)
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               listResult => {
@@ -271,6 +284,8 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           val params = ujson.Obj("path" -> subDir.toString)
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               listResult => {
@@ -301,6 +316,8 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           val params = ujson.Obj("path" -> subDir.toString, "include_hidden" -> true)
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               listResult => {
@@ -328,6 +345,8 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           val params = ujson.Obj("path" -> tempFile.toString)
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               infoResult => {
@@ -354,6 +373,8 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           val params = ujson.Obj("path" -> (testDir.toString + "/nonexistent_12345.txt"))
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               infoResult => {
@@ -377,6 +398,8 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           val params     = ujson.Obj("path" -> outputPath, "content" -> "Hello!")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               writeResult => {
@@ -402,7 +425,10 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
     encoding.foreach(e => params("encoding") = e)
     val result = WriteFileTool
       .createSafe(config)
-      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), _.handler(SafeParameterExtractor(params)))
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        _.handler(SafeParameterExtractor(params)).left.map(org.llm4s.toolapi.ToolHandlerError.message)
+      )
     (result, target)
   }
 
@@ -444,6 +470,8 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           val params = ujson.Obj("path" -> "/tmp/other/file.txt", "content" -> "test")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => err should include("Access denied"),
               result => fail(s"Expected Left but got Right: $result")
@@ -465,6 +493,8 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
           val params = ujson.Obj("path" -> tempFile.toString, "content" -> " World!", "append" -> true)
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               _ => {

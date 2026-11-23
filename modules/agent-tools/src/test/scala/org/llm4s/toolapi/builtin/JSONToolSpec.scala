@@ -28,7 +28,7 @@ class JSONToolSpec extends AnyFlatSpec with Matchers {
   }
 
   private def run(arguments: ujson.Value): Either[String, JSONResult] =
-    tool.handler(SafeParameterExtractor(arguments))
+    tool.handler(SafeParameterExtractor(arguments)).left.map(org.llm4s.toolapi.ToolHandlerError.message)
 
   private def run(operation: String, json: String, path: Option[String] = None): Either[String, JSONResult] =
     run(args(operation, json, path))

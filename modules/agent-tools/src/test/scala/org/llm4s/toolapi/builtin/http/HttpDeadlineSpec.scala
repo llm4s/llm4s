@@ -148,7 +148,8 @@ class HttpDeadlineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   private def timed(url: String, cfg: HttpConfig): (Either[String, HTTPResult], FiniteDuration) = {
     val tool  = HTTPTool.createSafe(cfg).fold(e => fail(e.formatted), identity)
     val start = System.nanoTime()
-    val out   = tool.handler(SafeParameterExtractor(ujson.Obj("url" -> url)))
+    val out =
+      tool.handler(SafeParameterExtractor(ujson.Obj("url" -> url))).left.map(org.llm4s.toolapi.ToolHandlerError.message)
     (out, (System.nanoTime() - start).nanos)
   }
 

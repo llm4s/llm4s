@@ -32,11 +32,12 @@ A tool is a {% include api.html t="org.llm4s.toolapi.ToolFunction" %} with four 
 - a **name**, which is how the model calls it (`convert_temperature`);
 - a **description**, which is the model's only guide to when to call it;
 - a **parameter schema**, built with the `Schema` DSL, which tells the model the arguments it may send;
-- a **handler**, a function from a `SafeParameterExtractor` to `Either[String, R]`: `Right` is the result,
-  `Left` is an error message.
+- a **handler**, a function from a `SafeParameterExtractor` to `Either[ToolHandlerError, R]`: `Right` is the
+  result, `Left` is an error: the one a getter returned for a missing or mistyped argument, or a message of your
+  own.
 
 ```scala
-import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolFunction }
+import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolFunction, ToolHandlerError }
 import org.llm4s.types.Result
 
 def temperatureTool: Result[ToolFunction[Map[String, Any], String]] = {
@@ -57,11 +58,11 @@ def temperatureTool: Result[ToolFunction[Map[String, Any], String]] = {
       )
     )
 
-  def handler(params: SafeParameterExtractor): Either[String, String] =
+  def handler(params: SafeParameterExtractor): Either[ToolHandlerError, String] =
     for {
       value     <- params.getDouble("value")
       unit      <- params.getString("unit")
-      precision <- params.getOptionalInt("precision").left.map(_.message)
+      precision <- params.getOptionalInt("precision")
       converted <- unit match {
         case "celsius"    => Right(value * 9 / 5 + 32)
         case "fahrenheit" => Right((value - 32) * 5 / 9)
@@ -118,7 +119,7 @@ def lookupSchema: ObjectSchema[Map[String, Any]] =
     )
     .withOptionalField("tags", Schema.array("Labels to match", Schema.string("One label")))
 
-def city(params: SafeParameterExtractor): Either[String, String] = params.getString("location.city")
+def city(params: SafeParameterExtractor): Either[ToolParameterError, String] = params.getString("location.city")
 
 def country(params: SafeParameterExtractor): Either[ToolParameterError, Option[String]] =
   params.getOptionalString("location.country")
@@ -132,12 +133,17 @@ an optional parameter with `getOptional*`: it returns `None` for both.
 ## 3. Reading arguments
 
 `SafeParameterExtractor` reads one argument by name: `getString`, `getInt`, `getDouble`, `getBoolean`, `getArray`
-and `getObject`, each returning `Either[String, A]`, so they chain in a for-comprehension that stops at the first
-problem. `getOptionalString`, `getOptionalInt`, `getOptionalDouble` and `getOptionalBoolean` return
+and `getObject`, each returning `Either[ToolParameterError, A]`, so they chain in a for-comprehension that stops at
+the first problem. `getOptionalString`, `getOptionalInt`, `getOptionalDouble` and `getOptionalBoolean` return
 `Either[ToolParameterError, Option[A]]`: an absent or `null` argument is `Right(None)`, and only a wrong type fails.
-Map that error with `.left.map(_.message)` as the handler above does.
+`validateRequired("value" -> ToolParameterType.Number, "unit" -> ToolParameterType.String)` checks several at once
+and reports every problem rather than the first.
 
-A missing or mistyped argument does not throw; it is a `Left` with a message written for the model to act on:
+A handler's `Left` is a `ToolHandlerError`, which is `String | ToolParameterError`: return a getter's error as it
+is, and write a message for a failure of your own, as the handler above does for an unknown unit. Give a handler
+written as a `def` its return type, `Either[ToolHandlerError, R]`.
+
+A missing or mistyped argument does not throw; it is a `Left` whose `message` is written for the model to act on:
 
 | Arguments | Message |
 |---|---|
@@ -146,17 +152,19 @@ A missing or mistyped argument does not throw; it is a `Left` with a message wri
 | `value` is `null` | `parameter 'value' (type: number) is required but value was null` |
 
 The message names what was expected and what arrived, and lists the argument names that were sent, so the model
-can correct itself and call again. The `*Enhanced` getters and `ToolFunction.executeEnhanced` return the same
-problems as structured `ToolParameterError`s, and `ToolCallErrorJson` renders them as JSON.
+can correct itself and call again. The error is a structured `ToolParameterError` (`MissingParameter`,
+`TypeMismatch`, `NullParameter`, `InvalidNesting`), and `ToolCallErrorJson` renders it as JSON.
 
 ## 4. Returning a result or an error
 
 The handler's `Right` value is written to JSON and handed to the model; a `Left(message)` becomes a
-`ToolCallError.HandlerError`. Return a `Left` for anything the model can fix or should know: a bad argument, a
-missing record, a refused action. The model never sees a stack trace:
+`ToolCallError.HandlerError`, and a getter's `Left` a `ToolCallError.InvalidArguments`. Return a `Left` for anything
+the model can fix or should know: a bad argument, a missing record, a refused action. The model never sees a stack
+trace:
 
-- `tool.execute(args)` returns `Either[ToolCallError, ujson.Value]`, and a `Left(message)` from the handler is a
-  `Left(HandlerError(toolName, message))`.
+- `tool.execute(args)` returns `Either[ToolCallError, ujson.Value]`. A `Left(message)` from the handler is a
+  `Left(HandlerError(toolName, message))`, and a `Left` of a `ToolParameterError` is a
+  `Left(InvalidArguments(toolName, parameterErrors))` that lists each argument at fault.
 - Run through an agent, the model is shown `error.formatted`, which here reads
   `Tool call 'convert_temperature' failed with error: unit must be 'celsius' or 'fahrenheit', not 'kelvin'`.
 - An exception your handler throws is not a `Left` you chose. A {% include api.html t="org.llm4s.toolapi.ToolRegistry" %} catches it and reports a

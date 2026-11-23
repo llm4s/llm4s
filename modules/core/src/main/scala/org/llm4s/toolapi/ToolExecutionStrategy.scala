@@ -26,6 +26,7 @@ sealed trait ToolExecutionStrategy
 /**
  * Factory and singleton values for [[ToolExecutionStrategy]].
  */
+@Experimental
 object ToolExecutionStrategy {
 
   /**

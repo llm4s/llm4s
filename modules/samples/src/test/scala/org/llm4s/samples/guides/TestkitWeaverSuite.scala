@@ -28,9 +28,11 @@ object TestkitWeaverSuite extends SimpleIOSuite {
       Reply.text("It is 21 degrees in Oslo: pack light layers.")
     ).use { client =>
       for {
-        tool <- IO.fromEither(temperatureTool.left.map(new LLMException(_)))
+        tools <- IO.fromEither(
+          temperatureTool.flatMap(tool => ToolRegistry.of(Seq(tool))).left.map(new LLMException(_))
+        )
         agent <- LLMClientIO[IO](client).agent("packing-assistant")(
-          _.withTools(ToolRegistry.of(Seq(tool)).toOption.get)
+          _.withTools(tools)
         )
         run <- agent.run("What should I pack for Oslo today?")
       } yield expect.all(

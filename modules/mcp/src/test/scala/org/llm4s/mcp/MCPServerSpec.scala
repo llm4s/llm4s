@@ -26,7 +26,7 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       .`object`[Map[String, Any]]("Ping parameters")
       .withProperty(Schema.property("message", Schema.string("Message to echo back")))
 
-    def pingHandler(params: SafeParameterExtractor): Either[String, String] =
+    def pingHandler(params: SafeParameterExtractor): Either[org.llm4s.toolapi.ToolHandlerError, String] =
       params.getString("message").map(msg => s"Echo: $msg")
 
     val failSchema = Schema.`object`[Map[String, Any]]("Fail parameters")

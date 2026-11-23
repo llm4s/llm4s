@@ -85,8 +85,8 @@ import org.llm4s.toolapi.ToolRegistry
 
 def supportAgent(client: LLMClient): Result[Agent] =
   for {
-    order  <- orderTool
-    policy <- policyTool
+    order    <- orderTool
+    policy   <- policyTool
     registry <- ToolRegistry.of(Seq(order, policy))
     agent <- Agent
       .builder("support", client)

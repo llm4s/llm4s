@@ -42,7 +42,7 @@ class ListDirectoryToolSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
 
   private def list(params: (String, ujson.Value)*): Either[String, ListDirectoryResult] =
-    tool.handler(SafeParameterExtractor(ujson.Obj.from(params)))
+    tool.handler(SafeParameterExtractor(ujson.Obj.from(params))).left.map(org.llm4s.toolapi.ToolHandlerError.message)
 
   private def listOk(params: (String, ujson.Value)*): ListDirectoryResult =
     list(params: _*).fold(err => fail(s"Expected Right but got Left: $err"), identity)

@@ -118,7 +118,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
     val result = extractor.getString("user.name") // Trying to access .name on a string
 
     (result should be).a(Symbol("left"))
-    val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
+    val error = result.left.map(_.message).fold(identity, v => fail(s"Expected Left but got Right: $v"))
 
     error should include("cannot access parameter")
     error should include("name")
@@ -140,7 +140,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
     val result = extractor.getString("user.username") // username doesn't exist
 
     (result should be).a(Symbol("left"))
-    val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
+    val error = result.left.map(_.message).fold(identity, v => fail(s"Expected Left but got Right: $v"))
 
     error should include("username")
     error should include("missing")
@@ -166,7 +166,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
     val result = extractor.getString("country") // country doesn't exist at root
 
     (result should be).a(Symbol("left"))
-    val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
+    val error = result.left.map(_.message).fold(identity, v => fail(s"Expected Left but got Right: $v"))
 
     error should include("country")
     error should include("missing")
@@ -188,7 +188,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
     val result = extractor.getString("user.name")
 
     (result should be).a(Symbol("left"))
-    val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
+    val error = result.left.map(_.message).fold(identity, v => fail(s"Expected Left but got Right: $v"))
 
     error should include("cannot access parameter")
     error should include("name")
@@ -214,7 +214,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
     // Test missing parameter at different nesting levels
     val result1 = extractor.getString("user.profile.settings.language")
     (result1 should be).a(Symbol("left"))
-    val error1 = result1.fold(identity, v => fail(s"Expected Left but got Right: $v"))
+    val error1 = result1.left.map(_.message).fold(identity, v => fail(s"Expected Left but got Right: $v"))
     error1 should include("available:")
     error1 should include("theme")
     error1 should include("notifications")
@@ -222,7 +222,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
 
     val result2 = extractor.getString("user.profile.email")
     (result2 should be).a(Symbol("left"))
-    val error2 = result2.fold(identity, v => fail(s"Expected Left but got Right: $v"))
+    val error2 = result2.left.map(_.message).fold(identity, v => fail(s"Expected Left but got Right: $v"))
     error2 should include("available:")
     error2 should include("firstName")
     error2 should include("lastName")

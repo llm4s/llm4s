@@ -182,7 +182,7 @@ LangChain reads the tool's schema from the function's signature and docstring. I
 `Schema` DSL and give `ToolBuilder` a handler that reads the arguments:
 
 ```scala
-import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolFunction }
+import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolFunction, ToolHandlerError }
 import org.llm4s.types.Result
 
 def searchDatabase: Result[ToolFunction[Map[String, Any], String]] = {
@@ -191,10 +191,10 @@ def searchDatabase: Result[ToolFunction[Map[String, Any], String]] = {
     .withRequiredField("query", Schema.string("What to search for"))
     .withOptionalField("limit", Schema.integer("The most records to return (default 10)"))
 
-  def handler(params: SafeParameterExtractor): Either[String, String] =
+  def handler(params: SafeParameterExtractor): Either[ToolHandlerError, String] =
     for {
       query <- params.getString("query")
-      limit <- params.getOptionalInt("limit").left.map(_.message)
+      limit <- params.getOptionalInt("limit")
     } yield s"Found ${limit.getOrElse(10)} results for '$query'"
 
   ToolBuilder[Map[String, Any], String](
@@ -209,8 +209,7 @@ def searchDatabase: Result[ToolFunction[Map[String, Any], String]] = {
 ([Scala 3 book: using Option to replace null](https://docs.scala-lang.org/scala3/book/fp-functional-error-handling.html#using-option-to-replace-null)).
 Python's `limit: int = 10` is a value that may be missing. Scala says so in the type: `getOptionalInt` gives an
 `Option[Int]`, either `Some(2)` or `None`, and `limit.getOrElse(10)` supplies the default. A missing required
-argument (`query`) is a `Left` with a message the model can act on. (`_.message` is a short function, explained in
-section 5.) [Build your own tool](custom-tools) covers the rest of the DSL, and `Tool.of` derives the schema from a
+argument (`query`) is a `Left` with a message the model can act on. [Build your own tool](custom-tools) covers the rest of the DSL, and `Tool.of` derives the schema from a
 case class instead.
 
 ## 4. An agent loop

@@ -208,9 +208,11 @@ class ToolCallErrorJsonSpec extends AnyFlatSpec with Matchers {
     json("duration").str should include("30")
   }
 
-  it should "always include legacy error field" in {
+  it should "carry the text once, as message, with no legacy error field (#2815)" in {
     val json = ToolCallErrorJson.toJson(ToolCallError.UnknownFunction("myTool"))
-    json.obj.contains("error") shouldBe true
-    json("error").str should include("myTool")
+    json.obj.contains("error") shouldBe false
+    json.obj.keySet shouldBe Set("isError", "toolName", "message", "errorType")
+    json("toolName").str shouldBe "myTool"
+    json("message").str should include("not a recognized tool")
   }
 }

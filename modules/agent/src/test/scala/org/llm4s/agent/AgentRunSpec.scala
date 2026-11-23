@@ -224,9 +224,16 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
   }
 
   "AgentBuilder.build" should "refuse two tools with one name" in {
+    // ToolRegistry.of refuses the pair itself (#2816); a registry of another kind may still hold one
+    ToolRegistry.of(Seq(echoTool(), echoTool())).left.map(_.message).left.toOption.get should include("echo")
+    val twice = new ToolRegistry {
+      def tools: Seq[org.llm4s.toolapi.ToolFunction[?, ?]] = Seq(echoTool(), echoTool())
+      def execute(request: org.llm4s.toolapi.ToolCallRequest): Either[org.llm4s.toolapi.ToolCallError, ujson.Value] =
+        Left(org.llm4s.toolapi.ToolCallError.UnknownFunction(request.functionName))
+    }
     val error = Agent
       .builder("assistant", ScriptedLLMClient.of())
-      .withTools(ToolRegistry.of(Seq(echoTool(), echoTool())).toOption.get)
+      .withTools(twice)
       .build()
       .fold(identity, _ => fail("expected a refusal"))
 

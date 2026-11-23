@@ -78,10 +78,10 @@ import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolRegistry }
+import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolHandlerError, ToolRegistry }
 
 // Define a tool
-def getWeather(params: SafeParameterExtractor): Either[String, String] =
+def getWeather(params: SafeParameterExtractor): Either[ToolHandlerError, String] =
   params.getString("location").map(location => s"The weather in $location is sunny, 72F")
 
 val weatherSchema = Schema

@@ -112,8 +112,11 @@ class ShellWindowsDbcsSpec extends AnyFlatSpec with Matchers {
     val host = WindowsBestFit.hostAnsiCodePage
     val char = host.flatMap(cs => TrailBackslash.find(_._1.name == cs.name).map(_._2.head))
     assume(char.isDefined, s"the host's ANSI code page (${host.fold("UTF-8")(_.name)}) is not 932, 936 or 950")
-    val tool   = ShellTool.createSafe(config(newRoot())).fold(e => fail(e.formatted), identity)
-    val result = tool.handler(SafeParameterExtractor(ujson.Obj("command" -> s"findstr x 'a ${char.get}.txt'")))
+    val tool = ShellTool.createSafe(config(newRoot())).fold(e => fail(e.formatted), identity)
+    val result = tool
+      .handler(SafeParameterExtractor(ujson.Obj("command" -> s"findstr x 'a ${char.get}.txt'")))
+      .left
+      .map(org.llm4s.toolapi.ToolHandlerError.message)
     result.left.toOption.getOrElse(fail(s"expected a refusal, got $result")) should include("0x5C")
   }
 }

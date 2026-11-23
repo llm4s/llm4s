@@ -85,7 +85,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         )
       )
 
-    def addInventoryHandler(params: SafeParameterExtractor): Either[String, InventoryModifyResult] =
+    def addInventoryHandler(params: SafeParameterExtractor): Either[ToolHandlerError, InventoryModifyResult] =
       for {
         item <- params.getString("item")
       } yield
@@ -123,7 +123,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         )
       )
 
-    def removeInventoryHandler(params: SafeParameterExtractor): Either[String, InventoryModifyResult] =
+    def removeInventoryHandler(params: SafeParameterExtractor): Either[ToolHandlerError, InventoryModifyResult] =
       for {
         item <- params.getString("item")
       } yield
