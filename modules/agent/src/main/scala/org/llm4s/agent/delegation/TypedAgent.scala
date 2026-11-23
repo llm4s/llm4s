@@ -256,6 +256,7 @@ final class TypedAgent[I, O] private (
           s"Task for subagent '$rawId', as JSON:\n${TaskTools.canonical(upickle.default.writeJs(input))}"
     )(_(input))
 
+@Experimental
 object TypedAgent:
 
   /**
@@ -444,7 +445,7 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
         // a thread this overload did not start records no input: it is never taken as this call's (#2086)
         refused("input", "was not started by this call's input; a caller-chosen thread id must identify its input")
       case Right(Some((checkpoint, exec))) =>
-        val at = ref.copy(runId = RunId(checkpoint.runId))
+        val at = ref.withRunId(RunId(checkpoint.runId))
         checkpoint.status match
           case CheckpointStatus.Running => admitted(ref, config)(agent.startRecover(ref.threadId, config))
           case CheckpointStatus.Suspended =>
@@ -565,13 +566,13 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
   private def awaited(ref: ChildRef, config: RunConfig, run: AgentRun): Result[TaskOutcome[O]] =
     val runId = run.runId
     Agent.awaitBlocking(run) match
-      case Right(result)                       => Right(outcome(result, ref.copy(runId = result.runId)))
+      case Right(result)                       => Right(outcome(result, ref.withRunId(result.runId)))
       case Left(GraphError.OutputInvalid(all)) =>
         // the turn is removed, its model calls are kept: the thread's usage counts them
         // the ref names the run that failed its schema - this one - not the run the caller's ref came from
         Right(
           TaskOutcome.Refused(
-            ref.copy(runId = runId),
+            ref.withRunId(runId),
             TaskRefusal.OutputInvalid(all),
             BoundAgent.storedUsage(agent, ref.threadId, runId, config)
           )
@@ -583,7 +584,7 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
           case Right(Some((checkpoint, exec)))
               if checkpoint.runId == runId.value && checkpoint.status == CheckpointStatus.Running =>
             val usage = exec.state.get(LoopKeys.usage).toOption.getOrElse(UsageSummary())
-            Right(TaskOutcome.Refused(ref.copy(runId = runId), TaskRefusal.Failed(error.message), usage))
+            Right(TaskOutcome.Refused(ref.withRunId(runId), TaskRefusal.Failed(error.message), usage))
           case _ => Left(error)
 
   /**
@@ -613,7 +614,7 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
       .map { childEnd =>
         val (taskOutcome, cause, child, status) = childEnd match
           case ChildEnd.Ended(result, _) =>
-            val ended = ref.copy(runId = result.runId)
+            val ended = ref.withRunId(result.runId)
             val made  = outcome(result, ended)
             val label = made match
               case TaskOutcome.Refused(_, reason, _) => Some(TaskRefusal.label(reason))
@@ -642,7 +643,7 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
       .childAtRest(ref.threadId, agent.loop.graph, config)
       .toOption
       .flatten
-      .fold(ref)((checkpoint, _) => ref.copy(runId = RunId(checkpoint.runId)))
+      .fold(ref)((checkpoint, _) => ref.withRunId(RunId(checkpoint.runId)))
 
   /**
    * The `TaskEnded` of `child`: its status label, its roll-up `usage`, and the time from its first admission -
@@ -684,6 +685,7 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
   private def report(result: AgentResult, answer: String): Result[O] =
     definition.output.fold(text => Right(text(answer)), _ => result.decodeOutput[O](using definition.outputCodec))
 
+@Experimental
 object BoundAgent:
 
   /** What one read of a caller-chosen thread calls for: done, read it again, or wait for its run and read it again. */

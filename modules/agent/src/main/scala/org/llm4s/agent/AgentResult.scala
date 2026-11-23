@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.delegation.DelegatedRequest
 import org.llm4s.agent.graph.{ Breakpoint, InterruptId, RunId, ThreadId }
 import org.llm4s.agent.graph.toolloop.{
@@ -16,6 +17,7 @@ import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
 /** How an agent's turn ended, or why it is waiting. */
+@Stable
 enum AgentStatus:
 
   /** The active agent gave a final answer; `answer` is its content. */
@@ -81,6 +83,7 @@ enum AgentStatus:
  * @param messages the thread's full history, without system prompts
  * @param usage token usage accumulated over the thread, per model
  */
+@Stable
 final case class AgentResult private (
   threadId: ThreadId,
   runId: RunId,

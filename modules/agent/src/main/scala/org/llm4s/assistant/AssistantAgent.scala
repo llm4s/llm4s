@@ -13,10 +13,8 @@ import cats.implicits._
 import java.util.UUID
 import org.slf4j.LoggerFactory
 
-@Experimental
-sealed trait Command
-@Experimental
-object Command {
+sealed private[assistant] trait Command
+private[assistant] object Command {
   case object Help               extends Command
   case object New                extends Command
   case class Save(title: String) extends Command

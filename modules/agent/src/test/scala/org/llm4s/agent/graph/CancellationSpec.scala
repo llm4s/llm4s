@@ -337,7 +337,7 @@ class CancellationSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
         runtime.start(thread, f.graph, Vector("a", "b"), RunConfig().withRunId(RunId("run-1")), Durability.Async)
       )
     result.failed._2 match {
-      case GraphError.CheckpointWriteFailed(_, _, Some(_: GraphError.Cancelled)) => succeed
+      case e: GraphError.CheckpointWriteFailed if e.runError.exists(_.isInstanceOf[GraphError.Cancelled]) => succeed
       case other => fail(s"expected CheckpointWriteFailed with the cancellation, got $other")
     }
     // the thread claim was released: the next call is refused for the thread's state, not ThreadBusy

@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.tool
 
-import org.llm4s.annotation.Experimental
+import org.llm4s.annotation.Stable
 
 /**
  * A lock a tool call holds while it runs, as its tool declares with [[AgentToolSpec.withLocks]]: a
@@ -15,7 +15,7 @@ import org.llm4s.annotation.Experimental
  */
 opaque type LockKey = Vector[String]
 
-@Experimental
+@Stable
 object LockKey:
 
   /** The key of the parts' `/`-separated segments, in order; empty segments are dropped. */

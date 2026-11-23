@@ -52,6 +52,7 @@ final class FileContext private (val run: RunContext, val state: ThreadState, va
     val parts = n.toString +: discriminator
     tool.fold(run.effectKey(operation, parts*))(_.effectKey(operation, parts*))
 
+@Experimental
 object FileContext:
 
   /** The context of a tool call. */
@@ -178,6 +179,7 @@ trait FileBackend:
         search(under, compiled, accept, limit, ctx)
       }
 
+@Experimental
 object FileBackend:
 
   /**
@@ -212,6 +214,7 @@ object FileBackend:
 @Experimental
 final case class Listing[A](items: Vector[A], truncated: Boolean)
 
+@Experimental
 object Listing:
 
   /** The first `limit` of `items`, `truncated` when there are more. */
@@ -259,6 +262,7 @@ final case class BackendRefused(
     with NonRecoverableError:
   override val message: String = s"$operation $target: $reason"
 
+@Experimental
 object BackendRefused:
 
   /**

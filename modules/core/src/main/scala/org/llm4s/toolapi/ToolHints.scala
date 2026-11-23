@@ -1,6 +1,6 @@
 package org.llm4s.toolapi
 
-import org.llm4s.annotation.Experimental
+import org.llm4s.annotation.Stable
 
 /**
  * What a tool is likely to do, with the meanings of the MCP tool annotations and their conservative
@@ -18,7 +18,7 @@ import org.llm4s.annotation.Experimental
  * @param openWorld MCP `openWorldHint`: the tool may interact with an open world of external
  *                  entities, such as the web, rather than a closed domain
  */
-@Experimental
+@Stable
 final case class ToolHints private (readOnly: Boolean, destructive: Boolean, idempotent: Boolean, openWorld: Boolean):
   /**
    * Sets the `readOnlyHint`.
@@ -57,7 +57,7 @@ final case class ToolHints private (readOnly: Boolean, destructive: Boolean, ide
  * Factory and default for [[ToolHints]]. The defaults are the conservative MCP ones: a tool that does not
  * say what it does is treated as not read-only, destructive, not idempotent and open-world.
  */
-@Experimental
+@Stable
 object ToolHints:
   /**
    * Creates a [[ToolHints]]. Each default assumes the less safe case, so that a middleware asking approval for

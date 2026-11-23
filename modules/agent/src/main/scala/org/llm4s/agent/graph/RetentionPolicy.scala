@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
@@ -25,6 +26,7 @@ import scala.concurrent.duration.FiniteDuration
  * `apply` and the `with*` setters throw `IllegalArgumentException` for a non-positive `maxAge` or
  * `maxCheckpoints`, or a negative `maxEvents`; [[RetentionPolicy.of]] returns a `ValidationError`.
  */
+@Stable
 final case class RetentionPolicy private (
   maxAge: Option[FiniteDuration],
   maxCheckpoints: Option[Int],

@@ -59,7 +59,7 @@ class SqliteTodosEvolutionSpec extends AnyFlatSpec with Matchers with EitherValu
     val fresh = SqliteFiles.opened(SqliteFiles.fresh(), Clock.systemUTC())
     agent(fresh, todos = false, answer("hi")).run(thread, "q").value
     val stored  = fresh.latest(thread).value.value
-    val legacy  = stored.checkpoint.snapshot.copy(shape = None)
+    val legacy  = stored.checkpoint.snapshot.withShape(None)
     val planned = agent(fresh, todos = true).loop.graph.restore(legacy).left.value
     planned shouldBe a[GraphError.RestoreRejected]
     planned.message should include("a snapshot without a shape restores only into its own version")

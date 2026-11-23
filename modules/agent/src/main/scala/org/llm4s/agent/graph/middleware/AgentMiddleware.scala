@@ -10,7 +10,7 @@ import org.llm4s.agent.graph.tool.{
   ToolResource,
   ToolSet
 }
-import org.llm4s.annotation.Experimental
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{ LLMError, NonRecoverableError }
 import org.llm4s.llmconnect.model.{ Completion, Message, ToolCall }
 import org.llm4s.types.{ Result, TryOps }
@@ -25,6 +25,7 @@ import scala.util.Try
  */
 opaque type MiddlewareId = String
 
+@Stable
 object MiddlewareId:
   def apply(value: String): MiddlewareId         = value
   extension (id: MiddlewareId) def value: String = id
@@ -39,6 +40,7 @@ object MiddlewareId:
  * One model call as a model wrapper sees it: the conversation so far and the tools offered. A
  * wrapper that rewrites the request builds the next one with `withMessages` or `withTools`.
  */
+@Stable
 final case class ModelRequest private (messages: Vector[Message], tools: ToolSet):
   def withMessages(m: Vector[Message]): ModelRequest = copy(messages = m)
   def withTools(t: ToolSet): ModelRequest            = copy(tools = t)
@@ -55,7 +57,7 @@ object ModelRequest:
  * `ModelResponse(completion)`. Only the response a wrapper returns counts: the updates of a response it discarded,
  * calling `next` again, are never committed.
  */
-@Experimental
+@Stable
 final class ModelResponse private (
   val completion: Completion,
   private[graph] val parts: Vector[(Option[MiddlewareId], StateUpdate)]
@@ -77,7 +79,7 @@ final class ModelResponse private (
 
   override def toString: String = s"ModelResponse($completion, $update)"
 
-@Experimental
+@Stable
 object ModelResponse:
   /** `completion` with no update. */
   def apply(completion: Completion): ModelResponse = new ModelResponse(completion, Vector.empty)
@@ -87,7 +89,7 @@ object ModelResponse:
  * and an `update` to keys the middleware declares in its `writes`. `beforeAgent`'s commits with the turn's input,
  * so the turn's first model call sees it; `afterAgent`'s with the turn's final answer.
  */
-@Experimental
+@Stable
 final case class BoundaryResult private (text: String, update: StateUpdate):
   def withText(t: String): BoundaryResult = BoundaryResult(t, update)
 
@@ -97,7 +99,7 @@ final case class BoundaryResult private (text: String, update: StateUpdate):
   /** This result with `u` applied after its update. */
   def addUpdate(u: StateUpdate): BoundaryResult = BoundaryResult(text, update.combine(u))
 
-@Experimental
+@Stable
 object BoundaryResult:
   def apply(text: String, update: StateUpdate = StateUpdate.empty): BoundaryResult = new BoundaryResult(text, update)
 
@@ -106,13 +108,13 @@ object BoundaryResult:
  * `id` is unique within one request; `cacheable` content is placed before the rest, so a provider's prompt cache
  * sees a stable prefix.
  */
-@Experimental
+@Stable
 final case class PromptSection private (id: String, text: String, cacheable: Boolean):
   def withId(i: String): PromptSection         = PromptSection(i, text, cacheable)
   def withText(t: String): PromptSection       = PromptSection(id, t, cacheable)
   def withCacheable(c: Boolean): PromptSection = PromptSection(id, text, c)
 
-@Experimental
+@Stable
 object PromptSection:
   def apply(id: String, text: String, cacheable: Boolean = false): PromptSection =
     new PromptSection(id, text, cacheable)
@@ -132,6 +134,7 @@ object PromptSection:
  * its decoded arguments and its tool's `AgentToolSpec.withResources`; never empty, since a call that
  * declares none touches its tool's `defaultResource`.
  */
+@Stable
 final case class ToolCallRequest private (spec: AgentToolSpec[?], call: ToolCall, resources: Vector[ToolResource]):
 
   /** The call's id, typed; core's `ToolCall` keeps a string. */
@@ -175,6 +178,7 @@ object ToolCallRequest:
  * A middleware that asks typed questions - for review, an edit, or missing information - extends
  * [[org.llm4s.agent.graph.middleware.AgentMiddleware.Asking AgentMiddleware.Asking]].
  */
+@Stable
 trait AgentMiddleware:
 
   /** This middleware's identifier, unique in its stack; must match `[a-zA-Z0-9_-]{1,64}`. */
@@ -251,7 +255,7 @@ trait AgentMiddleware:
  * Where a middleware must run relative to another ([[org.llm4s.agent.graph.middleware.AgentMiddleware.placement AgentMiddleware.placement]]): a position its correctness depends
  * on, which the stack checks rather than leaving to the documentation.
  */
-@Experimental
+@Stable
 enum Placement:
 
   /** Why the placement is required, for the refusal. */
@@ -327,7 +331,7 @@ object AgentMiddleware:
  * suspends the run with it. A wrapper that sees it as `next`'s result passes it on. Outside the loop it
  * is an error: a question nobody can answer.
  */
-final case class MiddlewareAsked private[graph] (middleware: MiddlewareId, question: ujson.Value)
+final private[agent] case class MiddlewareAsked private[graph] (middleware: MiddlewareId, question: ujson.Value)
     extends LLMError
     with NonRecoverableError:
   override val message: String = s"Middleware '${middleware.value}' asked a question"

@@ -743,6 +743,7 @@ final case class HostRootInUse(root: Path, conflict: HostRootInUse.Conflict, det
     with NonRecoverableError:
   override val message: String = s"$root cannot be opened: $detail"
 
+@Experimental
 object HostRootInUse:
 
   /** How the open root conflicts with this one. */
@@ -757,6 +758,7 @@ object HostRootInUse:
     /** This root contains a backend's open root. */
     case ContainsOpenRoot
 
+@Experimental
 object HostFileBackend:
 
   /** The largest `maxFileBytes`: a file is read into one array, which holds at most this many bytes. */

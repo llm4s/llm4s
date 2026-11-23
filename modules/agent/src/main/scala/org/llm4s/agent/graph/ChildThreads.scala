@@ -2,7 +2,7 @@ package org.llm4s.agent.graph
 
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
-import org.llm4s.annotation.Experimental
+import org.llm4s.annotation.Stable
 import org.llm4s.error.LLMError
 import org.llm4s.trace.TraceContext
 import upickle.default.ReadWriter
@@ -25,7 +25,7 @@ import java.time.Instant
  * context of the call that drives them. A child thread is driven only through its parent's run: `start`, `recover`, `resume`, `fork`,
  * `updateState` and `deleteThread` on it are refused with [[GraphError.ChildThread]].
  */
-@Experimental
+@Stable
 final case class RunOrigin private (
   parent: ThreadId,
   call: IdempotencyKey,
@@ -42,6 +42,7 @@ final case class RunOrigin private (
   def withTrace(t: TraceContext): RunOrigin         = copy(trace = Some(t))
   def withTrace(t: Option[TraceContext]): RunOrigin = copy(trace = t)
 
+@Stable
 object RunOrigin:
 
   /** Throws `IllegalArgumentException` for a `depth` below 1: a child is at least one level below its parent. */
@@ -64,16 +65,32 @@ object RunOrigin:
  * One direct child of a thread, as [[Checkpointer.children]] lists it: its id, its [[RunOrigin]], and its latest
  * checkpoint's status, id and creation time.
  */
-@Experimental
-final case class ChildThread(
+@Stable
+final case class ChildThread private (
   threadId: ThreadId,
   origin: RunOrigin,
   status: CheckpointStatus,
   latest: String,
   updatedAt: Instant
-)
+):
+  def withThreadId(value: ThreadId): ChildThread       = copy(threadId = value)
+  def withOrigin(value: RunOrigin): ChildThread        = copy(origin = value)
+  def withStatus(value: CheckpointStatus): ChildThread = copy(status = value)
+  def withLatest(value: String): ChildThread           = copy(latest = value)
+  def withUpdatedAt(value: Instant): ChildThread       = copy(updatedAt = value)
 
+@Stable
 object ChildThread:
+
+  def apply(
+    threadId: ThreadId,
+    origin: RunOrigin,
+    status: CheckpointStatus,
+    latest: String,
+    updatedAt: Instant
+  ): ChildThread =
+    new ChildThread(threadId, origin, status, latest, updatedAt)
+
   private given ReadWriter[Instant] = upickle.default.readwriter[String].bimap(_.toString, Instant.parse)
 
   given ReadWriter[ChildThread] = upickle.default.macroRW
@@ -93,7 +110,7 @@ object ChildThread:
  * `Answered` when it completes and `Failed` when a node blocks it; any graph records `Blocked` for a
  * `GuardrailBlocked` Block and `OutputInvalid` for a `GraphError.OutputInvalid` one.
  */
-@Experimental
+@Stable
 enum RunOutcome derives ReadWriter:
 
   /** The run completed with an answer, which is in the thread's state. */
@@ -120,6 +137,7 @@ enum RunOutcome derives ReadWriter:
   /** The run settled as a failure: the error's kind (its class's simple name) and message. */
   case Failed(kind: String, message: String)
 
+@Stable
 object RunOutcome:
 
   /** The outcome of a run a node blocked with `error` ([[NodeResult.Block]]). */

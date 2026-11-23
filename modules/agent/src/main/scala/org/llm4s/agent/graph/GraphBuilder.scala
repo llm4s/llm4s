@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
@@ -28,6 +29,7 @@ import scala.util.Try
  * The builder is mutable and meant to be used from one thread while the graph is assembled; the
  * [[CompiledGraph]] it produces is immutable.
  */
+@Stable
 final class GraphBuilder private (val id: String, val version: String):
   private val owner        = GraphOwner(id)
   private val declared     = mutable.LinkedHashMap.empty[NodeId, NodeRef[?]]

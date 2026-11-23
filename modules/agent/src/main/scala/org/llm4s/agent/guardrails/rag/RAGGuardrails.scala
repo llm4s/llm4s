@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.rag
 
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.guardrails.{ Guardrail, InputGuardrail, OutputGuardrail }
 import org.llm4s.agent.guardrails.builtin.{ PIIDetector, PIIMasker, PromptInjectionDetector }
 import org.llm4s.llmconnect.LLMClient
@@ -35,6 +36,7 @@ import org.llm4s.llmconnect.LLMClient
  * }
  * }}}
  */
+@Experimental
 object RAGGuardrails {
 
   /**

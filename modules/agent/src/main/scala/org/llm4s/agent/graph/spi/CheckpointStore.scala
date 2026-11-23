@@ -61,6 +61,7 @@ final class CheckpointStore private (
 
   override def toString: String = s"CheckpointStore($kind)"
 
+@Experimental
 object CheckpointStore:
 
   /**

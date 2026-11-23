@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.agent.graph.{ BreakpointPhase, GraphRuntime, NodeId, RetentionPolicy }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, MiddlewareStack, PermissionMiddleware }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolArgumentValidator, ToolSet }
@@ -38,6 +39,7 @@ import scala.annotation.{ tailrec, varargs }
  * version covers them, so a thread is only ever continued by the graph it ran on. The runtime and
  * tracing are the root's: a handoff target's are ignored.
  */
+@Stable
 final class AgentBuilder private (
   private[agent] val id: String,
   client: LLMClient,
@@ -159,6 +161,7 @@ final class AgentBuilder private (
    * (`RunConfig.withRetention`, unless the run sets its own); a handoff target's is ignored, as its runtime is. `build()` refuses what the profile refuses
    * (see [[org.llm4s.agent.harness.HarnessProfile]]).
    */
+  @Experimental
   def withHarness(profile: HarnessProfile): AgentBuilder = copy(harness = Some(profile))
 
   /**
@@ -171,12 +174,14 @@ final class AgentBuilder private (
    * (design 4.48) they follow the profile's own subagents, the middleware runs inside the harness's permissions and
    * outside its other middleware, and the profile's `SubagentConfig.delegation` bounds them.
    */
+  @Experimental
   def withSubagents(agents: TypedAgent[?, ?]*): AgentBuilder = copy(subagents = subagents ++ agents)
 
   /**
    * The bounds on this agent's delegated tasks, replacing the defaults; [[build]] refuses a bound that is not positive,
    * and this beside a harness, whose `SubagentConfig.delegation` sets them.
    */
+  @Experimental
   def withDelegation(config: DelegationConfig): AgentBuilder = copy(delegation = Some(config))
 
   /** This builder as a subagent's (design 4.45): its depth, its ancestors' permission rules and its granted tools. */

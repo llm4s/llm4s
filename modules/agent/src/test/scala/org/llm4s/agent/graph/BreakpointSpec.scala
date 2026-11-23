@@ -343,25 +343,24 @@ class BreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers with E
     val parked   = snapshot.parked.head
     parked.breakpoint shouldBe Some(BreakpointPhase.After)
 
-    val badRoute = snapshot.copy(parked = Vector(parked.copy(heldRoutes = Vector(EncodedRoute.Goto("nowhere")))))
+    val badRoute = snapshot.withParked(Vector(parked.withHeldRoutes(Vector(EncodedRoute.Goto("nowhere")))))
     f.graph.restore(badRoute).left.value.message should include(
       "interrupt 0.0 holds a route that does not restore: unknown node 'nowhere'"
     )
-    val badNode = snapshot.copy(parked = Vector(parked.copy(resumeNode = "nowhere")))
+    val badNode = snapshot.withParked(Vector(parked.withResumeNode("nowhere")))
     f.graph.restore(badNode).left.value.message should include("interrupt 0.0 holds unknown node 'nowhere'")
-    val badInput = snapshot.copy(parked =
+    val badInput = snapshot.withParked(
       Vector(
-        parked.copy(
-          resumeNode = "worker",
-          breakpoint = Some(BreakpointPhase.Before),
-          question = VersionedJson(1, ujson.Obj())
-        )
+        parked
+          .withResumeNode("worker")
+          .withBreakpoint(Some(BreakpointPhase.Before))
+          .withQuestion(VersionedJson(1, ujson.Obj()))
       )
     )
     f.graph.restore(badInput).left.value.message should include("interrupt 0.0 input does not decode for node 'worker'")
-    val badOrigin = snapshot.copy(parked = Vector(parked.copy(originNode = "nowhere")))
+    val badOrigin = snapshot.withParked(Vector(parked.withOriginNode("nowhere")))
     f.graph.restore(badOrigin).left.value.message should include("interrupt 0.0 continues unknown node 'nowhere'")
-    val badReplay = snapshot.copy(frontier =
+    val badReplay = snapshot.withFrontier(
       Vector(
         GraphSnapshot.PendingTask(
           "1.0",

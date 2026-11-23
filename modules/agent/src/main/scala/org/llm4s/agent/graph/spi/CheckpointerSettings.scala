@@ -77,6 +77,7 @@ final class CheckpointerSettings private (val kind: String, val extras: Map[Stri
 
   override def toString: String = s"CheckpointerSettings($kind, keys = ${extras.keys.toVector.sorted.mkString(", ")})"
 
+@Experimental
 object CheckpointerSettings:
 
   /** The configuration path of the store settings. */

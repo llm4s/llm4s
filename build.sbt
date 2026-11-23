@@ -387,14 +387,14 @@ lazy val itTierCheck = taskKey[Unit](
 // ---- stability tier check ----
 // The tier of a frozen module's public types lives in the code (`@Stable` / `@Experimental`,
 // `org.llm4s.annotation`), not only in docs/reference/v1-scope.md where it drifts. See
-// project/StabilityTiers.scala. The modules are the ones that call `mimaFrozen`, minus
-// `llm4s-agent`, whose tier waits on the typed graph runtime (#1266, open question in #1281).
+// project/StabilityTiers.scala. The modules are the ones that call `mimaFrozen`; `llm4s-agent` joined
+// them in #2778.
 lazy val stabilityTierCheck = taskKey[Unit](
   "Fail the build if a top-level public type of a frozen module is not marked @Stable or @Experimental, or a " +
     "@Stable signature names an @Experimental or deny-listed third-party type, or a @Stable case class has a " +
     "public constructor or copy"
 )
-val stabilityTierModules = Seq("core", "openai", "openai-compatible", "anthropic", "gemini", "ollama")
+val stabilityTierModules = Seq("core", "openai", "openai-compatible", "anthropic", "gemini", "ollama", "agent")
 // Beta dialects that live inside the frozen `llm4s-openai-compatible`: 1.0 Scope does not freeze them.
 val stabilityExperimentalFiles = Seq("""/(Mistral|Cohere|Xai)[A-Za-z]*\.scala$""".r)
 

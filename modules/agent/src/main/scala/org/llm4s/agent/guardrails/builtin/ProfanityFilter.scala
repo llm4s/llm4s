@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
@@ -59,6 +60,7 @@ import org.llm4s.types.Result
  * @param caseSensitive  `false` (the default) compares without regard to case; `true` compares the normalised
  *                       text without case folding.
  */
+@Stable
 class ProfanityFilter(
   customBadWords: Set[String] = Set.empty,
   caseSensitive: Boolean = false

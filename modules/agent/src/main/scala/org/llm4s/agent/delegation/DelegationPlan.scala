@@ -21,6 +21,7 @@ final case class DelegationPlan private[agent] (subagents: Vector[SubagentPlan])
     if subagents.isEmpty then "DelegationPlan(no subagents)"
     else ("DelegationPlan:" +: subagents.flatMap(_.lines("  "))).mkString("\n")
 
+@Experimental
 object DelegationPlan:
 
   /** The plan of an agent without subagents. */

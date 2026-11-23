@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.delegation.{ ChildRef, DelegatedAnswers, DelegatedRequest, DelegationPlan }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.toolloop.{ AgentInput, SettledTurn, ToolLoop, TurnOutput }
@@ -37,6 +38,7 @@ import org.slf4j.LoggerFactory
  * thread's state shows it (`recover` then reports `NothingToRecover`). If the lease merely lapsed, with
  * no successor, `recover` continues the interrupted turn.
  */
+@Stable
 final class Agent private[agent] (
   val id: AgentId,
   val loop: ToolLoop,

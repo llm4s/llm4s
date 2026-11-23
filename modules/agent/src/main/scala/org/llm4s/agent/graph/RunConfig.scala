@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
@@ -25,6 +26,7 @@ import scala.concurrent.duration.FiniteDuration
  * call: its failed attempts carry no usage and are not counted, so set `maxTokens` with retries in
  * mind. `None`, the default, sets no token budget. A plain graph's nodes never read it.
  */
+@Stable
 final case class RunBudgets private (
   maxSupersteps: Int,
   timeout: Option[FiniteDuration],
@@ -94,6 +96,7 @@ object RunBudgets:
  * own, and a continuation already past a breakpoint is not held by it again. Admission refuses a
  * node the graph does not have with a `ValidationError`.
  */
+@Stable
 final case class RunConfig private (
   runId: RunId,
   tenantId: Option[TenantId],
@@ -199,6 +202,7 @@ object RunConfig:
  * `None` outside a runtime: a node that writes to an external system able to fence can pass it on,
  * so that system too refuses a run that has lost its claim.
  */
+@Stable
 final case class RunPosition private (
   threadId: ThreadId,
   runId: RunId,
@@ -251,6 +255,7 @@ object RunContext:
  * and similar high-volume progress, and carries a name and version like `emit`: delivered at once to current subscribers, never persisted or
  * replayed. Outside a [[GraphRuntime]] both are no-ops.
  */
+@Stable
 final class RunContext private[graph] (
   val config: RunConfig,
   val position: RunPosition,

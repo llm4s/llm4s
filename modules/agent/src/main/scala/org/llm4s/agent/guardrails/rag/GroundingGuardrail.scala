@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.rag
 
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.guardrails.GuardrailAction
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -20,7 +21,7 @@ import org.llm4s.util.Redaction
  * @param ungroundedClaims Claims that weren't supported by context (if any)
  * @param explanation Brief explanation of the evaluation
  */
-final case class GroundingResult(
+final private[guardrails] case class GroundingResult(
   score: Double,
   isGrounded: Boolean,
   ungroundedClaims: Seq[String],
@@ -66,6 +67,7 @@ final case class GroundingResult(
  * @param onFail Action to take when grounding fails (default: Block)
  * @param strictMode If true, ANY ungrounded claim fails. If false, uses score threshold.
  */
+@Experimental
 class GroundingGuardrail(
   val llmClient: LLMClient,
   val threshold: Double = 0.7,
@@ -293,6 +295,7 @@ class GroundingGuardrail(
   }
 }
 
+@Experimental
 object GroundingGuardrail {
 
   /**

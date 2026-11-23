@@ -1,10 +1,12 @@
 package org.llm4s.agent.graph.toolloop
 
+import org.llm4s.annotation.Stable
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.StateKey
 import org.llm4s.llmconnect.model.UsageSummary
 
 /** State keys the tool loop owns: no tool or middleware may declare them. */
+@Stable
 object LoopKeys:
 
   /** Usage accumulated over the thread, per model. An update is one call's summary, merged into the total. */

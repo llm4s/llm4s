@@ -95,7 +95,7 @@ final class EncryptingCheckpointer private (
         )
         writes <- traverse(commit.pendingWrites)(written(seal, _))
         events <- traverse(commit.events)(d =>
-          evented(seal, d.runId, d.checkpointId, d.taskId, d.nodeId, d.event).map(e => d.copy(event = e))
+          evented(seal, d.runId, d.checkpointId, d.taskId, d.nodeId, d.event).map(e => d.withEvent(e))
         )
         effects <- traverse(commit.effects)(effected(seal, _))
         records <- inner.commit(
@@ -233,16 +233,16 @@ object EncryptingCheckpointer:
           input <- versioned(codec, at :+ "input", task.input)
           replay <- task.replay
             .fold[Result[Option[Vector[EncodedRoute]]]](Right(None))(routed(codec, at, _).map(Some(_)))
-        yield task.copy(input = input, replay = replay)
+        yield task.withInput(input).withReplay(replay)
       }
       parked <- traverse(snapshot.parked) { continuation =>
         val at = place ++ Vector("parked", continuation.interruptId)
         for
           question <- versioned(codec, at :+ "question", continuation.question)
           held     <- routed(codec, at, continuation.heldRoutes)
-        yield continuation.copy(question = question, heldRoutes = held)
+        yield continuation.withQuestion(question).withHeldRoutes(held)
       }
-    yield checkpoint.withSnapshot(snapshot.copy(state = state.toMap, frontier = frontier, parked = parked))
+    yield checkpoint.withSnapshot(snapshot.withState(state.toMap).withFrontier(frontier).withParked(parked))
 
   private def written(codec: Codec, write: PendingWrite): Result[PendingWrite] =
     val place = Vector("write", write.checkpointId, write.taskId)
@@ -256,7 +256,7 @@ object EncryptingCheckpointer:
       suspension <- write.suspension.fold[Result[Option[EncodedSuspension]]](Right(None)) { s =>
         versioned(codec, place :+ "question", s.question).map(q => Some(s.copy(question = q)))
       }
-    yield write.copy(operations = operations, routes = routes, suspension = suspension)
+    yield write.withOperations(operations).withRoutes(routes).withSuspension(suspension)
 
   /**
    * `event` with a custom event's payload through `codec`, bound to what a draft and its record share - the store
@@ -285,7 +285,7 @@ object EncryptingCheckpointer:
     case other => Right(other)
 
   private def record(codec: Codec, r: EventRecord): Result[EventRecord] =
-    evented(codec, r.runId, r.checkpointId, r.taskId, r.nodeId, r.event).map(event => r.copy(event = event))
+    evented(codec, r.runId, r.checkpointId, r.taskId, r.nodeId, r.event).map(event => r.withEvent(event))
 
   /** `record` with its outcome and its presumed outcome through `codec`, in its JSON form: its body is the guard's. */
   private def effected(codec: Codec, record: EffectRecord): Result[EffectRecord] =

@@ -39,6 +39,7 @@ final case class StoreLimits private (maxItemBytes: Int, maxItems: Int, maxBytes
   def withMaxItems(n: Int): StoreLimits     = StoreLimits(maxItemBytes, n, maxBytes)
   def withMaxBytes(n: Long): StoreLimits    = StoreLimits(maxItemBytes, maxItems, n)
 
+@Experimental
 object StoreLimits:
 
   /** 64 KiB per item; 1000 items and 4 MiB per namespace. */
@@ -149,6 +150,7 @@ trait LongTermStore extends AppliedKeys:
       )
     }
 
+@Experimental
 object LongTermStore:
 
   /** The deepest a stored value may nest arrays and objects. */
@@ -447,6 +449,7 @@ final class InMemoryLongTermStore private (val limits: StoreLimits, clock: Clock
       )
     }
 
+@Experimental
 object InMemoryLongTermStore:
   def apply(limits: StoreLimits = StoreLimits.default, clock: Clock = Clock.systemUTC()): InMemoryLongTermStore =
     new InMemoryLongTermStore(limits, clock)

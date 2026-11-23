@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.rag
 
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.guardrails.GuardrailAction
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -20,7 +21,7 @@ import scala.util.Try
  * @param uncitedClaims Claims that should have been cited but weren't
  * @param explanation Brief explanation of the evaluation
  */
-final case class SourceAttributionResult(
+final private[guardrails] case class SourceAttributionResult(
   hasAttributions: Boolean,
   attributionScore: Double,
   citedSources: Seq[String],
@@ -66,6 +67,7 @@ final case class SourceAttributionResult(
  * @param minAttributionScore Minimum attribution quality score (default: 0.5)
  * @param onFail Action to take when attribution is insufficient (default: Block)
  */
+@Experimental
 class SourceAttributionGuardrail(
   val llmClient: LLMClient,
   val requireAttributions: Boolean = true,
@@ -286,6 +288,7 @@ class SourceAttributionGuardrail(
   }
 }
 
+@Experimental
 object SourceAttributionGuardrail {
 
   /**
