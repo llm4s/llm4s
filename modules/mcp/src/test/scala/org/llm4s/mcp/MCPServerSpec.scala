@@ -94,7 +94,7 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
         val execResult = clientTools.find(_.name == "ping").get.execute(args)
 
         execResult.isRight should be(true)
-        val successMsg = execResult.fold(e => fail(s"Expected success but got: ${e.getMessage}"), identity).str
+        val successMsg = execResult.fold(e => fail(s"Expected success but got: ${e.message}"), identity).str
         successMsg should include("Echo: Hello World")
 
       } finally client.close()

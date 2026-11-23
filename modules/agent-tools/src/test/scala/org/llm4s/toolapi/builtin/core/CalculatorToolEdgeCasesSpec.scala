@@ -341,7 +341,7 @@ class CalculatorToolEdgeCasesSpec extends AnyFlatSpec with Matchers {
   it should "report overflow through the tool's entry point as an error, not as the text Infinity" in {
     val reply = tool.execute(params("power", 10.0, Some(400.0)))
     reply.isLeft shouldBe true
-    reply.left.map(_.getMessage).left.getOrElse("") should include("finite")
+    reply.left.map(_.message).left.getOrElse("") should include("finite")
   }
 
   it should "still return the other errors unchanged" in {

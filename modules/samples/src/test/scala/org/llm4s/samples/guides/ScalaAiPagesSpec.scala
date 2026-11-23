@@ -88,7 +88,7 @@ class ScalaAiPagesSpec extends AnyFlatSpec with Matchers with EitherValues {
     agent <- Agent
       .builder("weather", client)
       .withSystemPrompt("You answer questions about the weather.")
-      .withTools(new ToolRegistry(Seq(forecast)))
+      .withTools(ToolRegistry.of(Seq(forecast)).toOption.get)
       .withMiddleware(new GuardrailMiddleware(input = Seq(new LengthCheck(1, 2000), new ProfanityFilter()), Nil))
       .withStreaming()
       .build()

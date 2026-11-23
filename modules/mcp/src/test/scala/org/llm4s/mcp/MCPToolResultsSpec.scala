@@ -72,7 +72,7 @@ class MCPToolResultsSpec extends AnyFlatSpec with Matchers {
 
   it should "ignore structured content on an error result" in {
     val result = call(ujson.Obj("content" -> text("bad"), "isError" -> true, "structuredContent" -> ujson.Num(1)))
-    result.left.toOption.map(_.getMessage).getOrElse("") should include("bad")
+    result.left.toOption.map(_.message).getOrElse("") should include("bad")
   }
 
   it should "be the structured content when the server sends no content at all" in {
@@ -80,7 +80,7 @@ class MCPToolResultsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail with a parse error when it carries neither content nor structured content" in {
-    call(ujson.Obj()).left.toOption.map(_.getMessage).getOrElse("") should include("Failed to parse tool result")
+    call(ujson.Obj()).left.toOption.map(_.message).getOrElse("") should include("Failed to parse tool result")
   }
 
   "A tool listing" should "skip a malformed tool and return the others" in {

@@ -188,7 +188,7 @@ final case class SafeParameterExtractor private (params: ujson.Value, call: Opti
 
   // Simple mode extractor - returns string errors
   private def extract[T](path: String, extractor: ujson.Value => Option[T], expectedType: String): Either[String, T] =
-    extractEnhanced(path, extractor, expectedType).left.map(_.getMessage)
+    extractEnhanced(path, extractor, expectedType).left.map(_.message)
 
   // Enhanced mode extractor - returns structured errors
   private def extractEnhanced[T](

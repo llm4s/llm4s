@@ -53,10 +53,11 @@ def weatherAgent(client: LLMClient, question: String): Result[AgentResult] = for
       .`object`[Map[String, Any]]("Forecast parameters")
       .withProperty(Schema.property("city", Schema.string("The city to look up")))
   ).withHandler(args => args.getString("city").map(city => s"Sunny and 18 C in $city")).buildSafe()
+  registry <- ToolRegistry.of(Seq(forecast))
   agent <- Agent
     .builder("weather", client)
     .withSystemPrompt("You answer questions about the weather.")
-    .withTools(new ToolRegistry(Seq(forecast)))
+    .withTools(registry)
     .withMiddleware(new GuardrailMiddleware(input = Seq(new LengthCheck(1, 2000), new ProfanityFilter()), Nil))
     .withStreaming()
     .build()

@@ -215,7 +215,7 @@ class StreamableHTTPReplyDeadlineSpec extends AnyFlatSpec with Matchers {
 
         val (result, elapsed) = timed(slow.execute(ujson.Obj()))
         result match {
-          case Left(error: ToolCallError.HandlerError) => error.getMessage should include("timed out")
+          case Left(error: ToolCallError.HandlerError) => error.message should include("timed out")
           case other                                   => fail(s"expected a timed-out tool failure, got $other")
         }
         elapsed should be < 5.seconds

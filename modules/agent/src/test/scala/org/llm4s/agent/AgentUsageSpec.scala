@@ -48,7 +48,7 @@ class AgentUsageSpec extends AnyFlatSpec with Matchers {
     )
 
     val usage =
-      built(Agent.builder("assistant", client).withTools(new ToolRegistry(Seq(tool)))).run("hi").value.usage
+      built(Agent.builder("assistant", client).withTools(ToolRegistry.of(Seq(tool)).toOption.get)).run("hi").value.usage
 
     usage.requestCount shouldBe 2L
     usage.inputTokens shouldBe 14L

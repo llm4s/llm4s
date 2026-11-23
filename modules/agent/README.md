@@ -30,7 +30,8 @@ val result = for {
   given ModelRegistryService = registryService
   client      <- LLMConnect.getClient(providerCfg)
   weatherTool <- WeatherTool.toolSafe
-  agent       <- Agent.builder("weather", client).withTools(new ToolRegistry(Seq(weatherTool))).build()
+  registry <- ToolRegistry.of(Seq(weatherTool))
+  agent       <- Agent.builder("weather", client).withTools(registry).build()
   r           <- agent.run("What's the weather like in Paris?")
 } yield r.answer.getOrElse(s"Run ended: ${r.status}")
 

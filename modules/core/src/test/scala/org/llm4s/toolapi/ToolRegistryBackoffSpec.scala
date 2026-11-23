@@ -47,7 +47,7 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
   private def request(name: String) = ToolCallRequest(name, ujson.Obj())
 
   private def retry(maxAttempts: Int, base: FiniteDuration, factor: Double = 1.0) =
-    ToolExecutionConfig(retryPolicy = Some(ToolRetryPolicy(maxAttempts, base, factor)))
+    ToolExecutionConfig(retryPolicy = Some(ToolRetryPolicy(maxAttempts, base, factor).toOption.get))
 
   private def withPool[A](threads: Int)(f: ExecutionContextExecutorService => A): A = {
     val executor: ExecutorService             = Executors.newFixedThreadPool(threads)
@@ -82,9 +82,9 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
   "ToolRegistry.executeAsync" should "leave its execution-context thread free while a retry waits out its backoff" in {
     val attempts     = new AtomicInteger(0)
     val firstAttempt = new CountDownLatch(1)
-    val registry     = new ToolRegistry(Seq(flaky("flaky", 1, attempts, firstAttempt)))
+    val registry     = ToolRegistry.of(Seq(flaky("flaky", 1, attempts, firstAttempt))).toOption.get
     withPool(1) { pool =>
-      val result = registry.executeAsync(request("flaky"), retry(2, 1500.millis))(pool)
+      val result = ToolExecutor.executeAsync(registry, request("flaky"), retry(2, 1500.millis))(pool)
       firstAttempt.await(5, TimeUnit.SECONDS) shouldBe true
       // The only pool thread must now be free: a probe submitted during the 1.5 s backoff runs at once. A
       // backoff that sleeps on the pool thread holds the probe back for roughly the whole delay.
@@ -99,12 +99,14 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
   it should "finish many concurrent retries on a small pool in about one backoff, not one backoff per wave" in {
     val calls    = 6
     val attempts = Vector.fill(calls)(new AtomicInteger(0))
-    val registry = new ToolRegistry(attempts.zipWithIndex.map { case (a, i) => flaky(s"t$i", 1, a) })
+    val registry = ToolRegistry.of(attempts.zipWithIndex.map { case (a, i) => flaky(s"t$i", 1, a) }).toOption.get
     withPool(2) { pool =>
       val config = retry(2, 800.millis)
       val (results, elapsedMs) = timed {
         Await.result(
-          Future.traverse((0 until calls).toList)(i => registry.executeAsync(request(s"t$i"), config)(pool))(
+          Future.traverse((0 until calls).toList)(i =>
+            ToolExecutor.executeAsync(registry, request(s"t$i"), config)(pool)
+          )(
             implicitly,
             pool
           ),
@@ -124,11 +126,11 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
     val mx     = ManagementFactory.getThreadMXBean
     val calls  = 100
     val tools  = Vector.fill(calls)(new AtomicInteger(0))
-    val reg    = new ToolRegistry(tools.zipWithIndex.map { case (a, i) => flaky(s"t$i", 1, a) })
+    val reg    = ToolRegistry.of(tools.zipWithIndex.map { case (a, i) => flaky(s"t$i", 1, a) }).toOption.get
     val config = retry(2, 5.millis)
     withPool(4) { pool =>
       Await.result(
-        Future.traverse((0 until calls).toList)(i => reg.executeAsync(request(s"t$i"), config)(pool))(
+        Future.traverse((0 until calls).toList)(i => ToolExecutor.executeAsync(reg, request(s"t$i"), config)(pool))(
           implicitly,
           pool
         ),
@@ -136,7 +138,7 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
       )
       val before = mx.getThreadCount
       Await.result(
-        Future.traverse((0 until calls).toList)(i => reg.executeAsync(request(s"t$i"), config)(pool))(
+        Future.traverse((0 until calls).toList)(i => ToolExecutor.executeAsync(reg, request(s"t$i"), config)(pool))(
           implicitly,
           pool
         ),
@@ -151,10 +153,12 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
 
   it should "wait at least the configured backoff between attempts and retry once" in {
     val attempts = new AtomicInteger(0)
-    val registry = new ToolRegistry(Seq(flaky("flaky", 1, attempts)))
+    val registry = ToolRegistry.of(Seq(flaky("flaky", 1, attempts))).toOption.get
     withPool(2) { pool =>
       val (result, elapsedMs) =
-        timed(Await.result(registry.executeAsync(request("flaky"), retry(2, 300.millis))(pool), 10.seconds))
+        timed(
+          Await.result(ToolExecutor.executeAsync(registry, request("flaky"), retry(2, 300.millis))(pool), 10.seconds)
+        )
       result.map(_("result").num) shouldBe Right(1.0)
       attempts.get shouldBe 2
       elapsedMs should be >= 250L
@@ -163,10 +167,12 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
 
   it should "retry at once when the backoff is zero" in {
     val attempts = new AtomicInteger(0)
-    val registry = new ToolRegistry(Seq(flaky("flaky", 2, attempts)))
+    val registry = ToolRegistry.of(Seq(flaky("flaky", 2, attempts))).toOption.get
     withPool(1) { pool =>
       val (result, elapsedMs) =
-        timed(Await.result(registry.executeAsync(request("flaky"), retry(3, Duration.Zero))(pool), 10.seconds))
+        timed(
+          Await.result(ToolExecutor.executeAsync(registry, request("flaky"), retry(3, Duration.Zero))(pool), 10.seconds)
+        )
       result.map(_("result").num) shouldBe Right(2.0)
       attempts.get shouldBe 3
       // No delay to wait out: two retries on a single thread finish far inside any real backoff.
@@ -183,10 +189,10 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
     val inlineEc    = ExecutionContext.fromExecutor((runnable: Runnable) => runnable.run())
     val attempts    = new AtomicInteger(0)
     val failing     = toolOf("always") { attempts.incrementAndGet(); throw new java.io.IOException("always") }
-    val registry    = new ToolRegistry(Seq(failing))
+    val registry    = ToolRegistry.of(Seq(failing)).toOption.get
     val maxAttempts = 50000
     val result = Await.result(
-      registry.executeAsync(request("always"), retry(maxAttempts, Duration.Zero))(inlineEc),
+      ToolExecutor.executeAsync(registry, request("always"), retry(maxAttempts, Duration.Zero))(inlineEc),
       60.seconds
     )
     result.left.toOption.get shouldBe a[ToolCallError.ExecutionError]
@@ -195,10 +201,10 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
 
   it should "grow the delay exponentially across several retries" in {
     val attempts = new AtomicInteger(0)
-    val registry = new ToolRegistry(Seq(flaky("flaky", 3, attempts)))
+    val registry = ToolRegistry.of(Seq(flaky("flaky", 3, attempts))).toOption.get
     withPool(2) { pool =>
       val (result, elapsedMs) = timed(
-        Await.result(registry.executeAsync(request("flaky"), retry(4, 50.millis, 2.0))(pool), 10.seconds)
+        Await.result(ToolExecutor.executeAsync(registry, request("flaky"), retry(4, 50.millis, 2.0))(pool), 10.seconds)
       )
       result.isRight shouldBe true
       attempts.get shouldBe 4
@@ -210,9 +216,10 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
   it should "return the last error once the attempts are exhausted" in {
     val attempts = new AtomicInteger(0)
     val failing  = toolOf("failing") { attempts.incrementAndGet(); throw new java.io.IOException("always") }
-    val registry = new ToolRegistry(Seq(failing))
+    val registry = ToolRegistry.of(Seq(failing)).toOption.get
     withPool(2) { pool =>
-      val result = Await.result(registry.executeAsync(request("failing"), retry(3, 10.millis))(pool), 10.seconds)
+      val result =
+        Await.result(ToolExecutor.executeAsync(registry, request("failing"), retry(3, 10.millis))(pool), 10.seconds)
       result.left.toOption.get shouldBe a[ToolCallError.ExecutionError]
       attempts.get shouldBe 3
     }
@@ -221,10 +228,12 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
   it should "not retry, and not wait, on an error that is not retryable" in {
     val attempts = new AtomicInteger(0)
     val failing  = toolOf("failing") { attempts.incrementAndGet(); Left("validation error") }
-    val registry = new ToolRegistry(Seq(failing))
+    val registry = ToolRegistry.of(Seq(failing)).toOption.get
     withPool(2) { pool =>
       val (result, elapsedMs) =
-        timed(Await.result(registry.executeAsync(request("failing"), retry(3, 5.seconds))(pool), 10.seconds))
+        timed(
+          Await.result(ToolExecutor.executeAsync(registry, request("failing"), retry(3, 5.seconds))(pool), 10.seconds)
+        )
       result.left.toOption.get shouldBe a[ToolCallError.HandlerError]
       attempts.get shouldBe 1
       elapsedMs should be < 2000L
@@ -237,13 +246,13 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
       if (attempts.getAndIncrement() == 0) Thread.sleep(600)
       Right(Ok(1.0))
     }
-    val registry = new ToolRegistry(Seq(slowThenFast))
+    val registry = ToolRegistry.of(Seq(slowThenFast)).toOption.get
     val config = ToolExecutionConfig(
       timeout = Some(100.millis),
-      retryPolicy = Some(ToolRetryPolicy(2, 20.millis))
+      retryPolicy = Some(ToolRetryPolicy(2, 20.millis).toOption.get)
     )
     withPool(2) { pool =>
-      val result = Await.result(registry.executeAsync(request("slow"), config)(pool), 10.seconds)
+      val result = Await.result(ToolExecutor.executeAsync(registry, request("slow"), config)(pool), 10.seconds)
       result.isRight shouldBe true
       attempts.get shouldBe 2
     }
@@ -255,13 +264,14 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
       attempts.incrementAndGet()
       throw new InterruptedException("stop")
     }
-    val registry = new ToolRegistry(Seq(cancelled))
+    val registry = ToolRegistry.of(Seq(cancelled)).toOption.get
     // One fork-join worker: the probe below runs on the very thread the cancelled attempt used, and a
     // ForkJoinPool (unlike a ThreadPoolExecutor) does not clear a worker's flag between tasks.
     val fj   = new ForkJoinPool(1)
     val pool = ExecutionContext.fromExecutorService(fj)
     try {
-      val result = Await.result(registry.executeAsync(request("cancelled"), retry(3, 10.millis))(pool), 10.seconds)
+      val result =
+        Await.result(ToolExecutor.executeAsync(registry, request("cancelled"), retry(3, 10.millis))(pool), 10.seconds)
       result shouldBe Left(ToolCallError.Cancelled("cancelled"))
       attempts.get shouldBe 1
       Await.result(Future(Thread.currentThread().isInterrupted)(pool), 10.seconds) shouldBe false
@@ -273,22 +283,29 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
   "ToolRegistry.execute" should "still retry on a single-thread execution context, with and without a timeout" in {
     val plain    = new AtomicInteger(0)
     val timeouts = new AtomicInteger(0)
-    val registry = new ToolRegistry(
-      Seq(
-        flaky("plain", 1, plain),
-        toolOf("slow") {
-          if (timeouts.getAndIncrement() == 0) Thread.sleep(600)
-          Right(Ok(1.0))
-        }
+    val registry = ToolRegistry
+      .of(
+        Seq(
+          flaky("plain", 1, plain),
+          toolOf("slow") {
+            if (timeouts.getAndIncrement() == 0) Thread.sleep(600)
+            Right(Ok(1.0))
+          }
+        )
       )
-    )
+      .toOption
+      .get
     withPool(1) { pool =>
       val viaPool = Future {
-        val a = registry.execute(request("plain"), retry(2, 50.millis))(pool)
-        val b = registry.execute(
+        val a = ToolExecutor.execute(registry, request("plain"), retry(2, 50.millis))
+        val b = ToolExecutor.execute(
+          registry,
           request("slow"),
-          ToolExecutionConfig(timeout = Some(100.millis), retryPolicy = Some(ToolRetryPolicy(2, 20.millis)))
-        )(pool)
+          ToolExecutionConfig(
+            timeout = Some(100.millis),
+            retryPolicy = Some(ToolRetryPolicy(2, 20.millis).toOption.get)
+          )
+        )
         (a, b)
       }(pool)
       val (a, b) = Await.result(viaPool, 10.seconds)

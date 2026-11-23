@@ -40,7 +40,7 @@ object ReadFileResult {
  *   allowedPaths = Some(Seq("/tmp", "/home/user/workspace"))
  * ))
  *
- * val tools = new ToolRegistry(Seq(readTool))
+ * val tools = ToolRegistry.of(Seq(readTool))
  * agent.run("Read the contents of /tmp/data.txt", tools)
  * }}}
  */

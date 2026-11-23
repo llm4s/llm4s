@@ -57,7 +57,7 @@ object PythonDevelopersGuide {
       def handler(params: SafeParameterExtractor): Either[String, String] =
         for {
           query <- params.getString("query")
-          limit <- params.getOptionalInt("limit").left.map(_.getMessage)
+          limit <- params.getOptionalInt("limit").left.map(_.message)
         } yield s"Found ${limit.getOrElse(10)} results for '$query'"
 
       ToolBuilder[Map[String, Any], String](

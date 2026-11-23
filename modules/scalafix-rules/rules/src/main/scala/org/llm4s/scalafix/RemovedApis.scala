@@ -52,7 +52,7 @@ object RemovedApis {
     else if (symbol == "org/llm4s/toolapi/ToolRegistry#getToolDefinitionsSafe().")
       Some(
         "getToolDefinitionsSafeRemoved" ->
-          ("ToolRegistry.getToolDefinitionsSafe is removed in 0.5.0; use getOpenAITools(), or the provider's own " +
+          ("ToolRegistry.getToolDefinitionsSafe is removed in 0.5.0; use ToolFunction.toolDefinitions(tools, strict = true), or the provider's own " +
             "tool conversion: " + Migration.guide05("7-errors-cancellation-and-types"))
       )
     else None

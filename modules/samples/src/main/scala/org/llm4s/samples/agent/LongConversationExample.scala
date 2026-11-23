@@ -37,9 +37,10 @@ object LongConversationExample {
       given org.llm4s.model.ModelRegistryService = registryService
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
+      registry    <- ToolRegistry.of(Seq(weatherTool))
       agent <- Agent
         .builder("long-conversation", client)
-        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withTools(registry)
         .withMiddleware(ContextWindowMiddleware(contextConfig)) // Enable automatic pruning
         .build()
 

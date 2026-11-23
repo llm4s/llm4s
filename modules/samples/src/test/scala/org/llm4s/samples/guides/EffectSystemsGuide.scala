@@ -50,7 +50,7 @@ object EffectSystemsGuide {
         for {
           _      <- client.streamComplete(greeting, CompletionOptions(), _.content.foreach(reply.append))
           tool   <- temperature
-          agent  <- Agent.builder("assistant", client).withTools(new ToolRegistry(Seq(tool))).build()
+          agent  <- Agent.builder("assistant", client).withTools(ToolRegistry.of(Seq(tool)).toOption.get).build()
           result <- agent.run(question)
         } yield s"$reply | ${result.answer.getOrElse("")}"
       }
@@ -69,7 +69,7 @@ object EffectSystemsGuide {
       val program = for {
         reply  <- llm.streamComplete(greeting).map(_.content.getOrElse("")).compile.string
         tool   <- IO.fromEither(temperature.left.map(new LLMException(_)))
-        agent  <- llm.agent("assistant")(_.withTools(new ToolRegistry(Seq(tool))))
+        agent  <- llm.agent("assistant")(_.withTools(ToolRegistry.of(Seq(tool)).toOption.get))
         result <- agent.run(question)
       } yield s"$reply | ${result.answer.getOrElse("")}"
       program.timeoutTo(timeout, IO.pure("timed out")).recover { case e: LLMException => s"failed: ${e.error.message}" }
@@ -87,7 +87,7 @@ object EffectSystemsGuide {
       val program = for {
         reply  <- llm.streamComplete(greeting).map(_.content.getOrElse("")).runFold("")(_ + _)
         tool   <- ZIO.fromEither(temperature)
-        agent  <- llm.agent("assistant")(_.withTools(new ToolRegistry(Seq(tool))))
+        agent  <- llm.agent("assistant")(_.withTools(ToolRegistry.of(Seq(tool)).toOption.get))
         result <- agent.run(question)
       } yield s"$reply | ${result.answer.getOrElse("")}"
       program.timeout(Duration.fromScala(timeout)).fold(e => s"failed: ${e.message}", _.getOrElse("timed out"))
@@ -107,7 +107,7 @@ object EffectSystemsGuide {
     def pekkoProgram(client: LLMClient, timeout: FiniteDuration)(using system: ActorSystem): Future[String] = {
       import system.dispatcher
       val llm = LLMClientPekko(client)
-      temperature.flatMap(tool => llm.agent("assistant")(_.withTools(new ToolRegistry(Seq(tool))))) match {
+      temperature.flatMap(tool => llm.agent("assistant")(_.withTools(ToolRegistry.of(Seq(tool)).toOption.get))) match {
         case Left(error) => Future.successful(s"failed: ${error.message}")
         case Right(agent) =>
           val reply = llm.streamComplete(greeting).map(_.content.getOrElse("")).fold("")(_ + _)

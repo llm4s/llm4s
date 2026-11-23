@@ -69,7 +69,7 @@ object RemovedApis_1_0 {
     else if (symbol == "org/llm4s/toolapi/OpenAIToolHelper.")
       Some(
         "openAIToolHelperInternal" ->
-          ("OpenAIToolHelper is internal; take the tool definitions as JSON with ToolRegistry.getOpenAITools(): " +
+          ("OpenAIToolHelper is internal; take the tool definitions as JSON with ToolFunction.toolDefinitions(tools, strict = true): " +
             Migration.guide10("openaitoolhelper-is-internal-2360"))
       )
     else if (symbol == "org/llm4s/trace/AnsiColors.")

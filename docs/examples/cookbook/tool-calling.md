@@ -75,7 +75,8 @@ object ToolCallingRecipe extends RecipeApp {
     for {
       rateTool   <- exchangeRate
       calculator <- CalculatorTool.toolSafe
-      agent  <- Agent.builder("currency-agent", client).withTools(new ToolRegistry(Seq(rateTool, calculator))).build()
+      registry <- ToolRegistry.of(Seq(rateTool, calculator))
+      agent  <- Agent.builder("currency-agent", client).withTools(registry).build()
       result <- agent.run(question)
     } yield result
 

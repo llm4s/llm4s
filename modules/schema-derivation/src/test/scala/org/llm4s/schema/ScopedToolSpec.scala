@@ -108,7 +108,7 @@ class ScopedToolSpec extends AnyFlatSpec with Matchers with ScalaCheckPropertyCh
   }
 
   it should "send the same schema as Tool.of" in {
-    built(scopedAdd).toOpenAITool() shouldBe built(typedAdd).toOpenAITool()
+    built(scopedAdd).toolDefinition(strict = true) shouldBe built(typedAdd).toolDefinition(strict = true)
   }
 
   it should "refuse arguments that are not a JSON object, as Tool.of does" in {
@@ -128,7 +128,7 @@ class ScopedToolSpec extends AnyFlatSpec with Matchers with ScalaCheckPropertyCh
   }
 
   it should "answer through a ToolRegistry" in {
-    val registry = new ToolRegistry(Seq(built(scopedAdd)))
+    val registry = ToolRegistry.of(Seq(built(scopedAdd))).toOption.get
     registry.execute(ToolCallRequest("add", ujson.Obj("a" -> 2, "b" -> 3))) shouldBe Right(ujson.Num(5))
   }
 
@@ -172,16 +172,20 @@ class ScopedToolSpec extends AnyFlatSpec with Matchers with ScalaCheckPropertyCh
     val tool = built(throwing)
     an[IllegalStateException] should be thrownBy tool.execute(ujson.Obj("text" -> "hi"))
 
-    val viaRegistry = new ToolRegistry(Seq(tool)).execute(ToolCallRequest("boom", ujson.Obj("text" -> "hi")))
+    val viaRegistry =
+      ToolRegistry.of(Seq(tool)).toOption.get.execute(ToolCallRequest("boom", ujson.Obj("text" -> "hi")))
     viaRegistry.isLeft shouldBe true
-    viaRegistry.left.map(_.getFormattedMessage).swap.getOrElse("") should include("cannot echo hi")
+    viaRegistry.left.map(_.formatted).swap.getOrElse("") should include("cannot echo hi")
 
     val typed =
       built(Tool.of[Echo, String]("boom", "Throws")(e => throw new IllegalStateException(s"cannot echo ${e.text}")))
-    new ToolRegistry(Seq(typed))
+    ToolRegistry
+      .of(Seq(typed))
+      .toOption
+      .get
       .execute(ToolCallRequest("boom", ujson.Obj("text" -> "hi")))
       .left
-      .map(_.getFormattedMessage) shouldBe viaRegistry.left.map(_.getFormattedMessage)
+      .map(_.formatted) shouldBe viaRegistry.left.map(_.formatted)
   }
 
   "ToolScope" should "give the handler the call's idempotency key and id when the call supplies them" in {
@@ -200,7 +204,7 @@ class ScopedToolSpec extends AnyFlatSpec with Matchers with ScalaCheckPropertyCh
         built(describe(name))
           .execute(args)
           .map(upickle.default.read[Sum](_))
-          .fold(e => fail(e.getFormattedMessage), _.key)
+          .fold(e => fail(e.formatted), _.key)
 
       val forward  = ujson.Obj("a" -> a, "b" -> b)
       val reversed = ujson.Obj("b" -> b, "a" -> a)

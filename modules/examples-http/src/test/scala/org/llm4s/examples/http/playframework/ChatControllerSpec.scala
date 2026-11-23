@@ -117,7 +117,7 @@ class ChatControllerSpec extends AnyFlatSpec with Matchers {
       .fold(e => fail(s"could not build the tool: $e"), identity)
     val client = ScriptedLLMClient.sequence(Reply.toolCall("clock", "{}", Some("call-1")), Reply.text("It is noon."))
     val agent = LLMClientPekko(client)
-      .agent("chat")(builder => ChatAgent.configure(builder).withTools(new ToolRegistry(Seq(clock))))
+      .agent("chat")(builder => ChatAgent.configure(builder).withTools(ToolRegistry.of(Seq(clock)).toOption.get))
       .fold(e => fail(s"could not build the agent: $e"), identity)
     val received = post(agent, "/chat/stream", """{"message": "time?"}""").events
     received.head shouldBe ("tool_call" -> ujson.Obj("id" -> "call-1", "tool" -> "clock"))

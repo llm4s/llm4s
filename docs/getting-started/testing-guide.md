@@ -311,7 +311,8 @@ class ToolCallingSpec extends AnyFlatSpec with Matchers {
 
     val outcome = for {
       tool  <- weatherTool
-      agent <- Agent.builder("test-agent", client).withTools(new ToolRegistry(Seq(tool))).build()
+      toolRegistry <- ToolRegistry.of(Seq(tool))
+      agent <- Agent.builder("test-agent", client).withTools(toolRegistry).build()
       _     <- agent.run("What's the weather in London?")
     } yield ()
 

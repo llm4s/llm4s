@@ -11,7 +11,7 @@ import org.llm4s.annotation.Stable
 @Stable
 sealed trait ToolParameterError {
   def parameterName: String
-  def getMessage: String
+  def message: String
 }
 
 object ToolParameterError {
@@ -28,7 +28,7 @@ object ToolParameterError {
     expectedType: String,
     availableParameters: List[String]
   ) extends ToolParameterError {
-    def getMessage: String = {
+    def message: String = {
       val available = if (availableParameters.nonEmpty) {
         s" (available: ${availableParameters.mkString(", ")})"
       } else ""
@@ -67,7 +67,7 @@ object ToolParameterError {
     parameterName: String,
     expectedType: String
   ) extends ToolParameterError {
-    def getMessage: String =
+    def message: String =
       s"parameter '$parameterName' (type: $expectedType) is required but value was null"
   }
 
@@ -83,7 +83,7 @@ object ToolParameterError {
     expectedType: String,
     actualType: String
   ) extends ToolParameterError {
-    def getMessage: String =
+    def message: String =
       s"parameter '$parameterName' has wrong type - expected $expectedType but got $actualType"
   }
 
@@ -99,7 +99,7 @@ object ToolParameterError {
     parentPath: String,
     parentType: String
   ) extends ToolParameterError {
-    def getMessage: String =
+    def message: String =
       s"cannot access parameter '$parameterName' because parent '$parentPath' is $parentType, not an object"
   }
 
@@ -112,11 +112,11 @@ object ToolParameterError {
     errors: List[ToolParameterError]
   ) extends ToolParameterError {
     def parameterName: String = errors.map(_.parameterName).mkString(", ")
-    def getMessage: String =
+    def message: String =
       if (errors.size == 1) {
-        errors.head.getMessage
+        errors.head.message
       } else {
-        s"multiple parameter issues:\n${errors.map(e => s"  - ${e.getMessage}").mkString("\n")}"
+        s"multiple parameter issues:\n${errors.map(e => s"  - ${e.message}").mkString("\n")}"
       }
   }
 }
@@ -130,8 +130,8 @@ object ToolParameterError {
 @Stable
 sealed trait ToolCallError {
   def toolName: String
-  def getMessage: String
-  def getFormattedMessage: String = s"Tool call '$toolName' ${getMessage}"
+  def message: String
+  def formatted: String = s"Tool call '$toolName' $message"
 }
 
 object ToolCallError {
@@ -159,7 +159,7 @@ object ToolCallError {
     toolName: String,
     availableTools: Seq[String]
   ) extends ToolCallError {
-    def getMessage: String = {
+    def message: String = {
       val toolsInfo = if (availableTools.nonEmpty) s" Available tools: [${availableTools.mkString(", ")}]." else ""
       s"is not a recognized tool.$toolsInfo Check the tool name matches exactly (case-sensitive)."
     }
@@ -182,7 +182,7 @@ object ToolCallError {
    * Tool received null arguments when it expected an object
    */
   case class NullArguments(toolName: String) extends ToolCallError {
-    def getMessage: String = "received null arguments - expected an object with required parameters"
+    def message: String = "received null arguments - expected an object with required parameters"
   }
 
   /**
@@ -192,11 +192,11 @@ object ToolCallError {
     toolName: String,
     parameterErrors: List[ToolParameterError]
   ) extends ToolCallError {
-    def getMessage: String = {
+    def message: String = {
       val errorMessages = parameterErrors match {
-        case single :: Nil => single.getMessage
+        case single :: Nil => single.message
         case multiple =>
-          s"has parameter issues:\n${multiple.map(e => s"  - ${e.getMessage}").mkString("\n")}"
+          s"has parameter issues:\n${multiple.map(e => s"  - ${e.message}").mkString("\n")}"
       }
       errorMessages
     }
@@ -209,7 +209,7 @@ object ToolCallError {
     toolName: String,
     cause: Throwable
   ) extends ToolCallError {
-    def getMessage: String = s"failed during execution: ${cause.getMessage}"
+    def message: String = s"failed during execution: ${cause.getMessage}"
   }
 
   /**
@@ -219,7 +219,7 @@ object ToolCallError {
     toolName: String,
     error: String
   ) extends ToolCallError {
-    def getMessage: String = s"failed with error: $error"
+    def message: String = s"failed with error: $error"
   }
 
   /**
@@ -232,12 +232,12 @@ object ToolCallError {
     toolName: String,
     duration: scala.concurrent.duration.FiniteDuration
   ) extends ToolCallError {
-    def getMessage: String = s"$toolName timed out after $duration"
+    def message: String = s"$toolName timed out after $duration"
   }
 
   /** The call was cancelled by interrupting its thread; the interrupt flag is kept. */
   case class Cancelled(toolName: String) extends ToolCallError {
-    def getMessage: String = "was cancelled"
+    def message: String = "was cancelled"
   }
 }
 
@@ -338,12 +338,12 @@ object ToolCallErrorJson {
    * @return ujson.Obj containing structured error information
    */
   def toJson(error: ToolCallError): ujson.Obj = {
-    val legacyError = error.getFormattedMessage
+    val legacyError = error.formatted
 
     val base = ujson.Obj(
       "isError"  -> true,
       "toolName" -> error.toolName,
-      "message"  -> error.getMessage,
+      "message"  -> error.message,
       "error"    -> legacyError // Legacy field for backward compatibility
     )
 

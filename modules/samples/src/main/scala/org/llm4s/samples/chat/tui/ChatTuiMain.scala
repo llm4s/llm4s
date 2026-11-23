@@ -23,8 +23,8 @@ def ChatTuiMain(): Unit =
     for {
       config   <- ChatTuiConfig.load()
       readFile <- ChatTuiTool.tool(config.workspaceRoot)
-      registry = new ToolRegistry(Seq(readFile))
-      client <- LLMConnect.getClient(config.providerConfig)(using config.modelRegistry)
+      registry <- ToolRegistry.of(Seq(readFile))
+      client   <- LLMConnect.getClient(config.providerConfig)(using config.modelRegistry)
     } yield {
       val app = new ChatTuiApp(config, client, registry)
       TuiRuntime.run(app)

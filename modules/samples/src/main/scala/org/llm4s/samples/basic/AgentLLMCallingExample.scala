@@ -107,14 +107,14 @@ object AgentLLMCallingExample {
           agentExecutionResult <- {
             val calcToolResult = CalculatorTool.toolSafe
             calcToolResult.flatMap { calcTool =>
-              val tools        = Seq(calcTool)
-              val toolRegistry = new ToolRegistry(tools)
+              val tools = Seq(calcTool)
 
               logger.info("🔧 Available Tools:")
               tools.foreach(tool => logger.info("• {}: {}", tool.name, tool.description))
               val query = "Calculate 15 to the power of 3, and then calculate the square root of that result."
 
               for {
+                toolRegistry <- ToolRegistry.of(tools)
                 agent <- Agent
                   .builder("calculator-agent", llmClient)
                   .withTools(toolRegistry)

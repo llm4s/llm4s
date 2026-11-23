@@ -136,29 +136,29 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
   // ---- the schema
 
   "A typed tool" should "send the schema of the hand-built add tool, in strict and relaxed mode (golden)" in {
-    typedAdd.toOpenAITool() shouldBe handBuiltAdd.toOpenAITool()
-    typedAdd.toOpenAITool(strict = false) shouldBe handBuiltAdd.toOpenAITool(strict = false)
+    typedAdd.toolDefinition(strict = true) shouldBe handBuiltAdd.toolDefinition(strict = true)
+    typedAdd.toolDefinition(strict = false) shouldBe handBuiltAdd.toolDefinition(strict = false)
   }
 
   it should "send the hand-built calculator's schema for the parameters as it declares them (golden)" in {
     val typed = built(
       Tool.of[CalculatorAsDeclared, String]("calculator", calculator.description)(_ => Right("unused"))
     )
-    typed.toOpenAITool() shouldBe calculator.toOpenAITool()
-    typed.toOpenAITool(strict = false) shouldBe calculator.toOpenAITool(strict = false)
+    typed.toolDefinition(strict = true) shouldBe calculator.toolDefinition(strict = true)
+    typed.toolDefinition(strict = false) shouldBe calculator.toolDefinition(strict = false)
   }
 
   it should "differ from the hand-built calculator only in letting the optional operand be null or absent" in {
     val typed = built(Tool.of[CalculatorArgs, String]("calculator", calculator.description)(_ => Right("unused")))
 
-    val strict = calculator.toOpenAITool()
+    val strict = calculator.toolDefinition(strict = true)
     strict("function")("parameters")("properties")("b")("type") = ujson.Arr("number", "null")
-    typed.toOpenAITool() shouldBe strict
+    typed.toolDefinition(strict = true) shouldBe strict
 
-    val relaxed = calculator.toOpenAITool(strict = false)
+    val relaxed = calculator.toolDefinition(strict = false)
     relaxed("function")("parameters")("properties")("b")("type") = ujson.Arr("number", "null")
     relaxed("function")("parameters")("required") = ujson.Arr("operation", "a")
-    typed.toOpenAITool(strict = false) shouldBe relaxed
+    typed.toolDefinition(strict = false) shouldBe relaxed
   }
 
   it should "describe a Long as an integer, as an Int is" in {
@@ -172,9 +172,11 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
     typedAdd.execute(arguments) shouldBe Right(ujson.Str("5"))
     typedAdd.execute(arguments) shouldBe handBuiltAdd.execute(arguments)
 
-    val registry = new ToolRegistry(Seq(typedAdd))
+    val registry = ToolRegistry.of(Seq(typedAdd)).toOption.get
     registry.execute(ToolCallRequest("add", arguments)) shouldBe Right(ujson.Str("5"))
-    registry.getOpenAITools() shouldBe ujson.Arr(handBuiltAdd.toOpenAITool())
+    org.llm4s.toolapi.ToolFunction.toolDefinitions(registry.tools, strict = true) shouldBe ujson.Arr(
+      handBuiltAdd.toolDefinition(strict = true)
+    )
   }
 
   it should "ignore keys the type has no field for, as a hand-written tool does" in {
@@ -253,10 +255,10 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
       )
       // the hand-written handler stops at the first, which is the typed tool's first
       typedAdd.execute(arguments) shouldBe Left(
-        ToolCallError.HandlerError("add", MultipleErrors(handWritten(arguments).left.getOrElse(Nil)).getMessage)
+        ToolCallError.HandlerError("add", MultipleErrors(handWritten(arguments).left.getOrElse(Nil)).message)
       )
       handBuiltAdd.execute(arguments) shouldBe Left(
-        ToolCallError.HandlerError("add", handWritten(arguments).left.getOrElse(Nil).head.getMessage)
+        ToolCallError.HandlerError("add", handWritten(arguments).left.getOrElse(Nil).head.message)
       )
     }
   }
@@ -266,7 +268,7 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
     val errors    = List(MissingParameter("a", "integer", List("b")), TypeMismatch("b", "integer", "string"))
     decodeAdd(arguments) shouldBe Left(errors)
     decodeAdd(arguments) shouldBe handWritten(arguments)
-    typedAdd.execute(arguments) shouldBe Left(ToolCallError.HandlerError("add", MultipleErrors(errors).getMessage))
+    typedAdd.execute(arguments) shouldBe Left(ToolCallError.HandlerError("add", MultipleErrors(errors).message))
   }
 
   it should "report a calculator operand of the wrong type as the hand-built calculator does" in {

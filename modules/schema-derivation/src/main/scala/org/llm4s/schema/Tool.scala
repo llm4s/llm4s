@@ -170,8 +170,8 @@ object Tool {
       }
 
   private[schema] def message(errors: List[ToolParameterError]): String = errors match {
-    case single :: Nil => single.getMessage
-    case several       => ToolParameterError.MultipleErrors(several).getMessage
+    case single :: Nil => single.message
+    case several       => ToolParameterError.MultipleErrors(several).message
   }
 
   /**

@@ -82,10 +82,10 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
       .getOrElse(fail(s"the reference server did not advertise '$name'"))
 
   private def parameters(tool: ToolFunction[_, _]): ujson.Value =
-    tool.toOpenAITool(strict = false)("function")("parameters")
+    tool.toolDefinition(strict = false)("function")("parameters")
 
   private def failureText(result: Either[ToolCallError, ujson.Value]): String =
-    result.fold(_.getMessage, v => fail(s"expected a failed call, got $v"))
+    result.fold(_.message, v => fail(s"expected a failed call, got $v"))
 
   "MCPClientImpl against the MCP reference server" should "complete the handshake over Streamable HTTP, without falling back to SSE" in
     withClient(client => client.transport.exists(_.isInstanceOf[StreamableHTTPTransportImpl]) shouldBe true)
@@ -113,7 +113,7 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
 
   it should "return a tool's structuredContent as the JSON value it is" in withClient { client =>
     val result = toolNamed(client, "get-structured-content").execute(ujson.Obj("location" -> "Chicago"))
-    val obj    = result.fold(e => fail(s"get-structured-content failed: ${e.getMessage}"), identity)
+    val obj    = result.fold(e => fail(s"get-structured-content failed: ${e.message}"), identity)
     obj.objOpt.isDefined shouldBe true
     obj.obj.keySet should not be empty
   }

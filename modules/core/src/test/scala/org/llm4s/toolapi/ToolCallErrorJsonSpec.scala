@@ -11,7 +11,7 @@ class ToolCallErrorJsonSpec extends AnyFlatSpec with Matchers {
   "ToolParameterError.MultipleErrors" should "delegate getMessage to single error when list has one element" in {
     val inner = ToolParameterError.MissingParameter("email", "string")
     val multi = ToolParameterError.MultipleErrors(List(inner))
-    multi.getMessage shouldBe inner.getMessage
+    multi.message shouldBe inner.message
   }
 
   it should "produce a combined message for multiple errors" in {
@@ -20,9 +20,9 @@ class ToolCallErrorJsonSpec extends AnyFlatSpec with Matchers {
       ToolParameterError.TypeMismatch("b", "integer", "string")
     )
     val multi = ToolParameterError.MultipleErrors(errors)
-    multi.getMessage should include("multiple parameter issues")
-    multi.getMessage should include("'a'")
-    multi.getMessage should include("'b'")
+    multi.message should include("multiple parameter issues")
+    multi.message should include("'a'")
+    multi.message should include("'b'")
   }
 
   it should "report all parameter names joined" in {
@@ -76,8 +76,8 @@ class ToolCallErrorJsonSpec extends AnyFlatSpec with Matchers {
 
   "ToolCallError.Timeout" should "include duration in its message" in {
     val t = ToolCallError.Timeout("slow_tool", 10.seconds)
-    t.getFormattedMessage should include("slow_tool")
-    t.getFormattedMessage should include("10")
+    t.formatted should include("slow_tool")
+    t.formatted should include("10")
   }
 
   // ---- ToolCallErrorJson.flattenErrors ----

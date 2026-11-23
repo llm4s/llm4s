@@ -27,7 +27,7 @@ class ToolCallingGuideSpec extends AnyFlatSpec with Matchers {
     Seq(
       """Reply.toolCall("get_weather", """ + "\"\"\"" + """{"city": "London"}""" + "\"\"\"" + """),""",
       """Reply.text("It is 20°C in London.")""",
-      "agent <- Agent.builder(\"test-agent\", client).withTools(new ToolRegistry(Seq(tool))).build()",
+      "agent <- Agent.builder(\"test-agent\", client).withTools(ToolRegistry.of(Seq(tool)).toOption.get).build()",
       "outcome.isRight shouldBe true",
       """capturedCity shouldBe Some("London")""",
       "client.callCount shouldBe 2",
@@ -61,7 +61,7 @@ class ToolCallingGuideSpec extends AnyFlatSpec with Matchers {
 
     val outcome = for {
       tool  <- weatherTool
-      agent <- Agent.builder("test-agent", client).withTools(new ToolRegistry(Seq(tool))).build()
+      agent <- Agent.builder("test-agent", client).withTools(ToolRegistry.of(Seq(tool)).toOption.get).build()
       _     <- agent.run("What's the weather in London?")
     } yield ()
 

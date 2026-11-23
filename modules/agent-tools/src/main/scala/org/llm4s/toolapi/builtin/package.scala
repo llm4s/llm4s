@@ -10,7 +10,7 @@ package org.llm4s.toolapi
  * {{{
  * import org.llm4s.toolapi.builtin.core._
  *
- * val tools = new ToolRegistry(Seq(
+ * val tools = ToolRegistry.of(Seq(
  *   DateTimeTool.tool,
  *   CalculatorTool.tool,
  *   UUIDTool.tool,
@@ -23,7 +23,7 @@ package org.llm4s.toolapi
  * {{{
  * import org.llm4s.toolapi.builtin.filesystem._
  *
- * val fileTools = new ToolRegistry(Seq(
+ * val fileTools = ToolRegistry.of(Seq(
  *   ReadFileTool.create(FileConfig(
  *     maxFileSize = 512 * 1024,
  *     allowedPaths = Some(Seq("/tmp"))
@@ -38,7 +38,7 @@ package org.llm4s.toolapi
  * {{{
  * import org.llm4s.toolapi.builtin.http._
  *
- * val httpTools = new ToolRegistry(Seq(
+ * val httpTools = ToolRegistry.of(Seq(
  *   HTTPTool.create(HttpConfig(
  *     timeout = 10.seconds,
  *     allowedDomains = Some(Seq("api.example.com"))
@@ -52,12 +52,12 @@ package org.llm4s.toolapi
  * import org.llm4s.toolapi.builtin.shell._
  *
  * // Read-only shell (safe commands)
- * val shellTools = new ToolRegistry(Seq(
+ * val shellTools = ToolRegistry.of(Seq(
  *   ShellTool.create(ShellConfig.readOnly())
  * ))
  *
  * // Development shell with common dev tools
- * val devShellTools = new ToolRegistry(Seq(
+ * val devShellTools = ToolRegistry.of(Seq(
  *   ShellTool.create(ShellConfig.development())
  * ))
  * }}}
@@ -67,7 +67,7 @@ package org.llm4s.toolapi
  * {{{
  * import org.llm4s.toolapi.builtin.search._
  *
- * val searchTools = new ToolRegistry(Seq(
+ * val searchTools = ToolRegistry.of(Seq(
  *   DuckDuckGoSearchTool.tool
  * ))
  * }}}

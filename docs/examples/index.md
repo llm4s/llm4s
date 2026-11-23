@@ -644,7 +644,7 @@ sbt "samples/runMain org.llm4s.samples.toolapi.MultiToolExample"
 
 **Key code:**
 ```scala
-val tools = new ToolRegistry(Seq(calculatorTool, searchTool))
+val tools: Result[ToolRegistry] = ToolRegistry.of(Seq(calculatorTool, searchTool))
 ```
 
 [View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/toolapi/MultiToolExample.scala)

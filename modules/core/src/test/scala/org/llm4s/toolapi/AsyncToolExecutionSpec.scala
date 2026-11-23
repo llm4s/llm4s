@@ -118,7 +118,7 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
 
   private def valuesOf(results: Seq[Either[ToolCallError, ujson.Value]]): Seq[String] =
     results.map { r =>
-      val json = r.fold(e => fail(s"Expected success: ${e.getMessage}"), identity)
+      val json = r.fold(e => fail(s"Expected success: ${e.message}"), identity)
       read[TestResult](json).value
     }
 
@@ -131,21 +131,16 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
   }
 
   "ToolExecutionStrategy.ParallelWithLimit" should "require positive concurrency" in {
-    an[IllegalArgumentException] should be thrownBy {
-      ToolExecutionStrategy.ParallelWithLimit(0)
-    }
-
-    an[IllegalArgumentException] should be thrownBy {
-      ToolExecutionStrategy.ParallelWithLimit(-1)
-    }
+    ToolExecutionStrategy.parallelWithLimit(0).isLeft shouldBe true
+    ToolExecutionStrategy.parallelWithLimit(-1).isLeft shouldBe true
 
     // Valid cases should work
     noException should be thrownBy {
-      ToolExecutionStrategy.ParallelWithLimit(1)
+      ToolExecutionStrategy.parallelWithLimit(1).toOption.get
     }
 
     noException should be thrownBy {
-      ToolExecutionStrategy.ParallelWithLimit(10)
+      ToolExecutionStrategy.parallelWithLimit(10).toOption.get
     }
   }
 
@@ -157,13 +152,13 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
     createDelayingTool("async_tool", 0).fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val registry = new ToolRegistry(Seq(tool))
+        val registry = ToolRegistry.of(Seq(tool)).toOption.get
         val request  = ToolCallRequest("async_tool", ujson.Obj("input" -> "test_value"))
-        val future   = registry.executeAsync(request)
+        val future   = ToolExecutor.executeAsync(registry, request)
         val result   = Await.result(future, 5.seconds)
 
         result shouldBe a[Right[_, _]]
-        val json   = result.fold(e => fail(s"Expected success: ${e.getMessage}"), identity)
+        val json   = result.fold(e => fail(s"Expected success: ${e.message}"), identity)
         val parsed = read[TestResult](json)
         parsed.value shouldBe "async_tool: test_value"
       }
@@ -174,9 +169,9 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
     createDelayingTool("known_tool", 0).fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val registry = new ToolRegistry(Seq(tool))
+        val registry = ToolRegistry.of(Seq(tool)).toOption.get
         val request  = ToolCallRequest("unknown_tool", ujson.Obj("input" -> "test"))
-        val future   = registry.executeAsync(request)
+        val future   = ToolExecutor.executeAsync(registry, request)
         val result   = Await.result(future, 5.seconds)
 
         result shouldBe a[Left[_, _]]
@@ -194,10 +189,10 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
   "ToolRegistry.executeAll" should "execute requests sequentially with Sequential strategy" in {
     val probe = new ConcurrencyProbe(None)
     val result = probe.tool("probe").map { tool =>
-      val registry = new ToolRegistry(Seq(tool))
+      val registry = ToolRegistry.of(Seq(tool)).toOption.get
       val results =
         Await.result(
-          registry.executeAll(requestsFor("probe", "a", "b", "c"), ToolExecutionStrategy.Sequential),
+          ToolExecutor.executeAll(registry, requestsFor("probe", "a", "b", "c"), ToolExecutionStrategy.Sequential),
           30.seconds
         )
 
@@ -215,10 +210,13 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
     // Each call waits until all three are running at once, so the test can only pass if they overlap
     val probe = new ConcurrencyProbe(Some(new CountDownLatch(3)))
     val result = probe.tool("probe").map { tool =>
-      val registry = new ToolRegistry(Seq(tool))
+      val registry = ToolRegistry.of(Seq(tool)).toOption.get
       val results =
         Await
-          .result(registry.executeAll(requestsFor("probe", "a", "b", "c"), ToolExecutionStrategy.Parallel), 30.seconds)
+          .result(
+            ToolExecutor.executeAll(registry, requestsFor("probe", "a", "b", "c"), ToolExecutionStrategy.Parallel),
+            30.seconds
+          )
 
       probe.maxConcurrent shouldBe 3
 
@@ -259,11 +257,15 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
     val gate  = new CountDownLatch(1)
     val probe = new ConcurrencyProbe(Some(new CountDownLatch(2)), Some(gate))
     val result = probe.tool("probe").map { tool =>
-      val registry                             = new ToolRegistry(Seq(tool))
+      val registry                             = ToolRegistry.of(Seq(tool)).toOption.get
       val tracked                              = new CountingExecutionContext(global)
       implicit val trackedEc: ExecutionContext = tracked
       val future =
-        registry.executeAll(requestsFor("probe", "a", "b", "c", "d"), ToolExecutionStrategy.ParallelWithLimit(2))
+        ToolExecutor.executeAll(
+          registry,
+          requestsFor("probe", "a", "b", "c", "d"),
+          ToolExecutionStrategy.parallelWithLimit(2).toOption.get
+        )
 
       implicit val patience: PatienceConfig = PatienceConfig(Span(10, Seconds), Span(10, Millis))
       eventually(probe.startCount shouldBe 2)
@@ -314,14 +316,14 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         failingTool => {
-          val registry = new ToolRegistry(Seq(failingTool))
+          val registry = ToolRegistry.of(Seq(failingTool)).toOption.get
           val requests = Seq(
             ToolCallRequest("failing_tool", ujson.Obj("input" -> "ok1")),
             ToolCallRequest("failing_tool", ujson.Obj("input" -> "fail")),
             ToolCallRequest("failing_tool", ujson.Obj("input" -> "ok2"))
           )
 
-          val future  = registry.executeAll(requests, ToolExecutionStrategy.Parallel)
+          val future  = ToolExecutor.executeAll(registry, requests, ToolExecutionStrategy.Parallel)
           val results = Await.result(future, 5.seconds)
 
           // First and third should succeed
@@ -339,8 +341,8 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
     createDelayingTool("tool", 0).fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val registry = new ToolRegistry(Seq(tool))
-        val future   = registry.executeAll(Seq.empty, ToolExecutionStrategy.Parallel)
+        val registry = ToolRegistry.of(Seq(tool)).toOption.get
+        val future   = ToolExecutor.executeAll(registry, Seq.empty, ToolExecutionStrategy.Parallel)
         val results  = Await.result(future, 5.seconds)
         results shouldBe empty
       }
@@ -351,9 +353,9 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
     createDelayingTool("tool", 0).fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val registry = new ToolRegistry(Seq(tool))
+        val registry = ToolRegistry.of(Seq(tool)).toOption.get
         val requests = Seq(ToolCallRequest("tool", ujson.Obj("input" -> "single")))
-        val future   = registry.executeAll(requests, ToolExecutionStrategy.Parallel)
+        val future   = ToolExecutor.executeAll(registry, requests, ToolExecutionStrategy.Parallel)
         val results  = Await.result(future, 5.seconds)
         results.size shouldBe 1
         results.head shouldBe a[Right[_, _]]
@@ -368,9 +370,9 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
   it should "use Sequential by default" in {
     val probe = new ConcurrencyProbe(None)
     val result = probe.tool("probe").map { tool =>
-      val registry = new ToolRegistry(Seq(tool))
+      val registry = ToolRegistry.of(Seq(tool)).toOption.get
       // Use default (no strategy specified)
-      val results = Await.result(registry.executeAll(requestsFor("probe", "a", "b")), 30.seconds)
+      val results = Await.result(ToolExecutor.executeAll(registry, requestsFor("probe", "a", "b")), 30.seconds)
 
       probe.maxConcurrent shouldBe 1
       probe.startOrder shouldBe Seq("a", "b")

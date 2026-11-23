@@ -44,7 +44,7 @@ object ErrorMessageDemonstration extends App {
     val nullResult = inventoryTool.execute(ujson.Null)
     nullResult match {
       case Left(error) =>
-        logger.info("   Error: {}", error.getMessage)
+        logger.info("   Error: {}", error.message)
       case Right(_) =>
         logger.info("   Unexpected success")
     }
@@ -61,7 +61,7 @@ object ErrorMessageDemonstration extends App {
     )
     missingParamResult match {
       case Left(error) =>
-        logger.info("   Error: {}", error.getMessage)
+        logger.info("   Error: {}", error.message)
       case Right(_) =>
         logger.info("   Unexpected success")
     }
@@ -78,7 +78,7 @@ object ErrorMessageDemonstration extends App {
     )
     typeMismatchResult match {
       case Left(error) =>
-        logger.info("   Error: {}", error.getMessage)
+        logger.info("   Error: {}", error.message)
       case Right(_) =>
         logger.info("   Unexpected success")
     }
@@ -95,7 +95,7 @@ object ErrorMessageDemonstration extends App {
     )
     nullFieldResult match {
       case Left(error) =>
-        logger.info("   Error: {}", error.getMessage)
+        logger.info("   Error: {}", error.message)
       case Right(_) =>
         logger.info("   Unexpected success")
     }
@@ -112,7 +112,7 @@ object ErrorMessageDemonstration extends App {
     )
     successResult match {
       case Left(error) =>
-        logger.info("   Error: {}", error.getMessage)
+        logger.info("   Error: {}", error.message)
       case Right(r) =>
         logger.info("   Success: {}", r.render())
     }

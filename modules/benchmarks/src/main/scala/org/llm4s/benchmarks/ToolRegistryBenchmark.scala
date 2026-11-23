@@ -1,6 +1,6 @@
 package org.llm4s.benchmarks
 
-import org.llm4s.toolapi.{ ToolCallError, ToolCallRequest, ToolExecutionStrategy, ToolRegistry }
+import org.llm4s.toolapi.{ ToolCallError, ToolCallRequest, ToolExecutionStrategy, ToolExecutor, ToolRegistry }
 import org.openjdk.jmh.annotations._
 
 import java.util.concurrent.TimeUnit
@@ -34,9 +34,9 @@ class ToolRegistryBenchmark {
 
   @Benchmark
   def dispatchBatch10Sequential(): Seq[Either[ToolCallError, ujson.Value]] =
-    Await.result(registry.executeAll(batchRequests, ToolExecutionStrategy.Sequential), 10.seconds)
+    Await.result(ToolExecutor.executeAll(registry, batchRequests, ToolExecutionStrategy.Sequential), 10.seconds)
 
   @Benchmark
   def dispatchBatch10Parallel(): Seq[Either[ToolCallError, ujson.Value]] =
-    Await.result(registry.executeAll(batchRequests, ToolExecutionStrategy.Parallel), 10.seconds)
+    Await.result(ToolExecutor.executeAll(registry, batchRequests, ToolExecutionStrategy.Parallel), 10.seconds)
 }

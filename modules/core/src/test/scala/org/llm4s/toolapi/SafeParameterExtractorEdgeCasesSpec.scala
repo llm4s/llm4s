@@ -253,7 +253,7 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val error = extractor("""{"config":"text"}""").getStringEnhanced("config.host")
 
     error shouldBe Left(InvalidNesting("host", "config", "string"))
-    val message = error.left.map(_.getMessage).left.getOrElse(fail("expected Left"))
+    val message = error.left.map(_.message).left.getOrElse(fail("expected Left"))
     message should include("'host'")
     message should include("'config'")
     message should include("string")

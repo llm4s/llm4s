@@ -71,10 +71,11 @@ object DerivedToolsExample {
 
     val outcome = for {
       tools <- Tools.derive[CustomerService](InMemoryCustomerService)
-      _ = tools.foreach(tool => println(tool.toOpenAITool().render(indent = 2)))
+      _ = tools.foreach(tool => println(tool.toolDefinition(strict = true).render(indent = 2)))
+      registry <- ToolRegistry.of(tools)
       agent <- Agent
         .builder("support", model)
-        .withTools(new ToolRegistry(tools))
+        .withTools(registry)
         .withSystemPrompt("You help customers with their orders.")
         .build()
       result <- agent.run("What did I order last? I am C-1001.")

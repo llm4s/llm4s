@@ -141,7 +141,7 @@ given Session = Session.offline(
   Reply.text("It is 21 degrees in Paris.")
 )
 
-weather.foreach(tool => ask("Weather in Paris?", tools = new ToolRegistry(Seq(tool))))
+weather.flatMap(tool => ToolRegistry.of(Seq(tool))).foreach(tools => ask("Weather in Paris?", tools = tools))
 // -> get_weather({"city":"Paris"})
 // <- {"city":"Paris","temperature":21}
 // It is 21 degrees in Paris.

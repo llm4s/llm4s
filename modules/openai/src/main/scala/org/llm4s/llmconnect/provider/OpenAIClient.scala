@@ -61,7 +61,7 @@ import org.llm4s.llmconnect.streaming._
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult, UnmappedOptions }
 import org.llm4s.security.{ KnownSecrets, TokenGenerations }
-import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
+import org.llm4s.toolapi.OpenAIToolHelper
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
@@ -659,7 +659,7 @@ class OpenAIClient private[provider] (
       if (streaming && OpenAIClient.acceptsStreamUsage(config))
         builder.streamOptions(ChatCompletionStreamOptions.builder().includeUsage(true).build())
 
-      if (options.tools.nonEmpty) OpenAIToolHelper.addToolsToParams(new ToolRegistry(options.tools), builder)
+      if (options.tools.nonEmpty) OpenAIToolHelper.addToolsToParams(options.tools, builder)
 
       options.responseFormat.foreach {
         case ResponseFormat.Json =>

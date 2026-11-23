@@ -138,11 +138,12 @@ object CostTrackingExample {
   /** Demos 1 and 2 on `client`: the per-request cost, then an agent run, and the session tracker after both. */
   private def levelsOneAndTwo(client: LLMClient, session: CostTracker): Result[LevelsOneAndTwo] =
     for {
-      perRequest <- requestCost(client)
-      tools      <- BuiltinTools.coreSafe
-      agent      <- Agent.builder("cost-demo", client).withTools(new ToolRegistry(tools)).build()
-      result     <- agent.run(AgentPrompt)
-      _          <- agent.forget(result.threadId)
+      perRequest   <- requestCost(client)
+      tools        <- BuiltinTools.coreSafe
+      toolRegistry <- ToolRegistry.of(tools)
+      agent        <- Agent.builder("cost-demo", client).withTools(toolRegistry).build()
+      result       <- agent.run(AgentPrompt)
+      _            <- agent.forget(result.threadId)
     } yield LevelsOneAndTwo(perRequest, result.usage, session.snapshot)
 
   private def requestCost(client: LLMClient): Result[RequestCost] =

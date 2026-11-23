@@ -50,7 +50,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
     createGreetingTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val json = tool.toOpenAITool()
+        val json = tool.toolDefinition(strict = true)
         json("type").str shouldBe "function"
         json("function")("name").str shouldBe "greet"
         json("function")("description").str shouldBe "Creates a greeting message"
@@ -61,7 +61,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
 
   it should "set strict to true by default" in {
     createGreetingTool()
-      .map(_.toOpenAITool())
+      .map(_.toolDefinition(strict = true))
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         json => json("function")("strict").bool shouldBe true
@@ -70,7 +70,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
 
   it should "allow setting strict to false" in {
     createGreetingTool()
-      .map(_.toOpenAITool(strict = false))
+      .map(_.toolDefinition(strict = false))
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         json => json("function")("strict").bool shouldBe false
@@ -79,7 +79,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
 
   it should "include parameter schema" in {
     createGreetingTool()
-      .map(_.toOpenAITool())
+      .map(_.toolDefinition(strict = true))
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         json => {
@@ -121,7 +121,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
           result.isLeft shouldBe true
           val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
           error shouldBe a[ToolCallError.HandlerError]
-          error.getMessage should include("intentional failure")
+          error.message should include("intentional failure")
         }
       )
   }
@@ -134,7 +134,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
         result.isLeft shouldBe true
         val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
         error shouldBe a[ToolCallError.NullArguments]
-        error.getMessage should include("null arguments")
+        error.message should include("null arguments")
       }
     )
   }
@@ -213,7 +213,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
           result.isLeft shouldBe true
           val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
           error shouldBe a[ToolCallError.InvalidArguments]
-          error.getMessage should include("missing")
+          error.message should include("missing")
         }
       )
   }

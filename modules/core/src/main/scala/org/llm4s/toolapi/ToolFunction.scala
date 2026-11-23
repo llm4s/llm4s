@@ -44,9 +44,14 @@ final case class ToolFunction[T, R: ReadWriter] private (
   def withHandler(handler: SafeParameterExtractor => Either[String, R]): ToolFunction[T, R] = copy(handler = handler)
 
   /**
-   * Converts the tool definition to the format expected by OpenAI's API
+   * The definition of this tool as a model is told about it: the chat-completions function-tool JSON
+   * (`{"type": "function", "function": {name, description, parameters, strict}}`), which is the format every
+   * provider client in llm4s starts from, whatever its own wire format.
+   *
+   * @param strict `true` renders the schema for OpenAI's strict mode, where every property is listed as
+   *               required; `false` keeps `required` as the schema declares it
    */
-  def toOpenAITool(strict: Boolean = true): ujson.Value =
+  def toolDefinition(strict: Boolean): ujson.Value =
     ujson.Obj(
       "type" -> ujson.Str("function"),
       "function" -> ujson.Obj(
@@ -135,6 +140,14 @@ final case class ToolFunction[T, R: ReadWriter] private (
 }
 
 object ToolFunction {
+
+  /**
+   * The [[ToolFunction.toolDefinition definitions]] of `tools`, in order, as the JSON array a request carries.
+   *
+   * @param strict as for [[ToolFunction.toolDefinition]]
+   */
+  def toolDefinitions(tools: Seq[ToolFunction[_, _]], strict: Boolean): ujson.Arr =
+    ujson.Arr.from(tools.map(_.toolDefinition(strict)))
 
   /** Creates a [[ToolFunction]]; [[ToolBuilder]] is the usual way in. */
   def apply[T, R: ReadWriter](

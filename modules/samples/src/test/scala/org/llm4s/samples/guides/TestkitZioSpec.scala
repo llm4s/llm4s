@@ -39,8 +39,10 @@ object TestkitZioSpec extends ZIOSpecDefault {
       for {
         client <- ZIO.service[ScriptedLLMClient]
         tool   <- ZIO.fromEither(temperatureTool)
-        agent  <- ZIO.serviceWithZIO[LLMClientZ](_.agent("packing-assistant")(_.withTools(new ToolRegistry(Seq(tool)))))
-        run    <- agent.run("What should I pack for Oslo today?")
+        agent <- ZIO.serviceWithZIO[LLMClientZ](
+          _.agent("packing-assistant")(_.withTools(ToolRegistry.of(Seq(tool)).toOption.get))
+        )
+        run <- agent.run("What should I pack for Oslo today?")
       } yield assertTrue(
         run.answer.contains("It is 21 degrees in Oslo: pack light layers."),
         client.calls.head.options.tools.map(_.name) == Seq("get_temperature")

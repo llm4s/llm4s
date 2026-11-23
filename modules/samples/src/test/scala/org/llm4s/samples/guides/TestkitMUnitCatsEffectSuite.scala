@@ -33,7 +33,7 @@ class TestkitMUnitCatsEffectSuite extends CatsEffectSuite {
   packing.test("the packing assistant calls the tool, then answers") { client =>
     for {
       tool  <- IO.fromEither(temperatureTool.left.map(new LLMException(_)))
-      agent <- LLMClientIO[IO](client).agent("packing-assistant")(_.withTools(new ToolRegistry(Seq(tool))))
+      agent <- LLMClientIO[IO](client).agent("packing-assistant")(_.withTools(ToolRegistry.of(Seq(tool)).toOption.get))
       run   <- agent.run("What should I pack for Oslo today?")
     } yield {
       assertEquals(run.answer, Some("It is 21 degrees in Oslo: pack light layers."))

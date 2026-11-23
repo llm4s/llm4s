@@ -36,7 +36,7 @@ object ScriptedAgentZSpec extends ZIOSpecDefault {
 
   def packingAgent(client: LLMClient): Result[Agent] =
     temperatureTool.flatMap(tool =>
-      Agent.builder("packing-assistant", client).withTools(new ToolRegistry(Seq(tool))).build()
+      Agent.builder("packing-assistant", client).withTools(ToolRegistry.of(Seq(tool)).toOption.get).build()
     )
 
   /** The error the scripted client returned: an agent wraps it in the `NodeFailed` of the node that called it. */

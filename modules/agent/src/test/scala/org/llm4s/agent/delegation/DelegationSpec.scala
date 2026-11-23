@@ -108,7 +108,7 @@ class DelegationSpec
 
     result.answer.value shouldBe "report on summarise X"
     val taskTool = client.optionsSentTo(LeadPrompt).head.tools.find(_.name == "task").value
-    taskTool.toOpenAITool(true).render() should include(""""enum":["general"]""")
+    taskTool.toolDefinition(strict = true).render() should include(""""enum":["general"]""")
     // the prompt section lists the subagent
     client.sentTo(LeadPrompt).head.head.content should include("general (`task` with subagent_type \"general\")")
   }

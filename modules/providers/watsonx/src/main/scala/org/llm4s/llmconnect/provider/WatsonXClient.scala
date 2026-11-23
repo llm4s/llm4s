@@ -548,7 +548,7 @@ class WatsonXClient(
       else options.reasoning.foreach(effort => body("reasoning_effort") = reasoningEffortValue(effort))
     }
     if (options.tools.nonEmpty) {
-      body("tools") = ujson.Arr.from(options.tools.map(tool => encodeTool(tool.toOpenAITool(strict = false))))
+      body("tools") = ujson.Arr.from(options.tools.map(tool => encodeTool(tool.toolDefinition(strict = false))))
       // SDK-evidenced: IBM's LangChain integration sends "auto" by default (LCIBM chat_models.py:1764). The Node
       // SDK's own doc comment says `auto` is not yet supported (NODE types/vml_v1.ts:751-761); that integration
       // contradicts it, so the probe suite checks this against a real account.

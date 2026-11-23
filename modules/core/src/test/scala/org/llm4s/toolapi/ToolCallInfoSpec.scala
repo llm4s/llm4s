@@ -28,7 +28,10 @@ class ToolCallInfoSpec extends AnyFlatSpec with Matchers {
 
   "ToolFunction.execute(args)" should "leave the call empty, as plain tool calling has none" in {
     echo(required = true).execute(ujson.Obj("q" -> "x")) shouldBe Right(ujson.Str("none"))
-    new ToolRegistry(Seq(echo(required = true)))
+    ToolRegistry
+      .of(Seq(echo(required = true)))
+      .toOption
+      .get
       .execute(ToolCallRequest("echo", ujson.Obj("q" -> "x"))) shouldBe Right(ujson.Str("none"))
   }
 

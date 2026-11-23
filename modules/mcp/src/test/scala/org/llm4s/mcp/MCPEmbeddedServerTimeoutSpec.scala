@@ -72,7 +72,7 @@ class MCPEmbeddedServerTimeoutSpec extends AnyFlatSpec with Matchers with Before
       result match {
         case Left(error) =>
           error shouldBe a[ToolCallError.HandlerError]
-          error.getMessage should include("timed out")
+          error.message should include("timed out")
         case Right(value) => fail(s"expected a timeout, got $value")
       }
       elapsed should be < GiveUpWithin
@@ -93,7 +93,7 @@ class MCPEmbeddedServerTimeoutSpec extends AnyFlatSpec with Matchers with Before
       result match {
         case Left(_: ToolCallError.Cancelled)       => fail("a timeout is not a cancellation")
         case Left(_: ToolCallError.UnknownFunction) => fail("a timeout is not an unknown tool")
-        case Left(error)                            => error.getMessage should include("timed out")
+        case Left(error)                            => error.message should include("timed out")
         case Right(value)                           => fail(s"expected a timeout, got $value")
       }
       elapsed should be < GiveUpWithin

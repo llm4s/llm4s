@@ -32,10 +32,10 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
   private def names(tools: Result[Seq[ToolFunction[_, _]]]): Set[String] = tools.value.map(_.name).toSet
 
   private def call(tools: Seq[ToolFunction[_, _]], tool: String, arguments: ujson.Obj) =
-    new ToolRegistry(tools).execute(ToolCallRequest(tool, arguments))
+    ToolRegistry.of(tools).toOption.get.execute(ToolCallRequest(tool, arguments))
 
   private def parameterNames(tool: ToolFunction[_, _]): Set[String] =
-    tool.toOpenAITool(strict = false)("function")("parameters")("properties").obj.keys.toSet
+    tool.toolDefinition(strict = false)("function")("parameters")("properties").obj.keys.toSet
 
   private def tempDir(): Path = Files.createTempDirectory("builtin-tools-guide")
 
@@ -150,7 +150,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
       val supplied = ujson.Obj.from(params.take(i))
       val failed   = call(tools, tool, supplied)
       withClue(s"$tool without ${params(i)._1}: ") {
-        failed.left.value.getMessage should include(s"required parameter '${params(i)._1}'")
+        failed.left.value.message should include(s"required parameter '${params(i)._1}'")
       }
     }
   }
@@ -158,10 +158,10 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
   // ---- registering the tools
 
   "The registration snippet" should "turn a bundle into a registry and run a tool" in {
-    val registry = BuiltinTools.coreSafe.map(tools => new ToolRegistry(tools)).value
+    val registry = BuiltinTools.coreSafe.map(tools => ToolRegistry.of(tools).toOption.get).value
 
     registry.tools.map(_.name).toSet shouldBe coreNames
-    registry.getOpenAITools().arr should have size 4
+    org.llm4s.toolapi.ToolFunction.toolDefinitions(registry.tools, strict = true).arr should have size 4
 
     val product = registry.execute(
       ToolCallRequest("calculator", ujson.Obj("operation" -> "multiply", "a" -> 6, "b" -> 7))
@@ -170,11 +170,11 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   "A refused call" should "come back as a Left, not an exception" in {
-    val registry = new ToolRegistry(BuiltinTools.coreSafe.value)
+    val registry = ToolRegistry.of(BuiltinTools.coreSafe.value).toOption.get
     val divided = registry.execute(
       ToolCallRequest("calculator", ujson.Obj("operation" -> "divide", "a" -> 1, "b" -> 0))
     )
-    divided.left.value.getFormattedMessage should include("Division by zero")
+    divided.left.value.formatted should include("Division by zero")
   }
 
   // ---- file tools
@@ -189,7 +189,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
       .value
 
     call(tools, "read_file", ujson.Obj("path" -> inside.toString)).value("content").str shouldBe "hello"
-    call(tools, "read_file", ujson.Obj("path" -> outside.toString)).left.value.getMessage should include("not allowed")
+    call(tools, "read_file", ujson.Obj("path" -> outside.toString)).left.value.message should include("not allowed")
   }
 
   it should "block /etc, /var, /sys, /proc and /dev by default, even when they are allowed" in {
@@ -198,7 +198,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
     val tools = BuiltinTools
       .customSafe(fileConfig = Some(FileConfig(allowedPaths = Some(Seq("/etc")))))
       .value
-    call(tools, "read_file", ujson.Obj("path" -> "/etc/hosts")).left.value.getMessage should include("not allowed")
+    call(tools, "read_file", ujson.Obj("path" -> "/etc/hosts")).left.value.message should include("not allowed")
   }
 
   it should "allow any path outside the blocklist when allowedPaths is not set" in {
@@ -215,7 +215,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
     val tools = BuiltinTools
       .customSafe(fileConfig = Some(FileConfig(maxFileSize = 4, blockedPaths = Seq.empty)))
       .value
-    call(tools, "read_file", ujson.Obj("path" -> file.toString)).left.value.getMessage should include("File too large")
+    call(tools, "read_file", ujson.Obj("path" -> file.toString)).left.value.message should include("File too large")
   }
 
   it should "treat /var as blocked, which on macOS includes the system temporary directory" in {
@@ -237,7 +237,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
 
     val scoped = BuiltinTools.developmentSafe(workingDirectory = Some(here.toString)).value
     call(scoped, "read_file", ujson.Obj("path" -> local.toString)).value("content").str shouldBe "local"
-    call(scoped, "read_file", ujson.Obj("path" -> remote.toString)).left.value.getMessage should include("not allowed")
+    call(scoped, "read_file", ujson.Obj("path" -> remote.toString)).left.value.message should include("not allowed")
   }
 
   it should "default to 1 MB reads and not following symbolic links" in {
@@ -261,7 +261,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
         ujson.Obj("path" -> link.toString)
       )
 
-    readLink(follow = false).left.value.getMessage should include("Not a regular file")
+    readLink(follow = false).left.value.message should include("Not a regular file")
     readLink(follow = true).value("content").str shouldBe "linked"
   }
 
@@ -282,7 +282,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
         ujson.Obj("path" -> link.toString)
       )
 
-    listLink(follow = false).left.value.getMessage should include("Not a directory")
+    listLink(follow = false).left.value.message should include("Not a directory")
     listLink(follow = true).value("entries").arr.map(_("name").str) should contain("note.txt")
   }
 
@@ -301,13 +301,13 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
 
     for (follow <- Seq(false, true))
       withClue(s"followSymlinks = $follow: ") {
-        call(tools(follow), "list_directory", ujson.Obj("path" -> link.toString)).left.value.getMessage should
+        call(tools(follow), "list_directory", ujson.Obj("path" -> link.toString)).left.value.message should
           include("Access denied")
         call(
           tools(follow),
           "read_file",
           ujson.Obj("path" -> link.resolve("secret.txt").toString)
-        ).left.value.getMessage should
+        ).left.value.message should
           include("Access denied")
       }
   }
@@ -322,7 +322,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
     call(tools, "write_file", ujson.Obj("path" -> target.toString, "content" -> "one")).isRight shouldBe true
     Files.readString(target) shouldBe "one"
 
-    call(tools, "write_file", ujson.Obj("path" -> target.toString, "content" -> "two")).left.value.getMessage should
+    call(tools, "write_file", ujson.Obj("path" -> target.toString, "content" -> "two")).left.value.message should
       include("overwrite is not allowed")
     Files.readString(target) shouldBe "one"
 
@@ -330,7 +330,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
       tools,
       "write_file",
       ujson.Obj("path" -> other.resolve("x.txt").toString, "content" -> "x")
-    ).left.value.getMessage should
+    ).left.value.message should
       include("not in allowed paths")
     Files.exists(other.resolve("x.txt")) shouldBe false
   }
@@ -356,20 +356,20 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
   "The HTTP tool" should "refuse a method that is not allowed, before any request" in {
     val tools   = BuiltinTools.withHttpSafe().value
     val refused = call(tools, "http_request", ujson.Obj("url" -> "https://example.com/", "method" -> "POST"))
-    refused.left.value.getMessage should include("HTTP method 'POST' is not allowed. Allowed: GET, HEAD")
+    refused.left.value.message should include("HTTP method 'POST' is not allowed. Allowed: GET, HEAD")
   }
 
   it should "refuse localhost, loopback and the cloud metadata address, before any request" in {
     val tools = BuiltinTools.withHttpSafe().value
     Seq("http://localhost:8080/", "http://127.0.0.1/", "http://169.254.169.254/latest/meta-data/").foreach { url =>
-      call(tools, "http_request", ujson.Obj("url" -> url)).left.value.getMessage should include("SSRF_BLOCKED")
+      call(tools, "http_request", ujson.Obj("url" -> url)).left.value.message should include("SSRF_BLOCKED")
     }
   }
 
   it should "refuse private network addresses, before any request" in {
     val tools = BuiltinTools.withHttpSafe().value
     Seq("http://10.0.0.1/", "http://192.168.1.1/", "http://172.16.0.1/").foreach { url =>
-      call(tools, "http_request", ujson.Obj("url" -> url)).left.value.getMessage should include("SSRF_BLOCKED")
+      call(tools, "http_request", ujson.Obj("url" -> url)).left.value.message should include("SSRF_BLOCKED")
     }
   }
 
@@ -404,13 +404,13 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   it should "refuse a scheme other than http and https" in {
     val tools = BuiltinTools.withHttpSafe().value
-    call(tools, "http_request", ujson.Obj("url" -> "file:///etc/hosts")).left.value.getMessage should
+    call(tools, "http_request", ujson.Obj("url" -> "file:///etc/hosts")).left.value.message should
       include("UNSUPPORTED_PROTOCOL")
   }
 
   it should "refuse a domain outside allowedDomains" in {
     val tools = BuiltinTools.withHttpSafe(HttpConfig.restricted(Seq("api.example.com"))).value
-    call(tools, "http_request", ujson.Obj("url" -> "https://other.example.org/")).left.value.getMessage should
+    call(tools, "http_request", ujson.Obj("url" -> "https://other.example.org/")).left.value.message should
       include("SSRF_BLOCKED")
   }
 
@@ -433,7 +433,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
   "The development bundle" should "give the model the read-only HTTP tool, not write methods" in {
     val tools   = BuiltinTools.developmentSafe().value
     val refused = call(tools, "http_request", ujson.Obj("url" -> "https://example.com/", "method" -> "DELETE"))
-    refused.left.value.getMessage should include("is not allowed. Allowed: GET, HEAD")
+    refused.left.value.message should include("is not allowed. Allowed: GET, HEAD")
   }
 
   // ---- shell tool
@@ -458,7 +458,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
     ran.value("exitCode").num shouldBe 0.0
     ran.value("stdout").str.trim shouldBe "hello"
 
-    call(tools, "shell_command", ujson.Obj("command" -> "rm -rf /tmp/anything")).left.value.getMessage should
+    call(tools, "shell_command", ujson.Obj("command" -> "rm -rf /tmp/anything")).left.value.message should
       include("Command 'rm' is not allowed")
   }
 
@@ -526,7 +526,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
       config <- ToolsConfigLoader.loadDuckDuckGoSearchTool(source)
       search <- DuckDuckGoSearchTool.create(config)
       core   <- BuiltinTools.coreSafe
-    } yield new ToolRegistry(core :+ search)).value
+    } yield ToolRegistry.of(core :+ search).toOption.get).value
 
     registry.tools.map(_.name).toSet shouldBe coreNames + "duckduckgo_search"
   }
@@ -542,8 +542,8 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
   "A call with a missing parameter" should "come back as a Left that names the parameter" in {
     val failed = call(BuiltinTools.coreSafe.value, "calculator", ujson.Obj("operation" -> "add"))
     failed.isLeft shouldBe true
-    failed.left.value.getMessage should include("required parameter 'a'")
-    failed.left.value.getMessage should include("is missing")
+    failed.left.value.message should include("required parameter 'a'")
+    failed.left.value.message should include("is missing")
   }
 
   "The development bundle" should "allow overwriting a file inside its working directory" in {
@@ -570,11 +570,11 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
   "The registry snippet of section 2" should "print the product of the calculator call" in {
     val printed = scala.collection.mutable.ArrayBuffer.empty[String]
     BuiltinTools.coreSafe.foreach { tools =>
-      val registry = new ToolRegistry(tools)
+      val registry = ToolRegistry.of(tools).toOption.get
 
       registry.execute(ToolCallRequest("calculator", ujson.Obj("operation" -> "multiply", "a" -> 6, "b" -> 7))) match {
         case Right(json) => printed += json("result").toString
-        case Left(error) => printed += error.getFormattedMessage
+        case Left(error) => printed += error.formatted
       }
     }
 
@@ -593,7 +593,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
   // ---- the weather tool
 
   "WeatherTool" should "return fixed demo data and call no service" in {
-    val registry = new ToolRegistry(Seq(WeatherTool.toolSafe.value))
+    val registry = ToolRegistry.of(Seq(WeatherTool.toolSafe.value)).toOption.get
     val reply = registry
       .execute(ToolCallRequest("get_weather", ujson.Obj("location" -> "Oslo, Norway", "units" -> "celsius")))
       .value

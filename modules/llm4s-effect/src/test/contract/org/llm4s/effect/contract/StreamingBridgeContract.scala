@@ -227,7 +227,7 @@ object StreamingBridgeContract {
         seen.set(Some(Thread.currentThread()))
         params.getString("city").map(_ => 21.0)
       }.buildSafe()
-      agent <- Agent.builder("contract", client).withTools(new ToolRegistry(Seq(tool))).build()
+      agent <- Agent.builder("contract", client).withTools(ToolRegistry.of(Seq(tool)).toOption.get).build()
     } yield agent
     built.fold(e => throw new IllegalStateException(s"could not build the contract's agent: $e"), identity)
   }

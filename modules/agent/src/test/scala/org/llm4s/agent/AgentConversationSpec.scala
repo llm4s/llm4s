@@ -49,7 +49,7 @@ class AgentConversationSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(new ToolRegistry(Seq(tool)))
+        .withTools(ToolRegistry.of(Seq(tool)).toOption.get)
         .withMiddleware(new ApprovalMiddleware(_ => Some("review")))
     )
 

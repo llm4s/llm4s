@@ -52,7 +52,7 @@ class DerivedToolsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "dispatch a call to the right method, and write its result" in {
-    val registry = new ToolRegistry(tools.values.toSeq)
+    val registry = ToolRegistry.of(tools.values.toSeq).toOption.get
     registry.execute(ToolCallRequest("find_orders", ujson.Obj("customerId" -> "C-7"))) shouldBe
       Right(ujson.Arr(ujson.Obj("id" -> "C-7-1", "total" -> 10.0)))
     registry.execute(ToolCallRequest("find_orders", ujson.Obj("customerId" -> "C-7", "since" -> "2026-01-01"))) shouldBe

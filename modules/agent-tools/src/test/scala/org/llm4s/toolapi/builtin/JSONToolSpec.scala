@@ -70,7 +70,7 @@ class JSONToolSpec extends AnyFlatSpec with Matchers {
 
   "JSONTool" should "advertise exactly the four operations it supports" in {
     val operations = tool
-      .toOpenAITool(strict = false)("function")("parameters")("properties")("operation")("enum")
+      .toolDefinition(strict = false)("function")("parameters")("properties")("operation")("enum")
       .arr
       .map(_.str)
       .toList
@@ -79,7 +79,7 @@ class JSONToolSpec extends AnyFlatSpec with Matchers {
 
   it should "handle every operation its schema advertises (none is reported as unknown)" in {
     val advertised = tool
-      .toOpenAITool(strict = false)("function")("parameters")("properties")("operation")("enum")
+      .toolDefinition(strict = false)("function")("parameters")("properties")("operation")("enum")
       .arr
       .map(_.str)
       .toList
@@ -314,7 +314,7 @@ class JSONToolSpec extends AnyFlatSpec with Matchers {
   // ---- through the public execute API
 
   it should "return the JSON result through execute for a success" in {
-    val result = tool.execute(args("parse", "[1]")).fold(e => fail(s"Expected Right: ${e.getMessage}"), identity)
+    val result = tool.execute(args("parse", "[1]")).fold(e => fail(s"Expected Right: ${e.message}"), identity)
     result("success").bool shouldBe true
     result("result") shouldBe ujson.Arr(1)
     result("formatted").str shouldBe "[\n  1\n]"

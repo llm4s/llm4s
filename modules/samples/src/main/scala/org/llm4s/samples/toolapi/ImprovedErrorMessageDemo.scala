@@ -17,13 +17,13 @@ object ImprovedErrorMessageDemo extends App {
   logger.info("")
   logger.info("1. Unknown tool:")
   val unknownTool = ToolCallError.UnknownFunction("calculate_tax")
-  logger.info("   {}", unknownTool.getFormattedMessage)
+  logger.info("   {}", unknownTool.formatted)
 
   // Example 2: Null arguments
   logger.info("")
   logger.info("2. Null arguments:")
   val nullArgs = ToolCallError.NullArguments("add_inventory_item")
-  logger.info("   {}", nullArgs.getFormattedMessage)
+  logger.info("   {}", nullArgs.formatted)
 
   // Example 3: Missing required parameter
   logger.info("")
@@ -32,7 +32,7 @@ object ImprovedErrorMessageDemo extends App {
     "add_inventory_item",
     List(ToolParameterError.MissingParameter("quantity", "number", List("item", "location")))
   )
-  logger.info("   {}", missingParam.getFormattedMessage)
+  logger.info("   {}", missingParam.formatted)
 
   // Example 4: Null value for required parameter
   logger.info("")
@@ -41,7 +41,7 @@ object ImprovedErrorMessageDemo extends App {
     "add_inventory_item",
     List(ToolParameterError.NullParameter("quantity", "number"))
   )
-  logger.info("   {}", nullParam.getFormattedMessage)
+  logger.info("   {}", nullParam.formatted)
 
   // Example 5: Type mismatch
   logger.info("")
@@ -50,7 +50,7 @@ object ImprovedErrorMessageDemo extends App {
     "add_inventory_item",
     List(ToolParameterError.TypeMismatch("quantity", "number", "string"))
   )
-  logger.info("   {}", typeMismatch.getFormattedMessage)
+  logger.info("   {}", typeMismatch.formatted)
 
   // Example 6: Multiple parameter errors
   logger.info("")
@@ -63,7 +63,7 @@ object ImprovedErrorMessageDemo extends App {
       ToolParameterError.NullParameter("product_id", "string")
     )
   )
-  logger.info("   {}", multipleErrors.getFormattedMessage)
+  logger.info("   {}", multipleErrors.formatted)
 
   // Example 7: Nested parameter error
   logger.info("")
@@ -72,7 +72,7 @@ object ImprovedErrorMessageDemo extends App {
     "update_profile",
     List(ToolParameterError.InvalidNesting("email", "user", "string"))
   )
-  logger.info("   {}", nestedError.getFormattedMessage)
+  logger.info("   {}", nestedError.formatted)
 
   // Example 8: Execution error
   logger.info("")
@@ -81,7 +81,7 @@ object ImprovedErrorMessageDemo extends App {
     "process_payment",
     new RuntimeException("Network timeout while contacting payment gateway")
   )
-  logger.info("   {}", execError.getFormattedMessage)
+  logger.info("   {}", execError.formatted)
 
   // Example 9: Handler error (business logic failure)
   logger.info("")
@@ -90,7 +90,7 @@ object ImprovedErrorMessageDemo extends App {
     "divide_numbers",
     "cannot divide by zero"
   )
-  logger.info("   {}", handlerError.getFormattedMessage)
+  logger.info("   {}", handlerError.formatted)
 
   logger.info("")
   logger.info("=" * 70)
@@ -111,7 +111,7 @@ object ImprovedErrorMessageDemo extends App {
   logger.info("=" * 70)
 
   def toJsonError(error: ToolCallError): String = {
-    val message = error.getFormattedMessage
+    val message = error.formatted
       .replace("\\", "\\\\")
       .replace("\"", "\\\"")
       .replace("\n", "\\n")

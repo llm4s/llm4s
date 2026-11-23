@@ -354,14 +354,14 @@ class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
   // ---- parameters are optional
 
   "The DateTimeTool schema" should "declare no parameter as required, because every one has a default" in {
-    val parameters = tool.toOpenAITool(strict = false)("function")("parameters")
+    val parameters = tool.toolDefinition(strict = false)("function")("parameters")
     parameters("required").arr shouldBe empty
     parameters("properties").obj.keySet shouldBe Set("timezone", "format")
     parameters("properties")("format")("enum").arr.toSeq shouldBe Seq(ujson.Str("iso"), ujson.Str("human"), ujson.Null)
   }
 
   it should "allow null defaults when strict schemas require both properties" in {
-    val parameters = tool.toOpenAITool(strict = true)("function")("parameters")
+    val parameters = tool.toolDefinition(strict = true)("function")("parameters")
     parameters("required").arr.map(_.str).toSet shouldBe Set("timezone", "format")
     Seq("timezone", "format").foreach { name =>
       parameters("properties")(name)("type").arr.map(_.str).toSet shouldBe Set("string", "null")

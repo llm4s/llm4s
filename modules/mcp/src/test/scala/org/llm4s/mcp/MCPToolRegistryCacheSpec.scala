@@ -138,7 +138,32 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
   // OpenAI Tools Format Tests
   // ==========================================================================
 
-  "MCPToolRegistry.getOpenAITools" should "return tools in OpenAI format" in {
+  "MCPToolRegistry" should "return a local tool's own failure, not go on to the MCP servers (#2816)" in {
+    val failing = ToolBuilder[Map[String, Any], TestResult](
+      "failing_tool",
+      "Always fails",
+      Schema.`object`[Map[String, Any]]("No parameters")
+    ).withHandler(_ => Left("the local tool said no")).buildSafe().toOption.get
+    val registry = new MCPToolRegistry(Seq.empty, Seq(failing), 1.minute, initializeOnStartup = false)
+
+    registry.execute(ToolCallRequest("failing_tool", ujson.Obj())) shouldBe
+      Left(ToolCallError.HandlerError("failing_tool", "the local tool said no"))
+  }
+
+  it should "list a tool name once when two local tools share it, the first shadowing the second (#2816)" in {
+    def named(reply: String) = ToolBuilder[Map[String, Any], TestResult](
+      "twice",
+      s"Replies $reply",
+      Schema.`object`[Map[String, Any]]("No parameters")
+    ).withHandler(_ => Right(TestResult(reply))).buildSafe().toOption.get
+    val registry = new MCPToolRegistry(Seq.empty, Seq(named("first"), named("second")), 1.minute, false)
+
+    registry.tools.map(_.description) shouldBe Seq("Replies first")
+    ToolFunction.toolDefinitions(registry.tools, strict = false).arr should have size 1
+    registry.execute(ToolCallRequest("twice", ujson.Obj())).map(_("value").str) shouldBe Right("first")
+  }
+
+  "MCPToolRegistry's tool definitions" should "be rendered from its tools" in {
     testTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
@@ -149,7 +174,7 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
           initializeOnStartup = false
         )
 
-        val openAITools = registry.getOpenAITools()
+        val openAITools = ToolFunction.toolDefinitions(registry.tools, strict = true)
 
         openAITools.value should have size 1
       }
@@ -164,7 +189,7 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
       initializeOnStartup = false
     )
 
-    val openAITools = registry.getOpenAITools()
+    val openAITools = ToolFunction.toolDefinitions(registry.tools, strict = true)
 
     openAITools.value shouldBe empty
   }

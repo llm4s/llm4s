@@ -52,7 +52,7 @@ object FileInfoResult {
  *   allowedPaths = Some(Seq("/tmp"))
  * ))
  *
- * val tools = new ToolRegistry(Seq(infoTool))
+ * val tools = ToolRegistry.of(Seq(infoTool))
  * agent.run("Get info about /tmp/data.txt", tools)
  * }}}
  */

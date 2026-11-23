@@ -122,7 +122,9 @@ class TapirChatRoutesSpec extends AnyFlatSpec with Matchers {
       .fold(e => fail(s"could not build the tool: $e"), identity)
     val client = ScriptedLLMClient.sequence(Reply.toolCall("clock", "{}", Some("call-1")), Reply.text("It is noon."))
     val agent = LLMClientIO[IO](client)
-      .agent("chat")(builder => Http4sChatServer.configureAgent(builder).withTools(new ToolRegistry(Seq(clock))))
+      .agent("chat")(builder =>
+        Http4sChatServer.configureAgent(builder).withTools(ToolRegistry.of(Seq(clock)).toOption.get)
+      )
       .unsafeRunSync()
     val received = events(post(agent, "/chat/stream", """{"message": "time?"}"""))
     received.head shouldBe ("tool_call" -> ujson.Obj("id" -> "call-1", "tool" -> "clock"))

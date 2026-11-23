@@ -41,7 +41,9 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers {
       CompletionFixture.withMessage(AssistantMessage(None, Seq(call))),
       CompletionFixture.simple("The tool failed, sorry.")
     )
-    built(Agent.builder("assistant", client).withTools(new ToolRegistry(Seq(tool)))).run("Use the tool").value
+    built(Agent.builder("assistant", client).withTools(ToolRegistry.of(Seq(tool)).toOption.get))
+      .run("Use the tool")
+      .value
   }
 
   private def onlyToolMessage(result: AgentResult): ToolMessage = {
@@ -251,12 +253,12 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers {
 
   "MissingParameter.getMessage" should "include available parameters when present" in {
     val error = ToolParameterError.MissingParameter("query", "string", List("q", "search", "term"))
-    error.getMessage should include("available: q, search, term")
+    error.message should include("available: q, search, term")
   }
 
   "MissingParameter.getMessage" should "not include available hint when list is empty" in {
     val error = ToolParameterError.MissingParameter("query", "string", Nil)
-    error.getMessage shouldBe "required parameter 'query' (type: string) is missing"
-    (error.getMessage should not).include("available")
+    error.message shouldBe "required parameter 'query' (type: string) is missing"
+    (error.message should not).include("available")
   }
 }

@@ -66,13 +66,11 @@ object HallucinationDetector {
           )
         )
 
-        exaToolResult match {
+        exaToolResult.flatMap(tool => ToolRegistry.of(List(tool))) match {
           case Left(error) =>
             logger.error("Failed to create Exa search tool: {}", error.formatted)
 
-          case Right(exaSearchTool) =>
-            val registry = new ToolRegistry(List(exaSearchTool))
-
+          case Right(registry) =>
             // Use the typed config loaded at the edge
             val text = detectorConfig.text
 

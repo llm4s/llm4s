@@ -33,7 +33,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
     case Left(e)  => throw new IllegalStateException(s"could not build tool: $e")
   }
 
-  private def tools: ToolRegistry = new ToolRegistry(Seq(echoTool))
+  private def tools: ToolRegistry = ToolRegistry.of(Seq(echoTool)).toOption.get
 
   /** Records every request; answers with `reply(callIndex)`. */
   final private class Recording(reply: Int => Completion) extends LLMClient {

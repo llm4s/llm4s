@@ -199,7 +199,7 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     // snippet: agent-run
     val result = for {
       tool  <- forecastTool
-      agent <- Agent.builder("forecast-agent", client).withTools(new ToolRegistry(Seq(tool))).build()
+      agent <- Agent.builder("forecast-agent", client).withTools(ToolRegistry.of(Seq(tool)).toOption.get).build()
       state <- agent.run("What is the weather in Oslo?")
     } yield state
     // end snippet

@@ -75,14 +75,16 @@ object ResearcherAgentExample {
         val tools = createResearchTools(braveConfig)
         logger.info("✓ Research tools initialized: {}", tools.map(_.name).mkString(", "))
 
-        val registry = new ToolRegistry(tools)
-
         // Execute research workflow
-        Agent
-          .builder("researcher", client)
-          .withTools(registry)
-          .withSystemPrompt(createResearchSystemPrompt())
-          .build() match {
+        ToolRegistry
+          .of(tools)
+          .flatMap { registry =>
+            Agent
+              .builder("researcher", client)
+              .withTools(registry)
+              .withSystemPrompt(createResearchSystemPrompt())
+              .build()
+          } match {
           case Left(error)  => logger.error("Failed to build the research agent: {}", error.formatted)
           case Right(agent) => executeResearch(agent, researchTopic)
         }

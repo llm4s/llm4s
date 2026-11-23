@@ -261,7 +261,7 @@ trait CustomerService {
 }
 
 def supportTools(service: CustomerService): Result[ToolRegistry] =
-  Tools.derive[CustomerService](service).map(tools => new ToolRegistry(tools))
+  Tools.derive[CustomerService](service).flatMap(ToolRegistry.of)
 
 def cancelTool(service: CustomerService): Result[ToolFunction[?, Cancellation]] =
   Tool.fromMethod(service.cancelOrder)

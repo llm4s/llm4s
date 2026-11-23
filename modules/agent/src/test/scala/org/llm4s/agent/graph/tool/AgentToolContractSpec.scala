@@ -69,9 +69,9 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
       Vector("$.extra: property not allowed")
   }
 
-  "toolDefinition" should "have the shape of ToolFunction.toOpenAITool(true)" in {
+  "toolDefinition" should "have the shape of ToolFunction.toolDefinition(strict = true)" in {
     val function = ToolFunction[Search, String]("search", "Searches", searchSchema, _ => Right("ok"))
-    spec("search").toolDefinition shouldBe function.toOpenAITool(true)
+    spec("search").toolDefinition shouldBe function.toolDefinition(strict = true)
   }
 
   it should "hand out a fresh copy each time, so editing one definition changes no other" in {
@@ -81,7 +81,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     definition("function")("parameters")("properties").obj.remove("query")
     s.argumentSchema shouldBe searchSchema.toJsonSchema(false)
     s.toolDefinition shouldBe ToolFunction[Search, String]("search", "Searches", searchSchema, _ => Right("ok"))
-      .toOpenAITool(true)
+      .toolDefinition(strict = true)
   }
 
   "withValidation" should "store the check" in {
@@ -164,7 +164,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     tool.spec.name shouldBe "echo"
     tool.spec.description shouldBe "Echoes"
     tool.spec.argumentSchema shouldBe schema.toJsonSchema(false)
-    tool.spec.toolDefinition shouldBe function.toOpenAITool(true)
+    tool.spec.toolDefinition shouldBe function.toolDefinition(strict = true)
     tool.writes shouldBe Set.empty
     tool.execute(ujson.Obj("message" -> "hi"), context) shouldBe ToolOutcome.success(
       ToolContent.Json(ujson.Obj("query" -> "hi"))

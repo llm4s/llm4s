@@ -235,7 +235,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     }
 
     def supportTools(service: CustomerService): Result[ToolRegistry] =
-      Tools.derive[CustomerService](service).map(tools => new ToolRegistry(tools))
+      Tools.derive[CustomerService](service).map(tools => ToolRegistry.of(tools).toOption.get)
 
     def cancelTool(service: CustomerService): Result[ToolFunction[?, Cancellation]] =
       Tool.fromMethod(service.cancelOrder)
@@ -391,17 +391,17 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     review(new Scripted("""{"sentiment":"Positive","confidence":0.9,"quote":null}"""), conversation) shouldBe
       Right("Positive (0.9)")
     val tool = lookup.fold(e => fail(e.formatted), identity)
-    tool.toOpenAITool()("function")("parameters")("required") shouldBe ujson.Arr("city", "days")
+    tool.toolDefinition(strict = true)("function")("parameters")("required") shouldBe ujson.Arr("city", "days")
     tool.execute(ujson.Obj("city" -> "Paris", "days" -> 2)) shouldBe Right(ujson.Obj("high" -> 22.0, "low" -> 12.5))
     tool.execute(ujson.Obj("city" -> "Paris")).isLeft shouldBe true
   }
 
   "The tool of the guide" should "send the derived schema as its parameters, and read a call with it" in {
     val tool = ToolParameters.weatherTool.fold(e => fail(e.toString), identity)
-    tool.toOpenAITool()("function")("parameters") shouldBe org.llm4s.schema
+    tool.toolDefinition(strict = true)("function")("parameters") shouldBe org.llm4s.schema
       .SchemaOf[ToolParameters.WeatherQuery]
       .toJsonSchema()
-    val parameters = tool.toOpenAITool()("function")("parameters")
+    val parameters = tool.toolDefinition(strict = true)("function")("parameters")
     parameters("required") shouldBe ujson.Arr("city", "unit")
     parameters("properties")("unit")("enum") shouldBe ujson.Arr("Celsius", "Fahrenheit", ujson.Null)
     tool.execute(ujson.Obj("city" -> "Paris", "unit" -> ujson.Null)) shouldBe Right(ujson.Str("Sunny in Paris"))
@@ -413,10 +413,10 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     import org.llm4s.toolapi.{ ToolCallError, ToolParameterError }
     import ToolParameterError.*
     val tool = TypedTools.forecastTool.fold(e => fail(e.toString), identity)
-    tool.toOpenAITool()("function")("parameters") shouldBe
+    tool.toolDefinition(strict = true)("function")("parameters") shouldBe
       org.llm4s.schema.SchemaOf[TypedTools.ForecastQuery].toJsonSchema()
 
-    def error(e: ToolParameterError) = Left(ToolCallError.HandlerError("get_forecast", e.getMessage))
+    def error(e: ToolParameterError) = Left(ToolCallError.HandlerError("get_forecast", e.message))
     tool.execute(ujson.Obj("city" -> "Paris", "days" -> 3, "extra" -> true)) shouldBe
       Right(ujson.Obj("city" -> "Paris", "days" -> 3, "summary" -> "Sunny"))
     tool.execute(ujson.Obj("city" -> "Paris", "days" -> 9)) shouldBe
@@ -431,7 +431,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
         "get_forecast",
         MultipleErrors(
           List(InvalidNesting("city", "root", "string"), InvalidNesting("days", "root", "string"))
-        ).getMessage
+        ).message
       )
     )
   }

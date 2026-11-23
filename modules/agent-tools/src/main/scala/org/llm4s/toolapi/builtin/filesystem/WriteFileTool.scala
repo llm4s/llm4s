@@ -42,7 +42,7 @@ object WriteFileResult {
  *   allowedPaths = Seq("/tmp", "/home/user/output")
  * ))
  *
- * val tools = new ToolRegistry(Seq(writeTool))
+ * val tools = ToolRegistry.of(Seq(writeTool))
  * agent.run("Write 'Hello World' to /tmp/output.txt", tools)
  * }}}
  */

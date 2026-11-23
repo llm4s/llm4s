@@ -59,7 +59,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
       .withHandler(ext => ext.getString("input").map(s => EchoResult(s"echoed: $s")))
       .buildSafe()
     tool match {
-      case Right(t) => new ToolRegistry(Seq(t))
+      case Right(t) => ToolRegistry.of(Seq(t)).toOption.get
       case Left(e)  => fail(s"Failed to build echo tool: $e")
     }
   }

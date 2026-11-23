@@ -41,7 +41,7 @@ object JSONResult {
  * {{{
  * import org.llm4s.toolapi.builtin.core.JSONTool
  *
- * val tools = new ToolRegistry(Seq(JSONTool.tool))
+ * val tools = ToolRegistry.of(Seq(JSONTool.tool))
  * agent.run("Parse this JSON and extract the user's email", tools)
  * }}}
  */

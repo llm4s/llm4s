@@ -98,9 +98,8 @@ object MultiToolExample {
         "Searches for information",
         searchSchema
       ).withHandler(searchHandler).buildSafe()
+      toolRegistry <- ToolRegistry.of(Seq(calculatorTool, searchTool))
     } yield {
-      // Create registry with both tools
-      val toolRegistry = new ToolRegistry(Seq(calculatorTool, searchTool))
 
       // Example executions
       val calcRequest = ToolCallRequest(
@@ -145,7 +144,7 @@ object MultiToolExample {
 
       // Generate OpenAI tool definitions
       logger.info("Tool definitions for OpenAI:")
-      logger.info(toolRegistry.getOpenAITools().render(indent = 2))
+      logger.info(ToolFunction.toolDefinitions(toolRegistry.tools, strict = true).render(indent = 2))
     }
 
     result.left.foreach(err => logger.error("Failed to build tools: {}", err.formatted))

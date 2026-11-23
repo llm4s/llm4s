@@ -100,10 +100,11 @@ object Part4HelpCentre {
       order  <- Part3Tools.orderTool
       policy <- Part3Tools.policyTool
       help   <- helpTool(rag)
+      registry <- ToolRegistry.of(Seq(order, policy, help))
       agent <- Agent
         .builder("support", client)
         .withSystemPrompt("You are the support assistant of Acme Shop. Use the tools; never guess an order's status.")
-        .withTools(new ToolRegistry(Seq(order, policy, help)))
+        .withTools(registry)
         .build()
     } yield agent
   // end snippet

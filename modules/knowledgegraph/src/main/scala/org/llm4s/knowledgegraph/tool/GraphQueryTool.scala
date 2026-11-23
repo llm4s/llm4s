@@ -38,7 +38,7 @@ object GraphQueryToolResult {
  *
  * for {
  *   tool <- GraphQueryTool.toolSafe(llmClient, graphStore)
- *   tools = new ToolRegistry(Seq(tool))
+ *   tools <- ToolRegistry.of(Seq(tool))
  *   state <- agent.run("Who does Alice work with?", tools)
  * } yield state
  * }}}

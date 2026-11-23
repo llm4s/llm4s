@@ -61,7 +61,7 @@ def temperatureTool: Result[ToolFunction[Map[String, Any], String]] = {
     for {
       value     <- params.getDouble("value")
       unit      <- params.getString("unit")
-      precision <- params.getOptionalInt("precision").left.map(_.getMessage)
+      precision <- params.getOptionalInt("precision").left.map(_.message)
       converted <- unit match {
         case "celsius"    => Right(value * 9 / 5 + 32)
         case "fahrenheit" => Right((value - 32) * 5 / 9)
@@ -122,9 +122,9 @@ def country(params: SafeParameterExtractor): Either[ToolParameterError, Option[S
   params.getOptionalString("location.country")
 ```
 
-Optional fields have a catch: `toOpenAITool` and `ToolRegistry.getOpenAITools` default to `strict = true`, which
+Optional fields have a catch: `toolDefinition(strict = true)`, which the OpenAI-compatible clients send,
 lists every property as required in the JSON schema it sends. Read an optional parameter with `getOptional*` either
-way, so the handler copes whether or not the model sent it, and call `toOpenAITool(strict = false)` where a provider
+way, so the handler copes whether or not the model sent it, and call `toolDefinition(strict = false)` where a provider
 should see the `required = false` flag.
 
 ## 3. Reading arguments
@@ -133,7 +133,7 @@ should see the `required = false` flag.
 and `getObject`, each returning `Either[String, A]`, so they chain in a for-comprehension that stops at the first
 problem. `getOptionalString`, `getOptionalInt`, `getOptionalDouble` and `getOptionalBoolean` return
 `Either[ToolParameterError, Option[A]]`: an absent or `null` argument is `Right(None)`, and only a wrong type fails.
-Map that error with `.left.map(_.getMessage)` as the handler above does.
+Map that error with `.left.map(_.message)` as the handler above does.
 
 A missing or mistyped argument does not throw; it is a `Left` with a message written for the model to act on:
 
@@ -155,7 +155,7 @@ missing record, a refused action. The model never sees a stack trace:
 
 - `tool.execute(args)` returns `Either[ToolCallError, ujson.Value]`, and a `Left(message)` from the handler is a
   `Left(HandlerError(toolName, message))`.
-- Run through an agent, the model is shown `error.getFormattedMessage`, which here reads
+- Run through an agent, the model is shown `error.formatted`, which here reads
   `Tool call 'convert_temperature' failed with error: unit must be 'celsius' or 'fahrenheit', not 'kelvin'`.
 - An exception your handler throws is not a `Left` you chose. A {% include api.html t="org.llm4s.toolapi.ToolRegistry" %} catches it and reports a
   `ToolCallError.ExecutionError` with the exception's message; calling `tool.execute` directly lets it escape.
@@ -182,7 +182,8 @@ def askWithTool(tool: ToolFunction[?, ?], question: String): Result[Option[Strin
     registry       <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
-    agent  <- Agent.builder("assistant", client).withTools(new ToolRegistry(Seq(tool))).build()
+    toolRegistry <- ToolRegistry.of(Seq(tool))
+    agent  <- Agent.builder("assistant", client).withTools(toolRegistry).build()
     result <- agent.run(question)
   } yield result.answer
 ```
@@ -192,11 +193,13 @@ receives:
 
 ```scala
 import org.llm4s.toolapi.{ ToolCallError, ToolCallRequest, ToolFunction, ToolRegistry }
+import org.llm4s.types.Result
 
-def callByName(tool: ToolFunction[?, ?]): Either[ToolCallError, ujson.Value] = {
-  val registry = new ToolRegistry(Seq(tool))
-  println(registry.getOpenAITools().render(indent = 2)) // what the model is told about the tool
-  registry.execute(ToolCallRequest(tool.name, ujson.Obj("value" -> 100, "unit" -> "celsius")))
+def callByName(tool: ToolFunction[?, ?]): Result[Either[ToolCallError, ujson.Value]] = {
+  println(tool.toolDefinition(strict = true).render(indent = 2)) // what the model is told about the tool
+  ToolRegistry
+    .of(Seq(tool)) // a Left when two tools share a name
+    .map(_.execute(ToolCallRequest(tool.name, ujson.Obj("value" -> 100, "unit" -> "celsius"))))
 }
 ```
 
@@ -270,7 +273,7 @@ def declaredParameters: Either[org.llm4s.error.LLMError, List[String]] =
     Schema.`object`[Map[String, Any]]("Temperature").withRequiredField("value", Schema.number("The temperature"))
   ).withHandler(params => params.getString("unit")) // reads `unit`, which the schema never declares
     .buildSafe()
-    .map(tool => tool.toOpenAITool()("function")("parameters")("properties").obj.keys.toList)
+    .map(tool => tool.toolDefinition(strict = true)("function")("parameters")("properties").obj.keys.toList)
 ```
 
 The list is `List("value")`: add every parameter the handler reads to the schema.
@@ -280,13 +283,12 @@ running on, and one hung call stalls the whole turn. Run the registry with a tim
 an error the model can see:
 
 ```scala
-import org.llm4s.toolapi.{ ToolCallError, ToolCallRequest, ToolExecutionConfig, ToolRegistry }
+import org.llm4s.toolapi.{ ToolCallError, ToolCallRequest, ToolExecutionConfig, ToolExecutor, ToolRegistry }
 
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.*
 
 def callWithLimit(registry: ToolRegistry, request: ToolCallRequest): Either[ToolCallError, ujson.Value] =
-  registry.execute(request, ToolExecutionConfig(timeout = Some(5.seconds)))
+  ToolExecutor.execute(registry, request, ToolExecutionConfig(timeout = Some(5.seconds)))
 ```
 
 A call that runs past the limit returns `Left(ToolCallError.Timeout(name, 5.seconds))`. Give the underlying client

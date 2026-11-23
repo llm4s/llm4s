@@ -76,7 +76,8 @@ val temperatureTool: Result[ToolFunction[Map[String, Any], Temperature]] =
 def packingAdvice(client: LLMClient, city: String): Result[String] =
   for {
     tool   <- temperatureTool
-    agent  <- Agent.builder("packing-assistant", client).withTools(new ToolRegistry(Seq(tool))).build()
+    registry <- ToolRegistry.of(Seq(tool))
+    agent  <- Agent.builder("packing-assistant", client).withTools(registry).build()
     run    <- agent.run(s"What should I pack for $city today?")
     answer <- run.answer.toRight(ProcessingError("packing-advice", s"the run did not complete: ${run.status}"))
   } yield answer
@@ -183,9 +184,11 @@ The scripted client is an ordinary `LLMClient`, so it drives an agent run throug
 
 ```scala
 def packingAgent(client: LLMClient): Result[Agent] =
-  temperatureTool.flatMap(tool =>
-    Agent.builder("packing-assistant", client).withTools(new ToolRegistry(Seq(tool))).build()
-  )
+  for {
+    tool  <- temperatureTool
+    tools <- ToolRegistry.of(Seq(tool))
+    agent <- Agent.builder("packing-assistant", client).withTools(tools).build()
+  } yield agent
 ```
 
 With cats-effect:
@@ -296,8 +299,8 @@ val packing = ResourceFunFixture(
 
 packing.test("the packing assistant calls the tool, then answers") { client =>
   for {
-    tool  <- IO.fromEither(temperatureTool.left.map(new LLMException(_)))
-    agent <- LLMClientIO[IO](client).agent("packing-assistant")(_.withTools(new ToolRegistry(Seq(tool))))
+    tools <- IO.fromEither(temperatureTool.flatMap(tool => ToolRegistry.of(Seq(tool))).left.map(new LLMException(_)))
+    agent <- LLMClientIO[IO](client).agent("packing-assistant")(_.withTools(tools))
     run   <- agent.run("What should I pack for Oslo today?")
   } yield {
     assertEquals(run.answer, Some("It is 21 degrees in Oslo: pack light layers."))
@@ -322,8 +325,8 @@ test("the packing assistant calls the tool, then answers") {
     Reply.text("It is 21 degrees in Oslo: pack light layers.")
   ).use { client =>
     for {
-      tool  <- IO.fromEither(temperatureTool.left.map(new LLMException(_)))
-      agent <- LLMClientIO[IO](client).agent("packing-assistant")(_.withTools(new ToolRegistry(Seq(tool))))
+      tools <- IO.fromEither(temperatureTool.flatMap(tool => ToolRegistry.of(Seq(tool))).left.map(new LLMException(_)))
+      agent <- LLMClientIO[IO](client).agent("packing-assistant")(_.withTools(tools))
       run   <- agent.run("What should I pack for Oslo today?")
     } yield expect.all(
       run.answer.contains("It is 21 degrees in Oslo: pack light layers."),
@@ -365,8 +368,8 @@ def scripted(replies: Reply*): ZLayer[Any, Nothing, ScriptedLLMClient & LLMClien
 test("the packing assistant calls the tool, then answers") {
   for {
     client <- ZIO.service[ScriptedLLMClient]
-    tool   <- ZIO.fromEither(temperatureTool)
-    agent  <- ZIO.serviceWithZIO[LLMClientZ](_.agent("packing-assistant")(_.withTools(new ToolRegistry(Seq(tool)))))
+    tools  <- ZIO.fromEither(temperatureTool.flatMap(tool => ToolRegistry.of(Seq(tool))))
+    agent  <- ZIO.serviceWithZIO[LLMClientZ](_.agent("packing-assistant")(_.withTools(tools)))
     run    <- agent.run("What should I pack for Oslo today?")
   } yield assertTrue(
     run.answer.contains("It is 21 degrees in Oslo: pack light layers."),

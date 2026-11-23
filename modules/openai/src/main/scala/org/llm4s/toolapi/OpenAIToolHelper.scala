@@ -6,7 +6,7 @@ import com.openai.models.chat.completions.{ ChatCompletionCreateParams, ChatComp
 import scala.jdk.CollectionConverters._
 
 /**
- * Converts a [[ToolRegistry]] into the tool definitions of OpenAI's Java SDK
+ * Converts [[ToolFunction]]s into the tool definitions of OpenAI's Java SDK
  * (`com.openai:openai-java`), which `OpenAIClient` sends for OpenAI, Azure OpenAI and Requesty.
  *
  * This replaces `AzureToolHelper`, whose methods took and returned types from Microsoft's
@@ -15,32 +15,31 @@ import scala.jdk.CollectionConverters._
  *
  * Internal: its signatures name openai-java types, which llm4s does not freeze into its API
  * ([[https://github.com/llm4s/llm4s/issues/2360 #2360]]). Users get the same definitions as JSON from
- * [[ToolRegistry.getOpenAITools]].
+ * [[ToolFunction.toolDefinitions]].
  */
 private[llm4s] object OpenAIToolHelper {
 
   /**
-   * Sets the registry's tools on a chat-completions request builder.
+   * Sets `tools` on a chat-completions request builder.
    *
-   * @param toolRegistry The tool registry containing the tools
+   * @param tools  The tools to offer the model
    * @param params The request builder to add the tools to
    * @return The same builder, for chaining
    */
   def addToolsToParams(
-    toolRegistry: ToolRegistry,
+    tools: Seq[ToolFunction[_, _]],
     params: ChatCompletionCreateParams.Builder
   ): ChatCompletionCreateParams.Builder =
-    params.tools(convertToolRegistryToOpenAITools(toolRegistry))
+    params.tools(chatCompletionTools(tools))
 
   /**
-   * Converts a ToolRegistry to chat-completions tool definitions, one function tool per
-   * registered tool, in registry order.
+   * Converts tools to chat-completions tool definitions, one strict function tool per tool, in order.
    *
-   * @param toolRegistry The tool registry to convert
+   * @param tools The tools to convert
    * @return The tool definitions
    */
-  def convertToolRegistryToOpenAITools(toolRegistry: ToolRegistry): java.util.List[ChatCompletionTool] = {
-    val toolsJson = toolRegistry.getOpenAITools()
+  def chatCompletionTools(tools: Seq[ToolFunction[_, _]]): java.util.List[ChatCompletionTool] = {
+    val toolsJson = ToolFunction.toolDefinitions(tools, strict = true)
     val mapper    = ObjectMappers.jsonMapper()
     toolsJson.arr.map(tool => mapper.readValue(ujson.write(tool), classOf[ChatCompletionTool])).toSeq.asJava
   }

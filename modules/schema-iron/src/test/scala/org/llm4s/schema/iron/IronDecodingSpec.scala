@@ -99,7 +99,7 @@ class IronDecodingSpec extends AnyFlatSpec with Matchers {
 
   "Tool.of with a refined argument" should "send the bounds in its parameters" in {
     val tool       = book.fold(fail(_), identity)
-    val parameters = tool.toOpenAITool()("function")("parameters")
+    val parameters = tool.toolDefinition(strict = true)("function")("parameters")
     parameters("properties")("nights")("minimum") shouldBe ujson.Num(1)
     parameters("properties")("nights")("maximum") shouldBe ujson.Num(14)
     parameters("properties")("guest")("minLength") shouldBe ujson.Num(1)
@@ -119,7 +119,7 @@ class IronDecodingSpec extends AnyFlatSpec with Matchers {
     decoded match {
       case Left(List(e: ToolParameterError.TypeMismatch)) =>
         e.parameterName shouldBe "nights"
-        e.getMessage should include("Should be included in [1, 14]")
+        e.message should include("Should be included in [1, 14]")
       case other => fail(s"expected one TypeMismatch, got $other")
     }
     tool.execute(ujson.Obj("guest" -> "Ada", "nights" -> 30)) match {

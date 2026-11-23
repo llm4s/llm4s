@@ -1,10 +1,11 @@
 package org.llm4s.toolapi
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
+import org.llm4s.error.ValidationError
+import org.llm4s.types.Result
 
 /**
- * Determines how multiple tool calls in a single agent step are executed by
- * [[ToolRegistry.executeAll]].
+ * Determines how several tool calls are executed by [[ToolExecutor.executeAll]].
  *
  * Choose [[ToolExecutionStrategy.Sequential]] when calls depend on one another
  * or mutate shared state. Choose [[ToolExecutionStrategy.Parallel]] when calls
@@ -14,20 +15,12 @@ import org.llm4s.annotation.Stable
  *
  * @example
  * {{{
- * val results = registry.executeAll(
- *   requests,
- *   strategy = ToolExecutionStrategy.ParallelWithLimit(2)
- * )
- *
- * val agentState = agent.runWithStrategy(
- *   query = "Get weather in London, Paris, and Tokyo",
- *   tools = registry,
- *   toolExecutionStrategy = ToolExecutionStrategy.Parallel,
- *   maxSteps = Some(5)
- * )
+ * val results = ToolExecutionStrategy.parallelWithLimit(2).map { strategy =>
+ *   ToolExecutor.executeAll(registry, requests, strategy)
+ * }
  * }}}
  */
-@Stable
+@Experimental
 sealed trait ToolExecutionStrategy
 
 /**
@@ -60,11 +53,19 @@ object ToolExecutionStrategy {
    * external APIs have rate limits, the system has limited local resources, or
    * parallel execution is useful but must remain controlled.
    *
-   * @param maxConcurrency Maximum number of tools executing simultaneously
+   * Build one with [[ToolExecutionStrategy.parallelWithLimit]], which checks the limit.
+   *
+   * @param maxConcurrency Maximum number of tools executing simultaneously; positive
    */
-  final case class ParallelWithLimit(maxConcurrency: Int) extends ToolExecutionStrategy {
-    require(maxConcurrency > 0, "maxConcurrency must be positive")
-  }
+  final case class ParallelWithLimit private[ToolExecutionStrategy] (maxConcurrency: Int) extends ToolExecutionStrategy
+
+  /**
+   * [[ParallelWithLimit]] with at most `maxConcurrency` tools executing at once, or a `ValidationError` when
+   * `maxConcurrency` is not positive.
+   */
+  def parallelWithLimit(maxConcurrency: Int): Result[ParallelWithLimit] =
+    if (maxConcurrency > 0) Right(new ParallelWithLimit(maxConcurrency))
+    else Left(ValidationError("maxConcurrency", s"must be positive, but is $maxConcurrency"))
 
   /**
    * Default strategy: Sequential execution.

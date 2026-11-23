@@ -99,8 +99,9 @@ val result = for {
   registry       <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
   client <- LLMConnect.getClient(providerConfig)
+  toolRegistry <- ToolRegistry.of(Seq(weatherTool))
   agent <- Agent.builder("assistant", client)
-    .withTools(new ToolRegistry(Seq(weatherTool)))
+    .withTools(toolRegistry)
     .build()
   result <- agent.run("What's the weather in Paris?")
 } yield result
@@ -326,7 +327,7 @@ finish node (output guardrails) ---> Completed | Blocked (turn removed)
 The tool calls of one model message run in parallel, bounded by `RunBudgets.maxConcurrency`,
 which you set through the `RunConfig` you pass to `run`.
 
-`ToolExecutionStrategy` remains in core as a `ToolRegistry` feature; the agent no longer takes one.
+`ToolExecutionStrategy` remains in core for `ToolExecutor.executeAll`; the agent no longer takes one.
 
 ### Tool Side Effects
 
@@ -994,7 +995,8 @@ import org.llm4s.toolapi.builtin.BuiltinTools
 
 val result = for {
   tools <- BuiltinTools.coreSafe // date/time, calculator, UUID, JSON: no files, network or processes
-  agent <- Agent.builder("assistant", client).withTools(new ToolRegistry(tools)).build()
+  toolRegistry <- ToolRegistry.of(tools)
+  agent <- Agent.builder("assistant", client).withTools(toolRegistry).build()
   state <- agent.run("What is 15% of 850?")
 } yield state
 ```

@@ -27,14 +27,16 @@ package org.llm4s.toolapi.builtin
  * // Read-only HTTP tool (GET/HEAD only)
  * for {
  *   readOnlyTool <- HTTPTool.createSafe(HttpConfig.readOnly())
- * } yield new ToolRegistry(Seq(readOnlyTool))
+ *   registry <- ToolRegistry.of(Seq(readOnlyTool))
+ * } yield registry
  *
  * // Restricted to specific domains
  * for {
  *   restrictedTool <- HTTPTool.createSafe(HttpConfig.restricted(
  *     Seq("api.example.com", "data.example.org")
  *   ))
- * } yield new ToolRegistry(Seq(restrictedTool))
+ *   registry <- ToolRegistry.of(Seq(restrictedTool))
+ * } yield registry
  *
  * // Full access with custom timeout
  * for {
@@ -42,7 +44,8 @@ package org.llm4s.toolapi.builtin
  *     timeout = 60.seconds,
  *     maxResponseSize = 50 * 1024 * 1024
  *   ))
- * } yield new ToolRegistry(Seq(fullTool))
+ *   registry <- ToolRegistry.of(Seq(fullTool))
+ * } yield registry
  * }}}
  */
 package object http {

@@ -3,7 +3,7 @@ package fix.v1
 import org.llm4s.error.{ LLMError, ServiceError }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion }
-import org.llm4s.toolapi.ToolRetryPolicy
+import org.llm4s.toolapi.ToolExecutionConfig
 import java.time.Instant
 import org.llm4s.security.Secret
 
@@ -25,7 +25,7 @@ object Llm4sMigrate_1_0Test {
 
   def retryable(error: ServiceError): Boolean = error.isRecoverableStatus
 
-  def patient(policy: ToolRetryPolicy): ToolRetryPolicy = policy.withMaxAttempts(5)
+  def unbounded(config: ToolExecutionConfig): ToolExecutionConfig = config.withTimeout(None)
 
   def header(config: OpenAIConfig): String = "Bearer " + config.apiKey.reveal
 }

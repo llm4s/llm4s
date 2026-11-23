@@ -61,7 +61,7 @@ class RagGuardrailsGuideSpec extends AnyFlatSpec with Matchers with EitherValues
 
     val agent = Agent
       .builder("support", client)
-      .withTools(new ToolRegistry(Seq(searchDocs)))
+      .withTools(ToolRegistry.of(Seq(searchDocs)).toOption.get)
       .withMiddleware(new GuardrailMiddleware(input = Seq.empty, output = Seq(grounded)))
       .build()
 
@@ -81,7 +81,7 @@ class RagGuardrailsGuideSpec extends AnyFlatSpec with Matchers with EitherValues
     }
     val agent = Agent
       .builder("support", client)
-      .withTools(new ToolRegistry(Seq(searchDocs)))
+      .withTools(ToolRegistry.of(Seq(searchDocs)).toOption.get)
       .withMiddleware(new GuardrailMiddleware(input = Seq.empty, output = Seq(grounded)))
       .build()
 
@@ -113,7 +113,7 @@ class RagGuardrailsGuideSpec extends AnyFlatSpec with Matchers with EitherValues
 
     val agent = Agent
       .builder("support", client)
-      .withTools(new ToolRegistry(Seq(searchDocs)))
+      .withTools(ToolRegistry.of(Seq(searchDocs)).toOption.get)
       .withMiddleware(guardrails)
       .build()
     agent.flatMap(_.run("What is the refund window?")).value.status shouldBe

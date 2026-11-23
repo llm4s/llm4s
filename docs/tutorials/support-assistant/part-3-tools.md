@@ -87,10 +87,11 @@ def supportAgent(client: LLMClient): Result[Agent] =
   for {
     order  <- orderTool
     policy <- policyTool
+    registry <- ToolRegistry.of(Seq(order, policy))
     agent <- Agent
       .builder("support", client)
       .withSystemPrompt("You are the support assistant of Acme Shop. Use the tools; never guess an order's status.")
-      .withTools(new ToolRegistry(Seq(order, policy)))
+      .withTools(registry)
       .build()
   } yield agent
 

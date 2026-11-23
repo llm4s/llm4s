@@ -105,7 +105,7 @@ class ToolSetSpec extends AnyFlatSpec with Matchers with EitherValues {
     val fns     = set.toolFunctions
     fns.map(_.name) shouldBe Vector("a_tool", "echo")
     fns.map(_.description) shouldBe Vector("Tool a_tool", "d")
-    fns.map(_.toOpenAITool(true)) shouldBe set.definitions
+    fns.map(_.toolDefinition(strict = true)) shouldBe set.definitions
   }
 
   it should "return the original function for an adapted tool and a refusing stand-in otherwise" in {
@@ -113,7 +113,7 @@ class ToolSetSpec extends AnyFlatSpec with Matchers with EitherValues {
     val set      = ToolSet.of(tool("a_tool"), AgentTool.fromToolFunction(original)).value
     (set.toolFunctions(1) should be).theSameInstanceAs(original)
     val standIn = set.toolFunctions.head.execute(ujson.Obj("query" -> "q"))
-    standIn.left.value.getFormattedMessage should include("executed by ToolLoop")
+    standIn.left.value.formatted should include("executed by ToolLoop")
   }
 
   "ToolSet.empty" should "hold no tools" in {

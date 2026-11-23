@@ -38,7 +38,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
         val result = tool.execute(ujson.Null)
         (result should be).a(Symbol("left"))
         val error   = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
-        val message = error.getFormattedMessage
+        val message = error.formatted
         message should include("inventory_tool")
         message should include("null arguments")
         message should include("expected an object")
@@ -58,7 +58,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
         )
         (result should be).a(Symbol("left"))
         val error   = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
-        val message = error.getMessage
+        val message = error.message
         message should include("requiredNumber")
         message should include("missing")
         message should include("available:")
@@ -79,7 +79,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
         )
         (result should be).a(Symbol("left"))
         val error   = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
-        val message = error.getMessage
+        val message = error.message
         // Should report the first error encountered
         message should include("has wrong type")
         message should (include("expected string").or(include("expected number")))
@@ -99,7 +99,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
         )
         (result should be).a(Symbol("left"))
         val error   = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
-        val message = error.getMessage
+        val message = error.message
         message should include("requiredString")
         message should include("null")
         message should include("required but value was null")
@@ -278,7 +278,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
           )
           (result should be).a(Symbol("left"))
           val error   = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
-          val message = error.getMessage
+          val message = error.message
           message should include("settings")
           message should include("missing")
           message should include("user.profile.settings")
@@ -296,7 +296,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
       )
     )
 
-    val message = error.getFormattedMessage
+    val message = error.formatted
 
     message should include("Tool call 'test_tool' has parameter issues:")
     message should include("- required parameter 'name' (type: string) is missing")

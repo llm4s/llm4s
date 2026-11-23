@@ -85,7 +85,7 @@ class MCPEmbeddedServerRoundTripSpec extends AnyFlatSpec with Matchers with Befo
     }
 
   it should "advertise the parameter names of each tool" in withClient { client =>
-    val json = toolNamed(client, "add").toOpenAITool().toString
+    val json = toolNamed(client, "add").toolDefinition(strict = true).toString
     json should include("\"a\"")
     json should include("\"b\"")
   }
@@ -103,7 +103,7 @@ class MCPEmbeddedServerRoundTripSpec extends AnyFlatSpec with Matchers with Befo
   }
 
   it should "mark every declared parameter of add as required in the advertised schema" in withClient { client =>
-    val params = toolNamed(client, "add").toOpenAITool(strict = false)("function")("parameters")
+    val params = toolNamed(client, "add").toolDefinition(strict = false)("function")("parameters")
     params("required").arr.map(_.str).toSet shouldBe Set("a", "b")
     params("properties")("a")("type").str shouldBe "integer"
   }
@@ -182,6 +182,24 @@ class MCPEmbeddedServerRoundTripSpec extends AnyFlatSpec with Matchers with Befo
       registry.execute(ToolCallRequest("nope", ujson.Obj())).isLeft shouldBe true
       registry.execute(ToolCallRequest("fail", ujson.Obj())).isLeft shouldBe true
       registry.execute(ToolCallRequest("ping", ujson.Obj())) shouldBe Right(ujson.Str("pong"))
+    } finally registry.close()
+  }
+
+  it should "run a remote tool with a timeout, retries, asynchronously and in a batch (#2816)" in {
+    import scala.concurrent.ExecutionContext.Implicits.global
+    val config   = MCPServerConfig.streamableHTTP("registry-executor", s"http://127.0.0.1:$port/mcp", 10.seconds)
+    val registry = new MCPToolRegistry(Seq(config), Seq.empty, 5.minutes, initializeOnStartup = false)
+    val add      = ToolCallRequest("add", ujson.Obj("a" -> 20, "b" -> 22))
+    val bounded = ToolExecutionConfig.default
+      .withTimeout(10.seconds)
+      .withRetryPolicy(ToolRetryPolicy(maxAttempts = 2, baseDelay = 1.milli).toOption.get)
+    try {
+      // The registry holds no local tool: before #2816 each of these paths looked only at the local tools
+      // and answered UnknownFunction.
+      ToolExecutor.execute(registry, add, bounded) shouldBe Right(ujson.Str("42"))
+      Await.result(ToolExecutor.executeAsync(registry, add), 20.seconds) shouldBe Right(ujson.Str("42"))
+      Await.result(ToolExecutor.executeAll(registry, Seq(add, add)), 20.seconds) shouldBe
+        Seq(Right(ujson.Str("42")), Right(ujson.Str("42")))
     } finally registry.close()
   }
 }
