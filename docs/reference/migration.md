@@ -98,7 +98,8 @@ records.map(_.event).collect { case f: RunEvent.RunFailed => f }
 `ChildThread`, `ThreadStatus`, `ThreadMetadata`, `ThreadCursor`, `ThreadQuery`, `ThreadSummary`, `ThreadPage`,
 `SweepPolicy`, `SweepGuard`, `SweepPage` (the `Checkpointer` contract); `ChildRef`, `ChildInterrupt`,
 `DelegatedRequest` (`AgentStatus.Suspended.delegated`, `StreamEvent.Nested`). `@Experimental` members of Stable
-types: `AgentBuilder.withHarness`, `withSubagents`, `withDelegation`, and `InMemoryCheckpointer.runQueue`. The RAG
+types: `AgentBuilder.withHarness`, `withSubagents`, `withDelegation`, `Agent.delegation`, and
+`InMemoryCheckpointer.runQueue`. The RAG
 guardrails (`org.llm4s.agent.guardrails.rag`) are `@Experimental`: the agent runtime does not yet hand them a
 `RAGContext`.
 
