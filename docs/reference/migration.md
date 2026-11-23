@@ -132,7 +132,8 @@ records.map(_.event).collect { case f: RunEvent.RunFailed => f }
 
 **Tiers that moved.** Core's `ToolHints` is now `@Stable` (the tool contract). `Agent.loop` is now an `@Experimental`
 `def` rather than a constructor `val`, so `agent.loop.graph` reads as before. The RAG guardrails
-(`org.llm4s.agent.guardrails.rag`) are `@Experimental`: the agent runtime does not yet hand them a `RAGContext`.
+(`org.llm4s.agent.guardrails.rag`) are `@Experimental`: an agent gives them the turn's `RAGContext` only through
+`RAGGuardrail.withTurnContext`, whose shape may still change.
 
 ## Context pruning enforces both limits and `minRecentTurns` (#2728, #2729)
 
@@ -155,6 +156,11 @@ records.map(_.event).collect { case f: RunEvent.RunFailed => f }
   as much of the start and the end as the limits allow, and no longer counts system messages outside `maxMessages`.
 - **No earlier message is kept past a limit.** `OldestFirst` kept at least one message of the earlier history even
   when the protected turns had used the whole budget.
+- **`RecentTurnsOnly(n)` always prunes to `n` turns.** It acted only once `maxTokens` or `maxMessages` was exceeded,
+  so with neither set it did nothing, and with one set the history was sent whole until it crossed the limit. Now a
+  history of more than `n` turns is pruned to the last `n` regardless. Those turns also obey the limits: when they
+  exceed `maxTokens` or `maxMessages`, the oldest of them are dropped. If you relied on a generous limit to keep more
+  than `n` turns, raise `n`.
 
 ## RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root (#2724)
 

@@ -43,7 +43,11 @@ llm4s.providers.openai-main {
 }
 ```
 
-Whichever `ApiKeyProvider` you use, it goes on the provider config the same way:
+Whichever `ApiKeyProvider` you use, it goes on the provider config the same way. A section is validated when it is
+loaded, so `Llm4sConfig.provider` below still needs the section to resolve a key of its own (the `apiKeyFile` above, for
+example); the provider you attach then supplies every key the client sends. When the secret store is the only
+source, build the provider config in code instead
+([Configuration in code](../../getting-started/configuration-in-code)) and attach the provider to that:
 
 ```scala
 import org.llm4s.config.Llm4sConfig

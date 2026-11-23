@@ -4,6 +4,7 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.agent.guardrails.{ Guardrail, InputGuardrail, OutputGuardrail }
 import org.llm4s.agent.guardrails.builtin.{ PIIDetector, PIIMasker, PromptInjectionDetector }
 import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model.Message
 
 /**
  * Preset configurations for RAG guardrails.
@@ -20,20 +21,22 @@ import org.llm4s.llmconnect.LLMClient
  *
  * Example usage:
  * {{{
- * // Get standard guardrails for production
- * val (inputGuardrails, outputGuardrails, ragGuardrails) =
- *   RAGGuardrails.standard(llmClient)
+ * val config = RAGGuardrails.standard(llmClient)
  *
- * // Use in agent
+ * // In an agent whose retrieval is the tool "search": the RAG guardrails check each final answer
+ * // against that turn's search results
  * Agent
  *   .builder("assistant", llmClient)
- *   .withMiddleware(new GuardrailMiddleware(inputGuardrails, outputGuardrails))
+ *   .withMiddleware(
+ *     new GuardrailMiddleware(
+ *       config.inputGuardrails,
+ *       config.outputGuardrailsWithContext(turn => Some(RAGContext.fromToolResults(turn, Set("search"))))
+ *     )
+ *   )
  *   .build()
  *
- * // Use RAG guardrails separately
- * ragGuardrails.foreach { guardrail =>
- *   guardrail.validateWithContext(response, ragContext)
- * }
+ * // Or call the RAG guardrails directly, in a pipeline of your own
+ * config.ragGuardrails.map(_.validateWithContext(response, ragContext))
  * }}}
  */
 @Experimental
@@ -50,7 +53,15 @@ object RAGGuardrails {
     inputGuardrails: Seq[InputGuardrail],
     outputGuardrails: Seq[OutputGuardrail],
     ragGuardrails: Seq[RAGGuardrail]
-  )
+  ) {
+
+    /**
+     * The output guardrails an agent's `GuardrailMiddleware` takes: [[outputGuardrails]], then every one of
+     * [[ragGuardrails]] given the turn's context by `retrieved`, as [[RAGGuardrail.withTurnContext]] does.
+     */
+    def outputGuardrailsWithContext(retrieved: Seq[Message] => Option[RAGContext]): Seq[OutputGuardrail] =
+      outputGuardrails ++ ragGuardrails.map(RAGGuardrail.withTurnContext(_)(retrieved))
+  }
 
   // ==========================================================================
   // Preset Configurations
