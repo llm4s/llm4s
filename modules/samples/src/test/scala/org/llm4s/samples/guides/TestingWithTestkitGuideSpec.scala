@@ -4,6 +4,7 @@ package org.llm4s.samples.guides
 // this order.
 import org.llm4s.llmconnect.model._
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient, UnscriptedCallError }
+import org.llm4s.testkit.{ AfterCorrection, AfterToolResult, EndsWithUser, LastUser }
 import org.llm4s.agent.Agent
 import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.{ LLMError, ProcessingError, RateLimitError }
@@ -103,12 +104,40 @@ class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherV
 
   "The respondingTo example of the guide" should "choose the answer from the conversation" in {
     val client = ScriptedLLMClient.respondingTo {
-      case c if c.messages.lastOption.exists(_.content.contains("Oslo"))  => Reply.text("cold")
-      case c if c.messages.lastOption.exists(_.content.contains("Cairo")) => Reply.text("hot")
+      case LastUser(text) if text.contains("Oslo")  => Reply.text("cold")
+      case LastUser(text) if text.contains("Cairo") => Reply.text("hot")
     }
 
     client.complete(Conversation(Seq(UserMessage("Weather in Cairo?"))), options).map(_.content) shouldBe Right("hot")
     client.complete(Conversation(Seq(UserMessage("Weather in Oslo?"))), options).map(_.content) shouldBe Right("cold")
+  }
+
+  "The extractor examples of the guide" should "script an agent's tool call and its answer from the conversation" in {
+    val client = ScriptedLLMClient.respondingTo {
+      case EndsWithUser(s"What should I pack for $city today?") =>
+        Reply.toolCall("get_temperature", s"""{"city": "$city"}""")
+      case AfterToolResult("get_temperature", result) if result.contains("21") =>
+        Reply.text("Pack light layers.")
+    }
+
+    packingAdvice(client, "Oslo") shouldBe Right("Pack light layers.")
+    client.callCount shouldBe 2
+  }
+
+  it should "answer the agent's correction request" in {
+    val client = ScriptedLLMClient.respondingTo {
+      case AfterCorrection() => Reply.text("""{"city": "Oslo", "celsius": 21}""")
+      case EndsWithUser(_)   => Reply.text("""{"city": "Oslo", "celsius": "mild"}""")
+    }
+
+    val reading = for {
+      agent   <- Agent.builder("weather-reader", client).withOutput(temperatureSchema).build()
+      run     <- agent.run("How warm is Oslo?")
+      reading <- run.decodeOutput[Temperature]
+    } yield reading
+
+    reading shouldBe Right(Temperature("Oslo", 21.0))
+    client.callCount shouldBe 2
   }
 
   "The streaming example of the guide" should "replay the answer as chunks" in {
@@ -170,6 +199,14 @@ object TestingWithTestkitGuideSpec {
       run    <- agent.run(s"What should I pack for $city today?")
       answer <- run.answer.toRight(ProcessingError("packing-advice", s"the run did not complete: ${run.status}"))
     } yield answer
+
+  val temperatureSchema: ObjectSchema[Temperature] = ObjectSchema[Temperature](
+    "A temperature reading",
+    Seq(
+      PropertyDefinition("city", StringSchema("City name")),
+      PropertyDefinition("celsius", NumberSchema("Degrees Celsius"))
+    )
+  )
 
   def providerError(error: LLMError): LLMError = error match {
     case GraphError.NodeFailed(_, _, cause) => cause

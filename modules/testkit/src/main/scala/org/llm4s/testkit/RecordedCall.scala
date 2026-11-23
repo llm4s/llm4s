@@ -1,6 +1,6 @@
 package org.llm4s.testkit
 
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, Message, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, Message }
 
 /**
  * One request a [[ScriptedLLMClient]] received, kept so a test can check what the code under test sent.
@@ -18,9 +18,8 @@ final case class RecordedCall private (
   /** The messages of the conversation. */
   def messages: Seq[Message] = conversation.messages
 
-  /** The text of the last user message, if the conversation has one. */
-  def lastUserText: Option[String] =
-    conversation.messages.reverseIterator.collectFirst { case m: UserMessage => m.content }
+  /** The text of the last user message, if the conversation has one: the conversation's own `lastUserText`. */
+  def lastUserText: Option[String] = conversation.lastUserText
 }
 
 object RecordedCall {

@@ -221,9 +221,14 @@ object ScriptedLLMClient {
    * The rules run under the client's lock, so they must not block on another call to the same client, and an
    * exception a rule throws is not caught: it propagates from `complete` or `streamComplete`.
    *
+   * [[EndsWithUser]], [[LastUser]], [[AfterToolResult]], [[AfterToolResults]] and [[AfterCorrection]] are extractors
+   * for the rules: each matches a conversation by where in a turn its call is.
+   *
    * {{{
    * ScriptedLLMClient.respondingTo {
-   *   case c if c.messages.lastOption.exists(_.content.contains("capital")) => Reply.text("Paris")
+   *   case EndsWithUser(s"take $item")              => Reply.toolCall("add_inventory_item", s"""{"item":"$item"}""")
+   *   case AfterToolResult("add_inventory_item", _) => Reply.text("Taken.")
+   *   case c if c.messages.size > 20                => Reply.text("That is enough.")
    * }
    * }}}
    */

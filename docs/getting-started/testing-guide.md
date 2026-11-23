@@ -102,14 +102,11 @@ hanging or throwing:
 
 ```scala
 import org.llm4s.llmconnect.model._
-import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
-
-def lastUser(conversation: Conversation): String =
-  conversation.messages.collect { case u: UserMessage => u.content }.lastOption.getOrElse("")
+import org.llm4s.testkit.{ LastUser, Reply, ScriptedLLMClient }
 
 val client = ScriptedLLMClient.respondingTo {
-  case c if lastUser(c) == "What is 2+2?"                    => Reply.text("2+2 equals 4")
-  case c if lastUser(c) == "What is the capital of France?" => Reply.text("The capital of France is Paris")
+  case LastUser("What is 2+2?")                   => Reply.text("2+2 equals 4")
+  case LastUser("What is the capital of France?") => Reply.text("The capital of France is Paris")
 }
 
 val answer     = client.complete(Conversation(Seq(UserMessage("What is 2+2?"))))      // Right, "2+2 equals 4"
