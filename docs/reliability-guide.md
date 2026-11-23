@@ -8,7 +8,7 @@ The reliability layer wraps any `LLMClient` implementation, intercepting all ope
 
 1. **Retry Policy**: Determines if/when to retry failed requests
 2. **Circuit Breaker**: Tracks failure patterns and fails fast when service is unhealthy
-3. **Deadline Enforcement**: Ensures operations complete within time bounds
+3. **Deadline Enforcement**: Stops retrying once a call's attempts have used their time budget
 4. **Local Rate Limiting** (opt-in): A token bucket consulted before every attempt, retries included
 5. **Metrics Collection**: Records retry attempts, circuit state transitions, and error types
 
@@ -48,7 +48,8 @@ User Code → ReliableClient → Circuit Breaker → Retry Logic → Deadline �
 
 **2. Open (Failing Fast)**
 - Requests fail immediately without calling provider
-- Returns `ServiceError(503, "circuit-breaker", ...)`
+- Returns a `CircuitOpenError` carrying `retryAfter`, the time left before a probe is let through. It is not retried:
+  `RetryPolicy.isRetryable` is `false` for it, so neither this client nor an outer retry repeats the fast-fail
 - After recovery timeout, transitions to Half-Open
 
 **3. Half-Open (Testing Recovery)**
@@ -61,12 +62,13 @@ User Code → ReliableClient → Circuit Breaker → Retry Logic → Deadline �
 - Reduces latency during outages (fail fast vs. timeout)
 - Automatic recovery testing
 
-**Deadline Enforcement** - Prevents unbounded waiting with configurable per-operation timeouts:
+**Deadline Enforcement** - A time budget for all the attempts of one call together:
 
 - Tracks elapsed time across all retry attempts
-- Cancels retries when deadline approaches
+- Checked before each attempt and before each wait: no retry starts once it has passed
 - Returns `TimeoutError` with context about attempts made
-- Independent of provider-specific timeouts
+- Does not interrupt an attempt in flight: a call hung inside the provider client is bounded by that client's own
+  timeout (`llm4s.providers.<name>.timeouts`), not by the deadline
 
 **Use Cases:**
 - Real-time applications requiring bounded latency
@@ -406,10 +408,11 @@ Non-retryable errors (fail immediately):
 - ❌ `ConfigurationError` - Client misconfiguration
 - ❌ `ServiceError` with any other 4xx status - the request itself is wrong, so repeating it cannot succeed
 - ❌ `OptimisticLockFailure` - recoverable, but the caller must re-read the record first
+- ❌ `CircuitOpenError` - recoverable after its `retryAfter`, but repeating the call at once is what an open circuit prevents
 - ❌ `CancelledError` - the caller stopped the call
 
-**One rule.** Automatic retry is `LLMError.isRecoverable` minus the two exceptions above (a client-error response
-and an `OptimisticLockFailure`). `RetryPolicy.isRetryable`, `LLMClientRetry` and an agent graph node's default
+**One rule.** Automatic retry is `LLMError.isRecoverable` minus the three exceptions above (a client-error response,
+an `OptimisticLockFailure` and a `CircuitOpenError`). `RetryPolicy.isRetryable`, `LLMClientRetry` and an agent graph node's default
 retry all use it, so they cannot disagree about an error. `isRecoverable` means the error may succeed if tried
 again, perhaps after the caller does something; automatic retry is the part where repeating the identical request is
 enough. `RetryPolicy.custom(attempts, delayFn)` uses the same rule unless you pass your own `retryableFn`, and
@@ -664,7 +667,7 @@ val config = ReliabilityConfig.default.withCircuitBreaker(
 val config = ReliabilityConfig.default.withDeadline(5.minutes)
 
 // Or remove deadline entirely
-val noDeadline = ReliabilityConfig.default.withoutDeadline
+val noDeadline = ReliabilityConfig.default.withDeadline(None)
 ```
 
 ### Issue: Rate Limits Not Respected
@@ -1009,7 +1012,9 @@ final case class ReliabilityConfig(
 ```
 
 **Builders:** `withRetryPolicy`, `withCircuitBreaker`, `withRateLimit`, `withDeadline`,
-`withoutDeadline`, `disabled`.
+`withDeadline(None)`, `withEnabled`. `validate` returns the configuration, or a `ValidationError` naming the first
+setting a client cannot run with (a `failureThreshold` or `burstCapacity` below 1, a negative `requestsPerMinute`);
+a `ReliableClient` given such a configuration returns that error from every call and from `validate()`.
 
 **Factory Methods:**
 - `ReliabilityConfig.default` - Recommended starting point
@@ -1023,7 +1028,7 @@ final case class ReliabilityConfig(
 sealed trait RetryPolicy {
   def maxAttempts: Int
   def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration
-  def isRetryable(error: LLMError): Boolean // default: the recoverable errors, except a client-error response (4xx other than 408/429) and an OptimisticLockFailure
+  def isRetryable(error: LLMError): Boolean // default: the recoverable errors, except a client-error response (4xx other than 408/429), an OptimisticLockFailure and a CircuitOpenError
 }
 ```
 
@@ -1060,7 +1065,8 @@ final case class RateLimitConfig(
 )
 ```
 
-`RateLimitConfig.disabled` is the default. Builders: `withRequestsPerMinute`,
+`RateLimitConfig.disabled` is the default, and `RateLimitConfig.default` is the same value (`RateLimitConfig()`):
+turn it on with `withEnabled(true)` or `RateLimitConfig(enabled = true)`. Builders: `withRequestsPerMinute`,
 `withBurstCapacity`, `withEnabled`.
 
 ### ReliableClient

@@ -331,6 +331,7 @@ object ErrorKind {
       case _: org.llm4s.error.ValidationError      => Validation
       case _: org.llm4s.error.InvalidInputError    => Validation
       case _: org.llm4s.error.ServiceError         => ServiceError
+      case _: org.llm4s.error.CircuitOpenError     => ServiceError
       case _: org.llm4s.error.ExecutionError       => ExecutionError
       case _: org.llm4s.error.ConfigurationError   => Validation
       case _: org.llm4s.error.CancelledError       => Cancelled

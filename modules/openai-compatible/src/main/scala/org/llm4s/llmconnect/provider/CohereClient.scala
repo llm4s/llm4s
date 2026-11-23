@@ -97,6 +97,9 @@ object CohereClient {
  */
 private[llm4s] object CohereDialect extends OpenAICompatibleDialect:
 
+  // the Compatibility API serves chat completions and embeddings only: it has no model listing
+  override val validationPath: Option[String] = None
+
   override val systemRole: String = "developer"
 
   /**

@@ -12,7 +12,7 @@ import scala.concurrent.duration.{ Duration, DurationInt, FiniteDuration, NANOSE
 @Stable
 sealed trait RetryPolicy {
 
-  /** Maximum number of retry attempts */
+  /** The most attempts one call makes, the first included: 3 is the first try and up to two retries, 1 is no retry. */
   def maxAttempts: Int
 
   /**
@@ -32,12 +32,15 @@ sealed trait RetryPolicy {
    * use it too. It is derived from [[org.llm4s.error.LLMError.isRecoverable]], never wider: an error is retried
    * only if it is a [[org.llm4s.error.RecoverableError]]. `isRecoverable` says an error may succeed if tried again,
    * perhaps after the caller does something first; this rule keeps the part where repeating the same request is
-   * enough. A recoverable error is therefore retried unless one of two documented exceptions applies:
+   * enough. A recoverable error is therefore retried unless one of three documented exceptions applies:
    *
    *  - '''A client-error HTTP status.''' A [[org.llm4s.error.ServiceError]] is retried only for 5xx, 429 or 408.
    *    Any other 4xx means the request itself is wrong, so sending it unchanged cannot succeed.
    *  - '''An [[org.llm4s.error.OptimisticLockFailure]].''' The caller must re-read the record first; the same update
    *    fails again until it does.
+   *  - '''A [[org.llm4s.error.CircuitOpenError]].''' A circuit breaker refused the call without making it; sending
+   *    it again at once is what the open circuit is there to prevent. It is worth sending after the error's
+   *    `retryAfter`.
    *
    * So the retried errors are [[org.llm4s.error.RateLimitError]], [[org.llm4s.error.TimeoutError]],
    * [[org.llm4s.error.NetworkError]], [[org.llm4s.error.ExecutionError]], a `ServiceError` with a retryable
@@ -55,13 +58,14 @@ object RetryPolicy {
     status >= 500 || status == 429 || status == 408
 
   /**
-   * The one rule for automatic retry; see [[RetryPolicy.isRetryable]]. It is `LLMError.isRecoverable` with two
+   * The one rule for automatic retry; see [[RetryPolicy.isRetryable]]. It is `LLMError.isRecoverable` with three
    * documented exceptions, and total like it: an error that is neither a `RecoverableError` nor a
    * `NonRecoverableError` is not retried.
    */
   private[llm4s] def isTransient(error: LLMError): Boolean = error match {
     case s: ServiceError          => isRetryableStatus(s.httpStatus)
     case _: OptimisticLockFailure => false
+    case _: CircuitOpenError      => false
     case _: RecoverableError      => true
     case _                        => false
   }

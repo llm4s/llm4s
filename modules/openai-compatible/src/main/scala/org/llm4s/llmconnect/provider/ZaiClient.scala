@@ -105,6 +105,9 @@ object ZaiClient {
 private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
   override val headers: Seq[(String, String)] = Seq("User-Agent" -> "llm4s-coding-assistant/1.0")
 
+  // Z.ai documents no model listing or other cheap authenticated request on its chat API
+  override val validationPath: Option[String] = None
+
   /**
    * Not sent. Z.ai's chat-completion reference has no `stream_options` parameter; it documents
    * `usage` as returned when the call ends.

@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect
 
 import org.llm4s.annotation.Stable
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ ValidationError, ValidationUnsupportedError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ObjectSchema
 import org.llm4s.types.{ HeadroomPercent, Result, TokenBudget }
@@ -156,14 +156,23 @@ trait LLMClient extends AutoCloseable {
   }
 
   /**
-   * Validates client configuration and connectivity to the LLM provider.
+   * Checks this client against its provider with one cheap request: that the endpoint answers and accepts the
+   * client's credentials, and, where the provider has a lookup for one model, that the configured model exists. It
+   * sends no completion and uses no tokens. Each provider client documents the request it sends.
    *
-   * May perform checks such as verifying API credentials, testing connectivity, and validating
-   * configuration. Default implementation returns success; override for provider-specific validation.
+   * `Right(())` means that request was sent and the provider accepted it: a client never returns it without having
+   * checked something (#2830). A check that fails is the `Left` a call would have failed with - an
+   * `AuthenticationError` for a rejected key, a `NetworkError` or `ServiceError` for an endpoint that does not
+   * answer, the provider's own error for a model it does not have.
    *
-   * @return Right(()) if validation succeeds, Left(LLMError) with details on failure
+   * A client with no such request returns `Left(ValidationUnsupportedError)`, which is also this default: nothing
+   * was checked, and the client may well work. Match on it to tell the two apart. A wrapper delegates to the client
+   * it wraps.
+   *
+   * @return `Right(())` when the provider accepted the validation request; `Left(ValidationUnsupportedError)` when
+   *         the client has none; otherwise the `Left` the failed request mapped to
    */
-  def validate(): Result[Unit] = Right(())
+  def validate(): Result[Unit] = Left(ValidationUnsupportedError(LLMClient.describe(this)))
 
   /**
    * The canonical id of the provider this client calls (e.g. `openai`), when it is known. Tracing reports it as the
@@ -182,6 +191,10 @@ trait LLMClient extends AutoCloseable {
 }
 
 object LLMClient {
+
+  /** What `client` is called in an error about it: its class's simple name, or the full name of an anonymous one. */
+  private def describe(client: LLMClient): String =
+    Option(client.getClass.getSimpleName).filter(_.nonEmpty).getOrElse(client.getClass.getName)
 
   private val FencePattern = """(?s)^```[A-Za-z0-9_-]*[ \t]*\r?\n?(.*?)\r?\n?```\s*$""".r
 

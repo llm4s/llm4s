@@ -26,9 +26,9 @@ import scala.util.matching.Regex
  * matching, and a match that exceeds its character-access budget (the guard against catastrophic backtracking)
  * is aborted. Only the companion's `String` factories also pre-screen the pattern itself: there a pattern that
  * is `null`, empty after trimming, longer than 1000 characters, or matches a known catastrophic-backtracking
- * shape is refused. The shape check is a rough textual heuristic aimed at nested quantifiers and quantified
- * alternation (it refuses `(a+)+` and `(cat|dog)*`): it refuses some harmless patterns and misses some
- * dangerous ones. A
+ * shape is refused. The shape check is a rough textual heuristic aimed at nested quantifiers and at quantified
+ * alternations whose alternatives overlap (it refuses `(a+)+` and `(a|ab)*`, and takes `(cat|dog)*`): it refuses
+ * some harmless patterns and misses some dangerous ones. A
  * pattern passed as a [[scala.util.matching.Regex]] or a compiled `java.util.regex.Pattern` (the constructors,
  * `RegexValidator(regex)`, [[RegexValidator.email]], [[RegexValidator.phone]] and
  * [[RegexValidator.alphanumeric]]) is used as given, with no pre-screen; its matching is still bounded.
@@ -132,7 +132,7 @@ class RegexValidator(
               )
             )
           case Left(error) =>
-            Left(ValidationError.invalid("value", s"Regex security error: $error"))
+            Left(ValidationError.invalid("value", s"Regex security error: ${error.message}"))
         }
     }
 
@@ -165,7 +165,7 @@ object RegexValidator {
         new RegexValidator(
           Pattern.compile("(?!)"),
           pattern,
-          fallbackError = Some(s"Invalid or unsafe regex pattern: $error")
+          fallbackError = Some(s"Invalid or unsafe regex pattern: ${error.message}")
         )
     }
 
@@ -199,7 +199,7 @@ object RegexValidator {
           Pattern.compile("(?!)"),
           pattern,
           Some(errorMessage),
-          Some(s"Invalid or unsafe regex pattern: $error")
+          Some(s"Invalid or unsafe regex pattern: ${error.message}")
         )
     }
 

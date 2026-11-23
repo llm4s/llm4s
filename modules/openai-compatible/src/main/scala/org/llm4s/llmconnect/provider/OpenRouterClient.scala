@@ -180,6 +180,9 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
   /** The provider id on the [[org.llm4s.llmconnect.model.ThinkingBlock.Opaque ThinkingBlock.Opaque]] blocks that hold OpenRouter's `reasoning_details`. */
   val ProviderId: String = "openrouter"
 
+  // OpenRouter's `/models` answers without a key, so it would pass a wrong one; `/key` describes the key sent
+  override val validationPath: Option[String] = Some("/key")
+
   override val headers: Seq[(String, String)] =
     Seq("HTTP-Referer" -> "https://github.com/llm4s/llm4s", "X-Title" -> "LLM4S")
 

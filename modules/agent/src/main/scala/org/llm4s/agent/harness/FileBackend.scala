@@ -170,7 +170,7 @@ trait FileBackend:
         org.llm4s.security.RegexSafetyManager
           .safeCompile(regex)
           .left
-          .map(reason => BackendRefused("grep", Text.quoted(regex), reason))
+          .map(refused => BackendRefused("grep", Text.quoted(regex), refused.message))
       )
       .flatMap { compiled =>
         val accept: VPath => Boolean = include match
@@ -550,7 +550,8 @@ private[llm4s] object Text:
         case Right(true)  => Iterator(GrepMatch(path, i + 1, line))
         case Right(false) => Iterator.empty
         // the file is the target, so a composite rebases it through its mount like any other path
-        case Left(reason) => throw new SearchAborted(path, s"line ${i + 1}: the pattern was stopped: $reason")
+        case Left(stopped) =>
+          throw new SearchAborted(path, s"line ${i + 1}: the pattern was stopped: ${stopped.message}")
     }
 
   /**

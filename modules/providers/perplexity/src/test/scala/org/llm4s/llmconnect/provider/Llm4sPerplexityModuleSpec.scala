@@ -155,6 +155,10 @@ class Llm4sPerplexityModuleSpec extends AnyWordSpec with Matchers with ProviderM
       assertModelCallContract(PerplexityContractFixtures.replies)(clientAt)
     }
 
+    "say that validate() checks nothing: it has no validation request (#2830)" in {
+      assertValidationUnsupported(clientAt("http://localhost:1"))
+    }
+
     "return CancelledError when a call is interrupted" in {
       withServer("/")(holdOpen)(baseUrl => assertCancelsWhenInterrupted(clientAt(baseUrl)))
     }

@@ -1,6 +1,8 @@
 package org.llm4s.reliability
 
 import org.llm4s.annotation.Stable
+import org.llm4s.error.ValidationError
+import org.llm4s.types.Result
 
 import scala.concurrent.duration.{ DurationInt, FiniteDuration }
 
@@ -10,10 +12,14 @@ import scala.concurrent.duration.{ DurationInt, FiniteDuration }
  * Provides retry logic, circuit breakers, and deadline enforcement
  * to make LLM API calls resilient to transient failures.
  *
+ * Construction does not check the values, so that a configuration can be built up with setters; [[validate]]
+ * does, and a [[ReliableClient]] given a configuration that fails it returns that error from every call.
+ *
  * @param retryPolicy Retry policy for transient failures
  * @param circuitBreaker Circuit breaker configuration
  * @param rateLimit Local rate limiting configuration
- * @param deadline Maximum time to wait for operation completion
+ * @param deadline Time allowed for all the attempts of one call together, waits included; checked between
+ *                 attempts, so it stops further retries but does not interrupt an attempt in flight
  * @param enabled Whether reliability features are enabled (for opt-out)
  */
 @Stable
@@ -24,11 +30,9 @@ final case class ReliabilityConfig private (
   deadline: Option[FiniteDuration],
   enabled: Boolean
 ) {
-  def withEnabled(enabled: Boolean): ReliabilityConfig = copy(enabled = enabled)
 
-  /** Disable all reliability features */
-  def disabled: ReliabilityConfig =
-    copy(enabled = false)
+  /** Turns every reliability feature on or off; off, a [[ReliableClient]] passes each call straight through. */
+  def withEnabled(enabled: Boolean): ReliabilityConfig = copy(enabled = enabled)
 
   /** Set retry policy */
   def withRetryPolicy(policy: RetryPolicy): ReliabilityConfig =
@@ -46,11 +50,19 @@ final case class ReliabilityConfig private (
   def withDeadline(duration: FiniteDuration): ReliabilityConfig =
     copy(deadline = Some(duration))
 
+  /** Set the operation deadline, or remove it with `None`. */
   def withDeadline(deadline: Option[FiniteDuration]): ReliabilityConfig = copy(deadline = deadline)
 
-  /** Remove deadline */
-  def withoutDeadline: ReliabilityConfig =
-    copy(deadline = None)
+  /**
+   * This configuration, or the first setting a [[ReliableClient]] cannot run with: a
+   * [[org.llm4s.error.ValidationError]] naming the field. Checked are the circuit breaker
+   * ([[CircuitBreakerConfig.validate]]) and, when it is enabled, the rate limit ([[RateLimitConfig.validate]]).
+   */
+  def validate: Result[ReliabilityConfig] =
+    for {
+      _ <- circuitBreaker.validate
+      _ <- if (rateLimit.enabled) rateLimit.validate else Right(rateLimit)
+    } yield this
 }
 
 object ReliabilityConfig {
@@ -120,6 +132,19 @@ final case class CircuitBreakerConfig private (
   /** Set success threshold */
   def withSuccessThreshold(threshold: Int): CircuitBreakerConfig =
     copy(successThreshold = threshold)
+
+  /**
+   * This configuration, or the first value a circuit breaker cannot run with: `failureThreshold` and
+   * `successThreshold` must be at least 1, and `recoveryTimeout` not negative.
+   */
+  def validate: Result[CircuitBreakerConfig] =
+    if (failureThreshold < 1)
+      Left(ValidationError("circuitBreaker.failureThreshold", s"must be at least 1, was $failureThreshold"))
+    else if (successThreshold < 1)
+      Left(ValidationError("circuitBreaker.successThreshold", s"must be at least 1, was $successThreshold"))
+    else if (recoveryTimeout.toNanos < 0)
+      Left(ValidationError("circuitBreaker.recoveryTimeout", s"must not be negative, was $recoveryTimeout"))
+    else Right(this)
 }
 
 object CircuitBreakerConfig {
@@ -180,6 +205,18 @@ final case class RateLimitConfig private (
   /** Set enabled flag */
   def withEnabled(isEnabled: Boolean): RateLimitConfig =
     copy(enabled = isEnabled)
+
+  /**
+   * This configuration, or the first value a token bucket cannot run with: `burstCapacity` must be at least 1 (a
+   * bucket that holds no token lets no call through) and `requestsPerMinute` not negative. Zero requests per
+   * minute is valid: the bucket is never refilled, so the client makes `burstCapacity` calls in all.
+   */
+  def validate: Result[RateLimitConfig] =
+    if (burstCapacity < 1)
+      Left(ValidationError("rateLimit.burstCapacity", s"must be at least 1, was $burstCapacity"))
+    else if (requestsPerMinute < 0)
+      Left(ValidationError("rateLimit.requestsPerMinute", s"must not be negative, was $requestsPerMinute"))
+    else Right(this)
 }
 
 object RateLimitConfig {
@@ -188,8 +225,11 @@ object RateLimitConfig {
   def apply(enabled: Boolean = false, requestsPerMinute: Int = 60, burstCapacity: Int = 60): RateLimitConfig =
     new RateLimitConfig(enabled, requestsPerMinute, burstCapacity)
 
-  /** Default: enabled, 60 requests/minute, burst of 60 */
-  val default: RateLimitConfig = RateLimitConfig(enabled = true)
+  /**
+   * Default: `RateLimitConfig()`, which is disabled, at 60 requests/minute and a burst of 60 once
+   * `withEnabled(true)` turns it on.
+   */
+  val default: RateLimitConfig = RateLimitConfig()
 
   /** Disabled: no local rate limiting (the field default in ReliabilityConfig) */
   val disabled: RateLimitConfig = RateLimitConfig(enabled = false)

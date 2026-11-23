@@ -224,7 +224,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
     inner.calls.get() shouldBe 3
   }
 
-  it should "fail fast with the circuit-breaker's ServiceError, without calling the model, once the circuit is open" in {
+  it should "fail fast with a CircuitOpenError, without calling the model, once the circuit is open" in {
     val provider = ServiceError(503, "provider-x", "down")
     val inner    = new CountingFailingClient(provider)
     val config = ReliabilityConfig.default
@@ -237,8 +237,8 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
     inner.calls.get() shouldBe 2
 
     val open = runError(client)
-    open shouldBe a[ServiceError]
-    open.asInstanceOf[ServiceError].provider shouldBe "circuit-breaker"
+    open shouldBe a[org.llm4s.error.CircuitOpenError]
+    open.asInstanceOf[org.llm4s.error.CircuitOpenError].provider shouldBe "provider-x"
     inner.calls.get() shouldBe 2
   }
 

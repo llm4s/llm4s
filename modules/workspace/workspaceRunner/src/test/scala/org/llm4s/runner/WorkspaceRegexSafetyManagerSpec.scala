@@ -26,6 +26,18 @@ class WorkspaceRegexSafetyManagerSpec extends AnyFlatSpec with TestTimeLimit wit
     result.getOrElse(fail("the operation produced no result"))
   }
 
+  "WorkspaceRegexSafetyManager.safeCompile" should "accept a quantified alternation whose alternatives do not overlap (#2825)" in {
+    Seq("(foo|bar)+", "(?:jpg|png)*", "^(GET|POST)+$", "(?<verb>GET|POST)+ /").foreach { pattern =>
+      withClue(pattern)(WorkspaceRegexSafetyManager.safeCompile(pattern).isRight shouldBe true)
+    }
+  }
+
+  it should "still reject a quantified alternation whose alternatives overlap, and nested quantifiers" in {
+    Seq("(a|a)*b", "(a|aa)+", "(ab|a)*c", "(?:a|ab)*c", "(?<x>a|ab)+", "(a+)+b", "((a+)+)+b").foreach { pattern =>
+      withClue(pattern)(WorkspaceRegexSafetyManager.safeCompile(pattern).isLeft shouldBe true)
+    }
+  }
+
   "WorkspaceRegexSafetyManager" should "find and replace normally within the budget" in {
     val p = Pattern.compile("b+")
     WorkspaceRegexSafetyManager.safeFind(p, "aabbb") shouldBe Right(true)
