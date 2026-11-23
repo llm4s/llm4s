@@ -46,7 +46,7 @@ Write one when the concern applies to every turn or every call, whatever the mod
 ## A first middleware
 
 `id` is the only member without a default. This one removes e-mail addresses from the user's text before
-anything else sees it, so the thread never stores them:
+it joins the conversation, so the model and the thread's messages never hold them:
 
 ```scala
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, BoundaryResult, MiddlewareId, ModelContext }
@@ -61,6 +61,9 @@ final class RedactEmails extends AgentMiddleware:
     Right(BoundaryResult(Email.replaceAllIn(input, "[email]")))
 ```
 
+On a durable thread the query as submitted is still in the turn's first checkpoint, which is written before any
+hook runs: when sensitive input must never reach storage, redact it before you call the agent.
+
 Attach it with `Agent.builder(...).withMiddleware(new RedactEmails)`. `withMiddleware` appends, in order, to
 the agent's stack; the order matters (see [Ordering](#ordering)).
 
@@ -68,7 +71,7 @@ the agent's stack; the order matters (see [Ordering](#ordering)).
 
 | Hook | When it runs | What it returns |
 |---|---|---|
-| `beforeAgent(input, context)` | once per turn, on the user's query, before it is stored | `Result[BoundaryResult]`: the query, possibly changed, and a state update |
+| `beforeAgent(input, context)` | once per turn, on the user's query, before it joins the conversation | `Result[BoundaryResult]`: the query, possibly changed, and a state update |
 | `promptSections(context)` | before every model call, to build its system prompt | `Result[Vector[PromptSection]]` |
 | `wrapModelCall(request, context)(next)` | around every model call | `Result[ModelResponse]` |
 | `wrapToolCall(request, context)(next)` | around every tool call, after its arguments were validated and decoded | `ToolOutcome` |
