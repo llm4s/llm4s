@@ -135,3 +135,35 @@ final class HalfBrokenProviderModule extends Llm4sProviderModule:
   override def chatProviders: Seq[ProviderDescriptor] = Seq(FixtureProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] =
     throw new IllegalStateException("the embedding half of this module is broken")
+
+/**
+ * A chat provider compiled against another llm4s: asking for its aliases throws, as a missing method
+ * does (#2812).
+ */
+object SkewedProvider extends ProviderDescriptor:
+  val id: ProviderId                 = ProviderId("skewed")
+  val configSpec: ProviderConfigSpec = ProviderConfigSpec()
+
+  override def aliases: Set[String] =
+    throw new AbstractMethodError("org.llm4s.llmconnect.spi.ProviderDescriptor.aliases()")
+
+  def buildConfig(providerName: String, section: NamedProviderConfig)(using
+    ContextWindowResolver
+  ): Result[ProviderConfig] =
+    Left(ConfigurationError("skewed provider builds no config"))
+
+  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
+    ModelRegistryService
+  ): Result[LLMClient] =
+    Left(ConfigurationError("skewed provider builds no client"))
+
+/** An embedding provider whose id throws, as a version-skewed descriptor's can (#2812). */
+object SkewedEmbeddings extends EmbeddingProviderDescriptor:
+  def id: ProviderId = throw new AbstractMethodError("org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor.id()")
+
+  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = FixtureEmbeddings.build(config)
+
+/** A module whose skewed descriptors sit beside a working one: only the skewed ones are dropped. */
+final class SkewedProviderModule extends Llm4sProviderModule:
+  override def chatProviders: Seq[ProviderDescriptor]               = Seq(SkewedProvider, FixtureProvider)
+  override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(SkewedEmbeddings, FixtureEmbeddings)

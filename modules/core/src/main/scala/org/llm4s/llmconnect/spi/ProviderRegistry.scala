@@ -34,9 +34,12 @@ import scala.util.control.NonFatal
  * therefore appear in both, and does: `ollama` names a chat client and an
  * embedding provider that share nothing but a base URL.
  *
- * Lookup is by `ProviderId` and never throws: an id nothing handles produces
- * a `Left` naming the ids that are registered, which is the difference between
- * a usable error and "provider openai not registered".
+ * Lookup is by `ProviderId` or by an alias a descriptor declares, and never
+ * throws: an id nothing handles produces a `Left` naming the ids that are
+ * registered, which is the difference between a usable error and "provider
+ * openai not registered". An id always beats an alias: an alias equal to
+ * another provider's id is ignored, and reported in [[report]] as a collision,
+ * as is an alias two providers declare (the later one keeps it).
  *
  * @param descriptors          the registered chat providers, in registration order.
  * @param embeddingDescriptors the registered embedding providers, in registration order.
@@ -53,23 +56,19 @@ final class ProviderRegistry private (
     descriptors.map(descriptor => descriptor.id.asString -> descriptor).toMap
 
   private val byAlias: Map[String, ProviderDescriptor] =
-    descriptors.flatMap { descriptor =>
-      descriptor.aliases.map(alias => ProviderId(alias).asString -> descriptor)
-    }.toMap
+    ProviderRegistry.aliasIndex(descriptors)(_.id.asString, _.aliases)
 
   private val embeddingById: Map[String, EmbeddingProviderDescriptor] =
     embeddingDescriptors.map(descriptor => descriptor.id.asString -> descriptor).toMap
 
   private val embeddingByAlias: Map[String, EmbeddingProviderDescriptor] =
-    embeddingDescriptors.flatMap { descriptor =>
-      descriptor.aliases.map(alias => ProviderId(alias).asString -> descriptor)
-    }.toMap
+    ProviderRegistry.aliasIndex(embeddingDescriptors)(_.id.asString, _.aliases)
 
-  /** The registered descriptor for `id`, if any. Does not consider aliases. */
-  def find(id: ProviderId): Option[ProviderDescriptor] = byId.get(id.asString)
+  /** The registered descriptor whose id or alias is `id`, if any; an id beats an alias. */
+  def find(id: ProviderId): Option[ProviderDescriptor] = byId.get(id.asString).orElse(byAlias.get(id.asString))
 
   /**
-   * The registered descriptor for `id`, or an error naming what is registered.
+   * The registered descriptor whose id or alias is `id`, or an error naming what is registered.
    *
    * The error carries the discovery summary as well as the registered ids,
    * because the two most common causes of a missing provider are invisible
@@ -82,15 +81,13 @@ final class ProviderRegistry private (
   def resolve(id: ProviderId, configPath: Option[String] = None): Result[ProviderDescriptor] =
     find(id).toRight(notRegistered("Provider", id, configPath, ids, "ProviderRegistry.of(...)"))
 
-  /** The registered descriptor for `id`, or an error naming what is registered. */
-  def get(id: ProviderId): Result[ProviderDescriptor] = resolve(id, None)
-
-  /** The registered embedding descriptor for `id`, if any. Does not consider aliases. */
-  def findEmbedding(id: ProviderId): Option[EmbeddingProviderDescriptor] = embeddingById.get(id.asString)
+  /** The registered embedding descriptor whose id or alias is `id`, if any; an id beats an alias. */
+  def findEmbedding(id: ProviderId): Option[EmbeddingProviderDescriptor] =
+    embeddingById.get(id.asString).orElse(embeddingByAlias.get(id.asString))
 
   /**
-   * The registered embedding descriptor for `id`, or an error naming what is
-   * registered.
+   * The registered embedding descriptor whose id or alias is `id`, or an error
+   * naming what is registered.
    *
    * The error names the '''embedding''' providers specifically. A user who set
    * `EMBEDDING_MODEL=anthropic/...` needs to be told that Anthropic supplies no
@@ -149,18 +146,18 @@ final class ProviderRegistry private (
    * Folds an alias onto the id that owns it, leaving unknown strings alone.
    *
    * `"google"` becomes `"gemini"` because the Gemini descriptor (`llm4s-gemini`) declares that
-   * alias. An id no provider claims is returned canonicalised but unchanged —
-   * parsing config must not depend on what happens to be on the classpath; only
-   * resolution does.
+   * alias. A registered id stays itself even when another provider declares it as an alias. An
+   * id no provider claims is returned canonicalised but unchanged — parsing config must not
+   * depend on what happens to be on the classpath; only resolution does.
    */
   def canonicalId(raw: String): ProviderId =
     val id = ProviderId(raw)
-    byAlias.get(id.asString).fold(id)(_.id)
+    find(id).fold(id)(_.id)
 
   /** [[canonicalId]] over the embedding providers, which have their own aliases. */
   def canonicalEmbeddingId(raw: String): ProviderId =
     val id = ProviderId(raw)
-    embeddingByAlias.get(id.asString).fold(id)(_.id)
+    findEmbedding(id).fold(id)(_.id)
 
   /**
    * This registry plus `descriptor`; a later registration of the same id wins.
@@ -221,13 +218,17 @@ object ProviderRegistry:
     // going through this path.
     val (dedupedChat, chatCollisionIds)            = lastWins(descriptors)(_.id.asString)
     val (dedupedEmbeddings, embeddingCollisionIds) = lastWins(embeddingDescriptors)(_.id.asString)
-    val collisions =
+    val idCollisions =
       chatCollisionIds.map(id => ProviderIdCollision("chat", id, "explicit registration", None)) ++
         embeddingCollisionIds.map(id => ProviderIdCollision("embedding", id, "explicit registration", None))
+    // Alias collisions belong to the set as it now stands, so they are recomputed rather than
+    // accumulated: replacing the provider that declared an alias can resolve one.
+    val collisions = report.collisions.filterNot(isAliasCollision) ++ idCollisions ++
+      aliasCollisions(dedupedChat, dedupedEmbeddings)
     build(
       dedupedChat,
       dedupedEmbeddings,
-      if collisions.isEmpty then report else report.withCollisions(report.collisions ++ collisions)
+      if collisions == report.collisions then report else report.withCollisions(collisions)
     )
 
   private def build(
@@ -236,6 +237,61 @@ object ProviderRegistry:
     report: ProviderRegistryReport
   ): ProviderRegistry =
     new ProviderRegistry(descriptors, embeddingDescriptors, report)
+
+  private val ChatAlias      = "chat alias"
+  private val EmbeddingAlias = "embedding alias"
+
+  private def isAliasCollision(collision: ProviderIdCollision): Boolean =
+    collision.kind == ChatAlias || collision.kind == EmbeddingAlias
+
+  /**
+   * Alias to descriptor, in canonical spelling. An alias equal to a registered id is left out,
+   * because the id wins; of two descriptors declaring the same alias, the later one keeps it.
+   */
+  private[spi] def aliasIndex[D](
+    descriptors: Vector[D]
+  )(idOf: D => String, aliasesOf: D => Set[String]): Map[String, D] =
+    val ids = descriptors.map(idOf).toSet
+    aliasPairs(descriptors)(aliasesOf).filterNot((alias, _) => ids.contains(alias)).toMap
+
+  private def aliasPairs[D](descriptors: Vector[D])(aliasesOf: D => Set[String]): Vector[(String, D)] =
+    descriptors.flatMap(descriptor => aliasesOf(descriptor).toVector.sorted.map(ProviderId(_).asString -> descriptor))
+
+  private def aliasCollisions(
+    chat: Vector[ProviderDescriptor],
+    embeddings: Vector[EmbeddingProviderDescriptor]
+  ): Vector[ProviderIdCollision] =
+    aliasCollisionsOf(chat, ChatAlias)(_.id.asString, _.aliases) ++
+      aliasCollisionsOf(embeddings, EmbeddingAlias)(_.id.asString, _.aliases)
+
+  /**
+   * The aliases that do not resolve to the descriptor declaring them: one equal to another
+   * provider's id (the id wins), and one an earlier descriptor also declared (the later wins).
+   * `keptModule` and `droppedModule` name the providers, since one module can supply both.
+   */
+  private def aliasCollisionsOf[D](descriptors: Vector[D], kind: String)(
+    idOf: D => String,
+    aliasesOf: D => Set[String]
+  ): Vector[ProviderIdCollision] =
+    def provider(id: String) = s"provider '$id'"
+    val ids                  = descriptors.map(idOf).toSet
+    val pairs                = aliasPairs(descriptors)(aliasesOf).map((alias, descriptor) => alias -> idOf(descriptor))
+    val shadowed = pairs.collect {
+      case (alias, owner) if ids.contains(alias) && alias != owner =>
+        ProviderIdCollision(kind, alias, provider(alias), Some(provider(owner)))
+    }
+    val shared = pairs
+      .filterNot((alias, _) => ids.contains(alias))
+      .groupBy(_._1)
+      .toVector
+      .sortBy(_._1)
+      .flatMap { (alias, claims) =>
+        val owners = claims.map(_._2).distinct
+        Option.when(owners.sizeIs > 1)(
+          ProviderIdCollision(kind, alias, provider(owners.last), Some(provider(owners(owners.size - 2))))
+        )
+      }
+    shadowed ++ shared
 
   /** Deduplicates by `key`, last registration wins; also returns which keys collided. */
   private def lastWins[A](values: Vector[A])(key: A => String): (Vector[A], Vector[String]) =
@@ -257,11 +313,45 @@ object ProviderRegistry:
    * each step in [[guarded]], recording the failure in
    * [[ProviderRegistryReport]] instead.
    *
-   * @param loader the class loader to scan; defaults to the thread's context
-   *               class loader, falling back to this class's own loader when a
-   *               context loader is not set.
+   * A descriptor whose `id` or `aliases` throws - one compiled against another
+   * llm4s - is left out and recorded too; the module's other descriptors stay.
+   *
+   * @param loaders the class loaders to scan, in order. With none, the thread's
+   *                context class loader and the loader of `llm4s-core` itself, so
+   *                a context loader that cannot see the provider modules (some
+   *                containers and test runners set one) does not hide them. A
+   *                module seen through more than one loader counts once.
    */
-  def discover(loader: ClassLoader = defaultClassLoader): ProviderRegistry =
+  def discover(loaders: ClassLoader*): ProviderRegistry =
+    val scanned = if loaders.isEmpty then defaultClassLoaders else loaders.distinct
+    discoverFrom(scanned.toVector)
+
+  private def discoverFrom(loaders: Vector[ClassLoader]): ProviderRegistry =
+    val scan = loaders.foldLeft(Scan())((scan, loader) => scanLoader(loader, scan))
+
+    val (dedupedChat, chatCollisionIds)            = lastWins(scan.descriptors)(_.id.asString)
+    val (dedupedEmbeddings, embeddingCollisionIds) = lastWins(scan.embeddingDescriptors)(_.id.asString)
+    val collisions =
+      collisionsOf(scan.modules, chatCollisionIds, "chat", _.providerIds) ++
+        collisionsOf(scan.modules, embeddingCollisionIds, "embedding", _.embeddingProviderIds) ++
+        aliasCollisions(dedupedChat, dedupedEmbeddings)
+
+    val report = ProviderRegistryReport(discovered = true, scan.modules, scan.failures, collisions)
+
+    collisions.foreach { collision =>
+      val dropped = collision.droppedModule.getOrElse("an earlier registration")
+      logger.warn(
+        s"Provider discovery: duplicate ${collision.subject} registered by both " +
+          s"$dropped and ${collision.keptModule}; ${collision.keptModule} won."
+      )
+    }
+    scan.failures.foreach(failure => logger.warn(s"Provider discovery: ${failure.detail}"))
+    logger.debug(s"Provider discovery complete.\n${report.describe}")
+
+    build(dedupedChat, dedupedEmbeddings, report)
+
+  /** `scan` plus the modules `loader` finds that no earlier loader supplied. */
+  private def scanLoader(loader: ClassLoader, start: Scan): Scan =
     val iterator = ServiceLoader.load(classOf[Llm4sProviderModule], loader).iterator()
 
     @tailrec
@@ -282,51 +372,59 @@ object ProviderRegistry:
               // no-arg constructor. `ServiceLoader` consumes it, so the scan continues.
               loop(scan.failed(failure))
 
+            case Right(module) if scan.seen.contains(module.getClass) =>
+              // the same module class through a second loader (the context loader's parent, say)
+              loop(scan)
+
             case Right(module) =>
               // Both lists are the module's own code, so both are guarded. Asking for them
               // separately means a module whose embedding half throws still contributes its
               // chat half, and the report says which half failed.
               val name = module.getClass.getName
               val chat = guarded(s"asking $name for its chat providers")(module.chatProviders.toVector)
+                .map(usable(name, "chat", _)(_.id.asString, _.aliases))
               val embeddings =
                 guarded(s"asking $name for its embedding providers")(module.embeddingProviders.toVector)
+                  .map(usable(name, "embedding", _)(_.id.asString, _.aliases))
 
+              val chatKept      = chat.map(_._1).getOrElse(Vector.empty)
+              val embeddingKept = embeddings.map(_._1).getOrElse(Vector.empty)
               val entry = ProviderModuleReport(
                 moduleClass = name,
-                providerIds = chat.toOption.getOrElse(Vector.empty).map(_.id.asString),
-                embeddingProviderIds = embeddings.toOption.getOrElse(Vector.empty).map(_.id.asString),
+                providerIds = chatKept.map(_._2),
+                embeddingProviderIds = embeddingKept.map(_._2),
                 source = sourceOf(module)
               )
               loop(
                 scan.copy(
-                  descriptors = scan.descriptors ++ chat.getOrElse(Vector.empty),
-                  embeddingDescriptors = scan.embeddingDescriptors ++ embeddings.getOrElse(Vector.empty),
+                  descriptors = scan.descriptors ++ chatKept.map(_._1),
+                  embeddingDescriptors = scan.embeddingDescriptors ++ embeddingKept.map(_._1),
                   modules = scan.modules :+ entry,
-                  failures = scan.failures ++ chat.left.toSeq ++ embeddings.left.toSeq
+                  failures = scan.failures ++ chat.left.toSeq ++ chat.toSeq.flatMap(_._2) ++
+                    embeddings.left.toSeq ++ embeddings.toSeq.flatMap(_._2),
+                  seen = scan.seen + module.getClass
                 )
               )
 
-    val scan = loop(Scan())
+    loop(start)
 
-    val (dedupedChat, chatCollisionIds)            = lastWins(scan.descriptors)(_.id.asString)
-    val (dedupedEmbeddings, embeddingCollisionIds) = lastWins(scan.embeddingDescriptors)(_.id.asString)
-    val collisions =
-      collisionsOf(scan.modules, chatCollisionIds, "chat", _.providerIds) ++
-        collisionsOf(scan.modules, embeddingCollisionIds, "embedding", _.embeddingProviderIds)
-
-    val report = ProviderRegistryReport(discovered = true, scan.modules, scan.failures, collisions)
-
-    collisions.foreach { collision =>
-      val dropped = collision.droppedModule.getOrElse("an earlier registration")
-      logger.warn(
-        s"Provider discovery: duplicate ${collision.kind} id '${collision.id}' registered by both " +
-          s"$dropped and ${collision.keptModule}; ${collision.keptModule} won."
-      )
+  /**
+   * The descriptors whose `id` and `aliases` can be read, each with its id, and a failure for
+   * each of the others. Both are a module's own code, so a version-skewed descriptor throws
+   * here (`AbstractMethodError`) rather than later, inside the registry.
+   */
+  private def usable[D](module: String, kind: String, descriptors: Vector[D])(
+    idOf: D => String,
+    aliasesOf: D => Set[String]
+  ): (Vector[(D, String)], Vector[ProviderDiscoveryFailure]) =
+    val read = descriptors.zipWithIndex.map { (descriptor, index) =>
+      guarded(s"reading the id and aliases of $module's $kind provider #${index + 1}") {
+        val id = idOf(descriptor)
+        aliasesOf(descriptor).foreach(ProviderId(_))
+        descriptor -> id
+      }
     }
-    scan.failures.foreach(failure => logger.warn(s"Provider discovery: ${failure.detail}"))
-    logger.debug(s"Provider discovery complete.\n${report.describe}")
-
-    build(dedupedChat, dedupedEmbeddings, report)
+    (read.collect { case Right(kept) => kept }, read.collect { case Left(failure) => failure })
 
   /** Turns duplicate ids into [[ProviderIdCollision]]s, naming the modules that supplied them. */
   private def collisionsOf(
@@ -347,7 +445,8 @@ object ProviderRegistry:
     descriptors: Vector[ProviderDescriptor] = Vector.empty,
     embeddingDescriptors: Vector[EmbeddingProviderDescriptor] = Vector.empty,
     modules: Vector[ProviderModuleReport] = Vector.empty,
-    failures: Vector[ProviderDiscoveryFailure] = Vector.empty
+    failures: Vector[ProviderDiscoveryFailure] = Vector.empty,
+    seen: Set[Class[?]] = Set.empty
   ):
     def failed(failure: ProviderDiscoveryFailure): Scan = copy(failures = failures :+ failure)
 
@@ -384,9 +483,8 @@ object ProviderRegistry:
   private def sourceOf(module: Llm4sProviderModule): Option[String] =
     Try(Option(module.getClass.getProtectionDomain.getCodeSource).map(_.getLocation.toString)).toOption.flatten
 
-  private def defaultClassLoader: ClassLoader =
-    Option(Thread.currentThread.getContextClassLoader)
-      .getOrElse(classOf[Llm4sProviderModule].getClassLoader)
+  private def defaultClassLoaders: Seq[ClassLoader] =
+    (Option(Thread.currentThread.getContextClassLoader).toSeq :+ classOf[Llm4sProviderModule].getClassLoader).distinct
 
   /**
    * The registry used when a caller supplies none: everything discovered on the

@@ -22,7 +22,8 @@ import ujson._
  *  - '''JSON/YAML''': Removes null values, empty strings, truncates large arrays
  *  - '''Logs''': Keeps head/tail, collapses repeated lines
  *  - '''Errors''': Preserves error message and top stack frames
- *  - '''Binary''': Replaces with placeholder (always externalized)
+ *  - '''Binary''': a `data:` URI, a run of base64, or text that is mostly control characters; externalized
+ *    when it is over 2KB and there is a store, otherwise left as it is
  *  - '''Text''': Generic word-based truncation
  *
  * ==Size Thresholds==
@@ -30,7 +31,8 @@ import ujson._
  * Content is processed based on size:
  *  - '''< 2KB''': Kept as-is (no compression)
  *  - '''2KB - 8KB''': Inline compression (type-specific)
- *  - '''> 8KB''': Externalized to [[ArtifactStore]] with content pointer
+ *  - '''> 8KB''': Externalized to [[ArtifactStore]] with content pointer; compressed inline instead when
+ *    there is no store (see [[DeterministicCompressor.compressToCap]])
  *
  * ==Externalization==
  *
@@ -70,6 +72,18 @@ object ToolOutputCompressor {
     messages: Seq[Message],
     artifactStore: ArtifactStore,
     threshold: ExternalizationThreshold = DefaultExternalizationThreshold
+  ): Result[Seq[Message]] =
+    compress(messages, Some(artifactStore), threshold)
+
+  /**
+   * As [[compressToolOutputs]], with `artifactStore` optional: without one nothing is externalized, since a pointer
+   * to content nobody kept could never be resolved. Over-threshold text is compressed inline instead, and binary
+   * content is left as it is.
+   */
+  private[context] def compress(
+    messages: Seq[Message],
+    artifactStore: Option[ArtifactStore],
+    threshold: ExternalizationThreshold = DefaultExternalizationThreshold
   ): Result[Seq[Message]] = {
     val processed = messages.map {
       case tool: ToolMessage => compressToolMessage(tool, artifactStore, threshold)
@@ -99,7 +113,7 @@ object ToolOutputCompressor {
    */
   private def compressToolMessage(
     message: ToolMessage,
-    artifactStore: ArtifactStore,
+    store: Option[ArtifactStore],
     threshold: ExternalizationThreshold
   ): Result[Message] = {
     val texts                        = message.parts.collect { case ContentPart.Text(t) => t }
@@ -117,7 +131,7 @@ object ToolOutputCompressor {
       }
 
     // all the text as one artifact; the first text part its pointer, the other text parts gone, the media in place
-    def externalizeTogether: Result[Vector[ContentPart]] = {
+    def externalizeTogether(artifactStore: ArtifactStore): Result[Vector[ContentPart]] = {
       val joined = texts.zipWithIndex.map { case (t, i) => s"[text part ${i + 1}]\n$t" }.mkString("\n\n")
       externalizeToolOutput(joined, artifactStore, detectContentType(joined)).map { pointer =>
         val first = message.parts.indexWhere(_.isInstanceOf[ContentPart.Text])
@@ -128,25 +142,32 @@ object ToolOutputCompressor {
       }
     }
 
+    def externalizeEach(artifactStore: ArtifactStore): Result[Vector[ContentPart]] =
+      rewriteEach(text => externalizeToolOutput(text, artifactStore, detectContentType(text)))
+    def inline: Result[Vector[ContentPart]] =
+      rewriteEach(text => compressInlineContent(text, detectContentType(text)))
+    val binary = texts.size == 1 && detectContentType(texts.head) == "binary"
+
     val rewritten: Option[Result[Vector[ContentPart]]] =
-      if (texts.size <= 1) total match {
-        case size if size > threshold =>
-          Some(rewriteEach(text => externalizeToolOutput(text, artifactStore, detectContentType(text))))
-        case size if size > MaxInlineToolOutput =>
-          Some(rewriteEach(text => compressInlineContent(text, message.toolCallId, detectContentType(text))))
-        case _ => None
+      if (texts.size <= 1) (total, store) match {
+        // binary content is never cut: it is stored whole, or left as it is
+        case (size, Some(s)) if binary && size > MaxInlineToolOutput => Some(externalizeEach(s))
+        case _ if binary                                             => None
+        case (size, Some(s)) if size > threshold                     => Some(externalizeEach(s))
+        case (size, _) if size > MaxInlineToolOutput                 => Some(inline)
+        case _                                                       => None
       }
       else
-        total match {
-          case size if size > threshold => Some(externalizeTogether)
-          case size if size > MaxInlineToolOutput =>
-            Some(
-              rewriteEach(text => compressInlineContent(text, message.toolCallId, detectContentType(text))).flatMap {
-                parts =>
-                  if (bytes(parts.collect { case ContentPart.Text(t) => t }) > MaxInlineToolOutput) externalizeTogether
-                  else Right(parts)
+        (total, store) match {
+          case (size, Some(s)) if size > threshold => Some(externalizeTogether(s))
+          case (size, _) if size > MaxInlineToolOutput =>
+            Some(inline.flatMap { parts =>
+              store match {
+                case Some(s) if bytes(parts.collect { case ContentPart.Text(t) => t }) > MaxInlineToolOutput =>
+                  externalizeTogether(s)
+                case _ => Right(parts)
               }
-            )
+            })
           case _ => None
         }
     rewritten.fold[Result[Message]](Right(message))(_.map(message.withParts))
@@ -169,25 +190,50 @@ object ToolOutputCompressor {
     } yield createContentPointer(externalizedInfo)
   }
 
-  private def compressInlineContent(content: String, toolCallId: String, contentType: String): Result[String] =
+  private def compressInlineContent(content: String, contentType: String): Result[String] =
     contentType match {
       case "json" | "yaml" => compressStructuredData(content)
       case "log" | "trace" => compressLogContent(content)
       case "error"         => compressErrorContent(content)
-      case "binary"        => externalizeBinaryContent(content, toolCallId)
+      case "binary"        => Right(content) // never cut: it would be useless, and nothing could restore it
       case _               => compressGenericText(content)
     }
+
+  /** The fewest characters a run of base64 needs before it counts as binary. */
+  private val MinBase64Run = 256
+
+  /**
+   * Whether `content` is binary: a base64 `data:` URI, a run of at least [[MinBase64Run]] base64 characters with
+   * no spaces (line breaks allowed), or text more than a tenth of which is control characters. Mentioning the word
+   * "base64" is not enough (#2817).
+   */
+  private[context] def looksBinary(content: String): Boolean = {
+    val trimmed = content.trim
+    def isBase64Char(c: Char) =
+      (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || "+/=-_".indexOf(c.toInt) >= 0
+    def dataUri = trimmed.startsWith("data:") && trimmed.indexOf(";base64,") > 0
+    def base64Run = {
+      val body = trimmed.filterNot(c => c == '\n' || c == '\r')
+      body.length >= MinBase64Run && body.forall(isBase64Char)
+    }
+    def controlHeavy = {
+      val control =
+        trimmed.count(c => (Character.isISOControl(c) && c != '\n' && c != '\r' && c != '\t') || c == '\uFFFD')
+      trimmed.nonEmpty && control * 10 > trimmed.length
+    }
+    dataUri || base64Run || controlHeavy
+  }
 
   private def detectContentType(content: String): String = {
     val trimmed = content.trim
 
     trimmed match {
+      case c if looksBinary(c)                                                             => "binary"
       case c if c.startsWith("{") && c.endsWith("}")                                       => "json"
       case c if c.startsWith("[") && c.endsWith("]")                                       => "json"
       case c if c.contains("---") && (c.contains(":") || c.contains("-"))                  => "yaml"
       case c if c.contains("ERROR:") || c.contains("Exception") || c.contains("Traceback") => "error"
       case c if c.contains("INFO ") || c.contains("DEBUG ") || c.contains("WARN ")         => "log"
-      case c if c.startsWith("data:") || c.contains("base64")                              => "binary"
       case _                                                                               => "text"
     }
   }
@@ -278,10 +324,6 @@ object ToolOutputCompressor {
         Right(s"$errorHeader\n${topFrames.mkString("\n")}\n... [+$skippedCount additional stack frames] ...")
     }
   }
-
-  private def externalizeBinaryContent(content: String, toolCallId: String): Result[String] =
-    // Binary content should never be inline
-    Right(s"[BINARY CONTENT - ${content.length} bytes - externalized: $toolCallId]")
 
   private def compressGenericText(content: String): Result[String] =
     content.length match {
