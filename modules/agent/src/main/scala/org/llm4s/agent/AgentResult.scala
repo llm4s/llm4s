@@ -40,7 +40,8 @@ enum AgentStatus:
 
   /**
    * A guardrail refused the turn: `guardrail` is the first failing guardrail's name, `reason` every
-   * failure's error. An input block stores nothing of the turn; an output block removes it - the
+   * failure's error. A middleware that blocks a turn itself is named the same way: `guardrail` is then its id, and
+   * `reason` the one it gave. An input block stores nothing of the turn; an output block removes it - the
    * query, any tool calls and the answer - so `messages` is the history from before the turn. Usage
    * keeps the turn's model calls. The thread is usable, and the next turn runs normally.
    */

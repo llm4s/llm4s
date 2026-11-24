@@ -8,6 +8,9 @@ import org.llm4s.error.{ LLMError, NonRecoverableError }
  * and `reason` every failing guardrail's error, joined with `"; "`. The tool loop blocks the run with
  * it (`RunResult.Failed`, the thread usable), and `Agent` reports it as `AgentStatus.Blocked`.
  *
+ * A middleware that is not a guardrail blocks a turn the same way with `AgentMiddleware.block(reason)` (#2795):
+ * `guardrail` is then the middleware's id.
+ *
  * `message` names the guardrail and never holds `reason`, which may quote the text the guardrail
  * refused (#2793): the message is what the durable `TaskFailed` and `RunFailed` events, a run queue
  * entry's failure, logs and traces record. Read `reason` from this error, or from

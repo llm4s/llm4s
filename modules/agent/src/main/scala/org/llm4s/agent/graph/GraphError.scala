@@ -64,8 +64,10 @@ object GraphError:
       new ToolFailed(tool, toolCallId, cause)
 
   /**
-   * A middleware hook threw: the run fails, the checkpoint stays `Running`, and `recover` re-runs
-   * only that task. `middleware` is the middleware's id.
+   * A middleware hook threw; `middleware` is the middleware's id. It is that hook's failure, and does what any
+   * failure of the hook does (#2795): from `promptSections`, `wrapModelCall` or `wrapToolCall` the run fails, the
+   * checkpoint stays `Running`, and `recover` re-runs only that task; from `beforeAgent` or `afterAgent` the turn is
+   * blocked, the thread stays usable and there is nothing to recover.
    */
   final case class MiddlewareFailed(middleware: String, cause: Throwable) extends GraphError with NonRecoverableError:
     override val message: String = s"Middleware '$middleware' failed: ${describe(cause)}"

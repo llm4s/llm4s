@@ -238,8 +238,20 @@ object ToolCallRequest:
  *
  * Middleware run as a stack, ordered by registration and by [[runsBefore]] and
  * [[runsAfter]]: the first in stack order is the outermost wrapper and runs `beforeAgent` first;
- * unwinding, and `afterAgent`, run in reverse. A hook that throws fails the run with
- * `GraphError.MiddlewareFailed`; a thrown cancellation cancels it.
+ * unwinding, and `afterAgent`, run in reverse.
+ *
+ * Failure follows one model for every hook (#2795). A hook fails by value: a `Left` from a hook that returns
+ * `Result`, a `ToolOutcome.Fatal` from `wrapToolCall`, which returns what a tool returns. A hook that throws has
+ * failed with that value holding `GraphError.MiddlewareFailed`, which names the middleware; a thrown cancellation
+ * cancels the run. What a failure does depends on where the hook runs:
+ *
+ *   - at a turn's boundary (`beforeAgent`, `afterAgent`) it blocks the turn: nothing of the turn is kept, the
+ *     thread stays usable, there is nothing to recover, and `agent.run` returns the error as its `Left` - or, for a
+ *     [[block]], ends the turn `AgentStatus.Blocked`;
+ *   - inside a step (`promptSections`, `wrapModelCall`, `wrapToolCall`) it fails the run: the thread keeps its
+ *     last checkpoint, and `recover` runs the step again.
+ *
+ * `ToolOutcome.Error` is not a failure: it is a tool call's result, which the model reads.
  *
  * `wrapToolCall` runs concurrently for the calls of one batch (up to `RunBudgets.maxConcurrency`),
  * on task threads, so a middleware's own state must be thread-safe.
@@ -286,16 +298,32 @@ trait AgentMiddleware:
   /** Tools this middleware contributes; they join the loop's tool set and are validated like any other. */
   def tools: Vector[AgentTool[?]] = Vector.empty
 
+  /**
+   * Ends the turn as blocked by this middleware: return it from `beforeAgent` or `afterAgent`. The turn ends
+   * `AgentStatus.Blocked(id, reason)` - an outcome of `agent.run`, not its `Left` - exactly as a guardrail's block
+   * does with the guardrail's name: an input block stores nothing of the turn, an output block removes it, the
+   * thread stays usable, and a durable `GuardrailBlocked` event names this middleware and never the reason. Any other
+   * `Left` from a boundary hook blocks the turn too, but reaches the caller as the `Left` of `agent.run`.
+   *
+   * It blocks only at a boundary: returned from `promptSections` or `wrapModelCall` it is a failure of the run like
+   * any other `Left`.
+   */
+  final protected def block(reason: String): Result[Nothing] = Left(GuardrailBlocked(id.value, reason))
+
   /** The codecs of the question this middleware asks and the answer it takes; only [[org.llm4s.agent.graph.middleware.AgentMiddleware.Asking AgentMiddleware.Asking]] declares one. */
   private[graph] def declaredQuestion: Option[ToolQuestion[?, ?]] = None
 
   /**
    * Sees the run's input before anything else runs: returns it, possibly changed, with an update to this
-   * middleware's `writes` that the turn's first model call sees, or `Left` to block the run.
+   * middleware's `writes` that the turn's first model call sees. A `Left` blocks the turn; [[block]] blocks it as an
+   * outcome, `AgentStatus.Blocked`.
    */
   def beforeAgent(input: String, @unused context: ModelContext): Result[BoundaryResult] = Right(BoundaryResult(input))
 
-  /** Sees the run's final answer: returns it, possibly changed, with an update to this middleware's `writes`, or `Left` to block the run. */
+  /**
+   * Sees the run's final answer: returns it, possibly changed, with an update to this middleware's `writes`. A `Left`
+   * blocks the turn, removing it; [[block]] blocks it as an outcome, `AgentStatus.Blocked`.
+   */
   def afterAgent(answer: String, @unused context: ModelContext): Result[BoundaryResult] = Right(BoundaryResult(answer))
 
   /**
@@ -322,8 +350,10 @@ trait AgentMiddleware:
   /**
    * Wraps one tool call, after its arguments were validated. A wrapper denies with
    * `ToolOutcome.Error("Denied: ...")`, asks for approval with `NeedsApproval(reason)` (unless
-   * `context.approved`), fails the run with `Fatal`, and short-circuits by not calling `next`. It
-   * may call `next` more than once (retry) and transform the outcome `next` returns.
+   * `context.approved`), fails the run with `Fatal` - its `Left`: the run fails with `GraphError.ToolFailed` - and
+   * short-circuits by not calling `next`. It may call `next` more than once (retry) and transform the outcome `next`
+   * returns, adding an update to its `writes` with `ToolOutcome.addUpdate`. `next` takes no request: the call is
+   * read-only.
    */
   def wrapToolCall(@unused request: ToolCallRequest, @unused context: ToolContext)(
     next: () => ToolOutcome
