@@ -40,7 +40,7 @@ def ProviderSetupDemoMain(): Unit =
         )
 
       discoveredModels: Map[ProviderName, List[DiscoveredModel]] = configs.keys.toList.map { name =>
-        Llm4sConfig.listModels(name.asName) match
+        Llm4sConfig.listModels(name) match
           case Right(list) =>
             (name, list)
           case _ =>

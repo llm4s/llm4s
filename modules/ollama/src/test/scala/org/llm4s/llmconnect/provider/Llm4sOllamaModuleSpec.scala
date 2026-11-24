@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.security.Secret
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, OllamaConfig }
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -166,7 +166,7 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
-        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "nomic-embed-text", apiKey = Secret("test-key"))
+        val config = EmbeddingProviderConfig(providerId = ProviderId("ollama"), baseUrl = BaseUrl(baseUrl), model = ModelName("nomic-embed-text"), apiKey = Some(Secret("test-key")))
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(OllamaEmbeddingProvider, config))
       }
     }
@@ -174,7 +174,7 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
       assertEmbeddingUsesSuppliedHttpClient(
         OllamaEmbeddingProvider,
-        EmbeddingProviderConfig(baseUrl = "http://localhost:1", model = "test-model", apiKey = Secret("test-key"))
+        EmbeddingProviderConfig(providerId = ProviderId("ollama"), baseUrl = BaseUrl("http://localhost:1"), model = ModelName("test-model"), apiKey = Some(Secret("test-key")))
       )
     }
 
@@ -182,8 +182,8 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
       assertEmbeddingHonoursApiKeyProvider(
         LocalProviderTestServer.sendJsonResponse(_, 200, """{"embedding":[0.1,0.2]}""")
       ) { (baseUrl, keys) =>
-        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "nomic-embed-text", apiKey = Secret("test-key"))
-        assertBuildsEmbeddingProvider(OllamaEmbeddingProvider, config.withApiKeyProvider(keys))
+        val config = EmbeddingProviderConfig(providerId = ProviderId("ollama"), baseUrl = BaseUrl(baseUrl), model = ModelName("nomic-embed-text"), apiKey = Some(Secret("test-key")))
+        assertBuildsEmbeddingProvider(OllamaEmbeddingProvider, config.withApiKeyProvider(Some(keys)))
       }
     }
   }

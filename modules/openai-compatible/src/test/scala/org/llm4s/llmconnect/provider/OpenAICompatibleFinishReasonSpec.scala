@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ContentFilteredError
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model._
@@ -19,7 +20,7 @@ class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val client = new OpenAICompatibleClient(
-    OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", "http://localhost:1/v1", None)),
+    OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), "http://localhost:1/v1", None)),
     OpenAICompatibleDialect.Standard
   )
 
@@ -38,7 +39,7 @@ class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
     )
 
   private def clientAt(baseUrl: String) = new OpenAICompatibleClient(
-    OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", baseUrl, None)),
+    OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), baseUrl, None)),
     OpenAICompatibleDialect.Standard
   )
 

@@ -39,9 +39,8 @@ section's own `apiKey`, else the shared `llm4s.credentials.<id>.apiKey` that thi
 `reference.conf` binds to the variable above. `openrouter` also accepts an optional `organization`.
 
 ```hocon
+llm4s.defaultProvider = "deepseek-main"       # the default section
 llm4s.providers {
-  provider = "deepseek-main"       # the default section
-
   deepseek-main {
     provider = "deepseek"
     model    = "deepseek-chat"
@@ -88,9 +87,10 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val reply = for {
-  providerConfig  <- Llm4sConfig.provider("deepseek-main")
+  providerConfig  <- Llm4sConfig.provider(ProviderName("deepseek-main"))
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client     <- LLMConnect.getClient(providerConfig)

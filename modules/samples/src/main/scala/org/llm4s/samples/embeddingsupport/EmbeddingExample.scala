@@ -43,14 +43,10 @@ object EmbeddingExample {
       service <- Llm4sConfig.modelRegistryService()
       client <- {
         given ModelRegistryService = service
-        EmbeddingClient.from(emb._1, emb._2)
+        EmbeddingClient.from(emb)
       }
       runtime <- EmbeddingRuntimeSettings()
-      textCfg <- Llm4sConfig.textEmbeddingModel()
-      textModel = org.llm4s.llmconnect.config.EmbeddingModelConfig(
-        name = textCfg.modelName,
-        dimensions = textCfg.dimensions
-      )
+      textModel <- Llm4sConfig.textEmbeddingModel()
       chunkingCfg = TextChunkingConfig(
         enabled = runtime.chunkingEnabled,
         size = runtime.chunkSize,
@@ -66,7 +62,7 @@ object EmbeddingExample {
       )
       _ = {
         val eq          = EmbeddingQuery(inputs.query)
-        val queryVecOpt = eq.value.flatMap(q => embedQueryOnce(client, q, runtime.provider, emb._2.model, ui))
+        val queryVecOpt = eq.value.flatMap(q => embedQueryOnce(client, q, runtime.provider, emb.model.asString, ui))
         // accumulate results
         val perFileRows = collection.mutable.ArrayBuffer.empty[(String, Seq[Row])]
         val globalText  = collection.mutable.ArrayBuffer.empty[Row]

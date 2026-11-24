@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.error.ConfigurationError
@@ -19,7 +20,7 @@ class OllamaClientClosedStateTest extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def createTestConfig: OllamaConfig = OllamaConfig(
-    model = "llama3",
+    model = ModelName("llama3"),
     baseUrl = "http://example.invalid:11434",
     contextWindow = 8192,
     reserveCompletion = 4096
@@ -80,7 +81,7 @@ class OllamaClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.withModel("mistral")
+    val config = createTestConfig.withModel(ModelName("mistral"))
     val client = new OllamaClient(config)
 
     client.close()

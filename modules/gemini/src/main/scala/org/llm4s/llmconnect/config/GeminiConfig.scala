@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -33,7 +33,7 @@ import org.llm4s.types.Result
 @Stable
 final case class GeminiConfig private (
   apiKey: Secret,
-  model: String,
+  model: ModelName,
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
@@ -43,11 +43,11 @@ final case class GeminiConfig private (
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
   override val providerId: ProviderId                                     = ProviderId("gemini")
-  override def endpointUrl: Option[String]                                = Some(baseUrl)
-  override def withModel(model: String): GeminiConfig                     = copy(model = model)
+  override def endpointUrl: Option[BaseUrl]                                = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): GeminiConfig                     = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig     = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): GeminiConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): GeminiConfig = copy(apiKeyProvider = Some(provider))
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[GeminiConfig] = Right(copy(apiKeyProvider = Some(provider)))
   def withApiKeyProvider(provider: Option[ApiKeyProvider]): GeminiConfig  = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): GeminiConfig                    = copy(apiKey = apiKey)
@@ -79,7 +79,7 @@ object GeminiConfig {
    */
   def apply(
     apiKey: Secret,
-    model: String,
+    model: ModelName,
     baseUrl: String,
     contextWindow: Int,
     reserveCompletion: Int,
@@ -105,19 +105,19 @@ object GeminiConfig {
    * (1M tokens for current Gemini models); set them, and the rest, with the `with*` setters, or use
    * [[fromValues]] to consult the bundled model catalogue.
    */
-  def apply(apiKey: Secret, model: String): GeminiConfig = {
-    val (cw, rc) = geminiFallback(model)
+  def apply(apiKey: Secret, model: ModelName): GeminiConfig = {
+    val ContextLimits(cw, rc) = geminiFallback(model.asString)
     apply(apiKey, model, DEFAULT_BASE_URL, cw, rc)
   }
 
-  private def geminiFallback(modelName: String): (Int, Int) =
+  private def geminiFallback(modelName: String): ContextLimits =
     modelName match {
-      case name if name.contains("gemini-2")     => (1048576, standardReserve)
-      case name if name.contains("gemini-1.5")   => (1048576, standardReserve)
-      case name if name.contains("gemini-1.0")   => (32768, standardReserve)
-      case name if name.contains("gemini-pro")   => (1048576, standardReserve)
-      case name if name.contains("gemini-flash") => (1048576, standardReserve)
-      case _                                     => (1048576, standardReserve)
+      case name if name.contains("gemini-2")     => ContextLimits(1048576, standardReserve)
+      case name if name.contains("gemini-1.5")   => ContextLimits(1048576, standardReserve)
+      case name if name.contains("gemini-1.0")   => ContextLimits(32768, standardReserve)
+      case name if name.contains("gemini-pro")   => ContextLimits(1048576, standardReserve)
+      case name if name.contains("gemini-flash") => ContextLimits(1048576, standardReserve)
+      case _                                     => ContextLimits(1048576, standardReserve)
     }
 
   /**
@@ -138,7 +138,7 @@ object GeminiConfig {
       _ <- ProviderConfig.nonEmpty("Gemini", "baseUrl", baseUrl)
     } yield {
       val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("gemini", "google"),
         modelName = modelName,
         defaultContextWindow = 1048576,
@@ -147,7 +147,7 @@ object GeminiConfig {
       )
       GeminiConfig(
         apiKey = apiKey,
-        model = modelName,
+        model = ModelName(modelName),
         baseUrl = normalizedBaseUrl,
         contextWindow = cw,
         reserveCompletion = rc

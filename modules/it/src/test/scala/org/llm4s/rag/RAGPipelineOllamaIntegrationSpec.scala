@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Ollama
@@ -75,7 +76,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
   private lazy val embeddingClient: EmbeddingClient =
     EmbeddingClient(
       OllamaEmbeddingProvider.fromConfig(
-        EmbeddingProviderConfig(baseUrl = ollamaBaseUrl, model = embeddingModel, apiKey = Secret("not-required"))
+        EmbeddingProviderConfig(providerId = ProviderId("ollama"), baseUrl = BaseUrl(ollamaBaseUrl), model = ModelName(embeddingModel), apiKey = Some(Secret("not-required")))
       )
     )
 
@@ -147,7 +148,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
 
   private def newOllamaClient(): OllamaClient =
     new OllamaClient(
-      OllamaConfig(model = llmModel, baseUrl = ollamaBaseUrl, contextWindow = 8192, reserveCompletion = 4096)
+      OllamaConfig(model = ModelName(llmModel), baseUrl = ollamaBaseUrl, contextWindow = 8192, reserveCompletion = 4096)
     )
 
   private def buildInMemoryRag(): RAG = {

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.JlamaConfig
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -15,8 +16,8 @@ class JlamaConfigSpec extends AnyWordSpec with Matchers:
   "JlamaConfig.fromValues" should {
 
     "accept a Hugging Face id, trimmed, with the defaults" in {
-      val config = JlamaConfig.fromValues("  tjake/Llama-3.2-1B-Instruct-JQ4 ").fold(e => fail(e.message), identity)
-      config.model shouldBe "tjake/Llama-3.2-1B-Instruct-JQ4"
+      val config = JlamaConfig.fromValues(ModelName("  tjake/Llama-3.2-1B-Instruct-JQ4 ")).fold(e => fail(e.message), identity)
+      config.model.asString shouldBe "tjake/Llama-3.2-1B-Instruct-JQ4"
       config.providerId.asString shouldBe "jlama"
       config.modelDir shouldBe JlamaConfig.defaultModelDir
       config.threads shouldBe None
@@ -26,22 +27,22 @@ class JlamaConfigSpec extends AnyWordSpec with Matchers:
 
     "refuse a model that is not owner/name" in {
       Seq("", "llama3", "/name", "owner/", "a/b/c").foreach { model =>
-        JlamaConfig.fromValues(model).isLeft shouldBe true
+        JlamaConfig.fromValues(ModelName(model)).isLeft shouldBe true
       }
     }
 
     "refuse a thread count below 1" in {
-      JlamaConfig.fromValues("tjake/x", threads = Some(0)).isLeft shouldBe true
-      JlamaConfig.fromValues("tjake/x", threads = Some(3)).map(_.threads) shouldBe Right(Some(3))
+      JlamaConfig.fromValues(ModelName("tjake/x"), threads = Some(0)).isLeft shouldBe true
+      JlamaConfig.fromValues(ModelName("tjake/x"), threads = Some(3)).map(_.threads) shouldBe Right(Some(3))
     }
   }
 
   "a JlamaConfig" should {
 
     "change its model, directory and threads through its setters" in {
-      val config = JlamaConfig.fromValues("tjake/x").fold(e => fail(e.message), identity)
+      val config = JlamaConfig.fromValues(ModelName("tjake/x")).fold(e => fail(e.message), identity)
       val dir    = Paths.get("elsewhere")
-      config.withModel("tjake/y").model shouldBe "tjake/y"
+      config.withModel(ModelName("tjake/y")).model.asString shouldBe "tjake/y"
       config.withModelDir(dir).modelDir shouldBe dir
       config.withThreads(4).threads shouldBe Some(4)
       config.withThreads(None).threads shouldBe None

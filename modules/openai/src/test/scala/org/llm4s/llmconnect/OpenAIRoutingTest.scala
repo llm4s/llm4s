@@ -1,11 +1,11 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.*
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.testutil.FixtureChatConfig
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 // scalafix:off DisableSyntax.NoConfigFactory
@@ -48,7 +48,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
   test("OpenAI provider with OpenAIConfig returns OpenAIClient") {
     val cfg: ProviderConfig = OpenAIConfig(
       apiKey = Secret("key"),
-      model = "gpt-4o",
+      model = ModelName("gpt-4o"),
       organization = None,
       baseUrl = "https://api.openai.com/v1",
       contextWindow = 128000,
@@ -65,7 +65,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
     val cfg: ProviderConfig = AzureConfig(
       endpoint = "https://example.azure.com",
       apiKey = Secret("key"),
-      model = "gpt-4o",
+      model = ModelName("gpt-4o"),
       apiVersion = "V2025_01_01_PREVIEW",
       contextWindow = 128000,
       reserveCompletion = 4096
@@ -78,7 +78,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
   }
 
   test("OpenAI provider with non-OpenAIConfig should throw IllegalArgumentException") {
-    val wrongCfg: ProviderConfig = FixtureChatConfig(apiKey = "key", model = "fixture-model")
+    val wrongCfg: ProviderConfig = FixtureChatConfig(apiKey = "key", modelName = "fixture-model")
 
     val res = LLMConnect.getClient(ProviderId("openai"), wrongCfg)
     res.isLeft shouldBe true
@@ -87,7 +87,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
   test("Azure provider with non-AzureConfig should throw IllegalArgumentException") {
     val wrongCfg: ProviderConfig = OpenAIConfig(
       apiKey = Secret("key"),
-      model = "gpt-4o",
+      model = ModelName("gpt-4o"),
       organization = None,
       baseUrl = "https://api.openai.com/v1",
       contextWindow = 128000,
@@ -100,7 +100,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
 
   test("getClient returns OpenAIClient for the default named OpenAI provider") {
     val props = Map(
-      "llm4s.providers.provider"             -> "openai-main",
+      "llm4s.defaultProvider"             -> "openai-main",
       "llm4s.providers.openai-main.provider" -> "openai",
       "llm4s.providers.openai-main.model"    -> "gpt-4o",
       "llm4s.providers.openai-main.apiKey"   -> "sk",
@@ -117,7 +117,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
 
   test("getClient returns OpenAIClient for the default named Azure provider") {
     val props = Map(
-      "llm4s.providers.provider"            -> "azure-main",
+      "llm4s.defaultProvider"            -> "azure-main",
       "llm4s.providers.azure-main.provider" -> "azure",
       "llm4s.providers.azure-main.model"    -> "gpt-4o",
       "llm4s.providers.azure-main.endpoint" -> "https://example.azure.com",
@@ -134,7 +134,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
 
   test("Llm4sConfig.defaultProvider loads OpenAI config from named providers") {
     val props = Map(
-      "llm4s.providers.provider"             -> "openai-main",
+      "llm4s.defaultProvider"             -> "openai-main",
       "llm4s.providers.openai-main.provider" -> "openai",
       "llm4s.providers.openai-main.model"    -> "gpt-4o",
       "llm4s.providers.openai-main.apiKey"   -> "test-key"
@@ -144,7 +144,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
       val prov = Llm4sConfig.defaultProvider().fold(err => fail(err.toString), identity)
       prov match {
         case openai: OpenAIConfig =>
-          openai.model shouldBe "gpt-4o"
+          openai.model.asString shouldBe "gpt-4o"
           openai.apiKey.reveal shouldBe "test-key"
           openai.baseUrl should startWith("https://api.openai.com/")
         case other => fail(s"Expected OpenAIConfig, got $other")
@@ -155,7 +155,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
   test("Requesty provider with OpenAIConfig returns OpenAIClient") {
     val cfg: ProviderConfig = OpenAIConfig(
       apiKey = Secret("key"),
-      model = "openai/gpt-4o-mini",
+      model = ModelName("openai/gpt-4o-mini"),
       organization = None,
       baseUrl = "https://router.requesty.ai/v1",
       contextWindow = 128000,

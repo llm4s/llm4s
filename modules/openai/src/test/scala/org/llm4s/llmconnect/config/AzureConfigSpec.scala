@@ -1,8 +1,8 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -27,7 +27,7 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   private val apiKey        = "sk-test"
 
   private val azure =
-    AzureConfig("https://x.openai.azure.com", Secret("k"), "gpt-4o", "2025-01-01-preview", 128000, 4096)
+    AzureConfig("https://x.openai.azure.com", Secret("k"), ModelName("gpt-4o"), "2025-01-01-preview", 128000, 4096)
 
   // ---- fromValues (from ProviderConfigSpec and ProviderConfigLoaderTest) ----
 
@@ -41,7 +41,7 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
       )
       .value
 
-    config.model shouldBe "gpt-4o"
+    config.model.asString shouldBe "gpt-4o"
     config.endpoint shouldBe "https://my-resource.openai.azure.com"
     config.apiVersion shouldBe "2024-02-15-preview"
   }
@@ -154,8 +154,8 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("AzureConfig.withModel changes only the model") {
-    val renamed = azure.withModel("m")
-    renamed.model shouldBe "m"
+    val renamed = azure.withModel(ModelName("m"))
+    renamed.model.asString shouldBe "m"
     renamed.apiVersion shouldBe azure.apiVersion
     renamed.endpointUrl shouldBe azure.endpointUrl
     renamed.contextWindow shouldBe azure.contextWindow
@@ -170,10 +170,10 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   test(
     "AzureConfig(endpoint, apiKey, model) defaults the API version and takes the context window from the model name"
   ) {
-    AzureConfig("https://x.openai.azure.com", Secret("k"), "gpt-4o") shouldBe
-      AzureConfig("https://x.openai.azure.com", Secret("k"), "gpt-4o", AzureConfig.DEFAULT_API_VERSION, 128000, 4096)
-    AzureConfig("https://x.openai.azure.com", Secret("k"), "gpt-4").contextWindow shouldBe 8192
-    AzureConfig("https://x.openai.azure.com", Secret("k"), "my-deployment").contextWindow shouldBe 8192
+    AzureConfig("https://x.openai.azure.com", Secret("k"), ModelName("gpt-4o")) shouldBe
+      AzureConfig("https://x.openai.azure.com", Secret("k"), ModelName("gpt-4o"), AzureConfig.DEFAULT_API_VERSION, 128000, 4096)
+    AzureConfig("https://x.openai.azure.com", Secret("k"), ModelName("gpt-4")).contextWindow shouldBe 8192
+    AzureConfig("https://x.openai.azure.com", Secret("k"), ModelName("my-deployment")).contextWindow shouldBe 8192
   }
 
   test("AzureConfig's setters each change one field") {
@@ -181,7 +181,7 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     val adjusted = azure
       .withEndpoint("https://y.openai.azure.com")
       .withApiKey(Secret("k2"))
-      .withModel("gpt-4o-mini")
+      .withModel(ModelName("gpt-4o-mini"))
       .withApiVersion("2024-10-21")
       .withContextWindow(64000)
       .withReserveCompletion(2048)
@@ -190,7 +190,7 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     adjusted shouldBe AzureConfig(
       "https://y.openai.azure.com",
       Secret("k2"),
-      "gpt-4o-mini",
+      ModelName("gpt-4o-mini"),
       "2024-10-21",
       64000,
       2048,

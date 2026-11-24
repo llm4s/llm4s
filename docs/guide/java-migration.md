@@ -370,9 +370,8 @@ instance or task role) unless the section sets `accessKeyId` and `secretAccessKe
 
 ```hocon
 llm4s {
+  defaultProvider = "claude-bedrock"
   providers {
-    provider = "claude-bedrock"
-
     claude-bedrock {
       provider = "bedrock"
       model    = "us.anthropic.claude-sonnet-5-5"
@@ -385,7 +384,7 @@ llm4s {
 The same in Spring Boot, where the starter reads properties rather than `application.conf`:
 
 ```properties
-llm4s.providers.provider=claude-bedrock
+llm4s.defaultProvider=claude-bedrock
 llm4s.providers.claude-bedrock.provider=bedrock
 llm4s.providers.claude-bedrock.model=us.anthropic.claude-sonnet-5-5
 llm4s.providers.claude-bedrock.region=us-east-1

@@ -1,6 +1,6 @@
 package org.llm4s.testkit
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.http.{ Llm4sHttpClient, MultipartPart }
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
 import org.llm4s.llmconnect.model.{
@@ -178,7 +178,7 @@ class SuppliedHttpClientChecksSpec extends AnyWordSpec with Matchers with Provid
 
     "assertEmbeddingUsesSuppliedHttpClient (#2811)" should {
 
-      val config = EmbeddingProviderConfig("https://acme.invalid/v1", "acme-embed-1", Secret("sk-acme"))
+      val config = EmbeddingProviderConfig(ProviderId("acme"), BaseUrl("https://acme.invalid/v1"), ModelName("acme-embed-1"), Some(Secret("sk-acme")))
 
       def descriptor(name: String, sends: Boolean, closes: Boolean): EmbeddingProviderDescriptor =
         new EmbeddingProviderDescriptor:
@@ -188,7 +188,7 @@ class SuppliedHttpClientChecksSpec extends AnyWordSpec with Matchers with Provid
             Right(
               new EmbeddingProvider:
                 def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
-                  if sends then context.httpClient.foreach(_.post(config.baseUrl, Map.empty, "{}"))
+                  if sends then context.httpClient.foreach(_.post(config.baseUrl.asUrl, Map.empty, "{}"))
                   if closes then context.httpClient.foreach(_.close())
                   Right(EmbeddingResponse(embeddings = Seq(Vector(0.1))))
             )

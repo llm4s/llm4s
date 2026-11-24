@@ -2,13 +2,14 @@ package org.llm4s.testkit
 
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ CancelledError, UnsupportedContentPartError }
-import org.llm4s.http.{ HttpRequest, HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.http.{ HttpNetworkSettings, HttpRequest, HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.config.{
   ContextWindowResolver,
   EmbeddingModelConfig,
   EmbeddingProviderConfig,
-  ProviderConfig
+  ProviderConfig,
+  ProviderTimeouts
 }
 import org.llm4s.llmconnect.model.{ Conversation, EmbeddingRequest, MessageRole, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -25,7 +26,7 @@ import org.llm4s.llmconnect.spi.{
 import org.llm4s.llmconnect.{ EmbeddingClientOptions, LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.auth.ApiKeyProvider
-import org.llm4s.types.ProviderModelTypes.{ ApiKey, ProviderId }
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 import org.scalactic.source.Position
 import org.scalatest.exceptions.{ StackDepthException, TestFailedException }
@@ -683,7 +684,7 @@ trait ProviderModuleChecks extends Assertions:
   )(using pos: Position): Assertion =
     val http     = new ProviderModuleChecks.RecordingHttpClient
     val provider = assertBuildsEmbeddingProvider(descriptor, config, EmbeddingClientOptions().withHttpClient(http))
-    provider.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig(config.model, 8)))
+    provider.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig(config.model.asString, 8)))
     if http.requests.isEmpty then
       failAt(s"${descriptor.id.asString}: embed sent no request through the supplied HTTP client")
     if http.closed then failAt(s"${descriptor.id.asString} closed the HTTP client its caller supplied")
@@ -796,11 +797,11 @@ trait ProviderModuleChecks extends Assertions:
    */
   def assertEmbeddingCredentialBindings(
     descriptor: EmbeddingProviderDescriptor,
-    model: String,
+    model: ModelName,
     registry: ProviderRegistry = ProviderRegistry.default
   )(using pos: Position): Assertion =
     given ProviderRegistry = registry
-    CredentialsRoundTrip.embeddingBindings(descriptor, model).foreach { (variable, key) =>
+    CredentialsRoundTrip.embeddingBindings(descriptor, model.asString).foreach { (variable, key) =>
       if key != Right(s"key-from-$variable") then
         failAt(
           s"${descriptor.id.asString} declares $variable in apiKeyEnv, but with only it set the embeddings key is " +
@@ -852,9 +853,15 @@ object ProviderModuleChecks extends ProviderModuleChecks:
 
   /** A config no real provider builds, to prove a descriptor refuses what is not its own. */
   private object ForeignConfig extends ProviderConfig:
-    val providerId: ProviderId                   = ProviderId("provider-testkit-foreign")
-    val model: String                            = "foreign-model"
-    val contextWindow: Int                       = 8192
-    val reserveCompletion: Int                   = 1024
-    val endpointUrl: Option[String]              = None
-    def withModel(model: String): ProviderConfig = this
+    val providerId: ProviderId                                        = ProviderId("provider-testkit-foreign")
+    val model: ModelName                                              = ModelName("foreign-model")
+    val contextWindow: Int                                            = 8192
+    val reserveCompletion: Int                                        = 1024
+    val endpointUrl: Option[BaseUrl]                                  = None
+    def withModel(model: ModelName): ProviderConfig                   = this
+    def timeouts: ProviderTimeouts                                    = ProviderTimeouts.default
+    def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig      = this
+    def network: HttpNetworkSettings                                  = HttpNetworkSettings.default
+    def withNetwork(network: HttpNetworkSettings): ProviderConfig     = this
+    def apiKeyProvider: Option[ApiKeyProvider]                        = None
+    def withApiKeyProvider(provider: ApiKeyProvider): Result[Nothing] = ProviderConfig.noApiKeyProvider(providerId)

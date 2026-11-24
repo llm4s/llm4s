@@ -22,7 +22,7 @@ class FrameworkConfigSpec extends AnyFlatSpec with Matchers with LoneElement {
   "sections" should "list each section of llm4s.providers once, ignoring the default pointer and other keys" in {
     val p = props(
       (fixture ++ Seq(
-        "llm4s.providers.provider"       -> "main",
+        "llm4s.defaultProvider"       -> "main",
         "llm4s.providers.other.provider" -> "fixturechat",
         "llm4s.health.probe"             -> "true"
       )): _*
@@ -31,7 +31,7 @@ class FrameworkConfigSpec extends AnyFlatSpec with Matchers with LoneElement {
   }
 
   "defaultSection" should "be the named section, else the only one, else empty" in {
-    FrameworkConfig.defaultSection(props("llm4s.providers.provider" -> " b ")).get shouldBe "b"
+    FrameworkConfig.defaultSection(props("llm4s.defaultProvider" -> " b ")).get shouldBe "b"
     FrameworkConfig.defaultSection(props(fixture: _*)).get shouldBe "main"
     FrameworkConfig
       .defaultSection(props("llm4s.providers.a.model" -> "x", "llm4s.providers.b.model" -> "y"))
@@ -62,10 +62,10 @@ class FrameworkConfigSpec extends AnyFlatSpec with Matchers with LoneElement {
   }
 
   it should "report a default that names no section" in {
-    val found = FrameworkConfig.problems(props((fixture :+ ("llm4s.providers.provider" -> "missing")): _*))
-    found.asScala.loneElement should (startWith("llm4s.providers.provider").and(include("sections: main")))
+    val found = FrameworkConfig.problems(props((fixture :+ ("llm4s.defaultProvider" -> "missing")): _*))
+    found.asScala.loneElement should (startWith("llm4s.defaultProvider").and(include("sections: main")))
     FrameworkConfig
-      .problems(props("llm4s.providers.provider" -> "missing"))
+      .problems(props("llm4s.defaultProvider" -> "missing"))
       .asScala
       .loneElement should include("no section is configured")
   }

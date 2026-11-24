@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.provider.DeepSeekProvider
@@ -22,8 +22,8 @@ class DeepSeekNamedProviderSpec extends AnyWordSpec with Matchers:
   private val hocon =
     """
       |llm4s {
+      |  defaultProvider = "deepseek-main"
       |  providers {
-      |    provider = "deepseek-main"
       |    deepseek-main {
       |      provider = "deepseek"
       |      model = "deepseek-chat"
@@ -36,9 +36,9 @@ class DeepSeekNamedProviderSpec extends AnyWordSpec with Matchers:
   "Llm4sConfig" should {
 
     "load a DeepSeek named provider end to end, defaulting the base URL" in {
-      Llm4sConfig.provider(ConfigSource.string(hocon), "deepseek-main") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("deepseek-main")) match
         case Right(deepseek: DeepSeekConfig) =>
-          deepseek.model shouldBe "deepseek-chat"
+          deepseek.model.asString shouldBe "deepseek-chat"
           deepseek.apiKey.reveal shouldBe "deepseek-key"
           deepseek.baseUrl shouldBe DeepSeekConfig.DEFAULT_BASE_URL
         case other =>
@@ -50,7 +50,7 @@ class DeepSeekNamedProviderSpec extends AnyWordSpec with Matchers:
         """{ "data": [ { "id": "deepseek-chat", "created": 1710000000, "owned_by": "deepseek" } ] }"""
       val httpClient = new MockHttpClient(HttpResponse(200, responseBody, Map.empty))
 
-      Llm4sConfig.listModels("deepseek-main", ConfigSource.string(hocon), httpClient) match
+      Llm4sConfig.listModels(ProviderName("deepseek-main"), ConfigSource.string(hocon), httpClient) match
         case Right(models) =>
           models.map(_.name.asString) shouldBe List("deepseek-chat")
           models.map(_.provider) shouldBe List(ProviderId("deepseek"))

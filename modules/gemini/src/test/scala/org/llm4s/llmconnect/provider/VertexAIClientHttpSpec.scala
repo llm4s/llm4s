@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.http.{ HttpResponse, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.VertexAIConfig
@@ -28,7 +29,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   private val testConfig = VertexAIConfig(
     projectId = "my-gcp-project",
     location = "us-central1",
-    model = "gemini-2.0-flash",
+    model = ModelName("gemini-2.0-flash"),
     credentialFilePath = None,
     contextWindow = 1048576,
     reserveCompletion = 8192

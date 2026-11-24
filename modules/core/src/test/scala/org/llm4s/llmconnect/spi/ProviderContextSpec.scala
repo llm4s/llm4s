@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.http.{ HttpRequest, HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
@@ -8,7 +9,6 @@ import org.llm4s.llmconnect.{ EmbeddingClient, EmbeddingClientOptions, LlmClient
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -107,19 +107,19 @@ class ProviderContextSpec extends AnyWordSpec with Matchers with EitherValues:
         Right(
           new EmbeddingProvider:
             def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
-              context.httpClient.foreach(_.post(config.baseUrl, Map.empty, "{}"))
+              context.httpClient.foreach(_.post(config.baseUrl.asUrl, Map.empty, "{}"))
               Right(EmbeddingResponse(embeddings = request.input.map(_ => Vector(0.5))))
         )
 
     given ModelRegistryService = registry
     given ProviderRegistry     = ProviderRegistry.ofEmbeddings(HttpEmbeddings)
 
-    val config  = EmbeddingProviderConfig("https://httpembeddings.invalid", "m", Secret("k"))
+    val config  = EmbeddingProviderConfig(ProviderId("fixtureembedding"), BaseUrl("https://httpembeddings.invalid"), ModelName("m"), Some(Secret("k")))
     val request = EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("m", 1))
 
     "hand the caller's HTTP client to the provider (#2811)" in {
       val http   = new CountingHttpClient
-      val client = EmbeddingClient.from("httpembeddings", config, EmbeddingClientOptions().withHttpClient(http))
+      val client = EmbeddingClient.from(config.withProviderId(ProviderId("httpembeddings")), EmbeddingClientOptions().withHttpClient(http))
       client.value.embed(request).isRight shouldBe true
       http.sent.get shouldBe 1
     }

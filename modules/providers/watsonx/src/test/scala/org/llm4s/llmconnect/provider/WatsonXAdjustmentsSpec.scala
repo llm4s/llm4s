@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.http.HttpResponse
 import org.llm4s.llmconnect.config.WatsonXConfig
 import org.llm4s.llmconnect.model.*
@@ -20,7 +21,7 @@ class WatsonXAdjustmentsSpec extends AnyFunSuite with Matchers with EitherValues
   import StubHttp.*
   import WatsonXTestConfig.config
 
-  private val gptOss = config.copy(model = "openai/gpt-oss-120b")
+  private val gptOss = config.copy(model = ModelName("openai/gpt-oss-120b"))
   private val hi     = Conversation(Seq(UserMessage("Hi")))
 
   private val reply =

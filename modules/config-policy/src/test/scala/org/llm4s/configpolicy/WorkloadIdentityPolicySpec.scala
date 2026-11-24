@@ -1,7 +1,7 @@
 package org.llm4s.configpolicy
 
 import org.llm4s.config.ApiKeySource
-import org.llm4s.config.ProvidersConfigModel.ProviderName
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 

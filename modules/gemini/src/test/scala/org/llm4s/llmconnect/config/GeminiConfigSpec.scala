@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -25,8 +25,8 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   private val apiKey  = "sk-test"
   private val baseUrl = "https://api.example.com"
 
-  private val gemini   = GeminiConfig(Secret("k"), "gemini-2.0-flash", "https://x.invalid/v1beta", 1048576, 8192)
-  private val vertexai = VertexAIConfig("proj", "us-central1", "gemini-2.0-flash", None, 1048576, 8192)
+  private val gemini   = GeminiConfig(Secret("k"), ModelName("gemini-2.0-flash"), "https://x.invalid/v1beta", 1048576, 8192)
+  private val vertexai = VertexAIConfig("proj", "us-central1", ModelName("gemini-2.0-flash"), None, 1048576, 8192)
 
   // ---- GeminiConfig.fromValues: base URL normalisation (from ProviderConfigSpec) ----
 
@@ -122,7 +122,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("VertexAIConfig.toString does not leak the credential file path") {
-    val vertex = VertexAIConfig("proj", "us-central1", "gemini-2.0-flash", Some("/secret/creds.json"), 1048576, 8192)
+    val vertex = VertexAIConfig("proj", "us-central1", ModelName("gemini-2.0-flash"), Some("/secret/creds.json"), 1048576, 8192)
     (vertex.toString should not).include("/secret/creds.json")
     vertex.toString should include("credentialFilePath=<redacted>")
   }
@@ -142,16 +142,16 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
 
   test("withModel changes only the model, preserving type, provider and provider-specific fields") {
     Seq[ProviderConfig](gemini, vertexai).foreach { config =>
-      val renamed = config.withModel("some-other-model")
-      renamed.model shouldBe "some-other-model"
+      val renamed = config.withModel(ModelName("some-other-model"))
+      renamed.model.asString shouldBe "some-other-model"
       renamed.providerId shouldBe config.providerId
       renamed.getClass shouldBe config.getClass
       renamed.endpointUrl shouldBe config.endpointUrl
       renamed.contextWindow shouldBe config.contextWindow
       renamed.reserveCompletion shouldBe config.reserveCompletion
     }
-    vertexai.withModel("m").asInstanceOf[VertexAIConfig].projectId shouldBe vertexai.projectId
-    gemini.withModel("m").asInstanceOf[GeminiConfig].apiKey shouldBe gemini.apiKey
+    vertexai.withModel(ModelName("m")).asInstanceOf[VertexAIConfig].projectId shouldBe vertexai.projectId
+    gemini.withModel(ModelName("m")).asInstanceOf[GeminiConfig].apiKey shouldBe gemini.apiKey
   }
 
   // ---- fromValues returns Left for a blank required field (from ProviderConfigSpec) ----
@@ -186,17 +186,17 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("GeminiConfig(apiKey, model) defaults the base URL and takes the context window from the model name") {
-    GeminiConfig(Secret("k"), "gemini-2.0-flash") shouldBe
-      GeminiConfig(Secret("k"), "gemini-2.0-flash", GeminiConfig.DEFAULT_BASE_URL, 1048576, 8192)
-    GeminiConfig(Secret("k"), "gemini-1.0-pro").contextWindow shouldBe 32768
-    GeminiConfig(Secret("k"), "gemini-2.0-flash").providerId shouldBe ProviderId("gemini")
+    GeminiConfig(Secret("k"), ModelName("gemini-2.0-flash")) shouldBe
+      GeminiConfig(Secret("k"), ModelName("gemini-2.0-flash"), GeminiConfig.DEFAULT_BASE_URL, 1048576, 8192)
+    GeminiConfig(Secret("k"), ModelName("gemini-1.0-pro")).contextWindow shouldBe 32768
+    GeminiConfig(Secret("k"), ModelName("gemini-2.0-flash")).providerId shouldBe ProviderId("gemini")
   }
 
   test("GeminiConfig's setters each change one field") {
     val timeouts = ProviderTimeouts(request = Some(30.seconds))
     val adjusted = gemini
       .withApiKey(Secret("k2"))
-      .withModel("gemini-2.5-pro")
+      .withModel(ModelName("gemini-2.5-pro"))
       .withBaseUrl("https://proxy.example.com/v1beta")
       .withContextWindow(64000)
       .withReserveCompletion(2048)
@@ -205,7 +205,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
 
     adjusted shouldBe GeminiConfig(
       Secret("k2"),
-      "gemini-2.5-pro",
+      ModelName("gemini-2.5-pro"),
       "https://proxy.example.com/v1beta",
       64000,
       2048,
@@ -222,8 +222,8 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("VertexAIConfig(projectId, model) defaults the location, credentials and context window") {
-    VertexAIConfig("proj", "gemini-2.0-flash") shouldBe vertexai
-    VertexAIConfig("proj", "gemini-2.0-flash").providerId shouldBe ProviderId("vertexai")
+    VertexAIConfig("proj", ModelName("gemini-2.0-flash")) shouldBe vertexai
+    VertexAIConfig("proj", ModelName("gemini-2.0-flash")).providerId shouldBe ProviderId("vertexai")
   }
 
   test("VertexAIConfig's setters each change one field") {
@@ -231,7 +231,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     val adjusted = vertexai
       .withProjectId("proj-2")
       .withLocation("europe-west4")
-      .withModel("gemini-2.5-pro")
+      .withModel(ModelName("gemini-2.5-pro"))
       .withCredentialFilePath("/creds.json")
       .withContextWindow(64000)
       .withReserveCompletion(2048)
@@ -242,7 +242,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     adjusted shouldBe VertexAIConfig(
       "proj-2",
       "europe-west4",
-      "gemini-2.5-pro",
+      ModelName("gemini-2.5-pro"),
       Some("/creds.json"),
       64000,
       2048,

@@ -82,10 +82,10 @@ object BenchmarkExample {
       given org.llm4s.model.ModelRegistryService = registryService
       llmClient       <- LLMConnect.getClient(providerCfg)
       embeddingResult <- Llm4sConfig.embeddings()
-      (providerName, embCfg) = embeddingResult
-      embeddingClient <- EmbeddingClient.from(providerName, embCfg)
+      embCfg = embeddingResult
+      embeddingClient <- EmbeddingClient.from(embCfg)
       resolveEmbedding = (name: String) =>
-        if (name.equalsIgnoreCase(providerName)) Right(embCfg)
+        if (name.equalsIgnoreCase(embCfg.providerId.asString)) Right(embCfg)
         else Left(ConfigurationError(s"No embedding credentials for provider '$name'"))
     } yield BenchmarkRunner(llmClient, embeddingClient, resolveEmbedding)
 

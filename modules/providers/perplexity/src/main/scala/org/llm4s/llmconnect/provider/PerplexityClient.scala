@@ -92,9 +92,9 @@ class PerplexityClient(
 
   protected def clientDescription: String = s"Perplexity Agent API client for model ${config.model}"
   protected def providerName: String      = ProviderName
-  protected def modelName: String         = config.model
+  protected def modelName: String         = config.model.asString
 
-  private val replayOrigin = ReplayOrigin(ProviderName, config.model)
+  private val replayOrigin = ReplayOrigin(ProviderName, config.model.asString)
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else [[PerplexityClient.DefaultRequestTimeout]]. */
   protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(DefaultRequestTimeout)
@@ -116,8 +116,8 @@ class PerplexityClient(
 
   private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
     val adjustments =
-      PerplexityClient.unsentOptions(config.model, options) ++ UnmappedOptions.serviceTier("Perplexity", options)
-    adjustmentLog.record(config.model, adjustments)
+      PerplexityClient.unsentOptions(config.model.asString, options) ++ UnmappedOptions.serviceTier("Perplexity", options)
+    adjustmentLog.record(config.model.asString, adjustments)
     adjustments
   }
 
@@ -259,11 +259,11 @@ class PerplexityClient(
       id = if (reply.id.nonEmpty) reply.id else java.util.UUID.randomUUID().toString,
       created = reply.created.getOrElse(Instant.now()),
       content = reply.text,
-      model = reply.model.getOrElse(config.model),
+      model = reply.model.getOrElse(config.model.asString),
       message = message,
       toolCalls = reply.toolCalls,
       usage = reply.usage,
-      estimatedCost = reply.cost.orElse(reply.usage.flatMap(CostEstimator.estimate(config.model, _))),
+      estimatedCost = reply.cost.orElse(reply.usage.flatMap(CostEstimator.estimate(config.model.asString, _))),
       citations = reply.citations,
       finishReason = finishReasonOf(reply)
     )
@@ -293,13 +293,13 @@ class PerplexityClient(
       }): Result[Option[ujson.Value]]
     } yield {
       val messages = ThinkingReplay.replayableOrigin(replayOrigin, conversation.messages)
-      val body     = ujson.Obj("model" -> config.model, "input" -> encodeInput(messages))
+      val body     = ujson.Obj("model" -> config.model.asString, "input" -> encodeInput(messages))
       val system   = messages.collect { case SystemMessage(content) => content }.filter(_.nonEmpty)
       if (system.nonEmpty) body("instructions") = system.mkString("\n\n")
       body("temperature") = options.temperature
       if (options.topP != 1.0) body("top_p") = options.topP
       options.maxTokens
-        .orElse(Option.when(isAnthropic(config.model))(anthropicDefaultMaxTokens(config.reserveCompletion)))
+        .orElse(Option.when(isAnthropic(config.model.asString))(anthropicDefaultMaxTokens(config.reserveCompletion)))
         .foreach(max => body("max_output_tokens") = max)
       val effort =
         if (options.thinking.contains(Thinking.Off)) Some("minimal") else options.reasoning.map(reasoningEffortValue)
@@ -351,7 +351,7 @@ class PerplexityClient(
     ProviderExchangeRecorder.record(
       exchangeLogging = exchangeLogging,
       provider = providerName,
-      model = Some(config.model),
+      model = Some(config.model.asString),
       startedAt = startedAt,
       requestBody = requestBody,
       responseBody = Option(responseBody).filter(_.nonEmpty),

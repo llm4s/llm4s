@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.llmconnect.config.{
   CohereConfig,
   DeepSeekConfig,
@@ -14,7 +15,6 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -39,7 +39,7 @@ class OpenAICompatibleInCodeConfigSpec extends AnyWordSpec with Matchers with Ei
 
   "llm4s-openai-compatible, configured in code" should {
     "build a generic OpenAI-compatible client from a model and base URL, with no key" in {
-      assertBuilds(OpenAICompatibleConfig.fromValues("qwen2.5", "http://localhost:8000/v1").value, "openai-compatible")
+      assertBuilds(OpenAICompatibleConfig.fromValues(ModelName("qwen2.5"), "http://localhost:8000/v1").value, "openai-compatible")
     }
 
     "build a DeepSeek client from a model, key and base URL" in {

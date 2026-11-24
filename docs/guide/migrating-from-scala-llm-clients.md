@@ -272,9 +272,8 @@ With sttp-ai you choose a client per provider, or point the OpenAI client at an 
 ```hocon
 # src/main/resources/application.conf
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {                     # key from OPENAI_API_KEY
       provider = "openai"
       model    = "gpt-4o-mini"

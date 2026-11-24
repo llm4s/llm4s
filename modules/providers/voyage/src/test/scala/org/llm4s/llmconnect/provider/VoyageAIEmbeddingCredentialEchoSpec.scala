@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.EmbeddingRequest
 import org.llm4s.security.{ KnownSecrets, Secret }
@@ -14,7 +15,7 @@ final class VoyageAIEmbeddingCredentialEchoSpec extends AnyFlatSpec with Matcher
 
   "VoyageAIEmbeddingProvider" should "keep an echoed key out of the error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
-      val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "voyage-3", apiKey = Secret(echoKey))
+      val config = EmbeddingProviderConfig(providerId = ProviderId("voyage"), baseUrl = BaseUrl(baseUrl), model = ModelName("voyage-3"), apiKey = Some(Secret(echoKey)))
       VoyageAIEmbeddingProvider
         .fromConfig(config)
         .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("voyage-3", 8)))

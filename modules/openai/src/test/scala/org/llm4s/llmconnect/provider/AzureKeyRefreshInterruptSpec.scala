@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName }
 import org.llm4s.error.{ CancelledError, ConfigurationError }
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.llmconnect.config.AzureConfig
@@ -8,7 +9,6 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.testkit.ProviderModuleChecks
 import org.llm4s.testutil.TestTimeLimit
-import org.llm4s.types.ProviderModelTypes.ApiKey
 import org.llm4s.types.Result
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -34,7 +34,7 @@ class AzureKeyRefreshInterruptSpec extends AnyWordSpec with Matchers with TestTi
           release.await()
           Left(ConfigurationError("vault down"))
 
-      val config = AzureConfig("https://r.openai.azure.com", Secret(""), "gpt-4o").withApiKeyProvider(blocking)
+      val config = AzureConfig("https://r.openai.azure.com", Secret(""), ModelName("gpt-4o")).withApiKeyProvider(Some(blocking))
       val client = OpenAIClient(config).fold(e => fail(e.message), identity)
 
       val holder = new Thread(() => client.complete(hello, CompletionOptions()): Unit)

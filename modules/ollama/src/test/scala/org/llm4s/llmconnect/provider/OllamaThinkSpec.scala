@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.OllamaThink.{ Controls, Plan }
@@ -157,7 +158,7 @@ class OllamaThinkSpec extends AnyWordSpec with Matchers {
         }
       } { url =>
         val client =
-          new OllamaClient(OllamaConfig(model = "qwen3", baseUrl = url, contextWindow = 4096, reserveCompletion = 512))
+          new OllamaClient(OllamaConfig(model = ModelName("qwen3"), baseUrl = url, contextWindow = 4096, reserveCompletion = 512))
         test(client, shows, chats)
         client.close()
       }

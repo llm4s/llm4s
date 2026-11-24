@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ConfigurationError
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 import java.nio.file.{ Path, Paths }
@@ -21,18 +21,41 @@ import java.nio.file.{ Path, Paths }
  */
 @Experimental
 final case class JlamaConfig private (
-  model: String,
+  model: ModelName,
   modelDir: Path,
   threads: Option[Int],
   contextWindow: Int,
   reserveCompletion: Int
 ) extends ProviderConfig:
   override val providerId: ProviderId                = ProviderId("jlama")
-  override def endpointUrl: Option[String]           = None
-  override def withModel(model: String): JlamaConfig = copy(model = model)
+  override def endpointUrl: Option[BaseUrl]           = None
+  override def withModel(model: ModelName): JlamaConfig = copy(model = model)
   def withModelDir(modelDir: Path): JlamaConfig      = copy(modelDir = modelDir)
   def withThreads(threads: Int): JlamaConfig         = copy(threads = Some(threads))
   def withThreads(threads: Option[Int]): JlamaConfig = copy(threads = threads)
+
+  // Jlama runs the model in this JVM: there is no request to time out and no connection to route. So these
+  // setters return the config unchanged, and a `provider = "jlama"` section that sets `timeouts` or an `http`
+  // block of its own is refused by the loader instead of being ignored.
+
+  /** Always [[ProviderTimeouts.default]]: inference runs in-process, with no request to time out. */
+  override def timeouts: ProviderTimeouts = ProviderTimeouts.default
+
+  /** Returns this config: there are no timeouts to set. */
+  override def withTimeouts(timeouts: ProviderTimeouts): JlamaConfig = this
+
+  /** Always the default: inference makes no HTTP call. */
+  override def network: org.llm4s.http.HttpNetworkSettings = org.llm4s.http.HttpNetworkSettings.default
+
+  /** Returns this config: there is no HTTP call to route. */
+  override def withNetwork(network: org.llm4s.http.HttpNetworkSettings): JlamaConfig = this
+
+  /** Always `None`: this provider authenticates without an API key. */
+  override def apiKeyProvider: Option[org.llm4s.llmconnect.auth.ApiKeyProvider] = None
+
+  /** Always a `ConfigurationError`: this provider takes no API key, so there is none to supply per request. */
+  override def withApiKeyProvider(provider: org.llm4s.llmconnect.auth.ApiKeyProvider): Result[Nothing] =
+    ProviderConfig.noApiKeyProvider(providerId)
 
 @Experimental
 object JlamaConfig:
@@ -52,11 +75,11 @@ object JlamaConfig:
    * given, must be positive. Anything else is a `ConfigurationError`.
    */
   def fromValues(
-    model: String,
+    model: ModelName,
     modelDir: Path = defaultModelDir,
     threads: Option[Int] = None
   ): Result[JlamaConfig] =
-    val name = model.trim
+    val name = model.asString.trim
     val isHuggingFaceId = name.split("/", -1) match
       case Array(owner, repo) => owner.nonEmpty && repo.nonEmpty
       case _                  => false
@@ -75,4 +98,4 @@ object JlamaConfig:
         (),
         ConfigurationError("jlama threads must be a positive whole number", List("threads"))
       )
-    yield new JlamaConfig(name, modelDir, threads, DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)
+    yield new JlamaConfig(ModelName(name), modelDir, threads, DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)

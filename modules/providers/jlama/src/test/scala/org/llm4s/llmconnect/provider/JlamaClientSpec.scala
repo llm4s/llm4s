@@ -36,7 +36,7 @@ class JlamaClientSpec extends AnyWordSpec with Matchers:
       )
       completion.content shouldBe "Hi!"
       completion.message.content shouldBe "Hi!"
-      completion.model shouldBe config.model
+      completion.model shouldBe config.model.asString
       completion.toolCalls shouldBe empty
       completion.usage.map(u => (u.promptTokens, u.completionTokens, u.totalTokens)) shouldBe Some((11, 3, 14))
     }

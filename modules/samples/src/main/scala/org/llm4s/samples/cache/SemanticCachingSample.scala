@@ -1,5 +1,6 @@
 package org.llm4s.samples.cache
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ConfigurationError
@@ -93,11 +94,12 @@ object SemanticCachingSample extends App {
 
   private def createEmbeddingClient(apiKey: String)(using ModelRegistryService): Result[EmbeddingClient] = {
     val embeddingConfig = EmbeddingProviderConfig(
-      baseUrl = "https://api.openai.com",
-      model = "text-embedding-3-small",
-      apiKey = Secret(apiKey)
+      providerId = ProviderId("openai"),
+      baseUrl = BaseUrl("https://api.openai.com"),
+      model = ModelName("text-embedding-3-small"),
+      apiKey = Some(Secret(apiKey))
     )
-    EmbeddingClient.from("openai", embeddingConfig)
+    EmbeddingClient.from(embeddingConfig.withProviderId(ProviderId("openai")))
   }
 
   private def createCacheConfig(): Result[CacheConfig] =

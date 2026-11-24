@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.testutil.TestTimeLimit
 
@@ -50,7 +51,7 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     val config = OpenAIConfig(
       apiKey = Secret("sk-test-key"),
-      model = "gpt-4o",
+      model = ModelName("gpt-4o"),
       organization = None,
       baseUrl = "https://api.openai.com/v1",
       contextWindow = 128000,
@@ -96,7 +97,7 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       override def recordCost(provider: String, model: String, costUsd: Double): Unit = ()
     }
 
-    val config = OllamaConfig("llama3.2", s"http://127.0.0.1:${server.getAddress.getPort}")
+    val config = OllamaConfig(ModelName("llama3.2"), s"http://127.0.0.1:${server.getAddress.getPort}")
     val answer = FacadeInternals.createClient(config, metrics).get().complete("hello")
     server.stop(0)
 
@@ -109,7 +110,7 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   it should "refuse a null config and treat a null collector as none" in {
     import org.llm4s.llmconnect.config.OllamaConfig
     FacadeInternals.createClient(null, org.llm4s.metrics.MetricsCollector.noop).isFailure shouldBe true
-    FacadeInternals.createClient(OllamaConfig("llama3.2", "http://127.0.0.1:1"), null).isSuccess shouldBe true
+    FacadeInternals.createClient(OllamaConfig(ModelName("llama3.2"), "http://127.0.0.1:1"), null).isSuccess shouldBe true
   }
 
   "wrapClient" should "wrap a Scala LLMClient the caller built, its calls and close going to it (#1666)" in {

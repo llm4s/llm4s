@@ -1,10 +1,10 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import pureconfig.ConfigSource
@@ -19,7 +19,7 @@ class AnthropicRoutingTest extends AnyFunSuite with Matchers {
 
   private val anthropic: ProviderConfig = AnthropicConfig(
     apiKey = Secret("key"),
-    model = "claude-3-sonnet",
+    model = ModelName("claude-3-sonnet"),
     baseUrl = "https://api.anthropic.com",
     contextWindow = 200000,
     reserveCompletion = 4096
@@ -40,8 +40,8 @@ class AnthropicRoutingTest extends AnyFunSuite with Matchers {
     val hocon =
       """
         |llm4s {
+        |  defaultProvider = "anthropic-main"
         |  providers {
-        |    provider = "anthropic-main"
         |    anthropic-main {
         |      provider = "anthropic"
         |      model = "claude-3-sonnet"

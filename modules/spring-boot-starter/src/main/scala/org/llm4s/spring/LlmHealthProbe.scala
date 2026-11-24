@@ -45,7 +45,7 @@ object HealthSettings {
         val r = resolved.get()
         HealthSettings(
           r.config.providerId.asString,
-          Option(r.config.model).map(_.trim).filter(_.nonEmpty).getOrElse("unknown"),
+          Option(r.config.model).map(_.asString.trim).filter(_.nonEmpty).getOrElse("unknown"),
           p.health.probe,
           p.health.probeTtl,
           p.health.probeTimeout,

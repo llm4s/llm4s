@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ AuthenticationError, ServiceError }
@@ -30,7 +31,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def config(baseUrl: String, apiKey: Option[String] = None, headers: Map[String, String] = Map.empty) =
-    OpenAICompatibleConfig(model = "local-model", baseUrl = baseUrl, apiKey = apiKey.map(Secret(_)), headers = headers)
+    OpenAICompatibleConfig(model = ModelName("local-model"), baseUrl = baseUrl, apiKey = apiKey.map(Secret(_)), headers = headers)
 
   private def client(cfg: OpenAICompatibleConfig, logging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled) =
     OpenAICompatibleClient(cfg, exchangeLogging = logging).value
@@ -112,7 +113,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
     }
 
   it should "report the configured context window and reserve" in {
-    val c = client(OpenAICompatibleConfig("m", "http://localhost:1/v1", None, 32768, 4096))
+    val c = client(OpenAICompatibleConfig(ModelName("m"), "http://localhost:1/v1", None, 32768, 4096))
     (c.getContextWindow(), c.getReserveCompletion()) shouldBe (32768, 4096)
   }
 

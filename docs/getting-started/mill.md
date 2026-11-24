@@ -131,7 +131,7 @@ object Hello {
 }
 ```
 
-1. `Llm4sConfig.defaultProvider()` reads the section of `application.conf` that `llm4s.providers.provider` names.
+1. `Llm4sConfig.defaultProvider()` reads the section of `application.conf` that `llm4s.defaultProvider` names.
    This is the one place configuration is read.
 2. `LLMConnect.getClient` builds the client for that provider.
 3. `client.complete` sends the conversation. Every step returns a `Result`, so the `for` stops at the first error
@@ -145,10 +145,9 @@ covers the other providers:
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
+  defaultProvider = ${?LLM4S_PROVIDER}
   providers {
-    provider = "openai-main"
-    provider = ${?LLM4S_PROVIDER}
-
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"

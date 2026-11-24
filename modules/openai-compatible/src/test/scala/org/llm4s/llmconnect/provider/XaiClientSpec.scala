@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.XaiConfig
 import org.llm4s.llmconnect.model._
@@ -25,7 +26,7 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
   private def config(baseUrl: String, model: String = "grok-4.7"): XaiConfig =
     XaiConfig(
       apiKey = Secret("xai-test-key"),
-      model = model,
+      model = ModelName(model),
       baseUrl = baseUrl,
       contextWindow = 500000,
       reserveCompletion = 8192

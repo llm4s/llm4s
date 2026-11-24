@@ -38,7 +38,7 @@ sbt "examplesHttp/run --fake"
 ```
 
 With a model: the app loads the provider at startup through `Llm4sConfig`, from the named section
-`llm4s.providers.provider` names. The module's `application.conf` uses the samples' default, a local Ollama
+`llm4s.defaultProvider` names. The module's `application.conf` uses the samples' default, a local Ollama
 (`ollama pull llama3` first, or set `OLLAMA_MODEL`), and has `openai-main` and `anthropic-main` sections that use
 `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`:
 
@@ -262,7 +262,7 @@ provider <- settings.defaultProvider()
 client   <- LLMConnect.getClient(provider)(using registry)
 ```
 
-The precedence is the library's: JVM system properties (`-Dllm4s.providers.provider=openai-main`) override Play's
+The precedence is the library's: JVM system properties (`-Dllm4s.defaultProvider=openai-main`) override Play's
 configuration, which overrides each llm4s module's `reference.conf` - so `llm4s.credentials.<provider>.apiKey`, bound
 to the vendor's variable such as `OPENAI_API_KEY`, applies without a line in `application.conf`. A key a test sets with
 `GuiceApplicationBuilder().configure(...)` is part of Play's configuration, so it reaches llm4s too. The module's

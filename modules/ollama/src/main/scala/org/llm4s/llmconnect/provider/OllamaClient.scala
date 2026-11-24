@@ -94,7 +94,7 @@ class OllamaClient(
 
   protected def clientDescription: String = s"Ollama client for model ${config.model}"
   protected def providerName: String      = "ollama"
-  protected def modelName: String         = config.model
+  protected def modelName: String         = config.model.asString
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else [[OllamaClient.DefaultRequestTimeout]]. */
   protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(OllamaClient.DefaultRequestTimeout)
@@ -125,9 +125,9 @@ class OllamaClient(
    * service tier, which Ollama has none of.
    */
   private def unsent(options: CompletionOptions, think: OllamaThink.Plan): List[RequestAdjustment] = {
-    val adjustments = think.adjustments ++ UnmappedOptions.promptCache(config.model, options) ++
+    val adjustments = think.adjustments ++ UnmappedOptions.promptCache(config.model.asString, options) ++
       UnmappedOptions.serviceTier("Ollama", options)
-    adjustmentLog.record(config.model, adjustments)
+    adjustmentLog.record(config.model.asString, adjustments)
     adjustments
   }
 
@@ -144,25 +144,25 @@ class OllamaClient(
   private def thinkControls(): OllamaThink.Controls =
     discoveredThink.getOrElse {
       val headers = Map("Content-Type" -> "application/json")
-      val body    = ujson.Obj("model" -> config.model).render()
+      val body    = ujson.Obj("model" -> config.model.asString).render()
       http.post(s"${config.baseUrl}/api/show", headers, body, timeout = requestTimeout) match {
         case Right(response) if response.statusCode >= 200 && response.statusCode < 300 =>
           val controls = Try(ujson.read(response.body)).toOption
-            .flatMap(OllamaThink.fromShow(config.model, _))
-            .getOrElse(OllamaThink.byName(config.model))
+            .flatMap(OllamaThink.fromShow(config.model.asString, _))
+            .getOrElse(OllamaThink.byName(config.model.asString))
           discoveredThink = Some(controls)
           controls
         case other =>
           val why = other.fold(_.message, response => s"HTTP ${response.statusCode}")
           OllamaClient.logger.debug(s"Ollama /api/show for ${config.model} failed ($why); think follows the model name")
-          OllamaThink.byName(config.model)
+          OllamaThink.byName(config.model.asString)
       }
     }
 
   /** The `think` field for `options`, asking for the model's controls only when it sets thinking or reasoning. */
   private def thinkPlan(options: CompletionOptions): OllamaThink.Plan =
     if (!OllamaThink.asked(options)) OllamaThink.Plan(None, Nil)
-    else OllamaThink.plan(config.model, options, thinkControls())
+    else OllamaThink.plan(config.model.asString, options, thinkControls())
 
   private def send(requestBody: ujson.Obj, options: CompletionOptions): Result[Completion] = {
     val requestText = requestBody.render()
@@ -213,7 +213,7 @@ class OllamaClient(
       Left(
         ServiceError(404, providerName, HttpErrorMapper.extractErrorDetails(body, status, providerName))
           .withHint(
-            TroubleshootingLinks.ollamaModelMissingAction(config.model),
+            TroubleshootingLinks.ollamaModelMissingAction(config.model.asString),
             TroubleshootingLinks.Entry.OllamaModelMissing
           )
       )
@@ -228,7 +228,7 @@ class OllamaClient(
     ProviderExchangeRecorder.record(
       exchangeLogging = exchangeLogging,
       provider = providerName,
-      model = Some(config.model),
+      model = Some(config.model.asString),
       startedAt = startedAt,
       requestBody = requestBody,
       responseBody = Option(responseBody).filter(_.nonEmpty),
@@ -281,7 +281,7 @@ class OllamaClient(
           mapError(response.statusCode, err, response.headers, options)
         )
       case Right(response) =>
-        val accumulator = StreamingAccumulator(config.model)
+        val accumulator = StreamingAccumulator(config.model.asString)
         val ids         = new OllamaClient.CallIds
         var failure     = Option.empty[org.llm4s.error.LLMError]
         var sawCalls    = false
@@ -358,7 +358,7 @@ class OllamaClient(
           .flatMap(_ => accumulator.toCompletion)
           .map { c =>
             // the accumulator reports streamed calls on the message only
-            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model.asString, u))
             c.withToolCalls(c.message.toolCalls.toList).withEstimatedCost(cost)
           }
 
@@ -432,7 +432,7 @@ class OllamaClient(
     options.maxTokens.foreach(t => opts("num_predict") = t)
 
     val body = ujson.Obj(
-      "model"    -> config.model,
+      "model"    -> config.model.asString,
       "messages" -> msgs,
       "stream"   -> stream,
       "options"  -> opts
@@ -459,7 +459,7 @@ class OllamaClient(
     } yield TokenUsage(prompt, comp, prompt + comp)
 
     // Estimate cost using CostEstimator
-    val cost = usage.flatMap(u => CostEstimator.estimate(config.model, u))
+    val cost = usage.flatMap(u => CostEstimator.estimate(config.model.asString, u))
 
     OllamaClient.parseToolCalls(json.obj.get("message"), new OllamaClient.CallIds).map { calls =>
       Completion(
@@ -468,7 +468,7 @@ class OllamaClient(
         content = content,
         toolCalls = calls.toList,
         usage = usage,
-        model = config.model,
+        model = config.model.asString,
         message = (if (calls.isEmpty) AssistantMessage(content)
                    else AssistantMessage(Some(content).filter(_.nonEmpty), calls))
           .withThinking(OllamaClient.thinking(json.obj.get("message")).getOrElse("")),
@@ -490,7 +490,7 @@ class OllamaClient(
    */
   override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
     val headers = Map("Content-Type" -> "application/json")
-    val body    = ujson.Obj("model" -> config.model).render()
+    val body    = ujson.Obj("model" -> config.model.asString).render()
     http
       .post(s"${config.baseUrl}/api/show", headers, body, timeout = requestTimeout.min(OllamaClient.ValidationTimeout))
       .left

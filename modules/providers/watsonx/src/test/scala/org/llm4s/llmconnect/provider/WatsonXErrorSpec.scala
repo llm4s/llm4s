@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.*
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, StreamingHttpResponse }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
@@ -169,8 +170,8 @@ class WatsonXErrorSpec extends AnyFunSuite with Matchers:
   test("the api key is absent from WatsonXConfig's toString, copy and the client's toString") {
     (config.toString should not).include(ApiKey)
     config.toString should include("***")
-    (config.copy(model = "x").toString should not).include(ApiKey)
-    (config.withModel("y").toString should not).include(ApiKey)
+    (config.copy(model = ModelName("x")).toString should not).include(ApiKey)
+    (config.withModel(ModelName("y")).toString should not).include(ApiKey)
     (new WatsonXClient(config, httpClient = routed(_ => Right(iamToken()), _ => Right(chatReply))).toString should not)
       .include(ApiKey)
   }

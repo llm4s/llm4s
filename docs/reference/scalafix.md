@@ -86,6 +86,7 @@ nested inside another pattern. These 0.5 rules change names, not types; the `Sec
 | `CompressionRuleTransform` | Since 0.6.0: `CompressionRule`'s field `apply` to `transform`: `rule.apply(messages)` to `rule.transform(messages)`, `withApply(f)` to `withTransform(f)`, and the named argument `CompressionRule(name, apply = f)` to `transform = f` ([note](migration#compressionrules-apply-field-is-transform-1281)) |
 | `AgentCopyToWithSetters` | Since 0.6.0: `.copy(field = value)` to `.withField(value)` on the 36 `llm4s-agent` types made growth-safe by [#2778](https://github.com/llm4s/llm4s/issues/2778) (`ContextWindowConfig`, `Handoff`, the `AgentEvents` payloads, `EventRecord`, `GraphSnapshot`, `Command` and others); a positional `copy` and `new X(...)` are reported |
 | `ResultSyntaxMoved` | Since 0.6.0, imports only: `import org.llm4s.Result` to `org.llm4s.types.Result`; `import org.llm4s.types.TryOps` (or `OptionOps`, `FutureOps`) to `import org.llm4s.syntax.toResult`; `import org.llm4s.error.ThrowableOps._` to `import org.llm4s.syntax.toLLMError`; `import org.llm4s.syntax.syntax._` to `import org.llm4s.syntax.*`; `org.llm4s.core.safety.Safety` to `org.llm4s.error.Safety` and `NetworkSecurity` to `org.llm4s.security.NetworkSecurity`; `org.llm4s.identity.TokenizerId` to `org.llm4s.context.tokens.TokenizerId`; `org.llm4s.llmconnect.model.EmbeddingError` to `org.llm4s.error.EmbeddingError`; `org.llm4s.types.TraceId` to `org.llm4s.trace.model.TraceId` (`llm4s-observability`) |
+| `ProviderConfigNewtypes` | Since 0.6.0: a provider config's named `model = "gpt-4o"` argument and `config.withModel("gpt-4o")` to `ModelName("gpt-4o")`; `Llm4sConfig.provider("main")` and `listModels("main")` (and `Llm4sSettings`) to `ProviderName("main")`; adds the imports. A model passed by position is left for the compiler to report |
 
 A key passed by position (`OpenAIConfig("sk-...", "gpt-4o")`), and the other credentials that became `Secret`s
 (Langfuse, search-tool and store keys), still need a hand edit. The breaks that change behaviour or add cases have no
@@ -96,7 +97,7 @@ rule: see [Changes since 0.5.1 that no rule automates](migration#changes-since-0
 0.5.x code (Scalafix sees no types from Scala 3 dependencies), and would rewrite it again: `config.apiKey.reveal` to
 `config.apiKey.reveal.reveal`. Code on 0.6.x runs the rules for the breaks since 0.6.0 by name instead:
 `ThinkingReplacesBudgetTokens`, `FinishReasonTyped`, `CompressionRuleTransform`, `AgentCopyToWithSetters`,
-`ResultSyntaxMoved`, `AgentStatusGainsTruncated` and `PositionalPatternsGainFields`.
+`ResultSyntaxMoved`, `ProviderConfigNewtypes`, `AgentStatusGainsTruncated` and `PositionalPatternsGainFields`.
 
 The rules are compiled with scalac 2.13, the only compiler `scalafix-core` is published for; they read the SemanticDB of Scala 3 sources. Scalafix's
 Scala 3 support resolves the symbol at each name, which every rule here relies on, but has no synthetics or inferred

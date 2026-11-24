@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.spi
 
 import org.llm4s.annotation.Stable
-import org.llm4s.config.{ ProviderModelLister, ProvidersConfigModel, SharedCredentials }
+import org.llm4s.config.{ NamedProviderConfig, ProviderModelLister, SharedCredentials }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.AuthConfig
 import org.llm4s.llmconnect.LLMClient
@@ -89,7 +89,7 @@ trait ProviderDescriptor:
    *                windows a config's `fromValues` needs
    */
   def buildConfig(
-    section: ProvidersConfigModel.NamedProviderConfig,
+    section: NamedProviderConfig,
     context: ProviderConfigContext
   ): Result[ProviderConfig]
 
@@ -150,7 +150,7 @@ object ProviderDescriptor:
    */
   def requireExtra(
     providerName: String,
-    section: ProvidersConfigModel.NamedProviderConfig,
+    section: NamedProviderConfig,
     key: String
   ): Result[String] =
     requireField(providerName, key, section.extra(key), s"llm4s.providers.$providerName.$key")
@@ -174,7 +174,7 @@ object ProviderDescriptor:
    * `llm4s.credentials.<id>.apiKey` when the section set none, so this fails only for a
    * section that did not come through validation - one built in code.
    */
-  def requireApiKey(providerName: String, section: ProvidersConfigModel.NamedProviderConfig): Result[Secret] =
+  def requireApiKey(providerName: String, section: NamedProviderConfig): Result[Secret] =
     requireField(
       providerName,
       "api key",
@@ -190,7 +190,7 @@ object ProviderDescriptor:
    */
   def resolveBaseUrl(
     providerName: String,
-    section: ProvidersConfigModel.NamedProviderConfig,
+    section: NamedProviderConfig,
     spec: ProviderConfigSpec
   ): Result[String] =
     requireField(

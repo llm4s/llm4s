@@ -319,7 +319,7 @@ object VectorMemoryExample {
         |  //
         |  //  val result = for {
         |  //    (providerName, providerCfg) <- Llm4sConfig.embeddings()
-        |  //    client                      <- EmbeddingClient.from(providerName, providerCfg)
+        |  //    client                      <- EmbeddingClient.from(providerCfg)
         |  //    textModelSettings           <- Llm4sConfig.textEmbeddingModel()
         |  //    modelConfig = EmbeddingModelConfig(
         |  //                     name = textModelSettings.modelName,

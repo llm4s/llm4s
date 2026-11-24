@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.{ KnownSecrets, Secret }
 import org.llm4s.error.{ AuthenticationError, ConfigurationError, NetworkError, RateLimitError, ValidationError }
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
@@ -18,7 +19,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
     apiKey = Secret("secret key&="),
     projectId = "project-1",
     spaceId = None,
-    model = "ibm/granite-13b-instruct-v2",
+    model = ModelName("ibm/granite-13b-instruct-v2"),
     baseUrl = "https://wx.example.com",
     apiVersion = "2026-09-25",
     iamUrl = "https://iam.example.com/identity/token",
@@ -213,7 +214,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
   test("the version query parameter is IBM's current SDK date by default, and a configured apiVersion overrides it") {
     WatsonXConfig.DEFAULT_API_VERSION shouldBe "2026-09-25"
     val defaulted = WatsonXConfig
-      .fromValues(config.model, config.apiKey, Some(config.projectId), None, config.baseUrl)(using
+      .fromValues(config.model.asString, config.apiKey, Some(config.projectId), None, config.baseUrl)(using
         org.llm4s.llmconnect.config.ContextWindowResolver(summon[ModelRegistryService])
       )
       .getOrElse(fail("expected a config"))

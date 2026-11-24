@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.NetworkError
 import org.llm4s.error.TroubleshootingLinks.Entry
 import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, ServiceError, TroubleshootingLinks }
@@ -43,7 +44,7 @@ final class OllamaTroubleshootingLinksSpec extends AnyWordSpec with Matchers {
   }
 
   private def config(baseUrl: String): OllamaConfig =
-    OllamaConfig(model = "llama3", baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512)
+    OllamaConfig(model = ModelName("llama3"), baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512)
 
   private def call(baseUrl: String): Result[org.llm4s.llmconnect.model.Completion] =
     new OllamaClient(config(baseUrl)).complete(hello, CompletionOptions())

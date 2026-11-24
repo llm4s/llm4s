@@ -124,7 +124,7 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers with EitherV
   it should "succeed for operations before close() is called" in {
     val transport = new StubTransport
     val client = new OpenAIClient(
-      createTestConfig.model,
+      createTestConfig.model.asString,
       transport,
       createTestConfig,
       org.llm4s.metrics.MetricsCollector.noop,
@@ -150,7 +150,7 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers with EitherV
 
   it should "close its transport exactly once, however often close() is called" in {
     val transport = new StubTransport
-    val client    = OpenAIClient.forTest(createTestConfig.model, transport, createTestConfig)
+    val client    = OpenAIClient.forTest(createTestConfig.model.asString, transport, createTestConfig)
 
     client.close()
     client.close()

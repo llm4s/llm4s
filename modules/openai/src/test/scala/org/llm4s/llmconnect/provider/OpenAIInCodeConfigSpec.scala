@@ -1,11 +1,11 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.llmconnect.config.{ AzureConfig, EmbeddingProviderConfig, OpenAIConfig, ProviderConfig }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -29,7 +29,7 @@ class OpenAIInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
     window shouldBe config.contextWindow
 
   private def assertBuildsEmbeddings(provider: String, config: EmbeddingProviderConfig): Unit =
-    EmbeddingClient.from(provider, config).value.providerId shouldBe Some(ProviderId(provider))
+    EmbeddingClient.from(config).value.providerId shouldBe Some(ProviderId(provider))
 
   "llm4s-openai, configured in code" should {
     "build an OpenAI client from a model, key and base URL" in {
@@ -62,9 +62,10 @@ class OpenAIInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
       assertBuildsEmbeddings(
         "openai",
         EmbeddingProviderConfig(
-          baseUrl = OpenAIConfig.DEFAULT_BASE_URL,
-          model = "text-embedding-3-small",
-          apiKey = Secret("sk-test")
+          providerId = ProviderId("openai"),
+          baseUrl = BaseUrl(OpenAIConfig.DEFAULT_BASE_URL),
+          model = ModelName("text-embedding-3-small"),
+          apiKey = Some(Secret("sk-test"))
         )
       )
     }

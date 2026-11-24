@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.UnsupportedContentPartError
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model.*
@@ -16,7 +17,7 @@ class OllamaContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
 
   private val client =
     new OllamaClient(
-      OllamaConfig(model = "llava", baseUrl = "http://localhost:11434", contextWindow = 4096, reserveCompletion = 512)
+      OllamaConfig(model = ModelName("llava"), baseUrl = "http://localhost:11434", contextWindow = 4096, reserveCompletion = 512)
     )
 
   private val bytes = IArray[Byte](1, 2, 3)

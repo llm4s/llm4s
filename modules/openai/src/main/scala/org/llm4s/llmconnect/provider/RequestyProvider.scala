@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ OpenAIConfigKeys, ProviderModelLister, RequestyModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderBuildContext, ProviderConfigContext, ProviderConfigSpec, ProviderDescriptor }

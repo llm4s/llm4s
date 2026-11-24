@@ -9,7 +9,7 @@ import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 /**
  * A reference app's command line: `[--host H] [--port N] [--fake]`.
  *
- * The model is not chosen here: it is the named provider section `llm4s.providers.provider` names in
+ * The model is not chosen here: it is the named provider section `llm4s.defaultProvider` names in
  * `application.conf`, loaded through `Llm4sConfig` when the app starts (`LLMClientIO.resource`). `--fake` serves
  * [[ServerSettings.fakeClient]] instead, so the app runs with no model server and no API key.
  */

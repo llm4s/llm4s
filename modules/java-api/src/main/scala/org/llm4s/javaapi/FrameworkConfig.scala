@@ -19,7 +19,7 @@ import scala.jdk.CollectionConverters._
  * the application's `llm4s.*` properties into clients (#2280). The properties are spelt as in the Spring Boot starter:
  *
  * {{{
- * llm4s.providers.provider=main                    # the default section
+ * llm4s.default-provider=main                      # the default section (llm4s.defaultProvider is read too)
  * llm4s.providers.main.provider=ollama
  * llm4s.providers.main.model=llama3.2
  * llm4s.providers.main.base-url=http://localhost:11434
@@ -43,14 +43,23 @@ private[llm4s] object FrameworkConfig {
     keys(properties).collect { case "llm4s" :: "providers" :: section :: _ :: _ => section }.distinct.asJava
 
   /**
-   * The default section: the one `llm4s.providers.provider` names, else the only section there is; empty when there
+   * The default section: the one `llm4s.defaultProvider` names, else the only section there is; empty when there
    * are several and none is named.
    */
   def defaultSection(properties: JMap[String, String]): Optional[String] = {
-    val named = Option(properties.get("llm4s.providers.provider")).map(_.trim).filter(_.nonEmpty)
+    val named = namedDefault(properties)
     val all   = sections(properties).asScala.toList
     Optional.ofNullable(named.orElse(if (all.size == 1) all.headOption else None).orNull)
   }
+
+  private val DefaultPath = List("llm4s", "defaultProvider")
+
+  /** The section `llm4s.defaultProvider` names, however the property is spelt (`llm4s.default-provider` too). */
+  private def namedDefault(properties: JMap[String, String]): Option[String] =
+    properties.asScala.toList
+      .sortBy(_._1)
+      .collectFirst { case (key, value) if key != null && value != null && hoconPath(key).contains(DefaultPath) => value.trim }
+      .filter(_.nonEmpty)
 
   /** The embedding model `llm4s.embeddings.model` names, `provider/model`, if one is set. */
   def embeddingModel(properties: JMap[String, String]): Optional[String] =
@@ -79,9 +88,9 @@ private[llm4s] object FrameworkConfig {
       provider ++ model
     }
 
-    val defaultProblem = value("llm4s.providers.provider").toList.collect {
+    val defaultProblem = namedDefault(properties).toList.collect {
       case name if !all.contains(name) =>
-        s"llm4s.providers.provider names section '$name', which has no properties " +
+        s"llm4s.defaultProvider names section '$name', which has no properties " +
           s"(${if (all.isEmpty) "no section is configured" else s"sections: ${all.mkString(", ")}"})"
     }
 
@@ -126,7 +135,7 @@ private[llm4s] object FrameworkConfig {
   /** The HOCON path a property stands for, or None for a key that is not llm4s's own. */
   def hoconPath(key: String): Option[List[String]] =
     key.split("\\.").toList match {
-      case "llm4s" :: "providers" :: "provider" :: Nil => Some(List("llm4s", "providers", "provider"))
+      case "llm4s" :: key :: Nil if camel(key) == "defaultProvider" => Some(DefaultPath)
       case "llm4s" :: "embeddings" :: "model" :: Nil   => Some(List("llm4s", "embeddings", "model"))
       case "llm4s" :: block :: name :: first :: rest if Sectioned.contains(block) =>
         val head = camel(first)
@@ -144,7 +153,7 @@ private[llm4s] object FrameworkConfig {
     val root = new JLinkedHashMap[String, AnyRef]()
     val entries = properties.asScala.toList.sortBy(_._1).flatMap { case (key, value) =>
       Option(key).flatMap(hoconPath).filter(_ => value != null).map(_ -> value)
-    } ++ section.map(name => List("llm4s", "providers", "provider") -> name)
+    } ++ section.map(name => DefaultPath -> name)
 
     val conflicts = entries.flatMap { case (path, value) => put(root, path, value) }
     conflicts.headOption match {
@@ -157,7 +166,7 @@ private[llm4s] object FrameworkConfig {
   }
 
   /**
-   * llm4s's defaults without `llm4s.providers`: the sections are the framework's properties alone. Typesafe Config also
+   * llm4s's defaults without `llm4s.providers` and `llm4s.defaultProvider`: the sections are the framework's properties alone. Typesafe Config also
    * reads a classpath `application.properties`, the framework's own file, whose keys it would take as written
    * (`base-url`, not `baseUrl`).
    */
@@ -166,7 +175,7 @@ private[llm4s] object FrameworkConfig {
       .config()
       .left
       .map(failures => ConfigurationError(s"Cannot read llm4s's configuration: ${failures.prettyPrint()}"): LLMError)
-      .map(config => ConfigSource.fromConfig(config.withoutPath("llm4s.providers")))
+      .map(config => ConfigSource.fromConfig(config.withoutPath("llm4s.providers").withoutPath("llm4s.defaultProvider")))
 
   /** Puts `value` at `path`; the key, when the path crosses a value or ends on a section. */
   private def put(root: JMap[String, AnyRef], path: List[String], value: String): Option[String] = {

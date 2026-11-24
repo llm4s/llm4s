@@ -1,7 +1,7 @@
 package org.llm4s.configpolicy
 
 import org.llm4s.config.{ ApiKeySource, Llm4sConfig }
-import org.llm4s.config.ProvidersConfigModel.ProviderName
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -72,8 +72,8 @@ class OwnApiKeyPolicySpec extends AnyWordSpec with Matchers with EitherValues {
 
     "flag every inheriting section, not only the default, and skip keyless providers" in {
       val source = ConfigSource.string(
-        """llm4s.providers {
-          |  provider = "openai-main"
+        """llm4s.defaultProvider = "openai-main"
+          |llm4s.providers {
           |  openai-main  { provider = "openai", model = "gpt-4o-mini", apiKey = "sk-main" }
           |  openai-batch { provider = "openai", model = "gpt-4o-mini" }
           |  claude       { provider = "anthropic", model = "claude-sonnet-4-5" }

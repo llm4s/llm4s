@@ -161,7 +161,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
         val configSpec: ProviderConfigSpec = ProviderConfigSpec()
 
         def buildConfig(
-          section: org.llm4s.config.ProvidersConfigModel.NamedProviderConfig,
+          section: org.llm4s.config.NamedProviderConfig,
           context: org.llm4s.llmconnect.spi.ProviderConfigContext
         ): org.llm4s.types.Result[org.llm4s.llmconnect.config.ProviderConfig] =
           Left(org.llm4s.error.ConfigurationError("replacement"))

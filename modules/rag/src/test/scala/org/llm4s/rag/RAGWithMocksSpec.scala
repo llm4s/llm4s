@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.chunking.DocumentChunk
 import org.llm4s.security.Secret
 import org.llm4s.error.{ ConfigurationError, ProcessingError }
@@ -421,9 +422,10 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
       resolveEmbeddingProvider = _ =>
         Right(
           EmbeddingProviderConfig(
-            apiKey = Secret("test-key"),
-            baseUrl = "http://localhost",
-            model = "test-model"
+            providerId = ProviderId("fixture"),
+            apiKey = Some(Secret("test-key")),
+            baseUrl = BaseUrl("http://localhost"),
+            model = ModelName("test-model")
           )
         )
     )
@@ -438,9 +440,10 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
       resolveEmbeddingProvider = _ =>
         Right(
           EmbeddingProviderConfig(
-            apiKey = Secret("test-key"),
-            baseUrl = "http://localhost",
-            model = "test-model"
+            providerId = ProviderId("fixture"),
+            apiKey = Some(Secret("test-key")),
+            baseUrl = BaseUrl("http://localhost"),
+            model = ModelName("test-model")
           )
         ),
       resolveRerankerConfig = () => Right(None)

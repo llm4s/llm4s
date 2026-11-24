@@ -45,11 +45,10 @@ import org.llm4s.types.Result
 def docsPipeline(client: LLMClient): Result[RAG] = for {
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
-  selected <- Llm4sConfig.embeddings()
-  (provider, embeddingConfig) = selected
+  embeddingConfig <- Llm4sConfig.embeddings()
   rag <- RAG
     .builder()
-    .withEmbeddings(provider)
+    .withEmbeddings(embeddingConfig.providerId.asString)
     .withPgVector()
     .withLLM(client)
     .build(_ => Right(embeddingConfig))

@@ -109,9 +109,8 @@ Scala users write: a named section per provider, and one section named as the de
 ```hocon
 # src/main/resources/application.conf
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
@@ -126,9 +125,8 @@ the shared credential for `openai`, so the section needs only `provider` and `mo
 
 ```hocon
 llm4s {
+  defaultProvider = "claude"
   providers {
-    provider = "claude"
-
     claude {                              # key from ANTHROPIC_API_KEY
       provider = "anthropic"
       model    = "claude-sonnet-5-5"

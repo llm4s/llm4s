@@ -107,7 +107,7 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
             "input_type" -> inputTypeFor(request.purpose)
           )
 
-          val url = s"${cfg.baseUrl.stripSuffix("/")}/embeddings"
+          val url = s"${cfg.baseUrl.asUrl.stripSuffix("/")}/embeddings"
           logger.debug(s"[VoyageAIEmbeddingProvider] POST $url model=$model inputs=${input.size}")
 
           // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
@@ -123,7 +123,7 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
               .currentApiKey()
               .flatMap(key =>
                 httpClient
-                  .post(url, headers(key.reveal), payload.render(), timeout = cfg.timeouts.requestOr(120.seconds))
+                  .post(url, headers(key.fold("")(_.reveal)), payload.render(), timeout = cfg.timeouts.requestOr(120.seconds))
                   .left
                   .map {
                     // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)

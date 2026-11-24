@@ -1,12 +1,11 @@
 package org.llm4s.config
 
 import org.llm4s.annotation.Stable
-import org.llm4s.config.ProvidersConfigModel.{ BaseUrl, NamedProviderConfig, ProviderId }
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, BaseUrl, ModelName, ProviderId }
 import org.llm4s.error.ValidationError
 import org.llm4s.http.HttpResponse.*
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.GeminiConfig
-import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName }
 import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
 

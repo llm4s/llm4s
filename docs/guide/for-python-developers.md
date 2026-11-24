@@ -432,9 +432,8 @@ Where Python reads `OPENAI_API_KEY` in `OpenAI()`, LLM4S reads a named provider 
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
   providers {
-    provider = "openai-main"
-
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"

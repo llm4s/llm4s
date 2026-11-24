@@ -1,7 +1,8 @@
 package org.llm4s.testkit
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.config.{ Llm4sConfig, ReferenceConfig }
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
@@ -45,7 +46,7 @@ object ProviderTestConfig:
   def loadSection(name: String, hocon: String, env: Map[String, String] = Map.empty)(using
     ProviderRegistry
   ): Result[NamedProviderConfig] =
-    Llm4sConfig.providerSection(ReferenceConfig.withEnv(hocon, env), name)
+    Llm4sConfig.providerSection(ReferenceConfig.withEnv(hocon, env), ProviderName(name))
 
   /**
    * The `ProviderConfig` your descriptor builds from `llm4s.providers.<name>` - the full path
@@ -58,7 +59,7 @@ object ProviderTestConfig:
   def loadProvider(name: String, hocon: String, env: Map[String, String] = Map.empty)(using
     ProviderRegistry
   ): Result[ProviderConfig] =
-    Llm4sConfig.provider(ReferenceConfig.withEnv(hocon, env), name)
+    Llm4sConfig.provider(ReferenceConfig.withEnv(hocon, env), ProviderName(name))
 
   /**
    * The embedding provider `llm4s.embeddings.model` selects, and the config its descriptor
@@ -67,9 +68,9 @@ object ProviderTestConfig:
    *
    * @param hocon the application config; must set `llm4s.embeddings.model = "<provider>/<model>"`
    * @param env   the environment `${?VAR}` substitutions see
-   * @return the canonical provider id and its config
+   * @return the config, its `providerId` the canonical provider id
    */
   def loadEmbeddings(hocon: String, env: Map[String, String] = Map.empty)(using
     ProviderRegistry
-  ): Result[(String, EmbeddingProviderConfig)] =
+  ): Result[EmbeddingProviderConfig] =
     Llm4sConfig.embeddings(ReferenceConfig.withEnv(hocon, env))

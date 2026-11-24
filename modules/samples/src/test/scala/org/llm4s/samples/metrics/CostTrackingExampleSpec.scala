@@ -1,5 +1,6 @@
 package org.llm4s.samples.metrics
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.ProviderConfig
@@ -110,8 +111,8 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
 
     val outcome = Try {
       val hocon =
-        s"""llm4s.providers {
-           |  provider = "stub"
+        s"""llm4s.defaultProvider = "stub"
+           |llm4s.providers {
            |  stub {
            |    provider = "openai-compatible"
            |    baseUrl  = "http://localhost:${server.getAddress.getPort}/v1"
@@ -120,7 +121,7 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
            |  }
            |}""".stripMargin
       val config =
-        Llm4sConfig.provider(ConfigSource.string(hocon), "stub").fold(error => fail(error.formatted), identity)
+        Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("stub")).fold(error => fail(error.formatted), identity)
       test(config, provider)
     }
     server.stop(0)

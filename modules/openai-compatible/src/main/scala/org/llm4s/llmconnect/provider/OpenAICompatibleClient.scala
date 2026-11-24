@@ -1063,7 +1063,7 @@ object OpenAICompatibleClient {
     Settings(
       providerName = OpenAICompatibleConfig.ProviderIdName,
       displayName = "OpenAI-compatible",
-      model = config.model,
+      model = config.model.asString,
       baseUrl = config.baseUrl,
       credential = config.tokenExchange match {
         case Some(exchange) => Credential.Exchange(exchange)

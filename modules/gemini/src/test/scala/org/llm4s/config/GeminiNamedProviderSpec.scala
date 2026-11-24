@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.llmconnect.config.{ GeminiConfig, VertexAIConfig }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -209,9 +209,9 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           |}
           |""".stripMargin
 
-      Llm4sConfig.provider(ConfigSource.string(hocon), "gemini-main") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("gemini-main")) match
         case Right(gemini: GeminiConfig) =>
-          gemini.model shouldBe "gemini-2.0-flash"
+          gemini.model.asString shouldBe "gemini-2.0-flash"
           gemini.apiKey.reveal shouldBe "google-key"
           gemini.baseUrl shouldBe GeminiConfig.DEFAULT_BASE_URL
         case other =>
@@ -220,7 +220,7 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
 
     "read googleSearch from gemini and vertexai sections, off unless set (#1216)" in {
       def load(name: String, body: String) =
-        Llm4sConfig.provider(ConfigSource.string(s"llm4s.providers.$name { $body }"), name)
+        Llm4sConfig.provider(ConfigSource.string(s"llm4s.providers.$name { $body }"), ProviderName(name))
       val gemini = """provider = "gemini", model = "gemini-2.5-flash", apiKey = "k""""
       val vertex = """provider = "vertexai", model = "gemini-2.5-flash", project = "p""""
 
@@ -239,7 +239,7 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
 
     "refuse a googleSearch value that is not true or false" in {
       val hocon = """llm4s.providers.g-bad { provider = "gemini", model = "m", apiKey = "k", googleSearch = "yes" }"""
-      Llm4sConfig.provider(ConfigSource.string(hocon), "g-bad").left.map(_.message) match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("g-bad")).left.map(_.message) match
         case Left(message) => message should include("googleSearch must be true or false, got 'yes'")
         case Right(cfg)    => fail(s"expected an error, got $cfg")
     }
@@ -263,13 +263,13 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           |""".stripMargin
 
       val cfg =
-        Llm4sConfig.provider(ConfigSource.string(hocon), "vertex-main").fold(err => fail(err.toString), identity)
+        Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("vertex-main")).fold(err => fail(err.toString), identity)
 
       cfg match
         case vertex: VertexAIConfig =>
           vertex.projectId shouldBe "my-gcp-project"
           vertex.location shouldBe "europe-west4"
-          vertex.model shouldBe "gemini-2.0-flash"
+          vertex.model.asString shouldBe "gemini-2.0-flash"
           vertex.providerId shouldBe ProviderId("vertexai")
           vertex.endpointUrl shouldBe Some("https://europe-west4-aiplatform.googleapis.com/v1")
         case other =>
@@ -287,7 +287,7 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           |}
           |""".stripMargin
 
-      Llm4sConfig.provider(ConfigSource.string(hocon), "vertex-legacy") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("vertex-legacy")) match
         case Left(err) => err.message should include("- project: the GCP project ID")
         case other     => fail(s"Expected a missing-project failure, got $other")
     }
@@ -306,7 +306,7 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           |}
           |""".stripMargin
 
-      Llm4sConfig.provider(ConfigSource.string(hocon), "vertex-default") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("vertex-default")) match
         case Right(vertex: VertexAIConfig) =>
           vertex.location shouldBe VertexAIConfig.DEFAULT_LOCATION
           vertex.credentialFilePath shouldBe None

@@ -34,9 +34,8 @@ Therefore, there is no `llm4s.credentials.bedrock` block.
 A minimal section needs only `provider`, `model`, and `region`:
 
 ```hocon
+llm4s.defaultProvider = "claude-bedrock"      # the default section
 llm4s.providers {
-  provider = "claude-bedrock"      # the default section
-
   claude-bedrock {
     provider = "bedrock"
     model    = "anthropic.claude-3-5-sonnet-20241022-v2:0"
@@ -97,9 +96,10 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val reply = for {
-  providerConfig  <- Llm4sConfig.provider("claude-bedrock")
+  providerConfig  <- Llm4sConfig.provider(ProviderName("claude-bedrock"))
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client     <- LLMConnect.getClient(providerConfig)

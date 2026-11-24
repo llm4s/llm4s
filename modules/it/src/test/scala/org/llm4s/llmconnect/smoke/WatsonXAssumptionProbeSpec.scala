@@ -187,7 +187,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
 
     /** The body every request starts from; `extra` adds or overrides fields. */
     def body(messages: ujson.Value, extra: (String, ujson.Value)*): ujson.Obj = {
-      val b = ujson.Obj("model_id" -> cfg.model, "messages" -> messages)
+      val b = ujson.Obj("model_id" -> cfg.model.asString, "messages" -> messages)
       cfg.spaceId match {
         case Some(space) => b("space_id") = space
         case None        => b("project_id") = cfg.projectId

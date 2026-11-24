@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig }
 import org.llm4s.llmconnect.provider.{ AzureProvider, OpenAIProvider, RequestyProvider }
@@ -133,8 +133,8 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "openai-main"
           |  providers {
-          |    provider = "openai-main"
           |    openai-main {
           |      provider = "openai"
           |      model = "gpt-4o-mini"
@@ -146,7 +146,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
 
       Llm4sConfig.defaultProvider(ConfigSource.string(hocon)) match
         case Right(openai: OpenAIConfig) =>
-          openai.model shouldBe "gpt-4o-mini"
+          openai.model.asString shouldBe "gpt-4o-mini"
           openai.apiKey.reveal shouldBe "named-openai-key"
           openai.baseUrl shouldBe OpenAIProvider.DEFAULT_BASE_URL
         case other =>
@@ -167,7 +167,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           |}
           |""".stripMargin
 
-      Llm4sConfig.provider(ConfigSource.string(hocon), "requesty-main") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("requesty-main")) match
         case Right(requesty: OpenAIConfig) =>
           requesty.baseUrl shouldBe RequestyProvider.DEFAULT_BASE_URL
           requesty.providerId shouldBe ProviderId("requesty")
@@ -200,7 +200,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           |""".stripMargin
 
       def organization(name: String) =
-        Llm4sConfig.provider(ConfigSource.string(hocon), name) match
+        Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName(name)) match
           case Right(openai: OpenAIConfig) => openai.organization
           case other                       => fail(s"Expected OpenAIConfig, got $other")
 
@@ -219,7 +219,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           |}
           |""".stripMargin
 
-      Llm4sConfig.provider(ConfigSource.string(hocon), "azure-main") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("azure-main")) match
         case Left(err) =>
           err.message should include("Provider 'azure-main' (provider = azure) is missing required fields")
           err.message should include("- endpoint:")
@@ -242,7 +242,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           |}
           |""".stripMargin
 
-      Llm4sConfig.provider(ConfigSource.string(hocon), "azure-main") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("azure-main")) match
         case Right(azure: AzureConfig) =>
           azure.endpoint shouldBe "https://my-resource.openai.azure.com"
           azure.apiVersion shouldBe AzureConfig.DEFAULT_API_VERSION
@@ -254,8 +254,8 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "openai-main"
           |  providers {
-          |    provider = "openai-main"
           |    openai-main {
           |      provider = "openai"
           |      model = "gpt-4o-mini"
@@ -274,7 +274,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
 
       val httpClient = new MockHttpClient(HttpResponse(200, responseBody, Map.empty))
 
-      Llm4sConfig.listModels("openai-main", ConfigSource.string(hocon), httpClient) match
+      Llm4sConfig.listModels(ProviderName("openai-main"), ConfigSource.string(hocon), httpClient) match
         case Right(models) =>
           models.map(_.name.asString) shouldBe List("gpt-4o-mini")
           models.map(_.provider) shouldBe List(ProviderId("openai"))

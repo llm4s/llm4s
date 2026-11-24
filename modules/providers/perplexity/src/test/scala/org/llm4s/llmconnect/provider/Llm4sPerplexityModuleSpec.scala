@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.PerplexityConfig
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
@@ -71,7 +71,7 @@ class Llm4sPerplexityModuleSpec extends AnyWordSpec with Matchers with ProviderM
       ) match
         case Right(config: PerplexityConfig) =>
           config.apiKey.reveal shouldBe "env-key"
-          config.model shouldBe "perplexity/sonar"
+          config.model.asString shouldBe "perplexity/sonar"
           config.baseUrl shouldBe PerplexityConfig.DEFAULT_BASE_URL
           config.agentUrl shouldBe "https://api.perplexity.ai/v1/agent"
           config.webSearch shouldBe true
@@ -147,7 +147,7 @@ class Llm4sPerplexityModuleSpec extends AnyWordSpec with Matchers with ProviderM
 
     "send the key its ApiKeyProvider holds at each request" in {
       assertHonoursApiKeyProvider(sendJsonResponse(_, 200, response(s"[${textMessage("ok")}]"))) { (baseUrl, keys) =>
-        new PerplexityClient(config(baseUrl = baseUrl).withApiKeyProvider(keys))
+        new PerplexityClient(config(baseUrl = baseUrl).withApiKeyProvider(Some(keys)))
       }
     }
 

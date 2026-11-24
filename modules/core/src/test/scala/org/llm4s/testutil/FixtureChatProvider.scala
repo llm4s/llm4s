@@ -1,6 +1,6 @@
 package org.llm4s.testutil
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ DiscoveredModel, ProviderModelLister }
 import org.llm4s.error.ValidationError
 import org.llm4s.http.HttpNetworkSettings
@@ -16,7 +16,7 @@ import org.llm4s.llmconnect.spi.{
   ProviderDescriptor
 }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 import java.time.Instant
 
@@ -67,7 +67,7 @@ object FixtureChatProvider extends ProviderDescriptor:
  */
 final case class FixtureChatConfig(
   apiKey: String,
-  model: String,
+  modelName: String,
   baseUrl: String = FixtureChatProvider.DefaultBaseUrl,
   contextWindow: Int = 8192,
   reserveCompletion: Int = 1024,
@@ -76,12 +76,13 @@ final case class FixtureChatConfig(
   override val apiKeyProvider: Option[ApiKeyProvider] = None
 ) extends ProviderConfig:
   override val providerId: ProviderId                                       = FixtureChatProvider.id
-  override def endpointUrl: Option[String]                                  = Some(baseUrl)
-  override def withModel(model: String): FixtureChatConfig                  = copy(model = model)
+  override def model: ModelName                                             = ModelName(modelName)
+  override def endpointUrl: Option[BaseUrl]                                 = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): FixtureChatConfig               = copy(modelName = model.asString)
   override def withTimeouts(timeouts: ProviderTimeouts): FixtureChatConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): FixtureChatConfig = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): FixtureChatConfig =
-    copy(apiKeyProvider = Some(provider))
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[FixtureChatConfig] =
+    Right(copy(apiKeyProvider = Some(provider)))
 
 object FixtureChatConfig:
 
@@ -101,7 +102,7 @@ final case class FixtureChatClient(config: FixtureChatConfig) extends LLMClient:
         id = "fixturechat-completion",
         created = Instant.EPOCH,
         content = FixtureChatClient.Reply,
-        model = config.model,
+        model = config.model.asString,
         message = AssistantMessage(FixtureChatClient.Reply)
       )
     )

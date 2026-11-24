@@ -10,6 +10,6 @@ class ConfigReaderTest extends AnyFlatSpec with Matchers {
       .defaultProvider()
       .fold(err => fail(err.toString), identity)
 
-    cfg.model should not be empty
+    cfg.model.asString should not be empty
   }
 }

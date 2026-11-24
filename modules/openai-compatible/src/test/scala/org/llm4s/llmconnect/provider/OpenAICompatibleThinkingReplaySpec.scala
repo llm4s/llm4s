@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ZaiConfig }
 import org.llm4s.llmconnect.model._
@@ -21,7 +22,7 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   private def client(dialect: OpenAICompatibleDialect) =
     new OpenAICompatibleClient(
-      OpenAICompatibleClient.settings(OpenAICompatibleConfig(model = "m", baseUrl = "http://localhost:1/v1")),
+      OpenAICompatibleClient.settings(OpenAICompatibleConfig(model = ModelName("m"), baseUrl = "http://localhost:1/v1")),
       dialect
     )
 
@@ -75,7 +76,7 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
       val zai = new ZaiClient(
         ZaiConfig(
           apiKey = Secret("test-key"),
-          model = "glm-4.7",
+          model = ModelName("glm-4.7"),
           baseUrl = baseUrl,
           contextWindow = 128000,
           reserveCompletion = 4096

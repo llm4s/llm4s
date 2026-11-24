@@ -34,9 +34,16 @@ Cohere embeds queries and documents differently. The provider maps a request's `
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
 import org.llm4s.llmconnect.provider.CohereEmbeddingProvider
+import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 
 val provider = CohereEmbeddingProvider.fromConfig(
-  EmbeddingProviderConfig(baseUrl = "https://api.cohere.com", model = "embed-english-v3.0", apiKey = sys.env("COHERE_API_KEY"))
+  EmbeddingProviderConfig(
+    providerId = ProviderId("cohere"),
+    baseUrl = BaseUrl("https://api.cohere.com"),
+    model = ModelName("embed-english-v3.0"),
+    apiKey = Some(Secret(sys.env("COHERE_API_KEY")))
+  )
 )
 val model = EmbeddingModelConfig("embed-english-v3.0", 1024)
 

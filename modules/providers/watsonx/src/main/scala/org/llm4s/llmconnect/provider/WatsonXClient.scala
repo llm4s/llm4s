@@ -161,7 +161,7 @@ class WatsonXClient(
 
   protected def clientDescription: String = s"watsonx client for model ${config.model}"
   protected def providerName: String      = "watsonx"
-  protected def modelName: String         = config.model
+  protected def modelName: String         = config.model.asString
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else [[WatsonXClient.DefaultRequestTimeout]]. */
   protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(DefaultRequestTimeout)
@@ -288,8 +288,8 @@ class WatsonXClient(
 
   private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
     val adjustments =
-      WatsonXClient.reasoningAdjustments(config.model, options) ++ UnmappedOptions.serviceTier("watsonx", options)
-    adjustmentLog.record(config.model, adjustments)
+      WatsonXClient.reasoningAdjustments(config.model.asString, options) ++ UnmappedOptions.serviceTier("watsonx", options)
+    adjustmentLog.record(config.model.asString, adjustments)
     adjustments
   }
 
@@ -366,7 +366,7 @@ class WatsonXClient(
     token: String,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    val accumulator                   = StreamingAccumulator(config.model)
+    val accumulator                   = StreamingAccumulator(config.model.asString)
     val calls                         = mutable.LinkedHashMap.empty[Int, PartialCall]
     var promptTokens, generatedTokens = 0
     var terminal: Option[String]      = None
@@ -534,7 +534,7 @@ class WatsonXClient(
       Left(ServiceError(502, providerName, s"generation ended abnormally with finish_reason '$reason'"))
     else Right(())
 
-  private def estimateCost(usage: TokenUsage): Option[Double] = CostEstimator.estimate(config.model, usage)
+  private def estimateCost(usage: TokenUsage): Option[Double] = CostEstimator.estimate(config.model.asString, usage)
 
   private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): Result[ujson.Obj] =
     PartEncoding
@@ -543,7 +543,7 @@ class WatsonXClient(
 
   private def requestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val body = ujson.Obj(
-      "model_id"    -> config.model,
+      "model_id"    -> config.model.asString,
       "messages"    -> encodeMessages(conversation),
       "temperature" -> options.temperature
     )
@@ -563,7 +563,7 @@ class WatsonXClient(
     // see "Reasoning" in the class Scaladoc
     val off = options.thinking.contains(Thinking.Off)
     // what this leaves out is reported on the Completion (reasoningAdjustments), and logged once per model
-    if (takesReasoningEffort(config.model)) {
+    if (takesReasoningEffort(config.model.asString)) {
       if (off) body("reasoning_effort") = "low"
       else options.reasoning.foreach(effort => body("reasoning_effort") = reasoningEffortValue(effort))
     }
@@ -630,7 +630,7 @@ class WatsonXClient(
               content = text,
               toolCalls = toolCalls,
               usage = usage,
-              model = config.model,
+              model = config.model.asString,
               message = AssistantMessage(Some(text).filter(_.nonEmpty), toolCalls).withThinking(thinking),
               estimatedCost = usage.flatMap(estimateCost),
               finishReason = toFinishReason(reason)
@@ -648,7 +648,7 @@ class WatsonXClient(
     ProviderExchangeRecorder.record(
       exchangeLogging = exchangeLogging,
       provider = providerName,
-      model = Some(config.model),
+      model = Some(config.model.asString),
       startedAt = startedAt,
       requestBody = requestBody,
       responseBody = Option(responseBody).filter(_.nonEmpty),

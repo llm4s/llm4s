@@ -172,7 +172,7 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
   ): EmbeddingProvider =
     new EmbeddingProvider {
       private val logger = LoggerFactory.getLogger(getClass)
-      private val url    = endpoint(cfg.baseUrl)
+      private val url    = endpoint(cfg.baseUrl.asUrl)
 
       override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
         CancelledError.attempt("cohere.embed")(embedBatches(request))
@@ -231,7 +231,7 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
             .currentApiKey()
             .flatMap(key =>
               httpClient
-                .post(url, headers(key.reveal), payload.render(), timeout = cfg.timeouts.requestOr(120.seconds))
+                .post(url, headers(key.fold("")(_.reveal)), payload.render(), timeout = cfg.timeouts.requestOr(120.seconds))
                 .left
                 .map {
                   // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)

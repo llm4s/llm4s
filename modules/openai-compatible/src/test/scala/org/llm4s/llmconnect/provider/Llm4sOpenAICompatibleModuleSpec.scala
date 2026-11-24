@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.OpenAICompatibleConfigKeys
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.config.ContextWindowResolver
 import org.llm4s.llmconnect.spi.{ ProviderBuildContext, ProviderConfigContext, ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
@@ -149,7 +149,8 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
                 section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))),
                 ProviderConfigContext.of("rotation")
               )
-              .flatMap(config => descriptor.build(config.withApiKeyProvider(keys), ProviderBuildContext.of()))
+              .flatMap(_.withApiKeyProvider(keys))
+              .flatMap(descriptor.build(_, ProviderBuildContext.of()))
               .fold(error => fail(error.message), identity)
           }
         }

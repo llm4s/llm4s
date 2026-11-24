@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId, ProviderName }
+
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig, OllamaConfig, ProviderTimeouts }
@@ -28,7 +30,7 @@ final class OllamaConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
   private def hello: Conversation = Conversation(Seq(UserMessage("hello")))
 
   private def config(baseUrl: String, timeouts: ProviderTimeouts): OllamaConfig =
-    OllamaConfig(model = "llama3.1", baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512)
+    OllamaConfig(model = ModelName("llama3.1"), baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512)
       .withTimeouts(timeouts)
 
   // ---- HOCON -> descriptor -> config ----
@@ -45,7 +47,7 @@ final class OllamaConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
              |}
              |""".stripMargin
         ),
-        "main"
+        ProviderName("main")
       )
       .value
 
@@ -113,9 +115,10 @@ final class OllamaConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
     LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
       val provider = OllamaEmbeddingProvider.fromConfig(
         EmbeddingProviderConfig(
-          baseUrl = baseUrl,
-          model = "nomic-embed-text",
-          apiKey = Secret("ollama"),
+          providerId = ProviderId("ollama"),
+          baseUrl = BaseUrl(baseUrl),
+          model = ModelName("nomic-embed-text"),
+          apiKey = Some(Secret("ollama")),
           timeouts = ProviderTimeouts(request = Some(300.millis))
         )
       )

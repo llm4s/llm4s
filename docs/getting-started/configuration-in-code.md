@@ -39,8 +39,8 @@ in any of the five ways below, and they produce the same client.
 The default. The section and the code that loads it:
 
 ```hocon
+llm4s.defaultProvider = "openai-main"
 llm4s.providers {
-  provider = "openai-main"
   openai-main { provider = "openai", model = "gpt-4o-mini" }   # the key: OPENAI_API_KEY
 }
 ```
@@ -74,8 +74,8 @@ import org.llm4s.types.Result
 
 // Play: configuration.underlying. Pekko: system.settings.config. A test: a string per case.
 val appConfig: Config = ConfigFactory.parseString(
-  """llm4s.providers {
-    |  provider = "openai-main"
+  """llm4s.defaultProvider = "openai-main"
+    |llm4s.providers {
     |  openai-main { provider = "openai", model = "gpt-4o-mini", apiKey = "sk-tenant-a" }
     |}""".stripMargin
 )
@@ -150,21 +150,26 @@ Each config class has a `DEFAULT_BASE_URL` where the vendor has one. Each module
 ### Embeddings
 
 An embedding provider takes one `EmbeddingProviderConfig` for every vendor (`openai`, `voyage`,
-`jina`, `cohere`, `ollama`); name its arguments, since `baseUrl` and `model` are both strings:
+`jina`, `cohere`, `ollama`), named by its `providerId`; a provider that takes no key leaves `apiKey` out:
 
 ```scala
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 val embedder: Result[EmbeddingClient] = for {
   registry <- ModelRegistryService.default()
   given ModelRegistryService = registry
   client <- EmbeddingClient.from(
-    "voyage",
-    EmbeddingProviderConfig(baseUrl = "https://api.voyageai.com", model = "voyage-3", apiKey = Secret("pa-..."))
+    EmbeddingProviderConfig(
+      providerId = ProviderId("voyage"),
+      baseUrl = BaseUrl("https://api.voyageai.com"),
+      model = ModelName("voyage-3"),
+      apiKey = Some(Secret("pa-..."))
+    )
   )
 } yield client
 ```

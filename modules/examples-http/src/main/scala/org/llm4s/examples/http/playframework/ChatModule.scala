@@ -35,7 +35,7 @@ object ChatModule {
 
   /**
    * The client the app serves: the fake one when `examples.chat.fake` is set (`--fake`), else the provider section
-   * `llm4s.providers.provider` names. That `llm4s` block is read from Play's own configuration (`Llm4sConfig.from`), so
+   * `llm4s.defaultProvider` names. That `llm4s` block is read from Play's own configuration (`Llm4sConfig.from`), so
    * it lives in Play's `application.conf`; JVM system properties still override it, and each llm4s module's
    * `reference.conf` sits beneath it.
    */

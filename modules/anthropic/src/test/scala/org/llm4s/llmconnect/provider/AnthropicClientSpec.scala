@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.scalatest.funsuite.AnyFunSuite
@@ -20,7 +21,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
 
   private val testConfig = AnthropicConfig(
     apiKey = Secret("test-key"),
-    model = "claude-3-5-sonnet-latest",
+    model = ModelName("claude-3-5-sonnet-latest"),
     baseUrl = "https://api.anthropic.com",
     contextWindow = 200000,
     reserveCompletion = 4096

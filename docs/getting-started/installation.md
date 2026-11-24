@@ -931,9 +931,8 @@ section with `${?VAR}`:
 ```hocon
 # src/main/resources/application.conf
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
@@ -1055,14 +1054,14 @@ Response: LLM4S is working!
    (`llm4s-openai`) is a dependency - it is what binds the variable
 2. If the section sets its own `apiKey = ${?SOME_VAR}`, check that variable too
 3. Check the error names the section you meant to load - only that section is validated, so
-   if it names another, `llm4s.providers.provider` points somewhere you did not expect
+   if it names another, `llm4s.defaultProvider` points somewhere you did not expect
 
 ### "Configured provider '...' was not found" or an unknown provider id
 
-**Problem**: `llm4s.providers.provider` names a section that does not exist, or a section's
+**Problem**: `llm4s.defaultProvider` names a section that does not exist, or a section's
 `provider = "..."` id is not registered.
 
-**Solution**: make `llm4s.providers.provider` match a section name exactly, and add the module
+**Solution**: make `llm4s.defaultProvider` match a section name exactly, and add the module
 for the provider id (for example `llm4s-openai` for `provider = "openai"`; see
 [Optional Dependencies](#optional-dependencies)). Model names go in the section's `model`
 without a provider prefix: `model = "gpt-4o"` for OpenAI, not `openai/gpt-4o`.

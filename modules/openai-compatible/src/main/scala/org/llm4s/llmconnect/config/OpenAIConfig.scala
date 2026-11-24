@@ -6,7 +6,7 @@ import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ ApiKeyProvider, TokenExchange }
 import org.llm4s.llmconnect.spi.ProviderConfigKey
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -49,7 +49,7 @@ import org.llm4s.types.Result
 @Stable
 final case class OpenAIConfig private (
   apiKey: Secret,
-  model: String,
+  model: ModelName,
   organization: Option[String],
   baseUrl: String,
   contextWindow: Int,
@@ -77,11 +77,11 @@ final case class OpenAIConfig private (
       if baseUrl.contains("openrouter.ai") then ProviderId("openrouter") else ProviderId("openai")
     )
 
-  override def endpointUrl: Option[String]                                = Some(baseUrl)
-  override def withModel(model: String): OpenAIConfig                     = copy(model = model)
+  override def endpointUrl: Option[BaseUrl]                                = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): OpenAIConfig                     = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): OpenAIConfig     = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): OpenAIConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): OpenAIConfig = copy(apiKeyProvider = Some(provider))
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[OpenAIConfig] = Right(copy(apiKeyProvider = Some(provider)))
   def withApiKeyProvider(provider: Option[ApiKeyProvider]): OpenAIConfig  = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): OpenAIConfig                     = copy(apiKey = apiKey)
@@ -116,7 +116,7 @@ object OpenAIConfig {
    */
   def apply(
     apiKey: Secret,
-    model: String,
+    model: ModelName,
     organization: Option[String],
     baseUrl: String,
     contextWindow: Int,
@@ -145,8 +145,8 @@ object OpenAIConfig {
    * (`gpt-4o` is 128k, an unknown model 8192); set them, and the rest, with the `with*` setters,
    * or use [[fromValues]] to consult the bundled model catalogue.
    */
-  def apply(apiKey: Secret, model: String): OpenAIConfig = {
-    val (cw, rc) = openAIFallback(model)
+  def apply(apiKey: Secret, model: ModelName): OpenAIConfig = {
+    val ContextLimits(cw, rc) = openAIFallback(model.asString)
     apply(apiKey, model, None, DEFAULT_BASE_URL, cw, rc)
   }
 
@@ -163,14 +163,14 @@ object OpenAIConfig {
   val OrganizationConfigKey: ProviderConfigKey =
     ProviderConfigKey.optional(OrganizationKey, "the OpenAI organization ID, sent as the OpenAI-Organization header")
 
-  private def openAIFallback(modelName: String): (Int, Int) =
+  private def openAIFallback(modelName: String): ContextLimits =
     modelName match {
-      case name if name.contains("gpt-4o")        => (128000, standardReserve)
-      case name if name.contains("gpt-4-turbo")   => (128000, standardReserve)
-      case name if name.contains("gpt-4")         => (8192, standardReserve)
-      case name if name.contains("gpt-3.5-turbo") => (16384, standardReserve)
-      case name if name.contains("o1-")           => (128000, standardReserve)
-      case _                                      => (8192, standardReserve)
+      case name if name.contains("gpt-4o")        => ContextLimits(128000, standardReserve)
+      case name if name.contains("gpt-4-turbo")   => ContextLimits(128000, standardReserve)
+      case name if name.contains("gpt-4")         => ContextLimits(8192, standardReserve)
+      case name if name.contains("gpt-3.5-turbo") => ContextLimits(16384, standardReserve)
+      case name if name.contains("o1-")           => ContextLimits(128000, standardReserve)
+      case _                                      => ContextLimits(8192, standardReserve)
     }
 
   /**
@@ -267,7 +267,7 @@ object OpenAIConfig {
       _ <- if (workloadIdentity.isDefined) Right(()) else ProviderConfig.nonEmpty("OpenAI", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("OpenAI", "baseUrl", baseUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("openai"),
         modelName = modelName,
         defaultContextWindow = 8192,
@@ -276,7 +276,7 @@ object OpenAIConfig {
       )
       OpenAIConfig(
         apiKey = apiKey,
-        model = modelName,
+        model = ModelName(modelName),
         organization = organization,
         baseUrl = baseUrl,
         contextWindow = cw,

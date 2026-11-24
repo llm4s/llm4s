@@ -1,7 +1,8 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProviderModelListers
-import org.llm4s.config.ProvidersConfigModel.{ ApiKey, NamedProviderConfig, ProviderId }
+import org.llm4s.config.NamedProviderConfig
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName, ProviderId }
 import org.llm4s.error.{ ServiceError, ValidationError }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
@@ -9,7 +10,6 @@ import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer._
 import org.llm4s.testutil.SmallStack
-import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -38,7 +38,7 @@ class OpenAICompatibleDeepBodySpec extends AnyFlatSpec with Matchers {
 
   private def client(baseUrl: String) =
     new OpenAICompatibleClient(
-      OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", baseUrl, None)),
+      OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), baseUrl, None)),
       OpenAICompatibleDialect.Standard
     )
 

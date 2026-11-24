@@ -1,12 +1,12 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.config.JinaConfigKeys
 import org.llm4s.llmconnect.config.ModelDimensionRegistry
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.{ LocalProviderTestServer, ProviderModuleChecks, ProviderTestConfig }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -35,17 +35,17 @@ class Llm4sJinaModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
 
     "bind JINA_API_KEY to llm4s.credentials.jina.apiKey" in {
       JinaEmbeddingProvider.configSpec.apiKeyEnv shouldBe Seq(JinaConfigKeys.JINA_API_KEY)
-      assertEmbeddingCredentialBindings(JinaEmbeddingProvider, "jina-embeddings-v3")
+      assertEmbeddingCredentialBindings(JinaEmbeddingProvider, ModelName("jina-embeddings-v3"))
     }
 
     "build a Jina embedding provider from the selected block, as an application does" in {
-      val (_, config) = ProviderTestConfig
+      val config = ProviderTestConfig
         .loadEmbeddings("""llm4s.embeddings.model = "jina/jina-embeddings-v3"""", Map("JINA_API_KEY" -> "jina-test"))
         .fold(error => fail(error.message), identity)
 
-      config.model shouldBe "jina-embeddings-v3"
-      config.apiKey.reveal shouldBe "jina-test"
-      config.baseUrl shouldBe "https://api.jina.ai/v1"
+      config.model.asString shouldBe "jina-embeddings-v3"
+      config.apiKey.map(_.reveal) shouldBe Some("jina-test")
+      config.baseUrl.asUrl shouldBe "https://api.jina.ai/v1"
       assertBuildsEmbeddingProvider(JinaEmbeddingProvider, config)
     }
 
@@ -59,14 +59,14 @@ class Llm4sJinaModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
     }
 
     "honour JINA_EMBEDDING_BASE_URL" in {
-      val (_, config) = ProviderTestConfig
+      val config = ProviderTestConfig
         .loadEmbeddings(
           """llm4s.embeddings.model = "jina/jina-embeddings-v3"""",
           Map("JINA_API_KEY" -> "k", "JINA_EMBEDDING_BASE_URL" -> "http://proxy.local/v1")
         )
         .fold(error => fail(error.message), identity)
 
-      config.baseUrl shouldBe "http://proxy.local/v1"
+      config.baseUrl.asUrl shouldBe "http://proxy.local/v1"
     }
   }
 
@@ -84,7 +84,7 @@ class Llm4sJinaModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
         val config =
-          EmbeddingProviderConfig(baseUrl = baseUrl, model = "jina-embeddings-v3", apiKey = Secret("test-key"))
+          EmbeddingProviderConfig(providerId = ProviderId("jina"), baseUrl = BaseUrl(baseUrl), model = ModelName("jina-embeddings-v3"), apiKey = Some(Secret("test-key")))
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(JinaEmbeddingProvider, config))
       }
     }
@@ -92,7 +92,7 @@ class Llm4sJinaModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
     "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
       assertEmbeddingUsesSuppliedHttpClient(
         JinaEmbeddingProvider,
-        EmbeddingProviderConfig(baseUrl = "http://localhost:1", model = "test-model", apiKey = Secret("test-key"))
+        EmbeddingProviderConfig(providerId = ProviderId("jina"), baseUrl = BaseUrl("http://localhost:1"), model = ModelName("test-model"), apiKey = Some(Secret("test-key")))
       )
     }
 
@@ -101,8 +101,8 @@ class Llm4sJinaModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
         LocalProviderTestServer.sendJsonResponse(_, 200, """{"data":[{"embedding":[0.1,0.2]}]}""")
       ) { (baseUrl, keys) =>
         val config =
-          EmbeddingProviderConfig(baseUrl = baseUrl, model = "jina-embeddings-v3", apiKey = Secret("test-key"))
-        assertBuildsEmbeddingProvider(JinaEmbeddingProvider, config.withApiKeyProvider(keys))
+          EmbeddingProviderConfig(providerId = ProviderId("jina"), baseUrl = BaseUrl(baseUrl), model = ModelName("jina-embeddings-v3"), apiKey = Some(Secret("test-key")))
+        assertBuildsEmbeddingProvider(JinaEmbeddingProvider, config.withApiKeyProvider(Some(keys)))
       }
     }
   }

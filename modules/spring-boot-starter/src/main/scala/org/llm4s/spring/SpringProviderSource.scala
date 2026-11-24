@@ -26,7 +26,7 @@ import scala.util.Try
  * The properties mirror the HOCON blocks of the same names, in Spring's usual spelling:
  *
  * {{{
- * llm4s.providers.provider=gemini-main          # the default section, as llm4s.providers.provider in HOCON
+ * llm4s.default-provider=gemini-main         # the default section, llm4s.defaultProvider in HOCON
  * llm4s.providers.gemini-main.provider=gemini
  * llm4s.providers.gemini-main.model=gemini-2.0-flash
  * llm4s.providers.gemini-main.api-key=${GOOGLE_API_KEY}
@@ -49,8 +49,11 @@ private[spring] object SpringProviderSource {
   final val HttpPrefix         = "llm4s.http"
   final val EmbeddingsPrefix   = "llm4s.embeddings"
   final val TracingPrefix      = "llm4s.tracing"
-  private val ProviderPrefixes = Seq(ProvidersPrefix, CredentialsPrefix, HttpPrefix)
-  private val DefaultPointer   = List("llm4s", "providers", "provider")
+  /** The property naming the default section, in Spring's spelling; `llm4s.defaultProvider` and `llm4s.default_provider` are read too. */
+  final val DefaultProviderKey = "llm4s.default-provider"
+  private val DefaultProviderKeys = Seq(DefaultProviderKey, "llm4s.defaultProvider", "llm4s.default_provider")
+  private val ProviderPrefixes    = Seq(ProvidersPrefix, CredentialsPrefix, HttpPrefix) ++ DefaultProviderKeys
+  private val DefaultPointer      = List("llm4s", "defaultProvider")
 
   /** The provider llm4s resolved from the properties, and the secret values to keep out of reports: those the properties held and the resolved config's own. */
   final case class Resolved(config: ProviderConfig, secrets: Seq[String])
@@ -159,7 +162,7 @@ private[spring] object SpringProviderSource {
   /** The HOCON path a property key stands for, or what is wrong with the key. */
   def hoconPath(key: String): Either[LLMError, List[String]] =
     key.split("\\.").toList match {
-      case "llm4s" :: "providers" :: "provider" :: Nil => Right(DefaultPointer)
+      case "llm4s" :: key :: Nil if camel(key) == "defaultProvider" => Right(DefaultPointer)
       case "llm4s" :: "providers" :: section :: first :: rest =>
         val name = camel(first)
         Right(List("llm4s", "providers", section, name) ++ (if (name == "headers") rest else rest.map(camel)))
@@ -171,7 +174,7 @@ private[spring] object SpringProviderSource {
         Left(
           ConfigurationError(
             s"$key is not a provider property: expected $ProvidersPrefix.<section>.<name>, " +
-              s"$ProvidersPrefix.provider, $CredentialsPrefix.<vendor>.<name> or $HttpPrefix.<block>.<name>",
+              s"$DefaultProviderKey, $CredentialsPrefix.<vendor>.<name> or $HttpPrefix.<block>.<name>",
             List(key)
           )
         )
@@ -183,7 +186,7 @@ private[spring] object SpringProviderSource {
         case source: EnumerablePropertySource[_] => source.getPropertyNames.toVector
         case _                                   => Vector.empty
       }
-      .filter(name => prefixes.exists(prefix => name.startsWith(prefix + ".")))
+      .filter(name => prefixes.exists(prefix => name == prefix || name.startsWith(prefix + ".")))
       .distinct
 
   /**

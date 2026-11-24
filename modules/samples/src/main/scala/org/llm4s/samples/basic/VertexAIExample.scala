@@ -11,8 +11,8 @@ import org.slf4j.LoggerFactory
  * Configure a named provider in `application.local.conf`:
  * {{{
  * llm4s {
+ *   defaultProvider = "vertexai-main"
  *   providers {
- *     provider = "vertexai-main"
  *
  *     vertexai-main {
  *       provider  = "vertexai"

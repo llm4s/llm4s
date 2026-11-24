@@ -53,8 +53,8 @@ class ConfigurationInCodeGuideSpec extends AnyWordSpec with Matchers with Either
 
     "build the same client from an explicit Config" in {
       val appConfig = ConfigFactory.parseString(
-        s"""llm4s.providers {
-           |  provider = "openai-main"
+        s"""llm4s.defaultProvider = "openai-main"
+           |llm4s.providers {
            |  openai-main { provider = "openai", model = "$model", apiKey = "sk-tenant-a" }
            |}""".stripMargin
       )

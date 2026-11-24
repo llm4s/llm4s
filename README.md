@@ -252,9 +252,8 @@ for a second account sets its own `apiKey = ${?OTHER_VAR}`. Nothing reads `LLM_M
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
@@ -485,7 +484,7 @@ llm4s exposes a single configuration flow with sensible precedence:
 Preferred typed entry points (PureConfig-backed via `Llm4sConfig`):
 
 - Provider / model:
-  - `Llm4sConfig.defaultProvider(): Result[ProviderConfig]` – the typed config of the section `llm4s.providers.provider` names.
+  - `Llm4sConfig.defaultProvider(): Result[ProviderConfig]` – the typed config of the section `llm4s.defaultProvider` names.
   - `Llm4sConfig.provider(name: String): Result[ProviderConfig]` – the typed config of the section `llm4s.providers.<name>`.
   - `LLMConnect.getClient(config: ProviderConfig): Result[LLMClient]` – builds a client from a typed config (with a `given ModelRegistryService` from `Llm4sConfig.modelRegistryService()`).
 - Tracing:
@@ -493,8 +492,8 @@ Preferred typed entry points (PureConfig-backed via `Llm4sConfig`):
   - `Tracing.fromSettings(settings: TracingSettings): Result[Tracing]` – builds the tracer the mode selects; a missing backend is an error.
   - `Tracing.create(settings: TracingSettings): Tracing` – the same, falling back to `NoOpTracing` with an error logged.
 - Embeddings:
-  - `Llm4sConfig.embeddings(): Result[(String, EmbeddingProviderConfig)]` – returns `(provider, config)` with validation.
-  - `EmbeddingClient.from(provider: String, cfg: EmbeddingProviderConfig): Result[EmbeddingClient]` – builds an embeddings client from typed config.
+  - `Llm4sConfig.embeddings(): Result[EmbeddingProviderConfig]` – the validated config; its `providerId` names the provider.
+  - `EmbeddingClient.from(cfg: EmbeddingProviderConfig): Result[EmbeddingClient]` – builds an embeddings client from typed config.
 
 Recommended usage patterns:
 
@@ -509,10 +508,10 @@ Recommended usage patterns:
 Use these loaders to convert flat keys and HOCON paths into typed, validated settings used by the code:
 
 - LLM provider and model selection
-  - Keys: `llm4s.providers.provider` (the default section's name) and `llm4s.providers.<name>.{provider, model, apiKey, baseUrl, ...}`.
+  - Keys: `llm4s.defaultProvider` (the default section's name) and `llm4s.providers.<name>.{provider, model, apiKey, baseUrl, ...}`.
     No environment variable is bound: bind your own with `${?VAR}` in `application.conf`
   - Type: `ProviderConfig` (with provider-specific subtypes)
-  - Loader: `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider("name")` + `LLMConnect.getClient(...)`
+  - Loader: `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider(ProviderName("name"))` + `LLMConnect.getClient(...)`
 
 - Tracing configuration
   - Keys: `llm4s.tracing.mode` | `TRACING_MODE` (`llm4s-core`); `llm4s.tracing.langfuse.*` | `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION` (bound by `llm4s-observability`); `llm4s.tracing.opentelemetry.*` | `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` (bound by `llm4s-observability-otel`)
@@ -551,7 +550,7 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
     `llm4s.credentials.<provider>.apiKey`, which the provider module binds to `OPENAI_API_KEY`,
     `ANTHROPIC_API_KEY` and so on; a section's own `apiKey` wins
   - Type: concrete `ProviderConfig` (e.g., `OpenAIConfig`, `AnthropicConfig`, `AzureConfig`, `OllamaConfig`, `GeminiConfig`, `DeepSeekConfig`, `CohereConfig`)
-  - Loader: `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider("name")`
+  - Loader: `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider(ProviderName("name"))`
 
 Tracing
 
@@ -567,7 +566,7 @@ Tracing
 Example (no application.conf required):
 
 ```
-sbt -Dllm4s.providers.provider=openai-main -Dllm4s.providers.openai-main.provider=openai -Dllm4s.providers.openai-main.model=gpt-4o -Dllm4s.providers.openai-main.apiKey=sk-... "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
+sbt -Dllm4s.defaultProvider=openai-main -Dllm4s.providers.openai-main.provider=openai -Dllm4s.providers.openai-main.model=gpt-4o -Dllm4s.providers.openai-main.apiKey=sk-... "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
 Or with an `openai-main` section (`provider = "openai"` and a `model`) in

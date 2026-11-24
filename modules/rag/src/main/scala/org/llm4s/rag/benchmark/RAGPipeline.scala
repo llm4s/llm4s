@@ -1,5 +1,6 @@
 package org.llm4s.rag.benchmark
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.chunking.{ ChunkerFactory, DocumentChunk, DocumentChunker }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -423,13 +424,14 @@ object RAGPipeline {
     resolveEmbeddingProvider(config.provider).flatMap { baseConfig =>
       val providerConfig = config match {
         case EmbeddingConfig.OpenAI(model, _) =>
-          baseConfig.withModel(model)
+          baseConfig.withModel(ModelName(model))
         case EmbeddingConfig.Voyage(model, _) =>
-          baseConfig.withModel(model)
+          baseConfig.withModel(ModelName(model))
         case EmbeddingConfig.Ollama(model, _, baseUrl) =>
-          baseConfig.withModel(model).withBaseUrl(baseUrl)
+          baseConfig.withModel(ModelName(model)).withBaseUrl(BaseUrl(baseUrl))
       }
 
-      EmbeddingClient.from(config.provider, providerConfig)
+      // The experiment names the provider; the resolver only supplies its settings.
+      EmbeddingClient.from(providerConfig.withProviderId(ProviderId(config.provider)))
     }
 }

@@ -88,7 +88,7 @@ class CohereRerankerHttpSpec extends AnyFlatSpec with Matchers {
     }
     val config =
       RerankProviderConfig(s"http://127.0.0.1:${closedPort()}", org.llm4s.security.Secret("k"), "m")
-        .withApiKeyProvider(throwing)
+        .withApiKeyProvider(Some(throwing))
     config.currentApiKey().isLeft shouldBe true
     val result = CohereReranker(config).rerank(request)
     result.isLeft shouldBe true
@@ -101,7 +101,7 @@ class CohereRerankerHttpSpec extends AnyFlatSpec with Matchers {
       .withBaseUrl("https://b")
       .withApiKey(org.llm4s.security.Secret("k3"))
       .withModel("m2")
-      .withApiKeyProvider(keys)
+      .withApiKeyProvider(Some(keys))
     (config.baseUrl, config.apiKey.reveal, config.model) shouldBe (("https://b", "k3", "m2"))
     config.currentApiKey().map(_.reveal) shouldBe Right("k2")
     config.withApiKeyProvider(None).currentApiKey().map(_.reveal) shouldBe Right("k3")

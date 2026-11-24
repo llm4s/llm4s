@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.provider.OllamaProvider
 import org.llm4s.llmconnect.spi.ProviderDescriptor
@@ -97,8 +97,8 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "ollama-main"
           |  providers {
-          |    provider = "ollama-main"
           |    ollama-main {
           |      provider = "ollama"
           |      model = "llama3.1"
@@ -122,7 +122,7 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
 
       val httpClient = new MockHttpClient(HttpResponse(200, responseBody, Map.empty))
 
-      val result = Llm4sConfig.listModels("ollama-main", ConfigSource.string(hocon), httpClient)
+      val result = Llm4sConfig.listModels(ProviderName("ollama-main"), ConfigSource.string(hocon), httpClient)
 
       result match
         case Right(models) =>
@@ -136,15 +136,15 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
     "list models from the local server for a section without baseUrl (#1991)" in {
       val hocon =
         """
+          |llm4s.defaultProvider = "ollama-main"
           |llm4s.providers {
-          |  provider = "ollama-main"
           |  ollama-main { provider = "ollama", model = "llama3.1" }
           |}
           |""".stripMargin
 
       val httpClient = new MockHttpClient(HttpResponse(200, """{"models": [{"name": "llama3.1:latest"}]}""", Map.empty))
 
-      Llm4sConfig.listModels("ollama-main", ConfigSource.string(hocon), httpClient).map(_.map(_.name.asString)) shouldBe
+      Llm4sConfig.listModels(ProviderName("ollama-main"), ConfigSource.string(hocon), httpClient).map(_.map(_.name.asString)) shouldBe
         Right(List("llama3.1:latest"))
       httpClient.lastUrl shouldBe Some("http://localhost:11434/api/tags")
     }

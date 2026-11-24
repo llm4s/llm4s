@@ -1,8 +1,7 @@
 package org.llm4s.llmconnect
 
 import org.llm4s.config.DiscoveredModel
-import org.llm4s.config.ProvidersConfigModel.ProviderId
-import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 

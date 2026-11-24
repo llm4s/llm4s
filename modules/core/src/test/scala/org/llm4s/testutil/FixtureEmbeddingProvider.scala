@@ -68,7 +68,7 @@ object FixtureEmbeddingProvider extends EmbeddingProviderDescriptor:
           Right(
             EmbeddingResponse(
               embeddings = request.input.map(_ => Vector.fill(Dimensions)(0.5)),
-              metadata = Map("provider" -> id.asString, "model" -> config.model, "baseUrl" -> config.baseUrl)
+              metadata = Map("provider" -> id.asString, "model" -> config.model.asString, "baseUrl" -> config.baseUrl.asUrl)
             )
           )
     )

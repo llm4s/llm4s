@@ -48,7 +48,7 @@ class LlmCheckSpec extends AnyFlatSpec with Matchers {
 
   it should "be unconfigured when no default provider loads" in {
     val check =
-      new LlmCheck(() => Left(ConfigurationError("llm4s.providers.provider is not set")), _ => fail("no client"))
+      new LlmCheck(() => Left(ConfigurationError("llm4s.defaultProvider is not set")), _ => fail("no client"))
 
     check.run() shouldBe Unconfigured("ConfigurationError")
   }
@@ -113,8 +113,8 @@ class LlmCheckSpec extends AnyFlatSpec with Matchers {
     org.llm4s.testkit.FakeTokenExchangeServer.withServer { fake =>
       given org.llm4s.llmconnect.spi.ProviderRegistry = org.llm4s.llmconnect.spi.ProviderRegistry.default
       val hocon =
-        s"""llm4s.providers {
-           |  provider = "main"
+        s"""llm4s.defaultProvider = "main"
+           |llm4s.providers {
            |  main {
            |    provider = "openai-compatible"
            |    model    = "m"

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import com.sun.net.httpserver.HttpServer
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.model.{
@@ -228,7 +229,7 @@ class AnthropicThinkingSpec extends AnyFlatSpec with Matchers {
     try {
       val config = AnthropicConfig(
         apiKey = Secret("test-key"),
-        model = model,
+        model = ModelName(model),
         baseUrl = s"http://localhost:${server.getAddress.getPort}",
         contextWindow = 200000,
         reserveCompletion = 4096

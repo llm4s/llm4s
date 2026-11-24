@@ -134,7 +134,7 @@ object TracingLLMClient {
    * it has one, as the server address.
    */
   def apply(client: LLMClient, tracing: Tracing, config: ProviderConfig): TracingLLMClient =
-    new TracingLLMClient(client, tracing, Option(config.model).filter(_.nonEmpty), config.endpointUrl.flatMap(host))
+    new TracingLLMClient(client, tracing, Option(config.model.asString).filter(_.nonEmpty), config.endpointUrl.map(_.asUrl).flatMap(host))
 
   private def host(url: String): Option[String] =
     Try(Option(URI.create(url).getHost)).toOption.flatten.filter(_.nonEmpty)

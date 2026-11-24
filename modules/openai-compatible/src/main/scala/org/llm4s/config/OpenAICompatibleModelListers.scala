@@ -1,7 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.annotation.{ Experimental, Stable }
-import org.llm4s.config.ProvidersConfigModel.{ ApiKey, BaseUrl, NamedProviderConfig, ProviderId }
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, BaseUrl, ProviderId }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.auth.{ TokenExchange, TokenExchangeConfig }
 import org.llm4s.security.TokenGenerations

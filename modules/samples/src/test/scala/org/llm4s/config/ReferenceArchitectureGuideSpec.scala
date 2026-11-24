@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.configpolicy.{ CatalogEnvironment, ConfigPolicy, ConfigPolicyEngine }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.config.{ AzureConfig, BedrockConfig, OpenAICompatibleConfig, ProviderConfig }
@@ -72,7 +73,7 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
     // No environment variable; `user.home` only because the samples' classpath carries termflow's reference.conf,
     // which substitutes it, and ReferenceConfig resolves without system properties.
     val source = ReferenceConfig.withEnv(text, Map("user.home" -> System.getProperty("user.home")))
-    section.fold(Llm4sConfig.defaultProvider(source))(name => Llm4sConfig.provider(source, name)).value
+    section.fold(Llm4sConfig.defaultProvider(source))(name => Llm4sConfig.provider(source, ProviderName(name))).value
 
   private def gatewayConfig(file: Path, baseUrl: Option[String] = None): OpenAICompatibleConfig =
     load(withLocal(hocon.head, KeyPath, file, baseUrl)) match
@@ -96,7 +97,7 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
       val cfg = gatewayConfig(keyFile("sk-gateway-0001"))
 
       cfg.baseUrl shouldBe Gateway
-      cfg.model shouldBe "gpt-4o-mini"
+      cfg.model.asString shouldBe "gpt-4o-mini"
       cfg.headers shouldBe Map("X-Tenant-Id" -> "acme-retail", "X-Cost-Centre" -> "cc-4711")
       cfg.contextWindow shouldBe 128000
       cfg.timeouts.request shouldBe Some(60.seconds)
@@ -166,7 +167,7 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
       load(withLocal(hocon(2), DrKey, keyFile("sk-gateway-dr-0001")), Some("gateway-dr")) match
         case cfg: OpenAICompatibleConfig =>
           cfg.baseUrl shouldBe "https://llm-gateway.eu-west-1.example.internal/v1"
-          cfg.model shouldBe "gpt-4o-mini"
+          cfg.model.asString shouldBe "gpt-4o-mini"
           cfg.headers shouldBe Map("X-Tenant-Id" -> "acme-retail", "X-Cost-Centre" -> "cc-4711")
           cfg.contextWindow shouldBe 128000
         case other => fail(s"expected an openai-compatible section, got $other")
@@ -179,14 +180,14 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
       load(hocon(1), Some("azure-private")) match
         case azure: AzureConfig =>
           azure.endpoint shouldBe "https://contoso-llm.openai.azure.com"
-          azure.model shouldBe "gpt-4o"
+          azure.model.asString shouldBe "gpt-4o"
           azure.tokenProvider should not be empty
         case other => fail(s"expected an Azure section, got $other")
 
       load(hocon(1), Some("bedrock-private")) match
         case bedrock: BedrockConfig =>
           bedrock.region shouldBe "eu-central-1"
-          bedrock.model shouldBe "anthropic.claude-3-5-sonnet-20240620-v1:0"
+          bedrock.model.asString shouldBe "anthropic.claude-3-5-sonnet-20240620-v1:0"
           bedrock.endpointUrl shouldBe None
           bedrock.credentials shouldBe None
         case other => fail(s"expected a Bedrock section, got $other")

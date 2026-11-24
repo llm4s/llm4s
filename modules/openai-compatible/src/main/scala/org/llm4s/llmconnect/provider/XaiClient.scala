@@ -40,7 +40,7 @@ class XaiClient(
       OpenAICompatibleClient.Settings(
         providerName = "xai",
         displayName = "xAI",
-        model = config.model,
+        model = config.model.asString,
         baseUrl = config.baseUrl,
         credential = OpenAICompatibleClient.keyCredential(config.apiKey, config.apiKeyProvider),
         contextWindow = config.contextWindow,

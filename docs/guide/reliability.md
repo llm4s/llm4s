@@ -132,10 +132,11 @@ import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val clientResult: Result[LLMClient] =
   for
-    providerConfig <- Llm4sConfig.defaultProvider()          // or Llm4sConfig.provider("openai-main")
+    providerConfig <- Llm4sConfig.defaultProvider()          // or Llm4sConfig.provider(ProviderName("openai-main"))
     registry       <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
@@ -235,9 +236,8 @@ supplied by a module `llm4s-core` has never heard of. Each provider lives in its
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"        # key from OPENAI_API_KEY via llm4s.credentials.openai.apiKey
@@ -568,6 +568,7 @@ import org.llm4s.llmconnect.model.{ Completion, Conversation }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.slf4j.LoggerFactory
 
 val logger = LoggerFactory.getLogger("fallback")
@@ -589,8 +590,8 @@ def callWithFallback(
 for
   registry        <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
-  openAIConfig    <- Llm4sConfig.provider("openai-main")
-  anthropicConfig <- Llm4sConfig.provider("claude")
+  openAIConfig    <- Llm4sConfig.provider(ProviderName("openai-main"))
+  anthropicConfig <- Llm4sConfig.provider(ProviderName("claude"))
   openAIBase      <- LLMConnect.getClient(openAIConfig)
   anthropicBase   <- LLMConnect.getClient(anthropicConfig)
   openAI    = new ReliableClient(openAIBase, "openai", ReliabilityConfig.default)

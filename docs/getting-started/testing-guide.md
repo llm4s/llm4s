@@ -140,9 +140,8 @@ Put a named provider section in your test resources and select it as the default
 ```hocon
 # src/test/resources/application.conf
 llm4s {
+  defaultProvider = "ollama-test"
   providers {
-    provider = "ollama-test"
-
     ollama-test {
       provider = "ollama"
       model    = "llama3.2"

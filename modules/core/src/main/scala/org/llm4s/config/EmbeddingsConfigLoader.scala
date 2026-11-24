@@ -71,7 +71,7 @@ private[config] object EmbeddingsConfigLoader {
   // ---- Public API used by Llm4sConfig ----
 
   /** Load active embeddings provider and its config from the given source under llm4s.embeddings.*. */
-  def loadProvider(source: ConfigSource)(using ProviderRegistry): Result[(String, EmbeddingProviderConfig)] = {
+  def loadProvider(source: ConfigSource)(using ProviderRegistry): Result[EmbeddingProviderConfig] = {
     val rootEither = source.at("llm4s").load[EmbeddingsRoot]
 
     rootEither.left
@@ -89,7 +89,7 @@ private[config] object EmbeddingsConfigLoader {
    */
   def loadProviderFor(source: ConfigSource, modelSpec: String)(using
     ProviderRegistry
-  ): Result[(String, EmbeddingProviderConfig)] =
+  ): Result[EmbeddingProviderConfig] =
     unified(Option(modelSpec).getOrElse(""), None).flatMap(configFor(_, source))
 
   // ---- Internal helpers ----
@@ -97,7 +97,7 @@ private[config] object EmbeddingsConfigLoader {
   private def buildEmbeddingsConfig(
     root: EmbeddingsRoot,
     source: ConfigSource
-  )(using registry: ProviderRegistry): Result[(String, EmbeddingProviderConfig)] = {
+  )(using registry: ProviderRegistry): Result[EmbeddingProviderConfig] = {
     val emb = root.embeddings.getOrElse(EmbeddingsSection(None, None))
 
     // `EMBEDDING_MODEL=provider/model` is the only selector. A section still selecting the provider alone
@@ -139,12 +139,11 @@ private[config] object EmbeddingsConfigLoader {
   /** The selected provider's config: its section and key read from `source`. */
   private def configFor(selected: Selection, source: ConfigSource)(using
     registry: ProviderRegistry
-  ): Result[(String, EmbeddingProviderConfig)] =
+  ): Result[EmbeddingProviderConfig] =
     // Bound whole rather than destructured in the generator: `Either` has no
     // `withFilter`, so a pattern-matching generator does not compile.
     for {
       descriptor <- resolve(selected, registry)
-      id = descriptor.id.asString
       section  <- readSection(source, descriptor)
       extras   <- readExtras(source, descriptor)
       keyFile  <- readApiKeyFile(source, descriptor)
@@ -160,7 +159,9 @@ private[config] object EmbeddingsConfigLoader {
       resolved.foreach(SharedCredentials.logSource(EmbeddingConfigSpec.sectionPath(descriptor.id), _))
       // A key read from a file - the block's own `apiKeyFile` or the vendor's shared one - is read again per
       // request, so a key the secret manager rotates is used without reloading (#2478).
-      id -> config
+      // The id is the descriptor's canonical one whatever its `buildConfig` set, so the config resolves to it.
+      config
+        .withProviderId(descriptor.id)
         .withTimeouts(section.timeouts)
         .withNetwork(network)
         .withApiKeyProvider(resolved.flatMap(_.file).map(ApiKeyProvider.file))
@@ -255,7 +256,8 @@ private[config] object EmbeddingsConfigLoader {
         section.apiKey.map(_.reveal),
         EmbeddingConfigSpec.fieldPath(descriptor.id, "apiKey"),
         descriptor.id,
-        keyFile
+        keyFile,
+        descriptor.configSpec.apiKeyEnv
       )
 
   /**

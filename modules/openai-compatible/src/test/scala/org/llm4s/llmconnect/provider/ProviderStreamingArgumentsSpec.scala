@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpServer
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAIConfig, ZaiConfig }
@@ -73,7 +74,7 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
     withSseServer(payload) { baseUrl =>
       val config = OpenAIConfig(
         apiKey = Secret("test-key"),
-        model = "test-model",
+        model = ModelName("test-model"),
         organization = None,
         baseUrl = baseUrl,
         contextWindow = 8192,
@@ -105,7 +106,7 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
     withSseServer(payload) { baseUrl =>
       val config = ZaiConfig(
         apiKey = Secret("test-key"),
-        model = "test-model",
+        model = ModelName("test-model"),
         baseUrl = baseUrl,
         contextWindow = 8192,
         reserveCompletion = 4096
@@ -136,7 +137,7 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
     withSseServer(payload) { baseUrl =>
       val config = DeepSeekConfig(
         apiKey = Secret("test-key"),
-        model = "test-model",
+        model = ModelName("test-model"),
         baseUrl = baseUrl,
         contextWindow = 8192,
         reserveCompletion = 4096

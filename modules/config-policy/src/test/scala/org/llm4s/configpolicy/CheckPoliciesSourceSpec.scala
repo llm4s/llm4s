@@ -25,7 +25,7 @@ class CheckPoliciesSourceSpec extends AnyWordSpec with Matchers with EitherValue
   "CheckPolicies.sourceFor with --config" should {
 
     "include the modules' reference.conf, credentials bindings among them" in {
-      withConfigFile("""llm4s.providers.provider = "main"""") { path =>
+      withConfigFile("""llm4s.defaultProvider = "main"""") { path =>
         // The block exists whether or not OPENAI_API_KEY is set: llm4s-openai declares it.
         CheckPolicies.sourceFor(Some(path)).at("llm4s.credentials.openai").value().isRight shouldBe true
         // A reference default the file does not set.

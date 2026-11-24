@@ -58,11 +58,14 @@ final private[llm4s] case class SharedCredentials(
    *
    * @param id the canonical provider id - `gemini`, not the alias `google`. Callers pass the id
    *           a section or block resolved to, so aliases need no handling here.
+   * @param apiKeyEnv the variables the provider's module binds to the entry's `apiKey`, as its spec declares them:
+   *           named in the error for an entry that sets both `apiKey` and `apiKeyFile`. Core names no vendor's
+   *           variable itself.
    * @return `Right(None)` when no key is set, `Left` when the entry cannot be read - or names a
    *         key file that is missing, empty or unreadable. A key file is read now, so its key is
    *         the one it holds at this call, and [[SharedCredentials.Resolved.file]] names it.
    */
-  def apiKey(id: ProviderId): Result[Option[SharedCredentials.Resolved]] =
+  def apiKey(id: ProviderId, apiKeyEnv: Seq[String] = Seq.empty): Result[Option[SharedCredentials.Resolved]] =
     blockError match
       case Some(error) => Left(error)
       case None =>
@@ -74,6 +77,8 @@ final private[llm4s] case class SharedCredentials(
                 Right(Some(SharedCredentials.Resolved(key, SharedCredentials.apiKeyPath(id))))
               case SharedCredentials.Entry.File(file) =>
                 SharedCredentials.fromFile(file, SharedCredentials.apiKeyFilePath(id)).map(Some(_))
+              case SharedCredentials.Entry.Both(entryPath) =>
+                Left(SharedCredentials.bothSet(entryPath, apiKeyEnv))
             }
 
   /**
@@ -85,6 +90,7 @@ final private[llm4s] case class SharedCredentials(
    *                `apiKeyFile` is the sibling key, e.g. `llm4s.embeddings.openai.apiKeyFile`
    * @param id      the canonical id of the provider the client resolved to
    * @param ownFile the client's own `apiKeyFile`, made absolute; set with `own` it is an error
+   * @param apiKeyEnv the variables the provider's spec declares for its shared key; see [[apiKey]]
    * @return the key and the path it came from, `None` when neither is set, or `Left` when the
    *         client sets both `apiKey` and `apiKeyFile`, a key file cannot be read, or the shared
    *         entry the client would fall back to cannot be read
@@ -93,7 +99,8 @@ final private[llm4s] case class SharedCredentials(
     own: Option[String],
     ownPath: String,
     id: ProviderId,
-    ownFile: Option[Path] = None
+    ownFile: Option[Path] = None,
+    apiKeyEnv: Seq[String] = Seq.empty
   ): Result[Option[SharedCredentials.Resolved]] =
     val ownFilePath = SharedCredentials.siblingFilePath(ownPath)
     (own.map(_.trim).filter(_.nonEmpty), ownFile) match
@@ -107,7 +114,7 @@ final private[llm4s] case class SharedCredentials(
         )
       case (Some(key), None)  => Right(Some(SharedCredentials.Resolved(Secret(key), ownPath)))
       case (None, Some(file)) => SharedCredentials.fromFile(file, ownFilePath).map(Some(_))
-      case (None, None)       => apiKey(id)
+      case (None, None)       => apiKey(id, apiKeyEnv)
 
 private[llm4s] object SharedCredentials:
 
@@ -120,6 +127,9 @@ private[llm4s] object SharedCredentials:
 
     /** `apiKeyFile`: the file holding the key, made absolute; read when a client falls back to it. */
     case File(path: Path)
+
+    /** Both `apiKey` and `apiKeyFile` are set at `entryPath`: an error, reported when a client falls back to it. */
+    case Both(entryPath: String)
 
   /**
    * A resolved key and the config path it was read from.
@@ -145,6 +155,19 @@ private[llm4s] object SharedCredentials:
       .map(error => ConfigurationError(s"$configPath: ${error.message}", List("apiKeyFile")))
       .map(key => Resolved(Secret(key.asKey), s"file $file ($configPath)", Some(file)))
 
+  /**
+   * The error for a shared entry that sets both `apiKey` and `apiKeyFile`. `apiKey` is usually bound to the
+   * vendor's variable by its module's `reference.conf`, so a key the user never wrote is most likely an
+   * exported variable: the message says to unset it, naming the variables the provider's spec declares.
+   */
+  private def bothSet(entryPath: String, apiKeyEnv: Seq[String]): ConfigurationError =
+    val variable = if apiKeyEnv.isEmpty then "" else s" (${apiKeyEnv.mkString(" or ")})"
+    ConfigurationError(
+      s"$entryPath sets both apiKey and apiKeyFile. Its apiKey is usually the vendor's API key environment " +
+        s"variable$variable, which the provider module's reference.conf binds to $entryPath.apiKey: to read the " +
+        "key from the file, unset that variable; to use the variable, remove apiKeyFile",
+      List("apiKeyFile")
+    )
   /** `path`'s sibling `apiKeyFile`: `llm4s.embeddings.openai.apiKey` becomes `llm4s.embeddings.openai.apiKeyFile`. */
   private def siblingFilePath(path: String): String =
     if path.endsWith(".apiKey") then path + "File" else s"$path.apiKeyFile"
@@ -253,16 +276,7 @@ private[llm4s] object SharedCredentials:
                     .flatMap {
                       // `apiKey` is usually bound to the vendor's variable by its module's reference.conf, so a key
                       // the user never wrote is most likely an exported variable: the message says to unset it.
-                      case Some(_) if apiKey.isDefined =>
-                        Left(
-                          ConfigurationError(
-                            s"$entryPath sets both apiKey and apiKeyFile. Its apiKey is usually the vendor's API key " +
-                              s"environment variable, which the provider module's reference.conf binds to $entryPath.apiKey " +
-                              "(OPENAI_API_KEY for openai, COHERE_API_KEY for cohere, ...): to read the key from the " +
-                              "file, unset that variable; to use the variable, remove apiKeyFile",
-                            List("apiKeyFile")
-                          )
-                        )
+                      case Some(_) if apiKey.isDefined => Right(Some(Entry.Both(entryPath)))
                       case Some(file) => Right(Some(Entry.File(file)))
                       case None       => Right(apiKey.map(k => Entry.Key(Secret(k))))
                     }

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
@@ -23,7 +24,7 @@ class OpenAICompatibleCitationsSpec extends AnyFlatSpec with Matchers with Eithe
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def clientFor(baseUrl: String = "http://localhost:1/v1") = new OpenAICompatibleClient(
-    OpenAICompatibleClient.settings(OpenAICompatibleConfig("gpt-5-search-api", baseUrl, None)),
+    OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("gpt-5-search-api"), baseUrl, None)),
     OpenAICompatibleDialect.Standard
   )
 

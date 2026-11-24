@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect._
 import org.llm4s.llmconnect.model._
@@ -52,7 +53,7 @@ object ProviderFallbackExample extends App {
   val logger = LoggerFactory.getLogger(this.getClass)
 
   // Build a list of candidate providers:
-  //   1. The default named provider configured via Llm4sConfig (llm4s.providers.provider)
+  //   1. The default named provider configured via Llm4sConfig (llm4s.defaultProvider)
   //   2. A local Ollama fallback that requires no API key
   val configuredProvider: List[(String, ProviderConfig)] =
     Llm4sConfig.defaultProvider() match {
@@ -67,7 +68,7 @@ object ProviderFallbackExample extends App {
       "Ollama",
       OllamaConfig(
         baseUrl = "http://localhost:11434",
-        model = "llama3",
+        model = ModelName("llama3"),
         contextWindow = 8192,
         reserveCompletion = 4096
       )

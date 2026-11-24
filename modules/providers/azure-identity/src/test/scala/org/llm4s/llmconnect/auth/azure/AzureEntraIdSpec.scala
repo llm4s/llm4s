@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.auth.azure
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderName }
 import com.azure.core.credential.{ AccessToken as AzureAccessToken, TokenCredential, TokenRequestContext }
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.config.Llm4sConfig
@@ -66,7 +67,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         val clock      = new TestClock(Instant.parse("2026-10-25T10:00:00Z"))
         val credential = new TestCredential(clock)
         val tokens     = AzureEntraId.tokenProvider(credential, AzureEntraId.CognitiveServicesScope, clock)
-        val client     = OpenAIClient(AzureConfig.keyless(baseUrl, "my-deploy", tokens)).value
+        val client     = OpenAIClient(AzureConfig.keyless(baseUrl, ModelName("my-deploy"), tokens)).value
 
         client.complete(hello, CompletionOptions()).value.content shouldBe "hi"
         clock.advance(java.time.Duration.ofMinutes(30))
@@ -128,7 +129,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         |  clientId       = "00000000-0000-0000-0000-000000000001"
         |}
         |""".stripMargin
-    val config = Llm4sConfig.provider(ConfigSource.string(hocon), "azure-prod").value.asInstanceOf[AzureConfig]
+    val config = Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("azure-prod")).value.asInstanceOf[AzureConfig]
     config.apiKey.reveal shouldBe ""
     config.tokenProvider should not be empty
     config.endpoint shouldBe "https://my-resource.openai.azure.com"

@@ -29,7 +29,7 @@ class SpringHttpNetworkSpec extends AnyFlatSpec with Matchers {
   }
 
   private val fixtureSection = Seq(
-    "llm4s.providers.provider"    -> "fx",
+    "llm4s.default-provider"    -> "fx",
     "llm4s.providers.fx.provider" -> "fixturechat",
     "llm4s.providers.fx.model"    -> "fixture-model",
     "llm4s.providers.fx.api-key"  -> "sk-fixture"

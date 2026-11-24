@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.error.ConfigurationError
@@ -20,7 +21,7 @@ class VertexAIClientClosedStateTest extends AnyFlatSpec with Matchers {
   private def createTestConfig: VertexAIConfig = VertexAIConfig(
     projectId = "test-project",
     location = "us-central1",
-    model = "gemini-2.0-flash",
+    model = ModelName("gemini-2.0-flash"),
     credentialFilePath = None,
     contextWindow = 1048576,
     reserveCompletion = 8192
@@ -75,7 +76,7 @@ class VertexAIClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.withModel("gemini-1.5-pro")
+    val config = createTestConfig.withModel(ModelName("gemini-1.5-pro"))
     val client = new VertexAIClient(config)
 
     client.close()

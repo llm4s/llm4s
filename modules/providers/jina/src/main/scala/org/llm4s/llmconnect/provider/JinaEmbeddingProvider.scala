@@ -182,7 +182,7 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
         )
         sentTask.foreach(t => payload("task") = t.wireName)
 
-        val url = s"${cfg.baseUrl.stripSuffix("/")}/embeddings"
+        val url = s"${cfg.baseUrl.asUrl.stripSuffix("/")}/embeddings"
         logger.debug(
           s"[JinaEmbeddingProvider] POST $url model=$model task=${sentTask.map(_.wireName).getOrElse("-")} inputs=${input.size}"
         )
@@ -199,7 +199,7 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
             .currentApiKey()
             .flatMap(key =>
               httpClient
-                .post(url, headers(key.reveal), payload.render(), timeout = cfg.timeouts.requestOr(120.seconds))
+                .post(url, headers(key.fold("")(_.reveal)), payload.render(), timeout = cfg.timeouts.requestOr(120.seconds))
                 .left
                 .map {
                   // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)

@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import sttp.client4.testing.{ RecordingBackend, RichTestingRequest, SyncBackendStub }
@@ -47,7 +48,7 @@ class SttpGuideSpec extends AnyFlatSpec with Matchers {
 
     val answer = for {
       client <- LLMConnect.getClient(
-        OpenAICompatibleConfig("my-model", "http://llm.test/v1"),
+        OpenAICompatibleConfig(ModelName("my-model"), "http://llm.test/v1"),
         LlmClientOptions.default.withHttpClient(new SttpLlm4sHttpClient(backend))
       )
       completion <- client.complete(Conversation(Seq(UserMessage("What is Scala?"))), CompletionOptions())
@@ -75,7 +76,7 @@ class SttpGuideSpec extends AnyFlatSpec with Matchers {
 
     val streamed = for {
       client <- LLMConnect.getClient(
-        OpenAICompatibleConfig("my-model", "http://llm.test/v1"),
+        OpenAICompatibleConfig(ModelName("my-model"), "http://llm.test/v1"),
         LlmClientOptions.default.withHttpClient(new SttpLlm4sHttpClient(backend))
       )
       completion <- client.streamComplete(

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -30,7 +31,7 @@ class PerplexitySmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
   private val model: String =
     Option(System.getenv("PERPLEXITY_MODEL")).filter(_.nonEmpty).getOrElse("perplexity/sonar")
 
-  private def config(key: String): PerplexityConfig = PerplexityConfig.fromValues(model, Secret(key)).value
+  private def config(key: String): PerplexityConfig = PerplexityConfig.fromValues(ModelName(model), Secret(key)).value
 
   private def conversation: Conversation =
     Conversation(Seq(UserMessage("In one sentence, what is the latest stable Scala 3 release?")))

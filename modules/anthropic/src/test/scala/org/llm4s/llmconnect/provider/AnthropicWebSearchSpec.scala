@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.llmconnect.config.AnthropicConfig
@@ -23,7 +24,7 @@ class AnthropicWebSearchSpec extends AnyFlatSpec with Matchers {
 
   private val testConfig = AnthropicConfig(
     apiKey = Secret("test-key"),
-    model = "claude-sonnet-4-5",
+    model = ModelName("claude-sonnet-4-5"),
     baseUrl = "https://api.anthropic.com",
     contextWindow = 200000,
     reserveCompletion = 4096

@@ -274,7 +274,7 @@ def run(client: LLMClient, settings: TicketPipeline.Settings): IO[Unit] = {
 ```bash
 # A scripted model: no provider, no API key
 sbt "samples/runMain org.llm4s.samples.kafka.KafkaTicketEnrichmentExample --scripted"
-# The default provider of application.conf (llm4s.providers.provider)
+# The default provider of application.conf (llm4s.defaultProvider)
 sbt "samples/runMain org.llm4s.samples.kafka.KafkaTicketEnrichmentExample --bootstrap localhost:9092"
 ```
 

@@ -173,9 +173,10 @@ tracer traces its own calls:
 
 ```scala
 import org.llm4s.trace.TracingLLMClient
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 val traced     = TracingLLMClient(client, tracing, providerConfig) // request model and server.address from the config
-val embeddings = EmbeddingClient.from("openai", embeddingConfig).map(_.withTracing(tracing))
+val embeddings = EmbeddingClient.from(embeddingConfig.withProviderId(ProviderId("openai"))).map(_.withTracing(tracing))
 ```
 
 A `RAG` built `withTracing(tracing)` traces every model call it makes the same way, with the call's usage also

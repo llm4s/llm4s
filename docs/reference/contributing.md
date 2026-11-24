@@ -204,7 +204,7 @@ factory that can fail returns `Result[X]`, and none throws.
 | `apply` | the type's own fields | `CompletionOptions()`, `EmbeddingRequest(input, model)` |
 | `of` | values that are not simply its fields: the items it holds, the thing it wraps, a raw id | `ToolRegistry.of(tools)`, `ConversationTokenCounter.of(tokenizer)`, `AgentId.of("assistant")` |
 | `create` | something it has to look up, allocate or check first | `ConversationTokenCounter.create(tokenizerId)`, `ContextManager.create(counter)`, `HeadroomPercent.create(0.1)` |
-| `from`, `fromX` | another representation: configuration, JSON, a file, another type | `EmbeddingClient.from(provider, cfg)`, `Llm4sConfig.from(config)`, `ArtifactKey.fromContent(text)` |
+| `from`, `fromX` | another representation: configuration, JSON, a file, another type | `EmbeddingClient.from(cfg)`, `Llm4sConfig.from(config)`, `ArtifactKey.fromContent(text)` |
 | `forX` | a key that selects one of several | `OpenAITokenizers.counterFor(model)` |
 
 `new` is for a plain class with nothing to check. A type that validates its arguments, or that may gain a field,

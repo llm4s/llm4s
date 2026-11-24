@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName }
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.llmconnect.config.GeminiConfig
@@ -9,7 +10,6 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
 import org.llm4s.testkit.{ ProviderModuleChecks, ProviderTestConfig }
-import org.llm4s.types.ProviderModelTypes.ApiKey
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -90,7 +90,7 @@ class GeminiApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues:
         seen.add(exchange.getRequestURI.toString)
         sendJsonResponse(exchange, 200, reply)
       } { baseUrl =>
-        val config = GeminiConfig(Secret(""), "gemini-2.5-flash").withBaseUrl(baseUrl).withApiKeyProvider(throwing)
+        val config = GeminiConfig(Secret(""), ModelName("gemini-2.5-flash")).withBaseUrl(baseUrl).withApiKeyProvider(Some(throwing))
         config.toString should include("apiKeyProvider=")
         config.withApiKeyProvider(None).apiKeyProvider shouldBe None
         val client = GeminiClient(config).value

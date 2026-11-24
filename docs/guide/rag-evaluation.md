@@ -313,11 +313,10 @@ val runner: Result[BenchmarkRunner] = for {
   given ModelRegistryService = registryService
   providerCfg <- Llm4sConfig.defaultProvider()
   llm         <- LLMConnect.getClient(providerCfg)
-  embedding   <- Llm4sConfig.embeddings()
-  (embeddingProvider, embeddingCfg) = embedding
-  embed <- EmbeddingClient.from(embeddingProvider, embeddingCfg)
+  embeddingCfg   <- Llm4sConfig.embeddings()
+  embed <- EmbeddingClient.from(embeddingCfg)
   resolveEmbedding = (name: String) =>
-    if (name.equalsIgnoreCase(embeddingProvider)) Right(embeddingCfg)
+    if (name.equalsIgnoreCase(embeddingCfg.providerId.asString)) Right(embeddingCfg)
     else Left(ConfigurationError(s"No embedding configuration for provider '$name'"))
 } yield BenchmarkRunner(llm, embed, resolveEmbedding)
 

@@ -58,9 +58,10 @@ llm4s.credentials.anthropic.apiKeyFile = "/var/run/secrets/llm4s/anthropic-api-k
 
 `ApiKeyProvider` is a one-method trait, `def current(): Result[ApiKey]`, which a client calls on the request path for
 every request (`modules/core/.../llmconnect/auth/ApiKeyProvider.scala`). A config carries one as
-`ProviderConfig.apiKeyProvider`, and `withApiKeyProvider(provider)` returns the config with it set. A config whose client
-cannot take one returns itself unchanged and its `apiKeyProvider` stays `None`, so check it when the provider matters.
-`EmbeddingProviderConfig` has the same method. The built-in providers that take an API key support it; the list is in
+`ProviderConfig.apiKeyProvider`, and `withApiKeyProvider(provider)` returns a `Result` holding the config with it set.
+A config whose client cannot take one - a provider that authenticates without an API key - returns a
+`ConfigurationError` naming the provider, never the config unchanged. `EmbeddingProviderConfig` has the same setter,
+which always succeeds, so it returns the config itself. The built-in providers that take an API key support it; the list is in
 [Rotating keys](../getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider).
 
 The section you load must still resolve a key when it is loaded, so that it validates: a section with no key from the
@@ -82,6 +83,7 @@ import org.llm4s.llmconnect.auth.vault.{ VaultApiKeyProvider, VaultSettings }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 import scala.concurrent.duration.*
 
@@ -91,7 +93,7 @@ def vaultClient(vaultToken: String): Result[LLMClient] =
       VaultSettings("https://vault.internal:8200", Secret(vaultToken), "llm4s/openai", "apiKey")
         .withRefreshInterval(1.minute)
     )
-    config   <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+    config   <- Llm4sConfig.provider(ProviderName("openai-main")).flatMap(_.withApiKeyProvider(keys))
     registry <- Llm4sConfig.modelRegistryService()
     client <- {
       given ModelRegistryService = registry
@@ -144,6 +146,7 @@ import org.llm4s.llmconnect.auth.aws.{
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 import scala.concurrent.duration.*
 
@@ -158,7 +161,7 @@ def awsClient(): Result[LLMClient] =
     .withRefreshInterval(1.minute)
   for
     keys     <- AwsSecretsManagerApiKeyProvider(settings)
-    config   <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+    config   <- Llm4sConfig.provider(ProviderName("openai-main")).flatMap(_.withApiKeyProvider(keys))
     registry <- Llm4sConfig.modelRegistryService()
     client <- {
       given ModelRegistryService = registry

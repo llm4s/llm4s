@@ -116,7 +116,7 @@ signature.
 
 **Named provider section**
 : A block under `llm4s.providers.<name>` in `application.conf` that configures one provider (`provider`, `model` and
-  optional keys). `llm4s.providers.provider` names the default section. See
+  optional keys). `llm4s.defaultProvider` names the default section. See
   [Named provider sections](/getting-started/configuration#named-provider-sections).
 
 ## P

@@ -167,14 +167,14 @@ class OpenAIClient private[provider] (
    * @param metrics metrics collector (default: noop)
    */
   def this(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) =
-    this(config.model, OpenAIClientTransport.openAI(config), config, metrics, ProviderExchangeLogging.Disabled)
+    this(config.model.asString, OpenAIClientTransport.openAI(config), config, metrics, ProviderExchangeLogging.Disabled)
 
   def this(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService) =
-    this(config.model, OpenAIClientTransport.openAI(config), config, metrics, exchangeLogging)
+    this(config.model.asString, OpenAIClientTransport.openAI(config), config, metrics, exchangeLogging)
 
   /**
    * Creates an OpenAI client for Azure OpenAI service.
@@ -184,7 +184,7 @@ class OpenAIClient private[provider] (
    */
   def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) =
     this(
-      config.model,
+      config.model.asString,
       OpenAIClientTransport.azure(config),
       config,
       metrics,
@@ -197,7 +197,7 @@ class OpenAIClient private[provider] (
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService) =
-    this(config.model, OpenAIClientTransport.azure(config), config, metrics, exchangeLogging, config.providerId)
+    this(config.model.asString, OpenAIClientTransport.azure(config), config, metrics, exchangeLogging, config.providerId)
 
   override def complete(
     conversation: Conversation,
@@ -348,7 +348,7 @@ class OpenAIClient private[provider] (
       attempt
         .flatMap(_ => state.filtered.map(_.withUsage(state.usage)).toLeft(()))
         // checked here, not left to the SDK, which ends the stream quietly at the end of the body (RFC 0009, rule 1)
-        .filterOrElse(_ => state.finished, OpenAIClient.unfinished(config.endpointUrl.getOrElse(displayName)))
+        .filterOrElse(_ => state.finished, OpenAIClient.unfinished(config.endpointUrl.map(_.asUrl).getOrElse(displayName)))
         .flatMap(_ =>
           // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
           // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
@@ -1006,7 +1006,7 @@ object OpenAIClient {
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[OpenAIClient] =
     Try(
-      new OpenAIClient(config.model, OpenAIClientTransport.openAI(config), config, metrics, exchangeLogging, provider)
+      new OpenAIClient(config.model.asString, OpenAIClientTransport.openAI(config), config, metrics, exchangeLogging, provider)
     ).toResult
 
   /** How log lines and the "already closed" error name the provider. */

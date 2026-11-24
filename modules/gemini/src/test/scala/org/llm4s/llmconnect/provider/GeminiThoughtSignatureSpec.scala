@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.{ LLMClient, ProviderExchangeLogging }
@@ -54,7 +55,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     }
     val config = GeminiConfig(
       apiKey = Secret("test-key"),
-      model = model,
+      model = ModelName(model),
       baseUrl = "https://generativelanguage.googleapis.com/v1beta",
       contextWindow = 1048576,
       reserveCompletion = 8192
@@ -81,7 +82,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     val config = VertexAIConfig(
       projectId = "my-gcp-project",
       location = "us-central1",
-      model = model,
+      model = ModelName(model),
       credentialFilePath = None,
       contextWindow = 1048576,
       reserveCompletion = 8192
