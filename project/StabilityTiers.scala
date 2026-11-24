@@ -325,6 +325,12 @@ object StabilityTiers {
       "JSON values (tool arguments and schemas, structured output) are ujson.Value throughout the API by design"
     ),
     Allowed(
+      "com.typesafe.config.Config",
+      "Llm4sConfig.from(config), the documented app-edge entry point, reads a Config the application already holds; " +
+        "Typesafe Config is a core dependency (#2804)",
+      Some("""/org/llm4s/config/Llm4sConfig\.scala$""".r)
+    ),
+    Allowed(
       "upickle",
       "the API's JSON codecs are upickle ReadWriters (macroRW, DurationJson.millisRW); upickle and ujson are core's " +
         "one JSON dependency"

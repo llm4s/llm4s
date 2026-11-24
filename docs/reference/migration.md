@@ -1299,8 +1299,8 @@ for {
 ## `Llm4sConfig.providerConfigs()` returns each section's `Result`; `providers()` and `ProvidersConfig` are internal (#2804)
 
 `Llm4sConfig` and `Llm4sSettings` (from `Llm4sConfig.from(config)`) are now one implementation: every `Llm4sConfig`
-method calls the `Llm4sSettings` of the process-wide configuration. Both are `@Stable`; `Llm4sConfig.from` itself
-stays `@Experimental`.
+method calls the `Llm4sSettings` of the process-wide configuration. Both are `@Stable`, and so is
+`Llm4sConfig.from`, the entry point at the application edge, although it takes a Typesafe `Config`.
 
 **`providerConfigs()`** returned `Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])]`. It
 returns `Result[Map[ProviderName, Result[ProviderConfig]]]`: each section's config, or the error loading it, under

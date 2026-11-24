@@ -1,7 +1,7 @@
 // scalafix:off DisableSyntax.NoConfigFactory, DisableSyntax.NoSysEnv, DisableSyntax.NoSystemGetenv, DisableSyntax.NoPureConfigDefault
 package org.llm4s.config
 
-import org.llm4s.annotation.{ Experimental, Stable }
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.*
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -101,11 +101,10 @@ object Llm4sConfig {
    * } yield client
    * }}}
    *
-   * Experimental: it takes a Typesafe `Config`, a third-party type, so whether that is the
-   * entry point to freeze is open until the API baseline (#2340, #1281). The [[Llm4sSettings]] it
-   * returns is `@Stable`.
+   * The documented entry point at the application edge, so `@Stable` although it takes a Typesafe `Config`, a
+   * third-party type: Typesafe Config is a core dependency, and an application that has a `Config` already holds one
+   * (#2804). The [[Llm4sSettings]] it returns is `@Stable` too.
    */
-  @Experimental
   def from(config: Config): Result[Llm4sSettings] =
     Try(ConfigFactory.load(config)).toEither.left
       .map(e => org.llm4s.error.ConfigurationError(s"Cannot resolve the given configuration: ${e.getMessage}"))
