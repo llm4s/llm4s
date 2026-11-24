@@ -69,25 +69,25 @@ final class OpenAIClientAdjustmentsSpec extends AnyFlatSpec with Matchers with E
 
   "OpenAIClient.complete" should "report the options the model's rules dropped or left out" in {
     val (c, sent) = client("o3-mini")
-    c.complete(hello, CompletionOptions(topP = 0.5)).value.adjustments shouldBe oSeries
+    c.complete(hello, CompletionOptions(topP = Some(0.5))).value.adjustments shouldBe oSeries
     sendsNoSampling(sent.head)
   }
 
   it should "report nothing when every option is sent as requested" in {
     val (c, sent) = client("gpt-4o")
-    c.complete(hello, CompletionOptions(topP = 0.5)).value.adjustments shouldBe empty
+    c.complete(hello, CompletionOptions(topP = Some(0.5))).value.adjustments shouldBe empty
     sent.head.topP().isPresent shouldBe true
   }
 
   "OpenAIClient.streamComplete" should "report the same adjustments from a faked stream" in {
     // o-series models do not stream natively, so this is the faked stream
     val (c, _) = client("o3-mini")
-    c.streamComplete(hello, CompletionOptions(topP = 0.5), _ => ()).value.adjustments shouldBe oSeries
+    c.streamComplete(hello, CompletionOptions(topP = Some(0.5)), _ => ()).value.adjustments shouldBe oSeries
   }
 
   it should "report nothing from a native stream whose options were all sent" in {
     val (c, _)     = client("gpt-4o")
-    val completion = c.streamComplete(hello, CompletionOptions(topP = 0.5), _ => ()).value
+    val completion = c.streamComplete(hello, CompletionOptions(topP = Some(0.5)), _ => ()).value
     completion.content shouldBe "ok"
     completion.adjustments shouldBe empty
   }
@@ -95,7 +95,7 @@ final class OpenAIClientAdjustmentsSpec extends AnyFlatSpec with Matchers with E
   // gpt-5 and o4-mini are reasoning models that no OpenAIModelRules rule names, so only the client reports
   "A reasoning model's request" should "report each sampling option it leaves out, from complete and a native stream" in {
     val sampling =
-      CompletionOptions(temperature = 0.2, topP = 0.5, presencePenalty = 0.3, frequencyPenalty = 0.3)
+      CompletionOptions(temperature = Some(0.2), topP = Some(0.5), presencePenalty = Some(0.3), frequencyPenalty = Some(0.3))
     for (model <- List("gpt-5", "o4-mini")) {
       val (c, sent) = client(model)
       val expected = notSent(
@@ -128,14 +128,14 @@ final class OpenAIClientAdjustmentsSpec extends AnyFlatSpec with Matchers with E
 
   it should "report only the sampling options set away from their defaults" in {
     val (c, _) = client("gpt-5")
-    c.complete(hello, CompletionOptions(temperature = 0.2)).value.adjustments shouldBe
+    c.complete(hello, CompletionOptions(temperature = Some(0.2))).value.adjustments shouldBe
       notSent("gpt-5", RequestOption.Temperature)
   }
 
   it should "replace the transformer's adjusted o-series temperature with a drop, since none is sent" in {
     // OpenAIModelRules would send 1.0 in place of 0.2, but the request carries no temperature at all
     val (c, sent) = client("o3-mini")
-    c.complete(hello, CompletionOptions(temperature = 0.2)).value.adjustments shouldBe
+    c.complete(hello, CompletionOptions(temperature = Some(0.2))).value.adjustments shouldBe
       notSent("o3-mini", RequestOption.Temperature)
     sendsNoSampling(sent.head)
   }

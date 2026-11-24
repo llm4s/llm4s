@@ -249,9 +249,9 @@ class AnthropicThinkingSpec extends AnyFlatSpec with Matchers {
 
   it should "send thinking disabled with the temperature, which a non-thinking request may set" in {
     val (body, adjustments) =
-      sent("claude-opus-4-6", CompletionOptions(maxTokens = Some(4096)).withThinking(Thinking.Off))
+      sent("claude-opus-4-6", CompletionOptions(maxTokens = Some(4096)).withTemperature(0.7).withThinking(Thinking.Off))
     body("thinking") shouldBe ujson.Obj("type" -> "disabled")
-    body.obj.keySet should contain("temperature")
+    body("temperature").num shouldBe 0.7
     body.obj.keySet should not contain "output_config"
     adjustments shouldBe Nil
   }

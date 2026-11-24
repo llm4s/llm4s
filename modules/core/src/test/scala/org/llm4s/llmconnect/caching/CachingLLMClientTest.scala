@@ -160,11 +160,11 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val conv = Conversation.userOnly("Hello").getOrElse(fail())
 
     // Request 1: temp 0.7
-    client.complete(conv, CompletionOptions(temperature = 0.7))
+    client.complete(conv, CompletionOptions(temperature = Some(0.7)))
     mockLLM.callCount shouldBe 1
 
     // Request 2: temp 0.0 (Should be miss despite similar embedding)
-    client.complete(conv, CompletionOptions(temperature = 0.0))
+    client.complete(conv, CompletionOptions(temperature = Some(0.0)))
     mockLLM.callCount shouldBe 2
 
     // Verify reason

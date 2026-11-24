@@ -281,7 +281,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
     "miss when the options differ, and report why" in {
       val (client, llm, _, seen, _) = fixture()
       client.complete(conversation("hello"))
-      client.complete(conversation("hello"), CompletionOptions(temperature = 0.9))
+      client.complete(conversation("hello"), CompletionOptions(temperature = Some(0.9)))
       llm.calls.get shouldBe 2
       seen().map(describe) shouldBe List("miss: low_similarity", "miss: options_mismatch")
     }

@@ -85,7 +85,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val sent = client.conversations.get(0).messages
     sent.collect { case m: SystemMessage => m.content }.exists(_.contains("EXTRA-INSTRUCTIONS")) shouldBe true
     sent.collect { case m: UserMessage => m.content } shouldBe Seq("q")
-    client.options.get(0).temperature shouldBe 0.123
+    client.options.get(0).temperature shouldBe Some(0.123)
     client.options.get(0).maxTokens shouldBe Some(77)
     client.options.get(0).tools.map(_.name) shouldBe Seq("echo")
   }

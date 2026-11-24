@@ -83,7 +83,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
             assertTrue(client.calls.get() == 1) &&
             assertTrue(sent.collect { case m: SystemMessage => m.content }.exists(_.contains("EXTRA-INSTRUCTIONS"))) &&
             assertTrue(sent.collect { case m: UserMessage => m.content } == Seq("q")) &&
-            assertTrue(client.options.get(0).temperature == 0.123) &&
+            assertTrue(client.options.get(0).temperature == Some(0.123)) &&
             assertTrue(client.options.get(0).maxTokens == Some(77)) &&
             assertTrue(client.options.get(0).tools.map(_.name) == Seq("echo"))
           }

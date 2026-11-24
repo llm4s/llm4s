@@ -93,7 +93,7 @@ class SmokeContractOfflineSpec
   private val checked: Seq[Capability] = Capability.values.toSeq.filterNot(_ == Capability.Reasoning)
 
   private def reasoningSetup(client: LLMClient, expectsText: Boolean): ReasoningSetup =
-    ReasoningSetup(client, CompletionOptions(temperature = 0.0, maxTokens = Some(64)), expectsText)
+    ReasoningSetup(client, CompletionOptions(temperature = Some(0.0), maxTokens = Some(64)), expectsText)
 
   private def failedMessage(outcome: Outcome): Option[String] = outcome match {
     case Outcome.Failed(message) => Some(message)

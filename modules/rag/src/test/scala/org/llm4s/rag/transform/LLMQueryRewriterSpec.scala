@@ -137,7 +137,7 @@ class LLMQueryRewriterSpec extends AnyFlatSpec with Matchers {
 
     rewriter.transform("test")
     mock.callCount shouldBe 1
-    mock.lastOptions.get.temperature shouldBe 0.0
+    mock.lastOptions.get.temperature shouldBe Some(0.0)
   }
 
   // ==========================================================================

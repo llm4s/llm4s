@@ -530,7 +530,7 @@ class DelegationSpec
     val options = CompletionOptions().withTemperature(0.2).withMaxTokens(321)
     researcher.bind(client, GraphRuntime.inMemory(), options).value.run(Question("x")).value
     val sent = client.optionsSentTo("CHILD:researcher").loneElement
-    sent.temperature shouldBe 0.2
+    sent.temperature shouldBe Some(0.2)
     sent.maxTokens shouldBe Some(321)
 
     val own = RoutingClient { case Child("researcher", _) =>

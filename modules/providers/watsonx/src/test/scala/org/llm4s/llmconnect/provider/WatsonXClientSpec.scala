@@ -159,7 +159,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
 
   test("a space id replaces the project id, and top_p is sent only when it is not the default") {
     val spaced = config.copy(spaceId = Some("space-9"))
-    val body = client(new MockHttpClient(iam), spaced).createRequestBody(hi, CompletionOptions(topP = 0.5)).toOption.get
+    val body = client(new MockHttpClient(iam), spaced).createRequestBody(hi, CompletionOptions(topP = Some(0.5))).toOption.get
     body("space_id").str shouldBe "space-9"
     body.obj.contains("project_id") shouldBe false
     body("top_p").num shouldBe 0.5

@@ -58,7 +58,7 @@ object StreamingWithProgressExample {
       completion <- client.streamComplete(
         conversation,
         options = CompletionOptions(
-          temperature = 0.5,
+          temperature = Some(0.5),
           maxTokens = Some(1000)
         ),
         onChunk = chunk => {

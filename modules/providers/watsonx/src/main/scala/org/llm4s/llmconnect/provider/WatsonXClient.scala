@@ -544,9 +544,10 @@ class WatsonXClient(
   private def requestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val body = ujson.Obj(
       "model_id"    -> config.model,
-      "messages"    -> encodeMessages(conversation),
-      "temperature" -> options.temperature
+      "messages"    -> encodeMessages(conversation)
     )
+    // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
+    options.temperature.foreach(t => body("temperature") = t)
     config.spaceId match {
       case Some(space) => body("space_id") = space
       case None        => body("project_id") = config.projectId
@@ -555,10 +556,9 @@ class WatsonXClient(
     // deprecated in favour of `max_completion_tokens`, which a later change may adopt (NODE vml_v1.ts:2812-2813,
     // types/vml_v1.ts:790-803; LCIBM chat_models.py:953-959).
     options.maxTokens.foreach(max => body("max_tokens") = max)
-    if (options.topP != 1.0) body("top_p") = options.topP
-    // SDK-evidenced (see the class Scaladoc): sent only when set away from their 0.0 default
-    if (options.presencePenalty != 0.0) body("presence_penalty") = options.presencePenalty
-    if (options.frequencyPenalty != 0.0) body("frequency_penalty") = options.frequencyPenalty
+    options.topP.foreach(p => body("top_p") = p)
+    options.presencePenalty.foreach(p => body("presence_penalty") = p)
+    options.frequencyPenalty.foreach(p => body("frequency_penalty") = p)
     options.responseFormat.foreach(format => body("response_format") = encodeResponseFormat(format))
     // see "Reasoning" in the class Scaladoc
     val off = options.thinking.contains(Thinking.Off)

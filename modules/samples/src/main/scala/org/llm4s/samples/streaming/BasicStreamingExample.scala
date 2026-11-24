@@ -40,7 +40,7 @@ object BasicStreamingExample {
       startTime = System.currentTimeMillis()
       completion <- client.streamComplete(
         conversation,
-        options = CompletionOptions(temperature = 0.7),
+        options = CompletionOptions(temperature = Some(0.7)),
         onChunk = chunk => {
           // Record time to first chunk
           if (firstChunkTime.isEmpty && chunk.content.isDefined) {

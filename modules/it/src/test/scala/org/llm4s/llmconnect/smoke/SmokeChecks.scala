@@ -116,7 +116,7 @@ object SmokeChecks {
    */
   val StructuredPrompt = "Report the colour blue and the count 3."
 
-  private def small: CompletionOptions = CompletionOptions(temperature = 0.0, maxTokens = Some(24))
+  private def small: CompletionOptions = CompletionOptions(temperature = Some(0.0), maxTokens = Some(24))
 
   private def fail(capability: Capability, detail: String): Outcome =
     Outcome.Failed(s"[${capability.label}] $detail")
@@ -240,7 +240,7 @@ object SmokeChecks {
     } yield (call, result)
 
   private def toolOptions(tool: ToolFunction[_, _]): CompletionOptions =
-    CompletionOptions(temperature = 0.0, maxTokens = Some(64)).withTools(Seq(tool))
+    CompletionOptions(temperature = Some(0.0), maxTokens = Some(64)).withTools(Seq(tool))
 
   /**
    * A tool call round trip: the model calls the tool, the result goes back as a `ToolMessage`, and the model's
@@ -352,7 +352,7 @@ object SmokeChecks {
     val jsonSchema = schema.toJsonSchema(strict = true)
     val declared   = jsonSchema.obj.get("properties").flatMap(_.objOpt).map(_.keySet.toSet).getOrElse(Set.empty)
     val options =
-      CompletionOptions(temperature = 0.0, maxTokens = Some(64))
+      CompletionOptions(temperature = Some(0.0), maxTokens = Some(64))
         .withResponseFormat(ResponseFormat.JsonSchema(jsonSchema))
     outcome(
       Capability.StructuredOutput,

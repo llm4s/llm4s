@@ -96,7 +96,7 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wit
     AnthropicClient(config(key, ThinkingModel)).map { client =>
       ReasoningSetup(
         client,
-        CompletionOptions(temperature = 1.0, maxTokens = Some(4096)).withReasoning(ReasoningEffort.Low),
+        CompletionOptions(temperature = Some(1.0), maxTokens = Some(4096)).withReasoning(ReasoningEffort.Low),
         expectsThinkingText = true
       )
     }

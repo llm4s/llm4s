@@ -86,7 +86,7 @@ class JLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       override def getReserveCompletion(): Int = 512
     }
 
-    val options = CompletionOptions(temperature = 0.5)
+    val options = CompletionOptions(temperature = Some(0.5))
     val conv    = ConversationBuilder.create().user("test").build()
     val client  = Llm4s.wrapClient(capturingClient)
     client.complete(conv, options)

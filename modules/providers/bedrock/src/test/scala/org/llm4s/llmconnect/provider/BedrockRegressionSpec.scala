@@ -111,7 +111,7 @@ class BedrockRegressionSpec extends AnyWordSpec with Matchers {
     "send top-p when it is set, and omit it at the default" in {
       val conv = Conversation(Seq(UserMessage("hi")))
 
-      val tuned = requestBody(conv, CompletionOptions(temperature = 0.25, topP = 0.5, maxTokens = Some(321)))
+      val tuned = requestBody(conv, CompletionOptions(temperature = Some(0.25), topP = Some(0.5), maxTokens = Some(321)))
       tuned("inferenceConfig")("maxTokens").num shouldBe 321.0
       tuned("inferenceConfig")("temperature").num shouldBe 0.25
       tuned("inferenceConfig")("topP").num shouldBe 0.5

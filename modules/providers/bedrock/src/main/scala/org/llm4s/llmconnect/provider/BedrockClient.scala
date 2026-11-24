@@ -480,11 +480,12 @@ class BedrockClient(
   }
 
   private def inferenceConfig(options: CompletionOptions): InferenceConfiguration = {
-    val cfg = InferenceConfiguration.builder().temperature(options.temperature.floatValue())
-    options.maxTokens.foreach(m => cfg.maxTokens(m))
-    // Only an explicit top-p is sent: 1.0 is the CompletionOptions default, and some models reject
+    // Only what the caller set is sent: unset, the model's own default applies, and some models reject
     // temperature and top-p together.
-    if (options.topP != 1.0) cfg.topP(options.topP.floatValue())
+    val cfg = InferenceConfiguration.builder()
+    options.temperature.foreach(t => cfg.temperature(t.floatValue()))
+    options.maxTokens.foreach(m => cfg.maxTokens(m))
+    options.topP.foreach(p => cfg.topP(p.floatValue()))
     cfg.build()
   }
 
@@ -762,14 +763,10 @@ class BedrockClient(
       case msg: ToolMessage =>
         ujson.Obj("role" -> "tool", "toolCallId" -> msg.toolCallId, "content" -> Message.textWithMedia(msg))
     }
-    ujson
-      .Obj(
-        "modelId"     -> config.model,
-        "region"      -> config.region,
-        "temperature" -> options.temperature,
-        "messages"    -> ujson.Arr(msgs*)
-      )
-      .render()
+    val logged = ujson.Obj("modelId" -> config.model, "region" -> config.region)
+    options.temperature.foreach(t => logged("temperature") = t)
+    logged("messages") = ujson.Arr(msgs*)
+    logged.render()
   }
 
   private def serializeResponseForLogging(response: ConverseResponse): String = {

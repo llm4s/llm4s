@@ -157,7 +157,7 @@ class StructuredOutputGuideSpec extends AnyWordSpec with Matchers with EitherVal
         .isRight shouldBe true
 
       val seen = client.lastOptions.value
-      seen.temperature shouldBe 0.0
+      seen.temperature shouldBe Some(0.0)
       seen.maxTokens shouldBe Some(256)
       seen.responseFormat shouldBe Some(ResponseFormat.JsonSchema(invoiceSchema.toJsonSchema(strict = true)))
 

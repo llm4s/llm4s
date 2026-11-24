@@ -149,7 +149,7 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
 
       captured(GuideSnippets.completionOptions(client(capturing), conversation)) shouldBe Printed("Briefly.\n", "")
       options.toList shouldBe List(
-        CompletionOptions(temperature = 0.2, maxTokens = Some(512), reasoning = Some(ReasoningEffort.Medium))
+        CompletionOptions(temperature = Some(0.2), maxTokens = Some(512), reasoning = Some(ReasoningEffort.Medium))
       )
       capturing.sent.toList shouldBe List(conversation)
     }

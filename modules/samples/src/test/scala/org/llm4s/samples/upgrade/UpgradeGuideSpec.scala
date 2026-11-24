@@ -219,9 +219,9 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   "Growth-prone types" should "be changed with with* setters, not copy" in {
-    val options = CompletionOptions(temperature = 0.2).withMaxTokens(500)
+    val options = CompletionOptions(temperature = Some(0.2)).withMaxTokens(500)
 
-    options.temperature shouldBe 0.2
+    options.temperature shouldBe Some(0.2)
     options.maxTokens shouldBe Some(500)
   }
 }

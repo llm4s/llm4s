@@ -320,10 +320,11 @@ private[springai] object SpringAiMapping {
       case _                                            => ToolCallingChatOptions.builder()
     }
     // One statement per setter, as in `assistant`.
-    val _ = builder.temperature(java.lang.Double.valueOf(options.temperature))
-    val _ = builder.topP(java.lang.Double.valueOf(options.topP))
-    val _ = builder.presencePenalty(java.lang.Double.valueOf(options.presencePenalty))
-    val _ = builder.frequencyPenalty(java.lang.Double.valueOf(options.frequencyPenalty))
+    // only what the caller set: an unset sampling option keeps the model's own default
+    options.temperature.foreach(t => builder.temperature(java.lang.Double.valueOf(t)))
+    options.topP.foreach(p => builder.topP(java.lang.Double.valueOf(p)))
+    options.presencePenalty.foreach(p => builder.presencePenalty(java.lang.Double.valueOf(p)))
+    options.frequencyPenalty.foreach(p => builder.frequencyPenalty(java.lang.Double.valueOf(p)))
     val _ = builder.toolCallbacks(callbacks.asJava)
     options.maxTokens.foreach(m => builder.maxTokens(Integer.valueOf(m)))
     builder.build()

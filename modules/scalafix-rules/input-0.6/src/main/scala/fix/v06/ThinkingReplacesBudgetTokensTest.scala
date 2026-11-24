@@ -10,7 +10,7 @@ object ThinkingReplacesBudgetTokensTest {
 
   val offOption = CompletionOptions().withMaxTokens(100).withReasoning(Some(ReasoningEffort.None))
 
-  val built = CompletionOptions(temperature = 0.2, reasoning = Some(ReasoningEffort.None))
+  val built = CompletionOptions(maxTokens = Some(100), reasoning = Some(ReasoningEffort.None))
 
   val high = CompletionOptions().withReasoning(ReasoningEffort.High)
 }

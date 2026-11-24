@@ -43,8 +43,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
       body("model").str shouldBe "perplexity/sonar"
       body("input") shouldBe ujson.Arr(ujson.Obj("type" -> "message", "role" -> "user", "content" -> "Hello"))
       body("tools") shouldBe ujson.Arr(ujson.Obj("type" -> "web_search"))
-      body("temperature").num shouldBe CompletionOptions().temperature
-      body.obj.keySet should contain noneOf ("stream", "max_output_tokens", "top_p", "reasoning", "instructions")
+      body.obj.keySet should contain noneOf ("stream", "max_output_tokens", "temperature", "top_p", "reasoning", "instructions")
     }
 
     "join a base URL that already ends in /v1, and send the section's headers without letting them replace the key" in {

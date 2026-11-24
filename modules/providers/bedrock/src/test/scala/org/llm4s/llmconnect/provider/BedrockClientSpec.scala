@@ -85,7 +85,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
             UserMessage("2+2?")
           )
         )
-        new BedrockClient(config(url)).complete(conv, CompletionOptions(maxTokens = Some(100), temperature = 0.25))
+        new BedrockClient(config(url)).complete(conv, CompletionOptions(maxTokens = Some(100), temperature = Some(0.25)))
       }
 
       val (path, body) = seen.value

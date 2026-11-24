@@ -244,10 +244,10 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
     }
   }
 
-  test("anthropic client request body does not send top_p by default") {
+  test("anthropic client request body sends no sampling parameter the caller left unset") {
     withServer { exchange =>
       val requestBody = new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)
-      requestBody should include("temperature")
+      (requestBody should not).include("\"temperature\"")
       (requestBody should not).include("\"top_p\"")
 
       val body =

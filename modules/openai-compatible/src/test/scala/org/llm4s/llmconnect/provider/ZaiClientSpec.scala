@@ -184,7 +184,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
   it should "include temperature and top_p options" in {
     val helper       = new ZaiClientTestHelper(testConfig)
     val conversation = Conversation(Seq(UserMessage("Test")))
-    val options      = CompletionOptions(temperature = 0.5, topP = 0.9)
+    val options      = CompletionOptions(temperature = Some(0.5), topP = Some(0.9))
 
     val requestBody = helper.testCreateRequestBody(conversation, options)
 
@@ -205,7 +205,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
   it should "include presence_penalty when non-zero" in {
     val helper       = new ZaiClientTestHelper(testConfig)
     val conversation = Conversation(Seq(UserMessage("Test")))
-    val options      = CompletionOptions(presencePenalty = 0.5)
+    val options      = CompletionOptions(presencePenalty = Some(0.5))
 
     val requestBody = helper.testCreateRequestBody(conversation, options)
 
@@ -215,7 +215,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
   it should "include frequency_penalty when non-zero" in {
     val helper       = new ZaiClientTestHelper(testConfig)
     val conversation = Conversation(Seq(UserMessage("Test")))
-    val options      = CompletionOptions(frequencyPenalty = 0.3)
+    val options      = CompletionOptions(frequencyPenalty = Some(0.3))
 
     val requestBody = helper.testCreateRequestBody(conversation, options)
 

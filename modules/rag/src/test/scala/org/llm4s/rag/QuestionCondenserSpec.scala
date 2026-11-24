@@ -67,7 +67,7 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
         |Follow-up question: How much is the second one?
         |
         |Standalone question:""".stripMargin
-    client.options.head.temperature shouldBe 0.0
+    client.options.head.temperature shouldBe Some(0.0)
   }
 
   it should "send only the latest messages with text, leaving out tool messages and tool-call-only replies" in {
@@ -89,7 +89,7 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
 
   it should "use a custom prompt and options" in {
     val client = new ScriptedClient
-    val opts   = CompletionOptions(temperature = 0.3)
+    val opts   = CompletionOptions(temperature = Some(0.3))
     QuestionCondenser.llm(client, opts, systemPrompt = "Condense.").condense("Q?", history).isRight shouldBe true
     client.conversations.head.messages.head.content shouldBe "Condense."
     client.options.head shouldBe opts

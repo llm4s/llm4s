@@ -550,15 +550,16 @@ class OpenAICompatibleClient(
     }
 
     val body = ujson.Obj(
-      "model"       -> settings.model,
-      "messages"    -> ujson.Arr.from(messages),
-      "temperature" -> options.temperature,
-      "top_p"       -> options.topP
+      "model"    -> settings.model,
+      "messages" -> ujson.Arr.from(messages)
     )
 
+    // the sampling options are sent only when the caller set them: unset, the provider's own defaults apply
+    options.temperature.foreach(t => body("temperature") = t)
+    options.topP.foreach(p => body("top_p") = p)
     options.maxTokens.foreach(mt => body("max_tokens") = mt)
-    if (options.presencePenalty != 0) body("presence_penalty") = options.presencePenalty
-    if (options.frequencyPenalty != 0) body("frequency_penalty") = options.frequencyPenalty
+    options.presencePenalty.foreach(p => body("presence_penalty") = p)
+    options.frequencyPenalty.foreach(p => body("frequency_penalty") = p)
     if (options.tools.nonEmpty) body("tools") = ToolFunction.toolDefinitions(options.tools, strict = true)
     options.responseFormat.foreach { fmt =>
       dialect.encodeResponseFormat(fmt).foreach(rf => body("response_format") = rf)

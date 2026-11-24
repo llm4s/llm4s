@@ -23,11 +23,10 @@ enum RequestOption derives ReadWriter {
  * A client sends what the provider and model can take and reports the rest on
  * [[Completion.adjustments]], instead of dropping it silently. A caller that must not run without a
  * particular option looks for that option in the list and treats its [[RequestAdjustment.Dropped]] as a
- * failure. An option sent with another value is `Adjusted`, even when the caller left it at its
- * `CompletionOptions` default, since a value is still sent. An option not sent at all is `Dropped` only
- * when the caller set it away from that default: OpenAI leaves `temperature`, `top_p` and the penalties
- * out of a reasoning model's request, and a default call reports none of them, so an explicit value
- * equal to the default goes unreported.
+ * failure. An option sent with another value is `Adjusted`, and an option not sent at all is `Dropped`.
+ * The sampling options (`temperature`, `top_p` and the penalties) are `None` unless the caller sets them, and an
+ * unset one is neither sent nor reported: OpenAI leaves them out of a reasoning model's request, and reports each
+ * one the caller set, whatever its value.
  *
  * Reported today: every option the [[org.llm4s.model.RequestTransformer]] drops or adjusts (Anthropic,
  * OpenAI, Gemini, Vertex AI, Bedrock); a `reasoning` that Gemini, Vertex AI, Bedrock, Ollama or the

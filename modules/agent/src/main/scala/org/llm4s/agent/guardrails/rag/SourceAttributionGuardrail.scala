@@ -183,7 +183,7 @@ class SourceAttributionGuardrail(
     )
 
     val options = CompletionOptions(
-      temperature = 0.0,
+      temperature = Some(0.0),
       maxTokens = Some(400)
     )
 

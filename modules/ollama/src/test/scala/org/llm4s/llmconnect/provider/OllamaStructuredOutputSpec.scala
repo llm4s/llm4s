@@ -82,7 +82,7 @@ class OllamaStructuredOutputSpec extends AnyFunSuite with Matchers with BeforeAn
   }
 
   test("createRequestBody: keep the rest of the body intact when a format is set") {
-    val opts = CompletionOptions(temperature = 0.3, topP = 0.8, maxTokens = Some(77))
+    val opts = CompletionOptions(temperature = Some(0.3), topP = Some(0.8), maxTokens = Some(77))
     val b    = body(Some(ResponseFormat.JsonSchema(complexSchema)), stream = true, opts)
     b("model").str shouldBe "llama3.1"
     b("stream").bool shouldBe true

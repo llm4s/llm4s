@@ -420,7 +420,10 @@ class VertexAIClient(
         )
     }
 
-    val generationConfig = ujson.Obj("temperature" -> options.temperature, "topP" -> options.topP)
+    // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
+    val generationConfig = ujson.Obj()
+    options.temperature.foreach(t => generationConfig("temperature") = t)
+    options.topP.foreach(p => generationConfig("topP") = p)
     options.maxTokens.foreach(mt => generationConfig("maxOutputTokens") = mt)
     thinkingConfig.foreach(tc => generationConfig("thinkingConfig") = tc)
 

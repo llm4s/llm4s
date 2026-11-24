@@ -134,7 +134,7 @@ trait LLMGuardrail extends OutputGuardrail {
    * or to set other options.
    */
   def completionOptions: CompletionOptions = CompletionOptions(
-    temperature = 0.0,   // Deterministic for consistent judging
+    temperature = Some(0.0),   // Deterministic for consistent judging
     maxTokens = Some(10) // We only need a short numeric response
   )
 

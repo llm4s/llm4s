@@ -132,11 +132,11 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
     chat.call(new Prompt("hi", options))
 
     val sent = client.lastCall.map(_.options).get
-    sent.temperature shouldBe 0.2
-    sent.topP shouldBe 0.9
+    sent.temperature shouldBe Some(0.2)
+    sent.topP shouldBe Some(0.9)
     sent.maxTokens shouldBe Some(64)
-    sent.presencePenalty shouldBe 0.5
-    sent.frequencyPenalty shouldBe 0.25
+    sent.presencePenalty shouldBe Some(0.5)
+    sent.frequencyPenalty shouldBe Some(0.25)
     sent.tools shouldBe empty
   }
 

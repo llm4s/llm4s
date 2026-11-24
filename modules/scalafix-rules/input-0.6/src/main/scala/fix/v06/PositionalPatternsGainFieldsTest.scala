@@ -50,8 +50,8 @@ object PositionalPatternsGainFieldsTest {
   }
 
   // budgetTokens became thinking and promptCache was appended since 0.6.0 (#2115)
-  def temperature(options: CompletionOptions): Double = options match {
-    case CompletionOptions(temperature, _, _, _, _, _, _, _, _) => temperature
+  def maxTokens(options: CompletionOptions): Option[Int] = options match {
+    case CompletionOptions(_, _, maxTokens, _, _, _, _, _, _) => maxTokens
   }
 
   // gained cut since 0.6.0 (#2613)

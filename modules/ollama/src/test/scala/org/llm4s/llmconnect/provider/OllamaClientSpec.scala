@@ -320,7 +320,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
   }
 
   test("request body includes temperature and topP in options") {
-    val options = CompletionOptions(temperature = 0.7, topP = 0.9)
+    val options = CompletionOptions(temperature = Some(0.7), topP = Some(0.9))
     val conv    = Conversation(messages = Seq(UserMessage("Hello")))
     val body    = OllamaRequestBodyTestHelper.createRequestBody(conv, options, stream = false)
     val opts    = body("options")

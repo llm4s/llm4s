@@ -296,8 +296,9 @@ class PerplexityClient(
       val body     = ujson.Obj("model" -> config.model, "input" -> encodeInput(messages))
       val system   = messages.collect { case SystemMessage(content) => content }.filter(_.nonEmpty)
       if (system.nonEmpty) body("instructions") = system.mkString("\n\n")
-      body("temperature") = options.temperature
-      if (options.topP != 1.0) body("top_p") = options.topP
+      // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
+      options.temperature.foreach(t => body("temperature") = t)
+      options.topP.foreach(p => body("top_p") = p)
       options.maxTokens
         .orElse(Option.when(isAnthropic(config.model))(anthropicDefaultMaxTokens(config.reserveCompletion)))
         .foreach(max => body("max_output_tokens") = max)
@@ -476,12 +477,12 @@ object PerplexityClient {
     }
     val penalties =
       Option
-        .when(options.presencePenalty != 0.0)(
+        .when(options.presencePenalty.isDefined)(
           RequestAdjustment.Dropped(RequestOption.PresencePenalty, "the Perplexity Agent API takes no penalties")
         )
         .toList ++
         Option
-          .when(options.frequencyPenalty != 0.0)(
+          .when(options.frequencyPenalty.isDefined)(
             RequestAdjustment.Dropped(RequestOption.FrequencyPenalty, "the Perplexity Agent API takes no penalties")
           )
           .toList

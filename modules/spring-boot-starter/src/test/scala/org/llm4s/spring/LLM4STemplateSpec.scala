@@ -53,7 +53,7 @@ class LLM4STemplateSpec extends AnyFlatSpec with Matchers {
 
   "complete(Conversation, CompletionOptions)" should "forward options to the client" in {
     val conv    = ConversationBuilder.create().user("q").build()
-    val options = CompletionOptions(temperature = 0.5)
+    val options = CompletionOptions(temperature = Some(0.5))
     successTemplate("result").complete(conv, options) shouldBe "result"
   }
 

@@ -89,7 +89,7 @@ object XaiClient {
  *    standard behaviour of dropping it.
  *  - '''Reasoning effort''' - see [[addReasoning]].
  *  - '''Penalties.''' xAI rejects `presence_penalty`, `frequency_penalty` and `stop` on reasoning
- *    models. llm4s never sends `stop`, and sends the penalties only when they are non-zero; on a
+ *    models. llm4s never sends `stop`, and sends the penalties only when the caller set them; on a
  *    reasoning model they are left out (see [[addReasoning]]) rather than failing the request.
  */
 private[llm4s] object XaiDialect extends OpenAICompatibleDialect:

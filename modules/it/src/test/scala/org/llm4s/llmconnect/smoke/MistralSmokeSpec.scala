@@ -110,7 +110,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val completion = client
       .complete(
         Conversation(Seq(UserMessage("Use the get_secret_code tool with the topic 'vault'."))),
-        CompletionOptions(temperature = 0.0, maxTokens = Some(64)).withTools(Seq(secretCodeTool))
+        CompletionOptions(temperature = Some(0.0), maxTokens = Some(64)).withTools(Seq(secretCodeTool))
       )
       .value
     client.close()
@@ -136,7 +136,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val client = MistralClient(config(apiKey.get)).value
     val result = client.complete(
       history,
-      CompletionOptions(temperature = 0.0, maxTokens = Some(64)).withTools(Seq(secretCodeTool))
+      CompletionOptions(temperature = Some(0.0), maxTokens = Some(64)).withTools(Seq(secretCodeTool))
     )
     client.close()
 

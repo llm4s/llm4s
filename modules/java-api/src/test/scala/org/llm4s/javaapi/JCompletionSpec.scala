@@ -157,7 +157,7 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     client.sent.toList shouldBe List(
       conversation -> CompletionOptions(),
-      conversation -> CompletionOptions(temperature = 0.1, maxTokens = Some(64))
+      conversation -> CompletionOptions(temperature = Some(0.1), maxTokens = Some(64))
     )
   }
 

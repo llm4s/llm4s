@@ -944,7 +944,7 @@ curl https://api.anthropic.com/v1/messages \
     thinks: Boolean
   ): Unit =
     if (modelSupportsTemperature && !thinks)
-      builder.temperature(options.temperature.doubleValue())
+      options.temperature.foreach(t => builder.temperature(t.doubleValue()))
 
   /**
    * Whether `config.model` accepts the (deprecated) `temperature` sampling parameter.

@@ -226,7 +226,7 @@ class EntityLinker(llmClient: Option[LLMClient] = None) {
     )
 
     client
-      .complete(conversation, CompletionOptions(temperature = 0.0))
+      .complete(conversation, CompletionOptions(temperature = Some(0.0)))
       .flatMap(completion => parseDisambiguationResponse(completion.content, candidates, graph))
   }
 

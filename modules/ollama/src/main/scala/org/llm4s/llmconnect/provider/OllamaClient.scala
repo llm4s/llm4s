@@ -425,10 +425,10 @@ class OllamaClient(
         message
     })
 
-    val opts = ujson.Obj(
-      "temperature" -> options.temperature,
-      "top_p"       -> options.topP
-    )
+    // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
+    val opts = ujson.Obj()
+    options.temperature.foreach(t => opts("temperature") = t)
+    options.topP.foreach(p => opts("top_p") = p)
     options.maxTokens.foreach(t => opts("num_predict") = t)
 
     val body = ujson.Obj(

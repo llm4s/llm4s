@@ -18,8 +18,8 @@ import org.llm4s.javaapi.JThinking
  * val reply = client.complete("Summarise this", options)
  * ```
  *
- * A setting left unset keeps [base]'s value, or core's default without one (temperature `0.7`, top-p `1.0`, no
- * penalties, no token limit, reasoning level, thinking mode or service tier). A value no provider accepts - a negative
+ * A setting left unset keeps [base]'s value, or is not sent without one, so the provider's default applies (no
+ * temperature, top-p, penalties, token limit, reasoning level, thinking mode or service tier). A value no provider accepts - a negative
  * temperature, a top-p outside `0..1`, a token count below `1` - throws `IllegalArgumentException`, as the Java builder
  * does.
  */

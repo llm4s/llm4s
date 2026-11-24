@@ -322,7 +322,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val done = client.complete(conversation, CompletionOptions().withTemperature(0.1)).value
     (done.content, done.model, done.usage) shouldBe ("Paris", "fixture-model", Some(usage))
     scripted.lastCall.map(_.messages) shouldBe Some(conversation.messages)
-    scripted.lastCall.map(_.options.temperature) shouldBe Some(0.1)
+    scripted.lastCall.flatMap(_.options.temperature) shouldBe Some(0.1)
 
     client.complete(conversation, CompletionOptions()).left.value shouldBe (AuthenticationError(
       "fixture",

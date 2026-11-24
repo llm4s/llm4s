@@ -103,7 +103,7 @@ class OptionsAndClientDslTest {
         assertEquals("blue", reply)
         val (conversation, options) = seen.get()
         assertEquals("Name a colour", conversation.messages().last().content())
-        assertEquals(0.2, options.temperature())
+        assertEquals(0.2, options.temperature().get())
         assertEquals(20, options.maxTokens().get())
     }
 
