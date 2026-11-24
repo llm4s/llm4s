@@ -6,6 +6,7 @@ search_title: "Built-in agent tools in LLM4S: files, HTTP, web search"
 parent: Agents
 nav_order: 212
 grand_parent: User Guide
+cites_closed_issues: [1723, 1734, 1766, 1807]
 ---
 
 # Built-in Tools
@@ -148,8 +149,8 @@ import org.llm4s.toolapi.builtin.search.DuckDuckGoSearchTool
 val registry = for {
   config <- ToolsConfigLoader.loadDuckDuckGoSearchTool()
   search <- DuckDuckGoSearchTool.create(config)
-  toolRegistry <- ToolRegistry.of(core :+ search)
   core   <- BuiltinTools.coreSafe
+  toolRegistry <- ToolRegistry.of(core :+ search)
 } yield toolRegistry
 ```
 

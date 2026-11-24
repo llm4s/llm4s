@@ -4,6 +4,7 @@ title: RAG Benchmark Results
 description: "How the LLM4S RAG benchmarking harness works, and the retrieval and answer-quality results it produced, with the caveats on when they were measured."
 parent: Reference
 nav_order: 97.5
+cites_closed_issues: [1718, 1725]
 ---
 
 # RAG Benchmark Results Documentation

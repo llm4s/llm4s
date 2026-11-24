@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tests for scripts/check-doc-seo.sh: a missing, a too-short, a too-long, a duplicated and a site-wide description
-# fail, so do a bad search_title and (in the built-site mode) a <title> that is only `Home`; a good tree passes; the
+# fail, so do a bad search_title and (in the built-site mode) a <title> that is only `Home`; a good tree passes; every
+# served page is checked, but not one Jekyll ignores or excludes, nor the Scaladoc; the
 # baseline exempts a page and fails when it lists one that passes. No Jekyll and no network: each case builds a small
 # fixture tree.
 #
@@ -98,8 +99,21 @@ new_case; page guide/folded.md "Folded" "" 'description: >-
   as one description by the check.'
 expect_pass "folded block description"
 
-new_case; mkdir -p "$C/docs/design"; page design/out.md "Out" ""
-expect_pass "pages outside the checked sections are ignored"
+new_case; mkdir -p "$C/docs/rfcs"; page rfcs/0001-x.md "RFC" ""
+expect_fail "every served page is checked, not only the guide sections (#2833)" "rfcs/0001-x.md: has no description"
+
+new_case; page top.md "Top" ""
+expect_fail "a top-level page is checked" "docs/top.md: has no description"
+
+new_case; mkdir -p "$C/docs/_posts"; page _posts/2026-01-01-post.md "Post" ""
+expect_fail "a news post is checked" "_posts/2026-01-01-post.md: has no description"
+
+new_case; mkdir -p "$C/docs/_includes"; page _includes/part.md "Part" ""
+expect_pass "a directory Jekyll ignores is not checked"
+
+new_case; printf 'exclude:\n  - Gemfile\n  - design/\n  - notes.md\n' >> "$C/docs/_config.yml"
+mkdir -p "$C/docs/design"; page design/out.md "Out" ""; page notes.md "Notes" ""
+expect_pass "paths _config.yml excludes are not checked"
 
 new_case; printf 'no front matter, so Jekyll copies it and it is not a page\n' > "$C/docs/guide/raw.md"
 expect_pass "a file without front matter is not a page"
@@ -156,7 +170,11 @@ new_case; good_site; printf '<html><head><meta http-equiv="refresh" content="0; 
 expect_pass "a redirect stub is not a page" --site "$C/site"
 
 new_case; good_site; html scaladoc/x.html "Home | LLM4S" "Home" "Scaladoc pages are outside the checked sections, so this one is never read at all."
-expect_pass "pages outside the checked sections are ignored in the built site" --site "$C/site"
+expect_pass "the generated Scaladoc is ignored in the built site" --site "$C/site"
+
+new_case; good_site; html rfcs/x.html "Rfc | LLM4S" "Rfc" ""
+sed -i.bak '/name="description"/d' "$C/site/rfcs/x.html"
+expect_fail "every built page is checked, not only the guide sections" "rfcs/x.html: has no description" --site "$C/site"
 
 new_case; good_site; html guide/none.html "None | LLM4S" "None" "Explain a page that fails in the built site and is listed in the site baseline file."
 sed -i.bak 's/content="Explain a page that fails.*" \/>/content="x" \/>/' "$C/site/guide/none.html"; echo "site:guide/none.html" > "$C/scripts/doc-seo-baseline.txt"

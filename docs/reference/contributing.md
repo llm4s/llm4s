@@ -78,6 +78,7 @@ Run **all** of these locally before pushing:
 ```bash
 sbt scalafmtAll         # Format code
 sbt test                # Tests pass on the current Scala 3.7.1 build
+scripts/check-docs.sh   # If you changed docs/: every documentation check CI's Quick Checks runs without sbt
 ```
 
 Also check:

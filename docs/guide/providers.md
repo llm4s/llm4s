@@ -6,6 +6,7 @@ search_title: "LLM providers for Scala: OpenAI, Anthropic, Gemini, Ollama"
 parent: Core
 nav_order: 102
 grand_parent: User Guide
+cites_closed_issues: [1023, 1133, 1215, 2274]
 ---
 
 # Providers Guide

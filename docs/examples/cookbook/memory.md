@@ -6,6 +6,7 @@ search_title: "Give an LLM memory between turns in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 12
+cites_closed_issues: [1594]
 ---
 
 # Remember facts between turns

@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Contribute
+description: "How to contribute to LLM4S: find an issue by label, set up the build, follow the coding rules and get a pull request reviewed and merged."
 nav_order: 9
 has_children: true
 ---

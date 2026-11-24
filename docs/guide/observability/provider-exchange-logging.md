@@ -5,6 +5,7 @@ description: "Capture the raw request and response of each provider call in LLM4
 parent: Monitoring
 grand_parent: Operations
 nav_order: 1
+cites_closed_issues: [1576]
 ---
 
 # Provider Exchange Logging

@@ -46,7 +46,7 @@ val agent = Agent.builder("assistant", client)
   .withMiddleware(new ContextWindowMiddleware(contextConfig))
   .build()
 
-agent.flatMap(_.runMultiTurn("...", Seq(...)))
+agent.flatMap(_.runMultiTurn("What is a monad?", Seq("And a functor?", "How do the two relate?")))
 ```
 
 Two rules hold under every strategy:
@@ -403,7 +403,7 @@ Derive the budget from the configured model's metadata (`adaptiveFor` from
 changes the budget with it:
 
 ```scala
-val config = adaptiveFor(registry, providerConfig.model).map { strategy =>
+val config = adaptiveFor(registry, providerConfig.model.asString).map { strategy =>
   ContextWindowConfig(pruningStrategy = strategy)
 }
 ```
@@ -519,6 +519,8 @@ import org.llm4s.agent.graph.middleware.{
   ModelRequest,
   ModelResponse
 }
+import org.llm4s.types.Result
+import org.slf4j.Logger
 
 class LogSentMessages(logger: Logger) extends AgentMiddleware {
   val id = MiddlewareId("log-sent-messages")

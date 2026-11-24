@@ -79,7 +79,7 @@ client
 
 ```scala
 for {
-  agentIO <- client.agent("assistant")(_.withTools(myTools).withSystemPrompt("You are concise."))
+  agentIO <- client.agent("assistant")(_.withTools(tools).withSystemPrompt("You are concise."))
   result  <- agentIO.run("Summarise this")
   _       <- IO.println(result.answer)
 } yield ()

@@ -5,6 +5,7 @@ description: "What you can rely on when upgrading LLM4S: the promise by stabilit
 search_title: "LLM4S compatibility and deprecation policy"
 parent: Reference
 nav_order: 14
+cites_closed_issues: [1126, 1493, 1582, 2785]
 ---
 
 # Compatibility and Deprecation Policy

@@ -6,6 +6,7 @@ search_title: "A multi-agent graph in Scala: parallel agents and an editor"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 13
+cites_closed_issues: [1330]
 ---
 
 # Several agents in one graph
