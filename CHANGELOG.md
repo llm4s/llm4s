@@ -603,6 +603,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mean for a factory, `enum` or `sealed trait` for a sum type, plain accessor names, `PascalCase` constants and
   opaque-type newtypes ([#2822](https://github.com/llm4s/llm4s/issues/2822)).
 - **Changed** the docs site groups the User Guide sidebar, and the contributor pages moved from `/reference/` to `/contribute/` (old addresses redirect) [#2834](https://github.com/llm4s/llm4s/issues/2834).
+- **Changed** the support table (`docs/_data/support.yml`) has one entry per release line, with `security_until` and `ended_on` dates that the Support Policy page shows; `scripts/check-support-table.sh` checks the fields each status needs, and the release guide says what to change at each release ([Update the support table](docs/reference/release.md#update-the-support-table)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
 - **Changed** the Compatibility and Deprecation Policy no longer says provider modules aim to version independently: every module shares the release version, which `llm4s-bom` pins [#2835](https://github.com/llm4s/llm4s/issues/2835).
 
 ### Build & tooling

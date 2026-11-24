@@ -38,9 +38,24 @@ git push origin v0.3.2
 
 ### Update the support table
 
-Add the new version to `docs/_data/support.yml` (version, release date, status `latest`) and set the status of the line
-it replaces, in the same pull request that prepares the release. The table is rendered on the
-[Support Policy](../reference/support-policy). `scripts/check-support-table.sh` checks it: Quick Checks fails when the table lacks
+`docs/_data/support.yml` has one entry per release line, newest first, rendered on the
+[Support Policy](../reference/support-policy); its header lists the fields. Change it in the same pull request that
+prepares the release:
+
+| Release | Change |
+|---|---|
+| A patch (X.Y.Z) | The line's `version` and `released`. Nothing else. |
+| A minor before 1.0 (0.7.0) | Add the new line first: `line`, `version`, `released`, `status: "latest"`. The line it replaces becomes `superseded`, with `ended_on` the release date. |
+| 1.0.0 | Add the `1.0` line as `latest`. `0.7` becomes `security-only`, with `security_until` three months after the release date. Every older 0.x line becomes `eol`, keeping its `ended_on`. |
+| A minor from 1.1 | Add the new line as `latest`. The previous 1.x minor becomes `security-only`, with `security_until` three months after the release date. |
+| Any release | A `security-only` line whose `security_until` has passed becomes `eol`, with `ended_on` that date. |
+
+The end dates follow [Supported lines](../reference/support-policy#supported-lines); state each new `security_until` in
+the release notes ([End of support](../reference/support-policy#end-of-support)).
+
+`scripts/check-support-table.sh` checks the table: the fields each status needs (`security_until` for `security-only`,
+`ended_on` for `superseded` and `eol`), one `latest` line and it first, and that it is the newest CHANGELOG release; a
+`security-only` line whose date has passed is a warning. Quick Checks fails when the table lacks
 the newest CHANGELOG release, and the release workflow's `support-table` job fails a tag that is not the table's
 `latest` line, before `publish` runs. A pre-release tag (`v1.0.0-RC1`) is not a support line and is not checked.
 
@@ -111,8 +126,8 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
 
 **1.0, in addition:**
 
-- [ ] In the support table, mark 0.7.x `security-only` (critical fixes for three months after 1.0, with the end date)
-      and every older 0.x line `eol` ([Supported lines](../reference/support-policy#supported-lines)).
+- [ ] In the support table, mark 0.7.x `security-only` with `security_until` three months after 1.0 (critical fixes),
+      and every older 0.x line `eol` ([Update the support table](#update-the-support-table)).
 - [ ] Publish the Scalafix migration rules as `org.llm4s::llm4s-scalafix` with the release
       ([#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](../reference/scalafix#migration-rules)), and put the one-line
       command in the 1.0 upgrade notes.

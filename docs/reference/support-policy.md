@@ -23,10 +23,13 @@ see [SUPPORT.md](https://github.com/llm4s/llm4s/blob/main/SUPPORT.md).
 ## Current lines
 
 {% for l in site.data.support.lines %}
-{% if forloop.first %}| Version | Released | Status | Notes |
-|---|---|---|---|
-{% endif %}| {{ l.version }} | {{ l.released }} | {{ l.status }} | {{ l.note }} |
+{% if forloop.first %}| Line | Latest release | Released | Status | Security fixes until | Ended | Notes |
+|---|---|---|---|---|---|---|
+{% endif %}| {{ l.line }}.x | {{ l.version }} | {{ l.released }} | {{ l.status }} | {{ l.security_until | default: "-" }} | {{ l.ended_on | default: "-" }} | {{ l.note }} |
 {% endfor %}
+
+*Status*: `latest` gets every fix; `security-only` gets security fixes until the date shown; `superseded` (before 1.0)
+and `eol` get none, from the date in *Ended*.
 
 Every published `llm4s-*` module has the same version, so a line means the same version for every module. The list of
 published releases is on [GitHub](https://github.com/llm4s/llm4s/releases).

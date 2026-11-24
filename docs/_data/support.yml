@@ -1,18 +1,27 @@
 # The release lines and their support status, rendered by docs/reference/support-policy.md.
 # Updated by hand in the release process (docs/reference/release.md, step "Update the support table"), newest first.
 # scripts/check-support-table.sh checks it in CI and against the release tag.
-# status: latest | superseded (not patched; upgrade to the latest) | security-only | eol
-# Until the compatibility baseline is set (#1281) every line before 1.0 is "latest only".
+#
+# One entry per release line (MAJOR.MINOR):
+#   line            "MAJOR.MINOR"
+#   version         the line's newest release, MAJOR.MINOR.PATCH within `line`
+#   released        that release's date, YYYY-MM-DD (the CHANGELOG's date for it)
+#   status          latest        the one line that gets every fix; the first entry
+#                   security-only security fixes only, until `security_until`
+#                   superseded    before 1.0: not patched once a newer release is out; upgrade to the latest
+#                   eol           no fixes
+#   security_until  YYYY-MM-DD, the last day of security fixes: required for security-only, kept once it is eol
+#   ended_on        YYYY-MM-DD, the day the line stopped getting fixes: required for superseded and eol
+#   note            free text
 lines:
-  - version: "0.6.0"
+  - line: "0.6"
+    version: "0.6.0"
     released: "2026-11-21"
     status: "latest"
     note: "Pre-baseline: the only line that gets fixes."
-  - version: "0.5.1"
+  - line: "0.5"
+    version: "0.5.1"
     released: "2026-10-15"
     status: "superseded"
-    note: "Pre-baseline: not patched; upgrade to the latest release."
-  - version: "0.5.0"
-    released: "2026-10-15"
-    status: "superseded"
+    ended_on: "2026-11-21"
     note: "Pre-baseline: not patched; upgrade to the latest release."
