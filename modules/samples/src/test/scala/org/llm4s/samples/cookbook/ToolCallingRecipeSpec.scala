@@ -1,7 +1,7 @@
 package org.llm4s.samples.cookbook
 
 import org.llm4s.agent.AgentStatus
-import org.llm4s.llmconnect.model.{ AssistantMessage, MessageRole, ToolCall }
+import org.llm4s.llmconnect.model.{ AssistantMessage, MessageRole, ToolCall, ToolCallId }
 import org.llm4s.toolapi.SafeParameterExtractor
 import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -36,7 +36,10 @@ class ToolCallingRecipeSpec extends AnyFlatSpec with Matchers with EitherValues 
     val client = new ScriptedClient((conversation, _) =>
       Right(conversation.messages.filter(_.role == MessageRole.Tool).lastOption match {
         case None =>
-          AssistantMessage(None, Seq(ToolCall("c1", "exchange_rate", ujson.Obj("from" -> "USD", "to" -> "JPY"))))
+          AssistantMessage(
+            None,
+            Seq(ToolCall(ToolCallId("c1"), "exchange_rate", ujson.Obj("from" -> "USD", "to" -> "JPY")))
+          )
         case Some(output) => AssistantMessage(s"I could not convert: ${output.content}")
       })
     )

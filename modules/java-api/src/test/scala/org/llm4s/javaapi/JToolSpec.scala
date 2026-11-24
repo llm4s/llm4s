@@ -4,7 +4,7 @@ import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.javaapi.StreamFixtures.*
 import org.llm4s.llmconnect.model.*
-import org.llm4s.toolapi.ToolCallInfo
+import org.llm4s.toolapi.{ IdempotencyKey, ToolCallInfo }
 import org.llm4s.types.Result
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
@@ -45,26 +45,32 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
 
   "An annotated Java tool" should "be called with the model's arguments, and its result returned to the model" in {
     run(
-      ToolCall("c1", "weather", ujson.Obj("city" -> "Paris", "unit" -> "CELSIUS"))
+      ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris", "unit" -> "CELSIUS"))
     ) shouldBe "tool said: Sunny in Paris, 21C"
     ToolsCheck.CALLS.asScala.toList shouldBe List("weather:Paris,CELSIUS,null")
   }
 
   it should "receive an optional argument the model passed" in {
-    run(ToolCall("c1", "weather", ujson.Obj("city" -> "Oslo", "unit" -> "FAHRENHEIT", "days" -> 2)))
+    run(ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Oslo", "unit" -> "FAHRENHEIT", "days" -> 2)))
     ToolsCheck.CALLS.asScala.toList shouldBe List("weather:Oslo,FAHRENHEIT,2")
   }
 
   it should "turn an exception into a tool error the model sees, and keep the agent running" in {
-    run(ToolCall("c1", "explode", ujson.Obj("why" -> "test"))) should include("IllegalStateException: cannot: test")
+    run(ToolCall(ToolCallId("c1"), "explode", ujson.Obj("why" -> "test"))) should include(
+      "IllegalStateException: cannot: test"
+    )
     ToolsCheck.CALLS.asScala.toList shouldBe List("explode:test")
   }
 
   it should "refuse a missing, mistyped or unknown argument as a tool error, without calling the method" in {
     // the agent checks the arguments against the tool's schema before the tool runs
-    run(ToolCall("c1", "weather", ujson.Obj("unit" -> "CELSIUS"))) should include("required property missing")
-    run(ToolCall("c1", "weather", ujson.Obj("city" -> 5, "unit" -> "CELSIUS"))) should include("expected string")
-    run(ToolCall("c1", "weather", ujson.Obj("city" -> "x", "unit" -> "KELVIN"))) should include("KELVIN")
+    run(ToolCall(ToolCallId("c1"), "weather", ujson.Obj("unit" -> "CELSIUS"))) should include(
+      "required property missing"
+    )
+    run(ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> 5, "unit" -> "CELSIUS"))) should include(
+      "expected string"
+    )
+    run(ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "x", "unit" -> "KELVIN"))) should include("KELVIN")
     ToolsCheck.CALLS.asScala.toList shouldBe empty
   }
 
@@ -83,8 +89,10 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
   }
 
   "A lambda Java tool" should "read each kind of argument, and return JSON for a map" in {
-    run(ToolCall("c1", "add", ujson.Obj("a" -> 2, "b" -> 0.5))) shouldBe "tool said: 2.5"
-    run(ToolCall("c1", "add", ujson.Obj("a" -> 2, "b" -> 0.5, "round" -> true))) shouldBe """tool said: {"sum":3}"""
+    run(ToolCall(ToolCallId("c1"), "add", ujson.Obj("a" -> 2, "b" -> 0.5))) shouldBe "tool said: 2.5"
+    run(
+      ToolCall(ToolCallId("c1"), "add", ujson.Obj("a" -> 2, "b" -> 0.5, "round" -> true))
+    ) shouldBe """tool said: {"sum":3}"""
     ToolsCheck.CALLS.asScala.toList shouldBe List("add:2,0.5,false", "add:2,0.5,true")
     val add                      = ToolsCheck.calculator().get()
     def error(args: ujson.Value) = add.function.execute(args).left.map(_.message).left.getOrElse("")
@@ -247,14 +255,18 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
   }
 
   it should "carry the call an agent runs: its id and idempotency key (#1740)" in {
-    val args = new JToolArgs(FacadeToken.INSTANCE, java.util.Map.of(), Some(ToolCallInfo("c1", "k1")))
+    val args = new JToolArgs(
+      FacadeToken.INSTANCE,
+      java.util.Map.of(),
+      Some(ToolCallInfo(ToolCallId("c1"), IdempotencyKey("k1")))
+    )
     args.toolCallId() shouldBe java.util.Optional.of("c1")
     args.idempotencyKey() shouldBe java.util.Optional.of("k1")
   }
 
   "A Java tool run by an agent" should "read the call's id and idempotency key, annotated and lambda alike (#1740)" in {
-    val charged  = run(ToolCall("c7", "charge", ujson.Obj("cents" -> 5))).stripPrefix("tool said: ")
-    val refunded = run(ToolCall("c8", "refund", ujson.Obj("cents" -> 5))).stripPrefix("tool said: ")
+    val charged  = run(ToolCall(ToolCallId("c7"), "charge", ujson.Obj("cents" -> 5))).stripPrefix("tool said: ")
+    val refunded = run(ToolCall(ToolCallId("c8"), "refund", ujson.Obj("cents" -> 5))).stripPrefix("tool said: ")
     Seq(charged, refunded).foreach(_ should fullyMatch regex "[0-9a-f]{64}")
     charged should not be refunded
     ToolsCheck.CALLS.asScala.toList shouldBe List(s"charge:5,c7,$charged", s"refund:5,c8,$refunded")
@@ -265,7 +277,10 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
     val refund = ToolsCheck.refund().get()
     Seq(charge, refund).foreach { tool =>
       tool.function.execute(ujson.Obj("cents" -> 1)) shouldBe Right(ujson.Str("none"))
-      tool.function.execute(ujson.Obj("cents" -> 2), ToolCallInfo("id", "key")) shouldBe Right(ujson.Str("key"))
+      tool.function.execute(
+        ujson.Obj("cents" -> 2),
+        ToolCallInfo(ToolCallId("id"), IdempotencyKey("key"))
+      ) shouldBe Right(ujson.Str("key"))
     }
     ToolsCheck.CALLS.asScala.toList shouldBe List(
       "charge:1,none,none",
@@ -294,7 +309,7 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
 
   "The Java guide's Tools snippet" should "run an agent that calls an annotated tool" in {
     GuideSnippets
-      .tools(Llm4s.wrapClient(callingThen(ToolCall("c1", "weather", ujson.Obj("city" -> "Paris")))))
+      .tools(Llm4s.wrapClient(callingThen(ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris")))))
       .answer()
       .orElseThrow() shouldBe "tool said: Sunny in Paris"
   }

@@ -45,7 +45,7 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   /** One model message calling `big` once per `(id, size)`. */
   private def calling(calls: (String, Int)*): Vector[Message] => AssistantMessage =
-    _ => AssistantMessage(None, calls.map((id, n) => ToolCall(id, "big", ujson.Obj("text" -> n.toString))))
+    _ => AssistantMessage(None, calls.map((id, n) => ToolCall(ToolCallId(id), "big", ujson.Obj("text" -> n.toString))))
 
   /** A tool returning `n` lines of 40 characters, recording each call's idempotency key. */
   final private class Big {
@@ -54,7 +54,7 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
       AgentTool(
         AgentToolSpec[Echo]("big", "Big", Schema.`object`[Echo]("big").withRequiredField("text", Schema.string("n")))
       ) { (a, context) =>
-        keys.add(context.idempotencyKey.value)
+        keys.add(context.idempotencyKey.asString)
         ToolOutcome.success(ToolContent.Json(ujson.Str(lines(a.text.toInt))))
       }
   }
@@ -137,7 +137,7 @@ class ToolOutputOffloadSpec extends AnyFlatSpec with Matchers with EitherValues 
     val deny = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("deny")
       override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
-        if request.call.id == "c2" then ToolOutcome.Error("Denied: " + "d" * 9000) else next()
+        if request.call.id == ToolCallId("c2") then ToolOutcome.Error("Denied: " + "d" * 9000) else next()
     }
     val model = ScriptedModel(calling("c1" -> 1, "c2" -> 1), answer("done"))
     val (state, _) =

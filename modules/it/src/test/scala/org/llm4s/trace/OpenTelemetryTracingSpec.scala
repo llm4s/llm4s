@@ -3,7 +3,7 @@ package org.llm4s.trace
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.SpanKind
 import org.llm4s.llmconnect.config.{ OpenTelemetryConfig, TracingSettings }
-import org.llm4s.llmconnect.model.TokenUsage
+import org.llm4s.llmconnect.model.{ TokenUsage, ToolCallId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.it.tags.Local
@@ -36,7 +36,9 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
     tracing.getSpanKind(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "model", "op")) shouldBe SpanKind.INTERNAL
 
     tracing.getSpanKind(TraceEvent.CompletionReceived("id", "model", 0, "content")) shouldBe SpanKind.CLIENT
-    tracing.getSpanKind(TraceEvent.ToolExecuted("tool", "in", "out", 100.millis, true)) shouldBe SpanKind.INTERNAL
+    tracing.getSpanKind(
+      TraceEvent.ToolExecuted("tool", ToolCallId("in").asString, "out", 100.millis, true)
+    ) shouldBe SpanKind.INTERNAL
     tracing.getSpanKind(TraceEvent.ErrorOccurred.of(new Exception(""), "")) shouldBe SpanKind.INTERNAL
   }
 

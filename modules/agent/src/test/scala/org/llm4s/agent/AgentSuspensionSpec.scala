@@ -141,7 +141,7 @@ class AgentSuspensionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         suspension.questions.head
       case other => fail(s"expected Suspended, got $other")
     }
-    request.call.id shouldBe "c1"
+    request.call.id shouldBe ToolCallId("c1")
     request.question shouldBe ujson.Obj("prompt" -> "really go?")
 
     val done = agent.resume(parked.threadId, Map(parked.reply(id, Answer(true)))).value

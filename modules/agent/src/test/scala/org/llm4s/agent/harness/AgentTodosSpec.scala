@@ -22,7 +22,7 @@ class AgentTodosSpec extends AnyFlatSpec with Matchers with EitherValues with Op
         None,
         Seq(
           ToolCall(
-            "w1",
+            ToolCallId("w1"),
             "write_todos",
             ujson.Obj("todos" -> ujson.Arr(items.map((c, s) => ujson.Obj("content" -> c, "status" -> s))*))
           )

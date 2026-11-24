@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.toolloop
 
-import org.llm4s.llmconnect.model.{ ContentPart, ToolMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ ContentPart, ToolCallId, ToolMessage, UserMessage }
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -52,7 +52,7 @@ class InlineMediaBoundSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "tool-results" should "evict inline media from the results of a batch that would together be over the bound" in {
     val recorded = (1 to 6).foldLeft(Vector.empty[ToolResult]) { (rs, i) =>
-      ToolLoop.results.applyUpdate(rs, ToolResult("a", s"c$i", Vector(part), isError = false)).value
+      ToolLoop.results.applyUpdate(rs, ToolResult("a", ToolCallId(s"c$i"), Vector(part), isError = false)).value
     }
     recorded.map(r => ContentPart.inlineBytes(r.parts)).sum should be <= Messages.MaxInlineBytes
     recorded.take(4).map(_.parts) shouldBe Vector.fill(4)(Vector(part))

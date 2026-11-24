@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import java.time.Instant
@@ -41,7 +42,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
   }
 
   test("Completion.hasToolCalls returns true when tool calls present") {
-    val toolCall = ToolCall("call-1", "get_weather", ujson.Obj("location" -> "NYC"))
+    val toolCall = ToolCall(ToolCallId("call-1"), "get_weather", ujson.Obj("location" -> "NYC"))
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),

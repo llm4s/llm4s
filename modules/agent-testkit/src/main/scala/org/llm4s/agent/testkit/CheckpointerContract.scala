@@ -1,5 +1,6 @@
 package org.llm4s.agent.testkit
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.graph.*
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.types.Result

@@ -1,12 +1,12 @@
 package org.llm4s.samples.chat.tui
 
-import org.llm4s.llmconnect.model.{ StreamedChunk, ToolCall }
+import org.llm4s.llmconnect.model.{ StreamedChunk, ToolCall, ToolCallId }
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 class ChatTuiStreamSessionSpec extends AnyFunSuite with Matchers {
   private def chunk(id: String, name: String, args: ujson.Value): StreamedChunk =
-    StreamedChunk(id = "response", content = None, toolCall = Some(ToolCall(id, name, args)))
+    StreamedChunk(id = "response", content = None, toolCall = Some(ToolCall(ToolCallId(id), name, args)))
 
   test("parse a complete raw argument document before tool approval") {
     val session = new ChatTuiModel.StreamSession

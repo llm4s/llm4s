@@ -4,8 +4,8 @@ import org.llm4s.agent.AgentId
 import org.llm4s.agent.delegation.{ AncestorPermissions, AncestorRules }
 import org.llm4s.agent.graph.middleware.{ PermissionRule, ToolCallRequest }
 import org.llm4s.agent.graph.tool.{ AgentToolSpec, Operation, ToolContent, ToolContext, ToolOutcome }
-import org.llm4s.llmconnect.model.ToolCall
-import org.llm4s.toolapi.Schema
+import org.llm4s.llmconnect.model.{ ToolCall, ToolCallId }
+import org.llm4s.toolapi.{ IdempotencyKey, Schema }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -18,7 +18,7 @@ class AncestorPermissionsSpec extends AnyFlatSpec with Matchers {
 
   private val spec =
     AgentToolSpec("risky", "risky", Schema.`object`[Args]("args").withRequiredField("text", Schema.string("t")))
-  private val request = ToolCallRequest(spec, ToolCall("1", "risky", ujson.Obj("text" -> "x")))
+  private val request = ToolCallRequest(spec, ToolCall(ToolCallId("1"), "risky", ujson.Obj("text" -> "x")))
 
   private def context(approved: Boolean): ToolContext =
     ToolContext(

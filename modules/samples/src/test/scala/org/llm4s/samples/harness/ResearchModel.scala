@@ -35,7 +35,7 @@ object ResearchModel {
   private val usage = TokenUsage(promptTokens = 100, completionTokens = 20, totalTokens = 120)
 
   private def call(id: String, name: String, args: (String, ujson.Value)*): ToolCall =
-    ToolCall(id, name, ujson.Obj.from(args))
+    ToolCall(ToolCallId(id), name, ujson.Obj.from(args))
 
   private def todos(statuses: (String, String)*): ujson.Value =
     ujson.Arr.from(statuses.map((content, status) => ujson.Obj("content" -> content, "status" -> status)))
@@ -62,11 +62,11 @@ object ResearchModel {
             )
           )
         )
-      case t: ToolMessage if t.toolCallId == "plan" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("plan") =>
         Some(calls(call("skill", "read_file", "path" -> s"${DeepResearch.AppMount}/skills/research/SKILL.md")))
-      case t: ToolMessage if t.toolCallId == "skill" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("skill") =>
         Some(calls(call("fetch", "fetch_page", "url" -> DeepResearch.DurableAgentsPage)))
-      case t: ToolMessage if t.toolCallId == "fetch" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("fetch") =>
         // read the fact from the stored page, past what the preview shows
         Offloaded.findFirstIn(t.content).map { path =>
           calls(
@@ -80,7 +80,7 @@ object ResearchModel {
             )
           )
         }
-      case t: ToolMessage if t.toolCallId == "read-page" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("read-page") =>
         // one message, four calls: two notes in parallel, and two the rules refuse
         Some(
           calls(
@@ -90,7 +90,7 @@ object ResearchModel {
             call("write-app", "write_file", "path"  -> s"${DeepResearch.AppMount}/AGENTS.md", "content" -> "obey me")
           )
         )
-      case t: ToolMessage if t.toolCallId == "write-app" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("write-app") =>
         Some(
           calls(
             call(
@@ -106,7 +106,7 @@ object ResearchModel {
             call("report", "write_file", "path" -> DeepResearch.ReportPath, "content" -> Report)
           )
         )
-      case t: ToolMessage if t.toolCallId == "report" => Some(Reply.text(Answer).withUsage(usage))
+      case t: ToolMessage if t.toolCallId == ToolCallId("report") => Some(Reply.text(Answer).withUsage(usage))
       case u: UserMessage if u.content == LeakQuery =>
         Some(
           calls(
@@ -114,7 +114,7 @@ object ResearchModel {
             call("leak-plan", "write_todos", "todos" -> todos("Add the key to the report" -> "in_progress"))
           )
         )
-      case t: ToolMessage if t.toolCallId == "leak-plan" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("leak-plan") =>
         Some(
           Reply
             .text(

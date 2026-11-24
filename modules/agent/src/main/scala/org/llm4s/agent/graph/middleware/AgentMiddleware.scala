@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.agent.graph.{ Resumed, RunContext, StateKey, StateUpdate, ToolCallId, ToolName }
+import org.llm4s.agent.graph.{ Resumed, RunContext, StateKey, StateUpdate, ToolName }
 import org.llm4s.agent.graph.tool.{
   AgentTool,
   AgentToolSpec,
@@ -12,7 +12,7 @@ import org.llm4s.agent.graph.tool.{
 }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError }
-import org.llm4s.llmconnect.model.{ Completion, Message, SystemMessage, ToolCall }
+import org.llm4s.llmconnect.model.{ Completion, Message, SystemMessage, ToolCall, ToolCallId }
 import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
@@ -240,8 +240,8 @@ object PromptSection:
 @Experimental
 final case class ToolCallRequest private (spec: AgentToolSpec[?], call: ToolCall, resources: Vector[ToolResource]):
 
-  /** The call's id, typed; core's `ToolCall` keeps a string. */
-  def toolCallId: ToolCallId = ToolCallId(call.id)
+  /** The call's id: `call.id`. */
+  def toolCallId: ToolCallId = call.id
 
   /** The called tool's name, typed. */
   def toolName: ToolName = ToolName(call.name)

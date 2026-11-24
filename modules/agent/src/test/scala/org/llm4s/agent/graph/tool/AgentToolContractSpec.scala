@@ -1,8 +1,9 @@
 package org.llm4s.agent.graph.tool
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.llm4s.agent.graph._
 import org.llm4s.error.ValidationError
-import org.llm4s.toolapi.{ Schema, SchemaDefinition, ToolBuilder, ToolFunction, ToolHints }
+import org.llm4s.toolapi.{ IdempotencyKey, Schema, SchemaDefinition, ToolBuilder, ToolFunction, ToolHints }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers

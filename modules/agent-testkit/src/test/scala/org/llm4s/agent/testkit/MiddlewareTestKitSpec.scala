@@ -13,7 +13,7 @@ import org.llm4s.agent.graph.middleware.{
   ToolCallRequest
 }
 import org.llm4s.agent.graph.tool.{ AgentToolSpec, ToolContent, ToolContext, ToolOutcome }
-import org.llm4s.llmconnect.model.{ Conversation, ToolCall, UserMessage }
+import org.llm4s.llmconnect.model.{ Conversation, ToolCall, ToolCallId, UserMessage }
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.Schema
 import org.llm4s.types.Result
@@ -112,7 +112,7 @@ class MiddlewareTestKitSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   "MiddlewareTestKit.toolContext" should "let a tool wrapper be called directly" in {
     val policy = new ReviewDeploys
-    val call   = ToolCall("call-1", "deploy", ujson.Obj("text" -> "prod"))
+    val call   = ToolCall(ToolCallId("call-1"), "deploy", ujson.Obj("text" -> "prod"))
     val ran    = ToolOutcome.success(ToolContent.Json(ujson.Str("deployed")))
 
     policy.wrapToolCall(ToolCallRequest(spec("deploy"), call), MiddlewareTestKit.toolContext(call))(() => ran) shouldBe
@@ -124,18 +124,18 @@ class MiddlewareTestKitSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   it should "give one call the same idempotency key every time, and another call another" in {
-    val call  = ToolCall("call-1", "deploy", ujson.Obj("text" -> "prod"))
-    val other = ToolCall("call-2", "deploy", ujson.Obj("text" -> "prod"))
+    val call  = ToolCall(ToolCallId("call-1"), "deploy", ujson.Obj("text" -> "prod"))
+    val other = ToolCall(ToolCallId("call-2"), "deploy", ujson.Obj("text" -> "prod"))
 
     val context = MiddlewareTestKit.toolContext(call)
-    context.toolCallId.value shouldBe "call-1"
+    context.toolCallId.asString shouldBe "call-1"
     context.idempotencyKey shouldBe MiddlewareTestKit.toolContext(call).idempotencyKey
     context.idempotencyKey should not be MiddlewareTestKit.toolContext(other).idempotencyKey
     context.idempotencyKey should not be MiddlewareTestKit.toolContext(call, threadId = ThreadId("t2")).idempotencyKey
   }
 
   it should "carry the state and the run's configuration" in {
-    val call    = ToolCall("call-1", "deploy", ujson.Obj("text" -> "prod"))
+    val call    = ToolCall(ToolCallId("call-1"), "deploy", ujson.Obj("text" -> "prod"))
     val state   = MiddlewareTestKit.state(Set(Articles), StateUpdate.update(Articles, "a")).value
     val context = MiddlewareTestKit.toolContext(call, state, RunConfig().withTenantId(TenantId("acme")))
 

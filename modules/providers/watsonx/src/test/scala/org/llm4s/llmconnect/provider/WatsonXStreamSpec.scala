@@ -325,7 +325,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
       )
     )
     val completion   = result.getOrElse(fail(s"expected success, got $result"))
-    val expectedCall = ToolCall("call-a", "add", ujson.Obj("a" -> 1, "b" -> 2))
+    val expectedCall = ToolCall(ToolCallId("call-a"), "add", ujson.Obj("a" -> 1, "b" -> 2))
     completion.toolCalls shouldBe List(expectedCall)
     completion.message.toolCalls shouldBe Seq(expectedCall)
     chunks.flatMap(_.toolCall) shouldBe Seq(expectedCall)
@@ -343,8 +343,8 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
       )
     )
     result.map(_.toolCalls).getOrElse(fail(s"expected success, got $result")) shouldBe List(
-      ToolCall("call-a", "add", ujson.Obj("a" -> 1)),
-      ToolCall("call-b", "mul", ujson.Obj("x" -> 3))
+      ToolCall(ToolCallId("call-a"), "add", ujson.Obj("a" -> 1)),
+      ToolCall(ToolCallId("call-b"), "mul", ujson.Obj("x" -> 3))
     )
   }
 
@@ -365,7 +365,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
           callEvent(piece(0, None, Some("a"), Some("{}")), piece(1, None, Some("b"), Some("{}"))),
           finishEvent("tool_calls")
         )
-      )._1.map(_.toolCalls.map(_.id).toList).getOrElse(fail("expected success"))
+      )._1.map(_.toolCalls.map(_.id.asString).toList).getOrElse(fail("expected success"))
     val first  = ids()
     val second = ids()
     first.distinct should have size 2

@@ -136,7 +136,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
         SystemMessage("be brief"),
         UserMessage("Hi"),
         AssistantMessage("Hello"),
-        ToolMessage("42", "call-7"),
+        ToolMessage("42", ToolCallId("call-7")),
         UserMessage("Thanks")
       )
     )

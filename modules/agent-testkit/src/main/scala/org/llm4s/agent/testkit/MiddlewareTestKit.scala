@@ -1,16 +1,7 @@
 package org.llm4s.agent.testkit
 
 import org.llm4s.agent.AgentId
-import org.llm4s.agent.graph.{
-  IdempotencyKey,
-  RunConfig,
-  RunContext,
-  StateKey,
-  StateUpdate,
-  ThreadId,
-  ThreadState,
-  ToolCallId
-}
+import org.llm4s.agent.graph.{ IdempotencyKeys, RunConfig, RunContext, StateKey, StateUpdate, ThreadId, ThreadState }
 import org.llm4s.agent.graph.middleware.{
   AdmissionContext,
   AgentMiddleware,
@@ -95,7 +86,7 @@ object MiddlewareTestKit:
     approved: Boolean = false
   ): ToolContext =
     val run = RunContext.outsideRuntime(threadId, config)
-    ToolContext(run, ToolCallId(call.id), IdempotencyKey.ofCall(threadId, run.taskKey, call), state, approved)
+    ToolContext(run, call.id, IdempotencyKeys.ofCall(threadId, run.taskKey, call), state, approved)
 
   /** The model usage the hooks given `context` have recorded so far, through `accounted` clients and `recordUsage`. */
   def usage(context: ModelContext): UsageSummary = context.run.usage.summary

@@ -3,7 +3,7 @@ package org.llm4s.agent.graph.toolloop
 import org.llm4s.annotation.Experimental
 import org.llm4s.agent.graph.{ SchemaVersion, StateKey }
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.model.{ AssistantMessage, ContentPart, Message, ToolMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, ContentPart, Message, ToolCallId, ToolMessage, UserMessage }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -35,7 +35,7 @@ enum MessageUpdate derives ReadWriter:
    * rather than a whole-message `Replace`, so two edits to calls of one message in the same
    * superstep both apply instead of the later overwriting the earlier.
    */
-  case EditToolCall(messageId: String, toolCallId: String, arguments: ujson.Value)
+  case EditToolCall(messageId: String, toolCallId: ToolCallId, arguments: ujson.Value)
 
 @Experimental
 object Messages:

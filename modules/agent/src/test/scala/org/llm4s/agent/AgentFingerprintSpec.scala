@@ -98,7 +98,10 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
     val thread  = ThreadId("handed-off")
     val rootClient = ScriptedLLMClient.of(
       CompletionFixture.withMessage(
-        AssistantMessage(None, Seq(ToolCall("h1", "handoff_to_helper", ujson.Obj("reason" -> "needs help"))))
+        AssistantMessage(
+          None,
+          Seq(ToolCall(ToolCallId("h1"), "handoff_to_helper", ujson.Obj("reason" -> "needs help")))
+        )
       )
     )
     val helperClient = ScriptedLLMClient.of(CompletionFixture.simple("helped"), CompletionFixture.simple("never"))
@@ -163,7 +166,9 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
     val runtime = GraphRuntime(InMemoryCheckpointer())
     val thread  = ThreadId("parked")
     val client = ScriptedLLMClient.of(
-      CompletionFixture.withMessage(AssistantMessage(None, Seq(ToolCall("c1", "echo", ujson.Obj("text" -> "hi"))))),
+      CompletionFixture.withMessage(
+        AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "echo", ujson.Obj("text" -> "hi"))))
+      ),
       CompletionFixture.simple("done")
     )
     def family(builder: AgentBuilder) =
@@ -300,7 +305,7 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
       Agent
         .builder("root", ScriptedLLMClient.of(replies*))
         .withTools(SpecTools.set(step))
-        .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == "c1")("review")))
+        .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == ToolCallId("c1"))("review")))
         .withRuntime(runtime)
     )
   }
@@ -381,7 +386,7 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
         Agent
           .builder("root", ScriptedLLMClient.of(replies*))
           .withTools(SpecTools.set(step))
-          .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == "c1")("review")))
+          .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == ToolCallId("c1"))("review")))
           .withHandoffs(Handoff.to("helper", Agent.builder("helper", client).withTools(SpecTools.set(helperTool))))
           .withRuntime(runtime)
       )

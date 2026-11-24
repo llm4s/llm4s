@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.testutil.TestTimeLimit
@@ -64,7 +65,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       case Reply.Calls(calls*) =>
         val toolCalls = calls.map { c =>
           ujson.Obj(
-            "id"       -> c.id,
+            "id"       -> c.id.asString,
             "type"     -> "function",
             "function" -> ujson.Obj("name" -> c.name, "arguments" -> c.arguments.render())
           )
@@ -99,7 +100,9 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       case Reply.Says(text) => LocalProviderTestServer.anthropicMessage(text, model)
       case Reply.Calls(calls*) =>
         val uses =
-          calls.map(c => ujson.Obj("type" -> "tool_use", "id" -> c.id, "name" -> c.name, "input" -> c.arguments))
+          calls.map(c =>
+            ujson.Obj("type" -> "tool_use", "id" -> c.id.asString, "name" -> c.name, "input" -> c.arguments)
+          )
         ujson
           .Obj(
             "id"            -> "msg_calls",
@@ -154,8 +157,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
 
   /** The idempotency key each run of each call saw, in order. */
   final private class Keys {
-    private val seen                               = new ConcurrentLinkedQueue[(String, IdempotencyKey)]()
-    def record(context: ToolContext): Unit         = seen.add(context.toolCallId.value -> context.idempotencyKey): Unit
+    private val seen                       = new ConcurrentLinkedQueue[(String, IdempotencyKey)]()
+    def record(context: ToolContext): Unit = seen.add(context.toolCallId.asString -> context.idempotencyKey): Unit
     def of(callId: String): Vector[IdempotencyKey] = seen.asScala.toVector.collect { case (`callId`, k) => k }
     def all: Vector[IdempotencyKey]                = seen.asScala.toVector.map(_._2)
   }
@@ -168,7 +171,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
 
   private def text(t: String): ujson.Value = ujson.Obj("text" -> t)
 
-  private def toolCall(id: String, name: String, args: ujson.Value = text("x")): ToolCall = ToolCall(id, name, args)
+  private def toolCall(id: String, name: String, args: ujson.Value = text("x")): ToolCall =
+    ToolCall(ToolCallId(id), name, args)
 
   /** The stored conversation itself keeps the rule. */
   private def wellFormed(result: AgentResult): Unit =
@@ -176,7 +180,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
 
   /** Each tool call's stored result, as text. */
   private def results(result: AgentResult): Map[String, String] =
-    result.messages.collect { case t: ToolMessage => t.toolCallId -> ContentPart.text(t.parts) }.toMap
+    result.messages.collect { case t: ToolMessage => t.toolCallId.asString -> ContentPart.text(t.parts) }.toMap
 
   /**
    * Records which call-tool pending writes reached the store, and can stop storing anything, as a dying process: once
@@ -276,7 +280,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
         wellFormed(result)
         result.messages.collect { case t: ToolMessage => t.toolCallId } shouldBe Vector("c1", "c2", "c3", "c4", "c5")
       }
-      keys.all.foreach(_.value should fullyMatch regex "[0-9a-f]{64}")
+      keys.all.foreach(_.asString should fullyMatch regex "[0-9a-f]{64}")
       keys.all.distinct should have size 3
     }
 
@@ -309,11 +313,11 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
           case AgentStatus.Suspended(suspension) => suspension.approvals.map((id, r) => r.call.id -> (id, r)).toMap
           case other                             => fail(s"expected Suspended, got $other")
         }
-        approvals.keySet shouldBe Set("a1", "r1", "e1")
+        approvals.keySet shouldBe Set(ToolCallId("a1"), "r1", "e1")
         approvals.values.map(_._2.idempotencyKey).toSet should have size 3
 
         // a partial resume runs the approved call, and the model is still not asked
-        val partial = agent.resume(parked.threadId, Map(parked.approve(approvals("a1")._1))).value
+        val partial = agent.resume(parked.threadId, Map(parked.approve(approvals(ToolCallId("a1"))._1))).value
         partial.status shouldBe a[AgentStatus.Suspended]
         requests() shouldBe 1
 
@@ -321,8 +325,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
           .resume(
             parked.threadId,
             Map(
-              partial.reject(approvals("r1")._1, "not today"),
-              partial.edit(approvals("e1")._1, text("edited"))
+              partial.reject(approvals(ToolCallId("r1"))._1, "not today"),
+              partial.edit(approvals(ToolCallId("e1"))._1, text("edited"))
             )
           )
           .value
@@ -331,8 +335,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
         wellFormed(done)
         ran.asScala.toVector.sorted shouldBe Vector("alpha", "edited")
         // the approved and the edited call each ran with the key their approval request carried
-        keys.of("a1").distinct shouldBe Vector(approvals("a1")._2.idempotencyKey)
-        keys.of("e1").distinct shouldBe Vector(approvals("e1")._2.idempotencyKey)
+        keys.of("a1").distinct shouldBe Vector(approvals(ToolCallId("a1"))._2.idempotencyKey)
+        keys.of("e1").distinct shouldBe Vector(approvals(ToolCallId("e1"))._2.idempotencyKey)
       }
     }
 

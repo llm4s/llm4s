@@ -181,7 +181,7 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
         case None =>
           AssistantMessage(
             text = None,
-            toolCalls = Seq(ToolCall("call-1", "get_forecast", ujson.Obj("city" -> "Oslo")))
+            toolCalls = Seq(ToolCall(ToolCallId("call-1"), "get_forecast", ujson.Obj("city" -> "Oslo")))
           )
         case Some(output) => AssistantMessage(s"The tool returned $output")
       }

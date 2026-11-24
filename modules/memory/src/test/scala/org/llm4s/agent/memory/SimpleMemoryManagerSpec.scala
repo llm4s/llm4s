@@ -34,7 +34,7 @@ class SimpleMemoryManagerSpec extends AnyFlatSpec with Matchers {
       m1    <- manager.recordMessage(UserMessage("User message"), "conv-1", None)
       m2    <- m1.recordMessage(AssistantMessage("Assistant response"), "conv-1", None)
       m3    <- m2.recordMessage(SystemMessage("System prompt"), "conv-1", None)
-      m4    <- m3.recordMessage(ToolMessage("Tool result", "call-123"), "conv-1", None)
+      m4    <- m3.recordMessage(ToolMessage("Tool result", ToolCallId("call-123")), "conv-1", None)
       stats <- m4.stats
     } yield stats
 
