@@ -5,7 +5,7 @@ description: "The Scalafix rules LLM4S enforces to keep configuration loading at
 parent: Reference
 nav_order: 4
 cites_open_issues: [2330]
-cites_closed_issues: [2778, 2807, 2810]
+cites_closed_issues: [2778, 2807, 2810, 2815]
 cites_issues: [2804, 2805, 2809]
 ---
 
