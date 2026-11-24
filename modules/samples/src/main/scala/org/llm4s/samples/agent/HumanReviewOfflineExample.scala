@@ -4,7 +4,7 @@ import org.llm4s.agent.graph.middleware.ApprovalMiddleware
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolOutcome, ToolSet }
 import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.model.{ AssistantMessage, ToolCall, ToolMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, ToolCall, ToolCallId, ToolMessage }
 import org.llm4s.samples.cookbook.ScriptedClient
 import org.llm4s.toolapi.Schema
 import org.llm4s.types.Result
@@ -48,9 +48,9 @@ object HumanReviewOfflineExample {
   private val ToolName = "send_payment"
 
   // The three calls the model asks for in one turn, with the call ids the decisions are matched on.
-  private val ApprovedCallId = "pay-alice"
-  private val RejectedCallId = "pay-mallory"
-  private val EditedCallId   = "pay-bob"
+  private val ApprovedCallId = ToolCallId("pay-alice")
+  private val RejectedCallId = ToolCallId("pay-mallory")
+  private val EditedCallId   = ToolCallId("pay-bob")
 
   private val RejectReason = "not on the payee list"
   private val EditedAmount = 50
@@ -73,7 +73,7 @@ object HumanReviewOfflineExample {
     }
   }
 
-  private def paymentCall(id: String, to: String, amount: Int): ToolCall =
+  private def paymentCall(id: ToolCallId, to: String, amount: Int): ToolCall =
     ToolCall(id, ToolName, ujson.Obj("to" -> to, "amount" -> amount))
 
   /** Asks for the three payments, then answers with the tool results it saw. */
@@ -106,7 +106,7 @@ object HumanReviewOfflineExample {
       tools <- ToolSet.of(sendPayment(payments))
       agent <- Agent
         .builder("human-review-offline-example", client)
-        .withTools(tools)
+        .withToolSet(tools)
         .withMiddleware(new ApprovalMiddleware(request => Option.when(request.spec.name == ToolName)(ReviewReason)))
         .build()
       parked <- agent.run(UserRequest)
