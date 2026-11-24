@@ -65,7 +65,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(SpecTools.set(record))
+        .withToolSet(SpecTools.set(record))
         .withMiddleware(modelPositions(models))
         .withMiddleware(modelTasks)
     )
@@ -88,7 +88,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
       calling(call("call_0", "record")),
       CompletionFixture.simple("second")
     )
-    (built(Agent.builder("assistant", client).withTools(SpecTools.set(record))), seen)
+    (built(Agent.builder("assistant", client).withToolSet(SpecTools.set(record))), seen)
   }
 
   "Calls of two turns reusing a provider call id" should "get different keys under runMultiTurn" in {
@@ -119,7 +119,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
       Right(calling(call("c1", "lookup"), call("c2", "lookup"))),
       Right(CompletionFixture.simple("done"))
     )
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(lookup)))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(lookup)))
 
     cause(agent.run(thread, "go").error) match {
       case e: ValidationError => e.message should include("tool call id 'c1' is used more than once")
@@ -137,7 +137,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
   "A model message with a blank tool call id" should "be refused before it is stored" in {
     val lookup = SpecTools.tool("lookup")((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("ok"))))
     val client = ScriptedLLMClient.of(calling(call(" ", "lookup")))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(lookup)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(lookup)))
     cause(agent.run(thread, "go").error).message should include("a tool call has a blank id")
   }
 
@@ -152,7 +152,7 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     val lookup = SpecTools.tool("lookup")((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("ok"))))
     val client = ScriptedLLMClient.of(calling(call("c1", "lookup")), CompletionFixture.simple("never"))
     val agent =
-      built(Agent.builder("assistant", client).withTools(SpecTools.set(lookup)).withMiddleware(dropping))
+      built(Agent.builder("assistant", client).withToolSet(SpecTools.set(lookup)).withMiddleware(dropping))
 
     cause(agent.run(thread, "go").error).message should include("tool call 'c1' has no result straight after it")
     client.callCount shouldBe 1 // the first call had nothing to drop; the second was refused

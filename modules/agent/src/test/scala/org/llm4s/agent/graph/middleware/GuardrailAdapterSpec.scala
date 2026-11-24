@@ -20,7 +20,7 @@ class GuardrailAdapterSpec extends AnyFlatSpec with Matchers {
   final private class Recording(val name: String, fails: Boolean, calls: CopyOnWriteArrayList[String])
       extends Guardrail[String] {
     def validate(value: String): Result[String] = { calls.add(s"$name:plain"); outcome(value) }
-    override def validate(value: String, context: UsageAccounting): Result[String] = {
+    override def validateIn(value: String, context: UsageAccounting): Result[String] = {
       calls.add(s"$name:context"); outcome(value)
     }
     override def description: Option[String] = Some(s"$name checks")

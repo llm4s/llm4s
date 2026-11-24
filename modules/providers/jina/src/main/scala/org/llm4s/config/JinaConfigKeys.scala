@@ -15,7 +15,4 @@ object JinaConfigKeys {
 
   /** Overrides the Jina AI embedding base URL. Defaults to `"https://api.jina.ai/v1"`. */
   val JINA_EMBEDDING_BASE_URL = "JINA_EMBEDDING_BASE_URL"
-
-  /** Selects the Jina AI embedding model when using the legacy provider format. */
-  val JINA_EMBEDDING_MODEL = "JINA_EMBEDDING_MODEL"
 }

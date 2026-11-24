@@ -13,7 +13,7 @@ import org.llm4s.llmconnect.spi.{
   ProviderRegistryReport
 }
 import org.llm4s.llmconnect.streaming.SSEParser.SSEEvent
-import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ProviderId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -44,7 +44,6 @@ class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
     val section = EmbeddingProviderSection()
     section.apiKey shouldBe None
     section.baseUrl shouldBe None
-    section.model shouldBe None
     section.timeouts shouldBe ProviderTimeouts.default
     section.extras shouldBe Map.empty
 
@@ -52,17 +51,15 @@ class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
     val set = section
       .withApiKey(Secret("k"))
       .withBaseUrl(BaseUrl("http://b"))
-      .withModel(ModelName("m"))
       .withTimeouts(timeouts)
-    set shouldBe EmbeddingProviderSection(Some(Secret("k")), Some(BaseUrl("http://b")), Some(ModelName("m")), timeouts)
+    set shouldBe EmbeddingProviderSection(Some(Secret("k")), Some(BaseUrl("http://b")), timeouts)
 
-    val cleared = set.withApiKey(None).withBaseUrl(None).withModel(None)
+    val cleared = set.withApiKey(None).withBaseUrl(None)
     cleared shouldBe EmbeddingProviderSection(timeouts = timeouts)
     set
       .withApiKey(Some(Secret("k2")))
-      .withBaseUrl(Some(BaseUrl("http://c")))
-      .withModel(Some(ModelName("m2"))) shouldBe
-      EmbeddingProviderSection(Some(Secret("k2")), Some(BaseUrl("http://c")), Some(ModelName("m2")), timeouts)
+      .withBaseUrl(Some(BaseUrl("http://c"))) shouldBe
+      EmbeddingProviderSection(Some(Secret("k2")), Some(BaseUrl("http://c")), timeouts)
   }
 
   it should "hold the provider's declared extras, and keep their values out of toString (#2811)" in {

@@ -11,7 +11,6 @@ in this module.
 |---|---|---|
 | `VOYAGE_API_KEY` | `llm4s.credentials.voyage.apiKey` | none (required) |
 | `VOYAGE_EMBEDDING_BASE_URL` | `llm4s.embeddings.voyage.baseUrl` | `https://api.voyageai.com/v1` |
-| `VOYAGE_EMBEDDING_MODEL` | `llm4s.embeddings.voyage.model` | none |
 
 ```hocon
 llm4s.embeddings.model = "voyage/voyage-3"

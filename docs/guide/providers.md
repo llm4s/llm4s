@@ -419,9 +419,9 @@ it, and `GOOGLE_API_KEY` / `GEMINI_API_KEY` apply to the Gemini API provider onl
 
 `project` and `location` are Vertex AI's own keys ([provider-specific keys](#provider-specific-keys)).
 Before [#1215](https://github.com/llm4s/llm4s/issues/1215) Vertex read the project from `endpoint`
-and the region from `organization`. Those names are no longer read: they are unknown keys, logged
-with a warning and ignored, so a section that still sets `endpoint` instead of `project` fails to
-load. See the [migration note](../reference/migration#vertex-ai-no-longer-reads-endpoint-and-organization).
+and the region from `organization`. Those names are no longer read: `endpoint` is an unknown key,
+logged with a warning and ignored, so a section that still sets it instead of `project` fails to
+load, and a section that sets `organization` and no `location` fails, naming the fix. See the [migration note](../reference/migration#vertex-ai-no-longer-reads-endpoint-and-organization).
 
 ---
 
@@ -1974,12 +1974,12 @@ def toolTurn(
 ## Citations and grounding sources
 
 A model that searches the web by itself reports the sources behind its answer. llm4s returns them on
-`Completion.citations`, a `List[Citation]` that is empty for every completion that has none:
+`Completion.citations`, a `Seq[Citation]` that is empty for every completion that has none:
 
 ```scala
 import org.llm4s.llmconnect.model.Completion
 
-def sources(completion: Completion): List[String] =
+def sources(completion: Completion): Seq[String] =
   completion.citations.map(c => s"${c.title.getOrElse(c.url)} <${c.url}>")
 ```
 

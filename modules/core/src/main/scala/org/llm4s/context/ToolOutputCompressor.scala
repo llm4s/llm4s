@@ -138,7 +138,7 @@ object ToolOutputCompressor {
         message.parts.zipWithIndex.collect {
           case (_: ContentPart.Text, `first`)           => ContentPart.Text(pointer)
           case (media, _) if ContentPart.isMedia(media) => media
-        }
+        }.toVector
       }
     }
 

@@ -59,7 +59,6 @@ keep the `openai-java` SDK's own timeouts, which bound the whole call, retries i
 | Key | Environment variable |
 |---|---|
 | `llm4s.embeddings.openai.baseUrl` | `OPENAI_EMBEDDING_BASE_URL` |
-| `llm4s.embeddings.openai.model` | `OPENAI_EMBEDDING_MODEL` |
 
 The base URL defaults to `https://api.openai.com/v1`, the same root as the chat provider; requests go
 to `<baseUrl>/embeddings`, and a base URL without the `/v1` (a proxy root, say) gets

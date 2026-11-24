@@ -163,10 +163,10 @@ guide/agents/index.md | 8f4ed128d4 | with | import org.llm4s.agent.Agent; import
 guide/agents/index.md | 82582ede43 | skip | chargeSpec and payments stand for the reader's own tool spec and payment client
 guide/agents/index.md | 851d4f4d00 | skip | chargeSchema and payments stand for the reader's own schema and payment client
 guide/agents/index.md | 6774605f9e | skip | appendSpec, read and writeIfUnchanged stand for the reader's own tool spec and file access
-guide/agents/index.md | b76f20c767 | skip | dir, image and port stand for the workspace directory, runner image and port the reader starts
+guide/agents/index.md | 3f06adc79e | skip | dir, image and port stand for the workspace directory, runner image and port the reader starts
 guide/agents/index.md | 15ca9efc01 | skip | baseSpec and workspaceId stand for the reader's own tool spec and workspace
-guide/agents/index.md | ce76667140 | with | import org.llm4s.agent.Agent
-guide/agents/index.md | 74711366e8 | with | import org.llm4s.agent.Agent
+guide/agents/index.md | f15f77a51f | with | import org.llm4s.agent.Agent
+guide/agents/index.md | 7f0b64b8a6 | with | import org.llm4s.agent.Agent
 guide/agents/index.md | 17c3af78c5 | with | import org.llm4s.agent.Agent
 guide/agents/index.md | 4a8092bb7b | with | import org.llm4s.agent.Agent
 guide/agents/index.md | c58e4d4ee0 | with | import org.llm4s.agent.Agent
@@ -176,7 +176,7 @@ guide/agents/index.md | 36fb50d046 | with | import org.llm4s.agent.Agent
 guide/agents/index.md | 4f67dff48d | with | import org.llm4s.agent.Agent
 guide/agents/index.md | b7deab0a7d | with | import org.llm4s.agent.Agent
 guide/agents/index.md | 3a0a1f8daa | with | import org.llm4s.agent.Agent
-guide/agents/index.md | 53294b2a27 | with | import org.llm4s.agent.Agent
+guide/agents/index.md | b24cd6b180 | with | import org.llm4s.agent.Agent
 guide/agents/index.md | be4f20b575 | with | import org.llm4s.agent.Agent
 getting-started/installation.md | 631ae22c61 | skip | sbt build definition, not Scala source
 getting-started/installation.md | fcc67c6b63 | skip | sbt build definition, not Scala source

@@ -274,7 +274,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
         ),
         Reply.Says("done")
       ) { (client, requests) =>
-        val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(ok, err, boom)))
+        val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(ok, err, boom)))
         val result = agent.run("go").value
         result.answer shouldBe Some("done")
         requests() shouldBe 2
@@ -306,7 +306,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
         val agent = built(
           Agent
             .builder("assistant", client)
-            .withTools(SpecTools.set(deploy, danger))
+            .withToolSet(SpecTools.set(deploy, danger))
             .withMiddleware(denyDanger, new ApprovalMiddleware(r => Option.when(r.call.name == "deploy")("review")))
         )
         val parked = agent.run("ship it").value
@@ -356,7 +356,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       val ok = tool("ok", keys)((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("fine"))))
       scripted(wire, Reply.Calls(toolCall("q1", "confirm"), toolCall("k1", "ok")), Reply.Says("confirmed")) {
         (client, requests) =>
-          val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(asker, ok)))
+          val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(asker, ok)))
           val parked = agent.run("ask").value
           val (id, question) = parked.status match {
             case AgentStatus.Suspended(suspension) => suspension.questions.head
@@ -382,11 +382,11 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
         Reply.Calls(toolCall("f1", "refund")),
         Reply.Says("refunded")
       ) { (client, requests) =>
-        val billing = Agent.builder("billing", client).withTools(SpecTools.set(refund))
+        val billing = Agent.builder("billing", client).withToolSet(SpecTools.set(refund))
         val agent = built(
           Agent
             .builder("assistant", client)
-            .withTools(SpecTools.set(lookup))
+            .withToolSet(SpecTools.set(lookup))
             .withHandoffs(Handoff.to("billing", billing, "refunds"))
         )
         val result = agent.run("refund me").value
@@ -409,7 +409,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
         Reply.Calls(toolCall("call_0", "lookup", text("two"))),
         Reply.Says("second")
       ) { (client, requests) =>
-        val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(lookup)))
+        val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(lookup)))
         val thread = ThreadId(s"reused-${wire.name}")
         agent.run(thread, "one").value.answer shouldBe Some("first")
         val second = agent.run(thread, "two").value
@@ -442,7 +442,10 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       scripted(wire, Reply.Calls(toolCall("f1", "fast"), toolCall("s1", "slow")), Reply.Says("recovered")) {
         (client, requests) =>
           val agent = built(
-            Agent.builder("assistant", client).withTools(SpecTools.set(fast, slow)).withRuntime(new GraphRuntime(store))
+            Agent
+              .builder("assistant", client)
+              .withToolSet(SpecTools.set(fast, slow))
+              .withRuntime(new GraphRuntime(store))
           )
           val thread = ThreadId(s"cancelled-${wire.name}")
           val run    = agent.start(thread, "go").fold(e => fail(e.message), identity)
@@ -477,7 +480,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       }
       scripted(wire, Reply.Calls(toolCall("g1", "good"), toolCall("x1", "flaky")), Reply.Says("all done")) {
         (client, requests) =>
-          val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(good, flaky)))
+          val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(good, flaky)))
           val thread = ThreadId(s"fatal-${wire.name}")
           cause(agent.run(thread, "go").error) shouldBe a[GraphError.ToolFailed]
           requests() shouldBe 1
@@ -516,7 +519,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
             built(
               Agent
                 .builder("assistant", client)
-                .withTools(SpecTools.set(done, crasher))
+                .withToolSet(SpecTools.set(done, crasher))
                 .withRuntime(new GraphRuntime(store))
             )
           val thread = ThreadId(s"crash-${wire.name}")
@@ -557,7 +560,10 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       scripted(wire, Reply.Calls(toolCall("f1", "fast"), toolCall("s1", "slow")), Reply.Says("moved on")) {
         (client, requests) =>
           val agent = built(
-            Agent.builder("assistant", client).withTools(SpecTools.set(fast, slow)).withRuntime(new GraphRuntime(store))
+            Agent
+              .builder("assistant", client)
+              .withToolSet(SpecTools.set(fast, slow))
+              .withRuntime(new GraphRuntime(store))
           )
           val thread = ThreadId(s"abandon-cancelled-${wire.name}")
           val run    = agent.start(thread, "go").fold(e => fail(e.message), identity)
@@ -589,7 +595,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       val flaky = tool("flaky", keys)((_, _) => ToolOutcome.Fatal(ValidationError("flaky", "backend down")))
       scripted(wire, Reply.Calls(toolCall("g1", "good"), toolCall("x1", "flaky")), Reply.Says("without flaky")) {
         (client, requests) =>
-          val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(good, flaky)))
+          val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(good, flaky)))
           val thread = ThreadId(s"abandon-fatal-${wire.name}")
           cause(agent.run(thread, "go").error) shouldBe a[GraphError.ToolFailed]
           requests() shouldBe 1
@@ -627,7 +633,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
             built(
               Agent
                 .builder("assistant", client)
-                .withTools(SpecTools.set(done, crasher))
+                .withToolSet(SpecTools.set(done, crasher))
                 .withRuntime(new GraphRuntime(store))
             )
           val thread = ThreadId(s"abandon-crash-${wire.name}")

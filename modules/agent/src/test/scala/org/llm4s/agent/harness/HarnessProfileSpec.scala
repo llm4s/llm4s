@@ -287,7 +287,7 @@ class HarnessProfileSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
     val agent = built(
       Agent
         .builder("researcher", client)
-        .withTools(ToolSet.of(fetch).value)
+        .withToolSet(ToolSet.of(fetch).value)
         .withHarness(HarnessProfile().withOffload(OffloadConfig(thresholdTokens = 1000)))
     )
     val results = agent.run("research").value.messages.collect { case t: ToolMessage => t.content }

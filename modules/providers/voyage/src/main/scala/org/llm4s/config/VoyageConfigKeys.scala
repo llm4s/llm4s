@@ -16,7 +16,4 @@ object VoyageConfigKeys {
 
   /** Overrides the Voyage AI embedding base URL. Defaults to `"https://api.voyageai.com/v1"`. */
   val VOYAGE_EMBEDDING_BASE_URL = "VOYAGE_EMBEDDING_BASE_URL"
-
-  /** Selects the Voyage AI embedding model when using the legacy provider format. */
-  val VOYAGE_EMBEDDING_MODEL = "VOYAGE_EMBEDDING_MODEL"
 }

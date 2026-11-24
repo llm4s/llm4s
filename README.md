@@ -535,12 +535,12 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
   - Type: `(String, EmbeddingProviderConfig)`
   - Loader: `Llm4sConfig.embeddings()`
   - Provider-specific keys:
-    - **OpenAI**: `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL`, and `OPENAI_API_KEY` - the same key
+    - **OpenAI**: `OPENAI_EMBEDDING_BASE_URL`, and `OPENAI_API_KEY` - the same key
       OpenAI chat sections use
-    - **Voyage**: `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL`, `VOYAGE_API_KEY`
-    - **Jina**: `JINA_EMBEDDING_BASE_URL`, `JINA_EMBEDDING_MODEL`, `JINA_API_KEY`
-    - **Cohere**: `COHERE_EMBEDDING_BASE_URL`, `COHERE_EMBEDDING_MODEL`, `COHERE_API_KEY`
-    - **Ollama** (local): `OLLAMA_EMBEDDING_BASE_URL` (default: `http://localhost:11434`), `OLLAMA_EMBEDDING_MODEL`
+    - **Voyage**: `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_API_KEY`
+    - **Jina**: `JINA_EMBEDDING_BASE_URL`, `JINA_API_KEY`
+    - **Cohere**: `COHERE_EMBEDDING_BASE_URL`, `COHERE_API_KEY`
+    - **Ollama** (local): `OLLAMA_EMBEDDING_BASE_URL` (default: `http://localhost:11434`)
 
 - Provider API keys and endpoints
   - Keys: `apiKey` and `baseUrl` inside each `llm4s.providers.<name>` section, plus the provider's own

@@ -140,7 +140,7 @@ private[agent] object ContextPruning {
     java.util.Collections.synchronizedMap(new java.util.WeakHashMap[Message, Integer]())
 
   private def hasInlineBytes(message: Message): Boolean = {
-    def anyInline(parts: Vector[ContentPart]): Boolean = parts.exists {
+    def anyInline(parts: Seq[ContentPart]): Boolean = parts.exists {
       case i: ContentPart.Image    => i.source.isInstanceOf[org.llm4s.media.MediaSource.Inline]
       case d: ContentPart.Document => d.source.isInstanceOf[org.llm4s.media.MediaSource.Inline]
       case _                       => false

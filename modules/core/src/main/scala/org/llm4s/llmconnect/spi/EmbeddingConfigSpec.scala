@@ -22,7 +22,6 @@ import scala.jdk.CollectionConverters._
  *
  * @param apiKey  `llm4s.embeddings.<id>.apiKey`.
  * @param baseUrl `llm4s.embeddings.<id>.baseUrl`, typed as a chat section's is.
- * @param model   `llm4s.embeddings.<id>.model`, typed as a chat section's is.
  * @param timeouts `llm4s.embeddings.<id>.timeouts`: how long an embedding request may take, as the same
  *                 `timeouts` block a chat section has. Only `request` applies, since an embedding call
  *                 does not stream. Absent means the provider's own default.
@@ -35,7 +34,6 @@ import scala.jdk.CollectionConverters._
 final case class EmbeddingProviderSection private (
   apiKey: Option[Secret],
   baseUrl: Option[BaseUrl],
-  model: Option[ModelName],
   timeouts: ProviderTimeouts,
   extras: Map[String, String]
 ) {
@@ -43,8 +41,6 @@ final case class EmbeddingProviderSection private (
   def withApiKey(apiKey: Option[Secret]): EmbeddingProviderSection       = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: BaseUrl): EmbeddingProviderSection            = copy(baseUrl = Some(baseUrl))
   def withBaseUrl(baseUrl: Option[BaseUrl]): EmbeddingProviderSection    = copy(baseUrl = baseUrl)
-  def withModel(model: ModelName): EmbeddingProviderSection              = copy(model = Some(model))
-  def withModel(model: Option[ModelName]): EmbeddingProviderSection      = copy(model = model)
   def withTimeouts(timeouts: ProviderTimeouts): EmbeddingProviderSection = copy(timeouts = timeouts)
   def withExtras(extras: Map[String, String]): EmbeddingProviderSection  = copy(extras = extras)
 
@@ -57,7 +53,7 @@ final case class EmbeddingProviderSection private (
 
   // Extra values may be credentials, so they are redacted and their names kept, as a chat section's are.
   override def toString: String =
-    s"EmbeddingProviderSection(${apiKey.map(_ => "***")},${baseUrl.map(url => Redaction.url(url.asUrl))},$model," +
+    s"EmbeddingProviderSection(${apiKey.map(_ => "***")},${baseUrl.map(url => Redaction.url(url.asUrl))}," +
       s"$timeouts,${extras.keys.toSeq.sorted.map(k => s"$k -> ***").mkString("Map(", ", ", ")")})"
 }
 
@@ -67,11 +63,10 @@ object EmbeddingProviderSection:
   def apply(
     apiKey: Option[Secret] = None,
     baseUrl: Option[BaseUrl] = None,
-    model: Option[ModelName] = None,
     timeouts: ProviderTimeouts = ProviderTimeouts.default,
     extras: Map[String, String] = Map.empty
   ): EmbeddingProviderSection =
-    new EmbeddingProviderSection(apiKey, baseUrl, model, timeouts, extras)
+    new EmbeddingProviderSection(apiKey, baseUrl, timeouts, extras)
 
 /**
  * What an embedding provider needs from its section, and what to use when the
@@ -100,7 +95,8 @@ object EmbeddingProviderSection:
  *
  * @param requiresApiKey the provider cannot work without a key; a missing one is an error.
  * @param defaultBaseUrl base URL used when the section omits one.
- * @param defaultModel   model used when neither `EMBEDDING_MODEL` nor the section names one.
+ * @param defaultModel   model used when `EMBEDDING_MODEL` names none: `llm4s-rag` reads it for a provider chosen
+ *                       without a model (`RAGConfig.withEmbeddings(provider)`).
  * @param defaultApiKey  stand-in for a provider that takes a key but does not need a real
  *                       one - Ollama running locally.
  * @param apiKeyEnv      the variables the module's `reference.conf` binds to
@@ -109,7 +105,6 @@ object EmbeddingProviderSection:
  *                       the binding itself is the `reference.conf` line, and each module's
  *                       round-trip spec proves the two agree. Empty when nothing binds the
  *                       shared key, and the error then names the shared path instead.
- * @param modelEnv       the variable the module binds to the model, named likewise.
  * @param extras         provider-specific keys accepted in `llm4s.embeddings.<id>`, each with its own
  *                       description, default and requiredness - a region, an API version, a task. The loader
  *                       reads the declared keys, applies defaults and reports a required one that is missing,
@@ -125,7 +120,6 @@ final case class EmbeddingConfigSpec private (
   defaultModel: Option[ModelName],
   defaultApiKey: Option[String],
   apiKeyEnv: Seq[String],
-  modelEnv: Option[String],
   extras: Seq[ProviderConfigKey]
 ) {
   def withExtras(extras: Seq[ProviderConfigKey]): EmbeddingConfigSpec  = copy(extras = extras)
@@ -137,8 +131,6 @@ final case class EmbeddingConfigSpec private (
   def withDefaultApiKey(defaultApiKey: String): EmbeddingConfigSpec         = copy(defaultApiKey = Some(defaultApiKey))
   def withDefaultApiKey(defaultApiKey: Option[String]): EmbeddingConfigSpec = copy(defaultApiKey = defaultApiKey)
   def withApiKeyEnv(apiKeyEnv: Seq[String]): EmbeddingConfigSpec            = copy(apiKeyEnv = apiKeyEnv)
-  def withModelEnv(modelEnv: String): EmbeddingConfigSpec                   = copy(modelEnv = Some(modelEnv))
-  def withModelEnv(modelEnv: Option[String]): EmbeddingConfigSpec           = copy(modelEnv = modelEnv)
 }
 
 object EmbeddingConfigSpec:
@@ -150,14 +142,14 @@ object EmbeddingConfigSpec:
     defaultModel: Option[ModelName] = None,
     defaultApiKey: Option[String] = None,
     apiKeyEnv: Seq[String] = Seq.empty,
-    modelEnv: Option[String] = None,
     extras: Seq[ProviderConfigKey] = Seq.empty
   ): EmbeddingConfigSpec =
-    new EmbeddingConfigSpec(requiresApiKey, defaultBaseUrl, defaultModel, defaultApiKey, apiKeyEnv, modelEnv, extras)
+    new EmbeddingConfigSpec(requiresApiKey, defaultBaseUrl, defaultModel, defaultApiKey, apiKeyEnv, extras)
 
   /**
    * The keys of `llm4s.embeddings.<id>` that every provider's section has, which a provider therefore cannot
-   * declare in [[EmbeddingConfigSpec.extras]].
+   * declare in [[EmbeddingConfigSpec.extras]]. `model` is no longer read (the model is `EMBEDDING_MODEL`'s, #2835),
+   * and stays reserved so that a section still setting it is refused, naming the fix, rather than read as an extra.
    */
   val BuiltinKeys: Set[String] = Set("apiKey", "apiKeyFile", "baseUrl", "model", "timeouts")
 
@@ -179,28 +171,19 @@ object EmbeddingConfigSpec:
     ConfigUtil.joinPath(List("llm4s", "embeddings", id.asString, field).asJava)
 
   /**
-   * Resolves the model: the `EMBEDDING_MODEL=<id>/<model>` override first, then
-   * the section, then the spec's default.
+   * Resolves the model: the `EMBEDDING_MODEL=<id>/<model>` override first, then the spec's default.
    *
    * @param modelOverride the `<model>` half of a unified `EMBEDDING_MODEL`, when one was given.
    */
-  def resolveModel(
-    id: ProviderId,
-    section: EmbeddingProviderSection,
-    modelOverride: Option[ModelName],
-    spec: EmbeddingConfigSpec
-  ): Result[ModelName] =
+  def resolveModel(id: ProviderId, modelOverride: Option[ModelName], spec: EmbeddingConfigSpec): Result[ModelName] =
     nonEmpty(modelOverride.map(_.asString))
-      .orElse(nonEmpty(section.model.map(_.asString)))
       .map(ModelName(_))
       .orElse(spec.defaultModel)
-      .toRight {
-        val env = spec.modelEnv.fold("")(name => s" or $name")
+      .toRight(
         ConfigurationError(
-          s"Missing ${id.asString} embeddings model " +
-            s"(set EMBEDDING_MODEL=${id.asString}/<model>, ${fieldPath(id, "model")}$env)"
+          s"Missing ${id.asString} embeddings model (set EMBEDDING_MODEL=${id.asString}/<model>, llm4s.embeddings.model)"
         )
-      }
+      )
 
   /** Resolves the base URL: the section first, then the spec's default. */
   def resolveBaseUrl(id: ProviderId, section: EmbeddingProviderSection, spec: EmbeddingConfigSpec): Result[BaseUrl] =

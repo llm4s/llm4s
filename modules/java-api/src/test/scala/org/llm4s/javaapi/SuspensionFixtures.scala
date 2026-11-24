@@ -58,7 +58,7 @@ private[javaapi] object SuspensionFixtures {
     }
     val tools = ToolSet.of(deploy, confirm).fold(e => throw new AssertionError(e.message), identity)
     jAgentOf(client)(
-      _.withTools(tools).withMiddleware(
+      _.withToolSet(tools).withMiddleware(
         new ApprovalMiddleware(r => Option.when(r.spec.name == "deploy")(s"deploying ${r.call.arguments("text").str}"))
       )
     )

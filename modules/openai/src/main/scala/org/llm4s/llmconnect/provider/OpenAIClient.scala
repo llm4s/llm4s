@@ -309,7 +309,7 @@ class OpenAIClient private[provider] (
     startedAt: Instant,
     requestBody: String,
     params: ChatCompletionCreateParams,
-    adjustments: List[RequestAdjustment],
+    adjustments: Seq[RequestAdjustment],
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     call("fake streaming")(transport.createChatCompletion(params)) match {
@@ -332,7 +332,7 @@ class OpenAIClient private[provider] (
     startedAt: Instant,
     requestBody: String,
     params: ChatCompletionCreateParams,
-    adjustments: List[RequestAdjustment],
+    adjustments: Seq[RequestAdjustment],
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
     val accumulator = StreamingAccumulator(modelName)
@@ -577,14 +577,14 @@ class OpenAIClient private[provider] (
   private def openAIAdjustments(
     requested: CompletionOptions,
     transformed: TransformationResult
-  ): List[RequestAdjustment] =
+  ): Seq[RequestAdjustment] =
     withUnsentSampling(requested, transformed) ++ effortPlan(transformed.options).adjustments ++
       UnmappedOptions.promptCacheAutomatic("OpenAI", transformed.options) ++ serviceTierPlan(transformed.options)._2
 
   /** The `service_tier` to send for `options`, and what was not sent as asked (see [[OpenAIServiceTier]]). */
   private def serviceTierPlan(
     options: CompletionOptions
-  ): (Option[ChatCompletionCreateParams.ServiceTier], List[RequestAdjustment]) =
+  ): (Option[ChatCompletionCreateParams.ServiceTier], Seq[RequestAdjustment]) =
     OpenAIServiceTier.plan(providerName, displayName, options)
 
   /** The `reasoning_effort` to send for `options`, if any. */
@@ -614,7 +614,7 @@ class OpenAIClient private[provider] (
   private def withUnsentSampling(
     requested: CompletionOptions,
     transformed: TransformationResult
-  ): List[RequestAdjustment] =
+  ): Seq[RequestAdjustment] =
     if (!omitsSampling(transformed.options)) transformed.adjustments
     else {
       val reason = s"$model is a reasoning model, which takes no sampling parameters"
@@ -760,9 +760,9 @@ class OpenAIClient private[provider] (
       .flatMap(_ => Try(conversation.messages.map(toOpenAIMessage)).toEither.left.map(_.toLLMError))
 
   // one text part goes as a plain string, as every message did before content parts
-  private def singleText(parts: Vector[ContentPart]): Boolean = parts match {
-    case Vector(ContentPart.Text(_)) => true
-    case _                           => false
+  private def singleText(parts: Seq[ContentPart]): Boolean = parts match {
+    case Seq(ContentPart.Text(_)) => true
+    case _                        => false
   }
 
   private def toOpenAIMessage(message: Message): ChatCompletionMessageParam =

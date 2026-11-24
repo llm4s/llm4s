@@ -67,7 +67,7 @@ class ToolCallIdWireFormatSpec extends AnyFlatSpec with Matchers with EitherValu
     built(
       Agent
         .builder("assistant", client)
-        .withTools(SpecTools.set(echo, dep))
+        .withToolSet(SpecTools.set(echo, dep))
         .withMiddleware(
           new ApprovalMiddleware(request => Option.when(request.call.name == "deploy")(s"review ${request.call.id}"))
         )
@@ -132,7 +132,7 @@ class ToolCallIdWireFormatSpec extends AnyFlatSpec with Matchers with EitherValu
     val run = built(
       Agent
         .builder("assistant", ScriptedLLMClient.of(CompletionFixture.simple("shipped")))
-        .withTools(SpecTools.set(echo, resumed))
+        .withToolSet(SpecTools.set(echo, resumed))
         .withMiddleware(new ApprovalMiddleware(request => Option.when(request.call.name == "deploy")("review")))
         .withRuntime(new GraphRuntime(seeded))
     )

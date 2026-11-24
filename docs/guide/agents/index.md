@@ -114,7 +114,7 @@ val result = for {
 } yield result
 ```
 
-`withTools` takes a {% include api.html t="org.llm4s.toolapi.ToolRegistry" %} (an `MCPToolRegistry` too) or a `ToolSet` of `AgentTool`s.
+`withTools` takes a {% include api.html t="org.llm4s.toolapi.ToolRegistry" %} (an `MCPToolRegistry` too), and `withToolSet` a `ToolSet` of `AgentTool`s.
 
 ### Multi-Turn Conversations
 
@@ -366,7 +366,7 @@ val search: AgentTool[Search] =
 def searchAgent(client: LLMClient): Result[Agent] =
   for
     tools <- ToolSet.of(search)
-    agent <- Agent.builder("assistant", client).withTools(tools).build()
+    agent <- Agent.builder("assistant", client).withToolSet(tools).build()
   yield agent
 ```
 
@@ -385,7 +385,7 @@ The pieces:
   and `approved`.
 - **`ToolSet.of(tools*)`** is the only way to build a `ToolSet`, and returns a `Result`: it refuses, in one
   `ValidationError` listing every problem, an invalid or duplicate tool name, an argument schema whose root is not
-  an object, and a schema keyword the argument validator does not check. `withTools(tools)` takes the set.
+  an object, and a schema keyword the argument validator does not check. `withToolSet(tools)` takes the set.
 
 A tool answers with a `ToolOutcome`:
 
@@ -439,7 +439,7 @@ def confirmAll(agent: Agent, result: AgentResult): Result[AgentResult] =
     case _ => Right(result)
 
 def transferAgent(client: org.llm4s.llmconnect.LLMClient): Result[Agent] =
-  ToolSet.of(new TransferTool).flatMap(tools => Agent.builder("payments", client).withTools(tools).build())
+  ToolSet.of(new TransferTool).flatMap(tools => Agent.builder("payments", client).withToolSet(tools).build())
 ```
 
 Each entry of `suspension.questions` is a `ToolQuestionRequest` carrying the tool call and the question as JSON,
@@ -706,7 +706,7 @@ HostFileBackend.open(Path.of("/srv/project"), Path.of("/var/lib/myapp/llm4s-lock
   Using.resource(opened) { project => // closed when the block ends, whether it succeeds or fails
     for {
       tools  <- ToolSet.of(FileTools(project)*)
-      agent  <- Agent.builder("coder", client).withTools(tools).build()
+      agent  <- Agent.builder("coder", client).withToolSet(tools).build()
       result <- agent.run("Summarise README.md")
     } yield result
   }
@@ -727,7 +727,7 @@ import org.llm4s.agent.harness.{FileToolLimits, FileTools, StateFileBackend}
 
 for {
   tools <- ToolSet.of(FileTools(StateFileBackend(), FileToolLimits(maxResultChars = 20000))*)
-  agent <- Agent.builder("coder", client).withTools(tools).build()
+  agent <- Agent.builder("coder", client).withToolSet(tools).build()
 } yield agent
 ```
 
@@ -767,7 +767,7 @@ for
   files   <- WorkspaceFileBackend("ws1", workspace)             // a FileBackend for the file tools
   sandbox <- WorkspaceSandboxBackend("ws1", workspace)
   agent   <- Agent.builder("coder", client)
-               .withTools(ToolSet.of(ExecuteTool(sandbox)).toOption.get)
+               .withToolSet(ToolSet.of(ExecuteTool(sandbox)).toOption.get)
                .build()
 yield agent
 ```
@@ -1239,7 +1239,7 @@ for {
   files <- CompositeBackend(StateFileBackend(), ToolOutputOffload.Mount -> OffloadBackend)
   tools <- ToolSet.of(FileTools(files)*)
   agent <- Agent.builder("assistant", client)
-             .withTools(tools)
+             .withToolSet(tools)
              .withMiddleware(new ToolOutputOffload(thresholdTokens = 20000))
              .build()
 } yield agent

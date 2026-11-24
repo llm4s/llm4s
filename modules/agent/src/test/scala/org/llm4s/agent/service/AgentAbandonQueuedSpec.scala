@@ -82,7 +82,7 @@ class AgentAbandonQueuedSpec
       Agent
         .builder("assistant", client)
         .withRuntime(new GraphRuntime(store))
-        .withTools(SpecTools.set(slow))
+        .withToolSet(SpecTools.set(slow))
         .build()
         .value
     val on: ThreadId = ThreadId(s"abandon-q-${java.util.UUID.randomUUID().toString.take(8)}")

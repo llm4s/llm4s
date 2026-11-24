@@ -34,7 +34,7 @@ import scala.util.Try
 /**
  * What counts the model calls a hook, an admission stage or a guardrail makes itself, so that they are in the thread's
  * usage: a hook's [[ModelContext]], and an admission stage's [[AdmissionContext]] (#2854). A guardrail that calls a
- * model is given one (`Guardrail.validate(value, context)`) and calls through [[accounted]], whichever stage runs it.
+ * model is given one (`Guardrail.validateIn(value, context)`) and calls through [[accounted]], whichever stage runs it.
  */
 @Experimental
 trait UsageAccounting:

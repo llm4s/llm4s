@@ -133,7 +133,7 @@ object WorkspaceToolExample {
     Agent
       .builder("workspace-demo", client)
       .withSystemPrompt("You are a helpful assistant with workspace tools. Use them to help the user.")
-      .withTools(tools)
+      .withToolSet(tools)
       .withMaxSteps(10)
       .build()
       .flatMap(_.run(Prompt)) match {

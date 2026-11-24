@@ -41,7 +41,6 @@ environment:
 | Key | Environment variable |
 |---|---|
 | `llm4s.embeddings.ollama.baseUrl` | `OLLAMA_EMBEDDING_BASE_URL` |
-| `llm4s.embeddings.ollama.model` | `OLLAMA_EMBEDDING_MODEL` |
 
 Chat sections, and the embeddings block, also accept an optional `timeouts { request = 3m, stream = 15m }`
 block; this module defaults to 2 minutes and 10 minutes for the wait for a response to begin (see

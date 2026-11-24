@@ -692,8 +692,9 @@ configuration. `from` returns a `Left(ConfigurationError)` when the config canno
 such as a `${VAR}` substitution with no value.
 
 `Llm4sSettings` is the one implementation of every read: each `Llm4sConfig` method calls the method of the same
-name on the `Llm4sSettings` of the process-wide configuration, so the two cannot differ. Both are `@Stable`;
-`Llm4sConfig.from` itself is `@Experimental`, because it takes a Typesafe `Config`, a third-party type.
+name on the `Llm4sSettings` of the process-wide configuration, so the two cannot differ. Both are `@Stable`, and so
+is `Llm4sConfig.from`: it takes a Typesafe `Config`, a third-party type, but it is the documented entry point at the
+application edge and Typesafe Config is a core dependency.
 
 To skip HOCON altogether - values from ciris, zio-config or your own code - see
 [Configuration in Code](configuration-in-code): each provider's `fromValues` and
@@ -1169,11 +1170,11 @@ also set in `application.conf` or with `-D`.
 | `OPENAI_API_KEY`, `OPENAI_SPEECH_BASE_URL`; `ELEVENLABS_API_KEY`, `ELEVENLABS_BASE_URL`, `ELEVENLABS_MODEL_ID`; `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`, `AZURE_SPEECH_TTS_BASE_URL`, `AZURE_SPEECH_STT_BASE_URL` | `llm4s.speech.openai.*`, `llm4s.speech.elevenlabs.*`, `llm4s.speech.azure.*` | `llm4s-speech` |
 | `TYPESAFE_API_KEY` | `llm4s.credentials.typesafe.apiKey` (the Jev decision client) | `llm4s-jev` |
 | `TYPESAFE_BASE_URL`, `TYPESAFE_DEFAULT_MODEL` | `llm4s.jev.baseUrl`, `llm4s.jev.model` | `llm4s-jev` |
-| `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` | `llm4s.embeddings.openai.*` | `llm4s-openai` |
-| `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL` | `llm4s.embeddings.voyage.*` | `llm4s-voyage` |
-| `JINA_EMBEDDING_BASE_URL`, `JINA_EMBEDDING_MODEL` | `llm4s.embeddings.jina.*` | `llm4s-jina` |
-| `COHERE_EMBEDDING_BASE_URL`, `COHERE_EMBEDDING_MODEL` | `llm4s.embeddings.cohere.*` | `llm4s-cohere` |
-| `OLLAMA_EMBEDDING_BASE_URL`, `OLLAMA_EMBEDDING_MODEL` | `llm4s.embeddings.ollama.*` | `llm4s-ollama` |
+| `OPENAI_EMBEDDING_BASE_URL` | `llm4s.embeddings.openai.baseUrl` | `llm4s-openai` |
+| `VOYAGE_EMBEDDING_BASE_URL` | `llm4s.embeddings.voyage.baseUrl` | `llm4s-voyage` |
+| `JINA_EMBEDDING_BASE_URL` | `llm4s.embeddings.jina.baseUrl` | `llm4s-jina` |
+| `COHERE_EMBEDDING_BASE_URL` | `llm4s.embeddings.cohere.baseUrl` | `llm4s-cohere` |
+| `OLLAMA_EMBEDDING_BASE_URL` | `llm4s.embeddings.ollama.baseUrl` | `llm4s-ollama` |
 | `RERANK_PROVIDER`, `COHERE_RERANK_BASE_URL`, `COHERE_RERANK_MODEL` | `llm4s.rerank.*`, read by `RerankerConfigLoader` | `llm4s-rag` |
 | `LLM4S_CHECKPOINTER` | `llm4s.agent.checkpointer.kind` (`memory` - the default, built in - `sqlite`, `postgres`, or the kind of any other `CheckpointerBackend` on the classpath) | `llm4s-agent` |
 | `LLM4S_RUNTIME_LABEL` | `llm4s.agent.runtime.claims.label` (names the runtime holding a thread's claim in the logs) | `llm4s-agent` |

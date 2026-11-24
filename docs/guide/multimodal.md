@@ -25,7 +25,7 @@ whether the provider can take them.
 
 ## Content parts
 
-A `UserMessage` and a `ToolMessage` carry `parts: Vector[ContentPart]`. A part is one of:
+A `UserMessage` and a `ToolMessage` carry `parts: Seq[ContentPart]`. A part is one of:
 
 - `ContentPart.Text(text)`;
 - an image, built with `ContentPart.image(source, mediaType)`, `mediaType` an `ImageMediaType` (`Png`, `Jpeg`, `Gif`,

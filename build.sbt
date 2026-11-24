@@ -401,8 +401,14 @@ lazy val stabilityTierCheck = taskKey[Unit](
     "public constructor or copy"
 )
 val stabilityTierModules = Seq("core", "openai", "openai-compatible", "anthropic", "gemini", "ollama", "agent")
-// Beta dialects that live inside the frozen `llm4s-openai-compatible`: 1.0 Scope does not freeze them.
-val stabilityExperimentalFiles = Seq("""/(Mistral|Cohere|Xai)[A-Za-z]*\.scala$""".r)
+// The Beta parts that live inside frozen modules (#2835): every top-level public type in a matching file must be
+// `@Experimental`, so `mimaExcludeAnnotations` (in `mimaFrozen`) leaves it out of the 0.7.0 baseline, nested types
+// and companions included. The Mistral, Cohere and xAI dialects of `llm4s-openai-compatible` and
+// `org.llm4s.assistant` (`llm4s-agent`). An entry that matches no file fails `stabilityTierCheck`.
+val stabilityExperimentalFiles = Seq(
+  """/(Mistral|Cohere|Xai)[A-Za-z]*\.scala$""".r,
+  """/org/llm4s/assistant/[^/]+\.scala$""".r
+)
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))
@@ -3267,9 +3273,9 @@ lazy val gradleDemo = (project in file("modules/gradle-demo"))
 // The other projects are the scalafix-testkit layout: `scalafixInput` is user code compiled with SemanticDB
 // against the *old* release (llm4s-core 0.4.1 from Maven Central), `scalafixOutput` is what the rules must produce,
 // compiled against this checkout, and `scalafixTests` runs every rule on the input and compares the result with the
-// output. `scalafixInput05` and `scalafixTests05` are the same for the rules from 0.5.x (`Llm4sMigrate_1_0`), whose
+// output. `scalafixInput05` and `scalafixTests05` are the same for the rules from 0.5.x (`Llm4sMigrateFrom_0_5`), whose
 // input compiles against the 0.5.1 artifacts; their expected output is in `scalafixOutput` too, under `fix/v1`.
-// `scalafixInput06` and `scalafixTests06` test the `Llm4sMigrate_1_0` rules for the breaks since 0.6.0 on code compiled
+// `scalafixInput06` and `scalafixTests06` test `Llm4sMigrateFrom_0_6` and the rules for the breaks since 0.6.0 on code compiled
 // against the 0.6.0 artifacts, with the expected output under `fix/v06`. Neither input nor output is formatted
 // (.scalafmt.conf excludes them), because the rules' output is compared byte for byte.
 lazy val scalafixScala213 = "2.13.14"

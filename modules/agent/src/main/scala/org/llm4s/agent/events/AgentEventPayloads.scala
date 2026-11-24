@@ -20,13 +20,13 @@ private val logger = LoggerFactory.getLogger("org.llm4s.agent.events.AgentEventP
 
 // An adjustment this version cannot read - an option or a case added later (RFC 0008 plans more) - is left out, so
 // the event, and the usage it carries, still reads. Written as the derived codec writes it.
-private given ReadWriter[List[RequestAdjustment]] =
+private given ReadWriter[Seq[RequestAdjustment]] =
   upickle.default
     .readwriter[ujson.Value]
-    .bimap[List[RequestAdjustment]](
+    .bimap[Seq[RequestAdjustment]](
       adjustments => ujson.Arr.from(adjustments.map(upickle.default.writeJs[RequestAdjustment](_))),
       json =>
-        json.arrOpt.fold(List.empty)(_.toList.flatMap { entry =>
+        json.arrOpt.fold(Seq.empty[RequestAdjustment])(_.toList.flatMap { entry =>
           Try(upickle.default.read[RequestAdjustment](entry)).fold(
             e =>
               logger.debug(s"Left out an adjustment this version cannot read: ${e.getMessage}")
@@ -121,27 +121,27 @@ final case class ModelCallCompleted private (
   usage: Option[CallUsage],
   estimatedCost: Option[Double],
   provider: Option[ProviderId] = None,
-  adjustments: List[RequestAdjustment] = List.empty,
+  adjustments: Seq[RequestAdjustment] = Seq.empty,
   finishReason: Option[FinishReason] = None,
   servedTier: Option[ServiceTier] = None,
   duration: FiniteDuration = Duration.Zero
 ):
-  def withAgent(value: String): ModelCallCompleted                        = copy(agent = value)
-  def withModel(value: ModelName): ModelCallCompleted                     = copy(model = value)
-  def withAttempts(value: Int): ModelCallCompleted                        = copy(attempts = value)
-  def withToolCalls(value: Int): ModelCallCompleted                       = copy(toolCalls = value)
-  def withUsage(value: CallUsage): ModelCallCompleted                     = copy(usage = Some(value))
-  def withUsage(value: Option[CallUsage]): ModelCallCompleted             = copy(usage = value)
-  def withEstimatedCost(value: Double): ModelCallCompleted                = copy(estimatedCost = Some(value))
-  def withEstimatedCost(value: Option[Double]): ModelCallCompleted        = copy(estimatedCost = value)
-  def withProvider(value: ProviderId): ModelCallCompleted                 = copy(provider = Some(value))
-  def withProvider(value: Option[ProviderId]): ModelCallCompleted         = copy(provider = value)
-  def withAdjustments(value: List[RequestAdjustment]): ModelCallCompleted = copy(adjustments = value)
-  def withFinishReason(value: FinishReason): ModelCallCompleted           = copy(finishReason = Some(value))
-  def withFinishReason(value: Option[FinishReason]): ModelCallCompleted   = copy(finishReason = value)
-  def withServedTier(value: ServiceTier): ModelCallCompleted              = copy(servedTier = Some(value))
-  def withServedTier(value: Option[ServiceTier]): ModelCallCompleted      = copy(servedTier = value)
-  def withDuration(value: FiniteDuration): ModelCallCompleted             = copy(duration = value)
+  def withAgent(value: String): ModelCallCompleted                       = copy(agent = value)
+  def withModel(value: ModelName): ModelCallCompleted                    = copy(model = value)
+  def withAttempts(value: Int): ModelCallCompleted                       = copy(attempts = value)
+  def withToolCalls(value: Int): ModelCallCompleted                      = copy(toolCalls = value)
+  def withUsage(value: CallUsage): ModelCallCompleted                    = copy(usage = Some(value))
+  def withUsage(value: Option[CallUsage]): ModelCallCompleted            = copy(usage = value)
+  def withEstimatedCost(value: Double): ModelCallCompleted               = copy(estimatedCost = Some(value))
+  def withEstimatedCost(value: Option[Double]): ModelCallCompleted       = copy(estimatedCost = value)
+  def withProvider(value: ProviderId): ModelCallCompleted                = copy(provider = Some(value))
+  def withProvider(value: Option[ProviderId]): ModelCallCompleted        = copy(provider = value)
+  def withAdjustments(value: Seq[RequestAdjustment]): ModelCallCompleted = copy(adjustments = value)
+  def withFinishReason(value: FinishReason): ModelCallCompleted          = copy(finishReason = Some(value))
+  def withFinishReason(value: Option[FinishReason]): ModelCallCompleted  = copy(finishReason = value)
+  def withServedTier(value: ServiceTier): ModelCallCompleted             = copy(servedTier = Some(value))
+  def withServedTier(value: Option[ServiceTier]): ModelCallCompleted     = copy(servedTier = value)
+  def withDuration(value: FiniteDuration): ModelCallCompleted            = copy(duration = value)
 
 @Experimental
 object ModelCallCompleted:
@@ -153,7 +153,7 @@ object ModelCallCompleted:
     usage: Option[CallUsage],
     estimatedCost: Option[Double],
     provider: Option[ProviderId] = None,
-    adjustments: List[RequestAdjustment] = List.empty,
+    adjustments: Seq[RequestAdjustment] = Seq.empty,
     finishReason: Option[FinishReason] = None,
     servedTier: Option[ServiceTier] = None,
     duration: FiniteDuration = Duration.Zero

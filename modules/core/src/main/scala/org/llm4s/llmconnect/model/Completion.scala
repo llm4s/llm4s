@@ -45,24 +45,24 @@ final case class Completion private (
   message: AssistantMessage,
   usage: Option[TokenUsage],
   estimatedCost: Option[BigDecimal],
-  citations: List[Citation],
-  adjustments: List[RequestAdjustment],
+  citations: Seq[Citation],
+  adjustments: Seq[RequestAdjustment],
   finishReason: FinishReason,
   servedTier: Option[ServiceTier]
 ) {
-  def withId(id: String): Completion                                    = copy(id = id)
-  def withCreated(created: Instant): Completion                         = copy(created = created)
-  def withModel(model: ModelName): Completion                           = copy(model = model)
-  def withMessage(message: AssistantMessage): Completion                = copy(message = message)
-  def withUsage(usage: TokenUsage): Completion                          = copy(usage = Some(usage))
-  def withUsage(usage: Option[TokenUsage]): Completion                  = copy(usage = usage)
-  def withEstimatedCost(estimatedCost: BigDecimal): Completion          = copy(estimatedCost = Some(estimatedCost))
-  def withEstimatedCost(estimatedCost: Option[BigDecimal]): Completion  = copy(estimatedCost = estimatedCost)
-  def withCitations(citations: List[Citation]): Completion              = copy(citations = citations)
-  def withAdjustments(adjustments: List[RequestAdjustment]): Completion = copy(adjustments = adjustments)
-  def withFinishReason(finishReason: FinishReason): Completion          = copy(finishReason = finishReason)
-  def withServedTier(servedTier: ServiceTier): Completion               = copy(servedTier = Some(servedTier))
-  def withServedTier(servedTier: Option[ServiceTier]): Completion       = copy(servedTier = servedTier)
+  def withId(id: String): Completion                                   = copy(id = id)
+  def withCreated(created: Instant): Completion                        = copy(created = created)
+  def withModel(model: ModelName): Completion                          = copy(model = model)
+  def withMessage(message: AssistantMessage): Completion               = copy(message = message)
+  def withUsage(usage: TokenUsage): Completion                         = copy(usage = Some(usage))
+  def withUsage(usage: Option[TokenUsage]): Completion                 = copy(usage = usage)
+  def withEstimatedCost(estimatedCost: BigDecimal): Completion         = copy(estimatedCost = Some(estimatedCost))
+  def withEstimatedCost(estimatedCost: Option[BigDecimal]): Completion = copy(estimatedCost = estimatedCost)
+  def withCitations(citations: Seq[Citation]): Completion              = copy(citations = citations)
+  def withAdjustments(adjustments: Seq[RequestAdjustment]): Completion = copy(adjustments = adjustments)
+  def withFinishReason(finishReason: FinishReason): Completion         = copy(finishReason = finishReason)
+  def withServedTier(servedTier: ServiceTier): Completion              = copy(servedTier = Some(servedTier))
+  def withServedTier(servedTier: Option[ServiceTier]): Completion      = copy(servedTier = servedTier)
 
   /** The text of the reply: [[message]]'s content, `""` when the model produced only tool calls. */
   def content: String = message.content
@@ -115,8 +115,8 @@ object Completion {
     message: AssistantMessage,
     usage: Option[TokenUsage] = None,
     estimatedCost: Option[BigDecimal] = None,
-    citations: List[Citation] = List.empty,
-    adjustments: List[RequestAdjustment] = List.empty,
+    citations: Seq[Citation] = Seq.empty,
+    adjustments: Seq[RequestAdjustment] = Seq.empty,
     finishReason: FinishReason = FinishReason.Unknown,
     servedTier: Option[ServiceTier] = None
   ): Completion =

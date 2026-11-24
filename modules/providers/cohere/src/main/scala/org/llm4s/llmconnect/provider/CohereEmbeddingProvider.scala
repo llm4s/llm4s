@@ -84,8 +84,7 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
     requiresApiKey = true,
     defaultBaseUrl = Some(BaseUrl("https://api.cohere.com")),
     // Bound to the shared llm4s.credentials.cohere.apiKey in this module's reference.conf.
-    apiKeyEnv = Seq(CohereEmbeddingConfigKeys.COHERE_API_KEY),
-    modelEnv = Some(CohereEmbeddingConfigKeys.COHERE_EMBEDDING_MODEL)
+    apiKeyEnv = Seq(CohereEmbeddingConfigKeys.COHERE_API_KEY)
   )
 
   /** Default output dimensions; the client does not send an `output_dimension` parameter. */

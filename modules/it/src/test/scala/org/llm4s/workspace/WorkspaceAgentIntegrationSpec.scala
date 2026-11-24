@@ -104,7 +104,7 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
       tools   <- ToolSet.of((FileTools(files) :+ ExecuteTool(sandbox))*)
       agent <- Agent
         .builder("workspace", new ScriptedToolCallLLM(script))
-        .withTools(tools)
+        .withToolSet(tools)
         .withMaxSteps(10)
         .build()
       done <- agent.run("go")

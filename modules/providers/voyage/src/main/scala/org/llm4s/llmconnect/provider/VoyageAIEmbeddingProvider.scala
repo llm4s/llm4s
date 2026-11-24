@@ -48,8 +48,7 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     requiresApiKey = true,
     defaultBaseUrl = Some(BaseUrl("https://api.voyageai.com/v1")),
     // Bound to the shared llm4s.credentials.voyage.apiKey in this module's reference.conf.
-    apiKeyEnv = Seq(VoyageConfigKeys.VOYAGE_API_KEY),
-    modelEnv = Some(VoyageConfigKeys.VOYAGE_EMBEDDING_MODEL)
+    apiKeyEnv = Seq(VoyageConfigKeys.VOYAGE_API_KEY)
   )
 
   /**

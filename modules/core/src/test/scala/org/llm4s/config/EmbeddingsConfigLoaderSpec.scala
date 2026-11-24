@@ -116,6 +116,46 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
         "llm4s.embeddings.provider"
     }
 
+    "fail, naming EMBEDDING_MODEL, when the selected provider's block still sets its own model (#2835)" in {
+      val hocon =
+        """
+          |llm4s {
+          |  embeddings {
+          |    model = "fixtureembedding/fixture-embed-large"
+          |    fixtureembedding {
+          |      apiKey = "vk-test-key"
+          |      model = "fixture-embed-small"
+          |    }
+          |  }
+          |}
+          |""".stripMargin
+
+      val error = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon)).left.value
+
+      error.message shouldBe
+        "llm4s.embeddings.fixtureembedding.model ('fixture-embed-small') is no longer read: set EMBEDDING_MODEL " +
+        "(llm4s.embeddings.model) to fixtureembedding/<model>, e.g. fixtureembedding/fixture-embed-small, and remove " +
+        "llm4s.embeddings.fixtureembedding.model"
+    }
+
+    "ignore a blank model in the selected provider's block, as an unset ${?VAR} leaves it" in {
+      val hocon =
+        """
+          |llm4s {
+          |  embeddings {
+          |    model = "fixtureembedding/fixture-embed-large"
+          |    fixtureembedding {
+          |      apiKey = "vk-test-key"
+          |      model = " "
+          |    }
+          |  }
+          |}
+          |""".stripMargin
+
+      EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon)).value.model shouldBe
+        ModelName("fixture-embed-large")
+    }
+
     "fail with clear error when no model is set" in {
       val hocon =
         """

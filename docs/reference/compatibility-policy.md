@@ -54,8 +54,7 @@ sequence is 0.6.0, then 0.7.0 (the baseline for all seven frozen modules), then 
 baseline, and until 0.7.0 the check passes without checking anything. See [The Baseline](api-stability#the-baseline).
 
 Every published module has the same version, from one tag, so a provider module's version number
-follows the release it ships in. The [modularisation programme](https://github.com/llm4s/llm4s/issues/1126)
-aims for provider modules to version independently; that is not in place.
+follows the release it ships in, and `llm4s-bom` pins that one version for every artifact.
 
 ---
 

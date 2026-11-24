@@ -77,7 +77,7 @@ class DelegationSpec
       case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
     }
     val agent = lead(client)
-      .withTools(ToolSet.of(echo("parent_tool")).value)
+      .withToolSet(ToolSet.of(echo("parent_tool")).value)
       .withSubagents(researcher.withTools(ToolSet.of(echo("child_tool")).value))
       .build()
       .value
@@ -310,7 +310,7 @@ class DelegationSpec
     val specialist = Agent
       .builder("specialist", client)
       .withSystemPrompt("SPECIALIST")
-      .withTools(ToolSet.of(echo("task_researcher")).value)
+      .withToolSet(ToolSet.of(echo("task_researcher")).value)
     val refused = lead(client)
       .withSubagents(researcher)
       .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
@@ -1139,7 +1139,7 @@ class DelegationSpec
     val client = RoutingClient(PartialFunction.empty)
     lead(client).withSubagents(general, general).build().left.value.message should include("defined twice")
     lead(client)
-      .withTools(ToolSet.of(echo("task")).value)
+      .withToolSet(ToolSet.of(echo("task")).value)
       .withSubagents(general)
       .build()
       .left

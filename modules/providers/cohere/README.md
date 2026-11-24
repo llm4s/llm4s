@@ -11,7 +11,6 @@ in this module. Cohere's chat client is a different module: a dialect in `llm4s-
 |---|---|---|
 | `COHERE_API_KEY` | `llm4s.credentials.cohere.apiKey` | none (required) |
 | `COHERE_EMBEDDING_BASE_URL` | `llm4s.embeddings.cohere.baseUrl` | `https://api.cohere.com` |
-| `COHERE_EMBEDDING_MODEL` | `llm4s.embeddings.cohere.model` | none |
 
 ```hocon
 llm4s.embeddings.model = "cohere/embed-english-v3.0"

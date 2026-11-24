@@ -11,7 +11,6 @@ in this module.
 |---|---|---|
 | `JINA_API_KEY` | `llm4s.credentials.jina.apiKey` | none (required) |
 | `JINA_EMBEDDING_BASE_URL` | `llm4s.embeddings.jina.baseUrl` | `https://api.jina.ai/v1` |
-| `JINA_EMBEDDING_MODEL` | `llm4s.embeddings.jina.model` | none |
 
 ```hocon
 llm4s.embeddings.model = "jina/jina-embeddings-v3"

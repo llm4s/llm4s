@@ -31,7 +31,7 @@ class WorkspaceBackendsSpec extends AnyFlatSpec with Matchers with EitherValues 
       Reply.toolCalls(batch.zipWithIndex.map { case ((name, args), i) => ToolCall(ToolCallId(s"c$i"), name, args) }*),
       Reply.text("done")
     )
-    val agent = Agent.builder("ws", ScriptedLLMClient.sequence(replies*)).withTools(tools).build().value
+    val agent = Agent.builder("ws", ScriptedLLMClient.sequence(replies*)).withToolSet(tools).build().value
     agent
       .run(ThreadId(s"ws-${System.nanoTime()}"), "go")
       .value

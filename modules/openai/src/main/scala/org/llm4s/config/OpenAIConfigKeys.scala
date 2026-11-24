@@ -83,7 +83,4 @@ object OpenAIConfigKeys {
    * independently of the LLM base URL.
    */
   val OPENAI_EMBEDDING_BASE_URL = "OPENAI_EMBEDDING_BASE_URL"
-
-  /** Selects the OpenAI embedding model when using the legacy provider format. */
-  val OPENAI_EMBEDDING_MODEL = "OPENAI_EMBEDDING_MODEL"
 }

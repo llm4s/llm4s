@@ -43,7 +43,9 @@ class AgentAbandonSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       flakyRan.incrementAndGet()
       ToolOutcome.Fatal(ValidationError("flaky", "backend down"))
     }
-    built(Agent.builder("assistant", client).withTools(SpecTools.set(good, flaky)).withRuntime(new GraphRuntime(store)))
+    built(
+      Agent.builder("assistant", client).withToolSet(SpecTools.set(good, flaky)).withRuntime(new GraphRuntime(store))
+    )
   }
 
   "Agent.abandon" should "give each unfinished call the reason, keep a finished call's result, and let the thread take a new turn" in {
@@ -150,7 +152,7 @@ class AgentAbandonSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(SpecTools.set(deploy))
+        .withToolSet(SpecTools.set(deploy))
         .withMiddleware(new ApprovalMiddleware(_ => Some("review")))
     )
     val parked = agent.run("ship it").value
@@ -176,7 +178,7 @@ class AgentAbandonSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       ok("slow")
     }
     val client = ScriptedLLMClient.of(calling(call("s1", "slow")), CompletionFixture.simple("finished"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(slow)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(slow)))
     val thread = ThreadId("live")
     val run    = agent.start(thread, "go").fold(e => fail(e.message), identity)
     started.await(10, TimeUnit.SECONDS) shouldBe true

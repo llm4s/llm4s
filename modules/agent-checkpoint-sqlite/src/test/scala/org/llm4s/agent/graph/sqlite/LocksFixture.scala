@@ -76,7 +76,7 @@ object LocksFixture:
     Agent
       .builder("assistant", client)
       .withSystemPrompt("You are a fixture.")
-      .withTools(ToolSet.of(step).fold(e => throw new IllegalStateException(e.message), identity))
+      .withToolSet(ToolSet.of(step).fold(e => throw new IllegalStateException(e.message), identity))
       .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == ToolCallId("c1"))("review")))
       .withRuntime(GraphRuntime(store))
       .build()
