@@ -3,7 +3,10 @@ package org.llm4s.vectorstore
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
 
+import org.sqlite.Function
+
 import java.sql.{ Connection, DriverManager, PreparedStatement, ResultSet }
+import scala.annotation.tailrec
 import scala.collection.mutable.ArrayBuffer
 import scala.util.{ Try, Using }
 
@@ -486,22 +489,32 @@ final class SQLiteVectorStore private (
     )
   }
 
+  /**
+   * Whether the metadata has an entry with the bound key that meets `condition`. The key is compared as a value, not
+   * as a JSON path, which cannot name every key. Rows an earlier version wrote are read by the same Scala code as
+   * `rowToRecord` uses, so a filter sees what a read returns.
+   */
+  private def metadataEntry(condition: String): String =
+    s"EXISTS (SELECT 1 FROM json_each(${SQLiteVectorStore.metadataJson}) WHERE key = ? AND type = 'text' AND $condition)"
+
   private def filterToSql(filter: MetadataFilter): (String, Seq[Any]) = filter match {
     case MetadataFilter.All => ("1=1", Seq.empty)
 
     case MetadataFilter.Equals(key, value) =>
-      (s"metadata LIKE ?", Seq(s"%\"$key\":\"$value\"%"))
+      (metadataEntry("value = ?"), Seq(key, value))
 
     case MetadataFilter.Contains(key, substring) =>
-      (s"metadata LIKE ?", Seq(s"%\"$key\":\"%$substring%\"%"))
+      // instr is a literal, case-sensitive substring test: LIKE would read % and _ as wildcards
+      (metadataEntry("instr(value, ?) > 0"), Seq(key, substring))
 
     case MetadataFilter.HasKey(key) =>
-      (s"metadata LIKE ?", Seq(s"%\"$key\":%"))
+      (metadataEntry("1=1"), Seq(key))
+
+    case MetadataFilter.In(_, values) if values.isEmpty =>
+      ("1=0", Seq.empty)
 
     case MetadataFilter.In(key, values) =>
-      val conditions = values.map(_ => s"metadata LIKE ?").mkString(" OR ")
-      val params     = values.toSeq.map(v => s"%\"$key\":\"$v\"%")
-      (s"($conditions)", params)
+      (metadataEntry(s"value IN (${Seq.fill(values.size)("?").mkString(",")})"), Seq(key) ++ values.toSeq)
 
     case MetadataFilter.And(left, right) =>
       val (leftSql, leftParams)   = filterToSql(left)
@@ -560,8 +573,7 @@ object SQLiteVectorStore {
     Try {
       Class.forName("org.sqlite.JDBC")
       val connection = DriverManager.getConnection(s"jdbc:sqlite:$dbPath")
-      connection.setAutoCommit(true)
-      new SQLiteVectorStore(dbPath, connection)
+      openOn(dbPath, connection)
     }.toEither.left.map(e => ProcessingError("sqlite-vector-store", s"Failed to create store: ${e.getMessage}"))
 
   /**
@@ -575,26 +587,106 @@ object SQLiteVectorStore {
     Try {
       Class.forName("org.sqlite.JDBC")
       val connection = DriverManager.getConnection("jdbc:sqlite::memory:")
-      connection.setAutoCommit(true)
-      new SQLiteVectorStore(":memory:", connection)
+      openOn(":memory:", connection)
     }.toEither.left.map(e =>
       ProcessingError("sqlite-vector-store", s"Failed to create in-memory store: ${e.getMessage}")
     )
+
+  private def openOn(dbPath: String, connection: Connection): SQLiteVectorStore = {
+    connection.setAutoCommit(true)
+    Function.create(connection, OldMetadataJson, oldMetadataJson, 1, Function.FLAG_DETERMINISTIC)
+    new SQLiteVectorStore(dbPath, connection)
+  }
 
   // ============================================================
   // Serialization Helpers
   // ============================================================
 
-  private[vectorstore] def serializeMetadata(metadata: Map[String, String]): String =
-    if (metadata.isEmpty) "{}"
-    else metadata.map { case (k, v) => s""""$k":"$v"""" }.mkString("{", ",", "}")
+  /**
+   * Starts the metadata text of every row written since 0.6.0. Up to then the text began with `{` and nothing in it was
+   * escaped (#2759): parsing it as JSON would turn the `\n` of `{"path":"C:\new"}` into a line break.
+   */
+  private val JsonMarker = " "
 
-  private[vectorstore] def deserializeMetadata(json: String): Map[String, String] =
-    if (json == null || json == "{}" || json.isEmpty) Map.empty
-    else {
-      val pattern = """"([^"]+)":"([^"]*)"""".r
-      pattern.findAllMatchIn(json).map(m => m.group(1) -> m.group(2)).toMap
+  /** The SQL function giving the JSON of metadata an earlier version wrote. */
+  private val OldMetadataJson = "llm4s_old_metadata_json"
+
+  private def oldMetadataJson: Function = new Function {
+    override protected def xFunc(): Unit =
+      result(ujson.write(toJson(deserializeOldMetadata(value_text(0)))))
+  }
+
+  /** SQL for a row's metadata as JSON, whichever version wrote it. */
+  private val metadataJson =
+    s"CASE WHEN substr(metadata, 1, 1) = '$JsonMarker' AND json_valid(metadata) THEN metadata ELSE $OldMetadataJson(metadata) END"
+
+  private def toJson(metadata: Map[String, String]): ujson.Obj =
+    ujson.Obj.from(metadata.map { case (k, v) => k -> ujson.Str(String.valueOf(v)) })
+
+  private[vectorstore] def serializeMetadata(metadata: Map[String, String]): String =
+    JsonMarker + ujson.write(toJson(metadata))
+
+  private[vectorstore] def deserializeMetadata(text: String): Map[String, String] =
+    if (text != null && text.startsWith(JsonMarker)) parseJson(text).getOrElse(Map.empty)
+    else deserializeOldMetadata(text)
+
+  private def parseJson(text: String): Option[Map[String, String]] =
+    Try(ujson.read(text).obj.collect { case (k, ujson.Str(v)) => k -> v }.toMap).toOption
+
+  /** Metadata an earlier version wrote. JSON with no backslash and no repeated key means the same without escaping. */
+  private def deserializeOldMetadata(text: String): Map[String, String] =
+    if (text == null) Map.empty
+    else if (text.contains('\\') || repeatsKey(text)) parseUnescaped(text)
+    else parseJson(text).getOrElse(parseUnescaped(text))
+
+  /**
+   * Whether JSON holding only strings, with no escapes, has a key twice: it has four quotes an entry. Earlier versions
+   * wrote a `Map`, so there the second is part of a value.
+   */
+  private def repeatsKey(text: String): Boolean =
+    Try(ujson.read(text).obj).toOption.exists { entries =>
+      entries.values.forall(_.strOpt.isDefined) && text.count(_ == '"') != entries.size * 4
     }
+
+  /**
+   * Reads `{"key":"value","key2":"value2"}` with nothing escaped. A key ends at the first `":"`, and a value at the
+   * first `","` that a key not seen before and `":"` follow: quotes that are part of the text in that arrangement
+   * cannot be told from separators.
+   */
+  private def parseUnescaped(text: String): Map[String, String] = {
+    val entrySeparator = "\",\""
+    val keySeparator   = "\":\""
+
+    // nextKeyEnd is the key separator found for an earlier candidate: searching again for each would be quadratic
+    @tailrec
+    def valueEnd(body: String, from: Int, nextKeyEnd: Int, seen: Set[String]): Int = {
+      val at     = body.indexOf(entrySeparator, from)
+      val next   = at + entrySeparator.length
+      val keyEnd = if (at < 0 || nextKeyEnd >= next) nextKeyEnd else body.indexOf(keySeparator, next)
+      if (at < 0 || keyEnd < 0) body.length
+      else {
+        val entryEnd = body.indexOf(entrySeparator, next)
+        val isKey    = (entryEnd < 0 || keyEnd < entryEnd) && !seen.contains(body.substring(next, keyEnd))
+        if (isKey) at else valueEnd(body, at + 1, keyEnd, seen)
+      }
+    }
+
+    @tailrec
+    def entries(body: String, from: Int, read: Map[String, String]): Map[String, String] =
+      body.indexOf(keySeparator, from) match {
+        case -1 => read
+        case keyEnd =>
+          val key     = body.substring(from, keyEnd)
+          val start   = keyEnd + keySeparator.length
+          val end     = valueEnd(body, start, nextKeyEnd = 0, read.keySet + key)
+          val updated = read.updated(key, body.substring(start, end))
+          if (end == body.length) updated else entries(body, end + entrySeparator.length, updated)
+      }
+
+    if (text.length >= 7 && text.startsWith("{\"") && text.endsWith("\"}"))
+      entries(text.substring(2, text.length - 2), 0, Map.empty)
+    else Map.empty
+  }
 
   private[vectorstore] def serializeEmbedding(embedding: Array[Float]): Array[Byte] = {
     val buffer = java.nio.ByteBuffer.allocate(embedding.length * 4)
