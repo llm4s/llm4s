@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.{ ProviderConfig, WatsonXConfig }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -31,7 +32,9 @@ class WatsonXInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValue
   "llm4s-watsonx, configured in code" should {
     "build a watsonx.ai client from a model, key and project" in {
       assertBuilds(
-        WatsonXConfig.fromValues("ibm/granite-3-8b-instruct", Secret("wx-test"), projectId = Some("my-project")).value,
+        WatsonXConfig
+          .fromValues(ModelName("ibm/granite-3-8b-instruct"), Secret("wx-test"), projectId = Some("my-project"))
+          .value,
         "watsonx"
       )
     }

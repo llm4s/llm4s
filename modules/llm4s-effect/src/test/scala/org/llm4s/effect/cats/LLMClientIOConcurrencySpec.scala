@@ -1,5 +1,6 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import java.util.concurrent.TimeUnit
@@ -233,7 +234,7 @@ class LLMClientIOConcurrencySpec extends AnyFlatSpec with TestTimeLimit with Mat
           Completion(
             id = "id",
             created = Instant.EPOCH,
-            model = "m",
+            model = ModelName("m"),
             message = AssistantMessage(Some(key))
           )
         )

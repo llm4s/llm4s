@@ -50,7 +50,7 @@ object Part4HelpCentre {
       given ModelRegistryService = models
       config = RAG
         .builder()
-        .withEmbeddings(BagOfWordsEmbeddings.id.asString, BagOfWordsEmbeddings.Model, BagOfWordsEmbeddings.Dimensions)
+        .withEmbeddings(BagOfWordsEmbeddings.id.asString, BagOfWordsEmbeddings.Model.asString, BagOfWordsEmbeddings.Dimensions)
         .withTopK(2)
         .withSystemPrompt(helpCentrePrompt)
         .withLLM(client)

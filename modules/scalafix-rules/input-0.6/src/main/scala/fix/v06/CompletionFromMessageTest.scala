@@ -1,5 +1,5 @@
 /*
-rule = CompletionFromMessage
+rules = [CompletionFromMessage, ModelIdNewtypes]
 */
 package fix.v06
 
@@ -33,7 +33,7 @@ object CompletionFromMessageTest {
   def priced(completion: Completion, cost: Double): Completion =
     completion.withEstimatedCost(cost).withEstimatedCost(Some(cost / 2)).withEstimatedCost(None)
 
-  def model(completion: Completion): String = completion match {
+  def model(completion: Completion) = completion match {
     case Completion(_, _, _, model, _, _, _, _, _, _) => model
   }
 }

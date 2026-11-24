@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
@@ -37,9 +39,9 @@ class DeepSeekSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   private def config(key: String, model: String = "deepseek-chat"): DeepSeekConfig =
     DeepSeekConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret(key),
-        baseUrl = "https://api.deepseek.com"
+        baseUrl = BaseUrl("https://api.deepseek.com")
       )
       .value
 

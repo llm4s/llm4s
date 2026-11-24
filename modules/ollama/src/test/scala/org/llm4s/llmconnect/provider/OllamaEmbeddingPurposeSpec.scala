@@ -19,7 +19,7 @@ import scala.jdk.CollectionConverters.*
  */
 class OllamaEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
 
-  private val model = EmbeddingModelConfig("nomic-embed-text", 2)
+  private val model = EmbeddingModelConfig(ModelName("nomic-embed-text"), 2)
 
   private def bodiesFor(purpose: InputPurpose): List[ujson.Value] = {
     val seen = new ConcurrentLinkedQueue[ujson.Value]()
@@ -32,7 +32,7 @@ class OllamaEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
           EmbeddingProviderConfig(
             ProviderId("ollama"),
             BaseUrl(baseUrl),
-            ModelName(model.name),
+            ModelName(model.name.asString),
             Some(Secret("not-required"))
           )
         )

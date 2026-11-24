@@ -36,7 +36,7 @@ import org.llm4s.testutil.EchoedCredentials
  */
 class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
 
-  private val modelCfg  = EmbeddingModelConfig("embed-english-v3.0", 1024)
+  private val modelCfg  = EmbeddingModelConfig(ModelName("embed-english-v3.0"), 1024)
   private val secretKey = "cohere-SECRET-key-123"
 
   private def cfg(base: String = "http://cohere-test") =
@@ -126,7 +126,7 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
     val named = new MockHttpClient(ok(Seq(Seq(1.0))))
     CohereEmbeddingProvider
       .forTest(cfg(), named)
-      .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig("embed-english-v3.0-search_query", 1024)))
+      .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig(ModelName("embed-english-v3.0-search_query"), 1024)))
     // the model name is passed through untouched, and says nothing about the type
     read(named.lastBody.get)("model").str shouldBe "embed-english-v3.0-search_query"
     read(named.lastBody.get)("input_type").str shouldBe "search_document"
@@ -467,9 +467,9 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
     CohereEmbeddingProvider.id shouldBe ProviderId("cohere")
     CohereEmbeddingProvider.configSpec.defaultBaseUrl shouldBe Some("https://api.cohere.com")
     CohereEmbeddingProvider.configSpec.requiresApiKey shouldBe true
-    CohereEmbeddingProvider.dimensionsOf("embed-v4.0") shouldBe Some(1536)
-    CohereEmbeddingProvider.dimensionsOf("embed-english-light-v3.0") shouldBe Some(384)
-    CohereEmbeddingProvider.dimensionsOf("not-a-model") shouldBe None
+    CohereEmbeddingProvider.dimensionsOf(ModelName("embed-v4.0")) shouldBe Some(1536)
+    CohereEmbeddingProvider.dimensionsOf(ModelName("embed-english-light-v3.0")) shouldBe Some(384)
+    CohereEmbeddingProvider.dimensionsOf(ModelName("not-a-model")) shouldBe None
     CohereEmbeddingProvider.modelDimensions.values.foreach(_ should be > 0)
   }
 

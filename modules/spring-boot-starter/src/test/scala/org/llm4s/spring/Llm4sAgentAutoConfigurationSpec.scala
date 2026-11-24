@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.javaapi.{ JAgent, JLlmClient, JLlmClientTestFactory, JTool, Llm4s, Param, Tool }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -34,14 +35,14 @@ object Llm4sAgentAutoConfigurationSpec {
               Completion(
                 "id",
                 Instant.EPOCH,
-                "m",
+                ModelName("m"),
                 AssistantMessage(s"tool said: ${t.content}")
               )
             )
           case _ =>
             val call    = ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris"))
             val message = AssistantMessage(text = None, toolCalls = Seq(call))
-            Right(Completion("id", Instant.EPOCH, "m", message))
+            Right(Completion("id", Instant.EPOCH, ModelName("m"), message))
         }
       }
       override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =

@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.javaapi.{ GuideDocs, JLlmClient, LlmResult }
 import org.llm4s.llmconnect.config.{ AnthropicConfig, OllamaConfig, OpenAIConfig }
@@ -61,7 +62,7 @@ class JavaGuideConfigSpec extends AnyWordSpec with Matchers {
       Llm4sConfig.provider(source, ProviderName("ollama-local")) match {
         case Right(ollama: OllamaConfig) =>
           ollama.model.asString shouldBe "llama3.2"
-          ollama.baseUrl shouldBe "http://localhost:11434"
+          ollama.baseUrl shouldBe BaseUrl("http://localhost:11434")
         case other => fail(s"Expected OllamaConfig, got $other")
       }
     }

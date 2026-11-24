@@ -1,5 +1,6 @@
 package org.llm4s.zio
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.error.{ CancelledError, SimpleError }
 import org.llm4s.llmconnect.LLMClient
@@ -22,7 +23,7 @@ object LLMClientZSpec extends ZIOSpecDefault {
   private val testCompletion = Completion(
     id = "test-id",
     created = Instant.EPOCH,
-    model = "test-model",
+    model = ModelName("test-model"),
     message = AssistantMessage(Some("hello"))
   )
 

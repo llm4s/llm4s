@@ -32,8 +32,9 @@ class UntakenSectionSettingsSpec extends AnyWordSpec with Matchers with EitherVa
     def withModel(model: ModelName): ProviderConfig = this
 
   private object InProcess extends ProviderDescriptor:
-    val id: ProviderId                 = ProviderId("inprocess")
-    val configSpec: ProviderConfigSpec = ProviderConfigSpec(defaultBaseUrl = Some(FixtureChatProvider.DefaultBaseUrl))
+    val id: ProviderId = ProviderId("inprocess")
+    val configSpec: ProviderConfigSpec =
+      ProviderConfigSpec(defaultBaseUrl = Some(BaseUrl(FixtureChatProvider.DefaultBaseUrl)))
     def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
       Right(InProcessConfig(id))
     def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =

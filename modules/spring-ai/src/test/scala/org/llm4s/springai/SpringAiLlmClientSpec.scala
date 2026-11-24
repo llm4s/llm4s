@@ -1,5 +1,6 @@
 package org.llm4s.springai
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ AuthenticationError, LLMError, ValidationError }
 import org.llm4s.javaapi.{ LlmException, Llm4s }
 import org.llm4s.llmconnect.model.{
@@ -87,7 +88,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     done.content shouldBe "4"
     done.message shouldBe AssistantMessage("4")
     done.id shouldBe "resp-1"
-    done.model shouldBe "spring-model"
+    done.model shouldBe ModelName("spring-model")
     // cache writes are reported only by models whose prompt count leaves the cache out: added to it (#2765)
     done.usage shouldBe Some(TokenUsage(14, 2, 16, cachedTokens = Some(3), cacheCreationTokens = Some(1)))
     done.finishReason shouldBe FinishReason.Other("STOP") // Spring AI's reason as the model sent it, never a guess
@@ -269,7 +270,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     )
     done.content shouldBe "Hello"
     done.finishReason shouldBe FinishReason.Other("STOP")
-    done.model shouldBe "spring-model"
+    done.model shouldBe ModelName("spring-model")
     done.id shouldBe "resp-1"
     done.usage shouldBe Some(TokenUsage(3, 2, 5))
   }
@@ -295,7 +296,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     done.content shouldBe ""
     done.usage shouldBe None
     done.id should not be empty
-    done.model shouldBe "spring-model"
+    done.model shouldBe ModelName("spring-model")
   }
 
   it should "return a streaming error, or a bad tool call in a stream, as a Left" in {

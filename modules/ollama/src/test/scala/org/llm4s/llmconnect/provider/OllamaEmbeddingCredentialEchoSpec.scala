@@ -23,7 +23,7 @@ final class OllamaEmbeddingCredentialEchoSpec extends AnyFlatSpec with Matchers 
       )
       OllamaEmbeddingProvider
         .fromConfig(config)
-        .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("nomic-embed-text", 8)))
+        .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("nomic-embed-text"), 8)))
     }
   }
 }

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.{ GeminiConfig, ProviderConfig, VertexAIConfig }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -31,12 +32,14 @@ class GeminiInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
   "llm4s-gemini, configured in code" should {
     "build a Gemini API client from a model, key and base URL" in {
       assertBuilds(
-        GeminiConfig.fromValues("gemini-2.0-flash", Secret("google-test"), GeminiConfig.DEFAULT_BASE_URL).value,
+        GeminiConfig
+          .fromValues(ModelName("gemini-2.0-flash"), Secret("google-test"), GeminiConfig.DEFAULT_BASE_URL)
+          .value,
         "gemini"
       )
     }
 
     "build a Vertex AI client from a model and project" in {
-      assertBuilds(VertexAIConfig.fromValues("gemini-2.0-flash", "my-gcp-project").value, "vertexai")
+      assertBuilds(VertexAIConfig.fromValues(ModelName("gemini-2.0-flash"), "my-gcp-project").value, "vertexai")
     }
   }

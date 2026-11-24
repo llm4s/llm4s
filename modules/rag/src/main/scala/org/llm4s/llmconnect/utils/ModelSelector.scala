@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.utils
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, LocalEmbeddingModels }
 import org.llm4s.llmconnect.model.Modality
 import org.llm4s.error.ConfigurationError
@@ -42,19 +43,19 @@ object ModelSelector {
         val name = localModels.imageModel
         LocalEmbeddingModels.dimension(name).map { dim =>
           logger.info(s"[ModelSelector] Image model: $name ($dim dims)")
-          EmbeddingModelConfig(name, dim)
+          EmbeddingModelConfig(ModelName(name), dim)
         }
       case Modality.Audio =>
         val name = localModels.audioModel
         LocalEmbeddingModels.dimension(name).map { dim =>
           logger.info(s"[ModelSelector] Audio model: $name ($dim dims)")
-          EmbeddingModelConfig(name, dim)
+          EmbeddingModelConfig(ModelName(name), dim)
         }
       case Modality.Video =>
         val name = localModels.videoModel
         LocalEmbeddingModels.dimension(name).map { dim =>
           logger.info(s"[ModelSelector] Video model: $name ($dim dims)")
-          EmbeddingModelConfig(name, dim)
+          EmbeddingModelConfig(ModelName(name), dim)
         }
     }
 }

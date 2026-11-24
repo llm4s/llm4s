@@ -12,7 +12,8 @@ import scalafix.v1._
  * `OpenAIConfig.fromValues(model, Secret(key), baseUrl, Some("org-1"), providerId)`.
  * `AzureConfig.fromValues(deployment, endpoint, key, apiVersion)` becomes
  * `AzureConfig.fromValues(deployment, Secret(key), endpoint, apiVersion)`. A named argument keeps its name and place; once one is named, the
- * arguments after it are named too, as Scala requires.
+ * arguments after it are named too, as Scala requires. The model is wrapped in `ModelName` and the base URL in
+ * `BaseUrl` (#2822), which `ModelIdNewtypes` does for the other configs.
  */
 class FromValuesKeyFirst extends SemanticRule("FromValuesKeyFirst") {
 
@@ -27,7 +28,10 @@ class FromValuesKeyFirst extends SemanticRule("FromValuesKeyFirst") {
         Migration.callee(t).flatMap(methods.get).fold(Patch.empty)(rewrite(t, _))
     }
     val patch = patches.asPatch
-    if (patch.isEmpty) patch else patch + Migration.importOnce("org.llm4s.security", "Secret")
+    if (patch.isEmpty) patch
+    else
+      patch + Migration.importOnce("org.llm4s.security", "Secret") +
+        Migration.importOnce(Newtypes, "ModelName") + Migration.importOnce(Newtypes, "BaseUrl")
   }
 
   private def rewrite(t: Term.Apply, method: Method): Patch = {
@@ -42,7 +46,8 @@ class FromValuesKeyFirst extends SemanticRule("FromValuesKeyFirst") {
       val value: Map[String, (Term, Boolean)] = bound.map { case (name, rhs, named) => name -> (rhs -> named) }.toMap
       def text(name: String): String = {
         val rhs = value(name)._1.pos.text
-        if (method.secret.contains(name)) s"Secret($rhs)" else rhs
+        if (method.secret.contains(name)) s"Secret($rhs)"
+        else method.wrapped.get(name).filterNot(_ => rhs.endsWith("DEFAULT_BASE_URL")).fold(rhs)(w => s"$w($rhs)")
       }
       val positional = method.updated.takeWhile(n => value.get(n).exists(!_._2))
       // An `Option` parameter given as `None` is its default: dropped when nothing positional follows it.
@@ -67,21 +72,30 @@ object FromValuesKeyFirst {
     old: List[String],
     updated: List[String],
     secret: Set[String],
-    defaulted: Set[String]
+    defaulted: Set[String],
+    wrapped: Map[String, String]
   )
+
+  private val Newtypes = "org.llm4s.types.ProviderModelTypes"
+
+  /** The configs whose `fromValues` this rule rewrites whole, so that `ModelIdNewtypes` leaves them to it. */
+  private[scalafix] val configs: Set[String] =
+    Set("org/llm4s/llmconnect/config/OpenAIConfig", "org/llm4s/llmconnect/config/AzureConfig")
 
   private val methods: Map[String, Method] = Map(
     "org/llm4s/llmconnect/config/OpenAIConfig.fromValues()." -> Method(
       List("modelName", "apiKey", "organization", "baseUrl", "providerId", "workloadIdentity"),
       List("modelName", "apiKey", "baseUrl", "organization", "providerId", "workloadIdentity"),
       Set("apiKey"),
-      Set("organization", "providerId", "workloadIdentity")
+      Set("organization", "providerId", "workloadIdentity"),
+      Map("modelName" -> "ModelName", "baseUrl" -> "BaseUrl")
     ),
     "org/llm4s/llmconnect/config/AzureConfig.fromValues()." -> Method(
       List("modelName", "endpoint", "apiKey", "apiVersion"),
       List("modelName", "apiKey", "endpoint", "apiVersion"),
       Set("apiKey"),
-      Set.empty
+      Set.empty,
+      Map("modelName" -> "ModelName", "endpoint" -> "BaseUrl")
     )
   )
 }

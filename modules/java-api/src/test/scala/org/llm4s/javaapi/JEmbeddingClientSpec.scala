@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.error.{ CancelledError, LLMError, NetworkError, ProcessingError, ValidationError }
@@ -39,7 +40,7 @@ class JEmbeddingClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
       )
     )
 
-  private val configured = EmbeddingModelConfig("embed-model", 1536)
+  private val configured = EmbeddingModelConfig(ModelName("embed-model"), 1536)
 
   private def clientOver(provider: EmbeddingProvider): JEmbeddingClient =
     Llm4s.wrapEmbeddingClient(

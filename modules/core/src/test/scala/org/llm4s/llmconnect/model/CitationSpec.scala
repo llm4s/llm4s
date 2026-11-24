@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -65,7 +66,7 @@ class CitationSpec extends AnyFlatSpec with Matchers {
   }
 
   "Completion" should "have no citations unless it is given some" in {
-    val completion = Completion(id = "1", created = Instant.EPOCH, model = "m", message = message)
+    val completion = Completion(id = "1", created = Instant.EPOCH, model = ModelName("m"), message = message)
 
     completion.citations shouldBe Nil
     completion.hasCitations shouldBe false
@@ -73,14 +74,14 @@ class CitationSpec extends AnyFlatSpec with Matchers {
 
   it should "still be built the way it was before it had citations" in {
     // eight positional arguments: what every caller wrote when the last field was the estimated cost
-    val positional = Completion("1", Instant.EPOCH, "m", message, None, Some(0.5))
+    val positional = Completion("1", Instant.EPOCH, ModelName("m"), message, None, Some(0.5))
 
     positional.estimatedCost shouldBe Some(0.5)
     positional.citations shouldBe Nil
 
     // and by name, leaving the later fields out
     val named =
-      Completion(id = "1", created = Instant.EPOCH, model = "m", message = message, usage = None)
+      Completion(id = "1", created = Instant.EPOCH, model = ModelName("m"), message = message, usage = None)
     named.citations shouldBe Nil
   }
 
@@ -89,7 +90,7 @@ class CitationSpec extends AnyFlatSpec with Matchers {
     val c = Completion(
       id = "1",
       created = Instant.EPOCH,
-      model = "m",
+      model = ModelName("m"),
       message = message,
       citations = List(source, second)
     )
@@ -100,7 +101,7 @@ class CitationSpec extends AnyFlatSpec with Matchers {
 
   it should "set citations with withCitations, changing nothing else" in {
     val base =
-      Completion(id = "1", created = Instant.ofEpochSecond(7L), model = "m", message = message)
+      Completion(id = "1", created = Instant.ofEpochSecond(7L), model = ModelName("m"), message = message)
     val with1 = base.withCitations(List(source))
 
     with1.citations shouldBe List(source)
@@ -109,14 +110,14 @@ class CitationSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "treat completions that differ only in their citations as different" in {
-    val base = Completion(id = "1", created = Instant.EPOCH, model = "m", message = message)
+    val base = Completion(id = "1", created = Instant.EPOCH, model = ModelName("m"), message = message)
 
     (base should not).equal(base.withCitations(List(source)))
     base.withCitations(List(source)) shouldBe base.withCitations(List(source))
   }
 
   "A completion assembled from streamed chunks" should "carry no citations, because a chunk reports none" in {
-    val acc = StreamingAccumulator("test-model")
+    val acc = StreamingAccumulator(ModelName("test-model"))
     acc.addChunk(StreamedChunk(id = "s", content = Some("answer"), finishReason = Some(FinishReason.Stop)))
 
     acc.toCompletion(Instant.EPOCH).map(_.citations) shouldBe Right(Nil)

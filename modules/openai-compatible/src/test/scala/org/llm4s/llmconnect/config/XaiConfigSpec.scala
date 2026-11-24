@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId, ProviderName }
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
@@ -17,15 +18,15 @@ class XaiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
     ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
 
   "XaiConfig.fromValues" should "refuse a blank apiKey or baseUrl" in {
-    XaiConfig.fromValues("grok-4.7", Secret(""), XaiConfig.DEFAULT_BASE_URL).isLeft shouldBe true
-    XaiConfig.fromValues("grok-4.7", Secret("k"), " ").isLeft shouldBe true
+    XaiConfig.fromValues(ModelName("grok-4.7"), Secret(""), XaiConfig.DEFAULT_BASE_URL).isLeft shouldBe true
+    XaiConfig.fromValues(ModelName("grok-4.7"), Secret("k"), BaseUrl(" ")).isLeft shouldBe true
   }
 
   it should "build a config for the xai provider at the given base URL" in {
-    val config = XaiConfig.fromValues("grok-4.7", Secret("k"), XaiConfig.DEFAULT_BASE_URL).value
+    val config = XaiConfig.fromValues(ModelName("grok-4.7"), Secret("k"), XaiConfig.DEFAULT_BASE_URL).value
     config.providerId shouldBe ProviderId("xai")
     config.model.asString shouldBe "grok-4.7"
-    config.baseUrl shouldBe "https://api.x.ai/v1"
+    config.baseUrl shouldBe BaseUrl("https://api.x.ai/v1")
     config.endpointUrl shouldBe Some("https://api.x.ai/v1")
     config.contextWindow should be > 0
     config.withModel(ModelName("grok-3-mini")).model.asString shouldBe "grok-3-mini"
@@ -34,17 +35,20 @@ class XaiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "take a model's window from the registry when it lists the model" in {
     // the registry lists xai/grok-3-mini
-    XaiConfig.fromValues("grok-3-mini", Secret("k"), XaiConfig.DEFAULT_BASE_URL).value.contextWindow should be > 0
+    XaiConfig
+      .fromValues(ModelName("grok-3-mini"), Secret("k"), XaiConfig.DEFAULT_BASE_URL)
+      .value
+      .contextWindow should be > 0
   }
 
   "the fallback window" should "follow xAI's models page" in {
-    XaiConfig.xaiFallback("grok-4.7")._1 shouldBe 500000
-    XaiConfig.xaiFallback("grok-4.5-latest")._1 shouldBe 500000
-    XaiConfig.xaiFallback("grok-4.3")._1 shouldBe 1000000
-    XaiConfig.xaiFallback("grok-4.20-0309-reasoning")._1 shouldBe 1000000
-    XaiConfig.xaiFallback("grok-4-0709")._1 shouldBe 256000
-    XaiConfig.xaiFallback("grok-2")._1 shouldBe 131072
-    XaiConfig.xaiFallback("grok-2")._2 shouldBe 8192
+    XaiConfig.xaiFallback(ModelName("grok-4.7"))._1 shouldBe 500000
+    XaiConfig.xaiFallback(ModelName("grok-4.5-latest"))._1 shouldBe 500000
+    XaiConfig.xaiFallback(ModelName("grok-4.3"))._1 shouldBe 1000000
+    XaiConfig.xaiFallback(ModelName("grok-4.20-0309-reasoning"))._1 shouldBe 1000000
+    XaiConfig.xaiFallback(ModelName("grok-4-0709"))._1 shouldBe 256000
+    XaiConfig.xaiFallback(ModelName("grok-2"))._1 shouldBe 131072
+    XaiConfig.xaiFallback(ModelName("grok-2"))._2 shouldBe 8192
   }
 
   "XaiConfig.toString" should "redact the API key" in {

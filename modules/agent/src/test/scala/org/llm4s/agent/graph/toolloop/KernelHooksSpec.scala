@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.toolloop
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.AgentId
@@ -341,7 +342,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       writing = Set.empty,
       before = (t, c) => c.accounted(judge).complete(Conversation(Seq(UserMessage(t)))).map(_ => BoundaryResult(t)),
       after = (t, c) =>
-        c.recordUsage("embedder", TokenUsage(7, 0, 7))
+        c.recordUsage(ModelName("embedder"), TokenUsage(7, 0, 7))
         c.accounted(judge).complete(Conversation(Seq(UserMessage(t)))).map(_ => BoundaryResult(t))
     )
     val (state, _) = runInMemory(loopOf(ScriptedModel(answer("hi")), Seq(judging)).graph, AgentInput("go")).answered
@@ -349,7 +350,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     // the agent's call, the input judge's, the output judge's and the recorded usage
     usage.requestCount shouldBe 4
     usage.inputTokens shouldBe 10 + 100 + 100 + 7
-    usage.byModel.keySet shouldBe Set("scripted", "embedder")
+    usage.byModel.keySet shouldBe Set(ModelName("scripted"), ModelName("embedder"))
   }
 
   "Prompt sections" should "join the system prompt, cacheable ones first, each group in stack order, never stored" in {

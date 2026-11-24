@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Ollama
@@ -30,7 +31,12 @@ class OllamaStructuredOutputIntegrationSpec extends AnyFlatSpec with Matchers {
   private val baseUrl   = "http://localhost:11434"
 
   private val config =
-    OllamaConfig(model = ModelName(testModel), baseUrl = baseUrl, contextWindow = 8192, reserveCompletion = 4096)
+    OllamaConfig(
+      model = ModelName(testModel),
+      baseUrl = BaseUrl(baseUrl),
+      contextWindow = 8192,
+      reserveCompletion = 4096
+    )
 
   private lazy val ollamaAvailable: Boolean =
     Try {

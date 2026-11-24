@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model._
 import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
@@ -12,7 +13,7 @@ import org.llm4s.types.Result
 
 class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFactory with EitherValues {
 
-  val testModel = EmbeddingModelConfig("test-model", 1536)
+  val testModel = EmbeddingModelConfig(ModelName("test-model"), 1536)
 
   "CachedEmbeddingClient" should "only call the base client for cache misses" in {
     val baseClient   = mock[EmbeddingProvider]

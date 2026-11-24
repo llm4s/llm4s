@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.error.{ ProcessingError, ServiceError }
 import org.llm4s.llmconnect.{
@@ -53,7 +54,7 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
         provider = ProviderId(provider),
         startedAt = startedAt,
         requestBody = requestBody,
-        model = model,
+        model = model.map(ModelName(_)),
         responseBody = responseBody,
         requestId = requestId,
         correlationId = correlationId
@@ -177,7 +178,7 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
         provider = ProviderId("openai"),
         startedAt = fixedTime.minusSeconds(1),
         requestBody = "req",
-        model = Some("gpt-4o")
+        model = Some(ModelName("gpt-4o"))
       ),
       success,
       () => fixedTime,
@@ -287,7 +288,7 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
           provider = ProviderId("openai"),
           startedAt = Instant.now(),
           requestBody = "req",
-          model = Some("gpt-4o"),
+          model = Some(ModelName("gpt-4o")),
           responseBody = Some("resp")
         ),
         success
@@ -344,7 +345,7 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
             provider = ProviderId("openai"),
             startedAt = Instant.now(),
             requestBody = "req",
-            model = Some("gpt-4o"),
+            model = Some(ModelName("gpt-4o")),
             responseBody = Some("resp")
           ),
           success
@@ -367,7 +368,7 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
           provider = ProviderId("openai"),
           startedAt = Instant.now(),
           requestBody = """{"api_key":"sk-request-secret-123","prompt":"hello"}""",
-          model = Some("gpt-4o"),
+          model = Some(ModelName("gpt-4o")),
           responseBody = Some("""{"token":"response-secret-456"}""")
         ),
         Left(ServiceError(401, "openai", "Authorization: Bearer error-secret-789"))

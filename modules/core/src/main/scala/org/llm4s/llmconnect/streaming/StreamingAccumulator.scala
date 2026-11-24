@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.streaming
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ToolCallRules
@@ -21,7 +22,7 @@ import scala.collection.mutable
  * whose wire format identifies continuations only by index must map them back to the id first.
  */
 @Stable
-final class StreamingAccumulator private (model: String) {
+final class StreamingAccumulator private (model: ModelName) {
 
   private val contentBuilder                       = new StringBuilder()
   private val thinkingBuilder                      = new StringBuilder()
@@ -265,6 +266,6 @@ object StreamingAccumulator {
    * @param model the model the completion reports as `Completion.model`: the model the request named, or
    *              `""` where the caller does not know it
    */
-  def apply(model: String): StreamingAccumulator = new StreamingAccumulator(model)
+  def apply(model: ModelName): StreamingAccumulator = new StreamingAccumulator(model)
 
 }

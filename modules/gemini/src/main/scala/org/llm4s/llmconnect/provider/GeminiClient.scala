@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 import org.llm4s.util.{ BoundedJson, Redaction }
@@ -99,20 +100,20 @@ class GeminiClient(
 
   protected def clientDescription: String = s"Gemini client for model ${config.model}"
   protected def providerName: String      = "gemini"
-  protected def modelName: String         = config.model.asString
+  protected def modelName: ModelName      = config.model
 
   // thought signatures are replayed only to the provider and model id they were produced by (see ReplayOrigin)
   private val replayOrigin = ReplayOrigin(providerName, config.model.asString)
 
   // the references Gemini takes: web URLs and this provider's uploaded files
-  private val fileUri = GeminiParts.geminiFileUri(providerName, config.baseUrl)
+  private val fileUri = GeminiParts.geminiFileUri(providerName, config.baseUrl.asUrl)
 
   // what the transformer dropped, and what `reasoning` and `thinking` were sent as (see GeminiThinking), goes
   // on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
 
   // the model's registry capabilities, looked up once: the registry is a static snapshot
-  private lazy val capabilities = registryService.lookup(config.model.asString).toOption.map(_.capabilities)
+  private lazy val capabilities = registryService.lookup(config.model).toOption.map(_.capabilities)
 
   override def complete(
     conversation: Conversation,
@@ -121,7 +122,7 @@ class GeminiClient(
     val startedAt = Instant.now()
     TransformationResult
       .transform(
-        config.model.asString,
+        config.model,
         options,
         conversation.messages,
         org.llm4s.model.RequestTransformer.default(registryService),
@@ -178,7 +179,7 @@ class GeminiClient(
     val startedAt = Instant.now()
     TransformationResult
       .transform(
-        config.model.asString,
+        config.model,
         options,
         conversation.messages,
         org.llm4s.model.RequestTransformer.default(registryService),
@@ -216,7 +217,7 @@ class GeminiClient(
               handleErrorResponse(response.statusCode, err, response.headers)
             )(Some(err))
           case Right(response) =>
-            val accumulator = StreamingAccumulator(config.model.asString)
+            val accumulator = StreamingAccumulator(config.model)
             val messageId   = UUID.randomUUID().toString
             val rawStream   = StringBuilder()
             val signatures  = scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
@@ -299,7 +300,7 @@ class GeminiClient(
                 )
                 .flatMap(_ =>
                   accumulator.toCompletion.map { c =>
-                    val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model.asString, u))
+                    val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
                     // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
                     val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
                     c
@@ -563,12 +564,12 @@ class GeminiClient(
         )
 
         // Estimate cost using CostEstimator
-        val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model.asString, u))
+        val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
 
         Right(
           Completion(
             id = UUID.randomUUID().toString,
-            model = config.model.asString,
+            model = config.model,
             created = Instant.now(),
             message = message,
             usage = usageOpt,
@@ -642,7 +643,7 @@ class GeminiClient(
         provider = ProviderId(providerName),
         startedAt = startedAt,
         requestBody = requestBody,
-        model = Some(config.model.asString),
+        model = Some(config.model),
         responseBody = responseBody
       ),
       result

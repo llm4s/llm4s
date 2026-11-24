@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.DeepSeekConfig
@@ -32,7 +33,7 @@ class DeepSeekClientReasoningSpec extends AnyFlatSpec with Matchers with EitherV
     DeepSeekConfig(
       apiKey = Secret("test-key"),
       model = ModelName("deepseek-reasoner"),
-      baseUrl = baseUrl,
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 128000,
       reserveCompletion = 8192
     )

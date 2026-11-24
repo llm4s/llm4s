@@ -32,7 +32,7 @@ class ProviderExchangeSpec extends AnyFlatSpec with Matchers {
     val changed = exchange
       .withExchangeId("ex-2")
       .withProvider(ProviderId("anthropic"))
-      .withModel("claude")
+      .withModel(ModelName("claude"))
       .withRequestId("req-1")
       .withCorrelationId("corr-1")
       .withStartedAt(started.plusMillis(1))
@@ -49,7 +49,7 @@ class ProviderExchangeSpec extends AnyFlatSpec with Matchers {
       completedAt = completed,
       outcome = ProviderExchangeOutcome.Error,
       requestBody = """{"a":1}""",
-      model = Some("claude"),
+      model = Some(ModelName("claude")),
       requestId = Some("req-1"),
       correlationId = Some("corr-1"),
       responseBody = Some("""{"b":2}"""),
@@ -62,7 +62,7 @@ class ProviderExchangeSpec extends AnyFlatSpec with Matchers {
 
   it should "set or clear an Option field through its Option setter" in {
     val set = exchange
-      .withModel(Some("m"))
+      .withModel(Some(ModelName("m")))
       .withRequestId(Some("r"))
       .withCorrelationId(Some("c"))
       .withResponseBody(Some("body"))

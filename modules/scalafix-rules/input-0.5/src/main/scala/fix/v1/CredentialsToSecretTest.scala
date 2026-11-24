@@ -1,5 +1,5 @@
 /*
-rules = [CredentialsToSecret, ProviderConfigNewtypes]
+rules = [CredentialsToSecret, ProviderConfigNewtypes, ModelIdNewtypes]
 */
 package fix.v1
 

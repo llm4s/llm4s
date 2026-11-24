@@ -63,7 +63,7 @@ class ReplacingAPythonSidecarGuideSpec extends AnyFlatSpec with Matchers {
     expected.foreach { case (name, baseUrl, model, window) =>
       val config = compatible(name)
       withClue(s"$name: ") {
-        config.baseUrl shouldBe baseUrl
+        config.baseUrl.asUrl shouldBe baseUrl
         config.model.asString shouldBe model
         config.contextWindow shouldBe window
         config.apiKey shouldBe None

@@ -115,7 +115,7 @@ private object ProviderExchangeJson:
     ujson.Obj(
       "exchange_id"    -> exchange.exchangeId,
       "provider"       -> exchange.provider.asString,
-      "model"          -> exchange.model.getOrElse(""),
+      "model"          -> exchange.model.fold("")(_.asString),
       "request_id"     -> exchange.requestId.getOrElse(""),
       "correlation_id" -> exchange.correlationId.getOrElse(""),
       "started_at"     -> exchange.startedAt.toString,

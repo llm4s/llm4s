@@ -1,5 +1,6 @@
 package org.llm4s.reliability
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error._
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -86,7 +87,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
   private val testCompletion = Completion(
     id = "test-id",
     created = Instant.EPOCH,
-    model = "test-model",
+    model = ModelName("test-model"),
     message = AssistantMessage(content = "response")
   )
 

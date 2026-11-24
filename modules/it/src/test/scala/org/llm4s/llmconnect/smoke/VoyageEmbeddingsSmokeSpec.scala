@@ -27,7 +27,7 @@ class VoyageEmbeddingsSmokeSpec extends AnyFlatSpec with Matchers {
   private val voyageApiKey: Option[String] = Option(System.getenv("VOYAGE_API_KEY")).filter(_.nonEmpty)
 
   private val Model              = "voyage-3.5-lite"
-  private val ExpectedDimensions = VoyageAIEmbeddingProvider.modelDimensions(Model)
+  private val ExpectedDimensions = VoyageAIEmbeddingProvider.modelDimensions(ModelName(Model))
 
   private def provider(apiKey: String): EmbeddingProvider =
     VoyageAIEmbeddingProvider.fromConfig(
@@ -40,7 +40,7 @@ class VoyageEmbeddingsSmokeSpec extends AnyFlatSpec with Matchers {
     )
 
   private def request(purpose: InputPurpose, texts: String*): EmbeddingRequest =
-    EmbeddingRequest(texts, EmbeddingModelConfig(Model, ExpectedDimensions), purpose)
+    EmbeddingRequest(texts, EmbeddingModelConfig(ModelName(Model), ExpectedDimensions), purpose)
 
   "Voyage AI embeddings" should "embed 3 documents in one request" in {
     Tier.require(voyageApiKey.isDefined, "VOYAGE_API_KEY not set")

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAICompatibleConfig }
@@ -26,7 +27,7 @@ class OpenAICompatibleTimeoutSpec extends AnyFlatSpec with Matchers with EitherV
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def settings(baseUrl: String) =
-    OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), baseUrl, None))
+    OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), BaseUrl(baseUrl), None))
 
   "OpenAICompatibleClient" should "default to a two-minute request timeout and a five-minute stream timeout" in {
     OpenAICompatibleClient.RequestTimeout shouldBe 2.minutes
@@ -42,7 +43,9 @@ class OpenAICompatibleTimeoutSpec extends AnyFlatSpec with Matchers with EitherV
 
   it should "give every dialect's client the same timeouts" in {
     val deepSeek =
-      new DeepSeekClient(DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), "http://localhost:1", 128000, 8192))
+      new DeepSeekClient(
+        DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), BaseUrl("http://localhost:1"), 128000, 8192)
+      )
     deepSeek.requestTimeout shouldBe OpenAICompatibleClient.RequestTimeout
     deepSeek.streamTimeout shouldBe OpenAICompatibleClient.StreamTimeout
   }

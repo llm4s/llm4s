@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import java.util.Optional
@@ -50,7 +51,7 @@ class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
 
   private def calling: Completion = {
     val toolCall = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hello"))
-    Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(toolCall)))
+    Completion("turn-1", Instant.EPOCH, ModelName("test-model"), AssistantMessage(None, Seq(toolCall)))
   }
 
   private def echoTool = ToolBuilder[EchoResult](

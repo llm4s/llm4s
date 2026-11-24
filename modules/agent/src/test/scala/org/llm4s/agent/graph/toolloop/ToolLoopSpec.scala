@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.toolloop
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.graph.middleware.{ BoundaryResult, ModelContext, ModelResponse }
@@ -47,7 +48,7 @@ object ToolLoopFixtures {
     Completion(
       id = "scripted",
       created = Instant.EPOCH,
-      model = "scripted",
+      model = ModelName("scripted"),
       message = message,
       usage = Some(TokenUsage(prompt, completion, prompt + completion))
     )
@@ -816,8 +817,8 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     usage.requestCount shouldBe 3L
     usage.inputTokens shouldBe 30L
     usage.outputTokens shouldBe 15L
-    usage.byModel.keySet shouldBe Set("scripted")
-    usage.byModel("scripted").requestCount shouldBe 3L
+    usage.byModel.keySet shouldBe Set(ModelName("scripted"))
+    usage.byModel(ModelName("scripted")).requestCount shouldBe 3L
   }
 
   it should "refuse a call whose validator throws, without running the tool" in {
@@ -1881,7 +1882,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val client = new LLMClient {
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         offered.add(options.tools.map(_.name))
-        Right(Completion("id", Instant.EPOCH, "model", AssistantMessage("hello", toolCalls = List.empty)))
+        Right(Completion("id", Instant.EPOCH, ModelName("model"), AssistantMessage("hello", toolCalls = List.empty)))
       override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)

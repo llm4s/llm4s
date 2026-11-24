@@ -19,7 +19,7 @@ import scala.jdk.CollectionConverters.*
  */
 class OpenAIEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
 
-  private val model = EmbeddingModelConfig("text-embedding-3-small", 2)
+  private val model = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 2)
 
   private def bodiesFor(purpose: InputPurpose): List[ujson.Value] = {
     val seen = new ConcurrentLinkedQueue[ujson.Value]()
@@ -28,7 +28,12 @@ class OpenAIEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
       sendJsonResponse(ex, 200, """{"data":[{"embedding":[0.1,0.2]},{"embedding":[0.3,0.4]}]}""")
     } { baseUrl =>
       val provider = OpenAIEmbeddingProvider.fromConfig(
-        EmbeddingProviderConfig(ProviderId("openai"), BaseUrl(baseUrl), ModelName(model.name), Some(Secret("key")))
+        EmbeddingProviderConfig(
+          ProviderId("openai"),
+          BaseUrl(baseUrl),
+          ModelName(model.name.asString),
+          Some(Secret("key"))
+        )
       )
       provider.embed(EmbeddingRequest(Seq("a", "b"), model, purpose)).isRight shouldBe true
     }

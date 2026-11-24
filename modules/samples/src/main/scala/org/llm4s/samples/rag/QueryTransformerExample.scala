@@ -111,7 +111,11 @@ object QueryTransformerExample {
 
   private def config(transformers: Seq[QueryTransformer]) = RAG
     .builder()
-    .withEmbeddings(BagOfWordsEmbeddings.id.asString, BagOfWordsEmbeddings.Model, BagOfWordsEmbeddings.Dimensions)
+    .withEmbeddings(
+      BagOfWordsEmbeddings.id.asString,
+      BagOfWordsEmbeddings.Model.asString,
+      BagOfWordsEmbeddings.Dimensions
+    )
     .withTopK(1)
     .withQueryTransformers(transformers)
 

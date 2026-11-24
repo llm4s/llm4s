@@ -32,7 +32,7 @@ import org.llm4s.types.Result
 final case class PerplexityConfig private (
   apiKey: Secret,
   model: ModelName,
-  baseUrl: String,
+  baseUrl: BaseUrl,
   webSearch: Boolean,
   contextWindow: Int,
   reserveCompletion: Int,
@@ -42,7 +42,7 @@ final case class PerplexityConfig private (
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
   override val providerId: ProviderId                                      = ProviderId("perplexity")
-  override def endpointUrl: Option[BaseUrl]                                = Some(BaseUrl(baseUrl))
+  override def endpointUrl: Option[BaseUrl]                                = Some(baseUrl)
   override def withModel(model: ModelName): PerplexityConfig               = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): PerplexityConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): PerplexityConfig = copy(network = network)
@@ -54,10 +54,12 @@ final case class PerplexityConfig private (
   def withHeaders(headers: Map[String, String]): PerplexityConfig            = copy(headers = headers)
 
   /** The Agent API endpoint requests are posted to. */
-  def agentUrl: String = if baseUrl.endsWith("/v1") then s"$baseUrl/agent" else s"$baseUrl/v1/agent"
+  def agentUrl: String =
+    if baseUrl.asUrl.endsWith("/v1") then s"${baseUrl.asUrl}/agent" else s"${baseUrl.asUrl}/v1/agent"
 
   /** The Agent API's model listing, which `validate()` gets. */
-  def modelsUrl: String = if baseUrl.endsWith("/v1") then s"$baseUrl/models" else s"$baseUrl/v1/models"
+  def modelsUrl: String =
+    if baseUrl.asUrl.endsWith("/v1") then s"${baseUrl.asUrl}/models" else s"${baseUrl.asUrl}/v1/models"
 
   override def toString: String =
     s"PerplexityConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, webSearch=$webSearch, " +
@@ -68,7 +70,7 @@ final case class PerplexityConfig private (
 object PerplexityConfig:
 
   /** Perplexity's API host. */
-  val DEFAULT_BASE_URL: String = "https://api.perplexity.ai"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://api.perplexity.ai")
 
   /**
    * The context window assumed when neither the section's `contextWindow` nor the model registry gives one.
@@ -107,7 +109,7 @@ object PerplexityConfig:
   def fromValues(
     model: ModelName,
     apiKey: Secret,
-    baseUrl: String = DEFAULT_BASE_URL,
+    baseUrl: BaseUrl = DEFAULT_BASE_URL,
     webSearch: Boolean = true,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
@@ -115,7 +117,7 @@ object PerplexityConfig:
   ): Result[PerplexityConfig] =
     val key  = apiKey.reveal.trim
     val name = model.asString.trim
-    val base = baseUrl.trim.replaceAll("/+$", "")
+    val base = baseUrl.asUrl.trim.replaceAll("/+$", "")
     for
       _ <- ProviderConfig.nonEmpty("perplexity", "apiKey", key)
       _ <- ProviderConfig.nonEmpty("perplexity", "model", name)
@@ -137,7 +139,7 @@ object PerplexityConfig:
     yield new PerplexityConfig(
       apiKey = Secret(key),
       model = ModelName(name),
-      baseUrl = base,
+      baseUrl = BaseUrl(base),
       webSearch = webSearch,
       contextWindow = contextWindow,
       reserveCompletion = reserveCompletion,

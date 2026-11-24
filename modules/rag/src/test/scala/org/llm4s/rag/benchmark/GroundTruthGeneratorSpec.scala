@@ -1,5 +1,6 @@
 package org.llm4s.rag.benchmark
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.rag.evaluation.EvaluationError
@@ -28,7 +29,7 @@ class GroundTruthGeneratorSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-id",
           created = Instant.EPOCH,
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = AssistantMessage(text = Some(response)),
           usage = Some(TokenUsage(10, 10, 20))
         )
@@ -55,7 +56,7 @@ class GroundTruthGeneratorSpec extends AnyFlatSpec with Matchers {
           Completion(
             id = "mock",
             created = Instant.EPOCH,
-            model = "mock",
+            model = ModelName("mock"),
             message = AssistantMessage(text = Some(successResponse)),
             usage = Some(TokenUsage(10, 10, 20))
           )

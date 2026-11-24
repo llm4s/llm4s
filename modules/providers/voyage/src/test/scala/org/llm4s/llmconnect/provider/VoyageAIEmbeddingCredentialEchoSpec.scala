@@ -23,7 +23,7 @@ final class VoyageAIEmbeddingCredentialEchoSpec extends AnyFlatSpec with Matcher
       )
       VoyageAIEmbeddingProvider
         .fromConfig(config)
-        .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("voyage-3", 8)))
+        .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("voyage-3"), 8)))
     }
   }
 }

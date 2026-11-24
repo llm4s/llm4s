@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.error.ServiceError
@@ -33,10 +34,10 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
         if (callCount == 1) {
           val tc  = ToolCall(ToolCallId("call-1"), toolName, toolArgs)
           val msg = AssistantMessage(text = None, toolCalls = Seq(tc))
-          Right(Completion("id", Instant.EPOCH, "test-model", msg))
+          Right(Completion("id", Instant.EPOCH, ModelName("test-model"), msg))
         } else {
           val msg = AssistantMessage(text = Some(finalResponse))
-          Right(Completion("id", Instant.EPOCH, "test-model", msg))
+          Right(Completion("id", Instant.EPOCH, ModelName("test-model"), msg))
         }
       }
       override def streamComplete(conv: Conversation, opts: CompletionOptions)(
@@ -163,7 +164,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     val capturing = new LLMClient {
       override def complete(conv: Conversation, opts: CompletionOptions): Result[Completion] = {
         seen.set(conv)
-        Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("ok")))
+        Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("ok")))
       }
       override def streamComplete(conv: Conversation, opts: CompletionOptions)(
         onChunk: StreamedChunk => Unit

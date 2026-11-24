@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, TokenUsage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -19,7 +20,7 @@ import scala.concurrent.duration.*
 class TracingComposerConveniencesSpec extends AnyFlatSpec with Matchers {
 
   private val completion =
-    Completion("c-1", Instant.EPOCH, "test-model", AssistantMessage("the answer"), usage = None)
+    Completion("c-1", Instant.EPOCH, ModelName("test-model"), AssistantMessage("the answer"), usage = None)
   private val usage = TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30)
 
   "Tracing.traceError" should "record an LLMError as it is: its message and type, with no exception (#2800)" in {
@@ -40,8 +41,8 @@ class TracingComposerConveniencesSpec extends AnyFlatSpec with Matchers {
 
   private def traceAll(tracing: Tracing): Unit = {
     tracing.traceError(new IllegalStateException("boom"), "a step") shouldBe Right(())
-    tracing.traceCompletion(completion, "test-model") shouldBe Right(())
-    tracing.traceTokenUsage(usage, "test-model", "completion") shouldBe Right(())
+    tracing.traceCompletion(completion, ModelName("test-model")) shouldBe Right(())
+    tracing.traceTokenUsage(usage, ModelName("test-model"), "completion") shouldBe Right(())
   }
 
   "TracingComposer.transform" should "be given the events of traceError, traceCompletion and traceTokenUsage" in {

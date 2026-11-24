@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import java.time.Instant
@@ -177,7 +178,7 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
     val withoutThinking = Completion(
       id = "1",
       created = Instant.EPOCH,
-      model = "test",
+      model = ModelName("test"),
       message = AssistantMessage(Some("response"), Seq.empty)
     )
     withoutThinking.hasThinking shouldBe false
@@ -194,7 +195,7 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "1",
       created = Instant.EPOCH,
-      model = "test",
+      model = ModelName("test"),
       message = AssistantMessage(Some("The answer is 42."), Seq.empty).withThinking("Let me calculate this...")
     )
 
@@ -208,7 +209,7 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "1",
       created = Instant.EPOCH,
-      model = "test",
+      model = ModelName("test"),
       message = AssistantMessage(Some("The answer is 42."), Seq.empty)
     )
 

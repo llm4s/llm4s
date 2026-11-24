@@ -1,6 +1,7 @@
 // Outside `org.llm4s.capability` on purpose: this is what code that uses the module sees.
 package org.llm4s.capabilityusage
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.capability.*
 import org.llm4s.model.{ ModelCapabilities, ModelRegistryService }
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
@@ -55,7 +56,7 @@ class ModelLiteralSpec extends AnyFlatSpec with Matchers with EitherValues {
       Capability.PromptCaching
     )
     embeddings.capabilities shouldBe Nil
-    (gpt4o.provider, gpt4o.model, gpt4o.id) shouldBe (("openai", "gpt-4o", "openai/gpt-4o"))
+    (gpt4o.provider.asString, gpt4o.model.asString, gpt4o.id) shouldBe (("openai", "gpt-4o", "openai/gpt-4o"))
     o3mini.toString shouldBe "ModelRef(openai/o3-mini, Tools & StructuredOutput & Reasoning & PromptCaching)"
   }
 
@@ -111,7 +112,7 @@ class ModelLiteralSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "refuse, naming every missing capability, when the run-time registry differs from the bundled data" in {
     val downgraded = org.llm4s.capability.Fixtures
       .model("gpt-4o", ModelCapabilities(supportsFunctionCalling = Some(true)))
-      .withProvider("openai")
+      .withProvider(ProviderId("openai"))
     given ModelRegistryService = ModelRegistryService.fromModels(List(downgraded))
     val client                 = ScriptedLLMClient.always(Reply.text("unused"))
 

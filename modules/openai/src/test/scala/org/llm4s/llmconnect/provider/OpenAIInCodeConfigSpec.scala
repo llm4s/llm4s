@@ -34,14 +34,16 @@ class OpenAIInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
   "llm4s-openai, configured in code" should {
     "build an OpenAI client from a model, key and base URL" in {
       assertBuilds(
-        OpenAIConfig.fromValues("gpt-4o-mini", Secret("sk-test"), OpenAIConfig.DEFAULT_BASE_URL).value,
+        OpenAIConfig.fromValues(ModelName("gpt-4o-mini"), Secret("sk-test"), OpenAIConfig.DEFAULT_BASE_URL).value,
         "openai"
       )
     }
 
     "build an Azure OpenAI client from a deployment, key and endpoint" in {
       assertBuilds(
-        AzureConfig.fromValues("gpt-4o", Secret("azure-test"), "https://my-resource.openai.azure.com").value,
+        AzureConfig
+          .fromValues(ModelName("gpt-4o"), Secret("azure-test"), BaseUrl("https://my-resource.openai.azure.com"))
+          .value,
         "azure"
       )
     }
@@ -49,7 +51,7 @@ class OpenAIInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
     "build a Requesty client from an OpenAI config that names it" in {
       val config = OpenAIConfig
         .fromValues(
-          "openai/gpt-4o-mini",
+          ModelName("openai/gpt-4o-mini"),
           Secret("rq-test"),
           RequestyProvider.DEFAULT_BASE_URL,
           providerId = Some(ProviderId("requesty"))
@@ -63,7 +65,7 @@ class OpenAIInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
         "openai",
         EmbeddingProviderConfig(
           providerId = ProviderId("openai"),
-          baseUrl = BaseUrl(OpenAIConfig.DEFAULT_BASE_URL),
+          baseUrl = BaseUrl(OpenAIConfig.DEFAULT_BASE_URL.asUrl),
           model = ModelName("text-embedding-3-small"),
           apiKey = Some(Secret("sk-test"))
         )

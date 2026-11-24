@@ -1,5 +1,6 @@
 package org.llm4s.zio
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.AgentStatus
 import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.error.SimpleError
@@ -16,7 +17,7 @@ object AgentZSpec extends ZIOSpecDefault {
   private def completion(text: String) = Completion(
     id = "test-id",
     created = Instant.EPOCH,
-    model = "test-model",
+    model = ModelName("test-model"),
     message = AssistantMessage(text = Some(text))
   )
 

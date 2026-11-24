@@ -45,7 +45,7 @@ object FixtureChatProvider extends ProviderDescriptor:
 
   val DefaultBaseUrl: String = "https://fixturechat.invalid/v1"
 
-  val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DefaultBaseUrl)
+  val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(BaseUrl(DefaultBaseUrl))
 
   override val modelLister: Option[ProviderModelLister] =
     Some(FixtureModelLister)
@@ -54,7 +54,7 @@ object FixtureChatProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
-      config  <- FixtureChatConfig.fromValues(section.model.asString, apiKey.reveal, baseUrl)
+      config  <- FixtureChatConfig.fromValues(section.model.asString, apiKey.reveal, baseUrl.asUrl)
     yield config
 
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
@@ -101,7 +101,7 @@ final case class FixtureChatClient(config: FixtureChatConfig) extends LLMClient:
       Completion(
         id = "fixturechat-completion",
         created = Instant.EPOCH,
-        model = config.model.asString,
+        model = config.model,
         message = AssistantMessage(FixtureChatClient.Reply)
       )
     )
@@ -133,9 +133,11 @@ final class FixtureChatProviderModule extends Llm4sProviderModule:
 object FixtureModelLister extends ProviderModelLister:
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
     for
-      section  <- config.requireProvider(FixtureChatProvider.id)
-      _        <- section.requireApiKey
-      response <- httpClient.get(s"${section.baseUrlOrDefault(FixtureChatProvider.DefaultBaseUrl).asUrl}/models")
+      section <- config.requireProvider(FixtureChatProvider.id)
+      _       <- section.requireApiKey
+      response <- httpClient.get(
+        s"${section.baseUrlOrDefault(BaseUrl(FixtureChatProvider.DefaultBaseUrl)).asUrl}/models"
+      )
       ids <- scala.util
         .Try(ujson.read(response.body)("data").arr.toList.flatMap(_.obj.get("id").flatMap(_.strOpt)))
         .toOption

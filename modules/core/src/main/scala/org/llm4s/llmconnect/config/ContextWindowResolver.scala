@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.model.ModelRegistryService
 import org.slf4j.LoggerFactory
@@ -44,11 +46,11 @@ final class ContextWindowResolver(service: ModelRegistryService):
    * @return the limits of the resolved model
    */
   def resolve(
-    lookupProviders: Seq[String],
-    modelName: String,
+    lookupProviders: Seq[ProviderId],
+    modelName: ModelName,
     defaultContextWindow: Int,
     defaultReserve: Int,
-    fallbackResolver: String => ContextLimits
+    fallbackResolver: ModelName => ContextLimits
   ): ContextLimits =
     val registryResult =
       lookupProviders.view
@@ -63,7 +65,7 @@ final class ContextWindowResolver(service: ModelRegistryService):
           metadata.maxOutputTokens.getOrElse(defaultReserve)
         )
         logger.debug(
-          s"Using model registry metadata for ${lookupProviders.headOption.fold("")(_ + "/")}$modelName: " +
+          s"Using model registry metadata for ${lookupProviders.headOption.fold("")(_.asString + "/")}$modelName: " +
             s"context=${limits.contextWindow}, reserve=${limits.reserveCompletion}"
         )
         limits
@@ -87,13 +89,14 @@ final class ContextWindowResolver(service: ModelRegistryService):
    * @param modelName the model id as the provider's API names it, without the `provider/` prefix
    * @return the entry's input limit when it is a positive number, otherwise `None`
    */
-  def strictContextWindow(provider: String, modelName: String): Option[Int] =
+  def strictContextWindow(provider: ProviderId, modelName: ModelName): Option[Int] =
     service
       .listByProvider(provider)
       .toOption
       .flatMap(
         _.find(entry =>
-          entry.modelId.equalsIgnoreCase(s"$provider/$modelName") || entry.modelId.equalsIgnoreCase(modelName)
+          entry.modelId.asString.equalsIgnoreCase(s"${provider.asString}/$modelName") ||
+            entry.modelId.asString.equalsIgnoreCase(modelName.asString)
         )
       )
       .flatMap(_.maxInputTokens)
@@ -110,7 +113,7 @@ object ContextWindowResolver:
    * for {
    *   registry <- ModelRegistryService.default()
    *   given ModelRegistryService = registry
-   *   config <- OpenAIConfig.fromValues("gpt-4o-mini", apiKey, OpenAIConfig.DEFAULT_BASE_URL)
+   *   config <- OpenAIConfig.fromValues(ModelName("gpt-4o-mini"), apiKey, OpenAIConfig.DEFAULT_BASE_URL)
    *   client <- LLMConnect.getClient(config)
    * } yield client
    * }}}

@@ -55,7 +55,7 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
     NamedProviderConfig(
       provider = AnthropicProvider.id,
       model = ModelName("claude-sonnet-4-5"),
-      baseUrl = AnthropicProvider.configSpec.defaultBaseUrl.map(BaseUrl(_)),
+      baseUrl = AnthropicProvider.configSpec.defaultBaseUrl,
       apiKey = Some(ApiKey("test-key")),
     )
 

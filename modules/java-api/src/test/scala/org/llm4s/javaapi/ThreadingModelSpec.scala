@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
@@ -46,7 +47,7 @@ class ThreadingModelSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def concurrentCallers: Int = math.max(64, 4 * Runtime.getRuntime.availableProcessors())
 
   private def completion(text: String): Completion =
-    Completion("id", Instant.EPOCH, "test-model", AssistantMessage(text))
+    Completion("id", Instant.EPOCH, ModelName("test-model"), AssistantMessage(text))
 
   private def lastUser(conversation: Conversation): String =
     conversation.messages.collect { case u: UserMessage => u.content }.lastOption.getOrElse("")
@@ -113,7 +114,9 @@ class ThreadingModelSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     def client(): JLlmClient =
       Llm4s
-        .createClient(OllamaConfig(ModelName("llama3"), s"http://localhost:${server.getAddress.getPort}", 4096, 512))
+        .createClient(
+          OllamaConfig(ModelName("llama3"), BaseUrl(s"http://localhost:${server.getAddress.getPort}"), 4096, 512)
+        )
         .get()
 
     override def close(): Unit = {

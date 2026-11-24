@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, PerplexityConfig, ProviderTimeouts }
@@ -16,14 +17,14 @@ class PerplexityConfigSpec extends AnyWordSpec with Matchers:
   private def build(
     model: String = "perplexity/sonar",
     key: String = "k",
-    baseUrl: String = PerplexityConfig.DEFAULT_BASE_URL,
+    baseUrl: String = PerplexityConfig.DEFAULT_BASE_URL.asUrl,
     contextWindow: Int = 1000,
     reserve: Int = 10
   ) =
     PerplexityConfig.fromValues(
       ModelName(model),
       Secret(key),
-      baseUrl,
+      BaseUrl(baseUrl),
       contextWindow = contextWindow,
       reserveCompletion = reserve
     )
@@ -35,7 +36,7 @@ class PerplexityConfigSpec extends AnyWordSpec with Matchers:
         build(model = " perplexity/sonar ", key = " k ", baseUrl = "https://api.perplexity.ai//").toOption.get
       config.apiKey.reveal shouldBe "k"
       config.model.asString shouldBe "perplexity/sonar"
-      config.baseUrl shouldBe "https://api.perplexity.ai"
+      config.baseUrl shouldBe BaseUrl("https://api.perplexity.ai")
       config.endpointUrl shouldBe Some("https://api.perplexity.ai")
       config.providerId.asString shouldBe "perplexity"
     }

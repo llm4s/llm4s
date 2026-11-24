@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
@@ -29,7 +30,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
     DeepSeekConfig(
       apiKey = Secret("test-key"),
       model = ModelName("deepseek-chat"),
-      baseUrl = baseUrl,
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 128000,
       reserveCompletion = 8192
     )
@@ -50,7 +51,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
       result.isRight shouldBe true
       val completion = result.toOption.get
       completion.content shouldBe "Hello from DeepSeek!"
-      completion.model shouldBe "deepseek-chat"
+      completion.model shouldBe ModelName("deepseek-chat")
       completion.id shouldBe "chatcmpl-test"
       completion.usage shouldBe defined
       completion.usage.get.promptTokens shouldBe 10
@@ -174,7 +175,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
       result.isRight shouldBe true
       val completion = result.toOption.get
       completion.content shouldBe "test"
-      completion.model shouldBe "deepseek-chat"
+      completion.model shouldBe ModelName("deepseek-chat")
     }
 
   it should "record provider exchanges for streaming responses when logging is enabled" in

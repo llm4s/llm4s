@@ -1,5 +1,6 @@
 package org.llm4s.samples.upgrade
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentId, AgentStatus }
 import org.llm4s.agent.memory.{ InMemoryStore, Memory, MemoryFilter }
 import org.llm4s.config.PgSearchIndexConfigLoader
@@ -96,7 +97,7 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     private def reply: Completion = {
       calls.incrementAndGet(): Unit
       val message = AssistantMessage(answer)
-      Completion(id = "script", created = Instant.EPOCH, model = "script", message = message)
+      Completion(id = "script", created = Instant.EPOCH, model = ModelName("script"), message = message)
     }
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = Right(reply)
@@ -125,7 +126,7 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     run.messages.map(_.content) should contain("Say hello")
     // `result.usage` replaces `state.usageSummary`: one request, made against the scripted model.
     run.usage.requestCount shouldBe 1L
-    run.usage.byModel.keySet shouldBe Set("script")
+    run.usage.byModel.keySet shouldBe Set(ModelName("script"))
   }
 
   "An interrupted run" should "return CancelledError with the interrupt flag set, and start no turn" in {

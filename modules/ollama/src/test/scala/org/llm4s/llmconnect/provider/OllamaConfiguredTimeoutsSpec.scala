@@ -30,7 +30,12 @@ final class OllamaConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
   private def hello: Conversation = Conversation(Seq(UserMessage("hello")))
 
   private def config(baseUrl: String, timeouts: ProviderTimeouts): OllamaConfig =
-    OllamaConfig(model = ModelName("llama3.1"), baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512)
+    OllamaConfig(
+      model = ModelName("llama3.1"),
+      baseUrl = BaseUrl(baseUrl),
+      contextWindow = 4096,
+      reserveCompletion = 512
+    )
       .withTimeouts(timeouts)
 
   // ---- HOCON -> descriptor -> config ----
@@ -123,7 +128,8 @@ final class OllamaConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
         )
       )
       val started = System.nanoTime()
-      val result  = provider.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("nomic-embed-text", 768)))
+      val result =
+        provider.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("nomic-embed-text"), 768)))
       val elapsed = (System.nanoTime() - started).nanos
 
       result.isLeft shouldBe true

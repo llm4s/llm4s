@@ -39,7 +39,7 @@ class CohereEmbeddingsSmokeSpec extends AnyFlatSpec with Matchers {
     )
 
   private def request(texts: String*): EmbeddingRequest =
-    EmbeddingRequest(texts, EmbeddingModelConfig(Model, ExpectedDimensions))
+    EmbeddingRequest(texts, EmbeddingModelConfig(ModelName(Model), ExpectedDimensions))
 
   "Cohere embeddings" should "embed 3 sentences with embed-english-v3.0" in {
     Tier.require(cohereApiKey.isDefined, "COHERE_API_KEY not set")

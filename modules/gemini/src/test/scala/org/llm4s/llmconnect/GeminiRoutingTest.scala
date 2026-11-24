@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ GeminiConfig, ProviderConfig, VertexAIConfig }
@@ -18,7 +19,7 @@ class GeminiRoutingTest extends AnyFunSuite with Matchers {
     val cfg: ProviderConfig = GeminiConfig(
       apiKey = Secret("key"),
       model = ModelName("gemini-2.0-flash"),
-      baseUrl = "https://example.invalid/v1beta",
+      baseUrl = BaseUrl("https://example.invalid/v1beta"),
       contextWindow = 1048576,
       reserveCompletion = 8192
     )
@@ -47,7 +48,13 @@ class GeminiRoutingTest extends AnyFunSuite with Matchers {
 
   test("a GeminiConfig routed to the vertexai provider is refused") {
     val cfg: ProviderConfig =
-      GeminiConfig(Secret("key"), ModelName("gemini-2.0-flash"), "https://example.invalid/v1beta", 1048576, 8192)
+      GeminiConfig(
+        Secret("key"),
+        ModelName("gemini-2.0-flash"),
+        BaseUrl("https://example.invalid/v1beta"),
+        1048576,
+        8192
+      )
     LLMConnect.getClient(ProviderId("vertexai"), cfg, LlmClientOptions.default).isLeft shouldBe true
   }
 }

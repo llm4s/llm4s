@@ -1,5 +1,6 @@
 package org.llm4s.metrics
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.concurrent.duration.FiniteDuration
@@ -98,9 +99,9 @@ final class CostTracker private () extends MetricsCollector {
    * Note: `thinkingTokens` is always 0 because [[MetricsCollector.addTokens]]
    * does not pass thinking token counts.
    */
-  def byModel: Map[String, ModelUsage] =
+  def byModel: Map[ModelName, ModelUsage] =
     state.get().map { case (model, acc) =>
-      model -> ModelUsage(
+      ModelName(model) -> ModelUsage(
         requestCount = acc.requestCount,
         inputTokens = acc.inputTokens,
         outputTokens = acc.outputTokens,
@@ -113,7 +114,7 @@ final class CostTracker private () extends MetricsCollector {
   def snapshot: UsageSummary = {
     val current = state.get()
     val models = current.map { case (model, acc) =>
-      model -> ModelUsage(
+      ModelName(model) -> ModelUsage(
         requestCount = acc.requestCount,
         inputTokens = acc.inputTokens,
         outputTokens = acc.outputTokens,

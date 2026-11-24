@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.chunking.{ ChunkMetadata, DocumentChunk }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
@@ -37,7 +38,7 @@ class RAGSyncAndBytesSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock",
           created = Instant.EPOCH,
-          model = "mock",
+          model = ModelName("mock"),
           message = AssistantMessage(responseOverride.getOrElse("Mock answer.")),
           usage = Some(TokenUsage(10, 5, 15))
         )

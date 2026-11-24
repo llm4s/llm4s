@@ -1,5 +1,6 @@
 package org.llm4s.configpolicy
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
@@ -15,7 +16,7 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
 
   "ConfigPolicyEngine.check" should {
     "pass for dev ollama config under dev policy" in {
-      val cfg = OllamaConfig.fromValues("llama3", "http://localhost:11434").value
+      val cfg = OllamaConfig.fromValues(ModelName("llama3"), BaseUrl("http://localhost:11434")).value
       val violations = ConfigPolicyEngine.check(
         cfg,
         ConfigPolicy.devSandbox,
@@ -25,12 +26,12 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
     }
 
     "allow the generic openai-compatible provider under the dev preset" in {
-      val cfg = OpenAICompatibleConfig.fromValues(ModelName("qwen"), "http://localhost:8000/v1").value
+      val cfg = OpenAICompatibleConfig.fromValues(ModelName("qwen"), BaseUrl("http://localhost:8000/v1")).value
       ConfigPolicyEngine.check(cfg, ConfigPolicy.devSandbox, CatalogEnvironment.Dev) shouldBe empty
     }
 
     "reject the generic openai-compatible provider under the prod preset unless explicitly allowed" in {
-      val cfg = OpenAICompatibleConfig.fromValues(ModelName("gpt-4o-mini"), "https://gateway.example/v1").value
+      val cfg = OpenAICompatibleConfig.fromValues(ModelName("gpt-4o-mini"), BaseUrl("https://gateway.example/v1")).value
       ConfigPolicyEngine.check(cfg, ConfigPolicy.prodSafeDefaults, CatalogEnvironment.Prod) should contain(
         PolicyViolation("allowedProviders", "Provider 'openai-compatible' is not allowed")
       )
@@ -42,35 +43,42 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
     }
 
     "fail when provider is not in allowlist" in {
-      val cfg        = OpenAIConfig.fromValues("gpt-4o", Secret("test-key"), "https://api.openai.com/v1").value
+      val cfg =
+        OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("test-key"), BaseUrl("https://api.openai.com/v1")).value
       val policy     = ConfigPolicy.permissive.withAllowedProviders("anthropic")
       val violations = ConfigPolicyEngine.check(cfg, policy, CatalogEnvironment.Prod)
       violations.map(_.rule) should contain("allowedProviders")
     }
 
     "pass when model matches an allowlisted pattern" in {
-      val cfg        = OpenAIConfig.fromValues("gpt-4o-mini", Secret("test-key"), "https://api.openai.com/v1").value
+      val cfg = OpenAIConfig
+        .fromValues(ModelName("gpt-4o-mini"), Secret("test-key"), BaseUrl("https://api.openai.com/v1"))
+        .value
       val policy     = ConfigPolicy.permissive.withAllowedModelPatterns("openai/gpt-4o-mini")
       val violations = ConfigPolicyEngine.check(cfg, policy, CatalogEnvironment.Prod)
       violations shouldBe empty
     }
 
     "fail when model does not match any pattern" in {
-      val cfg        = OpenAIConfig.fromValues("gpt-3.5-turbo", Secret("test-key"), "https://api.openai.com/v1").value
+      val cfg = OpenAIConfig
+        .fromValues(ModelName("gpt-3.5-turbo"), Secret("test-key"), BaseUrl("https://api.openai.com/v1"))
+        .value
       val policy     = ConfigPolicy.permissive.withAllowedModelPatterns("openai/gpt-4o-mini")
       val violations = ConfigPolicyEngine.check(cfg, policy, CatalogEnvironment.Prod)
       violations.map(_.rule) should contain("allowedModels")
     }
 
     "fail when context window exceeds policy max for environment" in {
-      val cfg        = OpenAIConfig.fromValues("gpt-4o", Secret("test-key"), "https://api.openai.com/v1").value
+      val cfg =
+        OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("test-key"), BaseUrl("https://api.openai.com/v1")).value
       val policy     = ConfigPolicy.permissive.withMaxContextWindow(CatalogEnvironment.Prod, 1000)
       val violations = ConfigPolicyEngine.check(cfg, policy, CatalogEnvironment.Prod)
       violations.map(_.rule) should contain("maxContextWindow")
     }
 
     "fail when base URL does not match required pattern" in {
-      val cfg = OpenAIConfig.fromValues("gpt-4o", Secret("test-key"), "https://example.com/v1").value
+      val cfg =
+        OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("test-key"), BaseUrl("https://example.com/v1")).value
       val policy =
         ConfigPolicy.permissive.withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "https://api\\.openai\\.com.*")
       val violations = ConfigPolicyEngine.check(cfg, policy, CatalogEnvironment.Prod)
@@ -78,7 +86,8 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
     }
 
     "pass when base URL matches required pattern" in {
-      val cfg = OpenAIConfig.fromValues("gpt-4o", Secret("test-key"), "https://api.openai.com/v1").value
+      val cfg =
+        OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("test-key"), BaseUrl("https://api.openai.com/v1")).value
       val policy =
         ConfigPolicy.permissive.withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "https://api\\.openai\\.com.*")
       val violations = ConfigPolicyEngine.check(cfg, policy, CatalogEnvironment.Prod)
@@ -86,17 +95,19 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
     }
 
     "surface invalid model regex in policy as a violation" in {
-      val cfg        = OpenAIConfig.fromValues("gpt-4o", Secret("test-key"), "https://api.openai.com/v1").value
+      val cfg =
+        OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("test-key"), BaseUrl("https://api.openai.com/v1")).value
       val policy     = ConfigPolicy.permissive.withAllowedModelPatterns("[invalid")
       val violations = ConfigPolicyEngine.check(cfg, policy, CatalogEnvironment.Prod)
       violations.map(_.rule) should contain("allowedModelPatterns")
     }
 
     "match model patterns against the whole value, so a pin is not a prefix" in {
-      val mini   = OpenAIConfig.fromValues("gpt-4o-mini", Secret("k"), "https://api.openai.com/v1").value
+      val mini =
+        OpenAIConfig.fromValues(ModelName("gpt-4o-mini"), Secret("k"), BaseUrl("https://api.openai.com/v1")).value
       val policy = ConfigPolicy.permissive.withAllowedModelPatterns("openai/gpt-4o")
       ConfigPolicyEngine.check(mini, policy, CatalogEnvironment.Prod).map(_.rule) should contain("allowedModels")
-      val exact = OpenAIConfig.fromValues("gpt-4o", Secret("k"), "https://api.openai.com/v1").value
+      val exact = OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("k"), BaseUrl("https://api.openai.com/v1")).value
       ConfigPolicyEngine.check(exact, policy, CatalogEnvironment.Prod) shouldBe empty
     }
 
@@ -108,7 +119,7 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
         "https://api.openai.com.evil.example/v1",
         "https://evil.example/?u=https://api.openai.com/v1"
       ).foreach { url =>
-        val cfg = OpenAIConfig.fromValues("gpt-4o", Secret("k"), url).value
+        val cfg = OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("k"), BaseUrl(url)).value
         ConfigPolicyEngine.check(cfg, policy, CatalogEnvironment.Prod).map(_.rule) should contain("requiredBaseUrl")
       }
     }
@@ -117,11 +128,11 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
       val policy = ConfigPolicy.permissive
         .withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "https://api\\.openai\\.com/v1")
         .withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "openai-compatible", "https://api\\.groq\\.com/openai/v1")
-      val groq = OpenAICompatibleConfig.fromValues(ModelName("m"), "https://api.groq.com/openai/v1").value
+      val groq = OpenAICompatibleConfig.fromValues(ModelName("m"), BaseUrl("https://api.groq.com/openai/v1")).value
       ConfigPolicyEngine.check(groq, policy, CatalogEnvironment.Prod) shouldBe empty
-      val other = OpenAICompatibleConfig.fromValues(ModelName("m"), "https://api.openai.com/v1").value
+      val other = OpenAICompatibleConfig.fromValues(ModelName("m"), BaseUrl("https://api.openai.com/v1")).value
       ConfigPolicyEngine.check(other, policy, CatalogEnvironment.Prod).map(_.rule) should contain("requiredBaseUrl")
-      val openai = OpenAIConfig.fromValues("gpt-4o", Secret("k"), "https://api.openai.com/v1").value
+      val openai = OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("k"), BaseUrl("https://api.openai.com/v1")).value
       ConfigPolicyEngine.check(openai, policy, CatalogEnvironment.Prod) shouldBe empty
     }
 
@@ -129,9 +140,9 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
       val policy = ConfigPolicy.permissive
         .withMaxContextWindow(CatalogEnvironment.Prod, 1000)
         .withMaxContextWindow(CatalogEnvironment.Prod, "openai", 200000)
-      val cfg = OpenAIConfig.fromValues("gpt-4o", Secret("k"), "https://api.openai.com/v1").value
+      val cfg = OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("k"), BaseUrl("https://api.openai.com/v1")).value
       ConfigPolicyEngine.check(cfg, policy, CatalogEnvironment.Prod) shouldBe empty
-      val ollama = OllamaConfig.fromValues("llama3", "http://localhost:11434").value
+      val ollama = OllamaConfig.fromValues(ModelName("llama3"), BaseUrl("http://localhost:11434")).value
       ConfigPolicyEngine.check(ollama, policy, CatalogEnvironment.Prod).map(_.rule) should contain("maxContextWindow")
     }
 
@@ -156,7 +167,7 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
 
     "accept the documented Groq and xAI recipes under the dev preset" in {
       Seq("https://api.groq.com/openai/v1" -> 131072, "https://api.x.ai/v1" -> 500000).foreach { case (url, window) =>
-        val cfg = OpenAICompatibleConfig.fromValues(ModelName("m"), url, contextWindow = Some(window)).value
+        val cfg = OpenAICompatibleConfig.fromValues(ModelName("m"), BaseUrl(url), contextWindow = Some(window)).value
         ConfigPolicyEngine.check(cfg, ConfigPolicy.devSandbox, CatalogEnvironment.Dev) shouldBe empty
       }
     }
