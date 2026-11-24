@@ -59,12 +59,24 @@ trait OpenAICompatibleDialect:
   def headers: Seq[(String, String)] = Seq.empty
 
   /**
-   * The path, under the client's base URL, that `LLMClient.validate()` sends a `GET` to with the headers of a
-   * completion request (#2830). It must be a request the provider refuses without the credential a completion
-   * needs, or `validate()` would pass with a wrong key. Standard: `Some("/models")`, the model listing.
-   * `None` for a provider with no such request: its `validate()` is `Left(ValidationUnsupportedError)`.
+   * The URL `LLMClient.validate()` sends a `GET` to with the headers of a completion request (#2830), for a client
+   * with this base URL and model. It must be a request the provider documents and refuses without the credential a
+   * completion needs, or `validate()` would pass with a wrong key. Standard: `Some(s"\$baseUrl/models")`, the model
+   * listing. `None` for a provider with no such request: its `validate()` is `Left(ValidationUnsupportedError)`.
+   *
+   * @param baseUrl the client's base URL, without a trailing slash
+   * @param model   the configured model, for a request that looks it up
    */
-  def validationPath: Option[String] = Some("/models")
+  def validationUrl(baseUrl: String, @unused model: String): Option[String] = Some(s"$baseUrl/models")
+
+  /**
+   * Whether an error response refuses the credential although its status is neither 401 nor 403, which are an
+   * `AuthenticationError` already. Standard: never. xAI answers a wrong key with a 400.
+   *
+   * @param statusCode the status of the response, outside 2xx
+   * @param body       the response body
+   */
+  def refusesCredential(@unused statusCode: Int, @unused body: String): Boolean = false
 
   /**
    * The role a [[org.llm4s.llmconnect.model.SystemMessage]] is sent under. Standard:

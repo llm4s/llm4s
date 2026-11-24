@@ -123,6 +123,43 @@ class JlamaClientSpec extends AnyWordSpec with Matchers:
     }
   }
 
+  "validate" should {
+
+    "load the model without generating, and keep it for the first completion (#2855)" in {
+      val engine = new ScriptedEngine()
+      val loader = new CountingLoader(Right(engine))
+      val local  = client(loader)
+      local.validate() shouldBe Right(())
+      loader.loads.get shouldBe 1
+      engine.requests shouldBe empty
+      local.complete(hello) shouldBe a[Right[?, ?]]
+      loader.loads.get shouldBe 1
+    }
+
+    "return the error of a model that does not load, and try again on the next call" in {
+      val failure = ProcessingError("jlama.load", "could not load Jlama model")
+      val loader  = new CountingLoader(Left(failure))
+      val local   = client(loader)
+      local.validate() shouldBe Left(failure)
+      local.validate() shouldBe Left(failure)
+      loader.loads.get shouldBe 2
+    }
+
+    "refuse once closed, and return CancelledError when the thread is interrupted" in {
+      val closed = client(new ScriptedEngine())
+      closed.close()
+      closed.validate() should matchPattern { case Left(_: ConfigurationError) => }
+
+      val loader = new CountingLoader(Right(new ScriptedEngine()))
+      val local  = client(loader)
+      Thread.currentThread().interrupt()
+      val result = local.validate()
+      Thread.interrupted() shouldBe true // the flag is kept, and cleared here for the tests that follow
+      result should matchPattern { case Left(_: org.llm4s.error.CancelledError) => }
+      loader.loads.get shouldBe 0
+    }
+  }
+
   "streamComplete" should {
 
     "deliver each token as a chunk, then a chunk with the finish reason, all with the completion's id" in {

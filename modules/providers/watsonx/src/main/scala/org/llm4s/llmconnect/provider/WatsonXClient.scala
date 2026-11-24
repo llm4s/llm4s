@@ -225,6 +225,20 @@ class WatsonXClient(
       }
     )
 
+  /**
+   * Exchanges the API key for an IAM token, the request every completion depends on, and asks IAM afresh on each
+   * call: a cached token would hide a key revoked since. `Right(())` means IAM answered and took the key; a key it
+   * refuses is an `AuthenticationError`. The token it returns is kept for the next completion.
+   *
+   * It does not show that the watsonx endpoint answers, nor check the project or the model: IBM's examples of the
+   * model listing, `GET /ml/v1/foundation_model_specs`, send no credentials
+   * (https://www.ibm.com/docs/en/watsonx/saas?topic=solutions-get-model-information, read 2026-11-24), so it would
+   * pass a wrong key. Never run against the live service.
+   */
+  override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
+    currentApiKey().flatMap(fetchToken).map(_ => ())
+  }
+
   /** Forgets `token` if it is still the cached one (a newer token fetched meanwhile is kept). */
   private def invalidate(token: String): Unit =
     tokenCache.updateAndGet(cached => cached.filterNot(_.value == token)): Unit

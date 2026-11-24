@@ -92,4 +92,9 @@ class RequestySmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   override protected def contractClient(key: String): Result[LLMClient] = client(key)
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /v1/models, which refuses a wrong key with a 403 (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] = Some(client("invalid-key-for-testing"))
+
+  registerValidationContract()
 }

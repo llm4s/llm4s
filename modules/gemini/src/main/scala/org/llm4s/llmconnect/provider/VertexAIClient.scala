@@ -325,6 +325,28 @@ class VertexAIClient(
   override def getContextWindow(): Int     = config.contextWindow
   override def getReserveCompletion(): Int = config.reserveCompletion
 
+  /**
+   * Gets the configured publisher model, `GET <base>/publishers/google/models/<model>` (Vertex AI's
+   * `publishers.models.get`), with the OAuth2 token a completion carries. `Right(())` means credentials were found
+   * and exchanged, the regional endpoint answered, took the token and has the model. A refused token is an
+   * `AuthenticationError` and an unknown model a `ServiceError` 404. The project is not checked: the request names
+   * none, so a project the credentials may not call is found only by a completion.
+   */
+  override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
+    authProvider.getAccessToken().flatMap { token =>
+      http
+        .get(
+          s"${config.computedBaseUrl}/publishers/google/models/${config.model}",
+          Map("Authorization" -> s"Bearer $token"),
+          timeout = requestTimeout.min(VertexAIClient.ValidationTimeout)
+        )
+        .flatMap { response =>
+          if (response.statusCode >= 200 && response.statusCode < 300) Right(())
+          else handleErrorResponse(response.statusCode, response.body, response.headers)
+        }
+    }
+  }
+
   private def buildRequestBody(
     conversation: Conversation,
     options: CompletionOptions,
@@ -569,6 +591,9 @@ object VertexAIClient {
 
   /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
   val DefaultStreamTimeout: FiniteDuration = 10.minutes
+
+  /** The longest `validate()` waits for its one request: ten seconds. */
+  val ValidationTimeout: FiniteDuration = 10.seconds
   import org.llm4s.syntax.toResult
 
   def apply(config: VertexAIConfig)(using ModelRegistryService): Result[VertexAIClient] =

@@ -98,4 +98,12 @@ class CohereSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   override protected def contractClient(key: String): Result[LLMClient] = CohereClient(config(key))
 
   registerCapabilityContract()
+
+  // ---- validate(): the native GET /v1/models/<model> (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(CohereClient(config("invalid-key-for-testing")))
+  override protected def unknownModelClient(key: String): Option[Result[LLMClient]] =
+    Some(CohereClient(config(key).withModel("llm4s-no-such-model")))
+
+  registerValidationContract()
 }

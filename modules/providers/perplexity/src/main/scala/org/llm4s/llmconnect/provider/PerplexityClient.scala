@@ -357,6 +357,37 @@ class PerplexityClient(
   override def getContextWindow(): Int     = config.contextWindow
   override def getReserveCompletion(): Int = config.reserveCompletion
 
+  /**
+   * Gets the Agent API's model listing, `GET <baseUrl>/v1/models`
+   * (https://docs.perplexity.ai/api-reference/models-get, read 2026-11-24), with the key a completion carries.
+   * `Right(())` means the endpoint answered and took the key; the model is not looked for in the listing. A refused
+   * key is an `AuthenticationError`.
+   *
+   * The reference's OpenAPI declares no security for the request, but api.perplexity.ai answered it with a 401
+   * without a key and with a wrong one on that date. Should the listing ever answer without a key, this check would
+   * pass a wrong one.
+   */
+  override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
+    currentApiKey().flatMap { key =>
+      http
+        .get(
+          config.modelsUrl,
+          requestHeaders(key, "application/json") - "Content-Type",
+          timeout = requestTimeout.min(ValidationTimeout)
+        )
+        .flatMap { response =>
+          if (response.statusCode >= 200 && response.statusCode < 300) Right(())
+          else
+            HttpErrorMapper.mapHttpError(
+              response.statusCode,
+              Redaction.scrubRemote(response.body),
+              providerName,
+              response.headers
+            )
+        }
+    }
+  }
+
   override protected def releaseResources(): Unit = http.close()
 }
 
@@ -371,6 +402,9 @@ object PerplexityClient {
 
   /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
   val DefaultStreamTimeout: FiniteDuration = 10.minutes
+
+  /** The longest `validate()` waits for its one request: ten seconds. */
+  val ValidationTimeout: FiniteDuration = 10.seconds
 
   /**
    * Builds a [[PerplexityClient]], wrapping any construction-time exception in a `Left`.

@@ -127,7 +127,7 @@ is not recoverable, since nothing says a retry can help.
 | `NotFoundError` | no | A memory store (in-memory, SQLite, Postgres) is asked to update a memory it does not hold, or `VectorStoreFactory` is given an unknown backend name. |
 | `ContextError` | no | Context compression fails: `LLMCompressor`'s LLM call fails, or `ToolOutputCompressor` cannot store an artifact or parse JSON content. |
 | `TokenizerError` | no | `ConversationTokenCounter` has no tokenizer for the requested id. |
-| `ValidationUnsupportedError` | no | Only `LLMClient.validate()`, on a client with no request to check itself with (Azure OpenAI, Vertex AI, Bedrock and others, and any client that does not implement the check): nothing was checked, and the client may well work ([startup validation](observability/index#startup-validation)). |
+| `ValidationUnsupportedError` | no | Only `LLMClient.validate()`, on a client with no request to check itself with (Bedrock, Z.ai, and any client that does not implement the check): nothing was checked, and the client may well work ([startup validation](observability/index#startup-validation)). |
 | `SimpleError` | no | The MCP client and its transports (`llm4s-mcp`): connection, session, JSON-RPC and server-process failures. |
 | `UnknownError` | no | An unexpected exception, wrapped: the fallback of `Safety.fromThrowable` (and so of `toResult` and `toLLMError`), an unexpected failure in llm4s's HTTP client, or a tracing backend that fails to start or to export. |
 

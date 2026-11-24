@@ -144,4 +144,11 @@ class AzureSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Pr
   override protected def contractClient(key: String): Result[LLMClient] = OpenAIClient(classic(key))
 
   registerCapabilityContract()
+
+  // ---- validate(): the resource's model listing; the deployment is not looked up (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    endpoint.map(at => OpenAIClient(config("invalid-key-for-testing", at)))
+  override protected def noInvalidKeyClient: String = "AZURE_API_BASE not set: there is no resource to refuse a key"
+
+  registerValidationContract()
 }

@@ -96,4 +96,10 @@ class BedrockSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
   )
 
   registerCapabilityContract()
+
+  // ---- validate() (#2855) ----
+  override protected def validationUnsupported: Option[String] =
+    Some("the runtime API has no cheap request that the permission a completion needs authorises")
+
+  registerValidationContract()
 }

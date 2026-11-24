@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.error.{ AuthenticationError, ServiceError, ValidationUnsupportedError }
 import org.llm4s.it.Tier
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.types.Result
@@ -108,6 +109,71 @@ trait ProviderSmokeContract extends BeforeAndAfterAll { self: AnyFlatSpec & Matc
     behavior.of(s"$providerLabel capability contract")
     Capability.values.foreach { capability =>
       it should s"hold the ${capability.label} capability" in runCapability(capability)
+    }
+  }
+
+  // ---- LLMClient.validate() against the live service (#2855) ----
+
+  /** Why `validate()` checks nothing for this provider; `None` (the default) when it sends a request. */
+  protected def validationUnsupported: Option[String] = None
+
+  /**
+   * A client whose credential the provider refuses, where the spec can build one without a real key: its
+   * `validate()` must be an `AuthenticationError`. `None` (the default) cancels the case with the reason given by
+   * [[noInvalidKeyClient]].
+   */
+  protected def invalidKeyClient: Option[Result[LLMClient]] = None
+
+  /** Why the spec has no [[invalidKeyClient]]. */
+  protected def noInvalidKeyClient: String = "this spec cannot build a client with a refused credential"
+
+  /**
+   * A client, using the real `key`, for a model the provider does not have, where `validate()` looks the model up:
+   * its `validate()` must be the `ServiceError` 404 a completion gets. `None` (the default) cancels the case.
+   */
+  protected def unknownModelClient(key: String): Option[Result[LLMClient]] = None
+
+  private def validated(built: Result[LLMClient]): Result[Unit] =
+    built match {
+      case Left(error) => fail(s"could not build the client: ${error.message}")
+      case Right(client) =>
+        val result = client.validate()
+        client.close()
+        result
+    }
+
+  /**
+   * Registers the `validate()` cases; call it once, after the spec's own tests. They are tests of their own, not
+   * capabilities: `validate()` is not part of the capability matrix.
+   */
+  protected def registerValidationContract(): Unit = {
+    behavior.of(s"$providerLabel validate()")
+
+    it should "accept the credential a completion is sent with, or say that it cannot check" in {
+      Tier.require(contractKey.isDefined, s"$apiKeyEnvVar not set")
+      val result = validated(contractClient(contractKey.getOrElse("")))
+      validationUnsupported match {
+        case Some(_) => result should matchPattern { case Left(_: ValidationUnsupportedError) => }
+        case None    => result shouldBe Right(())
+      }
+    }
+
+    it should "report a refused credential as an AuthenticationError" in {
+      validationUnsupported.foreach(reason => cancel(s"validate() checks nothing for $providerLabel: $reason"))
+      invalidKeyClient match {
+        case None        => cancel(noInvalidKeyClient)
+        case Some(built) => validated(built) should matchPattern { case Left(_: AuthenticationError) => }
+      }
+    }
+
+    it should "report a model the provider does not have" in {
+      validationUnsupported.foreach(reason => cancel(s"validate() checks nothing for $providerLabel: $reason"))
+      Tier.require(contractKey.isDefined, s"$apiKeyEnvVar not set")
+      unknownModelClient(contractKey.getOrElse("")) match {
+        case None => cancel(s"$providerLabel's validation request does not look the model up")
+        case Some(built) =>
+          validated(built) should matchPattern { case Left(error: ServiceError) if error.httpStatus == 404 => }
+      }
     }
   }
 

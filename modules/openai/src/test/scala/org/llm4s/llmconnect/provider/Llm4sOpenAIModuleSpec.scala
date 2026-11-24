@@ -237,7 +237,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       }
     }
 
-    "validate OpenAI by its model, Requesty by its listing, and say Azure has no such request (#2830)" in {
+    "validate OpenAI by its model and Requesty by its listing (#2830)" in {
       def openAIError(exchange: com.sun.net.httpserver.HttpExchange, status: Int, message: String): Unit =
         LocalProviderTestServer.sendJsonResponse(
           exchange,
@@ -272,11 +272,44 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       requests(found)(openAIClientAt) shouldBe Seq("GET /models/gpt-4o" -> "Bearer sk-test")
       requests(listed)(requestyClientAt) shouldBe Seq("GET /models" -> "Bearer rq-key")
 
-      val azure = AzureConfig
-        .fromValues("my-deploy", Secret("azure-key"), "http://localhost:1", AzureConfig.DEFAULT_API_VERSION)
-        .toOption
-        .get
-      assertValidationUnsupported(AzureProvider.buildClient(azure, LlmClientOptions.default).toOption.get)
+    }
+
+    "validate Azure OpenAI by its resource's model listing, with the api-key a completion carries (#2855)" in {
+      def azureError(exchange: com.sun.net.httpserver.HttpExchange, status: Int, message: String): Unit =
+        LocalProviderTestServer.sendJsonResponse(
+          exchange,
+          status,
+          ujson.Obj("error" -> ujson.Obj("code" -> status.toString, "message" -> message)).render()
+        )
+      def azureClientAt(suffix: String)(baseUrl: String): LLMClient = {
+        val config = AzureConfig
+          .fromValues("my-deploy", Secret("azure-key"), s"$baseUrl$suffix", AzureConfig.DEFAULT_API_VERSION)
+          .toOption
+          .get
+        AzureProvider.buildClient(config, LlmClientOptions.default).toOption.get
+      }
+      val listed = """{"object":"list","data":[{"id":"gpt-4o","object":"model","created_at":1,"status":"succeeded"}]}"""
+      assertValidates(LocalProviderTestServer.sendJsonResponse(_, 200, listed), azureError)(azureClientAt(""))
+
+      /** The request `validate()` sends: `METHOD path?query`, and its `api-key` header. */
+      def request(suffix: String): Seq[(String, String)] = {
+        val seen = new java.util.concurrent.ConcurrentLinkedQueue[(String, String)]()
+        LocalProviderTestServer.withServer("/") { exchange =>
+          seen.add(
+            s"${exchange.getRequestMethod} ${exchange.getRequestURI}" ->
+              Option(exchange.getRequestHeaders.getFirst("api-key")).getOrElse("")
+          )
+          LocalProviderTestServer.sendJsonResponse(exchange, 200, listed)
+        } { baseUrl =>
+          val built = azureClientAt(suffix)(baseUrl)
+          built.validate() shouldBe Right(())
+          built.close()
+        }
+        seen.toArray(Array.empty[(String, String)]).toSeq
+      }
+      // the data plane's Models - List, and the v1 API's List models
+      request("") shouldBe Seq("GET /openai/models?api-version=2025-01-01-preview" -> "azure-key")
+      request("/openai/v1") shouldBe Seq("GET /openai/v1/models" -> "azure-key")
     }
 
     "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {

@@ -973,7 +973,9 @@ Your module spec runs `assertValidates(accept, reject)(clientAt)` for the first 
 `LocalProviderTestServer`: a request must reach the server before `Right(())`, a 401 must be an
 `AuthenticationError`, and nothing listening must be a `Left`. For the second it runs
 `assertValidationUnsupported(client)`. A client on `OpenAICompatibleClient` has the first already: `GET /models`,
-or the dialect's `validationPath` (`None` for a vendor with no such request).
+or the dialect's `validationUrl` (`None` for a vendor with no such request). A vendor that refuses a wrong key with
+a status other than 401 or 403 says so in the dialect's `refusesCredential`, so the refusal is an
+`AuthenticationError` from `validate()` and from a completion alike.
 
 ### Tool results
 

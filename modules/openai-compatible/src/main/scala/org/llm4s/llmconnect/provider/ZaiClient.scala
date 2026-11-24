@@ -105,8 +105,9 @@ object ZaiClient {
 private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
   override val headers: Seq[(String, String)] = Seq("User-Agent" -> "llm4s-coding-assistant/1.0")
 
-  // Z.ai documents no model listing or other cheap authenticated request on its chat API
-  override val validationPath: Option[String] = None
+  // Z.ai's API reference (https://docs.z.ai/llms.txt, read 2026-11-24) documents no model listing, and its other
+  // requests generate, search or bill: there is no cheap authenticated request to validate with
+  override def validationUrl(baseUrl: String, model: String): Option[String] = None
 
   /**
    * Not sent. Z.ai's chat-completion reference has no `stream_options` parameter; it documents

@@ -130,4 +130,12 @@ class VertexAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   override protected def contractClient(projectId: String): Result[LLMClient] = VertexAIClient(config(projectId))
 
   registerCapabilityContract()
+
+  // ---- validate(): publishers.models.get (#2855) ----
+  override protected def noInvalidKeyClient: String =
+    "Vertex AI's credentials are the environment's: the spec has no refused token to send"
+  override protected def unknownModelClient(projectId: String): Option[Result[LLMClient]] =
+    Some(VertexAIClient(config(projectId).withModel("llm4s-no-such-model")))
+
+  registerValidationContract()
 }

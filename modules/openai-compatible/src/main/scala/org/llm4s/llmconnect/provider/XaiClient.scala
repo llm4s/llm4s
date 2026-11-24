@@ -94,6 +94,13 @@ object XaiClient {
  */
 private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
 
+  /**
+   * xAI answers a wrong key with a 400, `{"code":"invalid-argument","error":"Incorrect API key provided. ..."}`
+   * (api.x.ai, 2026-11-24), where the other vendors send a 401.
+   */
+  override def refusesCredential(statusCode: Int, body: String): Boolean =
+    statusCode == 400 && body.toLowerCase(java.util.Locale.ROOT).contains("incorrect api key")
+
   override def thinking(obj: ujson.Value): Option[String] =
     OpenAICompatibleDialect.firstString(obj, "reasoning_content").filter(_.nonEmpty)
 
