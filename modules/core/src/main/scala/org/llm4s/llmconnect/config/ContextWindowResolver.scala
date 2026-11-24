@@ -9,9 +9,24 @@ import org.slf4j.LoggerFactory
  *
  * @param contextWindow     the tokens a prompt and its completion may take together
  * @param reserveCompletion the tokens held back from the prompt for the completion
+ *
+ * Build one with [[ContextLimits.apply]] and change it with the `with*` setters; the constructor and `copy` are
+ * private, so a further limit never breaks callers.
  */
 @Stable
-final case class ContextLimits(contextWindow: Int, reserveCompletion: Int)
+final case class ContextLimits private (contextWindow: Int, reserveCompletion: Int):
+
+  /** Sets the tokens a prompt and its completion may take together. */
+  def withContextWindow(contextWindow: Int): ContextLimits = copy(contextWindow = contextWindow)
+
+  /** Sets the tokens held back from the prompt for the completion. */
+  def withReserveCompletion(reserveCompletion: Int): ContextLimits = copy(reserveCompletion = reserveCompletion)
+
+object ContextLimits:
+
+  /** Creates the limits from the context window and the completion reserve. */
+  def apply(contextWindow: Int, reserveCompletion: Int): ContextLimits =
+    new ContextLimits(contextWindow, reserveCompletion)
 
 /** Resolves context window and output-reserve token counts for a given model using the model registry. */
 @Stable
