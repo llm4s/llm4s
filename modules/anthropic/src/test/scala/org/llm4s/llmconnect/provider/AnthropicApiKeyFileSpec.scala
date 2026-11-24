@@ -1,9 +1,8 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
-import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.spi.{ ProviderBuildContext, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{ anthropicMessage, sendJsonResponse, withServer }
 import org.llm4s.testkit.{ ProviderModuleChecks, ProviderTestConfig }
@@ -48,7 +47,7 @@ class AnthropicApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValue
           )
           .value
         given ModelRegistryService = ProviderModuleChecks.defaultModelRegistry
-        val client                 = AnthropicProvider.buildClient(config, LlmClientOptions.default).value
+        val client                 = AnthropicProvider.build(config, ProviderBuildContext.of()).value
 
         client.complete(hello).isRight shouldBe true
         Files.writeString(file, "sk-ant-rotated-key-00002")

@@ -5,6 +5,7 @@ import org.llm4s.javaapi.{ LlmErrorKind, LlmException, Llm4s }
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.llmconnect.spi.EmbeddingBuildContext
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.testutil.FixtureEmbeddingProvider
@@ -22,7 +23,8 @@ class Llm4sEmbeddingModelSpec extends AnyFlatSpec with Matchers {
   private val fixture: EmbeddingProvider =
     FixtureEmbeddingProvider
       .build(
-        EmbeddingProviderConfig(FixtureEmbeddingProvider.DefaultBaseUrl, "fixture-embed-small", Secret("sk-fixture"))
+        EmbeddingProviderConfig(FixtureEmbeddingProvider.DefaultBaseUrl, "fixture-embed-small", Secret("sk-fixture")),
+        EmbeddingBuildContext()
       )
       .toOption
       .get

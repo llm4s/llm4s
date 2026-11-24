@@ -8,6 +8,7 @@ import org.llm4s.model.ModelRegistryTestSupport
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.llmconnect.spi.ProviderConfigContext
 
 /** Negative and edge cases for config validation and the descriptor's section-to-config mapping. */
 class WatsonXConfigValidationSpec extends AnyFunSuite with Matchers:
@@ -138,14 +139,14 @@ class WatsonXConfigValidationSpec extends AnyFunSuite with Matchers:
   test("the descriptor maps spaceId, apiVersion and iamUrl extras and falls back to the defaults") {
     val full = WatsonXProvider
       .buildConfig(
-        "wx",
         section(extras =
           Map(
             WatsonXProvider.SpaceIdKey    -> "s-9",
             WatsonXProvider.ApiVersionKey -> "2025-01-01",
             WatsonXProvider.IamUrlKey     -> "https://iam.test.cloud.ibm.com/identity/token"
           )
-        )
+        ),
+        ProviderConfigContext.of("wx")
       )
       .getOrElse(fail("expected config"))
     full match
@@ -158,8 +159,8 @@ class WatsonXConfigValidationSpec extends AnyFunSuite with Matchers:
   }
 
   test("the descriptor refuses a section without an api key, and one without a project or space") {
-    WatsonXProvider.buildConfig("wx", section(apiKey = None)).isLeft shouldBe true
-    WatsonXProvider.buildConfig("wx", section(extras = Map.empty)).isLeft shouldBe true
+    WatsonXProvider.buildConfig(section(apiKey = None), ProviderConfigContext.of("wx")).isLeft shouldBe true
+    WatsonXProvider.buildConfig(section(extras = Map.empty), ProviderConfigContext.of("wx")).isLeft shouldBe true
   }
 
   test("the descriptor identity: id watsonx, requires an api key, WATSONX_API_KEY, https default base URL") {

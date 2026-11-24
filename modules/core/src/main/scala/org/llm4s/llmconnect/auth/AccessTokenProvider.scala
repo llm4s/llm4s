@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.auth
 
 import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError }
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 
 import java.time.{ Clock, Duration as JDuration, Instant }
@@ -10,14 +11,15 @@ import scala.concurrent.duration.*
 import scala.util.{ Try, Using }
 
 /**
- * A bearer token and when it stops being valid. The value is redacted in `toString`.
+ * A bearer token and when it stops being valid. The value is a `Secret`, as a key is: build it with
+ * `Secret.token(value)`, and read it with `value.reveal` only where it is sent.
  *
  * Build one with the companion `apply` and change it with the `with*` setters; the constructor is private, so a
  * field can be added without breaking callers (#1818).
  */
 @Stable
-final case class AccessToken private (value: String, expiresAt: Instant):
-  def withValue(value: String): AccessToken          = copy(value = value)
+final case class AccessToken private (value: Secret, expiresAt: Instant):
+  def withValue(value: Secret): AccessToken          = copy(value = value)
   def withExpiresAt(expiresAt: Instant): AccessToken = copy(expiresAt = expiresAt)
 
   override def toString: String = s"AccessToken(***, expiresAt=$expiresAt)"
@@ -25,7 +27,7 @@ final case class AccessToken private (value: String, expiresAt: Instant):
 object AccessToken:
 
   /** Creates an [[AccessToken]]. */
-  def apply(value: String, expiresAt: Instant): AccessToken = new AccessToken(value, expiresAt)
+  def apply(value: Secret, expiresAt: Instant): AccessToken = new AccessToken(value, expiresAt)
 
 /**
  * Supplies the bearer token for each request, refreshing it as needed.
@@ -33,21 +35,25 @@ object AccessToken:
  * Stable since #1818: `OpenAICompatibleClient.Credential.Dynamic` takes one. An implementation should return a
  * failure as a `Left` rather than throw; a client that calls it turns a thrown exception into an
  * `AuthenticationError` all the same.
+ *
+ * One of three sibling suppliers of a credential, each with the one method `current()`: [[ApiKeyProvider]]
+ * (an API key), this (a bearer token) and [[IdentityTokenProvider]] (the identity token a token exchange
+ * presents).
  */
 @Stable
 trait AccessTokenProvider:
-  /** A token believed valid now. */
-  def token(): Result[String]
+  /** A token believed valid now. Build it with `Secret.token(value)`, which keeps it out of logs and errors. */
+  def current(): Result[Secret]
 
   /**
    * Reports that the server rejected `rejected`. A provider that caches drops the cached token only if it is that
    * token, so concurrent calls that all saw a 401 for the same token cause one refresh, and a late
    * report about an older token does not discard a newer one.
    *
-   * Does nothing by default, which suits a provider that caches nothing: every [[token]] call then asks afresh. With
-   * it defaulted the trait has one abstract method, so a lambda is a provider: `() => readToken()`.
+   * Does nothing by default, which suits a provider that caches nothing: every [[current]] call then asks afresh. With
+   * it defaulted the trait has one abstract method, so a lambda is a provider: `() => readToken().map(Secret.token)`.
    */
-  def invalidate(@scala.annotation.unused rejected: String): Unit = ()
+  def invalidate(@scala.annotation.unused rejected: Secret): Unit = ()
 
 /**
  * Caches the token `fetch` returns until `refreshMargin` before it expires - or half-way through
@@ -98,11 +104,11 @@ final class CachingAccessTokenProvider(
       case Right(()) =>
         Using.resource((() => lock.unlock()): AutoCloseable)(_ => body)
 
-  def token(): Result[String] =
+  def current(): Result[Secret] =
     fresh() match
       case Some(value) => Right(value)
       case None =>
-        locked[Result[String]](Left(CancelledError(CachingAccessTokenProvider.Operation))) {
+        locked[Result[Secret]](Left(CancelledError(CachingAccessTokenProvider.Operation))) {
           fresh() match
             case Some(value) => Right(value)
             case None =>
@@ -127,7 +133,7 @@ final class CachingAccessTokenProvider(
         }
 
   /** Interrupted while waiting for the lock, it returns without dropping anything, the flag set again. */
-  override def invalidate(rejected: String): Unit =
+  override def invalidate(rejected: Secret): Unit =
     locked(()) {
       if cached.exists(_.token.value == rejected) then
         cached = None
@@ -141,7 +147,7 @@ final class CachingAccessTokenProvider(
   private def recentFailure(): Option[LLMError] =
     failed.collect { case Failed(error, until) if clock.instant().isBefore(until) => error }
 
-  private def fresh(): Option[String] =
+  private def fresh(): Option[Secret] =
     cached.collect { case Cached(token, at) if clock.instant().isBefore(at) => token.value }
 
   private def refreshAt(token: AccessToken): Instant =

@@ -6,7 +6,7 @@ import org.llm4s.http.{ HttpClientOptions, HttpResponse => Llm4sHttpResponse, Ll
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.error.EmbeddingError
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -90,7 +90,8 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
   )
 
   /** Builds the provider for the SPI: the task follows each request's purpose; see [[fromConfig]] to fix the task. */
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+    Right(create(config, None, context.httpClient.getOrElse(Llm4sHttpClient.create(HttpClientOptions(config.network)))))
 
   /** Creates an [[EmbeddingProvider]] backed by Jina AI whose `task` follows each request's [[org.llm4s.llmconnect.model.InputPurpose]]. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =

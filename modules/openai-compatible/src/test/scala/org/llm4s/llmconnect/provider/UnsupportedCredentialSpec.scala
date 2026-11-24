@@ -33,7 +33,7 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val identity = OpenAIWorkloadIdentity(
-    identityToken = IdentitySource.Literal("jwt"),
+    identityToken = IdentitySource.Literal(Secret("jwt")),
     identityProviderId = "idp",
     serviceAccountId = "sa"
   )

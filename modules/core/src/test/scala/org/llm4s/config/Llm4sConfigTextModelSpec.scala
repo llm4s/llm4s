@@ -5,7 +5,12 @@ import com.typesafe.config.ConfigFactory
 // scalafix:on DisableSyntax.NoConfigFactory
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
+  EmbeddingConfigSpec,
+  EmbeddingProviderDescriptor,
+  ProviderRegistry
+}
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
@@ -71,7 +76,7 @@ class Llm4sConfigTextModelSpec extends AnyWordSpec with Matchers with EitherValu
       defaultBaseUrl = Some("http://localhost:9999")
     )
 
-    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
       Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
   }
 }

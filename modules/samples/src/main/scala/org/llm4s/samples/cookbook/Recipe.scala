@@ -5,7 +5,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, EmbeddingProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -130,7 +130,9 @@ object BagOfWordsEmbeddings extends EmbeddingProviderDescriptor {
       Right(EmbeddingResponse(embeddings = request.input.map(vector), dim = Some(Dimensions)))
   }
 
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(provider)
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] = Right(
+    provider
+  )
 
   /** The provider config a pipeline built on this provider needs: it has no endpoint and no key. */
   val config: EmbeddingProviderConfig = EmbeddingProviderConfig(baseUrl = "", model = Model, apiKey = Secret(""))

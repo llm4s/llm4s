@@ -121,8 +121,8 @@ object OpenAICompatibleModelLister extends ProviderModelLister:
         case Some(exchange) =>
           val held = generations(exchange)
           TokenExchange.rfc8693With(exchange, httpClient, held.subjects)().map { token =>
-            held.access.rotate(token.value)
-            config.withApiKey(None).withHeaders(valid.headers.updated("Authorization", s"Bearer ${token.value}"))
+            held.access.rotate(token.value.reveal)
+            config.withApiKey(None).withHeaders(valid.headers.updated("Authorization", s"Bearer ${token.value.reveal}"))
           }
       models <- delegate.listModels(
         listed.withAuth(None).withBaseUrl(Some(BaseUrl(valid.baseUrl))),

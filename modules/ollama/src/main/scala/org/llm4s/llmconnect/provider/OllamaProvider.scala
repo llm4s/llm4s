@@ -5,8 +5,14 @@ import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OllamaConfigKeys, OllamaModelLister, ProviderModelLister }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderFeatures
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -39,23 +45,21 @@ object OllamaProvider extends ProviderDescriptor:
 
   override val modelLister: Option[ProviderModelLister] = Some(OllamaModelLister)
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    given ContextWindowResolver = context.contextWindows
     ProviderDescriptor
-      .resolveBaseUrl(providerName, section, configSpec)
+      .resolveBaseUrl(context.providerName, section, configSpec)
       .flatMap(baseUrl => OllamaConfig.fromValues(section.model.asString, baseUrl))
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[OllamaConfig](id, config)
       .flatMap(
         OllamaClient(
           _,
-          options.metrics,
-          options.exchangeLogging,
-          Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+          context.metrics,
+          context.exchangeLogging,
+          Llm4sHttpClient.suppliedOrFromConfig(context.httpClient)
         )
       )

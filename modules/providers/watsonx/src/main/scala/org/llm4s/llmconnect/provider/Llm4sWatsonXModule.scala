@@ -25,4 +25,4 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  * constructor.
  */
 final class Llm4sWatsonXModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(WatsonXProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(WatsonXProvider)

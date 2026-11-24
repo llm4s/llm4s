@@ -9,7 +9,7 @@ import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.*
 import org.llm4s.error.EmbeddingError
-import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, EmbeddingProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.extract.TikaDocumentExtractor
 import org.llm4s.rag.loader.*
@@ -2137,7 +2137,7 @@ object RAG {
           for {
             providerConfig <- resolveEmbeddingProvider(id.asString)
             model          <- embeddingModel(config, descriptor, Some(providerConfig.model))
-            provider       <- descriptor.build(providerConfig.withModel(model))
+            provider       <- descriptor.build(providerConfig.withModel(model), EmbeddingBuildContext())
           } yield (EmbeddingClient(provider).withProviderId(id), model)
       }
       (client, model) = clientAndModel

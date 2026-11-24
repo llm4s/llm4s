@@ -13,13 +13,16 @@ import org.llm4s.llmconnect.config.{
 import org.llm4s.llmconnect.model.{ Conversation, EmbeddingRequest, MessageRole, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
   EmbeddingProviderDescriptor,
   Llm4sProviderModule,
+  ProviderBuildContext,
+  ProviderConfigContext,
   ProviderDescriptor,
   ProviderModuleReport,
   ProviderRegistry
 }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.llmconnect.{ EmbeddingClientOptions, LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, ProviderId }
@@ -114,9 +117,9 @@ trait ProviderModuleChecks extends Assertions:
             s"$kind id '${id.asString}' should be supplied by $className alone, but is supplied by ${owners.mkString(", ")}"
           )
       }
-    suppliers("chat", module.chatProviders.map(_.id), _.providerIds)
+    suppliers("chat", module.providers.map(_.id), _.providerIds)
     suppliers("embedding", module.embeddingProviders.map(_.id), _.embeddingProviderIds)
-    val names = (module.chatProviders.flatMap(d => d.aliases.map(ProviderId(_).asString) + d.id.asString) ++
+    val names = (module.providers.flatMap(d => d.aliases.map(ProviderId(_).asString) + d.id.asString) ++
       module.embeddingProviders.flatMap(d => d.aliases.map(ProviderId(_).asString) + d.id.asString)).toSet
     report.collisions.find(c => names.contains(c.id.asString)).foreach { c =>
       failAt(s"${c.subject} collides: ${c.droppedModule.getOrElse("an earlier registration")} and ${c.keptModule}")
@@ -136,7 +139,7 @@ trait ProviderModuleChecks extends Assertions:
    * registration half of a module spec in one line. A module that lists no provider at all fails.
    */
   def assertModule(module: Llm4sProviderModule)(using pos: Position): Assertion =
-    if module.chatProviders.isEmpty && module.embeddingProviders.isEmpty then
+    if module.providers.isEmpty && module.embeddingProviders.isEmpty then
       failAt(s"${module.getClass.getName} lists no chat or embedding provider")
     assertDiscovered(module)
     assertSoleSupplier(module)
@@ -146,7 +149,7 @@ trait ProviderModuleChecks extends Assertions:
     Position
   ): Assertion =
     val className = module.getClass.getName
-    module.chatProviders.foreach { descriptor =>
+    module.providers.foreach { descriptor =>
       val id = descriptor.id.asString
       registry.resolve(descriptor.id) match
         case Right(found) if found == descriptor => ()
@@ -174,7 +177,7 @@ trait ProviderModuleChecks extends Assertions:
 
   /**
    * Builds a client the way `LLMConnect.getClient` does: `descriptor.buildConfig` on `section`,
-   * then `descriptor.buildClient` on the config it returned.
+   * then `descriptor.build` on the config it returned.
    *
    * @param descriptor    the chat descriptor under test
    * @param section       a section as validation would leave it; build one in code, or load one
@@ -191,8 +194,8 @@ trait ProviderModuleChecks extends Assertions:
     given ModelRegistryService  = modelRegistry
     given ContextWindowResolver = ContextWindowResolver(modelRegistry)
     descriptor
-      .buildConfig("provider-testkit", section)
-      .flatMap(descriptor.buildClient(_, options))
+      .buildConfig(section, ProviderConfigContext.of("provider-testkit"))
+      .flatMap(descriptor.build(_, ProviderBuildContext.of(options)))
 
   /**
    * [[buildClient]], failing the test on a `Left`. The config-to-client round trip.
@@ -210,7 +213,7 @@ trait ProviderModuleChecks extends Assertions:
       case Left(error)   => failAt(s"${descriptor.id.asString} failed to build a client: ${error.message}")
 
   /**
-   * `descriptor.buildClient` returns a `Left` - rather than throwing, or building a client - when
+   * `descriptor.build` returns a `Left` - rather than throwing, or building a client - when
    * handed a `ProviderConfig` some other provider built. `ProviderDescriptor.expectConfig` is the
    * usual way to get this right.
    */
@@ -219,7 +222,7 @@ trait ProviderModuleChecks extends Assertions:
     modelRegistry: ModelRegistryService = ProviderModuleChecks.defaultModelRegistry
   )(using pos: Position): Assertion =
     given ModelRegistryService = modelRegistry
-    descriptor.buildClient(ProviderModuleChecks.ForeignConfig, LlmClientOptions.default) match
+    descriptor.build(ProviderModuleChecks.ForeignConfig, ProviderBuildContext.of()) match
       case Left(_) => succeed
       case Right(client) =>
         failAt(s"${descriptor.id.asString} accepted another provider's config and built $client")
@@ -651,14 +654,40 @@ trait ProviderModuleChecks extends Assertions:
    * selected id in `registry`, then `build` it from `config`.
    *
    * Load `config` from HOCON with [[ProviderTestConfig.loadEmbeddings]], or construct one.
+   *
+   * @param options the caller's options; the defaults suit a test. Pass
+   *                `EmbeddingClientOptions().withHttpClient(client)` to check that the provider sends its
+   *                requests through a supplied HTTP client.
    */
   def assertBuildsEmbeddingProvider(
     descriptor: EmbeddingProviderDescriptor,
-    config: EmbeddingProviderConfig
+    config: EmbeddingProviderConfig,
+    options: EmbeddingClientOptions = EmbeddingClientOptions.default
   )(using pos: Position): EmbeddingProvider =
-    descriptor.build(config) match
+    descriptor.build(config, EmbeddingBuildContext(options)) match
       case Right(provider) => provider
       case Left(error) => failAt(s"${descriptor.id.asString} failed to build an embedding provider: ${error.message}")
+
+  /**
+   * An embedding provider built with `EmbeddingClientOptions.withHttpClient` sends its `embed` request through
+   * the supplied client, and does not close it: the caller owns it (#2811). The supplied client records the
+   * request and answers `400`, so no server is needed and the call ends in a `Left`. Every embedding provider
+   * that sends HTTP requests must pass.
+   *
+   * @param descriptor the embedding descriptor under test
+   * @param config     a config for it; its base URL is never contacted
+   */
+  def assertEmbeddingUsesSuppliedHttpClient(
+    descriptor: EmbeddingProviderDescriptor,
+    config: EmbeddingProviderConfig
+  )(using pos: Position): Assertion =
+    val http     = new ProviderModuleChecks.RecordingHttpClient
+    val provider = assertBuildsEmbeddingProvider(descriptor, config, EmbeddingClientOptions().withHttpClient(http))
+    provider.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig(config.model, 8)))
+    if http.requests.isEmpty then
+      failAt(s"${descriptor.id.asString}: embed sent no request through the supplied HTTP client")
+    if http.closed then failAt(s"${descriptor.id.asString} closed the HTTP client its caller supplied")
+    succeed
 
   // ---- API key rotation ----
 
@@ -805,7 +834,7 @@ object ProviderModuleChecks extends ProviderModuleChecks:
       .fold(error => failAt(s"llm4s model registry failed to load: ${error.message}"), identity)
 
   /**
-   * The HTTP client [[assertUsesSuppliedHttpClient]] supplies: it records each request's method and URL and
+   * The HTTP client [[assertUsesSuppliedHttpClient]] and [[assertEmbeddingUsesSuppliedHttpClient]] supply: it records each request's method and URL and
    * answers every one `400` with an OpenAI-style error body.
    */
   final private[testkit] class RecordingHttpClient extends Llm4sHttpClient:

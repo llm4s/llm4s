@@ -7,7 +7,7 @@ import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 import org.llm4s.llmconnect.auth.AccessTokenProvider
 import org.llm4s.security.{ Secret, TokenGenerations }
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.llmconnect.model._
@@ -79,8 +79,8 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
   }
 
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
-    requireApiKey(config.apiKey).map(_ => fromConfig(config))
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+    requireApiKey(config.apiKey).map(_ => provider(config, apiKeyOf(config), _ => (), context.httpClient))
 
   /** A blank `apiKey` would be sent as an empty bearer token: a `ConfigurationError` instead. */
   private def requireApiKey(key: Secret): Result[Unit] =
@@ -93,8 +93,11 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
    * @return configured EmbeddingProvider instance
    */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
-    // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
-    provider(cfg, () => cfg.currentApiKey().flatMap(key => requireApiKey(key).map(_ => key.reveal)), _ => ())
+    provider(cfg, apiKeyOf(cfg), _ => (), None)
+
+  // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
+  private def apiKeyOf(cfg: EmbeddingProviderConfig): () => Result[String] =
+    () => cfg.currentApiKey().flatMap(key => requireApiKey(key).map(_ => key.reveal))
 
   /**
    * An embedding provider that authenticates with bearer tokens from `tokenProvider` rather than an API key
@@ -110,23 +113,26 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     provider(
       cfg,
       () =>
-        tokenProvider.token().map { token =>
-          generations.rotate(token)
-          token
+        tokenProvider.current().map { token =>
+          generations.rotate(token.reveal)
+          token.reveal
         },
-      tokenProvider.invalidate
+      rejected => tokenProvider.invalidate(Secret.unregistered(rejected)),
+      None
     )
   }
 
   /**
    * The provider; `bearer` gives the token for each request, and `rejected` hears of one the service refused.
+   * Requests go through `supplied`, the caller's HTTP client, when there is one.
    */
   private def provider(
     cfg: EmbeddingProviderConfig,
     bearer: () => Result[String],
-    rejected: String => Unit
+    rejected: String => Unit,
+    supplied: Option[Llm4sHttpClient]
   ): EmbeddingProvider = new EmbeddingProvider {
-    private val httpClient = Llm4sHttpClient.create(HttpClientOptions(cfg.network))
+    private val httpClient = supplied.getOrElse(Llm4sHttpClient.create(HttpClientOptions(cfg.network)))
     private val logger     = LoggerFactory.getLogger(getClass)
 
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = CancelledError.attempt("openai.embed") {

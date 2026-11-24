@@ -25,7 +25,13 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
     clientId: Option[String] = None,
     scope: Option[String] = None,
     audience: Option[String] = None
-  ) = TokenExchangeConfig(IdentitySource.Literal(jwt), "https://ws.example/oidc/v1/token", clientId, scope, audience)
+  ) = TokenExchangeConfig(
+    IdentitySource.Literal(Secret(jwt)),
+    "https://ws.example/oidc/v1/token",
+    clientId,
+    scope,
+    audience
+  )
 
   private def form(body: String): Map[String, String] =
     body
@@ -41,7 +47,7 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
     "post the RFC 8693 form and return the access token with its expiry" in {
       val http  = MockHttpClient(Seq(ok))
       val token = TokenExchange.rfc8693(config(Some("sp-uuid"), Some("all-apis")), http, clock)().value
-      token shouldBe AccessToken("dbx-1", now.plusSeconds(3600))
+      token shouldBe AccessToken(Secret.unregistered("dbx-1"), now.plusSeconds(3600))
       http.lastUrl shouldBe Some("https://ws.example/oidc/v1/token")
       http.lastHeaders.value("Content-Type") shouldBe "application/x-www-form-urlencoded"
       form(http.lastBody.value) shouldBe Map(
@@ -134,7 +140,7 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
         // registers both itself (#1932).
         val subject  = "opaque-subject-token-7f3a9c"
         val clientId = "sp-client-4d2e81"
-        val cfg      = config(Some(clientId)).withIdentityToken(IdentitySource.Literal(subject))
+        val cfg      = config(Some(clientId)).withIdentityToken(IdentitySource.Literal(Secret(subject)))
         for status <- Seq(400, 401, 403) do
           val body =
             s"""{"error":"invalid_client","error_description":"client $clientId rejected subject $subject",""" +
@@ -193,7 +199,7 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
 
     "refuse a blank identity token, tokenUrl, clientId, scope or audience without calling the endpoint" in {
       val blanks = Seq(
-        "identityToken"     -> config().withIdentityToken(IdentitySource.Literal("  ")),
+        "identityToken"     -> config().withIdentityToken(IdentitySource.Literal(Secret("  "))),
         "identityTokenFile" -> config().withIdentityToken(IdentitySource.File(java.nio.file.Path.of(""))),
         "tokenUrl"          -> config().withTokenUrl(" "),
         "clientId"          -> config(clientId = Some("")),
@@ -220,7 +226,10 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
       val payload = java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(s"""{"exp":$exp}""".getBytes)
       val access  = s"eyJhbGciOiJSUzI1NiJ9.$payload.sig"
       val http    = MockHttpClient(Seq(HttpResponse(200, s"""{"access_token":"$access"}""")))
-      TokenExchange.rfc8693(config(), http, clock)().value shouldBe AccessToken(access, now.plusSeconds(900))
+      TokenExchange.rfc8693(config(), http, clock)().value shouldBe AccessToken(
+        Secret.unregistered(access),
+        now.plusSeconds(900)
+      )
     }
 
     "clamp a JWT exp claim to the documented maximum" in {
@@ -239,7 +248,7 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
 
     "keep the token URL's userinfo and query, and the client id, out of TokenExchangeConfig.toString" in {
       val cfg = TokenExchangeConfig(
-        IdentitySource.Literal(jwt),
+        IdentitySource.Literal(Secret(jwt)),
         "https://user:hunter2@ws.example:8443/oidc/v1/token?sig=s3cr3t#frag",
         clientId = Some("sp-uuid-secret"),
         scope = Some("all-apis")
@@ -366,8 +375,8 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
     "cache the exchanged token between calls" in {
       val http     = MockHttpClient(Seq(ok))
       val provider = TokenExchange.provider(config(), http)
-      provider.token() shouldBe Right("dbx-1")
-      provider.token() shouldBe Right("dbx-1")
+      provider.current().map(_.reveal) shouldBe Right("dbx-1")
+      provider.current().map(_.reveal) shouldBe Right("dbx-1")
       http.postCallCount shouldBe 1
     }
   }
@@ -412,7 +421,7 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
       for status <- Seq(400, 503, 200) do
         Using.resource(server(status, deepBody)) { s =>
           val cfg = TokenExchangeConfig(
-            IdentitySource.Literal(jwt),
+            IdentitySource.Literal(Secret(jwt)),
             s"http://127.0.0.1:${s.getAddress.getPort}/token",
             clientId = Some(clientId)
           )
@@ -432,7 +441,7 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
       for status <- Seq(500, 503, 200) do
         Using.resource(server(status, deepArray)) { s =>
           val cfg = TokenExchangeConfig(
-            IdentitySource.Literal(jwt),
+            IdentitySource.Literal(Secret(jwt)),
             s"http://127.0.0.1:${s.getAddress.getPort}/token",
             clientId = Some(clientId)
           )

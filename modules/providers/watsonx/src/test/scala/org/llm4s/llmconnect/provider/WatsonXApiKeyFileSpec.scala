@@ -1,10 +1,9 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
-import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
-import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.spi.{ ProviderBuildContext, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
 import org.llm4s.testkit.{ ProviderModuleChecks, ProviderTestConfig }
@@ -65,7 +64,7 @@ class WatsonXApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues:
           )
           .value
         config.apiKeyProvider shouldBe defined
-        val client = WatsonXProvider.buildClient(config, LlmClientOptions.default).value
+        val client = WatsonXProvider.build(config, ProviderBuildContext.of()).value
 
         client.complete(hello).isRight shouldBe true
         client.complete(hello).isRight shouldBe true // the key is unchanged: the cached token is reused

@@ -5,7 +5,7 @@ import org.llm4s.security.Secret
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.RequestyProvider
@@ -14,6 +14,7 @@ import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.llmconnect.spi.ProviderBuildContext
 
 /**
  * Cloud smoke tests for Requesty (`llm4s-openai`): the OpenAI client pointed at Requesty's router.
@@ -41,7 +42,7 @@ class RequestySmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   private def client(key: String): Result[LLMClient] =
     OpenAIConfig
       .fromValues(Model, Secret(key), RequestyProvider.DEFAULT_BASE_URL, None, Some(RequestyProvider.id))
-      .flatMap(RequestyProvider.buildClient(_, LlmClientOptions.default))
+      .flatMap(RequestyProvider.build(_, ProviderBuildContext.of()))
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 

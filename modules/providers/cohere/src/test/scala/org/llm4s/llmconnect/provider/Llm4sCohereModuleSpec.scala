@@ -23,7 +23,7 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     }
 
     "contribute no chat provider: Cohere chat is a dialect in llm4s-openai-compatible" in {
-      new Llm4sCohereModule().chatProviders shouldBe empty
+      new Llm4sCohereModule().providers shouldBe empty
       ProviderRegistry.default.find(ProviderId("cohere")) shouldBe None
     }
   }
@@ -36,6 +36,13 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
           EmbeddingProviderConfig(baseUrl = baseUrl, model = "embed-english-v3.0", apiKey = Secret("test-key"))
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(CohereEmbeddingProvider, config))
       }
+    }
+
+    "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
+      assertEmbeddingUsesSuppliedHttpClient(
+        CohereEmbeddingProvider,
+        EmbeddingProviderConfig(baseUrl = "http://localhost:1", model = "test-model", apiKey = Secret("test-key"))
+      )
     }
 
     "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {

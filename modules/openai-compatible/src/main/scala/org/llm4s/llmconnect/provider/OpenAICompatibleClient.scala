@@ -424,9 +424,9 @@ class OpenAICompatibleClient(
     // A Dynamic provider is the caller's code: one that throws fails the request instead of escaping it.
     case _ =>
       tokenProvider.fold[Result[Option[String]]](Right(None))(p =>
-        CachingAccessTokenProvider.guarded(p.token()).map { token =>
-          bearers.rotate(token)
-          Some(token)
+        CachingAccessTokenProvider.guarded(p.current()).map { token =>
+          bearers.rotate(token.reveal)
+          Some(token.reveal)
         }
       )
 
@@ -457,7 +457,7 @@ class OpenAICompatibleClient(
         case _                  => send(requestHeaders(token))
       (result, token) match
         case (Left(e: AuthenticationError), Some(rejected)) if e.code.contains("401") =>
-          tokenProvider.foreach(p => Try(p.invalidate(rejected)))
+          tokenProvider.foreach(p => Try(p.invalidate(Secret.unregistered(rejected))))
         case _ => ()
       result
     }

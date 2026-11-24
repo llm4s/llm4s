@@ -24,7 +24,7 @@ class Llm4sJinaModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
     }
 
     "contribute no chat provider, so jina is not a chat id" in {
-      new Llm4sJinaModule().chatProviders shouldBe empty
+      new Llm4sJinaModule().providers shouldBe empty
       ProviderRegistry.default.find(ProviderId("jina")) shouldBe None
     }
   }
@@ -87,6 +87,13 @@ class Llm4sJinaModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
           EmbeddingProviderConfig(baseUrl = baseUrl, model = "jina-embeddings-v3", apiKey = Secret("test-key"))
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(JinaEmbeddingProvider, config))
       }
+    }
+
+    "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
+      assertEmbeddingUsesSuppliedHttpClient(
+        JinaEmbeddingProvider,
+        EmbeddingProviderConfig(baseUrl = "http://localhost:1", model = "test-model", apiKey = Secret("test-key"))
+      )
     }
 
     "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {
