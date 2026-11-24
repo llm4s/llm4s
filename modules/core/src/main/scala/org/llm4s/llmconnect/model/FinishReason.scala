@@ -3,8 +3,6 @@ package org.llm4s.llmconnect.model
 import org.llm4s.annotation.Stable
 import upickle.default.ReadWriter
 
-import scala.annotation.nowarn
-
 /**
  * Why the model's turn ended, as the provider reported it, mapped to one vocabulary (RFC 0009).
  *
@@ -51,7 +49,6 @@ enum FinishReason {
 object FinishReason {
 
   // the derived codec: a case without fields is its name, `Other` is {"$type":"Other","raw":...}
-  @nowarn("msg=unused")
   private val derived: ReadWriter[FinishReason] = ReadWriter.derived
 
   /**

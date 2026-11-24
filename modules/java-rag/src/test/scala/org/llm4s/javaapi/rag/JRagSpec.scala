@@ -259,7 +259,7 @@ class JRagSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val plain   = pipeline(JRag.builder().embeddings(embeddings()).llm(llm(default)).build())
     try {
       plain.ask("Where did the cat sit?").get()
-      default.options.map(_.temperature) shouldBe Seq(0.0)
+      default.options.map(_.temperature) shouldBe Seq(Some(0.0))
     } finally plain.close()
 
     val model   = new EchoingLlm()
@@ -269,7 +269,7 @@ class JRagSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val rag = pipeline(builder.build())
     try {
       rag.ask("Where did the cat sit?").get()
-      model.options.map(o => (o.temperature, o.maxTokens)) shouldBe Seq((0.4, Some(200)))
+      model.options.map(o => (o.temperature, o.maxTokens)) shouldBe Seq((Some(0.4), Some(200)))
     } finally rag.close()
   }
 }
