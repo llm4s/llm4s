@@ -451,6 +451,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   starting with `[HISTORY_SUMMARY]`, so `TokenWindow` no longer pins a message that merely quotes the marker [#2505](https://github.com/llm4s/llm4s/issues/2505).
 - **Fixed** message and conversation validation name the field they reject (`content`, `toolCallId`, `toolMessage`,
   `conversation`) and give the reason as the violation, where field and reason were swapped [#2796](https://github.com/llm4s/llm4s/issues/2796).
+- **Fixed** the credential registry no longer keeps each value it refuses for being under 8 characters: it counts them and
+  logs the first refusal only, so many short `Secret`s neither grow memory nor stay held [#2888](https://github.com/llm4s/llm4s/issues/2888).
 
 ### Agent runtime
 
