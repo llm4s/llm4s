@@ -12,7 +12,7 @@ import org.llm4s.agent.graph.tool.{
 }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError }
-import org.llm4s.llmconnect.model.{ Completion, Message, ToolCall }
+import org.llm4s.llmconnect.model.{ Completion, Message, SystemMessage, ToolCall }
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
@@ -37,18 +37,42 @@ object MiddlewareId:
   given ReadWriter[MiddlewareId] = ReadWriter.join(upickle.default.StringReader, upickle.default.StringWriter)
 
 /**
- * One model call as a model wrapper sees it: the conversation so far and the tools offered. A
- * wrapper that rewrites the request builds the next one with `withMessages` or `withTools`.
+ * One model call as a model wrapper sees it: the system prompt, the conversation so far and the tools offered. A
+ * wrapper that rewrites the request builds the next one with `withMessages`, `withTools` or `withSystemPrompt`.
+ *
+ * The system prompt is a field of its own (#2795), never one of `messages`, so a wrapper that prunes, summarises or
+ * replaces the messages cannot drop it by accident. It is the prompt as assembled for this request: the agent's,
+ * then every middleware's prompt sections, and the response format's. [[sentMessages]] is what the model receives.
+ *
+ * @param messages the history being sent, without the system prompt; never stored from here
+ * @param tools the tools offered
+ * @param systemPrompt the assembled system prompt; `None` when the agent has none and no section was added
  */
 @Experimental
-final case class ModelRequest private (messages: Vector[Message], tools: ToolSet):
+final case class ModelRequest private (messages: Vector[Message], tools: ToolSet, systemPrompt: Option[String]):
   def withMessages(m: Vector[Message]): ModelRequest = copy(messages = m)
   def withTools(t: ToolSet): ModelRequest            = copy(tools = t)
 
+  /** This request with `prompt` as its system prompt. */
+  def withSystemPrompt(prompt: String): ModelRequest = copy(systemPrompt = Some(prompt))
+
+  /** This request with `prompt` as its system prompt, or none. */
+  def withSystemPrompt(prompt: Option[String]): ModelRequest = copy(systemPrompt = prompt)
+
+  /**
+   * What the model is sent: the system prompt as a `SystemMessage` first, then `messages`. A blank prompt sends no
+   * system message.
+   */
+  def sentMessages: Vector[Message] = systemPrompt.filter(_.trim.nonEmpty).map(SystemMessage(_)).toVector ++ messages
+
 @Experimental
 object ModelRequest:
-  def apply(messages: Vector[Message], tools: ToolSet = ToolSet.empty): ModelRequest =
-    new ModelRequest(messages, tools)
+  def apply(
+    messages: Vector[Message],
+    tools: ToolSet = ToolSet.empty,
+    systemPrompt: Option[String] = None
+  ): ModelRequest =
+    new ModelRequest(messages, tools, systemPrompt)
 
 /**
  * What a model wrapper returns: the model's `completion`, and an `update` to keys the wrapper declares in its

@@ -1545,7 +1545,7 @@ object ToolLoop:
           agent.maxPromptSectionTokens
         )
       yield
-        val request  = ModelRequest(system.map(SystemMessage(_)).toVector ++ view, nodes.offered)
+        val request  = ModelRequest(view, nodes.offered, system)
         val attempts = AtomicInteger(0)
         // every wrapper's update is checked as it returns, so one in a discarded response fails the run too
         val check = MiddlewareStack.WriteCheck()
@@ -1558,7 +1558,7 @@ object ToolLoop:
                 hooks.recordCall(
                   completion,
                   attempt,
-                  r.messages,
+                  r.sentMessages,
                   ModelContext.definitions(r.tools.toolFunctions, agent.model.responseFormat(r.tools)),
                   agent.model.providerId
                 )
@@ -1804,7 +1804,7 @@ object ToolLoop:
       ToolResultRule.check(request.messages).flatMap { _ =>
         val n = attempts.incrementAndGet()
         AgentEvents.ModelCallStarted.progress(context, events.ModelCallStarted(agent.value, n))
-        val result = attempt(model.next(request.messages, request.tools, ModelCall(context, agent, n))) match
+        val result = attempt(model.next(request.sentMessages, request.tools, ModelCall(context, agent, n))) match
           case Right(result) => result
           case Left(thrown) =>
             CancelledError.fromThrowable(thrown, "model") match
