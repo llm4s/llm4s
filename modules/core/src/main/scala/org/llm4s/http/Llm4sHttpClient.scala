@@ -734,13 +734,13 @@ trait Llm4sHttpClient extends AutoCloseable {
    * An implementation:
    *
    *  - returns any status, 2xx or not, as a `Right`, with response headers keyed in lower case;
-   *  - returns a transport failure as the `Left` described on [[Llm4sHttpClient]], and never throws;
+   *  - returns a transport failure as the `Left` described on [[org.llm4s.http.Llm4sHttpClient]], and never throws;
    *  - gives up after `request.responseTimeout` without the response's status line and headers;
    *  - makes a read of the body that waits longer than `request.idleTimeout` fail with a
-   *    `java.net.SocketTimeoutException` ([[StreamingHttpResponse.withIdleTimeout]] does this for a transport
+   *    `java.net.SocketTimeoutException` ([[org.llm4s.http.StreamingHttpResponse.withIdleTimeout]] does this for a transport
    *    with no read timeout of its own);
-   *  - sends `request.fullUrl`, and a [[HttpBody.Multipart]] body as `multipart/form-data`
-   *    ([[HttpRequest.withMultipartEncoded]] encodes one).
+   *  - sends `request.fullUrl`, and a [[org.llm4s.http.HttpBody.Multipart]] body as `multipart/form-data`
+   *    ([[org.llm4s.http.HttpRequest.withMultipartEncoded]] encodes one).
    *
    * The caller closes the body, on a non-2xx status too. A failure while reading it surfaces as an
    * `IOException` from the stream itself, not through the returned `Result`.
