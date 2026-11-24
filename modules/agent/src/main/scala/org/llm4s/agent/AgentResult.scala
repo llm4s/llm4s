@@ -1,6 +1,6 @@
 package org.llm4s.agent
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.agent.delegation.DelegatedRequest
 import org.llm4s.agent.graph.{ Breakpoint, InterruptId, RunId, ThreadId }
 import org.llm4s.agent.graph.toolloop.{
@@ -40,7 +40,8 @@ enum AgentStatus:
 
   /**
    * A guardrail refused the turn: `guardrail` is the first failing guardrail's name, `reason` every
-   * failure's error. An input block stores nothing of the turn; an output block removes it - the
+   * failure's error. A middleware that blocks a turn itself is named the same way: `guardrail` is then its id, and
+   * `reason` the one it gave. An input block stores nothing of the turn; an output block removes it - the
    * query, any tool calls and the answer - so `messages` is the history from before the turn. Usage
    * keeps the turn's model calls. The thread is usable, and the next turn runs normally.
    */
@@ -64,7 +65,7 @@ enum AgentStatus:
    * (approvals), [[AgentResult.reply]] (a tool's or a middleware's question, with its answer type) and
    * [[AgentResult.proceed]] (breakpoints), and continue with [[Agent.resume]]; unanswered ones stay pending.
    */
-  case Suspended(suspension: Suspension)
+  @Experimental case Suspended(suspension: Suspension)
 
 /**
  * What a suspended turn waits on ([[AgentStatus.Suspended]]), each interrupt keyed by its id.
@@ -80,7 +81,7 @@ enum AgentStatus:
  * @param breakpoints static breakpoints holding a task
  * @param delegated interrupts of suspended subagents
  */
-@Stable
+@Experimental
 final case class Suspension private (
   approvals: Vector[(InterruptId, ApprovalRequest)],
   questions: Vector[(InterruptId, ToolQuestionRequest)],
@@ -95,6 +96,7 @@ final case class Suspension private (
   def withBreakpoints(value: Vector[(InterruptId, BreakpointRequest)]): Suspension = copy(breakpoints = value)
   def withDelegated(value: Vector[(InterruptId, DelegatedRequest)]): Suspension    = copy(delegated = value)
 
+@Experimental
 object Suspension:
 
   def apply(
@@ -146,20 +148,25 @@ final case class AgentResult private (
       .flatMap(OutputFormat.decode[O])
 
   /** Approves the pending tool call `id`, for [[Agent.resume]]. */
+  @Experimental
   def approve(id: InterruptId): (InterruptId, ujson.Value) = decide(id, ApprovalDecision.Approve)
 
   /** Rejects the pending tool call `id`: the model sees `Rejected: <reason>` as its result. */
+  @Experimental
   def reject(id: InterruptId, reason: String): (InterruptId, ujson.Value) = decide(id, ApprovalDecision.Reject(reason))
 
   /** Approves the pending tool call `id` with new `arguments`, which replace the call's in the history. */
+  @Experimental
   def edit(id: InterruptId, arguments: ujson.Value): (InterruptId, ujson.Value) =
     decide(id, ApprovalDecision.Edit(arguments))
 
   /** Answers the question `id` - a tool's or a middleware's - with `value`, of the asker's answer type. */
+  @Experimental
   def reply[Ans: ReadWriter](id: InterruptId, value: Ans): (InterruptId, ujson.Value) =
     id -> upickle.default.writeJs(value)
 
   /** Continues the task the breakpoint `id` holds. */
+  @Experimental
   def proceed(id: InterruptId): (InterruptId, ujson.Value) = id -> Breakpoint.proceed
 
   private def decide(id: InterruptId, decision: ApprovalDecision): (InterruptId, ujson.Value) =

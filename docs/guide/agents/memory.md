@@ -435,9 +435,10 @@ for {
 - **Failures never cost the answer.** A store that cannot be searched or written is skipped, and
   announced with a durable `MemoryEvents.Skipped` (the operation and the error's type, no content);
   `MemoryEvents.Recorded` and `MemoryEvents.Consolidated` carry counts only.
-- **Register it before your guardrails** (or pass `runsBefore = Set(MiddlewareId("guardrails"))`),
-  so an answer a guardrail blocks is never recorded. A recording that already applied is not undone
-  by a later Block.
+- **It runs outside your guardrails**, so an answer a guardrail blocks is never recorded. In one agent that is
+  arranged for you, wherever you registered the two and whatever ids the guardrail middleware have; `build()` refuses
+  it on a handoff target when the root agent has guardrail middleware, since the root's run last. A recording that
+  already applied is not undone by a later Block.
 - **Adding it to an existing agent** registers the `semantic-memory-recalled` key, which starts
   empty: a thread at rest continues under the agent that added it, and, since the recall is
   cleared at the end of each turn, under an agent that removed it again. A thread in flight

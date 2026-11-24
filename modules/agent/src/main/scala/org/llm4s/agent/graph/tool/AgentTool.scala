@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.tool
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.delegation.TimedOutChild
 import org.llm4s.agent.graph.{ EffectKey, IdempotencyKey, RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
 import org.llm4s.error.LLMError
@@ -34,7 +34,7 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
  * @param resourcesOf what a call touches, from its decoded arguments; see [[withResources]]
  * @param locksOf the locks a call holds, from its decoded arguments, when the tool declares any; see [[withLocks]]
  */
-@Stable
+@Experimental
 final case class AgentToolSpec[A] private (
   name: String,
   description: String,
@@ -152,6 +152,7 @@ final case class AgentToolSpec[A] private (
       )
     )
 
+@Experimental
 object AgentToolSpec:
   private val ValidName = "[a-zA-Z0-9_-]{1,64}".r
 
@@ -222,7 +223,7 @@ final private[agent] class CallTimeout:
   override def hashCode: Int               = 0
 
 /** The codecs of a tool's question and of the answer it takes. */
-@Stable
+@Experimental
 final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec: ReadWriter[Ans])
 
 /**
@@ -239,7 +240,7 @@ final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec:
  * `run.position.fencingToken` is the run's claim token, which grows with every claim on the thread,
  * so the system keeps the highest token it has seen and refuses a lower one.
  */
-@Stable
+@Experimental
 final case class ToolContext private (
   run: RunContext,
   toolCallId: ToolCallId,
@@ -272,6 +273,7 @@ final case class ToolContext private (
   def effectKey(operation: String, discriminator: String*): EffectKey =
     run.effectKeyUnder(phase.getOrElse(idempotencyKey), operation, discriminator)
 
+@Experimental
 object ToolContext:
   def apply(
     run: RunContext,
@@ -307,7 +309,7 @@ object ToolContext:
  * replay it, parts and all: its inline media is base64 in the record, and counts towards the guard's
  * `maxOutcomeBytes` at that encoded size.
  */
-@Stable
+@Experimental
 enum ToolContent derives ReadWriter:
   case Json(value: ujson.Value)
   case Parts(parts: Vector[ContentPart])
@@ -318,7 +320,7 @@ enum ToolContent derives ReadWriter:
  * `Success` holds a [[ToolSuccess]], which can gain a field without breaking a tool; build one with
  * [[ToolOutcome.success]]. `Error`, `NeedsApproval`, `Ask` and `Fatal` are closed: each is exactly its one value.
  */
-@Stable
+@Experimental
 enum ToolOutcome:
 
   /** The call succeeded: `result` is its content for the model and its state update. */
@@ -336,6 +338,16 @@ enum ToolOutcome:
   /** An infrastructure failure: the run fails with `GraphError.ToolFailed`. */
   case Fatal(error: LLMError)
 
+  /**
+   * This outcome with `update` applied after a `Success`'s own: how a tool wrapper adds a write to the outcome
+   * `next` returned, as `addUpdate` does on a boundary hook's and a model wrapper's result. Every other outcome is
+   * returned as it is, since only a successful call commits an update.
+   */
+  def addUpdate(update: StateUpdate): ToolOutcome = this match
+    case Success(result) => Success(result.addUpdate(update))
+    case other           => other
+
+@Experimental
 object ToolOutcome:
 
   /** A `Success` with `content` for the model and `update` to keys the tool declares in `writes`. */
@@ -348,11 +360,16 @@ object ToolOutcome:
  * @param content the call's result for the model
  * @param update an update to keys the tool declares in `writes`
  */
-@Stable
+@Experimental
 final case class ToolSuccess private (content: ToolContent, update: StateUpdate):
-  def withContent(value: ToolContent): ToolSuccess = copy(content = value)
-  def withUpdate(value: StateUpdate): ToolSuccess  = copy(update = value)
 
+  /** This result with `value` as its content, keeping its update. */
+  def withContent(value: ToolContent): ToolSuccess = copy(content = value)
+
+  /** This result with `value` applied after its update; nothing replaces an update, so a wrapper keeps the tool's. */
+  def addUpdate(value: StateUpdate): ToolSuccess = copy(update = update.combine(value))
+
+@Experimental
 object ToolSuccess:
   def apply(content: ToolContent, update: StateUpdate = StateUpdate.empty): ToolSuccess =
     new ToolSuccess(content, update)
@@ -361,7 +378,7 @@ object ToolSuccess:
  * A tool the agent loop can call: typed arguments, validated against [[AgentToolSpec.argumentSchema]]
  * and decoded with its codec before `execute` runs. A tool writes only the state keys in `writes`.
  */
-@Stable
+@Experimental
 trait AgentTool[A]:
   def spec: AgentToolSpec[A]
 
@@ -379,6 +396,7 @@ trait AgentTool[A]:
   ): ToolOutcome =
     ToolOutcome.Error(s"tool '${spec.name}' does not take answers")
 
+@Experimental
 object AgentTool:
 
   /** A tool from a spec and a function; it never asks questions. */

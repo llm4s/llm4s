@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.guardrails.LLMGuardrail
 import org.llm4s.llmconnect.LLMClient
 
@@ -48,7 +48,7 @@ import org.llm4s.llmconnect.LLMClient
  *   .build()
  * }}}
  */
-@Stable
+@Experimental
 class LLMQualityGuardrail(
   val llmClient: LLMClient,
   originalQuery: String,
@@ -78,6 +78,7 @@ class LLMQualityGuardrail(
   )
 }
 
+@Experimental
 object LLMQualityGuardrail {
 
   /**

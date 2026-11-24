@@ -4,7 +4,7 @@ title: Testing Guide
 description: "Test LLM-powered Scala code without paying for API calls: fast, deterministic tests with mock clients, plus when to run a live model."
 search_title: "Test LLM applications in Scala without API calls"
 parent: Getting Started
-nav_order: 7
+nav_order: 9
 ---
 
 # Testing LLM4S Applications
@@ -481,7 +481,7 @@ src/test/scala/
 
 - [Configuration Guide](configuration) - Configure test environments
 - [Examples](/examples/) - See tests in action
-- [Tests in CI](/reference/testing-guide#10-tests-in-ci) - How the test suites run in CI
+- [Tests in CI](/contribute/testing-guide#10-tests-in-ci) - How the test suites run in CI
 
 ---
 
@@ -489,4 +489,4 @@ src/test/scala/
 
 - [ScalaTest Documentation](https://www.scalatest.org/)
 - [Ollama Models](https://ollama.com/library) - Available test models
-- [Testing Guide](/reference/testing-guide) - Advanced testing patterns
+- [Testing Guide](/contribute/testing-guide) - Advanced testing patterns

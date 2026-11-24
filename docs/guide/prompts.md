@@ -3,8 +3,9 @@ layout: page
 title: Typed Prompts
 description: "Build LLM prompts in Scala 3 with compile-time checked interpolation: values rendered by a derived type class, untrusted input fenced (experimental)."
 search_title: "Compile-time checked prompts in Scala 3"
-parent: User Guide
-nav_order: 42
+parent: Core
+nav_order: 105
+grand_parent: User Guide
 ---
 
 # Typed Prompts

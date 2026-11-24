@@ -34,7 +34,7 @@ llm4s {
 
     claude {                        # key from ANTHROPIC_API_KEY
       provider = "anthropic"
-      model    = "claude-sonnet-4-20250514"
+      model    = "claude-sonnet-5-5"
     }
 
     ollama-local {                  # no key: a model on your machine

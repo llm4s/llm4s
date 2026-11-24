@@ -81,7 +81,7 @@ final class ToolOutputOffload(
             ToolOutcome.Success(
               success
                 .withContent(shown(success.content, preview(result, large)))
-                .withUpdate(success.update.combine(StateUpdate.update(key, OffloadUpdate.Put(result, maxTotalBytes))))
+                .addUpdate(StateUpdate.update(key, OffloadUpdate.Put(result, maxTotalBytes)))
             )
       // an error over the threshold is cut before it is stored: it is the model's to read, not to page through
       case ToolOutcome.Error(message) if message.length.toLong > thresholdChars =>

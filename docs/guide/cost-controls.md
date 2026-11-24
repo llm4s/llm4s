@@ -3,8 +3,9 @@ layout: page
 title: Cost controls
 description: "Cut what LLM calls cost in LLM4S: Thinking and ReasoningEffort per provider, provider-side prompt caching, service tiers, and reports of what was not sent."
 search_title: "Control thinking and reasoning effort in Scala"
-parent: User Guide
-nav_order: 60
+parent: Core
+nav_order: 110
+grand_parent: User Guide
 ---
 
 # Cost controls

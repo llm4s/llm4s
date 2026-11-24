@@ -1,10 +1,11 @@
 ---
 layout: page
 title: Pick Your Stack
-parent: User Guide
+parent: Frameworks and Runtimes
 description: "One LLM4S program in plain Result, cats-effect, ZIO and Pekko side by side: the semantics every effect bridge shares, and the honest differences."
 search_title: "LLM4S effect systems: cats-effect, ZIO, Pekko compared"
-nav_order: 50
+nav_order: 501
+grand_parent: User Guide
 ---
 
 # Pick Your Stack

@@ -2,7 +2,7 @@
 layout: page
 title: Checked Code Blocks
 parent: Contribute
-nav_order: 1
+nav_order: 8
 ---
 
 # Checked code blocks

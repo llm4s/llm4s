@@ -3,8 +3,9 @@ layout: page
 title: Embeddings
 description: "Turn text into vectors with LLM4S: choose a provider and model, create an EmbeddingClient, embed documents and queries, and handle dimensions."
 search_title: "Text embeddings in Scala with LLM4S"
-parent: User Guide
-nav_order: 33
+parent: RAG and Data
+nav_order: 301
+grand_parent: User Guide
 ---
 
 # Embeddings

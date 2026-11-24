@@ -77,7 +77,7 @@ permalink: /foundation/
         <a href="mailto:kannupriya@llm4s.org?subject=Internship%20partnership">Propose a partnership</a>
       </li>
     </ul>
-    <p class="lp-small">Not in a position to give money? Contributions of code, documentation, reviews, talks and answers on Discord sustain the project too: see <a href="{{ '/learn/' | relative_url }}">Learn</a> and the <a href="{{ '/reference/contributing' | relative_url }}">contributing guide</a>.</p>
+    <p class="lp-small">Not in a position to give money? Contributions of code, documentation, reviews, talks and answers on Discord sustain the project too: see <a href="{{ '/learn/' | relative_url }}">Learn</a> and the <a href="{{ '/contribute/contributing' | relative_url }}">contributing guide</a>.</p>
   </div>
 </section>
 

@@ -3,8 +3,11 @@ layout: page
 title: Contributing Guide
 description: "How to open your first pull request to LLM4S: picking an issue, the contribution ladder, PR requirements and what gets a PR closed."
 nav_order: 1
-parent: Reference
+parent: Contribute
+permalink: /contribute/contributing
 redirect_from:
+  - /reference/contributing
+  - /reference/contributing.html
   - /reference/contribution-guidelines
   - /reference/contribution-guidelines.html
 ---
@@ -189,7 +192,7 @@ val result = for {
 val apiKey = sys.env.getOrElse("OPENAI_API_KEY", "")
 ```
 
-See [Configuration Boundary](configuration-boundary) and [Scalafix Rules](scalafix) for details.
+See [Configuration Boundary](../reference/configuration-boundary) and [Scalafix Rules](../reference/scalafix) for details.
 
 ### Run scalafmt
 
@@ -269,8 +272,8 @@ git push origin fix/short-description
 
 - [Code Review Guidelines](review-guidelines) — Detailed coding standards with examples
 - [Testing Guide](testing-guide) — How to write tests
-- [Configuration Boundary](configuration-boundary) — Config architecture
-- [Scalafix Rules](scalafix) — Automated code quality enforcement
+- [Configuration Boundary](../reference/configuration-boundary) — Config architecture
+- [Scalafix Rules](../reference/scalafix) — Automated code quality enforcement
 
 ---
 

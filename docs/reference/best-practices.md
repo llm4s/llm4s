@@ -38,9 +38,9 @@ The unmet criteria and the other things to fix are in [Follow-ups](#follow-ups).
 | Criterion | Level | Status | Evidence and justification |
 |---|---|---|---|
 | `description_good` | MUST | Met | The [home page](https://llm4s.org/) and [README.md](https://github.com/llm4s/llm4s/blob/main/README.md#overview) say what LLM4S is (a Scala framework for LLM applications) and the problem it solves. |
-| `interact` | MUST | Met | How to get it: [Installation](../getting-started/installation). Feedback: [issues](https://github.com/llm4s/llm4s/issues/new/choose) and [Community](../community/). Contributing: [Contributing Guide](contributing). |
+| `interact` | MUST | Met | How to get it: [Installation](../getting-started/installation). Feedback: [issues](https://github.com/llm4s/llm4s/issues/new/choose) and [Community](../community/). Contributing: [Contributing Guide](../contribute/contributing). |
 | `contribution` | MUST | Met | [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#pull-request-workflow) describes the issue-first, pull-request workflow. |
-| `contribution_requirements` | SHOULD | Met | Coding standards in [Code Review Guidelines](review-guidelines) and [Scalafix Rules](scalafix); the DCO sign-off in [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#developer-certificate-of-origin-dco); the [pull request template](https://github.com/llm4s/llm4s/blob/main/.github/PULL_REQUEST_TEMPLATE.md) checklist. |
+| `contribution_requirements` | SHOULD | Met | Coding standards in [Code Review Guidelines](../contribute/review-guidelines) and [Scalafix Rules](scalafix); the DCO sign-off in [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#developer-certificate-of-origin-dco); the [pull request template](https://github.com/llm4s/llm4s/blob/main/.github/PULL_REQUEST_TEMPLATE.md) checklist. |
 | `floss_license` | MUST | Met | MIT: [LICENSE](https://github.com/llm4s/llm4s/blob/main/LICENSE). |
 | `floss_license_osi` | SUGGESTED | Met | MIT is OSI-approved. |
 | `license_location` | MUST | Met | `LICENSE` at the repository root; GitHub detects it as MIT. |
@@ -85,11 +85,11 @@ The unmet criteria and the other things to fix are in [Follow-ups](#follow-ups).
 | `build` | MUST | Met | `sbt buildAll` rebuilds every module from source; see [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md). |
 | `build_common_tools` | SUGGESTED | Met | sbt, the standard Scala build tool. |
 | `build_floss_tools` | SHOULD | Met | sbt, the Scala 3 compiler and an OpenJDK 21 build are all FLOSS. |
-| `test` | MUST | Met | A ScalaTest suite in every module, run by `sbt test`; see the [Testing Guide](testing-guide). |
+| `test` | MUST | Met | A ScalaTest suite in every module, run by `sbt test`; see the [Testing Guide](../contribute/testing-guide). |
 | `test_invocation` | SHOULD | Met | `sbt test`, the standard way to run tests in sbt. |
-| `test_most` | SUGGESTED | Met | Each module has a statement-coverage floor that CI enforces, from 30% to 100% and 85% or more for most modules: [Test Coverage](test-coverage). |
+| `test_most` | SUGGESTED | Met | Each module has a statement-coverage floor that CI enforces, from 30% to 100% and 85% or more for most modules: [Test Coverage](../contribute/test-coverage). |
 | `test_continuous_integration` | SUGGESTED | Met | [`ci.yml`](https://github.com/llm4s/llm4s/blob/main/.github/workflows/ci.yml) runs the tests on every pull request, every merge-queue group and every push to `main`. |
-| `test_policy` | MUST | Met | "Every PR with new code needs tests": [Code Review Guidelines](review-guidelines). |
+| `test_policy` | MUST | Met | "Every PR with new code needs tests": [Code Review Guidelines](../contribute/review-guidelines). |
 | `tests_are_added` | MUST | Met | Recent changes add tests with their code: for example the new provider in [#2611](https://github.com/llm4s/llm4s/pull/2611) (9 source files, 7 test files) and the fixes in [#2640](https://github.com/llm4s/llm4s/pull/2640) and [#2616](https://github.com/llm4s/llm4s/pull/2616). |
 | `tests_documented_added` | SUGGESTED | Met | The [pull request template](https://github.com/llm4s/llm4s/blob/main/.github/PULL_REQUEST_TEMPLATE.md) asks for "New code includes tests" and "How was this tested?". |
 | `warnings` | MUST | Met | Every module compiles with `-Werror`, `-Wunused:all`, `-Wsafe-init`, `-deprecation`, `-feature` and `-unchecked` (`project/Dependencies.scala`). |

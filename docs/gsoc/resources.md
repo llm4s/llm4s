@@ -26,7 +26,7 @@ If you have been selected or want to start contributing now:
 2.  **Dev Environment Setup**:
     - Install JDK 21+ and SBT.
     - Run `sbt test` to ensure the core builds correctly.
-    - Check out the [Contribution Guide](/reference/contributing).
+    - Check out the [Contribution Guide](/contribute/contributing).
 
 ## Useful Links
 - [Official GSoC Website](https://summerofcode.withgoogle.com/)

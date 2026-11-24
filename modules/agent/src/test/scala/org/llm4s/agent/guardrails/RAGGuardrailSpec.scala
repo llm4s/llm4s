@@ -876,7 +876,7 @@ class RAGGuardrailSpec extends AnyFlatSpec with Matchers {
 
   "RAGGuardrails.custom" should "allow custom combinations" in {
     val config = RAGGuardrails.custom(
-      inputGuardrails = Seq(new org.llm4s.agent.guardrails.builtin.LengthCheck(1, 1000)),
+      inputGuardrails = Seq(org.llm4s.agent.guardrails.builtin.LengthCheck(1, 1000)),
       outputGuardrails = Seq.empty,
       ragGuardrails = Seq.empty
     )

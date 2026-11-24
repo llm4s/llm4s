@@ -3,8 +3,9 @@ layout: page
 title: Providers
 description: "Which LLM providers LLM4S supports, including OpenAI, Anthropic, Azure, Gemini and Ollama, how to select one and configure its API key and models."
 search_title: "LLM providers for Scala: OpenAI, Anthropic, Gemini, Ollama"
-parent: User Guide
-nav_order: 2
+parent: Core
+nav_order: 102
+grand_parent: User Guide
 ---
 
 # Providers Guide
@@ -46,7 +47,7 @@ CI, so this table does not repeat it:
 | **Jlama** | `jlama` | In-process | A small open model run inside your JVM: no API key, no server (`llm4s-jlama`, Experimental) | Easy |
 | **IBM watsonx.ai** | `watsonx` | Cloud Enterprise | Granite, Llama and Mistral models under IBM governance | Medium |
 | **Perplexity** | `perplexity` | Cloud | Agent API: web-search answers with citations, from Perplexity's and other vendors' models (`llm4s-perplexity`) | Easy |
-| **Amazon Bedrock** | `bedrock` | Cloud Enterprise | Models on AWS, through the Converse API (`llm4s-bedrock`) | Medium |
+| **Amazon Bedrock** | `bedrock` | Cloud Enterprise | Models on AWS, through the Converse API (`llm4s-bedrock`); see [Amazon Bedrock](#amazon-bedrock) | Medium |
 | **Requesty** | `requesty` | Cloud gateway | Many vendors' models behind one key | Easy |
 
 Missing a vendor? See [Writing a Provider](writing-a-provider) to publish your own provider module.
@@ -80,7 +81,7 @@ llm4s {
 
     claude {                          # key from ANTHROPIC_API_KEY
       provider = "anthropic"
-      model    = "claude-sonnet-4-20250514"
+      model    = "claude-sonnet-5-5"
     }
   }
 }
@@ -255,7 +256,7 @@ llm4s {
 
 ### Available Models
 
-Claude models such as `claude-opus-4-6`, `claude-sonnet-4-5` and `claude-haiku-4-5`; see
+Claude models such as `claude-opus-4-6`, `claude-sonnet-5-5` and `claude-haiku-4-5`; see
 [Anthropic's model list](https://docs.anthropic.com/en/docs/about-claude/models). The context window of each comes from
 the [model registry](../reference/model-metadata).
 
@@ -277,7 +278,7 @@ cites arrive on `Completion.citations` (see [Citations and grounding sources](#c
 ```hocon
 llm4s.providers.claude-search {
   provider  = "anthropic"
-  model     = "claude-sonnet-4-5"
+  model     = "claude-sonnet-5-5"
   webSearch = true
 }
 ```
@@ -323,7 +324,7 @@ llm4s {
 
     gemini-main {
       provider = "gemini"            # "google" is accepted as an alias
-      model    = "gemini-2.0-flash"
+      model    = "gemini-3.8-flash"
       # apiKey = ${?GEMINI_TEAM_API_KEY}   # optional; default: GOOGLE_API_KEY or GEMINI_API_KEY
       # baseUrl = "..."              # optional; default https://generativelanguage.googleapis.com/v1beta
     }
@@ -401,7 +402,7 @@ llm4s {
 
     vertex-main {
       provider = "vertexai"          # "vertex" is accepted as an alias
-      model    = "gemini-2.0-flash"
+      model    = "gemini-3.8-flash"
       project  = ${?VERTEXAI_PROJECT}
       location = "europe-west4"      # optional
       apiKey   = ${?GOOGLE_APPLICATION_CREDENTIALS}  # optional: path to a credential file
@@ -467,8 +468,8 @@ unchanged.
 > mapping and redaction for a wrong key. That proves IBM's clients send these shapes, not that the
 > service accepts them today. The module is Beta and its API is not frozen. The `@Cloud` suite
 > `WatsonXAssumptionProbeSpec` (modules/it) checks each of those details against a real account and prints
-> which held; it has not been run yet. Until it has
-> been run, treat tool calling and streaming as unconfirmed.
+> which held; it had not been run as of 2026-11-24, so `llm4s-watsonx` ships unverified against the live service.
+> Until it has been run, treat tool calling and streaming as unconfirmed.
 
 IBM's enterprise AI platform, serving Granite, Llama and Mistral models. It lives in its own module,
 `llm4s-watsonx`; adding the dependency registers the `watsonx` provider.
@@ -587,6 +588,74 @@ llm4s.providers.perplexity-main {
   (`fetch_url`, `finance_search`, ...), background runs and `previous_response_id`.
 - No live call was made while writing this module. The `@Cloud` suite `PerplexitySmokeSpec` runs it against
   the service with `PERPLEXITY_API_KEY`.
+
+## Amazon Bedrock
+
+> **Beta** ([1.0 scope](../reference/v1-scope)).
+
+Models hosted on AWS (Anthropic Claude, Meta Llama, Mistral, Amazon Nova and Titan, and others), through
+Bedrock's Converse and ConverseStream APIs. It lives in its own module, `llm4s-bedrock`, built on the AWS SDK for
+Java v2 `bedrockruntime` artifact; adding the dependency registers the `bedrock` provider. It is a chat provider
+only: the module has no embedding provider.
+
+```sbt
+libraryDependencies += "org.llm4s" %% "llm4s-bedrock" % llm4sVersion
+```
+
+```hocon
+llm4s.providers.claude-bedrock {
+  provider = "bedrock"
+  model    = "us.anthropic.claude-sonnet-5-5"   # an inference profile; or a bare model id, anthropic....
+  region   = ${?AWS_REGION}                     # required, never defaulted
+}
+```
+
+**Credentials.** Bedrock has no API key: it authenticates with AWS credentials, so there is no
+`llm4s.credentials.bedrock` block and no `apiKey`. The section's explicit `accessKeyId` and `secretAccessKey` are
+used when it sets them; otherwise its `profile`; otherwise the AWS SDK's default credential chain (environment
+variables, `~/.aws/credentials`, an EC2 instance profile, an ECS task role).
+
+| Key | Required | Meaning |
+|---|---|---|
+| `model` | yes | A Bedrock model id, or a regional inference profile id (`us.`, `eu.`, `apac.` or `global.` before the model id) |
+| `region` | yes | The AWS region that hosts the model, e.g. `us-east-1`. Bind it with `${?AWS_REGION}`; a section without it is refused |
+| `profile` | no | A shared-config profile to authenticate with (`${?AWS_PROFILE}`) |
+| `accessKeyId`, `secretAccessKey` | no | Explicit static credentials (`${?AWS_ACCESS_KEY_ID}`, `${?AWS_SECRET_ACCESS_KEY}`). Set both or neither, and not together with `profile` |
+| `sessionToken` | no | The session token of temporary credentials (`${?AWS_SESSION_TOKEN}`); needs the two keys above |
+| `baseUrl` | no | An endpoint override: a VPC endpoint, or a test server |
+| `timeouts` | no | `timeouts { request = 3m, stream = 15m }`. `request` is the SDK's API-call timeout for `Converse`; `stream` is a deadline on the whole `ConverseStream` call. Without the block the SDK keeps its default for requests and a stream has no limit. Either expiry is a `TimeoutError` ([Timeouts](../getting-started/configuration#timeouts)) |
+
+No environment variable is read by the module itself: the `AWS_*` names above are the conventional ones, bound in
+the section with `${?...}`, or found by the AWS SDK's default chain.
+
+**Model ids** are Bedrock's, not the vendor's: `anthropic.claude-sonnet-5-5`, or its US inference profile
+`us.anthropic.claude-sonnet-5-5`, not the Anthropic API's `claude-sonnet-5-5`. Which Regions serve a model, and
+whether it takes the bare model id or only an inference profile (Claude Sonnet 5.5 takes only a profile), is on the
+model's page in the [Bedrock model cards](https://docs.aws.amazon.com/bedrock/latest/userguide/model-cards.html);
+a model's Legacy and end-of-life dates are in the
+[model lifecycle](https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle.html) pages. (Model ids
+checked 2026-11-24.)
+The context window and the completion reserve come from the [model registry](../reference/model-metadata), for a
+bare id and for an inference profile alike.
+
+Behaviour to know about:
+
+- **Streaming and tools.** `complete` uses Converse and `streamComplete` ConverseStream, both with tool calling.
+  `onChunk` runs on the calling thread, in order; interrupting that thread cancels the request and returns
+  `Left(CancelledError)`.
+- **Structured output is not enforced.** The client does not read `CompletionOptions.responseFormat`, so the model
+  sees only your conversation: put the format in the prompt ([Structured Output](structured-output#8-what-each-provider-does-with-the-schema)).
+- **Reasoning.** `CompletionOptions`' reasoning and thinking settings are not sent, and the completion reports
+  them as dropped ([Cost Controls](cost-controls)). Reasoning blocks a model returns are kept, and signed and
+  redacted ones go back unchanged on the next turn ([Thinking in conversation history](#thinking-in-conversation-history)).
+- **Prompt caching and service tiers** are sent, as `cachePoint` blocks and `serviceTier`
+  ([Cost Controls](cost-controls)).
+- **Images and documents** go inline or as an `s3://` URL ([Multimodal content](multimodal)).
+- **Errors.** `ThrottlingException` and `ServiceQuotaExceededException` become `RateLimitError`,
+  `ValidationException` a `ValidationError`, `AccessDeniedException` (and any 401 or 403) an
+  `AuthenticationError`, a timeout a `TimeoutError`.
+- **Tests.** `sbt bedrock/test` runs the unit tests with no AWS account. The `@Cloud` suite `BedrockSmokeSpec`
+  runs the client against the service and needs AWS credentials.
 
 ## Azure OpenAI
 

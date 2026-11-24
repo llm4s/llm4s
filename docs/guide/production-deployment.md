@@ -2,8 +2,9 @@
 layout: page
 title: Production Deployment
 description: "Deploying LLM4S applications to production: configuration, secrets, reliability, observability, scaling and container images, specific to LLM4S patterns."
-nav_order: 22
-parent: User Guide
+nav_order: 701
+parent: Operations
+grand_parent: User Guide
 redirect_from:
   - /PRODUCTION_DEPLOYMENT
 ---
@@ -82,7 +83,7 @@ llm4s {
 
     claude {
       provider = "anthropic"
-      model    = "claude-sonnet-4-20250514"
+      model    = "claude-sonnet-5-5"
       apiKey   = ${?ANTHROPIC_API_KEY}
     }
   }

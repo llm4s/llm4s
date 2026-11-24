@@ -16,6 +16,9 @@ start, follow, cancel or delete any thread, a run whose machine dies is picked u
 whole deployment.
 {: .fs-6 .fw-300 }
 
+{: .note }
+> **Experimental at 1.0.** The API on this page (shared checkpointers, run claims, the run queue and worker in `agent.service`) is `@Experimental`: usable, but outside the 1.x compatibility promise, so it can change in a minor release, with a migration note. The stable core of `llm4s-agent` - building an agent, running, continuing and recovering a thread, handoffs and guardrails - is listed in [API Stability](../../reference/api-stability#tiers-in-the-code).
+
 ## Table of contents
 {: .no_toc .text-delta }
 
@@ -195,8 +198,13 @@ identity, so two machines name the same spans without coordinating.
 
 Spans are emitted by the agent's tracing: build the agent `withTracing(tracing)` with a backend from
 `llm4s-observability-otel` (`TRACING_MODE=opentelemetry`) or `llm4s-observability` (Langfuse). Delegated child runs
-sit under the tool call that started them. No message content goes into a span attribute, and no guardrail reason:
-a blocked run's failure names only the guardrail. Any other failure's error message is recorded as it is.
+sit under the tool call that started them. The spans of the run's events - its model calls, tool calls and
+`graph.*` and `agent.*` events - carry no message content, tool argument or tool result in either backend, and no
+guardrail reason: a blocked run's failure names only the guardrail. Any other failure's error message is recorded as
+it is, and the events that begin a run carry its `tenantId` and `principal`. The turn's messages are another matter:
+OpenTelemetry records only how many there were, but Langfuse records them, as the trace's input and output and as one
+span per message. [Agent tracing and metrics](../observability/agents#content) says how to drop them before they are
+sent.
 
 ## Metrics
 

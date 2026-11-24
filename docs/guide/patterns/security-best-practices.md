@@ -4,7 +4,7 @@ title: Security Best Practices
 description: "Secure LLM4S applications: API keys from files, Vault or AWS Secrets Manager, prompt injection and PII guardrails, encrypted checkpoints and the sandbox."
 search_title: "LLM application security: prompt injection, keys and PII"
 parent: Real-World Application Patterns
-grand_parent: User Guide
+grand_parent: Operations
 nav_order: 6
 ---
 
@@ -75,7 +75,7 @@ section sets its own key; the config policy's `prod` preset flags one that does 
 
 ## Untrusted input and output
 
-Guardrails are middleware on the agent (`GuardrailMiddleware(input, output)`); a block ends the turn
+Guardrails are set on the agent (`withInputGuardrails`, `withOutputGuardrails`); a block ends the turn
 `AgentStatus.Blocked` and stores nothing of it. The built-in ones that matter for security:
 
 | Concern | Guardrail |
@@ -88,19 +88,14 @@ Guardrails are middleware on the agent (`GuardrailMiddleware(input, output)`); a
 
 ```scala
 import org.llm4s.agent.Agent
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin.{ LengthCheck, PIIMasker, PromptInjectionDetector, SecretLeakGuardrail }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.types.Result
 
 def guardedAgent(client: LLMClient): Result[Agent] =
   Agent.builder("assistant", client)
-    .withMiddleware(
-      new GuardrailMiddleware(
-        input = Seq(new LengthCheck(1, 10000), PromptInjectionDetector(), PIIMasker()),
-        output = Seq(SecretLeakGuardrail(), PIIMasker())
-      )
-    )
+    .withInputGuardrails(LengthCheck(1, 10000), PromptInjectionDetector(), PIIMasker())
+    .withOutputGuardrails(SecretLeakGuardrail(), PIIMasker())
     .build()
 ```
 

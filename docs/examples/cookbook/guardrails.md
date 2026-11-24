@@ -29,7 +29,6 @@ network or a key; `demo` runs the recipe and returns what to print.
 ```scala
 package org.llm4s.samples.cookbook
 
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin.{ LengthCheck, ProfanityFilter }
 import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.llmconnect.LLMClient
@@ -60,12 +59,8 @@ object GuardrailsRecipe extends RecipeApp {
   def guardedAgent(client: LLMClient): Result[Agent] =
     Agent
       .builder("guarded-agent", client)
-      .withMiddleware(
-        new GuardrailMiddleware(
-          input = Seq(LengthCheck(1, 200), ProfanityFilter.withCustomWords(Set("heck"))),
-          output = Seq(LengthCheck(1, 300))
-        )
-      )
+      .withInputGuardrails(LengthCheck(1, 200), ProfanityFilter.withCustomWords(Set("heck")))
+      .withOutputGuardrails(LengthCheck(1, 300))
       .build()
 
   def ask(client: LLMClient, query: String): Result[AgentResult] =

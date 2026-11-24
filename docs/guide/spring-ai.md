@@ -3,8 +3,9 @@ layout: page
 title: Spring AI
 description: "Use any llm4s client as a Spring AI ChatModel or EmbeddingModel, and a Spring AI ChatModel as an llm4s client, with llm4s-spring-ai."
 search_title: "Using LLM4S with Spring AI: ChatModel interop"
-parent: User Guide
-nav_order: 59
+parent: Java and Kotlin
+nav_order: 408
+grand_parent: User Guide
 ---
 
 # Using LLM4S with Spring AI

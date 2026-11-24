@@ -1,6 +1,6 @@
 package org.llm4s.agent.events
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.model.{ FinishReason, RequestAdjustment, ServiceTier, TokenUsage }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.DurationJson
@@ -67,7 +67,7 @@ private given finishReasonRW: ReadWriter[Option[FinishReason]] = lenient("finish
 private given servedTierRW: ReadWriter[Option[ServiceTier]] = lenient("service tier", ServiceTier.Other(_))
 
 /** A model call's token usage, as plain numbers. */
-@Stable
+@Experimental
 final case class CallUsage private (
   promptTokens: Int,
   completionTokens: Int,
@@ -82,6 +82,7 @@ final case class CallUsage private (
 
   def toTokenUsage: TokenUsage = TokenUsage(promptTokens, completionTokens, totalTokens, thinkingTokens)
 
+@Experimental
 object CallUsage:
 
   def apply(promptTokens: Int, completionTokens: Int, totalTokens: Int, thinkingTokens: Option[Int]): CallUsage =
@@ -108,7 +109,7 @@ object CallUsage:
  * reported none, for usage recorded without a call, and in an event stored before the field existed; a tier this
  * version cannot read is `ServiceTier.Other`, as a finish reason is.
  */
-@Stable
+@Experimental
 final case class ModelCallCompleted private (
   agent: String,
   model: String,
@@ -137,6 +138,7 @@ final case class ModelCallCompleted private (
   def withServedTier(value: ServiceTier): ModelCallCompleted              = copy(servedTier = Some(value))
   def withServedTier(value: Option[ServiceTier]): ModelCallCompleted      = copy(servedTier = value)
 
+@Experimental
 object ModelCallCompleted:
   def apply(
     agent: String,
@@ -164,7 +166,7 @@ object ModelCallCompleted:
     )
 
 /** How a tool call ended for the loop. */
-@Stable
+@Experimental
 enum ToolExecutionOutcome derives ReadWriter:
   /** The tool returned `Success`. */
   case Succeeded
@@ -191,7 +193,7 @@ enum ToolExecutionOutcome derives ReadWriter:
  * [[org.llm4s.agent.graph.IdempotencyKey]] (a digest, no content), which names the call's trace span
  * (design 4.58); `None` in an event stored before it existed.
  */
-@Stable
+@Experimental
 final case class ToolExecuted private (
   agent: String,
   toolCallId: String,
@@ -208,6 +210,7 @@ final case class ToolExecuted private (
   def withIdempotencyKey(value: String): ToolExecuted         = copy(idempotencyKey = Some(value))
   def withIdempotencyKey(value: Option[String]): ToolExecuted = copy(idempotencyKey = value)
 
+@Experimental
 object ToolExecuted:
 
   def apply(
@@ -225,17 +228,18 @@ object ToolExecuted:
     macroRW
 
 /** The active agent changed from `from` to `to`. */
-@Stable
+@Experimental
 final case class HandedOff private (from: String, to: String) derives ReadWriter:
   def withFrom(value: String): HandedOff = copy(from = value)
   def withTo(value: String): HandedOff   = copy(to = value)
 
+@Experimental
 object HandedOff:
   def apply(from: String, to: String): HandedOff =
     new HandedOff(from, to)
 
 /** Where a guardrail blocked the turn. */
-@Stable
+@Experimental
 enum GuardrailPhase derives ReadWriter:
   case Input, Output
 
@@ -244,11 +248,12 @@ enum GuardrailPhase derives ReadWriter:
  * blocked run holds it (its `TaskFailed` and `RunFailed` name the guardrail only). The run's closing checkpoint does,
  * as `RunOutcome.Blocked`.
  */
-@Stable
+@Experimental
 final case class GuardrailBlock private (guardrail: String, phase: GuardrailPhase) derives ReadWriter:
   def withGuardrail(value: String): GuardrailBlock     = copy(guardrail = value)
   def withPhase(value: GuardrailPhase): GuardrailBlock = copy(phase = value)
 
+@Experimental
 object GuardrailBlock:
   def apply(guardrail: String, phase: GuardrailPhase): GuardrailBlock =
     new GuardrailBlock(guardrail, phase)
@@ -256,53 +261,58 @@ object GuardrailBlock:
 // Live payloads: delivered to current subscribers only, never stored. They may carry content.
 
 /** `agent`'s model is being called; a higher `attempt` in the same task discards the earlier attempt's text. */
-@Stable
+@Experimental
 final case class ModelCallStarted private (agent: String, attempt: Int) derives ReadWriter:
   def withAgent(value: String): ModelCallStarted = copy(agent = value)
   def withAttempt(value: Int): ModelCallStarted  = copy(attempt = value)
 
+@Experimental
 object ModelCallStarted:
   def apply(agent: String, attempt: Int): ModelCallStarted =
     new ModelCallStarted(agent, attempt)
 
 /** A chunk of the model's answer, for `attempt`. */
-@Stable
+@Experimental
 final case class TextDelta private (attempt: Int, text: String) derives ReadWriter:
   def withAttempt(value: Int): TextDelta = copy(attempt = value)
   def withText(value: String): TextDelta = copy(text = value)
 
+@Experimental
 object TextDelta:
   def apply(attempt: Int, text: String): TextDelta =
     new TextDelta(attempt, text)
 
 /** A chunk of the model's thinking, for `attempt`. */
-@Stable
+@Experimental
 final case class ThinkingDelta private (attempt: Int, text: String) derives ReadWriter:
   def withAttempt(value: Int): ThinkingDelta = copy(attempt = value)
   def withText(value: String): ThinkingDelta = copy(text = value)
 
+@Experimental
 object ThinkingDelta:
   def apply(attempt: Int, text: String): ThinkingDelta =
     new ThinkingDelta(attempt, text)
 
 /** A tool call passed its argument checks and is about to run through the middleware chain. */
-@Stable
+@Experimental
 final case class ToolCallStarted private (toolCallId: String, tool: String, arguments: ujson.Value) derives ReadWriter:
   def withToolCallId(value: String): ToolCallStarted     = copy(toolCallId = value)
   def withTool(value: String): ToolCallStarted           = copy(tool = value)
   def withArguments(value: ujson.Value): ToolCallStarted = copy(arguments = value)
 
+@Experimental
 object ToolCallStarted:
   def apply(toolCallId: String, tool: String, arguments: ujson.Value): ToolCallStarted =
     new ToolCallStarted(toolCallId, tool, arguments)
 
 /** The result the loop recorded for a call, as the model will see it. */
-@Stable
+@Experimental
 final case class ToolCallResult private (toolCallId: String, content: String, isError: Boolean) derives ReadWriter:
   def withToolCallId(value: String): ToolCallResult = copy(toolCallId = value)
   def withContent(value: String): ToolCallResult    = copy(content = value)
   def withIsError(value: Boolean): ToolCallResult   = copy(isError = value)
 
+@Experimental
 object ToolCallResult:
   def apply(toolCallId: String, content: String, isError: Boolean): ToolCallResult =
     new ToolCallResult(toolCallId, content, isError)

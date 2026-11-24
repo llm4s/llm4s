@@ -2,8 +2,12 @@
 layout: page
 title: Release Process
 description: "How an LLM4S release is made: tag format, release steps, the docs deploy, what is published and how to verify a release."
-parent: Reference
-nav_order: 3
+parent: Contribute
+nav_order: 6
+permalink: /contribute/release
+redirect_from:
+  - /reference/release
+  - /reference/release.html
 ---
 
 # Release Process
@@ -17,7 +21,7 @@ All release tags MUST use the `v` prefix format: `v0.3.2`, `v1.0.0`, etc. Use th
 
 ### 2. Release Steps
 
-Before tagging, update the [support table](support-policy#current-lines) (see
+Before tagging, update the [support table](../reference/support-policy#current-lines) (see
 [Update the support table](#update-the-support-table)).
 
 ```bash
@@ -36,7 +40,7 @@ git push origin v0.3.2
 
 Add the new version to `docs/_data/support.yml` (version, release date, status `latest`) and set the status of the line
 it replaces, in the same pull request that prepares the release. The table is rendered on the
-[Support Policy](support-policy). `scripts/check-support-table.sh` checks it: Quick Checks fails when the table lacks
+[Support Policy](../reference/support-policy). `scripts/check-support-table.sh` checks it: Quick Checks fails when the table lacks
 the newest CHANGELOG release, and the release workflow's `support-table` job fails a tag that is not the table's
 `latest` line, before `publish` runs. A pre-release tag (`v1.0.0-RC1`) is not a support line and is not checked.
 
@@ -70,40 +74,43 @@ Everything below goes in the pull request that prepares the release, and is merg
 release costs part of the organisation's monthly Sonatype quota ([What is published](#what-is-published-to-maven-central)),
 so there are few of them: 0.6.0, then 0.7.0, which sets the compatibility baseline, then 1.0. Roughly one release a
 month fits; a security patch takes that slot ahead of a planned release, and minor releases come at most about once a
-quarter ([Support Policy](support-policy#release-cadence)).
+quarter ([Support Policy](../reference/support-policy#release-cadence)).
 
 **Every release:**
 
 - [ ] Rename `## [Unreleased]` in `CHANGELOG.md` to `## [X.Y.Z] - <date>`, add its `### Highlights`, and open a new,
       empty `[Unreleased]`. Every entry under `### Breaking changes` links its note in the
-      [Migration Guide](migration).
+      [Migration Guide](../reference/migration).
 - [ ] Add the version's entry point to the [0.x to 1.0 upgrade index](../migrations/0x-to-1x) and a row to the
       [Migrations](../migrations/) table.
 - [ ] [Update the support table](#update-the-support-table) and [write the News post](#write-the-news-post).
 - [ ] Set the RFCs implemented in this release to their version: the index in [RFCs](../rfcs/) and each RFC's
       **Status** line ("release after 0.6.0" today in RFC 0008 and RFC 0009).
 - [ ] Update "Current documented version series" under [Version Numbering](#version-numbering) and the Quick Status
-      table of the [Roadmap](roadmap).
+      table of the [Roadmap](../reference/roadmap).
 - [ ] Check that everything the release is for is on the commit you will tag
       ([What gets published](#3-what-gets-published-is-whatever-the-tagged-commit-aggregates)).
 
 **0.7.0, the baseline release, in addition:**
 
 - [ ] Review `llm4s-agent`'s tiers one last time (`sbt stabilityTierCheck` covers it since
-      [#2778](https://github.com/llm4s/llm4s/issues/2778): what is `@Stable` here is what 1.0 promises), and decide the
-      Beta parts inside frozen modules ([The Baseline](api-stability#the-baseline)).
+      [#2778](https://github.com/llm4s/llm4s/issues/2778)): the `@Stable` core of
+      [#2785](https://github.com/llm4s/llm4s/issues/2785) is what 1.0 promises, everything else `@Experimental`.
+      Check that no Stable overload shares its name with an `@Experimental` one, which MiMa would skip with it
+      ([What MiMa Covers](../reference/api-stability#what-mima-covers)), and decide the Beta parts inside frozen modules
+      ([The Baseline](../reference/api-stability#the-baseline)).
 - [ ] Run `scripts/mima-dry-run.sh` on the commit to tag ([Release readiness](#release-readiness-a-mima-dry-run)).
 - [ ] After the release is on Central, set `mimaBaselineVersion = Some("0.7.0")` in a follow-up pull request
-      ([Setting and bumping the baseline](api-stability#setting-and-bumping-the-baseline)), and change the pages that
-      say no baseline is set yet ([API Stability](api-stability), [Compatibility and Deprecation Policy](compatibility-policy),
-      [1.0 Scope](v1-scope), [Enterprise Evaluation](enterprise-evaluation), `SECURITY.md`, this page).
+      ([Setting and bumping the baseline](../reference/api-stability#setting-and-bumping-the-baseline)), and change the pages that
+      say no baseline is set yet ([API Stability](../reference/api-stability), [Compatibility and Deprecation Policy](../reference/compatibility-policy),
+      [1.0 Scope](../reference/v1-scope), [Enterprise Evaluation](../reference/enterprise-evaluation), `SECURITY.md`, this page).
 
 **1.0, in addition:**
 
 - [ ] In the support table, mark 0.7.x `security-only` (critical fixes for three months after 1.0, with the end date)
-      and every older 0.x line `eol` ([Supported lines](support-policy#supported-lines)).
+      and every older 0.x line `eol` ([Supported lines](../reference/support-policy#supported-lines)).
 - [ ] Publish the Scalafix migration rules as `org.llm4s::llm4s-scalafix` with the release
-      ([#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](scalafix#migration-rules)), and put the one-line
+      ([#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](../reference/scalafix#migration-rules)), and put the one-line
       command in the 1.0 upgrade notes.
 - [ ] Release-day wording pass: the pages that call LLM4S pre-1.0 or say the compatibility promise is still to come.
       In `README.md`, "Current Status" ("LLM4S is under active pre-1.0 development", "The path to 1.0 is focused on");
@@ -114,7 +121,7 @@ quarter ([Support Policy](support-policy#release-cadence)).
       `docs/guide/migrating-from-scala-llm-clients.md` ("You need a stable API today. LLM4S is pre-1.0");
       `docs/guide/writing-a-provider.md` ("reaches a binary-compatibility baseline (MiMa) at a pre-1.0 release");
       `docs/guide/agents/multiple-machines.md` ("planned with the 1.0 compatibility"); and on the reference pages
-      above, the "Before the baseline" rows and the [Roadmap](roadmap).
+      above, the "Before the baseline" rows and the [Roadmap](../reference/roadmap).
 
 ### What the tag starts
 
@@ -260,7 +267,7 @@ A `gradle` line is an artifact the release publishes from a Gradle build rather 
 `llm4s-kotlin-api`, published by the `publish-kotlin` job. It is on the tagged commit when `modules/kotlin-api` is.
 
 `sbt publishedArtifactsCheck` (a CI quick check) fails when a published `llm4s-*` artifact has no tier in
-[1.0 Scope](v1-scope) or no install line in the installation guide.
+[1.0 Scope](../reference/v1-scope) or no install line in the installation guide.
 
 The `bom` line is `llm4s-bom`, a POM-only bill of materials that pins every real artifact to the release
 version. It is generated from the same list as the `artifact` lines, and `sbt bomCheck` (a CI quick check)
@@ -290,7 +297,7 @@ to **1,000 uploaded files a month**, and 0.6.0 uploaded 1,752. Two things that u
   `scripts/publish-kotlin-api.sh` leaves them out of the Kotlin bundle too, with Gradle's `.sha256` and `.sha512`.
 - **The CycloneDX SBOMs** (`-cyclonedx.json`), which sbt-sbom adds to every project's published artifacts. They are
   dropped from the publication (`NoSbomInPublication` in the same file) and are on the
-  [GitHub Release](sbom#where-the-sboms-are) instead, where the `sbom` job attests their build provenance and attaches
+  [GitHub Release](../reference/sbom#where-the-sboms-are) instead, where the `sbom` job attests their build provenance and attaches
   every module's.
 
 The bundle is checked as it is built: `sonaBundle` fails on a checksum of a signature, a CycloneDX file, a file other
@@ -354,7 +361,7 @@ it never overwrites. Write whatever the release deserves once it exists.
   Run against 0.4.1's POM it reports three problems: the description is the artifact name, the `<scm><url>` has a
   trailing slash and the connection is the SSH form. All three were fixed after 0.4.1 (#1588).
 - Check the Release's assets: the `sbom` job attaches one `<module>-<version>.bom.json` (the
-  [SBOM](sbom)) and one `<module>-<version>.licences.csv` (the [licence report](licences)) per published module that
+  [SBOM](../reference/sbom)) and one `<module>-<version>.licences.csv` (the [licence report](../reference/licences)) per published module that
   ships a jar, all named for the tag's version:
 
   ```bash
@@ -420,7 +427,7 @@ need a maintainer:
 ## Release readiness: a MiMa dry run
 
 `mimaBaselineVersion` in `build.sbt` is `None` and `mimaBaselineOverrides` is empty, so `sbt mimaReportBinaryIssues` compiles the build and checks
-nothing ([The Baseline](api-stability#the-baseline)). It is set at **0.7.0**, for every frozen module
+nothing ([The Baseline](../reference/api-stability#the-baseline)). It is set at **0.7.0**, for every frozen module
 ([#1281](https://github.com/llm4s/llm4s/issues/1281)); 0.5.0, 0.5.1 and 0.6.0 set none. `scripts/mima-dry-run.sh` does those steps early, against a throwaway version, to show that they will work:
 
 ```bash
@@ -453,7 +460,7 @@ without sbt.
 
 At the baseline release: publish it, confirm the frozen artifacts are on Central
 ([Verify Release](#5-verify-release)), then follow
-[Setting and bumping the baseline](api-stability#setting-and-bumping-the-baseline).
+[Setting and bumping the baseline](../reference/api-stability#setting-and-bumping-the-baseline).
 
 ## Troubleshooting
 
@@ -531,7 +538,7 @@ help.
 ## Version Numbering
 
 Versions are `MAJOR.MINOR.PATCH`, with `versionScheme := early-semver`. What each kind of release may break,
-before and after the baseline, is in the [Compatibility Policy](compatibility-policy#versions).
+before and after the baseline, is in the [Compatibility Policy](../reference/compatibility-policy#versions).
 
 Current documented version series: 0.6.x (pre-1.0 development). Until the MiMa baseline is set at 0.7.0, any
 release, patch included, may carry a breaking change, listed in the CHANGELOG with a migration note. From 0.7.0 to

@@ -3,8 +3,9 @@ layout: page
 title: Spring Boot
 description: "Use LLM4S with Spring Boot: add llm4s-spring-boot-starter, configure it in application.properties and inject an LLM4STemplate with a health indicator."
 search_title: "Use LLM4S with Spring Boot: LLM client starter"
-parent: User Guide
-nav_order: 7
+parent: Java and Kotlin
+nav_order: 407
+grand_parent: User Guide
 ---
 
 # Using LLM4S with Spring Boot
@@ -165,7 +166,7 @@ names the section the starter uses:
 ```properties
 llm4s.providers.provider=gemini-main
 llm4s.providers.gemini-main.provider=gemini
-llm4s.providers.gemini-main.model=gemini-2.0-flash
+llm4s.providers.gemini-main.model=gemini-3.8-flash
 llm4s.providers.gemini-main.api-key=${GOOGLE_API_KEY}
 ```
 

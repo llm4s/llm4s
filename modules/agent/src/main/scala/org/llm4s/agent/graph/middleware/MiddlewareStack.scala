@@ -179,8 +179,9 @@ private[agent] object MiddlewareStack:
 
   /**
    * Orders `middleware` topologically by `runsBefore` / `runsAfter` (`a.runsBefore(b)` and
-   * `b.runsAfter(a)` are the same edge, `a` outside `b`), breaking ties by registration order.
-   * One `ValidationError` lists every invalid id, duplicate id, constraint naming an id that is not
+   * `b.runsAfter(a)` are the same edge, `a` outside `b`), breaking ties by registration order. A constraint names
+   * the other by id or by type ([[MiddlewareRef]]); an optional one that names nothing registered is ignored.
+   * One `ValidationError` lists every invalid id, duplicate id, required constraint naming a middleware that is not
    * registered, cycle, and tool name contributed twice by one middleware or by more than one; when there is none, the
    * order is checked against every middleware's [[AgentMiddleware.placement]], and one `ValidationError` lists each
    * middleware that runs inside one it must run outside.
@@ -188,7 +189,6 @@ private[agent] object MiddlewareStack:
   def of(middleware: AgentMiddleware*): Result[MiddlewareStack] =
     val all   = middleware.toVector
     val nodes = all.map(_.id).distinct
-    val known = nodes.toSet
 
     val invalid = nodes
       .filterNot(id => IdPattern.matches(id.value))
@@ -196,20 +196,31 @@ private[agent] object MiddlewareStack:
 
     val duplicates = nodes
       .filter(id => all.count(_.id == id) > 1)
-      .map(id => s"duplicate middleware id '${id.value}'")
+      .map { id =>
+        // an id the agent uses itself: the clash is with a middleware the user never registered
+        val why =
+          MiddlewareId.reserved.get(id).fold("")(p => s": the id is reserved for $p, which the agent installs itself")
+        s"duplicate middleware id '${id.value}'$why"
+      }
 
+    // the middleware a reference of `m` names: by id, the one with it; by type, every other one of the type
+    def named(m: AgentMiddleware, ref: MiddlewareRef): Vector[MiddlewareId] =
+      all.filter(other => ref.matches(other) && !(ref.byType && (other eq m))).map(_.id).distinct
+
+    // a required reference that names nothing fails closed; an optional one (`ifPresent`) is then ignored
     val unknown = all.flatMap { m =>
-      def check(kind: String, ids: Set[MiddlewareId]): Vector[String] =
-        ids.toVector
-          .filterNot(known.contains)
-          .map(_.value)
+      def check(kind: String, refs: Set[MiddlewareRef]): Vector[String] =
+        refs.toVector
+          .filter(ref => !ref.optional && named(m, ref).isEmpty)
+          .map(_.missing)
           .sorted
-          .map(u => s"middleware '${m.id.value}': $kind names unknown middleware '$u'")
+          .map(missing => s"middleware '${m.id.value}': $kind names $missing")
       check("runsAfter", m.runsAfter) ++ check("runsBefore", m.runsBefore)
     }.distinct
 
     val edges: Set[(MiddlewareId, MiddlewareId)] = all.flatMap { m =>
-      m.runsBefore.filter(known.contains).map(m.id -> _) ++ m.runsAfter.filter(known.contains).map(_ -> m.id)
+      m.runsBefore.toVector.flatMap(named(m, _)).map(m.id -> _) ++
+        m.runsAfter.toVector.flatMap(named(m, _)).map(_ -> m.id)
     }.toSet
     val successors: Map[MiddlewareId, Vector[MiddlewareId]] =
       nodes.map(n => n -> nodes.filter(s => edges.contains(n -> s))).toMap

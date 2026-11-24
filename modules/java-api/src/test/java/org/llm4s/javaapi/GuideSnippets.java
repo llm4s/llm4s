@@ -73,7 +73,7 @@ final class GuideSnippets {
     /** The second "Configure in code" block: a client from a provider config, with no application.conf. */
     static List<LlmResult<JLlmClient>> inCode(String apiKey) {
         LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(Secret.apply(apiKey), "gpt-4o-mini"));
-        LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(Secret.apply(apiKey), "claude-sonnet-4-20250514"));
+        LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(Secret.apply(apiKey), "claude-sonnet-5-5"));
         LlmResult<JLlmClient> local = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"));
 
         return Arrays.asList(openai, anthropic, local);

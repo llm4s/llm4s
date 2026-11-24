@@ -61,9 +61,9 @@ import org.llm4s.types.Result
  *                       text without case folding.
  */
 @Stable
-class ProfanityFilter(
-  customBadWords: Set[String] = Set.empty,
-  caseSensitive: Boolean = false
+final class ProfanityFilter private (
+  customBadWords: Set[String],
+  caseSensitive: Boolean
 ) extends InputGuardrail
     with OutputGuardrail {
 
@@ -122,18 +122,18 @@ object ProfanityFilter {
   /**
    * Create a profanity filter with the built-in word list, case-insensitive.
    *
-   * @return a filter equivalent to `new ProfanityFilter()`
+   * @return the built-in list, case-insensitive
    */
-  def apply(): ProfanityFilter = new ProfanityFilter()
+  def apply(): ProfanityFilter = new ProfanityFilter(Set.empty, false)
 
   /**
    * Create a case-insensitive profanity filter that also rejects `customWords`.
    *
    * @param customWords single words to reject in addition to the built-in list
-   * @return a filter equivalent to `new ProfanityFilter(customBadWords = customWords)`
+   * @return the built-in list plus `customWords`, case-insensitive
    */
   def withCustomWords(customWords: Set[String]): ProfanityFilter =
-    new ProfanityFilter(customBadWords = customWords)
+    new ProfanityFilter(customWords, false)
 
   /**
    * Create a case-sensitive profanity filter.
@@ -142,8 +142,8 @@ object ProfanityFilter {
    * the lower-case built-in words do not match their upper-case spellings.
    *
    * @param customWords single words to reject in addition to the built-in list; empty by default
-   * @return a filter equivalent to `new ProfanityFilter(customWords, caseSensitive = true)`
+   * @return the built-in list plus `customWords`, case-sensitive
    */
   def caseSensitive(customWords: Set[String] = Set.empty): ProfanityFilter =
-    new ProfanityFilter(customBadWords = customWords, caseSensitive = true)
+    new ProfanityFilter(customWords, true)
 }

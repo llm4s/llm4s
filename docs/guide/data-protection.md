@@ -3,8 +3,9 @@ layout: page
 title: Data Protection
 description: "What personal data LLM4S sends where, what it keeps and logs by default, provider data residency, and deletion, for privacy and DPIA reviews."
 search_title: "LLM4S data protection: what data leaves your process"
-parent: User Guide
-nav_order: 38
+parent: Operations
+nav_order: 703
+grand_parent: User Guide
 ---
 
 # Data Protection
@@ -142,7 +143,7 @@ For example, a section that keeps processing in the EU on Vertex AI:
 ```hocon
 llm4s.providers.gemini-eu {
   provider = "vertexai"
-  model    = "gemini-2.0-flash"
+  model    = "gemini-3.8-flash"
   project  = ${?VERTEXAI_PROJECT}
   location = "europe-west4"
 }
@@ -196,18 +197,13 @@ Both cover `SSN`, `CreditCard`, `Email` and `Phone` by default; `PIIType.all` ad
 
 ```scala
 import org.llm4s.agent.Agent
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin.{ PIIDetector, PIIMasker }
 import org.llm4s.agent.guardrails.patterns.PIIPatterns.PIIType
 
 val guarded = Agent
   .builder("support", client)
-  .withMiddleware(
-    GuardrailMiddleware(
-      input = Seq(PIIMasker(PIIType.all)), // mask before the model sees the query
-      output = Seq(PIIDetector())          // block an answer that still contains PII
-    )
-  )
+  .withInputGuardrails(PIIMasker(PIIType.all)) // mask before the model sees the query
+  .withOutputGuardrails(PIIDetector())         // block an answer that still contains PII
   .build()
 ```
 

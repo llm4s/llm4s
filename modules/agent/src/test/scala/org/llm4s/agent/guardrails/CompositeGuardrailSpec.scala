@@ -97,8 +97,8 @@ class CompositeGuardrailSpec extends AnyFlatSpec with Matchers {
   it should "use real guardrails: length + profanity both failing" in {
     val composite = CompositeGuardrail.all(
       Seq(
-        new LengthCheck(100, 200),
-        new ProfanityFilter(customBadWords = Set("test"))
+        LengthCheck(100, 200),
+        ProfanityFilter.withCustomWords(Set("test"))
       )
     )
     val result = composite.validate("test")
@@ -198,8 +198,8 @@ class CompositeGuardrailSpec extends AnyFlatSpec with Matchers {
   it should "use real guardrails: one regex passes, one fails" in {
     val composite = CompositeGuardrail.any(
       Seq(
-        new RegexValidator("^[0-9]+$".r),
-        new RegexValidator("^[a-z]+$".r)
+        RegexValidator("^[0-9]+$".r),
+        RegexValidator("^[a-z]+$".r)
       )
     )
     composite.validate("hello") shouldBe Right("hello")
@@ -281,8 +281,8 @@ class CompositeGuardrailSpec extends AnyFlatSpec with Matchers {
   it should "use real guardrails: length check then profanity" in {
     val seq = CompositeGuardrail.sequential(
       Seq(
-        new LengthCheck(1, 50),
-        new ProfanityFilter()
+        LengthCheck(1, 50),
+        ProfanityFilter()
       )
     )
     seq.validate("Clean short text") shouldBe Right("Clean short text")
@@ -332,8 +332,8 @@ class CompositeGuardrailSpec extends AnyFlatSpec with Matchers {
   "CompositeGuardrail name" should "include child guardrail names" in {
     val composite = CompositeGuardrail.all(
       Seq(
-        new LengthCheck(1, 100),
-        new ProfanityFilter()
+        LengthCheck(1, 100),
+        ProfanityFilter()
       )
     )
     composite.name should include("LengthCheck")
@@ -350,8 +350,8 @@ class CompositeGuardrailSpec extends AnyFlatSpec with Matchers {
   it should "include child guardrail names" in {
     val composite = CompositeGuardrail.all(
       Seq(
-        new LengthCheck(1, 10),
-        new ProfanityFilter()
+        LengthCheck(1, 10),
+        ProfanityFilter()
       )
     )
     val desc = composite.description.get
@@ -362,8 +362,8 @@ class CompositeGuardrailSpec extends AnyFlatSpec with Matchers {
   "Sequential guardrail name" should "use arrow notation" in {
     val seq = CompositeGuardrail.sequential(
       Seq(
-        new LengthCheck(1, 10),
-        new ProfanityFilter()
+        LengthCheck(1, 10),
+        ProfanityFilter()
       )
     )
     seq.name should include("LengthCheck")
@@ -374,8 +374,8 @@ class CompositeGuardrailSpec extends AnyFlatSpec with Matchers {
   "Sequential guardrail description" should "include child names" in {
     val seq = CompositeGuardrail.sequential(
       Seq(
-        new LengthCheck(1, 10),
-        new ProfanityFilter()
+        LengthCheck(1, 10),
+        ProfanityFilter()
       )
     )
     seq.description.get should include("Sequential")
@@ -415,13 +415,13 @@ class CompositeGuardrailSpec extends AnyFlatSpec with Matchers {
   "CompositeGuardrail" should "support nesting: all containing any" in {
     val inner = CompositeGuardrail.any(
       Seq(
-        new RegexValidator("^[0-9]+$".r),
-        new RegexValidator("^[a-z]+$".r)
+        RegexValidator("^[0-9]+$".r),
+        RegexValidator("^[a-z]+$".r)
       )
     )
     val outer = CompositeGuardrail.all(
       Seq(
-        new LengthCheck(1, 20),
+        LengthCheck(1, 20),
         inner
       )
     )

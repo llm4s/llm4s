@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.toolloop
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.graph.{ SchemaVersion, StateKey }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ AssistantMessage, ContentPart, Message, ToolMessage, UserMessage }
@@ -12,11 +12,11 @@ import upickle.default.ReadWriter
  * so operations can name the message they change, and are derived from the task that wrote the
  * message so a re-run produces the same ids.
  */
-@Stable
+@Experimental
 final case class StoredMessage(id: String, message: Message) derives ReadWriter
 
 /** An operation on the message history, applied to the committed value in commit order. */
-@Stable
+@Experimental
 enum MessageUpdate derives ReadWriter:
   case Append(message: StoredMessage)
   case Replace(id: String, message: StoredMessage)
@@ -37,7 +37,7 @@ enum MessageUpdate derives ReadWriter:
    */
   case EditToolCall(messageId: String, toolCallId: String, arguments: ujson.Value)
 
-@Stable
+@Experimental
 object Messages:
 
   /**

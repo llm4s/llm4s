@@ -486,7 +486,7 @@ val result = for {
 
 - **Starter Kit**: Use [llm4s.g8](https://github.com/llm4s/llm4s.g8) to scaffold projects
 - **Share Examples**: Post your projects in Discord
-- **Contribute**: See the [contributing guide](/reference/contributing)
+- **Contribute**: See the [contributing guide](/contribute/contributing)
 
 ---
 

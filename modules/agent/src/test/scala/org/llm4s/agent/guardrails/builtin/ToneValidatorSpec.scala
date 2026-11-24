@@ -194,7 +194,7 @@ class ToneValidatorSpec extends AnyFlatSpec with Matchers {
   it should "work inside CompositeGuardrail.all with other validators" in {
     val composite = CompositeGuardrail.all(
       Seq(
-        new LengthCheck(1, 200),
+        LengthCheck(1, 200),
         new ToneValidator(Set(Tone.Professional)),
       )
     )
@@ -205,7 +205,7 @@ class ToneValidatorSpec extends AnyFlatSpec with Matchers {
   it should "fail in CompositeGuardrail.all when tone is wrong" in {
     val composite = CompositeGuardrail.all(
       Seq(
-        new LengthCheck(1, 200),
+        LengthCheck(1, 200),
         new ToneValidator(Set(Tone.Professional)),
       )
     )
@@ -216,7 +216,7 @@ class ToneValidatorSpec extends AnyFlatSpec with Matchers {
   it should "work in CompositeGuardrail.sequential with other validators" in {
     val composite = CompositeGuardrail.sequential(
       Seq(
-        new LengthCheck(1, 200),
+        LengthCheck(1, 200),
         new ToneValidator(Set(Tone.Professional, Tone.Friendly)),
       )
     )

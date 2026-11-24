@@ -3,8 +3,9 @@ layout: page
 title: Your HTTP Client
 description: "Send the provider clients' requests through the sttp backend your service already has, and test a provider call against sttp's stub backend."
 search_title: "Use your own sttp backend as the LLM4S HTTP transport"
-parent: User Guide
-nav_order: 52
+parent: Core
+nav_order: 112
+grand_parent: User Guide
 ---
 
 # Your HTTP client

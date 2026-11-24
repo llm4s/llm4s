@@ -33,10 +33,10 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     before: Set[String] = Set.empty,
     contributes: Vector[AgentTool[?]] = Vector.empty
   ) extends AgentMiddleware:
-    val id: MiddlewareId                       = MiddlewareId(name)
-    override def runsAfter: Set[MiddlewareId]  = after.map(MiddlewareId(_))
-    override def runsBefore: Set[MiddlewareId] = before.map(MiddlewareId(_))
-    override def tools: Vector[AgentTool[?]]   = contributes
+    val id: MiddlewareId                        = MiddlewareId(name)
+    override def runsAfter: Set[MiddlewareRef]  = after.map(n => MiddlewareRef(MiddlewareId(n)))
+    override def runsBefore: Set[MiddlewareRef] = before.map(n => MiddlewareRef(MiddlewareId(n)))
+    override def tools: Vector[AgentTool[?]]    = contributes
     override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
       log.add(s"$name:beforeAgent")
       Right(BoundaryResult(s"$input>$name"))
@@ -97,6 +97,8 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     )
 
   private def stack(middleware: AgentMiddleware*): MiddlewareStack = MiddlewareStack.of(middleware*).value
+
+  private def named(name: String): AgentMiddleware = new AgentMiddleware { val id: MiddlewareId = MiddlewareId(name) }
 
   private def ids(s: MiddlewareStack): Vector[String] = s.ordered.map(_.id.value)
 
@@ -162,7 +164,100 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     )
   }
 
-  it should "report a tool one middleware contributes twice, listing each clashing owner once" in {
+  // ---- one way to name another middleware, by id or by type, required or optional (#2795, items 5 and 9) ----
+
+  /** A middleware of a type of its own, for constraints that name a type. */
+  final private class Guard(name: String = "guard") extends AgentMiddleware:
+    val id: MiddlewareId = MiddlewareId(name)
+
+  /** A middleware with the given constraints. */
+  private def constrained(
+    name: String,
+    before: Set[MiddlewareRef] = Set.empty,
+    after: Set[MiddlewareRef] = Set.empty
+  ): AgentMiddleware = new AgentMiddleware:
+    val id: MiddlewareId                        = MiddlewareId(name)
+    override def runsBefore: Set[MiddlewareRef] = before
+    override def runsAfter: Set[MiddlewareRef]  = after
+
+  it should "order by a constraint naming a type, whatever id the other was given" in {
+    val outside = constrained("memory", before = Set(MiddlewareRef.ofType[Guard]))
+    ids(stack(new Guard("renamed-guard"), outside)) shouldBe Vector("memory", "renamed-guard")
+
+    val inside = constrained("audit", after = Set(MiddlewareRef.ofType[Guard]))
+    ids(stack(inside, new Guard("renamed-guard"))) shouldBe Vector("renamed-guard", "audit")
+  }
+
+  it should "order against every middleware of a named type" in {
+    val outside = constrained("memory", before = Set(MiddlewareRef.ofType[Guard]))
+    ids(stack(new Guard("g1"), named("plain"), new Guard("g2"), outside)) shouldBe
+      Vector("plain", "memory", "g1", "g2")
+  }
+
+  it should "refuse a required constraint naming a type the stack has none of" in {
+    problems(
+      MiddlewareStack.of(constrained("memory", before = Set(MiddlewareRef.ofType[Guard])), named("plain"))
+    ) shouldBe
+      List("middleware 'memory': runsBefore names a middleware of type Guard, and the stack has none")
+    problems(MiddlewareStack.of(constrained("audit", after = Set(MiddlewareRef.ofType[Guard])))) shouldBe
+      List("middleware 'audit': runsAfter names a middleware of type Guard, and the stack has none")
+  }
+
+  it should "not count a middleware as the one of its own type it must be ordered against" in {
+    final class Solo extends AgentMiddleware:
+      val id: MiddlewareId                        = MiddlewareId("solo")
+      override def runsBefore: Set[MiddlewareRef] = Set(MiddlewareRef.ofType[Solo])
+    problems(MiddlewareStack.of(new Solo)) shouldBe
+      List("middleware 'solo': runsBefore names a middleware of type Solo, and the stack has none")
+  }
+
+  it should "apply an optional constraint when the other is present" in {
+    val byType = constrained("memory", before = Set(MiddlewareRef.ofType[Guard].ifPresent))
+    ids(stack(new Guard, byType)) shouldBe Vector("memory", "guard")
+
+    val byId = constrained("memory", before = Set(MiddlewareRef(MiddlewareId("guard")).ifPresent))
+    ids(stack(named("guard"), byId)) shouldBe Vector("memory", "guard")
+
+    val after = constrained("audit", after = Set(MiddlewareRef(MiddlewareId("guard")).ifPresent))
+    ids(stack(after, named("guard"))) shouldBe Vector("guard", "audit")
+  }
+
+  it should "accept an optional constraint when the other is absent, where a required one is refused" in {
+    val optional = constrained(
+      "memory",
+      before = Set(MiddlewareRef.ofType[Guard].ifPresent, MiddlewareRef(MiddlewareId("guardrails")).ifPresent),
+      after = Set(MiddlewareRef(MiddlewareId("tracing")).ifPresent)
+    )
+    ids(stack(named("plain"), optional)) shouldBe Vector("plain", "memory")
+
+    problems(
+      MiddlewareStack.of(constrained("memory", before = Set(MiddlewareRef(MiddlewareId("guardrails")))))
+    ) shouldBe
+      List("middleware 'memory': runsBefore names unknown middleware 'guardrails'")
+  }
+
+  it should "still report a cycle made by optional constraints" in {
+    problems(
+      MiddlewareStack.of(
+        constrained("a", before = Set(MiddlewareRef(MiddlewareId("b")).ifPresent)),
+        constrained("b", before = Set(MiddlewareRef(MiddlewareId("a")).ifPresent))
+      )
+    ) shouldBe List("middleware cycle: a -> b -> a")
+  }
+
+  "MiddlewareRef" should "say whether it is optional, and describe what it names" in {
+    val byId = MiddlewareRef(MiddlewareId("guardrails"))
+    byId.optional shouldBe false
+    byId.ifPresent.optional shouldBe true
+    byId.ifPresent.ifPresent shouldBe byId.ifPresent
+    byId should not be byId.ifPresent
+    byId.toString shouldBe "MiddlewareRef('guardrails')"
+    byId.ifPresent.toString shouldBe "MiddlewareRef('guardrails', if present)"
+    MiddlewareRef.ofType[Guard].toString shouldBe "MiddlewareRef(type Guard)"
+    MiddlewareRef.ofType[Guard] shouldBe MiddlewareRef.ofType[Guard]
+  }
+
+  "MiddlewareStack.of" should "report a tool one middleware contributes twice, listing each clashing owner once" in {
     val log = newLog
     problems(
       MiddlewareStack.of(
@@ -509,8 +604,8 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     upickle.default.read[MiddlewareId]("\"approval\"") shouldBe MiddlewareId("approval")
   }
 
-  "BoundaryResult" should "replace its update with withUpdate and keep its text" in {
-    val result = BoundaryResult("text").withText("changed").withUpdate(StateUpdate.empty)
+  "BoundaryResult" should "change its text and keep its update" in {
+    val result = BoundaryResult("text").withText("changed")
     result.text shouldBe "changed"
     result.update shouldBe StateUpdate.empty
   }

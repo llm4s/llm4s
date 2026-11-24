@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
 
 import scala.concurrent.duration.FiniteDuration
@@ -10,9 +10,10 @@ import scala.concurrent.duration.FiniteDuration
  * [[org.llm4s.error.NonRecoverableError NonRecoverableError]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
  * continues that run - and [[GraphError.ThreadBusy]], which a retry may get past once the thread is free.
  */
-@Stable
+@Experimental
 sealed trait GraphError extends LLMError
 
+@Experimental
 object GraphError:
 
   /** The builder found one or more structural problems; every problem is listed. */
@@ -63,8 +64,10 @@ object GraphError:
       new ToolFailed(tool, toolCallId, cause)
 
   /**
-   * A middleware hook threw: the run fails, the checkpoint stays `Running`, and `recover` re-runs
-   * only that task. `middleware` is the middleware's id.
+   * A middleware hook threw; `middleware` is the middleware's id. It is that hook's failure, and does what any
+   * failure of the hook does (#2795): from `promptSections`, `wrapModelCall` or `wrapToolCall` the run fails, the
+   * checkpoint stays `Running`, and `recover` re-runs only that task; from `beforeAgent` or `afterAgent` the turn is
+   * blocked, the thread stays usable and there is nothing to recover.
    */
   final case class MiddlewareFailed(middleware: String, cause: Throwable) extends GraphError with NonRecoverableError:
     override val message: String = s"Middleware '$middleware' failed: ${describe(cause)}"

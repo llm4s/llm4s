@@ -2,7 +2,7 @@ package org.llm4s.agent.delegation
 
 import org.llm4s.agent.{ AgentId, AgentStatus }
 import org.llm4s.agent.graph.{ RunId, ThreadId, ToolCallId }
-import org.llm4s.annotation.{ Experimental, Stable }
+import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.model.UsageSummary
 import upickle.default.ReadWriter
 
@@ -37,7 +37,7 @@ enum ChildFailure:
  * id, the parent's tool call that started it, and its depth - 1 for a child of a top-level thread. A child run with no
  * parent ([[BoundAgent.run]]) has depth 0 and no `toolCallId`.
  */
-@Stable
+@Experimental
 final case class ChildRef private (
   threadId: ThreadId,
   runId: RunId,
@@ -52,7 +52,7 @@ final case class ChildRef private (
   def withToolCallId(value: Option[ToolCallId]): ChildRef = copy(toolCallId = value)
   def withDepth(value: Int): ChildRef                     = copy(depth = value)
 
-@Stable
+@Experimental
 object ChildRef:
 
   def apply(threadId: ThreadId, runId: RunId, agent: AgentId, toolCallId: Option[ToolCallId], depth: Int): ChildRef =

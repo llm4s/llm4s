@@ -4,7 +4,7 @@ title: Error Recovery
 description: "Recover from LLM failures with LLM4S: ReliableClient retries, circuit breaker and deadline, falling back between providers, and recovering agent runs."
 search_title: "LLM error recovery: retries, fallback, circuit breaker"
 parent: Real-World Application Patterns
-grand_parent: User Guide
+grand_parent: Operations
 nav_order: 5
 ---
 

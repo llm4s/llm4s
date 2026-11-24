@@ -3,7 +3,6 @@ package org.llm4s.samples.guides
 import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
 import org.llm4s.agent.events.AgentEvents
 import org.llm4s.agent.graph.ThreadId
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin.{ LengthCheck, ProfanityFilter }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
@@ -90,7 +89,7 @@ class ScalaAiPagesSpec extends AnyFlatSpec with Matchers with EitherValues {
       .builder("weather", client)
       .withSystemPrompt("You answer questions about the weather.")
       .withTools(registry)
-      .withMiddleware(new GuardrailMiddleware(input = Seq(new LengthCheck(1, 2000), new ProfanityFilter()), Nil))
+      .withInputGuardrails(LengthCheck(1, 2000), ProfanityFilter())
       .withStreaming()
       .build()
     run <- agent.stream(ThreadId("weather-1"), question) {

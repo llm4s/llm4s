@@ -3,8 +3,9 @@ layout: page
 title: Jupyter Notebooks
 description: "Run LLM4S in Jupyter with the Almond Scala kernel: two offline notebooks, configuration inside a notebook, and known limits."
 search_title: "Run LLM4S in Jupyter notebooks with the Almond Scala kernel"
-parent: User Guide
-nav_order: 57
+parent: Frameworks and Runtimes
+nav_order: 506
+grand_parent: User Guide
 ---
 
 # Jupyter Notebooks

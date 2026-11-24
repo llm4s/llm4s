@@ -2,8 +2,12 @@
 layout: page
 title: Contributor Testing Guide
 description: "How contributors write, run and reason about tests in LLM4S: unit, integration and end-to-end tests, directory structure and effective test design."
-nav_order: 8
-parent: Reference
+nav_order: 3
+parent: Contribute
+permalink: /contribute/testing-guide
+redirect_from:
+  - /reference/testing-guide
+  - /reference/testing-guide.html
 ---
 
 # Contributor Testing Guide

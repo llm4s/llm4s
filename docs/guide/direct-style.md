@@ -1,10 +1,11 @@
 ---
 layout: page
 title: Direct Style and Ox
-parent: User Guide
+parent: Frameworks and Runtimes
 description: "Use LLM4S in direct style on JDK 21 virtual threads: plain Result code, and llm4s-ox for streamed completions as an Ox Flow, bounded fan-out, races, timeouts and retries."
 search_title: "LLM4S in direct style: Ox, virtual threads, Flow streaming"
-nav_order: 47
+nav_order: 505
+grand_parent: User Guide
 ---
 
 # Direct Style and Ox

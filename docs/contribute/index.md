@@ -52,11 +52,27 @@ Find issues that match your interests:
 1. **Find an issue** — Use the links above to find something interesting
 2. **Comment on the issue** — Let maintainers know you'd like to work on it
 3. **Fork and branch** — Create a feature branch from `main`
-4. **Follow the guidelines** — See the [Contributing Guide](../reference/contributing) for coding standards
+4. **Follow the guidelines** — See the [Contributing Guide](contributing) for coding standards
 5. **Submit a PR** — Reference the issue number in your PR description
 
 Looking for a first task? Convert one documentation page to [checked code blocks](doc-snippets-plan): each is a
 small pull request that fixes real documentation bugs.
+
+---
+
+## Contributor Guides
+
+- **[Contributing Guide](contributing)** - How to submit your first PR (read this first)
+- **[Code Review Guidelines](review-guidelines)** - Coding standards and patterns expected in PRs
+- **[Contributor Testing Guide](testing-guide)** - How to write and run tests in this repository
+- **[Test Coverage](test-coverage)** - Coverage tooling and thresholds
+- **[Protecting main (merge queue)](merge-queue)** - Why two green PRs can break `main` together, and how maintainers enable the merge queue that prevents it
+- **[Release Process](release)** - How releases are cut, and the checklist for each
+- **[Verifying Releases](verifying-releases)** - Checking a jar's PGP signature and the build provenance of the jars, SBOMs and container image
+- **[Checked Code Blocks](doc-snippets-plan)** - Which documentation pages have compiled code blocks, and how to convert one
+
+The source of these pages is still under `docs/reference/` in the repository (scripts and workflows name those
+paths); the site serves them under `/contribute/`, and the old `/reference/` addresses redirect.
 
 ---
 

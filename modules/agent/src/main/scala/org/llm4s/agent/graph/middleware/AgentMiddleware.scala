@@ -10,14 +10,15 @@ import org.llm4s.agent.graph.tool.{
   ToolResource,
   ToolSet
 }
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError }
-import org.llm4s.llmconnect.model.{ Completion, Message, ToolCall }
+import org.llm4s.llmconnect.model.{ Completion, Message, SystemMessage, ToolCall }
 import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
 import scala.annotation.unused
+import scala.reflect.ClassTag
 import scala.util.Try
 
 /**
@@ -26,10 +27,34 @@ import scala.util.Try
  */
 opaque type MiddlewareId = String
 
-@Stable
+@Experimental
 object MiddlewareId:
   def apply(value: String): MiddlewareId         = value
   extension (id: MiddlewareId) def value: String = id
+
+  /** The id of the middleware that runs `AgentBuilder.withInputGuardrails` and `withOutputGuardrails`. */
+  val AgentGuardrails: MiddlewareId = "agent-guardrails"
+
+  /** The id of the middleware that offers an agent's subagents (`AgentBuilder.withSubagents`, a harness's). */
+  val Delegation: MiddlewareId = "delegation"
+
+  /** The id of the middleware that applies a subagent's ancestors' permission rules. */
+  val AncestorPermissions: MiddlewareId = "ancestor-permissions"
+
+  /** The id the response format's prompt section is listed under (`AgentBuilder.withOutput`). */
+  val ResponseFormat: MiddlewareId = "response-format"
+
+  /**
+   * The ids the agent uses itself, each with what it is reserved for (#2795): a middleware given to
+   * `AgentBuilder.withMiddleware` with one of them is refused by `build()`, whether or not the agent installs its own
+   * under that id. A constraint may name one (`MiddlewareRef(MiddlewareId.Delegation)`).
+   */
+  val reserved: Map[MiddlewareId, String] = Map(
+    AgentGuardrails     -> "the guardrails given to AgentBuilder.withInputGuardrails and withOutputGuardrails",
+    Delegation          -> "the middleware that offers an agent's subagents",
+    AncestorPermissions -> "the middleware that applies a subagent's ancestors' permission rules",
+    ResponseFormat      -> "the response format's prompt section (AgentBuilder.withOutput)"
+  )
 
   /**
    * Encodes as a plain JSON string. Built from upickle's string codecs: inside this scope a
@@ -38,27 +63,101 @@ object MiddlewareId:
   given ReadWriter[MiddlewareId] = ReadWriter.join(upickle.default.StringReader, upickle.default.StringWriter)
 
 /**
- * One model call as a model wrapper sees it: the conversation so far and the tools offered. A
- * wrapper that rewrites the request builds the next one with `withMessages` or `withTools`.
+ * Names the middleware an ordering constraint is about ([[AgentMiddleware.runsBefore]], [[AgentMiddleware.runsAfter]]):
+ * the one with an id, `MiddlewareRef(id)`, or every middleware of a type, `MiddlewareRef.ofType[GuardrailMiddleware]`
+ * (#2795). Name another middleware by its type when you can: its id is its user's to choose.
+ *
+ * A reference is required unless it is made optional with [[ifPresent]]: a required one that matches nothing in the
+ * stack is refused, so a mistyped id cannot silently leave an order unarranged; an optional one applies when the
+ * other is there and is ignored when it is not, which is how a reusable middleware says "outside the guardrails, if
+ * there are any".
  */
-@Stable
-final case class ModelRequest private (messages: Vector[Message], tools: ToolSet):
+@Experimental
+final case class MiddlewareRef private (
+  private[middleware] val target: Either[MiddlewareId, Class[?]],
+  optional: Boolean
+):
+
+  /** This reference, applied only when the stack has the middleware it names; no error when it has none. */
+  def ifPresent: MiddlewareRef = copy(optional = true)
+
+  /** Whether `middleware` is one this reference names. */
+  private[middleware] def matches(middleware: AgentMiddleware): Boolean =
+    target.fold(_ == middleware.id, _.isInstance(middleware))
+
+  /** Whether it names a type: a middleware is never ordered against itself by its own type. */
+  private[middleware] def byType: Boolean = target.isRight
+
+  /** What a required reference that matched nothing is reported as. */
+  private[middleware] def missing: String = target.fold(
+    id => s"unknown middleware '${id.value}'",
+    kind => s"a middleware of type ${kind.getSimpleName}, and the stack has none"
+  )
+
+  override def toString: String =
+    val named = target.fold(id => s"'${id.value}'", kind => s"type ${kind.getSimpleName}")
+    if optional then s"MiddlewareRef($named, if present)" else s"MiddlewareRef($named)"
+
+@Experimental
+object MiddlewareRef:
+
+  /** The middleware whose id is `id`. */
+  def apply(id: MiddlewareId): MiddlewareRef = new MiddlewareRef(Left(id), optional = false)
+
+  /** Every middleware of type `M` in the stack - a subclass too - whatever id each was given. */
+  def ofType[M <: AgentMiddleware](using tag: ClassTag[M]): MiddlewareRef =
+    new MiddlewareRef(Right(tag.runtimeClass), optional = false)
+
+/**
+ * One model call as a model wrapper sees it: the system prompt, the conversation so far and the tools offered. A
+ * wrapper that rewrites the request builds the next one with `withMessages`, `withTools` or `withSystemPrompt`.
+ *
+ * The system prompt is a field of its own (#2795), never one of `messages`, so a wrapper that prunes, summarises or
+ * replaces the messages cannot drop it by accident. It is the prompt as assembled for this request: the agent's,
+ * then every middleware's prompt sections, and the response format's. [[sentMessages]] is what the model receives.
+ *
+ * @param messages the history being sent, without the system prompt; never stored from here
+ * @param tools the tools offered
+ * @param systemPrompt the assembled system prompt; `None` when the agent has none and no section was added
+ */
+@Experimental
+final case class ModelRequest private (messages: Vector[Message], tools: ToolSet, systemPrompt: Option[String]):
   def withMessages(m: Vector[Message]): ModelRequest = copy(messages = m)
   def withTools(t: ToolSet): ModelRequest            = copy(tools = t)
 
+  /** This request with `prompt` as its system prompt. */
+  def withSystemPrompt(prompt: String): ModelRequest = copy(systemPrompt = Some(prompt))
+
+  /** This request with `prompt` as its system prompt, or none. */
+  def withSystemPrompt(prompt: Option[String]): ModelRequest = copy(systemPrompt = prompt)
+
+  /**
+   * What the model is sent: the system prompt as a `SystemMessage` first, then `messages`. A blank prompt sends no
+   * system message.
+   */
+  def sentMessages: Vector[Message] = systemPrompt.filter(_.trim.nonEmpty).map(SystemMessage(_)).toVector ++ messages
+
+@Experimental
 object ModelRequest:
-  def apply(messages: Vector[Message], tools: ToolSet = ToolSet.empty): ModelRequest =
-    new ModelRequest(messages, tools)
+  def apply(
+    messages: Vector[Message],
+    tools: ToolSet = ToolSet.empty,
+    systemPrompt: Option[String] = None
+  ): ModelRequest =
+    new ModelRequest(messages, tools, systemPrompt)
 
 /**
  * What a model wrapper returns: the model's `completion`, and an `update` to keys the wrapper declares in its
  * `writes`, committed with the model step's task. A wrapper adds its writes with [[addUpdate]], which keeps those of
  * the wrappers inside it - the combined update applies innermost first - and changes the completion with
  * [[withCompletion]], which keeps the update. A wrapper that answers without calling `next` builds its own with
- * `ModelResponse(completion)`. Only the response a wrapper returns counts: the updates of a response it discarded,
- * calling `next` again, are never committed.
+ * `ModelResponse(completion)` or `ModelResponse(completion, update)`. Only the response a wrapper returns counts: the
+ * updates of a response it discarded, calling `next` again, are never committed.
+ *
+ * Every hook returns its update the same way (#2795): built with the result, read with `update`, added to with
+ * `addUpdate` - here, on [[BoundaryResult]] and on a tool wrapper's `ToolOutcome`. Nothing replaces an update.
  */
-@Stable
+@Experimental
 final class ModelResponse private (
   val completion: Completion,
   private[graph] val parts: Vector[(Option[MiddlewareId], StateUpdate)]
@@ -80,27 +179,28 @@ final class ModelResponse private (
 
   override def toString: String = s"ModelResponse($completion, $update)"
 
-@Stable
+@Experimental
 object ModelResponse:
-  /** `completion` with no update. */
-  def apply(completion: Completion): ModelResponse = new ModelResponse(completion, Vector.empty)
+  /** `completion` with `update`, which belongs to the wrapper that returns the response; none by default. */
+  def apply(completion: Completion, update: StateUpdate = StateUpdate.empty): ModelResponse =
+    new ModelResponse(completion, Vector.empty).addUpdate(update)
 
 /**
  * What `beforeAgent` and `afterAgent` return: the `text` - the run's input, or its final answer - possibly changed,
  * and an `update` to keys the middleware declares in its `writes`. `beforeAgent`'s commits with the turn's input,
- * so the turn's first model call sees it; `afterAgent`'s with the turn's final answer.
+ * so the turn's first model call sees it; `afterAgent`'s with the turn's final answer. Built with its update,
+ * `BoundaryResult(text, update)`, and added to with [[addUpdate]], as every hook's result is.
  */
-@Stable
+@Experimental
 final case class BoundaryResult private (text: String, update: StateUpdate):
-  def withText(t: String): BoundaryResult = BoundaryResult(t, update)
 
-  /** This result with `u` in place of its update; [[addUpdate]] combines instead. */
-  def withUpdate(u: StateUpdate): BoundaryResult = BoundaryResult(text, u)
+  /** This result with `t` as its text, keeping its update. */
+  def withText(t: String): BoundaryResult = BoundaryResult(t, update)
 
   /** This result with `u` applied after its update. */
   def addUpdate(u: StateUpdate): BoundaryResult = BoundaryResult(text, update.combine(u))
 
-@Stable
+@Experimental
 object BoundaryResult:
   def apply(text: String, update: StateUpdate = StateUpdate.empty): BoundaryResult = new BoundaryResult(text, update)
 
@@ -109,13 +209,13 @@ object BoundaryResult:
  * `id` is unique within one request; `cacheable` content is placed before the rest, so a provider's prompt cache
  * sees a stable prefix.
  */
-@Stable
+@Experimental
 final case class PromptSection private (id: String, text: String, cacheable: Boolean):
   def withId(i: String): PromptSection         = PromptSection(i, text, cacheable)
   def withText(t: String): PromptSection       = PromptSection(id, t, cacheable)
   def withCacheable(c: Boolean): PromptSection = PromptSection(id, text, c)
 
-@Stable
+@Experimental
 object PromptSection:
   def apply(id: String, text: String, cacheable: Boolean = false): PromptSection =
     new PromptSection(id, text, cacheable)
@@ -124,18 +224,20 @@ object PromptSection:
    * The tokens `chars` characters of section text are estimated at - one per four, rounded up - the estimate the
    * agent bounds its sections by (`maxPromptSectionTokens`), and a middleware bounds its own section by.
    */
-  private[agent] def estimatedTokens(chars: Long): Long = (chars + 3) / 4
+  def estimatedTokens(chars: Long): Long = (chars + 3) / 4
 
-  /** The most characters a section of `tokens` estimated tokens holds. */
-  private[agent] def charsFor(tokens: Int): Long = tokens.toLong * 4
+  /** The most characters a section of `tokens` estimated tokens holds: cut a section's text to this to bound it. */
+  def charsFor(tokens: Int): Long = tokens.toLong * 4
 
 /**
  * One tool call as a tool wrapper sees it, after its arguments were validated and decoded. It is
- * read-only: a wrapper cannot change a call's arguments. `resources` are what the call touches, from
- * its decoded arguments and its tool's `AgentToolSpec.withResources`; never empty, since a call that
- * declares none touches its tool's `defaultResource`.
+ * read-only: a wrapper cannot change a call's tool, arguments or resources, so it has no setters and `wrapToolCall`'s
+ * `next` takes no request (#2795) - the arguments a tool runs with are the ones that were validated, and the
+ * resources a permission was decided on are the ones the call touches. A test builds one with
+ * `ToolCallRequest(spec, call)`. `resources` are what the call touches, from its decoded arguments and its tool's
+ * `AgentToolSpec.withResources`; never empty, since a call that declares none touches its tool's `defaultResource`.
  */
-@Stable
+@Experimental
 final case class ToolCallRequest private (spec: AgentToolSpec[?], call: ToolCall, resources: Vector[ToolResource]):
 
   /** The call's id, typed; core's `ToolCall` keeps a string. */
@@ -144,11 +246,7 @@ final case class ToolCallRequest private (spec: AgentToolSpec[?], call: ToolCall
   /** The called tool's name, typed. */
   def toolName: ToolName = ToolName(call.name)
 
-  def withSpec(s: AgentToolSpec[?]): ToolCallRequest = copy(spec = s)
-  def withCall(c: ToolCall): ToolCallRequest         = copy(call = c)
-  def withResources(r: Vector[ToolResource]): ToolCallRequest =
-    copy(resources = ToolCallRequest.orDefault(spec, r))
-
+@Experimental
 object ToolCallRequest:
 
   /** A request whose call touches `resources`, or the tool's `defaultResource` when that is empty. */
@@ -163,10 +261,22 @@ object ToolCallRequest:
  * run, its model calls and its tool calls. Every hook passes through by default; override only
  * those the concern needs.
  *
- * Middleware run as a [[org.llm4s.agent.graph.middleware.MiddlewareStack MiddlewareStack]], ordered by registration and by [[runsBefore]] and
+ * Middleware run as a stack, ordered by registration and by [[runsBefore]] and
  * [[runsAfter]]: the first in stack order is the outermost wrapper and runs `beforeAgent` first;
- * unwinding, and `afterAgent`, run in reverse. A hook that throws fails the run with
- * `GraphError.MiddlewareFailed`; a thrown cancellation cancels it.
+ * unwinding, and `afterAgent`, run in reverse.
+ *
+ * Failure follows one model for every hook (#2795). A hook fails by value: a `Left` from a hook that returns
+ * `Result`, a `ToolOutcome.Fatal` from `wrapToolCall`, which returns what a tool returns. A hook that throws has
+ * failed with that value holding `GraphError.MiddlewareFailed`, which names the middleware; a thrown cancellation
+ * cancels the run. What a failure does depends on where the hook runs:
+ *
+ *   - at a turn's boundary (`beforeAgent`, `afterAgent`) it blocks the turn: nothing of the turn is kept, the
+ *     thread stays usable, there is nothing to recover, and `agent.run` returns the error as its `Left` - or, for a
+ *     [[block]], ends the turn `AgentStatus.Blocked`;
+ *   - inside a step (`promptSections`, `wrapModelCall`, `wrapToolCall`) it fails the run: the thread keeps its
+ *     last checkpoint, and `recover` runs the step again.
+ *
+ * `ToolOutcome.Error` is not a failure: it is a tool call's result, which the model reads.
  *
  * `wrapToolCall` runs concurrently for the calls of one batch (up to `RunBudgets.maxConcurrency`),
  * on task threads, so a middleware's own state must be thread-safe.
@@ -179,24 +289,28 @@ object ToolCallRequest:
  * A middleware that asks typed questions - for review, an edit, or missing information - extends
  * [[org.llm4s.agent.graph.middleware.AgentMiddleware.Asking AgentMiddleware.Asking]].
  */
-@Stable
+@Experimental
 trait AgentMiddleware:
 
   /** This middleware's identifier, unique in its stack; must match `[a-zA-Z0-9_-]{1,64}`. */
   def id: MiddlewareId
 
-  /** Middleware this one must run outside of (wrap); each must be registered in the same stack. */
-  def runsBefore: Set[MiddlewareId] = Set.empty
+  /**
+   * Middleware this one must run outside of (wrap): the stack is arranged so. Each is named by id or by type
+   * ([[MiddlewareRef]]) and must be in the same stack, unless the reference is optional (`ifPresent`).
+   */
+  def runsBefore: Set[MiddlewareRef] = Set.empty
 
-  /** Middleware this one must run inside of (be wrapped by); each must be registered in the same stack. */
-  def runsAfter: Set[MiddlewareId] = Set.empty
+  /** Middleware this one must run inside of (be wrapped by), named and arranged as [[runsBefore]]'s are. */
+  def runsAfter: Set[MiddlewareRef] = Set.empty
 
   /**
    * Where this middleware must run relative to `other`, when both are present; `None`, the default, when it does not
-   * matter. A requirement is checked, never arranged: [[org.llm4s.agent.graph.middleware.MiddlewareStack.of MiddlewareStack.of]] - so `AgentBuilder.build()` - refuses a
+   * matter. A requirement is checked, never arranged: `AgentBuilder.build()` refuses a
    * stack in which this middleware does not run outside `other`, and a [[org.llm4s.agent.graph.middleware.Placement.OutsideAtBoundary Placement.OutsideAtBoundary]] is checked
-   * across an agent family too. Register the two in the right order, or name `other` in [[runsBefore]]. Name `other`
-   * by its type: ids are configurable.
+   * across an agent family too, which [[runsBefore]] cannot arrange. Register the two in the right order, or name
+   * `other` in [[runsBefore]]. `other` is the middleware itself, so match it by its type, as a [[MiddlewareRef]]
+   * names one, or by `other.id`.
    */
   def placement(@unused other: AgentMiddleware): Option[Placement] = None
 
@@ -209,16 +323,32 @@ trait AgentMiddleware:
   /** Tools this middleware contributes; they join the loop's tool set and are validated like any other. */
   def tools: Vector[AgentTool[?]] = Vector.empty
 
+  /**
+   * Ends the turn as blocked by this middleware: return it from `beforeAgent` or `afterAgent`. The turn ends
+   * `AgentStatus.Blocked(id, reason)` - an outcome of `agent.run`, not its `Left` - exactly as a guardrail's block
+   * does with the guardrail's name: an input block stores nothing of the turn, an output block removes it, the
+   * thread stays usable, and a durable `GuardrailBlocked` event names this middleware and never the reason. Any other
+   * `Left` from a boundary hook blocks the turn too, but reaches the caller as the `Left` of `agent.run`.
+   *
+   * It blocks only at a boundary: returned from `promptSections` or `wrapModelCall` it is a failure of the run like
+   * any other `Left`.
+   */
+  final protected def block(reason: String): Result[Nothing] = Left(GuardrailBlocked(id.value, reason))
+
   /** The codecs of the question this middleware asks and the answer it takes; only [[org.llm4s.agent.graph.middleware.AgentMiddleware.Asking AgentMiddleware.Asking]] declares one. */
   private[graph] def declaredQuestion: Option[ToolQuestion[?, ?]] = None
 
   /**
    * Sees the run's input before anything else runs: returns it, possibly changed, with an update to this
-   * middleware's `writes` that the turn's first model call sees, or `Left` to block the run.
+   * middleware's `writes` that the turn's first model call sees. A `Left` blocks the turn; [[block]] blocks it as an
+   * outcome, `AgentStatus.Blocked`.
    */
   def beforeAgent(input: String, @unused context: ModelContext): Result[BoundaryResult] = Right(BoundaryResult(input))
 
-  /** Sees the run's final answer: returns it, possibly changed, with an update to this middleware's `writes`, or `Left` to block the run. */
+  /**
+   * Sees the run's final answer: returns it, possibly changed, with an update to this middleware's `writes`. A `Left`
+   * blocks the turn, removing it; [[block]] blocks it as an outcome, `AgentStatus.Blocked`.
+   */
   def afterAgent(answer: String, @unused context: ModelContext): Result[BoundaryResult] = Right(BoundaryResult(answer))
 
   /**
@@ -245,8 +375,10 @@ trait AgentMiddleware:
   /**
    * Wraps one tool call, after its arguments were validated. A wrapper denies with
    * `ToolOutcome.Error("Denied: ...")`, asks for approval with `NeedsApproval(reason)` (unless
-   * `context.approved`), fails the run with `Fatal`, and short-circuits by not calling `next`. It
-   * may call `next` more than once (retry) and transform the outcome `next` returns.
+   * `context.approved`), fails the run with `Fatal` - its `Left`: the run fails with `GraphError.ToolFailed` - and
+   * short-circuits by not calling `next`. It may call `next` more than once (retry) and transform the outcome `next`
+   * returns, adding an update to its `writes` with `ToolOutcome.addUpdate`. `next` takes no request: the call is
+   * read-only.
    */
   def wrapToolCall(@unused request: ToolCallRequest, @unused context: ToolContext)(
     next: () => ToolOutcome
@@ -256,7 +388,7 @@ trait AgentMiddleware:
  * Where a middleware must run relative to another ([[org.llm4s.agent.graph.middleware.AgentMiddleware.placement AgentMiddleware.placement]]): a position its correctness depends
  * on, which the stack checks rather than leaving to the documentation.
  */
-@Stable
+@Experimental
 enum Placement:
 
   /** Why the placement is required, for the refusal. */
@@ -272,6 +404,7 @@ enum Placement:
    */
   case OutsideAtBoundary(reason: String)
 
+@Experimental
 object AgentMiddleware:
 
   /**

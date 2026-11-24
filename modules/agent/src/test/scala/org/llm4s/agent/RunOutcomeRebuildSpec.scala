@@ -72,7 +72,7 @@ class RunOutcomeRebuildSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "rebuild Blocked with the guardrail's name and reason" in {
     val builder = Agent
       .builder("assistant", ScriptedLLMClient.of(CompletionFixture.simple("never")))
-      .withMiddleware(new GuardrailMiddleware(input = Seq(new LengthCheck(1, 3)), output = Nil))
+      .withMiddleware(new GuardrailMiddleware(input = Seq(LengthCheck(1, 3)), output = Nil))
     val (live, rebuilt, outcome) = liveAndRebuilt(builder, "far too long")
     outcome.get shouldBe a[RunOutcome.Blocked]
     live.value shouldBe a[AgentStatus.Blocked]

@@ -1,6 +1,6 @@
 package org.llm4s.error
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.types.{ SessionId, FilePath }
 
 /**
@@ -17,9 +17,10 @@ import org.llm4s.types.{ SessionId, FilePath }
  * compatibility. Each case's `unapply` is explicit, with a fixed arity: `message`, then the fields in
  * constructor order.
  */
-@Stable
+@Experimental
 sealed abstract class AssistantError extends LLMError with NonRecoverableError
 
+@Experimental
 object AssistantError {
 
   // Console errors

@@ -25,8 +25,9 @@ Define the nodes, routes and joins of a workflow yourself and run it on durable 
 ## Overview
 
 The graph runtime in `org.llm4s.agent.graph` is what every `Agent` runs on, and you can build graphs on it directly
-with `GraphBuilder`. Each type's stability tier is its `@Stable` or `@Experimental` annotation
-([API stability](../../reference/api-stability)).
+with `GraphBuilder`.
+
+> **Experimental at 1.0.** The graph API on this page (`GraphBuilder`, `CompiledGraph`, `GraphRuntime`, state keys, nodes, routing and interrupts) is `@Experimental`: usable, but outside the 1.x compatibility promise, so it can change in a minor release, with a migration note. The run ids, `RunConfig` and its settings are part of the stable core of `llm4s-agent`, which is listed in [API Stability](../../reference/api-stability#tiers-in-the-code).
 
 Use a graph when the shape of the work is known in advance:
 

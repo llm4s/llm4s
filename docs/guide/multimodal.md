@@ -3,8 +3,9 @@ layout: page
 title: Multimodal content
 description: "Send images and documents to a model in a user message or tool result with LLM4S, and check provider support before the request goes out."
 search_title: "Send images and documents to LLMs in Scala"
-parent: User Guide
-nav_order: 30
+parent: Core
+nav_order: 108
+grand_parent: User Guide
 ---
 
 # Multimodal content: images and documents

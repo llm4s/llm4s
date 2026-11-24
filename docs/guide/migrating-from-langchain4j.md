@@ -3,8 +3,9 @@ layout: page
 title: Coming from LangChain4j or Spring AI
 description: "Move from LangChain4j or Spring AI to LLM4S: concepts side by side, with working code for model calls, typed output, tools, memory and RAG."
 search_title: "Migrate from LangChain4j or Spring AI to LLM4S"
-parent: User Guide
-nav_order: 27
+parent: Coming from Another Library
+nav_order: 602
+grand_parent: User Guide
 ---
 
 # Coming from LangChain4j or Spring AI
@@ -107,7 +108,7 @@ ActorFilms actorFilms = chatClient.prompt()
 ```
 
 *(From the [Spring AI `ChatClient` page](https://docs.spring.io/spring-ai/reference/api/chatclient.html), Spring AI
-2.0.1, fetched 2026-10-11.)* In LLM4S you describe the shape once as a schema and pass it:
+2.1.0, fetched 2026-11-24.)* In LLM4S you describe the shape once as a schema and pass it:
 
 ```scala
 case class Person(name: String, age: Int)
@@ -245,10 +246,10 @@ library ([guardrails](agents/guardrails)), and cats-effect and ZIO modules ([cat
 
 ## Sources
 
-All fetched on 2026-10-11, against LangChain4j 1.22.0 and Spring AI 2.0.1.
+All fetched on 2026-11-24, against LangChain4j 1.24.0 and Spring AI 2.1.0.
 
 | Tag | Page | Fact used |
 |---|---|---|
 | L1 | [LangChain4j: AI Services](https://docs.langchain4j.dev/tutorials/ai-services) | AI Services; return-type structured output; tools; chat memory, shared or per user; `ContentRetriever` for RAG |
 | L7 | [LangChain4j: structured outputs](https://docs.langchain4j.dev/tutorials/structured-outputs) | POJOs and records as return types |
-| S6 | [Spring AI: ChatClient](https://docs.spring.io/spring-ai/reference/api/chatclient.html) | The fluent API; the `entity()` example quoted above; `ChatMemory` |
+| S6 | [Spring AI: ChatClient](https://docs.spring.io/spring-ai/reference/api/chatclient.html) | The fluent API; the `entity()` example quoted above; `ChatMemory`, which the page marks deprecated since 2.1.0, for removal in 3.0.0, in favour of session memory |
