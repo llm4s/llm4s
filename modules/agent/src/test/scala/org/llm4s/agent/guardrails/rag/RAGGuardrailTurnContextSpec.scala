@@ -209,14 +209,14 @@ class RAGGuardrailTurnContextSpec extends AnyFlatSpec with Matchers {
       AssistantMessage(
         None,
         Seq(
-          ToolCall("c1", "search", ujson.Obj()),
-          ToolCall("c2", "calculator", ujson.Obj()),
-          ToolCall("c3", "lookup", ujson.Obj())
+          ToolCall(ToolCallId("c1"), "search", ujson.Obj()),
+          ToolCall(ToolCallId("c2"), "calculator", ujson.Obj()),
+          ToolCall(ToolCallId("c3"), "lookup", ujson.Obj())
         )
       ),
-      ToolMessage("first", "c1"),
-      ToolMessage("42", "c2"),
-      ToolMessage("second", "c3"),
+      ToolMessage("first", ToolCallId("c1")),
+      ToolMessage("42", ToolCallId("c2")),
+      ToolMessage("second", ToolCallId("c3")),
       AssistantMessage("answer")
     )
 

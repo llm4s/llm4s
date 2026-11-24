@@ -16,7 +16,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
       )
       .toOption
       .get
-    val message = ToolMessage(Vector(ContentPart.Text("x" * 20000), image), "call_1")
+    val message = ToolMessage(Vector(ContentPart.Text("x" * 20000), image), ToolCallId("call_1"))
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), ArtifactStore.inMemory()).toOption.get
 
@@ -34,7 +34,10 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
       .toOption
       .get
     val message =
-      ToolMessage(Vector(ContentPart.Text("first " * 4000), chart, ContentPart.Text("second caption"), chart), "c")
+      ToolMessage(
+        Vector(ContentPart.Text("first " * 4000), chart, ContentPart.Text("second caption"), chart),
+        ToolCallId("c")
+      )
     val compressed =
       ToolOutputCompressor
         .compressToolOutputs(Seq(message), ArtifactStore.inMemory())
@@ -56,16 +59,18 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
       )
       .toOption
       .get
-    val parts   = Vector.fill(5)(ContentPart.Text("z " * 250)) :+ chart
-    val result  = ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, "c")), ArtifactStore.inMemory())
+    val parts = Vector.fill(5)(ContentPart.Text("z " * 250)) :+ chart
+    val result =
+      ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, ToolCallId("c"))), ArtifactStore.inMemory())
     val message = result.toOption.get.head.asInstanceOf[ToolMessage]
     message.parts.last shouldBe chart
     message.content.getBytes("UTF-8").length should be <= 2048
   }
 
   it should "apply its thresholds to the result's text in total, not to each part" in {
-    val parts   = Vector.fill(5)(ContentPart.Text("y" * 2048))
-    val result  = ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, "c")), ArtifactStore.inMemory())
+    val parts = Vector.fill(5)(ContentPart.Text("y" * 2048))
+    val result =
+      ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, ToolCallId("c"))), ArtifactStore.inMemory())
     val message = result.toOption.get.head.asInstanceOf[ToolMessage]
     message.parts.size shouldBe 1
     message.content.length should be < 2048
@@ -75,7 +80,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
 
   "ToolOutputCompressor content type detection" should "identify JSON objects" in {
     val jsonContent = """{"name": "test", "value": 42}"""
-    val message     = ToolMessage(jsonContent, "call_1")
+    val message     = ToolMessage(jsonContent, ToolCallId("call_1"))
     val store       = ArtifactStore.inMemory()
 
     // Process small JSON - should remain unchanged
@@ -87,7 +92,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
 
   it should "identify JSON arrays" in {
     val jsonArray = """[1, 2, 3, "test"]"""
-    val message   = ToolMessage(jsonArray, "call_1")
+    val message   = ToolMessage(jsonArray, ToolCallId("call_1"))
     val store     = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
@@ -100,7 +105,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
       """INFO  2024-01-01 12:00:00 - Starting process
         |DEBUG 2024-01-01 12:00:01 - Loading config
         |WARN  2024-01-01 12:00:02 - Config missing value""".stripMargin
-    val message = ToolMessage(logContent, "call_1")
+    val message = ToolMessage(logContent, ToolCallId("call_1"))
     val store   = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
@@ -113,7 +118,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
       """ERROR: NullPointerException
         |Exception in thread "main"
         |  at com.example.Main.run(Main.java:42)""".stripMargin
-    val message = ToolMessage(errorContent, "call_1")
+    val message = ToolMessage(errorContent, ToolCallId("call_1"))
     val store   = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
@@ -123,7 +128,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
 
   it should "identify binary content" in {
     val binaryContent = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg..."
-    val message       = ToolMessage(binaryContent, "call_1")
+    val message       = ToolMessage(binaryContent, ToolCallId("call_1"))
     val store         = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
@@ -138,7 +143,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
     // Need 2KB+ to trigger compression, but <8KB to avoid externalization
     val nullFields  = (1 to 200).map(i => s""""field$i": null""").mkString(", ")
     val jsonContent = s"""{$nullFields, "keep": "value", "padding": "${"x" * 2000}"}"""
-    val message     = ToolMessage(jsonContent, "call_1")
+    val message     = ToolMessage(jsonContent, ToolCallId("call_1"))
     val store       = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
@@ -152,7 +157,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
   it should "remove empty strings from JSON" in {
     val emptyFields = (1 to 100).map(i => s""""field$i": """"").mkString(", ")
     val jsonContent = s"""{$emptyFields, "keep": "value"}"""
-    val message     = ToolMessage(jsonContent, "call_1")
+    val message     = ToolMessage(jsonContent, ToolCallId("call_1"))
     val store       = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
@@ -165,7 +170,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
     val largeArray = (1 to 50).map(i => s"$i").mkString("[", ", ", "]")
     // Need content > 2KB to trigger compression
     val jsonContent = s"""{"items": $largeArray, "padding": "${"x" * 2000}"}"""
-    val message     = ToolMessage(jsonContent, "call_1")
+    val message     = ToolMessage(jsonContent, ToolCallId("call_1"))
     val store       = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
@@ -180,7 +185,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
 
   "ToolOutputCompressor log compression" should "keep short logs unchanged" in {
     val shortLog = "INFO  Starting\nDEBUG Loading\nINFO  Done"
-    val message  = ToolMessage(shortLog, "call_1")
+    val message  = ToolMessage(shortLog, ToolCallId("call_1"))
     val store    = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
@@ -195,7 +200,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
     val longLog = lines.mkString("\n")
     // Need content > 2KB but < 8KB for inline compression (not externalization)
     val paddedLog = longLog + "\n" + ("x" * 2500)
-    val message   = ToolMessage(paddedLog, "call_1")
+    val message   = ToolMessage(paddedLog, ToolCallId("call_1"))
     val store     = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
@@ -212,7 +217,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
   "ToolOutputCompressor externalization" should "externalize content over threshold" in {
     // Create content larger than default threshold (8KB)
     val largeContent = "x" * 10000
-    val message      = ToolMessage(largeContent, "call_1")
+    val message      = ToolMessage(largeContent, ToolCallId("call_1"))
     val store        = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
@@ -224,7 +229,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
 
   it should "create content pointers for externalized content" in {
     val largeJson = s"""{"data": "${"x" * 10000}"}"""
-    val message   = ToolMessage(largeJson, "call_1")
+    val message   = ToolMessage(largeJson, ToolCallId("call_1"))
     val store     = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
@@ -237,7 +242,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
 
   it should "store externalized content in artifact store" in {
     val largeContent = "important-data-" + ("x" * 10000)
-    val message      = ToolMessage(largeContent, "call_1")
+    val message      = ToolMessage(largeContent, ToolCallId("call_1"))
     val store        = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
@@ -286,7 +291,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
     val messages = Seq(
       UserMessage("Hello"),
       AssistantMessage("Hi there"),
-      ToolMessage("small output", "call_1")
+      ToolMessage("small output", ToolCallId("call_1"))
     )
     val store = ArtifactStore.inMemory()
 
@@ -309,21 +314,21 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "preserve tool call IDs" in {
-    val message = ToolMessage("content", "my-unique-call-id")
+    val message = ToolMessage("content", ToolCallId("my-unique-call-id"))
     val store   = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
 
     result.isRight shouldBe true
     result.toOption.get.head match {
-      case tm: ToolMessage => tm.toolCallId shouldBe "my-unique-call-id"
+      case tm: ToolMessage => tm.toolCallId shouldBe ToolCallId("my-unique-call-id")
       case _               => fail("Expected ToolMessage")
     }
   }
 
   it should "handle invalid JSON gracefully" in {
     val invalidJson = "{not valid json"
-    val message     = ToolMessage(invalidJson, "call_1")
+    val message     = ToolMessage(invalidJson, ToolCallId("call_1"))
     val store       = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(Seq(message), store)
@@ -332,7 +337,7 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "handle multiple tool messages" in {
-    val messages = (1 to 5).map(i => ToolMessage(s"""{"id": $i, "data": "test"}""", s"call_$i"))
+    val messages = (1 to 5).map(i => ToolMessage(s"""{"id": $i, "data": "test"}""", ToolCallId(s"call_$i")))
     val store    = ArtifactStore.inMemory()
 
     val result = ToolOutputCompressor.compressToolOutputs(messages, store)
@@ -350,7 +355,9 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
     Seq(inline, externalized).foreach { deep =>
       val store = ArtifactStore.inMemory()
       withClue(s"${deep.length} bytes: ") {
-        SmallStack.run(ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(deep, "call_1")), store)) match {
+        SmallStack.run(
+          ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(deep, ToolCallId("call_1"))), store)
+        ) match {
           case Right(Right(messages)) => messages should have size 1
           case other                  => fail(s"expected Right(Right(messages)), got ${other.toString.take(200)}")
         }
@@ -372,9 +379,10 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
       .image(org.llm4s.media.MediaSource.Url(java.net.URI.create("https://e.com/a.png")), org.llm4s.media.MediaType.Png)
       .toOption
       .get
-    val parts   = (1 to 100).toVector.map(i => ContentPart.Text(s"note $i " + ("x" * 90))) :+ chart
-    val message = ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, "c")), store).toOption.get.head
-    val result  = message.asInstanceOf[ToolMessage]
+    val parts = (1 to 100).toVector.map(i => ContentPart.Text(s"note $i " + ("x" * 90))) :+ chart
+    val message =
+      ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(parts, ToolCallId("c"))), store).toOption.get.head
+    val result = message.asInstanceOf[ToolMessage]
     result.content.getBytes("UTF-8").length should be <= 2048
     result.parts.last shouldBe chart
     result.parts.count(_.isInstanceOf[ContentPart.Text]) shouldBe 1

@@ -90,11 +90,11 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
   }
 
   "A tool result" should "carry its media blocks inside tool_result" in {
-    val call = ToolCall("c1", "fetch", ujson.Obj())
+    val call = ToolCall(ToolCallId("c1"), "fetch", ujson.Obj())
     val messages = body(
       UserMessage("go"),
       AssistantMessage(None, Seq(call)),
-      ToolMessage(Vector(ContentPart.Text("here"), image(MediaSource.Inline(bytes)), doc(url)), "c1")
+      ToolMessage(Vector(ContentPart.Text("here"), image(MediaSource.Inline(bytes)), doc(url)), ToolCallId("c1"))
     )("messages").arr
     val result = messages.last("content").arr.head
     result("type").str shouldBe "tool_result"
@@ -102,15 +102,19 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
   }
 
   it should "keep a one-text result as a string" in {
-    val call = ToolCall("c1", "fetch", ujson.Obj())
+    val call = ToolCall(ToolCallId("c1"), "fetch", ujson.Obj())
     val result =
-      body(UserMessage("go"), AssistantMessage(None, Seq(call)), ToolMessage("done", "c1"))("messages").arr.last
+      body(UserMessage("go"), AssistantMessage(None, Seq(call)), ToolMessage("done", ToolCallId("c1")))(
+        "messages"
+      ).arr.last
     result("content").arr.head("content") shouldBe ujson.Str("done")
   }
 
   it should "go as text and then its media when there is no call to answer" in {
     val blocks =
-      body(ToolMessage(Vector(ContentPart.Text("orphan"), image(url)), "c9"))("messages").arr.head("content").arr
+      body(ToolMessage(Vector(ContentPart.Text("orphan"), image(url)), ToolCallId("c9")))("messages").arr
+        .head("content")
+        .arr
     blocks.head("text").str shouldBe "[Tool result for c9]:"
     blocks(1)("text").str shouldBe "orphan"
     blocks(2)("type").str shouldBe "image"
@@ -119,10 +123,10 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
   it should "keep an unanswered result's parts in their order, each caption beside its image" in {
     val parts =
       Vector(ContentPart.Text("before"), image(url), ContentPart.Text("after"), image(MediaSource.Inline(bytes)))
-    val blocks = body(ToolMessage(parts, "c9"))("messages").arr.head("content").arr
+    val blocks = body(ToolMessage(parts, ToolCallId("c9")))("messages").arr.head("content").arr
     blocks.map(_("type").str).toSeq shouldBe Seq("text", "text", "image", "text", "image")
     blocks.map(b => b.obj.get("text").map(_.str)).flatten.toSeq shouldBe Seq("[Tool result for c9]:", "before", "after")
-    body(ToolMessage("plain", "c9"))("messages").arr.head("content").arr.head("text").str shouldBe
+    body(ToolMessage("plain", ToolCallId("c9")))("messages").arr.head("content").arr.head("text").str shouldBe
       "[Tool result for c9]: plain"
   }
 
@@ -138,15 +142,20 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
         Vector(image(MediaSource.ProviderFile("anthropic", "file_1")))
       )                                                  -> "image (provider file anthropic, image/png)",
       UserMessage(Vector(doc(url, MediaType.PlainText))) -> "document (url, text/plain)",
-      UserMessage(Vector(image(MediaSource.Url(URI.create("gs://b/a.png")))))     -> "image (url, image/png)",
-      UserMessage(Vector(doc(MediaSource.Url(URI.create("s3://b/r.pdf")))))       -> "document (url, application/pdf)",
-      UserMessage(Vector(doc(MediaSource.Inline(bytes), MediaType.Csv)))          -> "document (inline, text/csv)",
-      ToolMessage(Vector(image(MediaSource.Inline(bytes), MediaType.Tiff)), "c1") -> "image (inline, image/tiff)"
+      UserMessage(Vector(image(MediaSource.Url(URI.create("gs://b/a.png"))))) -> "image (url, image/png)",
+      UserMessage(Vector(doc(MediaSource.Url(URI.create("s3://b/r.pdf")))))   -> "document (url, application/pdf)",
+      UserMessage(Vector(doc(MediaSource.Inline(bytes), MediaType.Csv)))      -> "document (inline, text/csv)",
+      ToolMessage(
+        Vector(image(MediaSource.Inline(bytes), MediaType.Tiff)),
+        ToolCallId("c1")
+      ) -> "image (inline, image/tiff)"
     )
     refused.foreach { case (message, kind) =>
       val conversation = message match {
         case t: ToolMessage =>
-          Conversation(Seq(UserMessage("go"), AssistantMessage(None, Seq(ToolCall("c1", "f", ujson.Obj()))), t))
+          Conversation(
+            Seq(UserMessage("go"), AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "f", ujson.Obj()))), t)
+          )
         case other => Conversation(Seq(other))
       }
       client.complete(conversation, CompletionOptions()).left.value match {

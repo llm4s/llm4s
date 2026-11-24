@@ -244,7 +244,7 @@ private[llm4s] object FacadeInternals {
         JMessageRole.TOOL,
         text(tool.content),
         java.util.List.of(),
-        Optional.ofNullable(tool.toolCallId),
+        Optional.ofNullable(tool.toolCallId.asString),
         Optional.empty
       )
   }
@@ -256,7 +256,7 @@ private[llm4s] object FacadeInternals {
   private def text(content: String): String = Option(content).getOrElse("")
 
   /** `call` as Java and Kotlin callers read it. */
-  def toolCall(call: ToolCall): JToolCall = new JToolCall(call.id, call.name, call.arguments.render())
+  def toolCall(call: ToolCall): JToolCall = new JToolCall(call.id.asString, call.name, call.arguments.render())
 
   /** `usage` as Java and Kotlin callers read it. */
   def usageSummary(usage: UsageSummary): JUsageSummary = {

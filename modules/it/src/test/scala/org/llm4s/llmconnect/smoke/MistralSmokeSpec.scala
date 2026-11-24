@@ -12,6 +12,7 @@ import org.llm4s.llmconnect.model.{
   Conversation,
   StreamedChunk,
   ToolCall,
+  ToolCallId,
   ToolMessage,
   UserMessage
 }
@@ -116,7 +117,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     client.close()
 
     completion.toolCalls should not be empty
-    completion.toolCalls.foreach(_.id should fullyMatch regex NineCharacterId)
+    completion.toolCalls.foreach(_.id.asString should fullyMatch regex NineCharacterId)
   }
 
   it should "accept a history whose tool-call id is not nine characters (from another provider)" in {
@@ -128,8 +129,11 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val history = Conversation(
       Seq(
         UserMessage("Use the get_secret_code tool with the topic 'vault', then tell me the code."),
-        AssistantMessage(None, toolCalls = Seq(ToolCall(foreignId, "get_secret_code", ujson.Obj("topic" -> "vault")))),
-        ToolMessage("ZX-4417", foreignId)
+        AssistantMessage(
+          None,
+          toolCalls = Seq(ToolCall(ToolCallId(foreignId), "get_secret_code", ujson.Obj("topic" -> "vault")))
+        ),
+        ToolMessage("ZX-4417", ToolCallId(foreignId))
       )
     )
 

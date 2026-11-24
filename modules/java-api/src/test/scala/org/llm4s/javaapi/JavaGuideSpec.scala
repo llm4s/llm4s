@@ -165,7 +165,10 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
               id = "r1",
               created = Instant.EPOCH,
               model = "gpt-4o-mini-2024-07-18",
-              message = AssistantMessage("Let me look.", Seq(ToolCall("c1", "weather", ujson.Obj("city" -> "Paris")))),
+              message = AssistantMessage(
+                "Let me look.",
+                Seq(ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris")))
+              ),
               usage = Some(TokenUsage(promptTokens = 12, completionTokens = 5, totalTokens = 17)),
               estimatedCost = Some(0.00042)
             )
@@ -402,8 +405,8 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
         }
       }
       val calls = List(
-        ToolCall("c1", "charge", ujson.Obj("cents" -> 5)),
-        ToolCall("c2", "refund", ujson.Obj("charge" -> "ch_1"))
+        ToolCall(ToolCallId("c1"), "charge", ujson.Obj("cents" -> 5)),
+        ToolCall(ToolCallId("c2"), "refund", ujson.Obj("charge" -> "ch_1"))
       )
       val n = new java.util.concurrent.atomic.AtomicInteger(0)
       val model = new Recording("done") {

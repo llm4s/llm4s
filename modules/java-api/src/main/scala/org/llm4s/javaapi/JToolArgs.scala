@@ -48,13 +48,13 @@ final class JToolArgs private[javaapi] (
   def asMap(): java.util.Map[String, AnyRef] = java.util.Collections.unmodifiableMap(values)
 
   /** The id the model gave this call, or empty outside an agent run. */
-  def toolCallId(): java.util.Optional[String] = call.map(_.toolCallId).toJava
+  def toolCallId(): java.util.Optional[String] = call.map(_.toolCallId.asString).toJava
 
   /**
    * The call's idempotency key, the same in every run of this call and different for every other call, or empty
    * outside an agent run. Pass it to the system a side effect reaches (an `Idempotency-Key` header, a unique column).
    */
-  def idempotencyKey(): java.util.Optional[String] = call.map(_.idempotencyKey).toJava
+  def idempotencyKey(): java.util.Optional[String] = call.map(_.idempotencyKey.asString).toJava
 
   override def toString: String = s"JToolArgs($values)"
 }

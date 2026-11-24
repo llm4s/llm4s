@@ -530,7 +530,7 @@ class OpenAICompatibleClient(
         if (toolCalls.nonEmpty) {
           message("tool_calls") = ujson.Arr.from(toolCalls.map { tc =>
             ujson.Obj(
-              "id"       -> dialect.encodeToolCallId(tc.id),
+              "id"       -> dialect.encodeToolCallId(tc.id.asString),
               "type"     -> "function",
               "function" -> ujson.Obj("name" -> tc.name, "arguments" -> tc.arguments.render())
             )
@@ -542,7 +542,7 @@ class OpenAICompatibleClient(
         // text only (checked by renderRequest); several text parts are sent as their text, joined
         ujson.Obj(
           "role"         -> "tool",
-          "tool_call_id" -> dialect.encodeToolCallId(tm.toolCallId),
+          "tool_call_id" -> dialect.encodeToolCallId(tm.toolCallId.asString),
           "content"      -> dialect.encodeContent(tm.content)
         )
     }
@@ -733,7 +733,7 @@ class OpenAICompatibleClient(
               id = call.obj.get("id").flatMap(_.strOpt).filter(_.nonEmpty),
               name = function.obj.get("name").flatMap(_.strOpt).filter(_.nonEmpty)
             )
-            ToolCall(id, name, if (raw.isEmpty) ujson.Obj() else ujson.Str(raw))
+            ToolCall(ToolCallId(id), name, if (raw.isEmpty) ujson.Obj() else ujson.Str(raw))
         }
 
         StreamedChunk(chunkId, content, calls.headOption, finishReason, thinking) +:

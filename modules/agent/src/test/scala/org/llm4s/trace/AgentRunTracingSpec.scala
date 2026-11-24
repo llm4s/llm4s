@@ -84,7 +84,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
   private def answer(text: String): Completion =
     Completion("answer", Instant.EPOCH, "test-model", AssistantMessage(text), usage = usage)
 
-  private val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
+  private val toolCall = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hello"))
   private def toolCallCompletion: Completion =
     Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(toolCall)), usage)
 
@@ -235,7 +235,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
   /** A run whose query, tool call and answer all hold `secret`, traced to `console`. */
   private def secretRun(console: ConsoleTracing): String = {
     val tracing = new Captured(console)
-    val call    = ToolCall("call-1", "echo", ujson.Obj("message" -> secret))
+    val call    = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> secret))
     val calling =
       Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call)), usage)
     ok(traced(new Scripted(Right(calling), Right(answer(s"Echoed $secret"))), tracing).run(s"Echo $secret"))
@@ -326,7 +326,10 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       "turn-1",
       Instant.EPOCH,
       "test-model",
-      AssistantMessage(None, Seq(ToolCall("call-h", "handoff_to_specialist", ujson.Obj("reason" -> "maths")))),
+      AssistantMessage(
+        None,
+        Seq(ToolCall(ToolCallId("call-h"), "handoff_to_specialist", ujson.Obj("reason" -> "maths")))
+      ),
       usage = usage
     )
     val specialist = Agent.builder("specialist", Scripted(Right(answer("2x"))))

@@ -95,7 +95,7 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe()
 
   private def client: LLMClient = {
-    val call  = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
+    val call  = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hello"))
     val usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
     new SequencedClient(
       Seq(

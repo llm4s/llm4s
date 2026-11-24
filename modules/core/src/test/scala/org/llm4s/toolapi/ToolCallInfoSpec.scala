@@ -1,12 +1,14 @@
 package org.llm4s.toolapi
 
+import org.llm4s.toolapi.IdempotencyKey
+import org.llm4s.llmconnect.model.ToolCallId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /** A `ToolFunction` handler reads the call it runs as `SafeParameterExtractor.call` (#1740). */
 class ToolCallInfoSpec extends AnyFlatSpec with Matchers {
 
-  private val call = ToolCallInfo(toolCallId = "call_1", idempotencyKey = "k" * 64)
+  private val call = ToolCallInfo(toolCallId = ToolCallId("call_1"), idempotencyKey = IdempotencyKey("k" * 64))
 
   /** A tool that answers with the call it saw, or "none". */
   private def echo(required: Boolean): ToolFunction[Map[String, Any], String] = {
@@ -41,7 +43,7 @@ class ToolCallInfoSpec extends AnyFlatSpec with Matchers {
   }
 
   "ToolCallInfo" should "change with its setters" in {
-    call.withToolCallId("call_2").toolCallId shouldBe "call_2"
-    call.withIdempotencyKey("other").idempotencyKey shouldBe "other"
+    call.withToolCallId(ToolCallId("call_2")).toolCallId shouldBe ToolCallId("call_2")
+    call.withIdempotencyKey(IdempotencyKey("other")).idempotencyKey shouldBe IdempotencyKey("other")
   }
 }

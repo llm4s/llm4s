@@ -13,7 +13,8 @@ import org.llm4s.llmconnect.model.{
   ResponseFormat,
   StreamedChunk,
   TokenUsage,
-  ToolCall
+  ToolCall,
+  ToolCallId
 }
 import org.llm4s.llmconnect.provider.{ CohereClient, DeepSeekClient, OpenAIClient, OpenRouterClient }
 import org.llm4s.model.ModelRegistryService
@@ -286,8 +287,10 @@ class SmokeContractOfflineSpec
 
   it should "fail a streamed tool call whose chunk arrives without its call's id" in {
     val client = stub(onStream = (_, _, onChunk) => {
-      onChunk(StreamedChunk(id = "s", content = None, toolCall = Some(ToolCall("", "get_secret_code", vaultCall))))
-      Right(completion("", List(ToolCall("call_1", "get_secret_code", vaultCall))))
+      onChunk(
+        StreamedChunk(id = "s", content = None, toolCall = Some(ToolCall(ToolCallId(""), "get_secret_code", vaultCall)))
+      )
+      Right(completion("", List(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))))
     })
     failedMessage(SmokeChecks.run(Capability.StreamedToolCalling, client)).value should (
       startWith("[streamed tool call]").and(include("without their call's id"))
@@ -297,9 +300,13 @@ class SmokeContractOfflineSpec
   it should "hold a streamed tool call whose chunks all carry an id" in {
     val client = stub(onStream = (_, _, onChunk) => {
       onChunk(
-        StreamedChunk(id = "s", content = None, toolCall = Some(ToolCall("call_1", "get_secret_code", vaultCall)))
+        StreamedChunk(
+          id = "s",
+          content = None,
+          toolCall = Some(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))
+        )
       )
-      Right(completion("", List(ToolCall("call_1", "get_secret_code", vaultCall))))
+      Right(completion("", List(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))))
     })
     SmokeChecks.run(Capability.StreamedToolCalling, client) shouldBe Outcome.Held
   }
@@ -311,10 +318,14 @@ class SmokeContractOfflineSpec
     val client = stub(onStream = (_, _, onChunk) => {
       Seq[ujson.Value](ujson.Str("{\"topic"), ujson.Str(":"), ujson.Str("\"vault\"}")).foreach { fragment =>
         onChunk(
-          StreamedChunk(id = "s", content = None, toolCall = Some(ToolCall("call_1", "get_secret_code", fragment)))
+          StreamedChunk(
+            id = "s",
+            content = None,
+            toolCall = Some(ToolCall(ToolCallId("call_1"), "get_secret_code", fragment))
+          )
         )
       }
-      Right(completion("", List(ToolCall("call_1", "get_secret_code", vaultCall))))
+      Right(completion("", List(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))))
     })
     failedMessage(SmokeChecks.run(Capability.StreamedToolCalling, client)).value should (
       startWith("[streamed tool call]").and(include("did not reassemble")).and(include("malformed tool call"))
@@ -329,11 +340,11 @@ class SmokeContractOfflineSpec
           StreamedChunk(
             id = "s",
             content = None,
-            toolCall = Some(ToolCall("call_1", "get_secret_code", ujson.Str(fragment)))
+            toolCall = Some(ToolCall(ToolCallId("call_1"), "get_secret_code", ujson.Str(fragment)))
           )
         )
       }
-      Right(completion("", List(ToolCall("call_1", "get_secret_code", vaultCall))))
+      Right(completion("", List(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))))
     })
     failedMessage(SmokeChecks.run(Capability.StreamedToolCalling, client)).value should (
       startWith("[streamed tool call]").and(include("reassembled from the streamed chunks"))
@@ -343,19 +354,28 @@ class SmokeContractOfflineSpec
   it should "fail a tool call that names the wrong tool, has an empty id, or has arguments that do not fit" in {
     def toolClient(call: ToolCall): LLMClient = stub(onComplete = (_, _) => Right(completion("", List(call))))
     failedMessage(
-      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall("call_1", "other_tool", vaultCall)))
+      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall(ToolCallId("call_1"), "other_tool", vaultCall)))
     ).value should include("instead of 'get_secret_code'")
     failedMessage(
-      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall("", "get_secret_code", vaultCall)))
+      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall(ToolCallId(""), "get_secret_code", vaultCall)))
     ).value should include("empty id")
     failedMessage(
-      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall("call_1", "get_secret_code", ujson.Obj("nope" -> 1))))
+      SmokeChecks.run(
+        Capability.ToolCalling,
+        toolClient(ToolCall(ToolCallId("call_1"), "get_secret_code", ujson.Obj("nope" -> 1)))
+      )
     ).value should include("does not declare nope")
     failedMessage(
-      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall("call_1", "get_secret_code", ujson.Obj())))
+      SmokeChecks.run(
+        Capability.ToolCalling,
+        toolClient(ToolCall(ToolCallId("call_1"), "get_secret_code", ujson.Obj()))
+      )
     ).value should include("do not fit the tool's schema")
     failedMessage(
-      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall("call_1", "get_secret_code", ujson.Arr())))
+      SmokeChecks.run(
+        Capability.ToolCalling,
+        toolClient(ToolCall(ToolCallId("call_1"), "get_secret_code", ujson.Arr()))
+      )
     ).value should include("not a JSON object")
     failedMessage(
       SmokeChecks.run(Capability.ToolCalling, stub(onComplete = (_, _) => Right(completion("I will not use it"))))

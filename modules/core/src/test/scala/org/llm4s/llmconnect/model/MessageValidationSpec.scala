@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.llm4s.error.{ LLMError, ValidationError }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -33,11 +34,11 @@ class MessageValidationSpec extends AnyFlatSpec with Matchers {
   }
 
   "Message.tool" should "reject blank content, naming the content field" in {
-    assertRejects(Message.tool(" ", "call-1"), "content", "Tool message content cannot be empty")
+    assertRejects(Message.tool(" ", ToolCallId("call-1")), "content", "Tool message content cannot be empty")
   }
 
   it should "reject a blank tool call id, naming the toolCallId field" in {
-    assertRejects(Message.tool("ok", " "), "toolCallId", "Tool call ID cannot be empty")
+    assertRejects(Message.tool("ok", ToolCallId(" ")), "toolCallId", "Tool call ID cannot be empty")
   }
 
   "Message.validate" should "reject a blank system message, naming the content field" in {
@@ -53,18 +54,19 @@ class MessageValidationSpec extends AnyFlatSpec with Matchers {
   }
 
   "ToolMessage.validate" should "reject blank content and a blank call id together, naming the toolMessage field" in {
-    val error = rejected(ToolMessage(Vector.empty, " ").validate)
+    val error = rejected(ToolMessage(Vector.empty, ToolCallId(" ")).validate)
     error.field shouldBe "toolMessage"
     error.violations shouldBe List("Tool message content cannot be empty", "Tool call ID cannot be empty")
     error.message shouldBe "Invalid toolMessage: Tool message content cannot be empty, Tool call ID cannot be empty"
   }
 
   it should "reject a blank call id alone, naming the toolMessage field" in {
-    assertRejects(ToolMessage("ok", " ").validate, "toolMessage", "Tool call ID cannot be empty")
+    assertRejects(ToolMessage("ok", ToolCallId(" ")).validate, "toolMessage", "Tool call ID cannot be empty")
   }
 
   "Message.validateConversation" should "name the conversation field and list each violation once" in {
-    val error = rejected(Message.validateConversation(List(UserMessage("hi"), ToolMessage("orphan", "call-9"))))
+    val error =
+      rejected(Message.validateConversation(List(UserMessage("hi"), ToolMessage("orphan", ToolCallId("call-9")))))
     error.field shouldBe "conversation"
     error.violations should not be empty
     error.violations should not contain "conversation"
@@ -75,11 +77,11 @@ class MessageValidationSpec extends AnyFlatSpec with Matchers {
   "ToolMessage.findToolCallName" should "be the name of the call it answers, and None when that call is not there" in {
     val history = Seq[Message](
       UserMessage("weather?"),
-      AssistantMessage(None, Seq(ToolCall("call-1", "get_weather", ujson.Obj())))
+      AssistantMessage(None, Seq(ToolCall(ToolCallId("call-1"), "get_weather", ujson.Obj())))
     )
 
-    ToolMessage("sunny", "call-1").findToolCallName(history) shouldBe Some("get_weather")
-    ToolMessage("sunny", "call-2").findToolCallName(history) shouldBe None
-    ToolMessage("sunny", "call-1").findToolCallName(Seq.empty) shouldBe None
+    ToolMessage("sunny", ToolCallId("call-1")).findToolCallName(history) shouldBe Some("get_weather")
+    ToolMessage("sunny", ToolCallId("call-2")).findToolCallName(history) shouldBe None
+    ToolMessage("sunny", ToolCallId("call-1")).findToolCallName(Seq.empty) shouldBe None
   }
 }

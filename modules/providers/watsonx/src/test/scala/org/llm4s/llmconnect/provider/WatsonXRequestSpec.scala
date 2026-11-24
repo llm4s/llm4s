@@ -39,8 +39,8 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
       Seq(
         SystemMessage("s"),
         UserMessage("u1"),
-        AssistantMessage(Some("a1"), Seq(ToolCall("call-7", "add", ujson.Obj("a" -> 1, "b" -> 2)))),
-        ToolMessage("3", "call-7"),
+        AssistantMessage(Some("a1"), Seq(ToolCall(ToolCallId("call-7"), "add", ujson.Obj("a" -> 1, "b" -> 2)))),
+        ToolMessage("3", ToolCallId("call-7")),
         UserMessage("u2")
       )
     )
@@ -94,7 +94,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
   }
 
   test("an assistant turn that is only tool calls has no content field") {
-    val turn = AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1))))
+    val turn = AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "add", ujson.Obj("a" -> 1))))
     val msg  = ujson.read(body(Conversation(Seq(UserMessage("u"), turn))))("messages")(1)
     msg.obj.keySet shouldBe Set("role", "tool_calls")
   }
@@ -323,7 +323,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
 
   test("a call's arguments go on the wire as a JSON string: an object, a string holding one, anything else {}") {
     def argumentsSent(arguments: ujson.Value): String =
-      val turn = AssistantMessage(None, Seq(ToolCall("c1", "add", arguments)))
+      val turn = AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "add", arguments)))
       ujson.read(body(Conversation(Seq(turn))))("messages")(0)("tool_calls")(0)("function")("arguments").str
     argumentsSent(ujson.Obj("a" -> 1)) shouldBe """{"a":1}"""
     argumentsSent(ujson.Str("""{"a": 2}""")) shouldBe """{"a":2}"""
@@ -337,10 +337,19 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
   test("two calls in one assistant turn keep their ids and order, and each tool result its own call id") {
     val turn = AssistantMessage(
       None,
-      Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1)), ToolCall("c2", "add", ujson.Obj("a" -> 2)))
+      Seq(
+        ToolCall(ToolCallId("c1"), "add", ujson.Obj("a" -> 1)),
+        ToolCall(ToolCallId("c2"), "add", ujson.Obj("a" -> 2))
+      )
     )
     val messages = ujson
-      .read(body(Conversation(Seq(UserMessage("u"), turn, ToolMessage("r2", "c2"), ToolMessage("r1", "c1")))))(
+      .read(
+        body(
+          Conversation(
+            Seq(UserMessage("u"), turn, ToolMessage("r2", ToolCallId("c2")), ToolMessage("r1", ToolCallId("c1")))
+          )
+        )
+      )(
         "messages"
       )
       .arr

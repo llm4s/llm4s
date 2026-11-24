@@ -84,7 +84,7 @@ class NestedStreamSpec
     nested.map(_._1.child).distinct.loneElement shouldBe ref
     ref.threadId shouldBe agent.children(ThreadId("t1")).value.loneElement.threadId
     ref.agent.value shouldBe "general"
-    ref.toolCallId.map(_.value) shouldBe Some("c1")
+    ref.toolCallId.map(_.asString) shouldBe Some("c1")
     ref.depth shouldBe 1
   }
 
@@ -271,7 +271,7 @@ class NestedStreamSpec
       case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
       case Child("researcher", _) =>
         childCalls.incrementAndGet() match
-          case 1 => Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+          case 1 => Right(calling(ToolCall(ToolCallId("k1"), "probe", ujson.Obj("text" -> "x"))))
           case 2 => Left(ProcessingError("provider", "the provider is down"))
           case _ => Right(CompletionFixture.simple("""{"summary":"recovered","sources":1}"""))
     }

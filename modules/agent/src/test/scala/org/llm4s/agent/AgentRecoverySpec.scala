@@ -41,7 +41,7 @@ class AgentRecoverySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     cause(failed.error) match {
       case GraphError.ToolFailed(tool, callId, _) =>
         tool shouldBe org.llm4s.agent.graph.ToolName("flaky")
-        callId shouldBe org.llm4s.agent.graph.ToolCallId("c2")
+        callId shouldBe org.llm4s.llmconnect.model.ToolCallId("c2")
       case other => fail(s"expected ToolFailed, got $other")
     }
 

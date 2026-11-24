@@ -84,7 +84,9 @@ class ToolCallIdWireFormatSpec extends AnyFlatSpec with Matchers with EitherValu
 
   "A stored checkpoint with tool calls" should "read and write back byte-identical" in {
     exactly(fixture("checkpoint"))(json => Checkpoint.toJson(Checkpoint.fromJson(json).value))
-    fixture("pendingWrites").arr.foreach(exactly(_)(json => upickle.default.writeJs(upickle.default.read[PendingWrite](json))))
+    fixture("pendingWrites").arr.foreach(
+      exactly(_)(json => upickle.default.writeJs(upickle.default.read[PendingWrite](json)))
+    )
   }
 
   "Its durable events" should "read and write back byte-identical, the tool_executed payloads too" in {
@@ -101,11 +103,11 @@ class ToolCallIdWireFormatSpec extends AnyFlatSpec with Matchers with EitherValu
     agent(client, store, ToolOutcome.success(ToolContent.Json(ujson.Str("deployed"))))
       .run(thread, "echo then deploy")
       .value
-    val now      = Checkpoint.toJson(store.latest(thread).value.get.checkpoint)("snapshot")
-    val stored   = fixture("checkpoint")("snapshot")
+    val now                  = Checkpoint.toJson(store.latest(thread).value.get.checkpoint)("snapshot")
+    val stored               = fixture("checkpoint")("snapshot")
     def keep(s: ujson.Value) = (ujson.write(s("state")("messages")), ujson.write(s("parked")))
     keep(now) shouldBe keep(stored)
-    val events = store.eventsAfter(thread, 0L, 10000).value.map(upickle.default.writeJs(_))
+    val events                          = store.eventsAfter(thread, 0L, 10000).value.map(upickle.default.writeJs(_))
     def ids(payloads: Seq[ujson.Value]) = payloads.map(p => (p("toolCallId"), p("idempotencyKey")))
     ids(toolExecuted(events)) shouldBe ids(toolExecuted(fixture("events").arr.toVector))
   }
@@ -138,7 +140,9 @@ class ToolCallIdWireFormatSpec extends AnyFlatSpec with Matchers with EitherValu
     run
       .resume(
         thread,
-        Map(InterruptId(parked("interruptId").str) -> upickle.default.writeJs[ApprovalDecision](ApprovalDecision.Approve))
+        Map(
+          InterruptId(parked("interruptId").str) -> upickle.default.writeJs[ApprovalDecision](ApprovalDecision.Approve)
+        )
       )
       .value
       .answer shouldBe Some("shipped")

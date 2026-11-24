@@ -490,7 +490,7 @@ system it calls, which then does the work once:
 import org.llm4s.agent.graph.tool.{AgentTool, ToolContent, ToolOutcome}
 
 val charge = AgentTool(chargeSpec) { (args, context) =>
-  payments.charge(args.amount, idempotencyKey = context.idempotencyKey.value) match
+  payments.charge(args.amount, idempotencyKey = context.idempotencyKey.asString) match
     case Right(receipt) => ToolOutcome.success(ToolContent.Json(ujson.Str(receipt.id)))
     case Left(error)    => ToolOutcome.Error(error.message)
 }
@@ -507,7 +507,7 @@ val charge = ToolBuilder[Map[String, Any], String]("charge", "Charges a card", c
   .withHandler { params =>
     for
       amount  <- params.getDouble("amount")
-      receipt <- payments.charge(amount, idempotencyKey = params.call.map(_.idempotencyKey))
+      receipt <- payments.charge(amount, idempotencyKey = params.call.map(_.idempotencyKey.asString))
     yield receipt.id
   }
   .buildSafe()

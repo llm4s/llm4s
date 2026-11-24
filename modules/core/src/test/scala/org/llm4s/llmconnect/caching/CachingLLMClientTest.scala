@@ -253,8 +253,8 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val step2 = Conversation(
       Seq(
         UserMessage("What is the weather?"),
-        AssistantMessage("Checking...", toolCalls = List(ToolCall("1", "weather", "{\"loc\":\"Paris\"}"))),
-        ToolMessage("Paris: 20C", "1")
+        AssistantMessage("Checking...", toolCalls = List(ToolCall(ToolCallId("1"), "weather", "{\"loc\":\"Paris\"}"))),
+        ToolMessage("Paris: 20C", ToolCallId("1"))
       )
     )
 
@@ -273,8 +273,8 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val conversation = Conversation(
       messages = List(
         UserMessage("What is the weather?"),
-        AssistantMessage("Checking...", toolCalls = List(ToolCall("1", "weather", "{\"loc\":\"Paris\"}"))),
-        ToolMessage("Paris: 20C", "1"),
+        AssistantMessage("Checking...", toolCalls = List(ToolCall(ToolCallId("1"), "weather", "{\"loc\":\"Paris\"}"))),
+        ToolMessage("Paris: 20C", ToolCallId("1")),
         AssistantMessage("It is 20C"),
         UserMessage("And in London?")
       )

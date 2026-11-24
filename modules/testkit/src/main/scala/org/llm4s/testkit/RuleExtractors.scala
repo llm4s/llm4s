@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.model.{
   Conversation,
   Message,
   OutputCorrection,
+  ToolCallId,
   ToolMessage,
   UserMessage
 }
@@ -108,7 +109,7 @@ object AfterToolResults {
     val (results, before) = trailingResults(conversation.messages)
     val names = before.lastOption match {
       case Some(assistant: AssistantMessage) => assistant.toolCalls.map(call => call.id -> call.name).toMap
-      case _                                 => Map.empty[String, String]
+      case _                                 => Map.empty[ToolCallId, String]
     }
     val named = results.flatMap(result => names.get(result.toolCallId).map(_ -> result.content))
     Option.when(results.nonEmpty && named.size == results.size)(named)

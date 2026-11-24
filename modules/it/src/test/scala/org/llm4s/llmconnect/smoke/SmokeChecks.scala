@@ -223,8 +223,12 @@ object SmokeChecks {
       call <- completion.toolCalls.headOption.toRight(
         s"the model did not call the tool; it said ${snippet(completion.content)}"
       )
-      _      <- Either.cond(call.name == tool.name, (), s"it called '${call.name}' instead of '${tool.name}'")
-      _      <- Either.cond(call.id.nonEmpty, (), "the tool call has an empty id, so its result cannot be sent back")
+      _ <- Either.cond(call.name == tool.name, (), s"it called '${call.name}' instead of '${tool.name}'")
+      _ <- Either.cond(
+        call.id.asString.nonEmpty,
+        (),
+        "the tool call has an empty id, so its result cannot be sent back"
+      )
       fields <- call.arguments.objOpt.toRight(s"the call's arguments are not a JSON object: ${call.arguments}")
       undeclared = fields.keySet.diff(ToolProperties)
       _ <- Either.cond(
@@ -297,7 +301,7 @@ object SmokeChecks {
           .left
           .map(e => s"the streamed request carrying a tool failed: ${e.message}")
         _ <- calledTool(tool, completion)
-        idless = chunks.flatMap(_.toolCall).filter(_.id.isEmpty)
+        idless = chunks.flatMap(_.toolCall).filter(_.id.asString.isEmpty)
         _ <- Either.cond(
           idless.isEmpty,
           (),

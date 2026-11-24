@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -17,7 +18,7 @@ class MessagePartsSpec extends AnyFlatSpec with Matchers with EitherValues {
   "UserMessage(text)" should "be the one-part message" in {
     UserMessage("hello").parts shouldBe Vector(ContentPart.Text("hello"))
     UserMessage("hello").content shouldBe "hello"
-    ToolMessage("result", "call-1").parts shouldBe Vector(ContentPart.Text("result"))
+    ToolMessage("result", ToolCallId("call-1")).parts shouldBe Vector(ContentPart.Text("result"))
   }
 
   "A positional pattern" should "not compile, so code that read the text from it cannot silently get the parts" in {
@@ -28,15 +29,15 @@ class MessagePartsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "withParts and equality" should "work as a case class's did" in {
     UserMessage("a").withParts(Vector(image)) shouldBe UserMessage(Vector(image))
-    ToolMessage("a", "c").withParts(Vector(pdf)) shouldBe ToolMessage(Vector(pdf), "c")
-    ToolMessage("a", "c") should not be ToolMessage("a", "d")
+    ToolMessage("a", ToolCallId("c")).withParts(Vector(pdf)) shouldBe ToolMessage(Vector(pdf), ToolCallId("c"))
+    ToolMessage("a", ToolCallId("c")) should not be ToolMessage("a", ToolCallId("d"))
     UserMessage("a").hashCode shouldBe UserMessage("a").hashCode
-    UserMessage("a") should not be ToolMessage("a", "c")
+    UserMessage("a") should not be ToolMessage("a", ToolCallId("c"))
   }
 
   "content" should "be the text view: the text parts, joined" in {
     UserMessage(Vector(ContentPart.Text("what is"), image, ContentPart.Text("this?"))).content shouldBe "what is\nthis?"
-    ToolMessage(Vector(image), "call-1").content shouldBe ""
+    ToolMessage(Vector(image), ToolCallId("call-1")).content shouldBe ""
   }
 
   "toString" should "name the media parts, never print their bytes" in {
@@ -46,17 +47,17 @@ class MessagePartsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "validate" should "accept a message with any content, and refuse one with none" in {
     UserMessage(Vector(image)).validate.isRight shouldBe true
-    ToolMessage(Vector(pdf), "call-1").validate.isRight shouldBe true
+    ToolMessage(Vector(pdf), ToolCallId("call-1")).validate.isRight shouldBe true
     UserMessage(Vector.empty).validate.isLeft shouldBe true
     UserMessage(Vector(ContentPart.Text(" "), ContentPart.Text(""))).validate.isLeft shouldBe true
-    ToolMessage(Vector.empty, "call-1").validate.isLeft shouldBe true
-    ToolMessage(Vector(image), " ").validate.isLeft shouldBe true
+    ToolMessage(Vector.empty, ToolCallId("call-1")).validate.isLeft shouldBe true
+    ToolMessage(Vector(image), ToolCallId(" ")).validate.isLeft shouldBe true
   }
 
   "A null text" should "be read as empty when the part is built, so validation and the codec stay total" in {
     ContentPart.Text(null) shouldBe ContentPart.Text("")
     UserMessage(Vector(ContentPart.Text(null), image)).validate.isRight shouldBe true
-    ToolMessage(Vector(ContentPart.Text(null)), "c").validate.isLeft shouldBe true
+    ToolMessage(Vector(ContentPart.Text(null)), ToolCallId("c")).validate.isLeft shouldBe true
     Conversation.create(Seq(UserMessage(Vector(ContentPart.Text(null), image)))).isRight shouldBe true
     read[Message](write[Message](UserMessage(Vector(ContentPart.Text(null), image)))) shouldBe
       UserMessage(Vector(ContentPart.Text(""), image))
@@ -64,25 +65,25 @@ class MessagePartsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "A null part" should "make a message invalid, and still print" in {
     UserMessage(Vector(null, image)).validate.isLeft shouldBe true
-    ToolMessage(Vector(ContentPart.Text("ok"), null), "c").validate.isLeft shouldBe true
+    ToolMessage(Vector(ContentPart.Text("ok"), null), ToolCallId("c")).validate.isLeft shouldBe true
     Conversation.create(Seq(UserMessage(Vector(null, image)))).isLeft shouldBe true
     UserMessage(Vector(null)).toString shouldBe "user: [null part]"
   }
 
   "Null parts" should "be no plain text for hasMedia and an empty text view, never a throw" in {
     Message.hasMedia(Seq(UserMessage(null: Vector[ContentPart]))) shouldBe true
-    Message.hasMedia(Seq(ToolMessage(Vector(null), "c"))) shouldBe true
+    Message.hasMedia(Seq(ToolMessage(Vector(null), ToolCallId("c")))) shouldBe true
     UserMessage(null: Vector[ContentPart]).content shouldBe ""
   }
 
   "Message.hasMedia" should "say whether any message carries an image or a document" in {
-    Message.hasMedia(Seq(SystemMessage("s"), UserMessage("text"), ToolMessage("r", "c"))) shouldBe false
-    Message.hasMedia(Seq(UserMessage("text"), ToolMessage(Vector(image), "c"))) shouldBe true
+    Message.hasMedia(Seq(SystemMessage("s"), UserMessage("text"), ToolMessage("r", ToolCallId("c")))) shouldBe false
+    Message.hasMedia(Seq(UserMessage("text"), ToolMessage(Vector(image), ToolCallId("c")))) shouldBe true
   }
 
   "The Message codec" should "write a one-text message in the shape it had before parts" in {
     ujson.read(write[Message](UserMessage("hi"))) shouldBe ujson.Obj("type" -> "user", "content" -> "hi")
-    ujson.read(write[Message](ToolMessage("r", "c1"))) shouldBe
+    ujson.read(write[Message](ToolMessage("r", ToolCallId("c1")))) shouldBe
       ujson.Obj("type" -> "tool", "toolCallId" -> "c1", "content" -> "r")
   }
 
@@ -96,20 +97,23 @@ class MessagePartsSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "round-trip messages with parts, and read the old string shape as one text part" in {
     val messages: Vector[Message] = Vector(
       UserMessage(Vector(ContentPart.Text("a"), image)),
-      ToolMessage(Vector(pdf, ContentPart.Text("b")), "c1"),
+      ToolMessage(Vector(pdf, ContentPart.Text("b")), ToolCallId("c1")),
       UserMessage(Vector(ContentPart.Text("x"), ContentPart.Text("y"))),
       UserMessage("plain")
     )
     read[Vector[Message]](write(messages)) shouldBe messages
     read[Message](ujson.Obj("type" -> "user", "content" -> "old")) shouldBe UserMessage("old")
     read[Message](ujson.Obj("type" -> "tool", "toolCallId" -> "c", "content" -> "old")) shouldBe
-      ToolMessage("old", "c")
+      ToolMessage("old", ToolCallId("c"))
   }
 
   "The case-class codecs" should "read both shapes too" in {
     read[UserMessage](write(UserMessage(Vector(image)))) shouldBe UserMessage(Vector(image))
     read[UserMessage](ujson.Obj("content" -> "old")) shouldBe UserMessage("old")
-    read[ToolMessage](write(ToolMessage(Vector(pdf), "c"))) shouldBe ToolMessage(Vector(pdf), "c")
-    read[ToolMessage](ujson.Obj("content" -> "old", "toolCallId" -> "c")) shouldBe ToolMessage("old", "c")
+    read[ToolMessage](write(ToolMessage(Vector(pdf), ToolCallId("c")))) shouldBe ToolMessage(
+      Vector(pdf),
+      ToolCallId("c")
+    )
+    read[ToolMessage](ujson.Obj("content" -> "old", "toolCallId" -> "c")) shouldBe ToolMessage("old", ToolCallId("c"))
   }
 }

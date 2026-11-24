@@ -138,7 +138,7 @@ final private[agent] class AgentTracing(
    */
   private def placement(event: StreamEvent, record: EventRecord): TraceSpan = event match
     case AgentEvents.ToolExecuted(t) =>
-      val context = t.idempotencyKey.map(IdempotencyKey(_)) match
+      val context = t.idempotencyKey match
         case Some(key) if AgentTraceSpans.suspends(t.outcome) =>
           AgentTraceSpans.toolCallPhase(runSpan, key, record.seq)
         case Some(key) => AgentTraceSpans.toolCall(runSpan, key)

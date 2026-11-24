@@ -464,7 +464,7 @@ class OpenAIClient private[provider] (
         id = known(call._id()).filter(_.nonEmpty),
         name = function.flatMap(f => known(f._name())).filter(_.nonEmpty)
       )
-      ToolCall(id, name, if (raw.isEmpty) ujson.Obj() else ujson.Str(raw))
+      ToolCall(ToolCallId(id), name, if (raw.isEmpty) ujson.Obj() else ujson.Str(raw))
     }
 
   /**
@@ -773,7 +773,7 @@ class OpenAIClient private[provider] (
           msg.addToolCall(
             ChatCompletionMessageFunctionToolCall
               .builder()
-              .id(tc.id)
+              .id(tc.id.asString)
               .function(
                 ChatCompletionMessageFunctionToolCall.Function
                   .builder()
@@ -788,7 +788,7 @@ class OpenAIClient private[provider] (
 
       case tm: ToolMessage if singleText(tm.parts) =>
         ChatCompletionMessageParam.ofTool(
-          ChatCompletionToolMessageParam.builder().content(tm.content).toolCallId(tm.toolCallId).build()
+          ChatCompletionToolMessageParam.builder().content(tm.content).toolCallId(tm.toolCallId.asString).build()
         )
 
       case tm: ToolMessage =>
@@ -798,7 +798,7 @@ class OpenAIClient private[provider] (
           ChatCompletionToolMessageParam
             .builder()
             .contentOfArrayOfContentParts(texts.asJava)
-            .toolCallId(tm.toolCallId)
+            .toolCallId(tm.toolCallId.asString)
             .build()
         )
     }
@@ -929,7 +929,7 @@ class OpenAIClient private[provider] (
           calls     <- done
           _         <- if (raw.trim.isEmpty) ToolCallRules.blankArguments(name, finishReason) else Right(())
           arguments <- ToolCallRules.parseArguments(name, raw)
-        } yield calls :+ ToolCall(id = known(ftc._id()).getOrElse(""), name = name, arguments = arguments)
+        } yield calls :+ ToolCall(id = ToolCallId(known(ftc._id()).getOrElse("")), name = name, arguments = arguments)
       }
 
   private def recordExchange(

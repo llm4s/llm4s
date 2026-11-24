@@ -142,7 +142,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
   it should "include tool calls in assistant message" in {
     val helper   = new ZaiClientTestHelper(testConfig)
-    val toolCall = ToolCall("call-123", "calculate", ujson.Obj("expression" -> "2+2"))
+    val toolCall = ToolCall(ToolCallId("call-123"), "calculate", ujson.Obj("expression" -> "2+2"))
     val conversation =
       Conversation(Seq(AssistantMessage(text = None, toolCalls = List(toolCall))))
     val options = CompletionOptions()
@@ -159,7 +159,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
   it should "create valid request body for tool message" in {
     val helper       = new ZaiClientTestHelper(testConfig)
-    val conversation = Conversation(Seq(ToolMessage("Result: 4", "call-123")))
+    val conversation = Conversation(Seq(ToolMessage("Result: 4", ToolCallId("call-123"))))
     val options      = CompletionOptions()
 
     val requestBody = helper.testCreateRequestBody(conversation, options)
@@ -171,7 +171,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
   it should "serialize tool message correctly via ZaiClient" in {
     val client       = new ZaiClientTestHelper(testConfig)
-    val conversation = Conversation(Seq(ToolMessage("Result: 4", "call-123")))
+    val conversation = Conversation(Seq(ToolMessage("Result: 4", ToolCallId("call-123"))))
 
     val requestBody = client.exposedCreateRequestBody(conversation, CompletionOptions())
     val toolMsg     = requestBody("messages")(0)
@@ -333,7 +333,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
     completion.toolCalls should have size 1
     val toolCall = completion.toolCalls(0)
-    toolCall.id shouldBe "call-abc"
+    toolCall.id shouldBe ToolCallId("call-abc")
     toolCall.name shouldBe "get_weather"
     toolCall.arguments("city").str shouldBe "London"
   }
@@ -405,10 +405,10 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val toolCalls = helper.testParseToolCalls(json)
 
     toolCalls should have size 2
-    toolCalls(0).id shouldBe "call-1"
+    toolCalls(0).id shouldBe ToolCallId("call-1")
     toolCalls(0).name shouldBe "func1"
     toolCalls(0).arguments("a").num.toInt shouldBe 1
-    toolCalls(1).id shouldBe "call-2"
+    toolCalls(1).id shouldBe ToolCallId("call-2")
     toolCalls(1).name shouldBe "func2"
     toolCalls(1).arguments("b").num.toInt shouldBe 2
   }
@@ -424,7 +424,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val toolCalls = helper.testParseToolCalls(json)
 
     toolCalls should have size 1
-    toolCalls(0).id shouldBe ""
+    toolCalls(0).id shouldBe ToolCallId("")
     toolCalls(0).name shouldBe ""
     toolCalls(0).arguments shouldBe a[ujson.Obj]
   }
@@ -676,7 +676,7 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
           val function = call("function")
           val rawArgs  = function.obj.get("arguments").flatMap(_.strOpt).getOrElse("")
           ToolCall(
-            id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
+            id = ToolCallId(call.obj.get("id").flatMap(_.strOpt).getOrElse("")),
             name = function.obj.get("name").flatMap(_.strOpt).getOrElse(""),
             arguments = ujson.Str(rawArgs)
           )

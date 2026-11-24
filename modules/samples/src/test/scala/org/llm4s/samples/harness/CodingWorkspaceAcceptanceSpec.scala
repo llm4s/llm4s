@@ -102,7 +102,7 @@ class CodingWorkspaceAcceptanceSpec extends AnyFlatSpec with Matchers with Eithe
   }
 
   private def toolResults(result: AgentResult): Map[String, ToolMessage] =
-    result.messages.collect { case t: ToolMessage => t.toolCallId -> t }.toMap
+    result.messages.collect { case t: ToolMessage => t.toolCallId.asString -> t }.toMap
 
   private def offloaded(state: ThreadState): Vector[String] =
     state.get(ToolOutputOffload.key).toOption.fold(Vector.empty[String])(o => o.results.map(_.key) ++ o.evicted)
@@ -233,7 +233,7 @@ class CodingWorkspaceAcceptanceSpec extends AnyFlatSpec with Matchers with Eithe
     val turn = process.client.calls.drop(callsBefore)
     turn
       .flatMap(_.messages)
-      .collect { case t: ToolMessage if t.toolCallId == "leak-note" => t.content }
+      .collect { case t: ToolMessage if t.toolCallId == ToolCallId("leak-note") => t.content }
       .headOption
       .value should include(s"${CodingWorkspace.NotesMount}/key.md")
     val summaryBefore = before.get(SummarizationMiddleware.key).value

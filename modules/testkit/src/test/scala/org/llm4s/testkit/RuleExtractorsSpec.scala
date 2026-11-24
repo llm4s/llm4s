@@ -12,7 +12,7 @@ class RuleExtractorsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def conversation(messages: Message*): Conversation = Conversation(messages)
 
-  private def call(id: String, name: String): ToolCall = ToolCall(id, name, ujson.Obj())
+  private def call(id: String, name: String): ToolCall = ToolCall(ToolCallId(id), name, ujson.Obj())
 
   private def calling(calls: ToolCall*): AssistantMessage = AssistantMessage("", calls)
 
@@ -46,7 +46,7 @@ class RuleExtractorsSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "not match when the conversation ends with anything else, or is empty" in {
     EndsWithUser.unapply(conversation(UserMessage("take lamp"), AssistantMessage("taken"))) shouldBe None
     EndsWithUser.unapply(
-      conversation(UserMessage("take lamp"), calling(call("c1", "add")), ToolMessage("ok", "c1"))
+      conversation(UserMessage("take lamp"), calling(call("c1", "add")), ToolMessage("ok", ToolCallId("c1")))
     ) shouldBe None
     EndsWithUser.unapply(conversation()) shouldBe None
   }
@@ -60,7 +60,7 @@ class RuleExtractorsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "LastUser" should "extract the latest user message even when later messages follow it" in {
     LastUser.unapply(
-      conversation(UserMessage("take lamp"), calling(call("c1", "add")), ToolMessage("ok", "c1"))
+      conversation(UserMessage("take lamp"), calling(call("c1", "add")), ToolMessage("ok", ToolCallId("c1")))
     ) shouldBe Some("take lamp")
   }
 
@@ -70,7 +70,11 @@ class RuleExtractorsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "AfterToolResult" should "extract the tool's name and its result when a tool result ends the conversation" in {
     AfterToolResult.unapply(
-      conversation(UserMessage("take lamp"), calling(call("c1", "add_inventory_item")), ToolMessage("added", "c1"))
+      conversation(
+        UserMessage("take lamp"),
+        calling(call("c1", "add_inventory_item")),
+        ToolMessage("added", ToolCallId("c1"))
+      )
     ) shouldBe Some(("add_inventory_item", "added"))
   }
 
@@ -79,8 +83,8 @@ class RuleExtractorsSpec extends AnyFlatSpec with Matchers with EitherValues {
       conversation(
         UserMessage("take lamp and look"),
         calling(call("c1", "add_inventory_item"), call("c2", "look")),
-        ToolMessage("added", "c1"),
-        ToolMessage("a dark room", "c2")
+        ToolMessage("added", ToolCallId("c1")),
+        ToolMessage("a dark room", ToolCallId("c2"))
       )
     ) shouldBe Some(("look", "a dark room"))
   }
@@ -90,8 +94,8 @@ class RuleExtractorsSpec extends AnyFlatSpec with Matchers with EitherValues {
       conversation(
         UserMessage("take lamp and look"),
         calling(call("c1", "add_inventory_item"), call("c2", "look")),
-        ToolMessage("a dark room", "c2"),
-        ToolMessage("added", "c1")
+        ToolMessage("a dark room", ToolCallId("c2")),
+        ToolMessage("added", ToolCallId("c1"))
       )
     ) shouldBe Some(("add_inventory_item", "added"))
   }
@@ -101,11 +105,11 @@ class RuleExtractorsSpec extends AnyFlatSpec with Matchers with EitherValues {
       conversation(
         UserMessage("look"),
         calling(call("call-1", "look")),
-        ToolMessage("a dark room", "call-1"),
+        ToolMessage("a dark room", ToolCallId("call-1")),
         AssistantMessage("It is dark."),
         UserMessage("take lamp"),
         calling(call("call-1", "add_inventory_item")),
-        ToolMessage("added", "call-1")
+        ToolMessage("added", ToolCallId("call-1"))
       )
     ) shouldBe Some(("add_inventory_item", "added"))
   }
@@ -115,7 +119,7 @@ class RuleExtractorsSpec extends AnyFlatSpec with Matchers with EitherValues {
       conversation(
         UserMessage("take lamp"),
         calling(call("c1", "add")),
-        ToolMessage("added", "c1"),
+        ToolMessage("added", ToolCallId("c1")),
         AssistantMessage("Taken.")
       )
     ) shouldBe None
@@ -125,18 +129,20 @@ class RuleExtractorsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "not match a result whose tool call cannot be found, rather than guess a name" in {
     // no assistant message before it
-    AfterToolResult.unapply(conversation(UserMessage("take lamp"), ToolMessage("added", "c1"))) shouldBe None
+    AfterToolResult.unapply(
+      conversation(UserMessage("take lamp"), ToolMessage("added", ToolCallId("c1")))
+    ) shouldBe None
     // the assistant message before it made a different call
     AfterToolResult.unapply(
-      conversation(UserMessage("take lamp"), calling(call("c9", "look")), ToolMessage("added", "c1"))
+      conversation(UserMessage("take lamp"), calling(call("c9", "look")), ToolMessage("added", ToolCallId("c1")))
     ) shouldBe None
     // the call is in an earlier turn, not in the message these results answer
     AfterToolResult.unapply(
       conversation(
         calling(call("c1", "add")),
-        ToolMessage("added", "c1"),
+        ToolMessage("added", ToolCallId("c1")),
         AssistantMessage("Taken."),
-        ToolMessage("again", "c1")
+        ToolMessage("again", ToolCallId("c1"))
       )
     ) shouldBe None
   }
@@ -146,8 +152,8 @@ class RuleExtractorsSpec extends AnyFlatSpec with Matchers with EitherValues {
       conversation(
         UserMessage("take lamp and look"),
         calling(call("c1", "add_inventory_item"), call("c2", "look")),
-        ToolMessage("added", "c1"),
-        ToolMessage("a dark room", "c2")
+        ToolMessage("added", ToolCallId("c1")),
+        ToolMessage("a dark room", ToolCallId("c2"))
       )
     ) shouldBe Some(Seq("add_inventory_item" -> "added", "look" -> "a dark room"))
   }
@@ -156,9 +162,9 @@ class RuleExtractorsSpec extends AnyFlatSpec with Matchers with EitherValues {
     AfterToolResults.unapply(
       conversation(
         calling(call("c1", "look")),
-        ToolMessage("a dark room", "c1"),
+        ToolMessage("a dark room", ToolCallId("c1")),
         calling(call("c2", "add")),
-        ToolMessage("added", "c2")
+        ToolMessage("added", ToolCallId("c2"))
       )
     ) shouldBe Some(Seq("add" -> "added"))
   }
@@ -170,7 +176,11 @@ class RuleExtractorsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "not match when any of the results cannot be named" in {
     AfterToolResults.unapply(
-      conversation(calling(call("c1", "look")), ToolMessage("a dark room", "c1"), ToolMessage("added", "c2"))
+      conversation(
+        calling(call("c1", "look")),
+        ToolMessage("a dark room", ToolCallId("c1")),
+        ToolMessage("added", ToolCallId("c2"))
+      )
     ) shouldBe None
   }
 
@@ -220,12 +230,16 @@ class RuleExtractorsSpec extends AnyFlatSpec with Matchers with EitherValues {
     def reply(messages: Message*): String = client.complete(conversation(messages*), options).value.content
 
     reply(UserMessage("look")) shouldBe "asked look"
-    reply(UserMessage("look"), calling(call("c1", "look")), ToolMessage("dark", "c1")) shouldBe "look said dark"
+    reply(
+      UserMessage("look"),
+      calling(call("c1", "look")),
+      ToolMessage("dark", ToolCallId("c1"))
+    ) shouldBe "look said dark"
     reply(
       UserMessage("look"),
       calling(call("c1", "look"), call("c2", "listen")),
-      ToolMessage("dark", "c1"),
-      ToolMessage("quiet", "c2")
+      ToolMessage("dark", ToolCallId("c1")),
+      ToolMessage("quiet", ToolCallId("c2"))
     ) shouldBe "look+listen"
     reply(UserMessage("look"), AssistantMessage("{}"), UserMessage(correction)) shouldBe "corrected"
     reply(UserMessage("look"), AssistantMessage("It is dark.")) shouldBe "still about look"

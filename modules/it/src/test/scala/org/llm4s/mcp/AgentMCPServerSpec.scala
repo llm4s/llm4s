@@ -64,7 +64,7 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       calls += 1
-      val toolCalls = if (calls == 1) Seq(ToolCall("call-1", toolName, args)) else Seq.empty
+      val toolCalls = if (calls == 1) Seq(ToolCall(ToolCallId("call-1"), toolName, args)) else Seq.empty
       val message =
         if (toolCalls.nonEmpty) AssistantMessage(text = None, toolCalls = toolCalls)
         else AssistantMessage("done")
@@ -102,7 +102,7 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
   "An Agent with MCP-served tools" should "feed the server-computed result back into the conversation" in {
     val toolMessages = runAgent("add", ujson.Obj("a" -> 19, "b" -> 23))
     toolMessages should have size 1
-    toolMessages.head.toolCallId shouldBe "call-1"
+    toolMessages.head.toolCallId shouldBe ToolCallId("call-1")
     toolMessages.head.content should include("42")
   }
 
@@ -116,7 +116,7 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
   it should "keep the run alive and record the handler message when the MCP tool itself fails" in {
     val toolMessages = runAgent("explode", ujson.Obj())
     toolMessages should have size 1
-    toolMessages.head.toolCallId shouldBe "call-1"
+    toolMessages.head.toolCallId shouldBe ToolCallId("call-1")
     toolMessages.head.content should include("kaboom-from-handler")
   }
 

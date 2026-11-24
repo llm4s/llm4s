@@ -1,7 +1,7 @@
 package org.llm4s.prompt
 
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, ToolMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, ToolCallId, ToolMessage, UserMessage }
 import org.llm4s.prompt.Fixtures.*
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -92,7 +92,7 @@ class PromptSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fence a tool's result" in {
-    val result = Untrusted.toolResult(ToolMessage("""{"weather":"<sunny>"}""", "call-1"))
+    val result = Untrusted.toolResult(ToolMessage("""{"weather":"<sunny>"}""", ToolCallId("call-1")))
     prompt"Tool said: $result".text shouldBe
       "Tool said: <untrusted id=\"u1\">\n{\"weather\":\"&lt;sunny&gt;\"}\n</untrusted>\n\n" + Prompt.UntrustedNotice
   }

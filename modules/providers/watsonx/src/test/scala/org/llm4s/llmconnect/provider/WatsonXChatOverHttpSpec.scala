@@ -116,7 +116,7 @@ class WatsonXChatOverHttpSpec
       } { (client, server) =>
         val first = client.complete(askToAdd, withTools).value
         val call  = first.toolCalls.loneElement
-        call shouldBe ToolCall("call-1", "add", ujson.Obj("a" -> 12, "b" -> 34))
+        call shouldBe ToolCall(ToolCallId("call-1"), "add", ujson.Obj("a" -> 12, "b" -> 34))
 
         val followUp = Conversation(askToAdd.messages ++ Seq(first.message, ToolMessage("46", call.id)))
         client.complete(followUp, withTools).value.content shouldBe "46"
@@ -170,7 +170,7 @@ class WatsonXChatOverHttpSpec
       withWatsonX((_, exchange) => sendSseResponse(exchange, body)) { (client, server) =>
         val chunks     = ListBuffer.empty[StreamedChunk]
         val completion = client.streamComplete(askToAdd, withTools)(chunks += _).value
-        val expected   = ToolCall("call-7", "add", ujson.Obj("a" -> 12, "b" -> 34))
+        val expected   = ToolCall(ToolCallId("call-7"), "add", ujson.Obj("a" -> 12, "b" -> 34))
         completion.toolCalls.loneElement shouldBe expected
         chunks.flatMap(_.toolCall).loneElement shouldBe expected
         chunks.flatMap(_.finishReason).last shouldBe FinishReason.ToolCalls

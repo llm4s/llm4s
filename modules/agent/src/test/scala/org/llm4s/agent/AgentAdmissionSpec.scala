@@ -212,7 +212,10 @@ class AgentAdmissionSpec
     val store = new Seen(new InMemoryCheckpointer())
     val log   = new CopyOnWriteArrayList[String]()
     val handoff = CompletionFixture.withMessage(
-      AssistantMessage(None, Seq(ToolCall("call_h", "handoff_to_specialist", ujson.Obj("reason" -> "specialist"))))
+      AssistantMessage(
+        None,
+        Seq(ToolCall(ToolCallId("call_h"), "handoff_to_specialist", ujson.Obj("reason" -> "specialist")))
+      )
     )
     val specialist = Agent
       .builder("specialist", answers("specialist answer", "never sent"))

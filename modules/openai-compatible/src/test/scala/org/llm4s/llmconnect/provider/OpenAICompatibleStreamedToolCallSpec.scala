@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAICompatibleConfig }
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, ToolCall, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, ToolCall, ToolCallId, UserMessage }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer._
 import org.scalatest.EitherValues
@@ -61,7 +61,7 @@ class OpenAICompatibleStreamedToolCallSpec extends AnyFlatSpec with Matchers wit
       finish
     )
 
-    toolCalls shouldBe Seq(ToolCall("call_1", "get_weather", ujson.Obj("location" -> "Paris")))
+    toolCalls shouldBe Seq(ToolCall(ToolCallId("call_1"), "get_weather", ujson.Obj("location" -> "Paris")))
     // Every continuation chunk handed to the caller names its call.
     chunks.flatMap(_.toolCall).map(tc => (tc.id, tc.name)).distinct shouldBe Seq(("call_1", "get_weather"))
     chunks.flatMap(_.toolCall) should have size 5
@@ -80,7 +80,7 @@ class OpenAICompatibleStreamedToolCallSpec extends AnyFlatSpec with Matchers wit
       finish
     )
 
-    toolCalls shouldBe Seq(ToolCall("call_1", "lookup", ujson.Obj("topic" -> "vault")))
+    toolCalls shouldBe Seq(ToolCall(ToolCallId("call_1"), "lookup", ujson.Obj("topic" -> "vault")))
     chunks.flatMap(_.toolCall).map(_.arguments).collect { case ujson.Str(s) => s }.mkString shouldBe
       """{"topic":"vault"}"""
     val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator("test-model")
@@ -97,9 +97,9 @@ class OpenAICompatibleStreamedToolCallSpec extends AnyFlatSpec with Matchers wit
       finish
     )
 
-    toolCalls.sortBy(_.id) shouldBe Seq(
-      ToolCall("call_a", "get_weather", ujson.Obj("city" -> "Oslo")),
-      ToolCall("call_b", "get_time", ujson.Obj("tz" -> "CET"))
+    toolCalls.sortBy(_.id.asString) shouldBe Seq(
+      ToolCall(ToolCallId("call_a"), "get_weather", ujson.Obj("city" -> "Oslo")),
+      ToolCall(ToolCallId("call_b"), "get_time", ujson.Obj("tz" -> "CET"))
     )
     chunks.flatMap(_.toolCall).map(_.id) shouldBe Seq("call_a", "call_b", "call_a", "call_b")
   }
@@ -116,9 +116,9 @@ class OpenAICompatibleStreamedToolCallSpec extends AnyFlatSpec with Matchers wit
       finish
     )
 
-    toolCalls.sortBy(_.id) shouldBe Seq(
-      ToolCall("c0", "f", ujson.Obj("a" -> 1)),
-      ToolCall("c1", "g", ujson.Obj("b" -> 2))
+    toolCalls.sortBy(_.id.asString) shouldBe Seq(
+      ToolCall(ToolCallId("c0"), "f", ujson.Obj("a" -> 1)),
+      ToolCall(ToolCallId("c1"), "g", ujson.Obj("b" -> 2))
     )
   }
 
@@ -129,7 +129,7 @@ class OpenAICompatibleStreamedToolCallSpec extends AnyFlatSpec with Matchers wit
       val completion = new DeepSeekClient(DeepSeekConfig(Secret("k"), "deepseek-chat", baseUrl, 128000, 8192))
         .streamComplete(conversation, CompletionOptions())(_ => ())
         .value
-      completion.toolCalls shouldBe Seq(ToolCall("call_1", "lookup", ujson.Obj("q" -> "llm4s")))
+      completion.toolCalls shouldBe Seq(ToolCall(ToolCallId("call_1"), "lookup", ujson.Obj("q" -> "llm4s")))
     }
 
   "parseStreamingChunks" should "resolve a continuation only against the stream it belongs to" in {

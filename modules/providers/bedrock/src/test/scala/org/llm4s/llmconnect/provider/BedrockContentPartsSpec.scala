@@ -87,8 +87,8 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
     val conv = Conversation(
       Seq(
         UserMessage("go"),
-        AssistantMessage(None, Seq(ToolCall("c1", "fetch", ujson.Obj()))),
-        ToolMessage(Vector(ContentPart.Text("here"), image(bytes), doc(bytes)), "c1")
+        AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "fetch", ujson.Obj()))),
+        ToolMessage(Vector(ContentPart.Text("here"), image(bytes), doc(bytes)), ToolCallId("c1"))
       )
     )
     val result = send(conv)._1.get("messages").arr.last("content").arr.head("toolResult")
@@ -96,7 +96,9 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
   }
 
   it should "go as text and then its media when there is no call to answer" in {
-    val conv = Conversation(Seq(UserMessage("go"), ToolMessage(Vector(ContentPart.Text("orphan"), image(bytes)), "c9")))
+    val conv = Conversation(
+      Seq(UserMessage("go"), ToolMessage(Vector(ContentPart.Text("orphan"), image(bytes)), ToolCallId("c9")))
+    )
     val blocks = send(conv)._1.get("messages").arr.head("content").arr
     blocks.map(_.obj.keys.head).toSeq shouldBe Seq("text", "text", "text", "image")
     blocks(1)("text").str shouldBe "[Tool result for c9]:"
@@ -106,7 +108,7 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
   it should "keep an unanswered result's parts in their order, each caption beside its image" in {
     val parts =
       Vector(ContentPart.Text("before"), image(bytes), ContentPart.Text("after"), image(bytes, MediaType.Gif))
-    val conv   = Conversation(Seq(UserMessage("go"), ToolMessage(parts, "c9")))
+    val conv   = Conversation(Seq(UserMessage("go"), ToolMessage(parts, ToolCallId("c9"))))
     val blocks = send(conv)._1.get("messages").arr.head("content").arr
     blocks.map(_.obj.keys.head).toSeq shouldBe Seq("text", "text", "text", "image", "text", "image")
     blocks.drop(2).flatMap(_.obj.get("text").map(_.str)).toSeq shouldBe Seq("before", "after")
@@ -149,8 +151,8 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
     val tool = Conversation(
       Seq(
         UserMessage("go"),
-        AssistantMessage(None, Seq(ToolCall("c1", "fetch", ujson.Obj()))),
-        ToolMessage(Vector(image(bytes, MediaType.Tiff)), "c1")
+        AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "fetch", ujson.Obj()))),
+        ToolMessage(Vector(image(bytes, MediaType.Tiff)), ToolCallId("c1"))
       )
     )
     val (sent, result) = send(tool)

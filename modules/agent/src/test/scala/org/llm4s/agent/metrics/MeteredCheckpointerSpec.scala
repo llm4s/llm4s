@@ -1,5 +1,6 @@
 package org.llm4s.agent.metrics
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.{ Agent, AgentId, AgentStatus, CompletionFixture, FailingLLMClient, NTurnFakeLLMClient }
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.agent.events.{ SubagentEvents, TaskEnded }

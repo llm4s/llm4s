@@ -1,7 +1,7 @@
 package org.llm4s.testkit
 
 import org.llm4s.error.LLMError
-import org.llm4s.llmconnect.model.{ TokenUsage, ToolCall }
+import org.llm4s.llmconnect.model.{ TokenUsage, ToolCall, ToolCallId }
 
 import scala.util.Try
 
@@ -118,7 +118,7 @@ object Reply {
 
   private def parsedToolCall(name: String, argumentsJson: String, id: Option[String]): ToolCall =
     Try(ujson.read(argumentsJson)).toOption match {
-      case Some(arguments: ujson.Obj) => ToolCall(id.getOrElse(""), name, arguments)
+      case Some(arguments: ujson.Obj) => ToolCall(ToolCallId(id.getOrElse("")), name, arguments)
       case Some(_) =>
         throw new IllegalArgumentException(
           s"the arguments of tool call '$name' must be a JSON object, but were: $argumentsJson"

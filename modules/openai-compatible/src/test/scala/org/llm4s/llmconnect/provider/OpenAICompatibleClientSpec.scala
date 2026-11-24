@@ -130,8 +130,8 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
         Seq(
           SystemMessage("sys"),
           UserMessage("hi"),
-          AssistantMessage(None, List(ToolCall("c1", "f", ujson.Obj("a" -> 1)))),
-          ToolMessage("out", "c1")
+          AssistantMessage(None, List(ToolCall(ToolCallId("c1"), "f", ujson.Obj("a" -> 1)))),
+          ToolMessage("out", ToolCallId("c1"))
         )
       ),
       CompletionOptions(maxTokens = Some(10)).withReasoning(ReasoningEffort.High)
@@ -196,9 +196,9 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
       ujson.read("""[{"id":"a","function":{"name":"f","arguments":"{\"x\":1}"}},{"function":{}},{}]""")
     ) shouldBe Right(
       Seq(
-        ToolCall("a", "f", ujson.Obj("x" -> 1)),
-        ToolCall("", "", ujson.Obj()),
-        ToolCall("", "", ujson.Obj())
+        ToolCall(ToolCallId("a"), "f", ujson.Obj("x" -> 1)),
+        ToolCall(ToolCallId(""), "", ujson.Obj()),
+        ToolCall(ToolCallId(""), "", ujson.Obj())
       )
     )
     OpenAICompatibleDialect.lenientToolCalls(ujson.read("""[{"function":{"arguments":"{bad"}}]""")).isLeft shouldBe true

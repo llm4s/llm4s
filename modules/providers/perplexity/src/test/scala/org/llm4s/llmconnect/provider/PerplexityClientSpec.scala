@@ -67,13 +67,13 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
     }
 
     "send system messages as instructions and the whole tool loop as input items" in {
-      val call = ToolCall("call_1", "get_weather", ujson.Obj("city" -> "Paris"))
+      val call = ToolCall(ToolCallId("call_1"), "get_weather", ujson.Obj("city" -> "Paris"))
       val conversation = Conversation(
         Seq(
           SystemMessage("Be brief."),
           UserMessage("Weather?"),
           AssistantMessage("Checking.", Seq(call)),
-          ToolMessage("""{"temp":20}""", "call_1"),
+          ToolMessage("""{"temp":20}""", ToolCallId("call_1")),
           SystemMessage("Cite sources."),
           UserMessage(Vector(ContentPart.Text("one"), ContentPart.Text("two")))
         )
@@ -109,7 +109,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
 
     "send a tool result for an unknown call without a name, and drop an empty assistant turn" in {
       val conversation =
-        Conversation(Seq(UserMessage("q"), AssistantMessage(text = None), ToolMessage("r", "call_x")))
+        Conversation(Seq(UserMessage("q"), AssistantMessage(text = None), ToolMessage("r", ToolCallId("call_x"))))
       val (http, _) = completeWith(response(s"[${textMessage("ok")}]"), conversation)
       http.lastBody("input").arr.map(_("type").str) shouldBe Seq("message", "function_call_output")
       http.lastBody("input")(1).obj.keySet should not contain "name"
@@ -273,8 +273,8 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
       val (_, result) = completeWith(response(output))
       val completion  = result.fold(e => fail(e.message), identity)
       completion.toolCalls shouldBe List(
-        ToolCall("call_a", "get_weather", ujson.Obj("city" -> "Rome")),
-        ToolCall("call_b", "get_weather", ujson.Obj())
+        ToolCall(ToolCallId("call_a"), "get_weather", ujson.Obj("city" -> "Rome")),
+        ToolCall(ToolCallId("call_b"), "get_weather", ujson.Obj())
       )
       completion.message.toolCalls shouldBe completion.toolCalls
       completion.message.thinking shouldBe Seq(
@@ -286,7 +286,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
     "send a kept thought signature back on its call to the same model, and not to another" in {
       val http  = answering(response(s"[${functionCall("call_a", "get_weather", "{}", Some("SIG"))}]"))
       val first = client(http).complete(hello, CompletionOptions()).fold(e => fail(e.message), identity)
-      val loop  = Conversation(Seq(UserMessage("Hello"), first.message, ToolMessage("sunny", "call_a")))
+      val loop  = Conversation(Seq(UserMessage("Hello"), first.message, ToolMessage("sunny", ToolCallId("call_a"))))
       client(http).complete(loop, CompletionOptions())
       http.lastBody("input")(1)("thought_signature").str shouldBe "SIG"
       client(http, config(model = "openai/gpt-5.6-sol")).complete(loop, CompletionOptions())

@@ -122,7 +122,7 @@ class AgentAbandonQueuedSpec
 
     /** The tool results the model was last sent. */
     def lastResults: Vector[(String, String)] =
-      client.sent.asScala.last.collect { case t: ToolMessage => t.toolCallId -> t.content }
+      client.sent.asScala.last.collect { case t: ToolMessage => t.toolCallId.asString -> t.content }
   }
 
   private val abandoned = EntryOutcome.Failed(FailureReason.Abandoned)

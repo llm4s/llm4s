@@ -124,7 +124,7 @@ class AgentHandoffSpec extends AnyFlatSpec with Matchers {
     CompletionFixture.withMessage(
       AssistantMessage(
         Some("I'll hand this off to the specialist"),
-        Seq(ToolCall("call_1", s"handoff_to_$target", ujson.Obj("reason" -> "Requires advanced math")))
+        Seq(ToolCall(ToolCallId("call_1"), s"handoff_to_$target", ujson.Obj("reason" -> "Requires advanced math")))
       )
     )
 
@@ -152,7 +152,10 @@ class AgentHandoffSpec extends AnyFlatSpec with Matchers {
     val triageClient = ScriptedLLMClient.of(handoffCall("physics"), CompletionFixture.simple("back with triage"))
     val physicsClient = ScriptedLLMClient.of(
       CompletionFixture.withMessage(
-        AssistantMessage(None, Seq(ToolCall("call_2", "handoff_to_triage", ujson.Obj("reason" -> "not physics"))))
+        AssistantMessage(
+          None,
+          Seq(ToolCall(ToolCallId("call_2"), "handoff_to_triage", ujson.Obj("reason" -> "not physics")))
+        )
       )
     )
     val physics = Agent.builder("physics", physicsClient).withHandoffs(Handoff.toId("triage", "Not a physics question"))

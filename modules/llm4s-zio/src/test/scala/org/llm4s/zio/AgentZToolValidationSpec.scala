@@ -64,7 +64,7 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
     Completion(id = "t", created = Instant.EPOCH, model = "m", message = AssistantMessage(Some(s)))
 
   private def callWith(i: Int, args: ujson.Value): Completion = {
-    val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = args))
+    val calls = Seq(ToolCall(id = ToolCallId(s"call-$i"), name = "echo", arguments = args))
     Completion(id = s"t$i", created = Instant.EPOCH, model = "m", message = AssistantMessage("", calls))
   }
 

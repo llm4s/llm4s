@@ -269,7 +269,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     val conv = Conversation(
       Seq(
         UserMessage("What is the weather?"),
-        AssistantMessage(None, Seq(ToolCall("tc-1", "get_weather", ujson.Obj("location" -> "London"))))
+        AssistantMessage(None, Seq(ToolCall(ToolCallId("tc-1"), "get_weather", ujson.Obj("location" -> "London"))))
       )
     )
 
@@ -286,8 +286,8 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     val conv = Conversation(
       Seq(
         UserMessage("What is the weather?"),
-        AssistantMessage(None, Seq(ToolCall("tc-1", "get_weather", ujson.Obj("location" -> "London")))),
-        ToolMessage("Sunny, 22 C", "tc-1")
+        AssistantMessage(None, Seq(ToolCall(ToolCallId("tc-1"), "get_weather", ujson.Obj("location" -> "London")))),
+        ToolMessage("Sunny, 22 C", ToolCallId("tc-1"))
       )
     )
 

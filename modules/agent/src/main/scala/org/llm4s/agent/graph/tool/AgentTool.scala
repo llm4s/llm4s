@@ -2,10 +2,10 @@ package org.llm4s.agent.graph.tool
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.agent.delegation.TimedOutChild
-import org.llm4s.agent.graph.{ EffectKey, IdempotencyKey, RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
+import org.llm4s.agent.graph.{ EffectKey, RunContext, StateKey, StateUpdate, ThreadState }
 import org.llm4s.error.LLMError
-import org.llm4s.llmconnect.model.ContentPart
-import org.llm4s.toolapi.{ SchemaDefinition, ToolCallInfo, ToolFunction, ToolHints }
+import org.llm4s.llmconnect.model.{ ContentPart, ToolCallId }
+import org.llm4s.toolapi.{ IdempotencyKey, SchemaDefinition, ToolCallInfo, ToolFunction, ToolHints }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -227,7 +227,7 @@ final private[agent] class CallTimeout:
 final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec: ReadWriter[Ans])
 
 /**
- * What a tool call knows: the run, the call's id, the call's [[org.llm4s.agent.graph.IdempotencyKey IdempotencyKey]], the thread state
+ * What a tool call knows: the run, the call's id, the call's [[org.llm4s.toolapi.IdempotencyKey IdempotencyKey]], the thread state
  * it may read, and whether the call has been approved. Built with `ToolContext(...)`; a field added
  * later gets a default there and a `with*` setter, so existing callers keep compiling.
  *
@@ -466,7 +466,7 @@ object AgentTool:
 
     // the call's id and idempotency key reach the handler as `SafeParameterExtractor.call` (#1740)
     def execute(args: ujson.Value, context: ToolContext): ToolOutcome =
-      function.execute(args, ToolCallInfo(context.toolCallId.value, context.idempotencyKey.value)) match
+      function.execute(args, ToolCallInfo(context.toolCallId, context.idempotencyKey)) match
         case Right(json) => ToolOutcome.success(ToolContent.Json(json))
         case Left(error) => ToolOutcome.Error(error.formatted)
 

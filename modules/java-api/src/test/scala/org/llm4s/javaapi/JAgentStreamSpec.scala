@@ -16,7 +16,7 @@ import org.llm4s.agent.graph.{
   ThreadId
 }
 import org.llm4s.error.{ CancelledError, LLMError, NetworkError, ValidationError }
-import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall, ToolCallId }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AnyFlatSpec
@@ -49,7 +49,7 @@ class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
   }
 
   private def calling: Completion = {
-    val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
+    val toolCall = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hello"))
     Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(toolCall)))
   }
 
@@ -88,7 +88,7 @@ class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
 
   it should "deliver a result that does not convert for Java to onError and to await, not fail fatally" in {
     // the Scala turn completes with a call whose arguments are null in its history; its Java view cannot render them
-    val call   = ToolCall("call-1", "missing", null)
+    val call   = ToolCall(ToolCallId("call-1"), "missing", null)
     def client = SuspensionFixtures.scripted(Right(SuspensionFixtures.calling(call)))
     agentOf(client)().run("hi").map(_.status) shouldBe Right(org.llm4s.agent.AgentStatus.Completed("done"))
     val recorder = Recorder()

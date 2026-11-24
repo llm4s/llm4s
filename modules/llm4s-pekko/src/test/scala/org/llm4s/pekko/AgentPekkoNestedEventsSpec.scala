@@ -72,7 +72,13 @@ object AgentPekkoNestedEventsSpec {
           Right(
             completion(
               "",
-              Seq(ToolCall("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "say hello")))
+              Seq(
+                ToolCall(
+                  ToolCallId("c1"),
+                  "task",
+                  ujson.Obj("subagent_type" -> "general", "description" -> "say hello")
+                )
+              )
             )
           )
         }

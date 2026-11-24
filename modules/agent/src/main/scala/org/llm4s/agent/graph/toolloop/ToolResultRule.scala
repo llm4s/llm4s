@@ -63,7 +63,7 @@ private[llm4s] object ToolResultRule:
     }
 
   private def idProblems(message: AssistantMessage, where: String): Vector[String] =
-    val ids = message.toolCalls.map(_.id).toVector
+    val ids = message.toolCalls.map(_.id.asString).toVector
     val blank =
       Option.when(ids.exists(_.trim.isEmpty))(s"$where: a tool call has a blank id").toVector
     val repeated =

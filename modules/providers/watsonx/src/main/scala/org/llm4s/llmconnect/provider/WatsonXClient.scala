@@ -596,7 +596,7 @@ class WatsonXClient(
           if (am.toolCalls.nonEmpty)
             message("tool_calls") = ujson.Arr.from(am.toolCalls.map { call =>
               ujson.Obj(
-                "id"       -> call.id,
+                "id"       -> call.id.asString,
                 "type"     -> "function",
                 "function" -> ujson.Obj("name" -> call.name, "arguments" -> requestArguments(call.arguments))
               )
@@ -604,7 +604,7 @@ class WatsonXClient(
           Some(message)
         }
       case tm: ToolMessage =>
-        Some(ujson.Obj("role" -> "tool", "tool_call_id" -> tm.toolCallId, "content" -> tm.content))
+        Some(ujson.Obj("role" -> "tool", "tool_call_id" -> tm.toolCallId.asString, "content" -> tm.content))
     })
 
   private def parseCompletion(body: String): Result[Completion] =
@@ -844,7 +844,7 @@ object WatsonXClient {
       name     <- function.get("name").flatMap(_.strOpt).filter(_.nonEmpty).toRight(malformed("an entry has no name"))
       args     <- normalizeArguments(function.get("arguments"))
     } yield ToolCall(
-      fields.get("id").flatMap(_.strOpt).filter(_.nonEmpty).getOrElse(syntheticId(idPrefix, index)),
+      ToolCallId(fields.get("id").flatMap(_.strOpt).filter(_.nonEmpty).getOrElse(syntheticId(idPrefix, index))),
       name,
       args
     )
@@ -867,7 +867,11 @@ object WatsonXClient {
         if (partial.name.isEmpty) Left(malformed("a streamed call has no name"))
         else
           normalizeArguments(Some(ujson.Str(partial.arguments.result()))).map { args =>
-            calls :+ ToolCall(if (partial.id.nonEmpty) partial.id else syntheticId(idPrefix, index), partial.name, args)
+            calls :+ ToolCall(
+              if (partial.id.nonEmpty) ToolCallId(partial.id) else ToolCallId(syntheticId(idPrefix, index)),
+              partial.name,
+              args
+            )
           }
       }
     }

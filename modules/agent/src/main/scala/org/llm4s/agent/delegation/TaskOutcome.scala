@@ -1,9 +1,9 @@
 package org.llm4s.agent.delegation
 
 import org.llm4s.agent.{ AgentId, AgentStatus }
-import org.llm4s.agent.graph.{ RunId, ThreadId, ToolCallId }
+import org.llm4s.agent.graph.{ RunId, ThreadId }
 import org.llm4s.annotation.Experimental
-import org.llm4s.llmconnect.model.UsageSummary
+import org.llm4s.llmconnect.model.{ ToolCallId, UsageSummary }
 import upickle.default.ReadWriter
 
 /**
@@ -58,8 +58,7 @@ object ChildRef:
   def apply(threadId: ThreadId, runId: RunId, agent: AgentId, toolCallId: Option[ToolCallId], depth: Int): ChildRef =
     new ChildRef(threadId, runId, agent, toolCallId, depth)
 
-  private given ReadWriter[RunId]      = upickle.default.readwriter[String].bimap(_.value, RunId(_))
-  private given ReadWriter[ToolCallId] = upickle.default.readwriter[String].bimap(_.value, ToolCallId(_))
+  private given ReadWriter[RunId] = upickle.default.readwriter[String].bimap(_.value, RunId(_))
 
   given ReadWriter[ChildRef] = upickle.default.macroRW
 
