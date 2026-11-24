@@ -144,10 +144,10 @@ private[config] object EmbeddingsConfigLoader {
     // `withFilter`, so a pattern-matching generator does not compile.
     for {
       descriptor <- resolve(selected, registry)
-      section  <- readSection(source, descriptor)
-      extras   <- readExtras(source, descriptor)
-      keyFile  <- readApiKeyFile(source, descriptor)
-      resolved <- resolveApiKey(section, keyFile, descriptor, source)
+      section    <- readSection(source, descriptor)
+      extras     <- readExtras(source, descriptor)
+      keyFile    <- readApiKeyFile(source, descriptor)
+      resolved   <- resolveApiKey(section, keyFile, descriptor, source)
       config <- descriptor.buildConfig(
         section.withApiKey(resolved.map(_.value)).withExtras(extras),
         EmbeddingConfigContext(selected.modelOverride)

@@ -49,7 +49,13 @@ class XaiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "XaiConfig.toString" should "redact the API key" in {
     val rendered =
-      XaiConfig(Secret("xai-secret-key-123456"), ModelName("grok-4.7"), XaiConfig.DEFAULT_BASE_URL, 500000, 8192).toString
+      XaiConfig(
+        Secret("xai-secret-key-123456"),
+        ModelName("grok-4.7"),
+        XaiConfig.DEFAULT_BASE_URL,
+        500000,
+        8192
+      ).toString
     (rendered should not).include("xai-secret-key-123456")
     rendered should include("grok-4.7")
   }

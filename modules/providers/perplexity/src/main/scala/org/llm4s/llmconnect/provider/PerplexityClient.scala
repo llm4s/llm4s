@@ -117,7 +117,10 @@ class PerplexityClient(
 
   private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
     val adjustments =
-      PerplexityClient.unsentOptions(config.model.asString, options) ++ UnmappedOptions.serviceTier("Perplexity", options)
+      PerplexityClient.unsentOptions(config.model.asString, options) ++ UnmappedOptions.serviceTier(
+        "Perplexity",
+        options
+      )
     adjustmentLog.record(config.model.asString, adjustments)
     adjustments
   }

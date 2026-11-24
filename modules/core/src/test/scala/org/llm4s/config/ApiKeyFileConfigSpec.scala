@@ -25,7 +25,8 @@ import java.nio.file.{ Files, Path }
 class ApiKeyFileConfigSpec extends AnyWordSpec with Matchers with EitherValues with OptionValues:
 
   /** A config that cannot take an `ApiKeyProvider` (the trait's default `withApiKeyProvider`), holding its key. */
-  final private case class StaticKeyConfig(key: String, providerId: ProviderId) extends org.llm4s.testutil.FixedProviderSettings:
+  final private case class StaticKeyConfig(key: String, providerId: ProviderId)
+      extends org.llm4s.testutil.FixedProviderSettings:
     val model: ModelName                            = ModelName("m")
     val contextWindow: Int                          = 8192
     val reserveCompletion: Int                      = 1024

@@ -10,7 +10,12 @@ import scala.concurrent.duration._
 /** `EmbeddingProviderConfig` and `EmbeddingModelConfig` as growth-prone types (#2346). */
 class GrowthSafeEmbeddingConfigsSpec extends AnyFunSuite with Matchers {
 
-  private val provider = EmbeddingProviderConfig(ProviderId("fixtureembedding"), BaseUrl("https://api.example.invalid/v1"), ModelName("embed-small"), Some(Secret("sk-secret")))
+  private val provider = EmbeddingProviderConfig(
+    ProviderId("fixtureembedding"),
+    BaseUrl("https://api.example.invalid/v1"),
+    ModelName("embed-small"),
+    Some(Secret("sk-secret"))
+  )
 
   test("EmbeddingProviderConfig(...) defaults timeouts") {
     provider.timeouts shouldBe ProviderTimeouts.default
@@ -24,7 +29,13 @@ class GrowthSafeEmbeddingConfigsSpec extends AnyFunSuite with Matchers {
       .withApiKey(Secret("sk-other"))
       .withTimeouts(timeouts)
 
-    adjusted shouldBe EmbeddingProviderConfig(ProviderId("fixtureembedding"), BaseUrl("https://other.invalid/v2"), ModelName("embed-large"), Some(Secret("sk-other")), timeouts)
+    adjusted shouldBe EmbeddingProviderConfig(
+      ProviderId("fixtureembedding"),
+      BaseUrl("https://other.invalid/v2"),
+      ModelName("embed-large"),
+      Some(Secret("sk-other")),
+      timeouts
+    )
   }
 
   test("EmbeddingProviderConfig still redacts the API key") {

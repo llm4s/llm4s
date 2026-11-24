@@ -123,13 +123,23 @@ class VoyageEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
 
     "build a Voyage client without a network call" in {
       val cfg =
-        EmbeddingProviderConfig(providerId = ProviderId("voyage"), baseUrl = BaseUrl("https://api.voyage.ai"), model = ModelName("voyage-3"), apiKey = Some(Secret("vk-test")))
+        EmbeddingProviderConfig(
+          providerId = ProviderId("voyage"),
+          baseUrl = BaseUrl("https://api.voyage.ai"),
+          model = ModelName("voyage-3"),
+          apiKey = Some(Secret("vk-test"))
+        )
       EmbeddingClient.from(cfg.withProviderId(ProviderId("voyage"))).isRight shouldBe true
     }
 
     "fold the voyageai alias onto voyage" in {
       val cfg =
-        EmbeddingProviderConfig(providerId = ProviderId("voyage"), baseUrl = BaseUrl("https://api.voyage.ai"), model = ModelName("voyage-3"), apiKey = Some(Secret("vk-test")))
+        EmbeddingProviderConfig(
+          providerId = ProviderId("voyage"),
+          baseUrl = BaseUrl("https://api.voyage.ai"),
+          model = ModelName("voyage-3"),
+          apiKey = Some(Secret("vk-test"))
+        )
       EmbeddingClient.from(cfg.withProviderId(ProviderId("voyageai"))).isRight shouldBe true
     }
   }

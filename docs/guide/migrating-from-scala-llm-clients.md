@@ -57,6 +57,7 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.schema.*
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 ```
@@ -291,7 +292,7 @@ llm4s {
 
 ```scala
 def connectTo(section: String): Result[LLMClient] = for {
-  providerConfig  <- Llm4sConfig.provider(section)
+  providerConfig  <- Llm4sConfig.provider(ProviderName(section))
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client <- LLMConnect.getClient(providerConfig)

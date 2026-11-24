@@ -516,7 +516,10 @@ class BedrockClient(
     partitionMessages(conversation, options).map { (systemTexts, messages) =>
       val cache = cachePlan(options)
       val builder =
-        ConverseRequest.builder().modelId(config.model.asString).messages(withConversationCheckpoint(messages, cache).asJava)
+        ConverseRequest
+          .builder()
+          .modelId(config.model.asString)
+          .messages(withConversationCheckpoint(messages, cache).asJava)
       if (systemTexts.nonEmpty) builder.system(systemBlocks(systemTexts, cache).asJava)
       builder.inferenceConfig(inferenceConfig(options))
       toolConfig(options, cache).foreach(builder.toolConfig)

@@ -23,7 +23,7 @@ class ChatModuleSpec extends AnyFlatSpec with Matchers {
 
   "ChatModule.client" should "load the provider section named in the llm4s block of Play's configuration" in {
     val config = configuration(
-      "llm4s.defaultProvider"       -> "local",
+      "llm4s.defaultProvider"          -> "local",
       "llm4s.providers.local.provider" -> "ollama",
       "llm4s.providers.local.model"    -> "llama3:latest",
       "llm4s.providers.local.baseUrl"  -> "http://127.0.0.1:11434"

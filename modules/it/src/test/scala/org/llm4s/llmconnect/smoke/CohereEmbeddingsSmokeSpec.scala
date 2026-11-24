@@ -29,7 +29,12 @@ class CohereEmbeddingsSmokeSpec extends AnyFlatSpec with Matchers {
 
   private def provider(apiKey: String, inputType: CohereInputType = CohereInputType.default): EmbeddingProvider =
     CohereEmbeddingProvider.fromConfig(
-      EmbeddingProviderConfig(providerId = ProviderId("cohere"), baseUrl = BaseUrl("https://api.cohere.com"), model = ModelName(Model), apiKey = Some(Secret(apiKey))),
+      EmbeddingProviderConfig(
+        providerId = ProviderId("cohere"),
+        baseUrl = BaseUrl("https://api.cohere.com"),
+        model = ModelName(Model),
+        apiKey = Some(Secret(apiKey))
+      ),
       inputType
     )
 

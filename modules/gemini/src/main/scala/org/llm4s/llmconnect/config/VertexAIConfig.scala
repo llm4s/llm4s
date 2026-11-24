@@ -49,7 +49,7 @@ final case class VertexAIConfig private (
   override val network: HttpNetworkSettings
 ) extends ProviderConfig:
   override val providerId: ProviderId                                    = ProviderId("vertexai")
-  override def withModel(model: ModelName): VertexAIConfig                  = copy(model = model)
+  override def withModel(model: ModelName): VertexAIConfig               = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): VertexAIConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): VertexAIConfig = copy(network = network)
 

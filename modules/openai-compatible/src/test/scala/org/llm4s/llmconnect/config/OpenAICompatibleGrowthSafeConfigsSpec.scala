@@ -63,7 +63,8 @@ class OpenAICompatibleGrowthSafeConfigsSpec extends AnyFlatSpec with Matchers {
     def withDefaults(a: String, m: String) =
       DeepSeekConfig(apiKey = Secret(a), model = ModelName(m), timeouts = ProviderTimeouts.default)
     def short(a: String, m: String) = DeepSeekConfig(Secret(a), ModelName(m))
-    def fields(c: C) = Fields(c.apiKey.reveal, c.model.asString, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+    def fields(c: C) =
+      Fields(c.apiKey.reveal, c.model.asString, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
     def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
     def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
@@ -83,7 +84,8 @@ class OpenAICompatibleGrowthSafeConfigsSpec extends AnyFlatSpec with Matchers {
     def withDefaults(a: String, m: String) =
       ZaiConfig(apiKey = Secret(a), model = ModelName(m), timeouts = ProviderTimeouts.default)
     def short(a: String, m: String) = ZaiConfig(Secret(a), ModelName(m))
-    def fields(c: C) = Fields(c.apiKey.reveal, c.model.asString, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+    def fields(c: C) =
+      Fields(c.apiKey.reveal, c.model.asString, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
     def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
     def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
@@ -103,7 +105,8 @@ class OpenAICompatibleGrowthSafeConfigsSpec extends AnyFlatSpec with Matchers {
     def withDefaults(a: String, m: String) =
       XaiConfig(apiKey = Secret(a), model = ModelName(m), timeouts = ProviderTimeouts.default)
     def short(a: String, m: String) = XaiConfig(Secret(a), ModelName(m))
-    def fields(c: C) = Fields(c.apiKey.reveal, c.model.asString, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+    def fields(c: C) =
+      Fields(c.apiKey.reveal, c.model.asString, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
     def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
     def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
@@ -123,7 +126,8 @@ class OpenAICompatibleGrowthSafeConfigsSpec extends AnyFlatSpec with Matchers {
     def withDefaults(a: String, m: String) =
       MistralConfig(apiKey = Secret(a), model = ModelName(m), timeouts = ProviderTimeouts.default)
     def short(a: String, m: String) = MistralConfig(Secret(a), ModelName(m))
-    def fields(c: C) = Fields(c.apiKey.reveal, c.model.asString, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+    def fields(c: C) =
+      Fields(c.apiKey.reveal, c.model.asString, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
     def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
     def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
@@ -143,7 +147,8 @@ class OpenAICompatibleGrowthSafeConfigsSpec extends AnyFlatSpec with Matchers {
     def withDefaults(a: String, m: String) =
       CohereConfig(apiKey = Secret(a), model = ModelName(m), timeouts = ProviderTimeouts.default)
     def short(a: String, m: String) = CohereConfig(Secret(a), ModelName(m))
-    def fields(c: C) = Fields(c.apiKey.reveal, c.model.asString, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+    def fields(c: C) =
+      Fields(c.apiKey.reveal, c.model.asString, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
     def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
     def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)

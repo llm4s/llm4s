@@ -60,7 +60,12 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
-        val config = EmbeddingProviderConfig(providerId = ProviderId("voyage"), baseUrl = BaseUrl(baseUrl), model = ModelName("voyage-3"), apiKey = Some(Secret("test-key")))
+        val config = EmbeddingProviderConfig(
+          providerId = ProviderId("voyage"),
+          baseUrl = BaseUrl(baseUrl),
+          model = ModelName("voyage-3"),
+          apiKey = Some(Secret("test-key"))
+        )
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(VoyageAIEmbeddingProvider, config))
       }
     }
@@ -68,7 +73,12 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
       assertEmbeddingUsesSuppliedHttpClient(
         VoyageAIEmbeddingProvider,
-        EmbeddingProviderConfig(providerId = ProviderId("voyage"), baseUrl = BaseUrl("http://localhost:1"), model = ModelName("test-model"), apiKey = Some(Secret("test-key")))
+        EmbeddingProviderConfig(
+          providerId = ProviderId("voyage"),
+          baseUrl = BaseUrl("http://localhost:1"),
+          model = ModelName("test-model"),
+          apiKey = Some(Secret("test-key"))
+        )
       )
     }
 
@@ -76,7 +86,12 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
       assertEmbeddingHonoursApiKeyProvider(
         LocalProviderTestServer.sendJsonResponse(_, 200, """{"data":[{"embedding":[0.1,0.2]}]}""")
       ) { (baseUrl, keys) =>
-        val config = EmbeddingProviderConfig(providerId = ProviderId("voyage"), baseUrl = BaseUrl(baseUrl), model = ModelName("voyage-3"), apiKey = Some(Secret("test-key")))
+        val config = EmbeddingProviderConfig(
+          providerId = ProviderId("voyage"),
+          baseUrl = BaseUrl(baseUrl),
+          model = ModelName("voyage-3"),
+          apiKey = Some(Secret("test-key"))
+        )
         assertBuildsEmbeddingProvider(VoyageAIEmbeddingProvider, config.withApiKeyProvider(Some(keys)))
       }
     }

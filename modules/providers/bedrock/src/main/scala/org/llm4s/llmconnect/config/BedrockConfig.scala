@@ -56,7 +56,7 @@ final case class BedrockConfig(
   override val network: HttpNetworkSettings = HttpNetworkSettings.default
 ) extends ProviderConfig:
   override val providerId: ProviderId                                   = ProviderId("bedrock")
-  override def withModel(model: ModelName): BedrockConfig                  = copy(model = model)
+  override def withModel(model: ModelName): BedrockConfig               = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): BedrockConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): BedrockConfig = copy(network = network)
 

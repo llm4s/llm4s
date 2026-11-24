@@ -108,7 +108,9 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   it should "refuse a null config and treat a null collector as none" in {
     import org.llm4s.llmconnect.config.OllamaConfig
     FacadeInternals.createClient(null, org.llm4s.metrics.MetricsCollector.noop).isFailure shouldBe true
-    FacadeInternals.createClient(OllamaConfig(ModelName("llama3.2"), "http://127.0.0.1:1"), null).isSuccess shouldBe true
+    FacadeInternals
+      .createClient(OllamaConfig(ModelName("llama3.2"), "http://127.0.0.1:1"), null)
+      .isSuccess shouldBe true
   }
 
   "wrapClient" should "wrap a Scala LLMClient the caller built, its calls and close going to it (#1666)" in {

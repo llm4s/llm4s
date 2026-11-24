@@ -87,7 +87,10 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
   }
 
   it should "refuse a non-positive timeout at load, naming the key" in {
-    Llm4sConfig.provider(ConfigSource.string(section("deepseek", "", "timeouts { request = 0s }")), ProviderName("main")) match {
+    Llm4sConfig.provider(
+      ConfigSource.string(section("deepseek", "", "timeouts { request = 0s }")),
+      ProviderName("main")
+    ) match {
       case Left(error) =>
         error.message should include("llm4s.providers.main.timeouts.request")
       case Right(config) => fail(s"expected a refusal, got $config")
@@ -98,17 +101,29 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
 
   "Each client" should "use the configured request and stream timeouts" in {
     val deepSeek =
-      DeepSeekClient(DeepSeekConfig(Secret("k"), ModelName("m"), "http://localhost:1", 128000, 8192).withTimeouts(Configured))
-    val zai = ZaiClient(ZaiConfig(Secret("k"), ModelName("m"), "http://localhost:1", 128000, 8192).withTimeouts(Configured))
+      DeepSeekClient(
+        DeepSeekConfig(Secret("k"), ModelName("m"), "http://localhost:1", 128000, 8192).withTimeouts(Configured)
+      )
+    val zai =
+      ZaiClient(ZaiConfig(Secret("k"), ModelName("m"), "http://localhost:1", 128000, 8192).withTimeouts(Configured))
     val mistral =
-      MistralClient(MistralConfig(Secret("k"), ModelName("m"), "http://localhost:1", 128000, 4096).withTimeouts(Configured))
+      MistralClient(
+        MistralConfig(Secret("k"), ModelName("m"), "http://localhost:1", 128000, 4096).withTimeouts(Configured)
+      )
     val cohere =
-      CohereClient(CohereConfig(Secret("k"), ModelName("m"), "http://localhost:1", 128000, 4096).withTimeouts(Configured))
-    val xai = XaiClient(XaiConfig(Secret("k"), ModelName("m"), "http://localhost:1", 131072, 8192).withTimeouts(Configured))
+      CohereClient(
+        CohereConfig(Secret("k"), ModelName("m"), "http://localhost:1", 128000, 4096).withTimeouts(Configured)
+      )
+    val xai =
+      XaiClient(XaiConfig(Secret("k"), ModelName("m"), "http://localhost:1", 131072, 8192).withTimeouts(Configured))
     val router =
-      OpenRouterClient(OpenAIConfig(Secret("k"), ModelName("m")).withBaseUrl("http://localhost:1").withTimeouts(Configured))
+      OpenRouterClient(
+        OpenAIConfig(Secret("k"), ModelName("m")).withBaseUrl("http://localhost:1").withTimeouts(Configured)
+      )
     val generic = new OpenAICompatibleClient(
-      OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), "http://localhost:1", None).withTimeouts(Configured)),
+      OpenAICompatibleClient.settings(
+        OpenAICompatibleConfig(ModelName("m"), "http://localhost:1", None).withTimeouts(Configured)
+      ),
       OpenAICompatibleDialect.Standard
     )
 
@@ -164,7 +179,9 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
     withSilentServer { baseUrl =>
       val client =
         DeepSeekClient(
-          DeepSeekConfig(Secret("k"), ModelName("m"), baseUrl, 128000, 8192).withTimeouts(ProviderTimeouts(Some(300.millis), None))
+          DeepSeekConfig(Secret("k"), ModelName("m"), baseUrl, 128000, 8192).withTimeouts(
+            ProviderTimeouts(Some(300.millis), None)
+          )
         ).value
 
       val started = System.nanoTime()
@@ -182,7 +199,9 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
     withSilentServer { baseUrl =>
       val client =
         DeepSeekClient(
-          DeepSeekConfig(Secret("k"), ModelName("m"), baseUrl, 128000, 8192).withTimeouts(ProviderTimeouts(None, Some(300.millis)))
+          DeepSeekConfig(Secret("k"), ModelName("m"), baseUrl, 128000, 8192).withTimeouts(
+            ProviderTimeouts(None, Some(300.millis))
+          )
         ).value
 
       val started = System.nanoTime()

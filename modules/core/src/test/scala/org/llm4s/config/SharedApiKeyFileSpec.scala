@@ -188,7 +188,12 @@ class SharedApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues w
     "report a provider's failure as a Left" in {
       val failing = new ApiKeyProvider:
         def current(): Result[ApiKey] = Left(ConfigurationError("API key file /x is empty"))
-      val config = EmbeddingProviderConfig(ProviderId("fixtureembedding"), BaseUrl("https://e.invalid"), ModelName("m"), Some(Secret("k"))).withApiKeyProvider(Some(failing))
+      val config = EmbeddingProviderConfig(
+        ProviderId("fixtureembedding"),
+        BaseUrl("https://e.invalid"),
+        ModelName("m"),
+        Some(Secret("k"))
+      ).withApiKeyProvider(Some(failing))
       config.currentApiKey().left.value.message should include("is empty")
       config.withApiKeyProvider(None).currentApiKey().value.map(_.reveal) shouldBe Some("k")
     }
@@ -196,8 +201,13 @@ class SharedApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues w
     "turn a provider that throws into a Left naming the exception's class, not an exception" in {
       val throwing = new ApiKeyProvider:
         def current(): Result[ApiKey] = throw new IllegalStateException("vault unreachable")
-      val config = EmbeddingProviderConfig(ProviderId("fixtureembedding"), BaseUrl("https://e.invalid"), ModelName("m"), Some(Secret("k"))).withApiKeyProvider(Some(throwing))
-      val error  = config.currentApiKey().left.value
+      val config = EmbeddingProviderConfig(
+        ProviderId("fixtureembedding"),
+        BaseUrl("https://e.invalid"),
+        ModelName("m"),
+        Some(Secret("k"))
+      ).withApiKeyProvider(Some(throwing))
+      val error = config.currentApiKey().left.value
       error shouldBe a[org.llm4s.error.AuthenticationError]
       error.message should include("IllegalStateException")
     }

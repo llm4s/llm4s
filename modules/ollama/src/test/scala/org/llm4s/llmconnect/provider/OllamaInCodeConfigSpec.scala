@@ -38,7 +38,12 @@ class OllamaInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
     "build an Ollama embedding client from a base URL and model" in {
       assertBuildsEmbeddings(
         "ollama",
-        EmbeddingProviderConfig(providerId = ProviderId("ollama"), baseUrl = BaseUrl("http://localhost:11434"), model = ModelName("nomic-embed-text"), apiKey = None)
+        EmbeddingProviderConfig(
+          providerId = ProviderId("ollama"),
+          baseUrl = BaseUrl("http://localhost:11434"),
+          model = ModelName("nomic-embed-text"),
+          apiKey = None
+        )
       )
     }
   }

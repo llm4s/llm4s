@@ -45,7 +45,11 @@ class TroubleshootingConfigErrorsSpec extends AnyWordSpec with Matchers with Eit
     "link #missing-api-key, from the default provider and from a section loaded by name" in {
       val prefix = "is missing required fields:\n  - apiKey: set "
       assertLinked(Llm4sConfig.defaultProvider(source(fixtureSection)).left.value, Entry.MissingApiKey, prefix)
-      assertLinked(Llm4sConfig.provider(source(fixtureSection), ProviderName("main")).left.value, Entry.MissingApiKey, prefix)
+      assertLinked(
+        Llm4sConfig.provider(source(fixtureSection), ProviderName("main")).left.value,
+        Entry.MissingApiKey,
+        prefix
+      )
     }
 
     "link #missing-api-key for an embeddings block too" in {
@@ -89,7 +93,11 @@ class TroubleshootingConfigErrorsSpec extends AnyWordSpec with Matchers with Eit
           |}
           |""".stripMargin
       assertLinked(Llm4sConfig.defaultProvider(source(hocon)).left.value, Entry.ProviderNotFound, "' was not found")
-      assertLinked(Llm4sConfig.provider(source(hocon), ProviderName("other")).left.value, Entry.ProviderNotFound, "' was not found")
+      assertLinked(
+        Llm4sConfig.provider(source(hocon), ProviderName("other")).left.value,
+        Entry.ProviderNotFound,
+        "' was not found"
+      )
       assertLinked(Llm4sConfig.providers(source(hocon)).left.value, Entry.ProviderNotFound, "Configured provider '")
     }
   }

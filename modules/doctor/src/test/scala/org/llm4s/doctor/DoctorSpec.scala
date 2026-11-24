@@ -128,7 +128,8 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
 
     "report an unknown provider id, naming the ones that are registered" in {
-      val report = run("""llm4s.defaultProvider = "main", llm4s.providers { main { provider = "no-such-vendor", model = "m" } }""")
+      val report =
+        run("""llm4s.defaultProvider = "main", llm4s.providers { main { provider = "no-such-vendor", model = "m" } }""")
 
       check(report, "Provider module").status shouldBe CheckStatus.Fail
       check(report, "Provider module").detail should include("no-such-vendor")
@@ -785,7 +786,8 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
 
     "check the default local server for a section that sets no baseUrl (#1991)" in {
-      val report = run("""llm4s.defaultProvider = "local", llm4s.providers { local { provider = "ollama", model = "llama3" } }""")
+      val report =
+        run("""llm4s.defaultProvider = "local", llm4s.providers { local { provider = "ollama", model = "llama3" } }""")
 
       check(report, "Local server").status shouldBe CheckStatus.Skipped
       check(report, "Local server").detail should include("localhost:11434")

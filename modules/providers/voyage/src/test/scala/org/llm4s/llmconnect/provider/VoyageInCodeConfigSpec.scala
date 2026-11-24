@@ -28,7 +28,12 @@ class VoyageInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
     "build a Voyage embedding client from a base URL, model and key" in {
       assertBuildsEmbeddings(
         "voyage",
-        EmbeddingProviderConfig(providerId = ProviderId("voyage"), baseUrl = BaseUrl("https://api.voyageai.com"), model = ModelName("voyage-3"), apiKey = Some(Secret("pa-test")))
+        EmbeddingProviderConfig(
+          providerId = ProviderId("voyage"),
+          baseUrl = BaseUrl("https://api.voyageai.com"),
+          model = ModelName("voyage-3"),
+          apiKey = Some(Secret("pa-test"))
+        )
       )
     }
   }

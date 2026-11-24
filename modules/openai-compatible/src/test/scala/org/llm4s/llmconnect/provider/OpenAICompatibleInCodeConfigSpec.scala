@@ -39,7 +39,10 @@ class OpenAICompatibleInCodeConfigSpec extends AnyWordSpec with Matchers with Ei
 
   "llm4s-openai-compatible, configured in code" should {
     "build a generic OpenAI-compatible client from a model and base URL, with no key" in {
-      assertBuilds(OpenAICompatibleConfig.fromValues(ModelName("qwen2.5"), "http://localhost:8000/v1").value, "openai-compatible")
+      assertBuilds(
+        OpenAICompatibleConfig.fromValues(ModelName("qwen2.5"), "http://localhost:8000/v1").value,
+        "openai-compatible"
+      )
     }
 
     "build a DeepSeek client from a model, key and base URL" in {

@@ -17,7 +17,12 @@ class OllamaContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
 
   private val client =
     new OllamaClient(
-      OllamaConfig(model = ModelName("llava"), baseUrl = "http://localhost:11434", contextWindow = 4096, reserveCompletion = 512)
+      OllamaConfig(
+        model = ModelName("llava"),
+        baseUrl = "http://localhost:11434",
+        contextWindow = 4096,
+        reserveCompletion = 512
+      )
     )
 
   private val bytes = IArray[Byte](1, 2, 3)

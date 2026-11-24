@@ -22,7 +22,9 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   private def client(dialect: OpenAICompatibleDialect) =
     new OpenAICompatibleClient(
-      OpenAICompatibleClient.settings(OpenAICompatibleConfig(model = ModelName("m"), baseUrl = "http://localhost:1/v1")),
+      OpenAICompatibleClient.settings(
+        OpenAICompatibleConfig(model = ModelName("m"), baseUrl = "http://localhost:1/v1")
+      ),
       dialect
     )
 

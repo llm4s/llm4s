@@ -289,7 +289,10 @@ class WatsonXClient(
 
   private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
     val adjustments =
-      WatsonXClient.reasoningAdjustments(config.model.asString, options) ++ UnmappedOptions.serviceTier("watsonx", options)
+      WatsonXClient.reasoningAdjustments(config.model.asString, options) ++ UnmappedOptions.serviceTier(
+        "watsonx",
+        options
+      )
     adjustmentLog.record(config.model.asString, adjustments)
     adjustments
   }

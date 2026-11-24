@@ -42,13 +42,15 @@ final case class GeminiConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                     = ProviderId("gemini")
-  override def endpointUrl: Option[BaseUrl]                                = Some(BaseUrl(baseUrl))
-  override def withModel(model: ModelName): GeminiConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): GeminiConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): Result[GeminiConfig] = Right(copy(apiKeyProvider = Some(provider)))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): GeminiConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                  = ProviderId("gemini")
+  override def endpointUrl: Option[BaseUrl]                            = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): GeminiConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): GeminiConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[GeminiConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): GeminiConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): GeminiConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): GeminiConfig                  = copy(baseUrl = baseUrl)

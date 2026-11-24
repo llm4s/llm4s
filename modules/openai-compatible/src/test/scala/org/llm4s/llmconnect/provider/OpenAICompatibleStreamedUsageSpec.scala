@@ -104,7 +104,9 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
 
   it should "carry the dialect's reasoning tokens" in {
     val deepSeek =
-      new DeepSeekClient(DeepSeekConfig(Secret("k"), ModelName("deepseek-reasoner"), "http://localhost:1", 128000, 8192))
+      new DeepSeekClient(
+        DeepSeekConfig(Secret("k"), ModelName("deepseek-reasoner"), "http://localhost:1", 128000, 8192)
+      )
     val usage =
       ""","usage":{"prompt_tokens":4,"completion_tokens":9,"total_tokens":13,""" +
         """"completion_tokens_details":{"reasoning_tokens":6}}"""

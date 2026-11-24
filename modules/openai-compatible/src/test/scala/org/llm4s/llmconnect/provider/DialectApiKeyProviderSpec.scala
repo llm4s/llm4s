@@ -28,12 +28,14 @@ class DialectApiKeyProviderSpec extends AnyFlatSpec with Matchers {
     client: Option[ApiKeyProvider] => Result[LLMClient]
   )
 
-  private def deepSeek(k: Option[ApiKeyProvider]) = DeepSeekConfig(Secret(""), ModelName("deepseek-chat")).withApiKeyProvider(k)
-  private def zai(k: Option[ApiKeyProvider])      = ZaiConfig(Secret(""), ModelName("glm-4.6")).withApiKeyProvider(k)
+  private def deepSeek(k: Option[ApiKeyProvider]) =
+    DeepSeekConfig(Secret(""), ModelName("deepseek-chat")).withApiKeyProvider(k)
+  private def zai(k: Option[ApiKeyProvider]) = ZaiConfig(Secret(""), ModelName("glm-4.6")).withApiKeyProvider(k)
   private def mistral(k: Option[ApiKeyProvider]) =
     MistralConfig(Secret(""), ModelName("mistral-small-latest")).withApiKeyProvider(k)
-  private def cohere(k: Option[ApiKeyProvider]) = CohereConfig(Secret(""), ModelName("command-a-03-2025")).withApiKeyProvider(k)
-  private def xai(k: Option[ApiKeyProvider])    = XaiConfig(Secret(""), ModelName("grok-4")).withApiKeyProvider(k)
+  private def cohere(k: Option[ApiKeyProvider]) =
+    CohereConfig(Secret(""), ModelName("command-a-03-2025")).withApiKeyProvider(k)
+  private def xai(k: Option[ApiKeyProvider]) = XaiConfig(Secret(""), ModelName("grok-4")).withApiKeyProvider(k)
 
   private val dialects = Seq(
     Dialect("DeepSeek", deepSeek, k => DeepSeekClient(deepSeek(k))),

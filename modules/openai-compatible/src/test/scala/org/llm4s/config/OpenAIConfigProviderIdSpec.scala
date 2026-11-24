@@ -49,7 +49,14 @@ class OpenAIConfigProviderIdSpec extends AnyWordSpec with Matchers with EitherVa
     }
 
     "default to None when built with the primary constructor" in {
-      OpenAIConfig(Secret("k"), ModelName("m"), None, "https://api.openai.com/v1", 8192, 4096).explicitProviderId shouldBe None
+      OpenAIConfig(
+        Secret("k"),
+        ModelName("m"),
+        None,
+        "https://api.openai.com/v1",
+        8192,
+        4096
+      ).explicitProviderId shouldBe None
     }
   }
 
@@ -68,7 +75,9 @@ class OpenAIConfigProviderIdSpec extends AnyWordSpec with Matchers with EitherVa
         |""".stripMargin
 
     "report openrouter even with a base URL that is not openrouter.ai's" in {
-      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("or-proxy")).value.providerId shouldBe ProviderId("openrouter")
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("or-proxy")).value.providerId shouldBe ProviderId(
+        "openrouter"
+      )
     }
 
     "reach the OpenRouter client through LLMConnect" in {

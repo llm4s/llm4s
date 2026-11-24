@@ -27,7 +27,8 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVal
 
   private val path = "/compatibility/v1/chat/completions"
 
-  private def config(baseUrl: String) = CohereConfig(Secret("test-key"), ModelName("command-a-03-2025"), baseUrl, 256000, 4096)
+  private def config(baseUrl: String) =
+    CohereConfig(Secret("test-key"), ModelName("command-a-03-2025"), baseUrl, 256000, 4096)
 
   private def event(delta: String, finish: String = "null", usage: String = ""): String =
     s"""data: {"id":"c-s","object":"chat.completion.chunk","created":1700000000,"model":"command-a-03-2025",""" +

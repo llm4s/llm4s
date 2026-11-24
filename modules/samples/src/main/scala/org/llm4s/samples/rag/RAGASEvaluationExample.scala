@@ -72,7 +72,7 @@ object RAGASEvaluationExample extends App {
     embeddingResult <- Llm4sConfig.embeddings()
     embeddingConfig = embeddingResult
     embeddingClient <- EmbeddingClient.from(embeddingConfig)
-    dims            <- ModelDimensionRegistry.getDimension(embeddingConfig.providerId.asString, embeddingConfig.model.asString)
+    dims <- ModelDimensionRegistry.getDimension(embeddingConfig.providerId.asString, embeddingConfig.model.asString)
     modelConfig = EmbeddingModelConfig(embeddingConfig.model.asString, dims)
     evaluator   = RAGASEvaluator(llmClient, embeddingClient, modelConfig)
     _           = logger.info("--- Running RAGAS Evaluation ---")

@@ -263,7 +263,9 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           |""".stripMargin
 
       val cfg =
-        Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("vertex-main")).fold(err => fail(err.toString), identity)
+        Llm4sConfig
+          .provider(ConfigSource.string(hocon), ProviderName("vertex-main"))
+          .fold(err => fail(err.toString), identity)
 
       cfg match
         case vertex: VertexAIConfig =>

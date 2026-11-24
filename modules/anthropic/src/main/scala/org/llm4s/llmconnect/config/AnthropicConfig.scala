@@ -51,13 +51,15 @@ final case class AnthropicConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                        = ProviderId("anthropic")
-  override def endpointUrl: Option[BaseUrl]                                   = Some(BaseUrl(baseUrl))
-  override def withModel(model: ModelName): AnthropicConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): AnthropicConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): Result[AnthropicConfig] = Right(copy(apiKeyProvider = Some(provider)))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): AnthropicConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                     = ProviderId("anthropic")
+  override def endpointUrl: Option[BaseUrl]                               = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): AnthropicConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): AnthropicConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[AnthropicConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): AnthropicConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): AnthropicConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): AnthropicConfig                  = copy(baseUrl = baseUrl)

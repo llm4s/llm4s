@@ -172,7 +172,9 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
     withReplies(toolCallReply) { (baseUrl, _) =>
       val first = client(baseUrl).complete(Conversation(history), CompletionOptions()).value
       val otherModel = new OpenAICompatibleClient(
-        OpenAICompatibleClient.settings(OpenAICompatibleConfig(model = ModelName("google/gemini-2.5-pro"), baseUrl = baseUrl)),
+        OpenAICompatibleClient.settings(
+          OpenAICompatibleConfig(model = ModelName("google/gemini-2.5-pro"), baseUrl = baseUrl)
+        ),
         OpenRouterDialect
       )
       val turn = assistantTurn(

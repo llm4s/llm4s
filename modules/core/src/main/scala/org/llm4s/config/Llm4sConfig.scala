@@ -158,7 +158,9 @@ object Llm4sConfig {
   // `private[llm4s]`, not `private[config]`: `llm4s-provider-testkit` loads a provider module's
   // section through it from a HOCON string and an injected environment. `ConfigSource` stays out
   // of every public signature.
-  private[llm4s] def provider(source: ConfigSource, name: ProviderName)(using ProviderRegistry): Result[ProviderConfig] =
+  private[llm4s] def provider(source: ConfigSource, name: ProviderName)(using
+    ProviderRegistry
+  ): Result[ProviderConfig] =
     of(source).provider(name)
 
   /** As [[Llm4sSettings.providerSection]]. */

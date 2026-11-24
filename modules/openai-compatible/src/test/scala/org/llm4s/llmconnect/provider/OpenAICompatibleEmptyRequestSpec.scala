@@ -101,7 +101,10 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
     // provider send such a turn (as {"role":"assistant"}), so the conversation is not empty.
     val clients: Seq[(String, (String, ProviderExchangeLogging) => LLMClient)] = Seq(
       "deepseek" -> ((url, logging) =>
-        new DeepSeekClient(DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), url, 128000, 8192), exchangeLogging = logging)
+        new DeepSeekClient(
+          DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), url, 128000, 8192),
+          exchangeLogging = logging
+        )
       ),
       "zai" -> ((url, logging) =>
         new ZaiClient(ZaiConfig(Secret("k"), ModelName("GLM-4.7"), url, 128000, 4096), exchangeLogging = logging)
@@ -129,7 +132,10 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
     val (results, hits, _) =
       against("/chat/completions", sendJsonResponse(_, 200, openAICompletion("never"))) { (url, logging) =>
         val c =
-          new DeepSeekClient(DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), url, 128000, 8192), exchangeLogging = logging)
+          new DeepSeekClient(
+            DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), url, 128000, 8192),
+            exchangeLogging = logging
+          )
         (
           c.complete(Conversation(Seq.empty), CompletionOptions()),
           c.streamComplete(Conversation(Seq.empty), CompletionOptions())(_ => ())

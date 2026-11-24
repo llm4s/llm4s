@@ -68,12 +68,14 @@ final case class OpenAICompatibleConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override def providerId: ProviderId                           = ProviderId(OpenAICompatibleConfig.ProviderIdName)
-  override def endpointUrl: Option[BaseUrl]                      = Some(BaseUrl(baseUrl))
+  override def providerId: ProviderId                              = ProviderId(OpenAICompatibleConfig.ProviderIdName)
+  override def endpointUrl: Option[BaseUrl]                        = Some(BaseUrl(baseUrl))
   override def withModel(model: ModelName): OpenAICompatibleConfig = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): OpenAICompatibleConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): OpenAICompatibleConfig = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): Result[OpenAICompatibleConfig] = Right(copy(apiKeyProvider = Some(provider)))
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[OpenAICompatibleConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
   def withApiKeyProvider(provider: Option[ApiKeyProvider]): OpenAICompatibleConfig = copy(apiKeyProvider = provider)
 
   def withBaseUrl(baseUrl: String): OpenAICompatibleConfig          = copy(baseUrl = baseUrl)

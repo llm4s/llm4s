@@ -121,7 +121,9 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
            |  }
            |}""".stripMargin
       val config =
-        Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("stub")).fold(error => fail(error.formatted), identity)
+        Llm4sConfig
+          .provider(ConfigSource.string(hocon), ProviderName("stub"))
+          .fold(error => fail(error.formatted), identity)
       test(config, provider)
     }
     server.stop(0)

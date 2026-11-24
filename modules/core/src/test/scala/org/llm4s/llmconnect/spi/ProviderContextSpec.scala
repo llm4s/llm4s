@@ -114,12 +114,20 @@ class ProviderContextSpec extends AnyWordSpec with Matchers with EitherValues:
     given ModelRegistryService = registry
     given ProviderRegistry     = ProviderRegistry.ofEmbeddings(HttpEmbeddings)
 
-    val config  = EmbeddingProviderConfig(ProviderId("fixtureembedding"), BaseUrl("https://httpembeddings.invalid"), ModelName("m"), Some(Secret("k")))
+    val config = EmbeddingProviderConfig(
+      ProviderId("fixtureembedding"),
+      BaseUrl("https://httpembeddings.invalid"),
+      ModelName("m"),
+      Some(Secret("k"))
+    )
     val request = EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("m", 1))
 
     "hand the caller's HTTP client to the provider (#2811)" in {
-      val http   = new CountingHttpClient
-      val client = EmbeddingClient.from(config.withProviderId(ProviderId("httpembeddings")), EmbeddingClientOptions().withHttpClient(http))
+      val http = new CountingHttpClient
+      val client = EmbeddingClient.from(
+        config.withProviderId(ProviderId("httpembeddings")),
+        EmbeddingClientOptions().withHttpClient(http)
+      )
       client.value.embed(request).isRight shouldBe true
       http.sent.get shouldBe 1
     }

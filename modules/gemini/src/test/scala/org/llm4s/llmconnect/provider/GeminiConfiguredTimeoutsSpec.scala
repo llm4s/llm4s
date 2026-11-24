@@ -31,7 +31,9 @@ final class GeminiConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
     GeminiConfig(Secret("test-key"), ModelName("gemini-2.0-flash"), baseUrl, 1048576, 8192).withTimeouts(timeouts)
 
   private def vertex(timeouts: ProviderTimeouts): VertexAIConfig =
-    VertexAIConfig("my-project", "us-central1", ModelName("gemini-2.0-flash"), None, 1048576, 8192).withTimeouts(timeouts)
+    VertexAIConfig("my-project", "us-central1", ModelName("gemini-2.0-flash"), None, 1048576, 8192).withTimeouts(
+      timeouts
+    )
 
   // ---- HOCON -> descriptor -> config ----
 

@@ -25,7 +25,8 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   private val apiKey  = "sk-test"
   private val baseUrl = "https://api.example.com"
 
-  private val gemini   = GeminiConfig(Secret("k"), ModelName("gemini-2.0-flash"), "https://x.invalid/v1beta", 1048576, 8192)
+  private val gemini =
+    GeminiConfig(Secret("k"), ModelName("gemini-2.0-flash"), "https://x.invalid/v1beta", 1048576, 8192)
   private val vertexai = VertexAIConfig("proj", "us-central1", ModelName("gemini-2.0-flash"), None, 1048576, 8192)
 
   // ---- GeminiConfig.fromValues: base URL normalisation (from ProviderConfigSpec) ----
@@ -122,7 +123,8 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("VertexAIConfig.toString does not leak the credential file path") {
-    val vertex = VertexAIConfig("proj", "us-central1", ModelName("gemini-2.0-flash"), Some("/secret/creds.json"), 1048576, 8192)
+    val vertex =
+      VertexAIConfig("proj", "us-central1", ModelName("gemini-2.0-flash"), Some("/secret/creds.json"), 1048576, 8192)
     (vertex.toString should not).include("/secret/creds.json")
     vertex.toString should include("credentialFilePath=<redacted>")
   }

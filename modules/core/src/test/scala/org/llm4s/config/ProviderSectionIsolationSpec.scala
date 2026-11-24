@@ -82,7 +82,9 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
 
         "not stop listModels(name) for the good section" in {
           val http = new MockHttpClient(HttpResponse(200, """{"data":[{"id":"fixture-model"}]}""", Map.empty))
-          Llm4sConfig.listModels(ProviderName("good-one"), config(badSection), http).map(_.map(_.name.asString)) shouldBe
+          Llm4sConfig
+            .listModels(ProviderName("good-one"), config(badSection), http)
+            .map(_.map(_.name.asString)) shouldBe
             Right(List("fixture-model"))
         }
 

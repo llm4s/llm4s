@@ -171,7 +171,14 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     "AzureConfig(endpoint, apiKey, model) defaults the API version and takes the context window from the model name"
   ) {
     AzureConfig("https://x.openai.azure.com", Secret("k"), ModelName("gpt-4o")) shouldBe
-      AzureConfig("https://x.openai.azure.com", Secret("k"), ModelName("gpt-4o"), AzureConfig.DEFAULT_API_VERSION, 128000, 4096)
+      AzureConfig(
+        "https://x.openai.azure.com",
+        Secret("k"),
+        ModelName("gpt-4o"),
+        AzureConfig.DEFAULT_API_VERSION,
+        128000,
+        4096
+      )
     AzureConfig("https://x.openai.azure.com", Secret("k"), ModelName("gpt-4")).contextWindow shouldBe 8192
     AzureConfig("https://x.openai.azure.com", Secret("k"), ModelName("my-deployment")).contextWindow shouldBe 8192
   }

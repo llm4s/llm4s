@@ -56,8 +56,8 @@ final case class AzureConfig private (
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
   override val providerId: ProviderId                                 = ProviderId("azure")
-  override def endpointUrl: Option[BaseUrl]                            = Some(BaseUrl(endpoint))
-  override def withModel(model: ModelName): AzureConfig                  = copy(model = model)
+  override def endpointUrl: Option[BaseUrl]                           = Some(BaseUrl(endpoint))
+  override def withModel(model: ModelName): AzureConfig               = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): AzureConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): AzureConfig = copy(network = network)
 

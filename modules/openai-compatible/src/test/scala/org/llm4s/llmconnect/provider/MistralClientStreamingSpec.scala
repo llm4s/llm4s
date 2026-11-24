@@ -27,7 +27,8 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
-  private def config(baseUrl: String) = MistralConfig(Secret("test-key"), ModelName("mistral-small-latest"), baseUrl, 128000, 4096)
+  private def config(baseUrl: String) =
+    MistralConfig(Secret("test-key"), ModelName("mistral-small-latest"), baseUrl, 128000, 4096)
 
   private def event(delta: String, finish: String = "null", usage: String = ""): String =
     s"""data: {"id":"cmpl-s","object":"chat.completion.chunk","created":1700000000,"model":"mistral-small-latest",""" +

@@ -50,13 +50,15 @@ final case class CohereConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                     = ProviderId("cohere")
-  override def endpointUrl: Option[BaseUrl]                                = Some(BaseUrl(baseUrl))
-  override def withModel(model: ModelName): CohereConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): CohereConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): CohereConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): Result[CohereConfig] = Right(copy(apiKeyProvider = Some(provider)))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): CohereConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                  = ProviderId("cohere")
+  override def endpointUrl: Option[BaseUrl]                            = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): CohereConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): CohereConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): CohereConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[CohereConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): CohereConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): CohereConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): CohereConfig                  = copy(baseUrl = baseUrl)
@@ -115,7 +117,8 @@ object CohereConfig {
   def apply(apiKey: Secret, model: ModelName): CohereConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
-  private val cohereFallback: String => ContextLimits = _ => ContextLimits(DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)
+  private val cohereFallback: String => ContextLimits = _ =>
+    ContextLimits(DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)
 
   /**
    * The Compatibility API base for a configured base URL.

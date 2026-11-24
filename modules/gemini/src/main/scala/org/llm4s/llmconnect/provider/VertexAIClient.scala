@@ -120,7 +120,7 @@ class VertexAIClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
-        val thinkingPlan                   = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
+        val thinkingPlan = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
         val (tierHeaders, tierAdjustments) = GeminiServiceTier.vertex(transformed.options)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
           UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options) ++ tierAdjustments
@@ -178,7 +178,7 @@ class VertexAIClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
-        val thinkingPlan                   = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
+        val thinkingPlan = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
         val (tierHeaders, tierAdjustments) = GeminiServiceTier.vertex(transformed.options)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
           UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options) ++ tierAdjustments

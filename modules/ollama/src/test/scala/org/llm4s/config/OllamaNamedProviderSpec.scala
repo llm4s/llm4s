@@ -144,7 +144,9 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
 
       val httpClient = new MockHttpClient(HttpResponse(200, """{"models": [{"name": "llama3.1:latest"}]}""", Map.empty))
 
-      Llm4sConfig.listModels(ProviderName("ollama-main"), ConfigSource.string(hocon), httpClient).map(_.map(_.name.asString)) shouldBe
+      Llm4sConfig
+        .listModels(ProviderName("ollama-main"), ConfigSource.string(hocon), httpClient)
+        .map(_.map(_.name.asString)) shouldBe
         Right(List("llama3.1:latest"))
       httpClient.lastUrl shouldBe Some("http://localhost:11434/api/tags")
     }

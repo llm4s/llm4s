@@ -33,7 +33,12 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
         val config =
-          EmbeddingProviderConfig(providerId = ProviderId("cohere"), baseUrl = BaseUrl(baseUrl), model = ModelName("embed-english-v3.0"), apiKey = Some(Secret("test-key")))
+          EmbeddingProviderConfig(
+            providerId = ProviderId("cohere"),
+            baseUrl = BaseUrl(baseUrl),
+            model = ModelName("embed-english-v3.0"),
+            apiKey = Some(Secret("test-key"))
+          )
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(CohereEmbeddingProvider, config))
       }
     }
@@ -41,7 +46,12 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
       assertEmbeddingUsesSuppliedHttpClient(
         CohereEmbeddingProvider,
-        EmbeddingProviderConfig(providerId = ProviderId("cohere"), baseUrl = BaseUrl("http://localhost:1"), model = ModelName("test-model"), apiKey = Some(Secret("test-key")))
+        EmbeddingProviderConfig(
+          providerId = ProviderId("cohere"),
+          baseUrl = BaseUrl("http://localhost:1"),
+          model = ModelName("test-model"),
+          apiKey = Some(Secret("test-key"))
+        )
       )
     }
 
@@ -54,7 +64,12 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
         )
       ) { (baseUrl, keys) =>
         val config =
-          EmbeddingProviderConfig(providerId = ProviderId("cohere"), baseUrl = BaseUrl(baseUrl), model = ModelName("embed-english-v3.0"), apiKey = Some(Secret("test-key")))
+          EmbeddingProviderConfig(
+            providerId = ProviderId("cohere"),
+            baseUrl = BaseUrl(baseUrl),
+            model = ModelName("embed-english-v3.0"),
+            apiKey = Some(Secret("test-key"))
+          )
         assertBuildsEmbeddingProvider(CohereEmbeddingProvider, config.withApiKeyProvider(Some(keys)))
       }
     }

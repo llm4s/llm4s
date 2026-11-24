@@ -20,7 +20,13 @@ class PerplexityConfigSpec extends AnyWordSpec with Matchers:
     contextWindow: Int = 1000,
     reserve: Int = 10
   ) =
-    PerplexityConfig.fromValues(ModelName(model), Secret(key), baseUrl, contextWindow = contextWindow, reserveCompletion = reserve)
+    PerplexityConfig.fromValues(
+      ModelName(model),
+      Secret(key),
+      baseUrl,
+      contextWindow = contextWindow,
+      reserveCompletion = reserve
+    )
 
   "PerplexityConfig.fromValues" should {
 

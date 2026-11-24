@@ -78,13 +78,17 @@ abstract class CopyToSetters(name: String) extends SemanticRule(name) {
   private def wrappedNewtypes(implicit doc: SemanticDocument): List[String] =
     if (newtypes.isEmpty) Nil
     else
-      doc.tree.collect {
-        case t: Term.Apply if isCopy(t.fun) && t.argClause.values.forall(_.is[Term.Assign]) =>
-          Migration.callee(t).filter(_.endsWith("#copy().")).map(Migration.owner).toList.flatMap { owner =>
-            val fields = t.argClause.values.collect { case Term.Assign(Term.Name(field), _) => field }
-            if (fields.exists(f => removed.contains(owner -> f))) Nil else fields.flatMap(f => newtypes.get(owner -> f))
-          }
-      }.flatten.distinct
+      doc.tree
+        .collect {
+          case t: Term.Apply if isCopy(t.fun) && t.argClause.values.forall(_.is[Term.Assign]) =>
+            Migration.callee(t).filter(_.endsWith("#copy().")).map(Migration.owner).toList.flatMap { owner =>
+              val fields = t.argClause.values.collect { case Term.Assign(Term.Name(field), _) => field }
+              if (fields.exists(f => removed.contains(owner -> f))) Nil
+              else fields.flatMap(f => newtypes.get(owner -> f))
+            }
+        }
+        .flatten
+        .distinct
 
   /** Whether a rewritten `copy` sets a field that is a `Secret` now, so the file needs `Secret` imported. */
   private def wrapsSecret(implicit doc: SemanticDocument): Boolean =
@@ -178,10 +182,10 @@ class CopyToWithSetters extends CopyToSetters("CopyToWithSetters") {
   override def description: String =
     "Rewrites .copy(field = value) on the llm4s growth-prone types to .withField(value) setters"
 
-  override protected def types: Set[String]                     = CopyToWithSetters.types
-  override protected def release: String                        = "0.5.0"
-  override protected def removed: Map[(String, String), String] = CopyToWithSetters.removed
-  override protected def setter(owner: String, field: String)   = CopyToWithSetters.setter(owner, field)
+  override protected def types: Set[String]                      = CopyToWithSetters.types
+  override protected def release: String                         = "0.5.0"
+  override protected def removed: Map[(String, String), String]  = CopyToWithSetters.removed
+  override protected def setter(owner: String, field: String)    = CopyToWithSetters.setter(owner, field)
   override protected def newtypes: Map[(String, String), String] = CopyToWithSetters.newtypes
   override protected def privateCopyGuide(owner: String): String =
     Migration.guide05("7-errors-cancellation-and-types")

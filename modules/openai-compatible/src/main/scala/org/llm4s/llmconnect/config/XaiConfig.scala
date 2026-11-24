@@ -41,13 +41,15 @@ final case class XaiConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                  = ProviderId("xai")
-  override def endpointUrl: Option[BaseUrl]                             = Some(BaseUrl(baseUrl))
-  override def withModel(model: ModelName): XaiConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): XaiConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): XaiConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): Result[XaiConfig] = Right(copy(apiKeyProvider = Some(provider)))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): XaiConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                               = ProviderId("xai")
+  override def endpointUrl: Option[BaseUrl]                         = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): XaiConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): XaiConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): XaiConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[XaiConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): XaiConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): XaiConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): XaiConfig                  = copy(baseUrl = baseUrl)

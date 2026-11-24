@@ -34,8 +34,8 @@ final case class OllamaConfig private (
   override val network: HttpNetworkSettings
 ) extends ProviderConfig:
   override val providerId: ProviderId                                  = ProviderId("ollama")
-  override def endpointUrl: Option[BaseUrl]                             = Some(BaseUrl(baseUrl))
-  override def withModel(model: ModelName): OllamaConfig                  = copy(model = model)
+  override def endpointUrl: Option[BaseUrl]                            = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): OllamaConfig               = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): OllamaConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): OllamaConfig = copy(network = network)
 

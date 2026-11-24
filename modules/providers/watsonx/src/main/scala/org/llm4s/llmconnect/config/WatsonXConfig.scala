@@ -44,13 +44,15 @@ final case class WatsonXConfig(
   override val network: HttpNetworkSettings = HttpNetworkSettings.default,
   override val apiKeyProvider: Option[ApiKeyProvider] = None
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                      = ProviderId("watsonx")
-  override def endpointUrl: Option[BaseUrl]                                 = Some(BaseUrl(baseUrl))
-  override def withModel(model: ModelName): WatsonXConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): WatsonXConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): WatsonXConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): Result[WatsonXConfig] = Right(copy(apiKeyProvider = Some(provider)))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): WatsonXConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                   = ProviderId("watsonx")
+  override def endpointUrl: Option[BaseUrl]                             = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): WatsonXConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): WatsonXConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): WatsonXConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[WatsonXConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): WatsonXConfig = copy(apiKeyProvider = provider)
   override def toString: String =
     s"WatsonXConfig(apiKey=$apiKey, projectId=$projectId, spaceId=$spaceId, model=$model, " +
       s"baseUrl=$baseUrl, apiVersion=$apiVersion, iamUrl=$iamUrl, contextWindow=$contextWindow, " +

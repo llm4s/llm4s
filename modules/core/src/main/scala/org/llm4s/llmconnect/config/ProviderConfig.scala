@@ -134,6 +134,7 @@ object ProviderConfig {
         List("apiKeyProvider")
       )
     )
+
   /**
    * The check behind every `fromValues` factory: `value` must not be blank.
    *

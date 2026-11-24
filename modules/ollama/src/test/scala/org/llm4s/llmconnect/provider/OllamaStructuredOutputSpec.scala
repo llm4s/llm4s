@@ -53,7 +53,9 @@ class OllamaStructuredOutputSpec extends AnyFunSuite with Matchers with BeforeAn
   private val conv = Conversation(Seq(UserMessage("hi")))
 
   private def mkClient(baseUrl: String = "http://localhost:11434"): OllamaClient =
-    new OllamaClient(OllamaConfig(model = ModelName("llama3.1"), baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512))
+    new OllamaClient(
+      OllamaConfig(model = ModelName("llama3.1"), baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512)
+    )
 
   private def body(rf: Option[ResponseFormat], stream: Boolean, opts: CompletionOptions = CompletionOptions()) =
     mkClient()

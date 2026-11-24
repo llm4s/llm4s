@@ -20,7 +20,9 @@ class CohereDialectSpec extends AnyFlatSpec with Matchers with EitherValues {
     ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
 
   private val client =
-    new CohereClient(CohereConfig(Secret("k"), ModelName("command-a-03-2025"), CohereConfig.DEFAULT_BASE_URL, 256000, 4096))
+    new CohereClient(
+      CohereConfig(Secret("k"), ModelName("command-a-03-2025"), CohereConfig.DEFAULT_BASE_URL, 256000, 4096)
+    )
 
   private val schema =
     ujson.Obj("type" -> "object", "properties" -> ujson.Obj("title" -> ujson.Obj("type" -> "string")))
@@ -89,7 +91,13 @@ class CohereDialectSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "redact the API key" in {
-    val shown = CohereConfig(Secret("co-secret-key"), ModelName("command-r"), CohereConfig.DEFAULT_BASE_URL, 128000, 4096).toString
+    val shown = CohereConfig(
+      Secret("co-secret-key"),
+      ModelName("command-r"),
+      CohereConfig.DEFAULT_BASE_URL,
+      128000,
+      4096
+    ).toString
     (shown should not).include("co-secret-key")
     shown should include("model=command-r")
   }

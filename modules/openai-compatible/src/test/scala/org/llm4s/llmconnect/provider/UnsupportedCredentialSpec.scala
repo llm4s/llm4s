@@ -113,13 +113,17 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
       ).message should include(
         "apiKey"
       )
-      configurationError(ZaiClient(ZaiConfig(Secret(" "), ModelName("GLM-4.7"), url, 8192, 1024))).message should include("apiKey")
+      configurationError(
+        ZaiClient(ZaiConfig(Secret(" "), ModelName("GLM-4.7"), url, 8192, 1024))
+      ).message should include("apiKey")
       configurationError(
         MistralClient(MistralConfig(Secret(""), ModelName("mistral-small"), url, 8192, 1024))
       ).message should include(
         "apiKey"
       )
-      configurationError(CohereClient(CohereConfig(Secret(""), ModelName("command-r"), url, 8192, 1024))).message should include(
+      configurationError(
+        CohereClient(CohereConfig(Secret(""), ModelName("command-r"), url, 8192, 1024))
+      ).message should include(
         "apiKey"
       )
     }
@@ -132,7 +136,9 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
       intercept[IllegalArgumentException](
         new MistralClient(MistralConfig(Secret(""), ModelName("mistral-small"), url, 8192, 1024))
       )
-      intercept[IllegalArgumentException](new CohereClient(CohereConfig(Secret(""), ModelName("command-r"), url, 8192, 1024)))
+      intercept[IllegalArgumentException](
+        new CohereClient(CohereConfig(Secret(""), ModelName("command-r"), url, 8192, 1024))
+      )
     }
 
     "accept a key" in {
@@ -159,7 +165,9 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
 
     "treat a generic config's blank apiKey as none, sending no Authorization header" in {
       OpenAICompatibleClient
-        .settings(OpenAICompatibleConfig(model = ModelName("m"), baseUrl = "https://x.example/v1", apiKey = Some(Secret("  "))))
+        .settings(
+          OpenAICompatibleConfig(model = ModelName("m"), baseUrl = "https://x.example/v1", apiKey = Some(Secret("  ")))
+        )
         .credential shouldBe OpenAICompatibleClient.Credential.Anonymous
 
       var seen = Map.empty[String, String]
@@ -167,7 +175,9 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
         seen = exchange.getRequestHeaders.asScala.map((k, v) => k.toLowerCase -> v.asScala.mkString(",")).toMap
         sendJsonResponse(exchange, 200, openAICompletion("ok", "m"))
       } { baseUrl =>
-        OpenAICompatibleClient(OpenAICompatibleConfig(model = ModelName("m"), baseUrl = baseUrl, apiKey = Some(Secret("")))).value
+        OpenAICompatibleClient(
+          OpenAICompatibleConfig(model = ModelName("m"), baseUrl = baseUrl, apiKey = Some(Secret("")))
+        ).value
           .complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())
           .isRight shouldBe true
       }

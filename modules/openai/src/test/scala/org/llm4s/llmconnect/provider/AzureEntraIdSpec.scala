@@ -211,7 +211,16 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
     keyless.withTokenProvider(None).tokenProvider shouldBe None
     keyed.toString should include("apiKey=")
     AzureConfig("e", Secret("k"), ModelName("m"), "v", 1000, 100, keyed.timeouts).tokenProvider shouldBe None
-    AzureConfig("e", Secret("k"), ModelName("m"), "v", 1000, 100, keyed.timeouts, Some(tokens)).apiKey.reveal shouldBe ""
+    AzureConfig(
+      "e",
+      Secret("k"),
+      ModelName("m"),
+      "v",
+      1000,
+      100,
+      keyed.timeouts,
+      Some(tokens)
+    ).apiKey.reveal shouldBe ""
   }
 
   "AzureConfig.withApiKeyProvider" should "authenticate one way: it clears the token provider, and a token provider clears it" in {
@@ -240,8 +249,13 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       if (authorization == "Bearer token-1") LocalProviderTestServer.sendJsonResponse(exchange, 401, "{}")
       else LocalProviderTestServer.sendJsonResponse(exchange, 200, reply)
     } { baseUrl =>
-      val tokens   = new CountingTokens
-      val config   = EmbeddingProviderConfig(ProviderId("openai"), BaseUrl(s"$baseUrl/openai/v1"), ModelName("my-embedding-deployment"), None)
+      val tokens = new CountingTokens
+      val config = EmbeddingProviderConfig(
+        ProviderId("openai"),
+        BaseUrl(s"$baseUrl/openai/v1"),
+        ModelName("my-embedding-deployment"),
+        None
+      )
       val provider = OpenAIEmbeddingProvider.fromConfig(config, tokens)
       val request  = EmbeddingRequest(Seq("a"), EmbeddingModelConfig("my-embedding-deployment", 2))
       provider.embed(request).isLeft shouldBe true
@@ -267,7 +281,12 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         s"""{"error":{"message":"request with $token is denied"}}"""
       )
     } { baseUrl =>
-      val config   = EmbeddingProviderConfig(ProviderId("openai"), BaseUrl(s"$baseUrl/openai/v1"), ModelName("my-embedding-deployment"), None)
+      val config = EmbeddingProviderConfig(
+        ProviderId("openai"),
+        BaseUrl(s"$baseUrl/openai/v1"),
+        ModelName("my-embedding-deployment"),
+        None
+      )
       val provider = OpenAIEmbeddingProvider.fromConfig(config, own)
       val request  = EmbeddingRequest(Seq("a"), EmbeddingModelConfig("my-embedding-deployment", 2))
       val message  = provider.embed(request).left.value.message

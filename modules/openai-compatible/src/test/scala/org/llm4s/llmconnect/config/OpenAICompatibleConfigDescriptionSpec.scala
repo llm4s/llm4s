@@ -14,13 +14,22 @@ import org.scalatest.wordspec.AnyWordSpec
  */
 class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
 
-  private val openai   = OpenAIConfig(Secret("k"), ModelName("gpt-4o"), None, "https://api.openai.com/v1", 128000, 4096)
-  private val zai      = ZaiConfig(Secret("k"), ModelName("GLM-4.7"), ZaiConfig.DEFAULT_BASE_URL, 200000, 4096)
-  private val deepseek = DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
-  private val mistral = MistralConfig(Secret("k"), ModelName("mistral-large-latest"), MistralConfig.DEFAULT_BASE_URL, 128000, 4096)
-  private val cohere  = CohereConfig(Secret("k"), ModelName("command-r"), CohereConfig.DEFAULT_BASE_URL, 128000, 4096)
+  private val openai = OpenAIConfig(Secret("k"), ModelName("gpt-4o"), None, "https://api.openai.com/v1", 128000, 4096)
+  private val zai    = ZaiConfig(Secret("k"), ModelName("GLM-4.7"), ZaiConfig.DEFAULT_BASE_URL, 200000, 4096)
+  private val deepseek =
+    DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
+  private val mistral =
+    MistralConfig(Secret("k"), ModelName("mistral-large-latest"), MistralConfig.DEFAULT_BASE_URL, 128000, 4096)
+  private val cohere = CohereConfig(Secret("k"), ModelName("command-r"), CohereConfig.DEFAULT_BASE_URL, 128000, 4096)
   private val generic =
-    OpenAICompatibleConfig(ModelName("m"), "http://localhost:8000/v1", Some(Secret("k")), 32768, 4096, Map("X-Team" -> "search"))
+    OpenAICompatibleConfig(
+      ModelName("m"),
+      "http://localhost:8000/v1",
+      Some(Secret("k")),
+      32768,
+      4096,
+      Map("X-Team" -> "search")
+    )
 
   private val all: Seq[ProviderConfig] = Seq(openai, zai, deepseek, mistral, cohere, generic)
 

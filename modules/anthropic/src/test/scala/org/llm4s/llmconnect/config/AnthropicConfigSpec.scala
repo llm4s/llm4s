@@ -23,7 +23,8 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   private val apiKey  = "sk-test"
   private val baseUrl = "https://api.example.com"
 
-  private val anthropic = AnthropicConfig(Secret("k"), ModelName("claude-sonnet-4-5"), "https://api.anthropic.com", 200000, 4096)
+  private val anthropic =
+    AnthropicConfig(Secret("k"), ModelName("claude-sonnet-4-5"), "https://api.anthropic.com", 200000, 4096)
 
   // ---- fromValues (from ProviderConfigSpec) ----
 
@@ -153,7 +154,13 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   test("AnthropicConfig(apiKey, model) defaults the base URL and takes the context window from the model name") {
     val config = AnthropicConfig(Secret("k"), ModelName("claude-sonnet-4-5"))
 
-    config shouldBe AnthropicConfig(Secret("k"), ModelName("claude-sonnet-4-5"), AnthropicConfig.DEFAULT_BASE_URL, 200000, 4096)
+    config shouldBe AnthropicConfig(
+      Secret("k"),
+      ModelName("claude-sonnet-4-5"),
+      AnthropicConfig.DEFAULT_BASE_URL,
+      200000,
+      4096
+    )
     AnthropicConfig(Secret("k"), ModelName("claude-instant-1")).contextWindow shouldBe 100000
   }
 
@@ -164,6 +171,12 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
       .withContextWindow(100000)
       .withReserveCompletion(2048)
 
-    adjusted shouldBe AnthropicConfig(Secret("k2"), ModelName("claude-sonnet-4-5"), "https://proxy.example.com", 100000, 2048)
+    adjusted shouldBe AnthropicConfig(
+      Secret("k2"),
+      ModelName("claude-sonnet-4-5"),
+      "https://proxy.example.com",
+      100000,
+      2048
+    )
   }
 }

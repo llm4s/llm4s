@@ -40,7 +40,12 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
   private val secretKey = "cohere-SECRET-key-123"
 
   private def cfg(base: String = "http://cohere-test") =
-    EmbeddingProviderConfig(providerId = ProviderId("cohere"), baseUrl = BaseUrl(base), model = ModelName("embed-english-v3.0"), apiKey = Some(Secret(secretKey)))
+    EmbeddingProviderConfig(
+      providerId = ProviderId("cohere"),
+      baseUrl = BaseUrl(base),
+      model = ModelName("embed-english-v3.0"),
+      apiKey = Some(Secret(secretKey))
+    )
 
   /** A v2 response: `embeddings` keyed by type, with the billed input tokens in `meta` when given. */
   private def body(vectors: Seq[Seq[Double]], billed: Option[Int] = None): String = {

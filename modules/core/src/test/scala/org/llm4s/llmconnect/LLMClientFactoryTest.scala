@@ -32,7 +32,7 @@ class LLMClientFactoryTest extends AnyFunSuite with Matchers {
 
   test("LLMConnect.getClient returns the client of the default named provider") {
     val props = Map(
-      "llm4s.defaultProvider"                  -> "fixturechat-main",
+      "llm4s.defaultProvider"                     -> "fixturechat-main",
       "llm4s.providers.fixturechat-main.provider" -> "fixturechat",
       "llm4s.providers.fixturechat-main.model"    -> "fixture-model",
       "llm4s.providers.fixturechat-main.apiKey"   -> "sk",

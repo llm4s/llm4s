@@ -45,7 +45,7 @@ object EmbeddingExample {
         given ModelRegistryService = service
         EmbeddingClient.from(emb)
       }
-      runtime <- EmbeddingRuntimeSettings()
+      runtime   <- EmbeddingRuntimeSettings()
       textModel <- Llm4sConfig.textEmbeddingModel()
       chunkingCfg = TextChunkingConfig(
         enabled = runtime.chunkingEnabled,

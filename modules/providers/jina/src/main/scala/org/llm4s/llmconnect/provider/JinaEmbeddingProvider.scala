@@ -199,7 +199,12 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
             .currentApiKey()
             .flatMap(key =>
               httpClient
-                .post(url, headers(key.fold("")(_.reveal)), payload.render(), timeout = cfg.timeouts.requestOr(120.seconds))
+                .post(
+                  url,
+                  headers(key.fold("")(_.reveal)),
+                  payload.render(),
+                  timeout = cfg.timeouts.requestOr(120.seconds)
+                )
                 .left
                 .map {
                   // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)

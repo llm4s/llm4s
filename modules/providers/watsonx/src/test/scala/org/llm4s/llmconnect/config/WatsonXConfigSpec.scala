@@ -47,6 +47,9 @@ class WatsonXConfigSpec extends AnyFunSuite with Matchers:
 
   test("withModel replaces only the model") {
     val config = build().getOrElse(fail("expected a config"))
-    config.withModel(ModelName("meta-llama/llama-3-8b-instruct")).model.asString shouldBe "meta-llama/llama-3-8b-instruct"
+    config
+      .withModel(ModelName("meta-llama/llama-3-8b-instruct"))
+      .model
+      .asString shouldBe "meta-llama/llama-3-8b-instruct"
     config.withModel(ModelName("x")).projectId shouldBe config.projectId
   }

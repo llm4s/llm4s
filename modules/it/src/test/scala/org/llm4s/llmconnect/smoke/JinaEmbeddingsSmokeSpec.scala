@@ -29,7 +29,12 @@ class JinaEmbeddingsSmokeSpec extends AnyFlatSpec with Matchers {
 
   private def provider(apiKey: String, task: JinaTask = JinaTask.default): EmbeddingProvider =
     JinaEmbeddingProvider.fromConfig(
-      EmbeddingProviderConfig(providerId = ProviderId("jina"), baseUrl = BaseUrl("https://api.jina.ai/v1"), model = ModelName(Model), apiKey = Some(Secret(apiKey))),
+      EmbeddingProviderConfig(
+        providerId = ProviderId("jina"),
+        baseUrl = BaseUrl("https://api.jina.ai/v1"),
+        model = ModelName(Model),
+        apiKey = Some(Secret(apiKey))
+      ),
       task
     )
 

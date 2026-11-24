@@ -58,7 +58,9 @@ private[llm4s] object FrameworkConfig {
   private def namedDefault(properties: JMap[String, String]): Option[String] =
     properties.asScala.toList
       .sortBy(_._1)
-      .collectFirst { case (key, value) if key != null && value != null && hoconPath(key).contains(DefaultPath) => value.trim }
+      .collectFirst {
+        case (key, value) if key != null && value != null && hoconPath(key).contains(DefaultPath) => value.trim
+      }
       .filter(_.nonEmpty)
 
   /** The embedding model `llm4s.embeddings.model` names, `provider/model`, if one is set. */
@@ -136,7 +138,7 @@ private[llm4s] object FrameworkConfig {
   def hoconPath(key: String): Option[List[String]] =
     key.split("\\.").toList match {
       case "llm4s" :: key :: Nil if camel(key) == "defaultProvider" => Some(DefaultPath)
-      case "llm4s" :: "embeddings" :: "model" :: Nil   => Some(List("llm4s", "embeddings", "model"))
+      case "llm4s" :: "embeddings" :: "model" :: Nil                => Some(List("llm4s", "embeddings", "model"))
       case "llm4s" :: block :: name :: first :: rest if Sectioned.contains(block) =>
         val head = camel(first)
         Some(List("llm4s", block, name, head) ++ (if (head == "headers") rest else rest.map(camel)))
@@ -175,7 +177,9 @@ private[llm4s] object FrameworkConfig {
       .config()
       .left
       .map(failures => ConfigurationError(s"Cannot read llm4s's configuration: ${failures.prettyPrint()}"): LLMError)
-      .map(config => ConfigSource.fromConfig(config.withoutPath("llm4s.providers").withoutPath("llm4s.defaultProvider")))
+      .map(config =>
+        ConfigSource.fromConfig(config.withoutPath("llm4s.providers").withoutPath("llm4s.defaultProvider"))
+      )
 
   /** Puts `value` at `path`; the key, when the path crosses a value or ends on a section. */
   private def put(root: JMap[String, AnyRef], path: List[String], value: String): Option[String] = {

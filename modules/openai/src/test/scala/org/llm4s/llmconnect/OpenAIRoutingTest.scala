@@ -100,7 +100,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
 
   test("getClient returns OpenAIClient for the default named OpenAI provider") {
     val props = Map(
-      "llm4s.defaultProvider"             -> "openai-main",
+      "llm4s.defaultProvider"                -> "openai-main",
       "llm4s.providers.openai-main.provider" -> "openai",
       "llm4s.providers.openai-main.model"    -> "gpt-4o",
       "llm4s.providers.openai-main.apiKey"   -> "sk",
@@ -117,7 +117,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
 
   test("getClient returns OpenAIClient for the default named Azure provider") {
     val props = Map(
-      "llm4s.defaultProvider"            -> "azure-main",
+      "llm4s.defaultProvider"               -> "azure-main",
       "llm4s.providers.azure-main.provider" -> "azure",
       "llm4s.providers.azure-main.model"    -> "gpt-4o",
       "llm4s.providers.azure-main.endpoint" -> "https://example.azure.com",
@@ -134,7 +134,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
 
   test("Llm4sConfig.defaultProvider loads OpenAI config from named providers") {
     val props = Map(
-      "llm4s.defaultProvider"             -> "openai-main",
+      "llm4s.defaultProvider"                -> "openai-main",
       "llm4s.providers.openai-main.provider" -> "openai",
       "llm4s.providers.openai-main.model"    -> "gpt-4o",
       "llm4s.providers.openai-main.apiKey"   -> "test-key"

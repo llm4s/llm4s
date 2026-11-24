@@ -43,13 +43,15 @@ final case class MistralConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                      = ProviderId("mistral")
-  override def endpointUrl: Option[BaseUrl]                                 = Some(BaseUrl(baseUrl))
-  override def withModel(model: ModelName): MistralConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): MistralConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): Result[MistralConfig] = Right(copy(apiKeyProvider = Some(provider)))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): MistralConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                   = ProviderId("mistral")
+  override def endpointUrl: Option[BaseUrl]                             = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): MistralConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): MistralConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[MistralConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): MistralConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): MistralConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): MistralConfig                  = copy(baseUrl = baseUrl)

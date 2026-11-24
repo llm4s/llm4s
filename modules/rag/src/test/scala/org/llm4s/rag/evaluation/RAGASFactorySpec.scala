@@ -163,7 +163,12 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
     FixtureChatConfig("k", "fixture-model")
 
   private def embeddings(model: String) =
-    EmbeddingProviderConfig(ProviderId("fixture"), BaseUrl("http://localhost:9999"), ModelName(model), Some(Secret("key")))
+    EmbeddingProviderConfig(
+      ProviderId("fixture"),
+      BaseUrl("http://localhost:9999"),
+      ModelName(model),
+      Some(Secret("key"))
+    )
 
   "RAGASFactory.fromConfigs" should "resolve the embedding model's dimensions through its provider" in {
     given ProviderRegistry = withFixture

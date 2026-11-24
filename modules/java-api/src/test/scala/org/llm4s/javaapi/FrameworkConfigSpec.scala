@@ -22,7 +22,7 @@ class FrameworkConfigSpec extends AnyFlatSpec with Matchers with LoneElement {
   "sections" should "list each section of llm4s.providers once, ignoring the default pointer and other keys" in {
     val p = props(
       (fixture ++ Seq(
-        "llm4s.defaultProvider"       -> "main",
+        "llm4s.defaultProvider"          -> "main",
         "llm4s.providers.other.provider" -> "fixturechat",
         "llm4s.health.probe"             -> "true"
       )): _*

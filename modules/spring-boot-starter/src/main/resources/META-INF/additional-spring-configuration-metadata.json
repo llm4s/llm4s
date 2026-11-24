@@ -130,7 +130,7 @@
     {
       "name": "llm4s.default-provider",
       "type": "java.lang.String",
-      "description": "Name of the default section of llm4s.providers, the provider the starter creates a client for. Mirrors llm4s.default-provider of the HOCON configuration."
+      "description": "Name of the default section of llm4s.providers, the provider the starter creates a client for. Mirrors llm4s.defaultProvider of the HOCON configuration."
     },
     {
       "name": "llm4s.providers",

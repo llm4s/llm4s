@@ -58,14 +58,14 @@ final case class AcmeConfig(apiKey: String, model: ModelName, baseUrl: String) e
   def endpointUrl: Option[BaseUrl]                = Some(BaseUrl(baseUrl))
   def withModel(model: ModelName): ProviderConfig = copy(model = model)
   // An author's minimal config: it takes none of the settings the loader applies, and says so.
-  def timeouts: ProviderTimeouts                                    = ProviderTimeouts.default
-  def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig      = this
-  def network: HttpNetworkSettings                                  = HttpNetworkSettings.default
-  def withNetwork(network: HttpNetworkSettings): ProviderConfig     = this
-  def apiKeyProvider: Option[ApiKeyProvider]                        = None
+  def timeouts: ProviderTimeouts                                = ProviderTimeouts.default
+  def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig  = this
+  def network: HttpNetworkSettings                              = HttpNetworkSettings.default
+  def withNetwork(network: HttpNetworkSettings): ProviderConfig = this
+  def apiKeyProvider: Option[ApiKeyProvider]                    = None
   def withApiKeyProvider(provider: ApiKeyProvider): Result[Nothing] =
     ProviderConfig.noApiKeyProvider(providerId, "reads its key once")
-  override def toString: String                   = s"AcmeConfig(${model.asString}, $baseUrl)"
+  override def toString: String = s"AcmeConfig(${model.asString}, $baseUrl)"
 
 final case class AcmeClient(config: AcmeConfig) extends LLMClient:
   def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =

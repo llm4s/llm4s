@@ -96,7 +96,7 @@ object EmbeddingCacheExample {
       service    <- Llm4sConfig.modelRegistryService()
       report <- {
         given ModelRegistryService = service
-        val config = embeddings
+        val config                 = embeddings
         val registry               = summon[ProviderRegistry]
         for {
           descriptor <- registry.resolveEmbedding(config.providerId)

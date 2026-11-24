@@ -158,7 +158,9 @@ class OllamaThinkSpec extends AnyWordSpec with Matchers {
         }
       } { url =>
         val client =
-          new OllamaClient(OllamaConfig(model = ModelName("qwen3"), baseUrl = url, contextWindow = 4096, reserveCompletion = 512))
+          new OllamaClient(
+            OllamaConfig(model = ModelName("qwen3"), baseUrl = url, contextWindow = 4096, reserveCompletion = 512)
+          )
         test(client, shows, chats)
         client.close()
       }

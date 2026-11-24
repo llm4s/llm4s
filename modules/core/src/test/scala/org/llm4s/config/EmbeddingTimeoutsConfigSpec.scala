@@ -41,7 +41,6 @@ class EmbeddingTimeoutsConfigSpec extends AnyWordSpec with Matchers with EitherV
              |""".stripMargin
         )
       )
-      
 
   private def refused(section: String): String =
     load(section) match
@@ -98,7 +97,14 @@ class EmbeddingTimeoutsConfigSpec extends AnyWordSpec with Matchers with EitherV
         val id                  = FixtureEmbeddingProvider.id
         override val configSpec = FixtureEmbeddingProvider.configSpec
         override def buildConfig(section: EmbeddingProviderSection, context: EmbeddingConfigContext) =
-          Right(EmbeddingProviderConfig(ProviderId("fixtureembedding"), BaseUrl("http://x"), ModelName(context.modelOverride.getOrElse("m")), Some(Secret("k"))))
+          Right(
+            EmbeddingProviderConfig(
+              ProviderId("fixtureembedding"),
+              BaseUrl("http://x"),
+              ModelName(context.modelOverride.getOrElse("m")),
+              Some(Secret("k"))
+            )
+          )
         def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
           FixtureEmbeddingProvider.build(config, context)
 
@@ -118,7 +124,12 @@ class EmbeddingTimeoutsConfigSpec extends AnyWordSpec with Matchers with EitherV
 
   "EmbeddingProviderConfig" should {
     "default to no timeouts, so a config built by hand behaves as before" in {
-      EmbeddingProviderConfig(ProviderId("fixtureembedding"), BaseUrl("http://x"), ModelName("m"), Some(Secret("k"))).timeouts shouldBe ProviderTimeouts.default
+      EmbeddingProviderConfig(
+        ProviderId("fixtureembedding"),
+        BaseUrl("http://x"),
+        ModelName("m"),
+        Some(Secret("k"))
+      ).timeouts shouldBe ProviderTimeouts.default
     }
   }
 }

@@ -331,7 +331,9 @@ object Doctor {
     if (key.status == CheckStatus.Fail) {
       key :: skipped("needs the API key", List(Section, LocalModel, Live))
     } else {
-      val built = Llm4sConfig.providerSection(source, ProviderName(name)).flatMap(s => Llm4sConfig.providerFrom(source).map(s -> _))
+      val built = Llm4sConfig
+        .providerSection(source, ProviderName(name))
+        .flatMap(s => Llm4sConfig.providerFrom(source).map(s -> _))
       val sectionC = sectionCheck(name, built)
       val rest = built match {
         case Left(_) => skipped("needs a valid provider config", List(LocalModel, Live))
@@ -515,7 +517,8 @@ object Doctor {
     val others = names.filterNot(name => selected.exists(_.asName == name))
     if (others.isEmpty) DoctorCheck.skipped(Others, "there is no section besides the default")
     else {
-      val problems = others.flatMap(name => Llm4sConfig.provider(source, ProviderName(name)).left.toOption.map(name -> _.message))
+      val problems =
+        others.flatMap(name => Llm4sConfig.provider(source, ProviderName(name)).left.toOption.map(name -> _.message))
       if (problems.isEmpty) DoctorCheck.pass(Others, s"${others.size} more section(s) load: ${others.mkString(", ")}")
       else
         DoctorCheck

@@ -31,7 +31,12 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def config(baseUrl: String, apiKey: Option[String] = None, headers: Map[String, String] = Map.empty) =
-    OpenAICompatibleConfig(model = ModelName("local-model"), baseUrl = baseUrl, apiKey = apiKey.map(Secret(_)), headers = headers)
+    OpenAICompatibleConfig(
+      model = ModelName("local-model"),
+      baseUrl = baseUrl,
+      apiKey = apiKey.map(Secret(_)),
+      headers = headers
+    )
 
   private def client(cfg: OpenAICompatibleConfig, logging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled) =
     OpenAICompatibleClient(cfg, exchangeLogging = logging).value

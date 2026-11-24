@@ -27,12 +27,12 @@ final case class JlamaConfig private (
   contextWindow: Int,
   reserveCompletion: Int
 ) extends ProviderConfig:
-  override val providerId: ProviderId                = ProviderId("jlama")
-  override def endpointUrl: Option[BaseUrl]           = None
+  override val providerId: ProviderId                   = ProviderId("jlama")
+  override def endpointUrl: Option[BaseUrl]             = None
   override def withModel(model: ModelName): JlamaConfig = copy(model = model)
-  def withModelDir(modelDir: Path): JlamaConfig      = copy(modelDir = modelDir)
-  def withThreads(threads: Int): JlamaConfig         = copy(threads = Some(threads))
-  def withThreads(threads: Option[Int]): JlamaConfig = copy(threads = threads)
+  def withModelDir(modelDir: Path): JlamaConfig         = copy(modelDir = modelDir)
+  def withThreads(threads: Int): JlamaConfig            = copy(threads = Some(threads))
+  def withThreads(threads: Option[Int]): JlamaConfig    = copy(threads = threads)
 
   // Jlama runs the model in this JVM: there is no request to time out and no connection to route. So these
   // setters return the config unchanged, and a `provider = "jlama"` section that sets `timeouts` or an `http`

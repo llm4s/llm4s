@@ -41,13 +41,15 @@ final case class DeepSeekConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                       = ProviderId("deepseek")
-  override def endpointUrl: Option[BaseUrl]                                  = Some(BaseUrl(baseUrl))
-  override def withModel(model: ModelName): DeepSeekConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): DeepSeekConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): DeepSeekConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): Result[DeepSeekConfig] = Right(copy(apiKeyProvider = Some(provider)))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): DeepSeekConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                    = ProviderId("deepseek")
+  override def endpointUrl: Option[BaseUrl]                              = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): DeepSeekConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): DeepSeekConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): DeepSeekConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[DeepSeekConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): DeepSeekConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): DeepSeekConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): DeepSeekConfig                  = copy(baseUrl = baseUrl)

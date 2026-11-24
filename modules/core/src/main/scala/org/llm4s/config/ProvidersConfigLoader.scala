@@ -55,7 +55,9 @@ final private[config] case class ProviderSections(
   def defaultProviderName: Result[ProviderName] =
     defaultProvider match
       case None =>
-        Left(ConfigurationError(movedDefault.fold(ProviderSections.noDefaultMessage)(ProviderSections.movedDefaultMessage)))
+        Left(
+          ConfigurationError(movedDefault.fold(ProviderSections.noDefaultMessage)(ProviderSections.movedDefaultMessage))
+        )
       case Some(name) if !sections.contains(name) =>
         Left(ConfigurationError(ProviderSections.notFoundMessage(name)))
       case Some(name) => Right(name)

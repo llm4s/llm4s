@@ -65,7 +65,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
   }
 
   private val section = Seq(
-    "llm4s.default-provider"   -> "o",
+    "llm4s.default-provider"     -> "o",
     "llm4s.providers.o.provider" -> "openai",
     "llm4s.providers.o.model"    -> "gpt-4o"
   )
@@ -223,7 +223,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     val viaSpi = SpringProviderSource
       .resolve(
         env(
-          "llm4s.default-provider"       -> "o",
+          "llm4s.default-provider"         -> "o",
           "llm4s.providers.o.provider"     -> "openai",
           "llm4s.providers.o.model"        -> "gpt-4o",
           "llm4s.providers.o.api-key"      -> "sk-x",
@@ -243,7 +243,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     // `contextWindow` and `reserveCompletion` are extras of the generic openai-compatible provider only: for
     // the other providers llm4s reads them from the model registry, as it does for a HOCON file.
     val section = Seq(
-      "llm4s.default-provider"   -> "o",
+      "llm4s.default-provider"     -> "o",
       "llm4s.providers.o.provider" -> "openai",
       "llm4s.providers.o.model"    -> "gpt-4o",
       "llm4s.providers.o.api-key"  -> "sk-x"
@@ -261,7 +261,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     val config = SpringProviderSource
       .resolve(
         env(
-          "llm4s.default-provider"              -> "oc",
+          "llm4s.default-provider"                -> "oc",
           "llm4s.providers.oc.provider"           -> "openai-compatible",
           "llm4s.providers.oc.model"              -> "local-model",
           "llm4s.providers.oc.base-url"           -> "http://localhost:1/v1",
@@ -279,7 +279,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     SpringProviderSource
       .resolve(
         env(
-          "llm4s.default-provider"       -> "az",
+          "llm4s.default-provider"         -> "az",
           "llm4s.providers.az.provider"    -> "azure",
           "llm4s.providers.az.model"       -> "dep",
           "llm4s.providers.az.api-key"     -> "k",
@@ -301,7 +301,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     val config = SpringProviderSource
       .resolve(
         env(
-          "llm4s.default-provider"          -> "az",
+          "llm4s.default-provider"            -> "az",
           "llm4s.providers.az.provider"       -> "azure",
           "llm4s.providers.az.model"          -> "dep",
           "llm4s.providers.az.endpoint"       -> "https://r.openai.azure.com",
@@ -323,7 +323,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     SpringProviderSource
       .resolve(
         env(
-          "llm4s.default-provider"   -> "b",
+          "llm4s.default-provider"     -> "b",
           "llm4s.providers.a.provider" -> "fixturechat",
           "llm4s.providers.a.model"    -> "model-a",
           "llm4s.providers.a.api-key"  -> "k",
@@ -335,7 +335,8 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       )
       .get()
       .config
-      .model.asString shouldBe "model-b"
+      .model
+      .asString shouldBe "model-b"
   }
 
   it should "be the section the flat llm4s.provider names when llm4s.default-provider is absent" in {
@@ -350,7 +351,8 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       )
       .get()
       .config
-      .model.asString shouldBe "model-a"
+      .model
+      .asString shouldBe "model-a"
   }
 
   it should "not be a vendor of llm4s.credentials that the flat llm4s.provider happens to name" in {
@@ -411,7 +413,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     SpringProviderSource
       .resolve(
         env(
-          "llm4s.default-provider"    -> "fx",
+          "llm4s.default-provider"      -> "fx",
           "llm4s.providers.fx.provider" -> "fixturechat",
           "llm4s.providers.fx.model"    -> "m \"quoted\" costs $5 {x} #hash",
           "llm4s.providers.fx.api-key"  -> "k"
@@ -420,7 +422,8 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       )
       .get()
       .config
-      .model.asString shouldBe "m \"quoted\" costs $5 {x} #hash"
+      .model
+      .asString shouldBe "m \"quoted\" costs $5 {x} #hash"
   }
 
   "a name set both as a value and as a section" should "fail with the name, whichever is read first" in {
@@ -451,7 +454,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     SpringProviderSource
       .resolve(
         env(
-          "llm4s.default-provider"              -> "fx",
+          "llm4s.default-provider"                -> "fx",
           "llm4s.providers.fx.provider"           -> "fixturechat",
           "llm4s.providers.fx.model"              -> "fixture-model",
           "llm4s.credentials.fixturechat.api-key" -> "sk-shared"
@@ -508,7 +511,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     runner
       .withInitializer { ctx =>
         val low: java.util.Map[String, Object] = Map[String, Object](
-          "llm4s.default-provider"    -> "fx",
+          "llm4s.default-provider"      -> "fx",
           "llm4s.providers.fx.provider" -> "fixturechat",
           "llm4s.providers.fx.model"    -> "fixture-model",
           "llm4s.providers.fx.apiKey"   -> "sk-LOW"
@@ -594,7 +597,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     val settings = HealthSettings.from(
       new Llm4sProperties,
       env(
-        "llm4s.default-provider"                 -> "fx",
+        "llm4s.default-provider"                   -> "fx",
         "llm4s.providers.fx.provider"              -> "fixturechat",
         "llm4s.providers.fx.model"                 -> "fixture-model",
         "llm4s.providers.fx.api-key"               -> "sk-SECRET",
@@ -645,16 +648,17 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
 
   "SpringProviderSource.configSecrets" should "read a Secret held by a vendor config" in
     org.llm4s.security.KnownSecrets.isolated {
-      val cfg = org.llm4s.llmconnect.config.OpenAIConfig(org.llm4s.security.Secret("sk-config-held-key-123"), ModelName("gpt-4o"))
+      val cfg = org.llm4s.llmconnect.config
+        .OpenAIConfig(org.llm4s.security.Secret("sk-config-held-key-123"), ModelName("gpt-4o"))
       SpringProviderSource.configSecrets(cfg) should contain("sk-config-held-key-123")
     }
 
   "SpringProviderSource.configSecrets" should "read every secret-looking text field of a config, set or optional" in {
     final case class SomeConfig(apiKey: String, sessionToken: Option[String], model: ModelName, maxTokens: Int)
         extends InertSettings {
-      def providerId                       = ProviderId("x")
-      def contextWindow                    = 1
-      def reserveCompletion                = 0
+      def providerId                          = ProviderId("x")
+      def contextWindow                       = 1
+      def reserveCompletion                   = 0
       def withModel(m: ModelName): SomeConfig = copy(model = m)
     }
     SpringProviderSource.configSecrets(SomeConfig("k1", Some("t1"), ModelName("gpt"), 3)) shouldBe Seq("k1", "t1")
@@ -671,9 +675,9 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       tokenUrl: String,
       extra: Map[String, String]
     ) extends InertSettings {
-      def providerId                   = ProviderId("x")
-      def contextWindow                = 1
-      def reserveCompletion            = 0
+      def providerId                      = ProviderId("x")
+      def contextWindow                   = 1
+      def reserveCompletion               = 0
       def withModel(m: ModelName): Nested = copy(model = m)
     }
     SpringProviderSource.configSecrets(
@@ -717,12 +721,14 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     }
     final case class Odd(model: ModelName, a: Exploding, b: Loop, apiKeys: ExplodingSeq, apiKey: String)
         extends InertSettings {
-      def providerId                  = ProviderId("x")
-      def contextWindow               = 1
-      def reserveCompletion           = 0
-      def withModel(m: ModelName): Odd   = copy(model = m)
+      def providerId                   = ProviderId("x")
+      def contextWindow                = 1
+      def reserveCompletion            = 0
+      def withModel(m: ModelName): Odd = copy(model = m)
     }
-    SpringProviderSource.configSecrets(Odd(ModelName("gpt"), new Exploding, new Loop, new ExplodingSeq, "k1")) shouldBe Seq("k1")
+    SpringProviderSource.configSecrets(
+      Odd(ModelName("gpt"), new Exploding, new Loop, new ExplodingSeq, "k1")
+    ) shouldBe Seq("k1")
   }
 
   they should "carry Bedrock session credentials from application.conf, nested in the resolved config (#1820)" in {
@@ -770,12 +776,12 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
 
   it should "read nothing from a config that is not a case class" in {
     final class PlainConfig extends InertSettings {
-      def providerId                        = ProviderId("x")
-      def model                             = ModelName("gpt")
-      def contextWindow                     = 1
-      def reserveCompletion                 = 0
+      def providerId                           = ProviderId("x")
+      def model                                = ModelName("gpt")
+      def contextWindow                        = 1
+      def reserveCompletion                    = 0
       def withModel(m: ModelName): PlainConfig = this
-      val apiKey                            = "not-read"
+      val apiKey                               = "not-read"
     }
     SpringProviderSource.configSecrets(new PlainConfig) shouldBe Nil
   }

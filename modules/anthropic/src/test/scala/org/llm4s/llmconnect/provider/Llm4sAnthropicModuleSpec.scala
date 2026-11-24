@@ -130,7 +130,7 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
     AnthropicProvider
       .buildConfig(section.withBaseUrl(Some(BaseUrl(baseUrl))), ProviderConfigContext.of("rotation"))
       .flatMap(_.withApiKeyProvider(keys))
-              .flatMap(AnthropicProvider.build(_, ProviderBuildContext.of()))
+      .flatMap(AnthropicProvider.build(_, ProviderBuildContext.of()))
       .fold(error => fail(error.message), identity)
 
   "a client built by the anthropic descriptor" should {

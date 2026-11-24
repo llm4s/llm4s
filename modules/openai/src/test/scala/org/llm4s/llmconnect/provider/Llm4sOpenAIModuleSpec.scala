@@ -209,7 +209,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
             ProviderConfigContext.of("rotation")
           )
           .flatMap(_.withApiKeyProvider(keys))
-              .flatMap(AzureProvider.build(_, ProviderBuildContext.of()))
+          .flatMap(AzureProvider.build(_, ProviderBuildContext.of()))
           .fold(error => fail(error.message), identity)
       }
     }
@@ -404,7 +404,12 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
         val config =
-          EmbeddingProviderConfig(providerId = ProviderId("openai"), baseUrl = BaseUrl(baseUrl), model = ModelName("text-embedding-3-small"), apiKey = Some(Secret("test-key")))
+          EmbeddingProviderConfig(
+            providerId = ProviderId("openai"),
+            baseUrl = BaseUrl(baseUrl),
+            model = ModelName("text-embedding-3-small"),
+            apiKey = Some(Secret("test-key"))
+          )
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(OpenAIEmbeddingProvider, config))
       }
     }
@@ -412,7 +417,12 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
       assertEmbeddingUsesSuppliedHttpClient(
         OpenAIEmbeddingProvider,
-        EmbeddingProviderConfig(providerId = ProviderId("openai"), baseUrl = BaseUrl("http://localhost:1"), model = ModelName("test-model"), apiKey = Some(Secret("test-key")))
+        EmbeddingProviderConfig(
+          providerId = ProviderId("openai"),
+          baseUrl = BaseUrl("http://localhost:1"),
+          model = ModelName("test-model"),
+          apiKey = Some(Secret("test-key"))
+        )
       )
     }
 
@@ -425,7 +435,12 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
         )
       ) { (baseUrl, keys) =>
         val config =
-          EmbeddingProviderConfig(providerId = ProviderId("openai"), baseUrl = BaseUrl(baseUrl), model = ModelName("text-embedding-3-small"), apiKey = Some(Secret("test-key")))
+          EmbeddingProviderConfig(
+            providerId = ProviderId("openai"),
+            baseUrl = BaseUrl(baseUrl),
+            model = ModelName("text-embedding-3-small"),
+            apiKey = Some(Secret("test-key"))
+          )
         assertBuildsEmbeddingProvider(OpenAIEmbeddingProvider, config.withApiKeyProvider(Some(keys)))
       }
     }

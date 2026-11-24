@@ -132,6 +132,6 @@ class MillQuickstartSpec extends AnyFlatSpec with Matchers {
 
     config.providerId.asString shouldBe "ollama"
     config.model.asString shouldBe "llama3"
-    read(confFile) should include("provider = ${?LLM4S_PROVIDER}")
+    read(confFile) should include("defaultProvider = ${?LLM4S_PROVIDER}")
   }
 }

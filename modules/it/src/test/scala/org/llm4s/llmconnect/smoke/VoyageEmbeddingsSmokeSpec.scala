@@ -31,7 +31,12 @@ class VoyageEmbeddingsSmokeSpec extends AnyFlatSpec with Matchers {
 
   private def provider(apiKey: String): EmbeddingProvider =
     VoyageAIEmbeddingProvider.fromConfig(
-      EmbeddingProviderConfig(providerId = ProviderId("voyage"), baseUrl = BaseUrl("https://api.voyageai.com/v1"), model = ModelName(Model), apiKey = Some(Secret(apiKey)))
+      EmbeddingProviderConfig(
+        providerId = ProviderId("voyage"),
+        baseUrl = BaseUrl("https://api.voyageai.com/v1"),
+        model = ModelName(Model),
+        apiKey = Some(Secret(apiKey))
+      )
     )
 
   private def request(purpose: InputPurpose, texts: String*): EmbeddingRequest =

@@ -57,7 +57,12 @@ private[llm4s] object FacadeInternals {
       config   <- loaded
       registry <- Llm4sConfig.modelRegistryService()
       client   <- EmbeddingClient.from(config)(using registry)
-    } yield new JEmbeddingClient(FacadeToken.INSTANCE, client, config.model.asString, declaredDimensions(config.providerId.asString, config.model.asString))
+    } yield new JEmbeddingClient(
+      FacadeToken.INSTANCE,
+      client,
+      config.model.asString,
+      declaredDimensions(config.providerId.asString, config.model.asString)
+    )
 
   /**
    * The dimensions `provider`'s module declares for `model`. The provider is the one the config loaded, so the only

@@ -15,7 +15,12 @@ final class VoyageAIEmbeddingCredentialEchoSpec extends AnyFlatSpec with Matcher
 
   "VoyageAIEmbeddingProvider" should "keep an echoed key out of the error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
-      val config = EmbeddingProviderConfig(providerId = ProviderId("voyage"), baseUrl = BaseUrl(baseUrl), model = ModelName("voyage-3"), apiKey = Some(Secret(echoKey)))
+      val config = EmbeddingProviderConfig(
+        providerId = ProviderId("voyage"),
+        baseUrl = BaseUrl(baseUrl),
+        model = ModelName("voyage-3"),
+        apiKey = Some(Secret(echoKey))
+      )
       VoyageAIEmbeddingProvider
         .fromConfig(config)
         .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("voyage-3", 8)))

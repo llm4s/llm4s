@@ -16,7 +16,8 @@ class JlamaConfigSpec extends AnyWordSpec with Matchers:
   "JlamaConfig.fromValues" should {
 
     "accept a Hugging Face id, trimmed, with the defaults" in {
-      val config = JlamaConfig.fromValues(ModelName("  tjake/Llama-3.2-1B-Instruct-JQ4 ")).fold(e => fail(e.message), identity)
+      val config =
+        JlamaConfig.fromValues(ModelName("  tjake/Llama-3.2-1B-Instruct-JQ4 ")).fold(e => fail(e.message), identity)
       config.model.asString shouldBe "tjake/Llama-3.2-1B-Instruct-JQ4"
       config.providerId.asString shouldBe "jlama"
       config.modelDir shouldBe JlamaConfig.defaultModelDir

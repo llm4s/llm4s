@@ -176,7 +176,12 @@ class SuppliedHttpClientChecksSpec extends AnyWordSpec with Matchers with Provid
 
     "assertEmbeddingUsesSuppliedHttpClient (#2811)" should {
 
-      val config = EmbeddingProviderConfig(ProviderId("acme"), BaseUrl("https://acme.invalid/v1"), ModelName("acme-embed-1"), Some(Secret("sk-acme")))
+      val config = EmbeddingProviderConfig(
+        ProviderId("acme"),
+        BaseUrl("https://acme.invalid/v1"),
+        ModelName("acme-embed-1"),
+        Some(Secret("sk-acme"))
+      )
 
       def descriptor(name: String, sends: Boolean, closes: Boolean): EmbeddingProviderDescriptor =
         new EmbeddingProviderDescriptor:

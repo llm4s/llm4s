@@ -325,7 +325,14 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
         valid.withBaseUrl("http://api.example"),
         valid.withBaseUrl("https://gateway.example"),
         valid.withApiKey(Secret("sk-ant")),
-        AnthropicConfig(Secret(""), ModelName("claude-test"), "http://localhost@api.example", 200000, 4096, Some(identity))
+        AnthropicConfig(
+          Secret(""),
+          ModelName("claude-test"),
+          "http://localhost@api.example",
+          200000,
+          4096,
+          Some(identity)
+        )
       )
       for config <- bad do
         AnthropicClient(config).left.value shouldBe a[ConfigurationError]
@@ -366,7 +373,9 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     "apply the same rules to the Java and Kotlin path: the short apply and withWorkloadIdentity" in {
       // the short apply with a blank key and no identity would authenticate as nobody
       for key <- Seq("", "  ") do
-        AnthropicClient(AnthropicConfig(Secret(key), ModelName("claude-test"))).left.value.message should include("apiKey")
+        AnthropicClient(AnthropicConfig(Secret(key), ModelName("claude-test"))).left.value.message should include(
+          "apiKey"
+        )
       // the short apply's default base URL is api.anthropic.com, so a keyless config with an identity is valid
       val federated = AnthropicConfig(Secret(""), ModelName("claude-test")).withWorkloadIdentity(identity)
       AnthropicConfig.validate(federated) shouldBe Right(federated)

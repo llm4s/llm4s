@@ -168,6 +168,7 @@ private[llm4s] object SharedCredentials:
         "key from the file, unset that variable; to use the variable, remove apiKeyFile",
       List("apiKeyFile")
     )
+
   /** `path`'s sibling `apiKeyFile`: `llm4s.embeddings.openai.apiKey` becomes `llm4s.embeddings.openai.apiKeyFile`. */
   private def siblingFilePath(path: String): String =
     if path.endsWith(".apiKey") then path + "File" else s"$path.apiKeyFile"
@@ -277,8 +278,8 @@ private[llm4s] object SharedCredentials:
                       // `apiKey` is usually bound to the vendor's variable by its module's reference.conf, so a key
                       // the user never wrote is most likely an exported variable: the message says to unset it.
                       case Some(_) if apiKey.isDefined => Right(Some(Entry.Both(entryPath)))
-                      case Some(file) => Right(Some(Entry.File(file)))
-                      case None       => Right(apiKey.map(k => Entry.Key(Secret(k))))
+                      case Some(file)                  => Right(Some(Entry.File(file)))
+                      case None                        => Right(apiKey.map(k => Entry.Key(Secret(k))))
                     }
                 }
 

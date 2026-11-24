@@ -153,11 +153,15 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
     val env = Map("OPENAI_API_KEY" -> "sk-default-account", "OPENAI_BATCH_API_KEY" -> "sk-batch-account")
 
     "give the section without a key the shared OPENAI_API_KEY" in {
-      apiKey(Llm4sConfig.provider(withEnv(secondAccount, env), ProviderName("openai-main"))) shouldBe "sk-default-account"
+      apiKey(
+        Llm4sConfig.provider(withEnv(secondAccount, env), ProviderName("openai-main"))
+      ) shouldBe "sk-default-account"
     }
 
     "give the section with its own key that key, not the shared one" in {
-      apiKey(Llm4sConfig.provider(withEnv(secondAccount, env), ProviderName("openai-batch"))) shouldBe "sk-batch-account"
+      apiKey(
+        Llm4sConfig.provider(withEnv(secondAccount, env), ProviderName("openai-batch"))
+      ) shouldBe "sk-batch-account"
     }
 
     "be flagged as inheriting by apiKeySources, for the prod policy" in {
@@ -189,6 +193,8 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
     "take an embeddings-only key over OPENAI_API_KEY when the block sets one" in {
       val hocon = embeddings + "\nllm4s.embeddings.openai.apiKey = ${?OPENAI_EMBEDDINGS_API_KEY}"
       val env   = Map("OPENAI_API_KEY" -> "sk-chat", "OPENAI_EMBEDDINGS_API_KEY" -> "sk-embeddings")
-      EmbeddingsConfigLoader.loadProvider(withEnv(hocon, env)).map(_.apiKey.fold("")(_.reveal)) shouldBe Right("sk-embeddings")
+      EmbeddingsConfigLoader.loadProvider(withEnv(hocon, env)).map(_.apiKey.fold("")(_.reveal)) shouldBe Right(
+        "sk-embeddings"
+      )
     }
   }

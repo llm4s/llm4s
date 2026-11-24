@@ -140,7 +140,7 @@ object Hello {
 ### app/resources/application.conf
 
 Mill puts `app/resources` on the classpath, which is where the configuration library looks for `application.conf`.
-`provider` names the section the program uses; the [Configuration guide](configuration#named-provider-sections)
+`defaultProvider` names the section the program uses; the [Configuration guide](configuration#named-provider-sections)
 covers the other providers:
 
 ```hocon
@@ -163,9 +163,9 @@ llm4s {
 }
 ```
 
-The OpenAI section needs no `apiKey` line: `llm4s-openai` reads `OPENAI_API_KEY` itself. The second `provider` line
-lets the environment pick the other section (`LLM4S_PROVIDER=ollama-local`). Only the section being loaded is
-checked, so the Ollama run does not need an OpenAI key.
+The OpenAI section needs no `apiKey` line: `llm4s-openai` reads `OPENAI_API_KEY` itself. The second
+`defaultProvider` line lets the environment pick the other section (`LLM4S_PROVIDER=ollama-local`). Only the section
+being loaded is checked, so the Ollama run does not need an OpenAI key.
 
 ### app/resources/logback.xml
 

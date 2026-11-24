@@ -44,13 +44,14 @@ import scala.util.Try
  */
 private[spring] object SpringProviderSource {
 
-  final val ProvidersPrefix    = "llm4s.providers"
-  final val CredentialsPrefix  = "llm4s.credentials"
-  final val HttpPrefix         = "llm4s.http"
-  final val EmbeddingsPrefix   = "llm4s.embeddings"
-  final val TracingPrefix      = "llm4s.tracing"
+  final val ProvidersPrefix   = "llm4s.providers"
+  final val CredentialsPrefix = "llm4s.credentials"
+  final val HttpPrefix        = "llm4s.http"
+  final val EmbeddingsPrefix  = "llm4s.embeddings"
+  final val TracingPrefix     = "llm4s.tracing"
+
   /** The property naming the default section, in Spring's spelling; `llm4s.defaultProvider` and `llm4s.default_provider` are read too. */
-  final val DefaultProviderKey = "llm4s.default-provider"
+  final val DefaultProviderKey    = "llm4s.default-provider"
   private val DefaultProviderKeys = Seq(DefaultProviderKey, "llm4s.defaultProvider", "llm4s.default_provider")
   private val ProviderPrefixes    = Seq(ProvidersPrefix, CredentialsPrefix, HttpPrefix) ++ DefaultProviderKeys
   private val DefaultPointer      = List("llm4s", "defaultProvider")
@@ -58,9 +59,14 @@ private[spring] object SpringProviderSource {
   /** The provider llm4s resolved from the properties, and the secret values to keep out of reports: those the properties held and the resolved config's own. */
   final case class Resolved(config: ProviderConfig, secrets: Seq[String])
 
-  /** True when the environment holds at least one `llm4s.providers.*` property, which selects this path. */
+  /**
+   * True when the environment holds at least one `llm4s.providers.*` property, or names the default section
+   * (`llm4s.default-provider`, which may name a section of `application.conf`): either selects this path.
+   */
   def usesProvidersBlock(env: ConfigurableEnvironment): Boolean =
-    propertyNames(env, ProviderPrefixes).exists(_.startsWith(ProvidersPrefix + "."))
+    propertyNames(env, ProviderPrefixes).exists(name =>
+      name.startsWith(ProvidersPrefix + ".") || DefaultProviderKeys.contains(name)
+    )
 
   /**
    * Resolves the default section of `llm4s.providers`. When the properties name no default but the flat

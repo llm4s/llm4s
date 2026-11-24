@@ -55,7 +55,10 @@ class DefaultProviderKeySpec extends AnyWordSpec with Matchers with EitherValues
           |""".stripMargin
       Llm4sConfig.provider(source(hocon), ProviderName("provider")).value.model.asString shouldBe "m"
       Llm4sConfig.defaultProvider(source(hocon)).value.model.asString shouldBe "m"
-      Llm4sConfig.providerConfigs(source(hocon)).value.keySet shouldBe Set(ProviderName("provider"), ProviderName("other"))
+      Llm4sConfig.providerConfigs(source(hocon)).value.keySet shouldBe Set(
+        ProviderName("provider"),
+        ProviderName("other")
+      )
     }
   }
 

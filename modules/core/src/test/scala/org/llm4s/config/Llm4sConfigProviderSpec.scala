@@ -27,7 +27,9 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
           |""".stripMargin
 
       val cfg =
-        Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("fixturechat-main")).fold(err => fail(err.toString), identity)
+        Llm4sConfig
+          .provider(ConfigSource.string(hocon), ProviderName("fixturechat-main"))
+          .fold(err => fail(err.toString), identity)
 
       cfg match
         case fixture: FixtureChatConfig =>

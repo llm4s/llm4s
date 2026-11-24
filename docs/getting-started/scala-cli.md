@@ -77,7 +77,7 @@ import org.llm4s.model.ModelRegistryService
 }
 ```
 
-`resources/application.conf` names the provider the script uses: the section that `provider` names. The
+`resources/application.conf` names the provider the script uses: the section that `defaultProvider` names. The
 [Configuration guide](configuration#named-provider-sections) covers the other providers:
 
 ```hocon

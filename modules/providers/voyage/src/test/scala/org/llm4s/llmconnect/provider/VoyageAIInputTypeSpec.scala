@@ -12,7 +12,12 @@ import ujson.read
 /** Voyage's `input_type`: a request says whether its texts are documents or queries, and Voyage is told. */
 class VoyageAIInputTypeSpec extends AnyFlatSpec with Matchers {
 
-  private val cfg = EmbeddingProviderConfig(providerId = ProviderId("voyage"), baseUrl = BaseUrl("http://voyage-test"), model = ModelName("voyage-3"), apiKey = Some(Secret("k")))
+  private val cfg = EmbeddingProviderConfig(
+    providerId = ProviderId("voyage"),
+    baseUrl = BaseUrl("http://voyage-test"),
+    model = ModelName("voyage-3"),
+    apiKey = Some(Secret("k"))
+  )
   private val modelCfg = EmbeddingModelConfig("voyage-3", 1024)
   private val okBody   = """{"data":[{"embedding":[0.1,0.2]},{"embedding":[0.3,0.4]}]}"""
 

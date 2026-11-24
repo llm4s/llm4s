@@ -210,7 +210,10 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
       .fromValues(ModelName("m"), "http://localhost:8000/v1", apiKey = Some(Secret("  ")))
       .value
       .apiKey shouldBe None
-    OpenAICompatibleConfig.fromValues(ModelName("m"), "http://h/v1", apiKey = Some(Secret(" k "))).value.apiKey shouldBe Some(
+    OpenAICompatibleConfig
+      .fromValues(ModelName("m"), "http://h/v1", apiKey = Some(Secret(" k ")))
+      .value
+      .apiKey shouldBe Some(
       Secret("k")
     )
   }

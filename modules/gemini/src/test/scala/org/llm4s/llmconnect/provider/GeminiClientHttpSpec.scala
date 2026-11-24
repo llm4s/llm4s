@@ -476,7 +476,10 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     requestBody(testConfig.withModel(ModelName("gemini-2.5-flash")), CompletionOptions().withThinking(Thinking.Off))(
       "generationConfig"
     )("thinkingConfig") shouldBe ujson.Obj("thinkingBudget" -> 0)
-    requestBody(testConfig.withModel(ModelName("gemini-3-pro-preview")), CompletionOptions().withReasoning(ReasoningEffort.High))(
+    requestBody(
+      testConfig.withModel(ModelName("gemini-3-pro-preview")),
+      CompletionOptions().withReasoning(ReasoningEffort.High)
+    )(
       "generationConfig"
     )("thinkingConfig") shouldBe ujson.Obj("thinkingLevel" -> "HIGH")
     requestBody(testConfig, CompletionOptions().withReasoning(ReasoningEffort.High))(

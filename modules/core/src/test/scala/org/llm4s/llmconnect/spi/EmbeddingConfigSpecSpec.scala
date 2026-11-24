@@ -93,11 +93,15 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
 
     "prefer the section to the default" in {
       val section = EmbeddingProviderSection(baseUrl = Some(BaseUrl("https://section.acme.example")))
-      EmbeddingConfigSpec.resolveBaseUrl(id, section, withDefault) shouldBe Right(BaseUrl("https://section.acme.example"))
+      EmbeddingConfigSpec.resolveBaseUrl(id, section, withDefault) shouldBe Right(
+        BaseUrl("https://section.acme.example")
+      )
     }
 
     "use the default when the section has none" in {
-      EmbeddingConfigSpec.resolveBaseUrl(id, noSection, withDefault) shouldBe Right(BaseUrl("https://default.acme.example"))
+      EmbeddingConfigSpec.resolveBaseUrl(id, noSection, withDefault) shouldBe Right(
+        BaseUrl("https://default.acme.example")
+      )
     }
 
     "use the default when the section's is blank" in {
@@ -128,7 +132,9 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
     "fall through a blank section key to the default" in {
       val blank = EmbeddingProviderSection(apiKey = Some(Secret("   ")))
       EmbeddingConfigSpec.resolveApiKey(id, blank, withDefault).value.map(_.reveal) shouldBe Some("default-acme-key")
-      EmbeddingConfigSpec.resolveApiKey(id, noSection, withDefault).value.map(_.reveal) shouldBe Some("default-acme-key")
+      EmbeddingConfigSpec.resolveApiKey(id, noSection, withDefault).value.map(_.reveal) shouldBe Some(
+        "default-acme-key"
+      )
     }
 
     "give no key when there is none and none is required" in {
