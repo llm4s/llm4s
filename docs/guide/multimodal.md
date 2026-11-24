@@ -33,6 +33,9 @@ A `UserMessage` and a `ToolMessage` carry `parts: Seq[ContentPart]`. A part is o
 - a document, built with `ContentPart.document(source, mediaType)`, `mediaType` a `DocumentMediaType` (`Pdf`,
   `PlainText`, `Markdown`, `Html`, `Csv`).
 
+Those media types, and `MediaSource`, are `llm4s-media`'s shared vocabulary, which image generation and RAG
+extraction use too: [Media Types](media-types) describes it.
+
 The source, an `org.llm4s.media.MediaSource`, says where the bytes are:
 
 | Source | Meaning |

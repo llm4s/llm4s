@@ -400,7 +400,56 @@ A tool answers with a `ToolOutcome`:
 A tool that asks extends `AgentTool.Asking[A, Q, Ans]`, with a `ReadWriter` for the question type `Q` and the
 answer type `Ans`. It calls `ask(question)` from `execute`, the run ends `Suspended` with the question under
 `questions`, and when the caller replies the loop calls the tool's `resume(args, question, answer, context)`
-([Human Review](human-review#five-ways-a-turn-waits)).
+([Human Review](human-review#five-ways-a-turn-waits)):
+
+```scala
+import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolContext, ToolOutcome, ToolSet }
+import org.llm4s.toolapi.{ Schema, SchemaDefinition }
+import org.llm4s.types.Result
+import upickle.default.ReadWriter
+
+final case class Transfer(account: String, amount: Int) derives ReadWriter
+final case class Confirm(prompt: String) derives ReadWriter      // the question, Q
+final case class Decision(confirmed: Boolean) derives ReadWriter // the answer, Ans
+
+val transferSchema: SchemaDefinition[Transfer] =
+  Schema
+    .`object`[Transfer]("Transfer")
+    .withRequiredField("account", Schema.string("The destination account"))
+    .withRequiredField("amount", Schema.integer("The amount, in whole units"))
+
+final class TransferTool
+    extends AgentTool.Asking[Transfer, Confirm, Decision](
+      AgentToolSpec[Transfer]("transfer", "Transfers money to an account", transferSchema)
+    ):
+  def execute(args: Transfer, context: ToolContext): ToolOutcome =
+    if args.amount <= 100 then ToolOutcome.success(ToolContent.Json(ujson.Str("sent")))
+    else ask(Confirm(s"Send ${args.amount} to ${args.account}?"))
+
+  def resume(args: Transfer, question: Confirm, answer: Decision, context: ToolContext): ToolOutcome =
+    if answer.confirmed then ToolOutcome.success(ToolContent.Json(ujson.Str("sent")))
+    else ToolOutcome.Error("the user declined the transfer")
+
+def confirmAll(agent: Agent, result: AgentResult): Result[AgentResult] =
+  result.status match
+    case AgentStatus.Suspended(suspension) =>
+      val answers = suspension.questions.map((id, _) => result.reply(id, Decision(confirmed = true)))
+      agent.resume(result.threadId, answers.toMap)
+    case _ => Right(result)
+
+def transferAgent(client: org.llm4s.llmconnect.LLMClient): Result[Agent] =
+  ToolSet.of(new TransferTool).flatMap(tools => Agent.builder("payments", client).withTools(tools).build())
+```
+
+Each entry of `suspension.questions` is a `ToolQuestionRequest` carrying the tool call and the question as JSON,
+for showing it to a person. The question and answer types are part of the tool's contract with whoever answers it:
+an answer that does not decode as `Ans` is not refused by `resume` but becomes that call's error result, which the
+model sees. `resume` may itself `ask` again, or return any other outcome.
+
+Typed tools live in `llm4s-agent` because they need the agent loop: its thread state, approvals and questions.
+A tool that needs none of those, and that other code (an MCP server, a plain `complete` call) should be able to
+call too, is a core `ToolFunction` ([Build Your Own Tool](../custom-tools)); the agent adapts it.
 
 ### Parallel Tool Calls
 

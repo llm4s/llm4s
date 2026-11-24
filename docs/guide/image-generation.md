@@ -135,7 +135,7 @@ val lion = for {
 | Option | Type | Used by | Description |
 |--------|------|---------|-------------|
 | `size` | `ImageSize` | all | `Square512` (default), `Square1024`, `Landscape768x512`, `Portrait512x768`, `Landscape1536x1024`, `Portrait1024x1536`, `Auto`, or `Custom(width, height)` |
-| `format` | `ImageMediaType` | all | The image format, from `org.llm4s.media` (`MediaType.Png` by default, or `MediaType.Jpeg`) |
+| `format` | `ImageMediaType` | all | The image format, from `org.llm4s.media` (`MediaType.Png` by default, or `MediaType.Jpeg`; see [Media Types](media-types)) |
 | `seed` | `Option[Long]` | Stable Diffusion, Stability AI, Hugging Face | A seed for reproducible results |
 | `guidanceScale` | `Double` | Stable Diffusion, Stability AI, Hugging Face | How strictly the model follows the prompt (default 7.5) |
 | `inferenceSteps` | `Int` | Stable Diffusion, Stability AI, Hugging Face | Diffusion steps (default 20) |
@@ -159,4 +159,5 @@ exports generic metrics exports them; see [Monitoring](observability/#metrics) f
 
 - [Examples](/examples/) - Working code examples
 - [Multimodal Content](multimodal) - Send images to a chat model
+- [Media Types](media-types) - The `MediaType` and `MediaCategory` vocabulary `ImageOptions.format` comes from
 - [Data Protection](data-protection) - Where image prompts are sent

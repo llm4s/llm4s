@@ -26,6 +26,9 @@ The [built-in tools](builtin-tools) are written with `ToolBuilder`, the same way
 for the thing most users do first: write a tool. Everything here is in `llm4s-core` (`org.llm4s.toolapi`); running
 the tool in an agent needs `llm4s-agent`.
 
+A tool that only an agent runs, and that needs the agent loop - typed arguments, the thread's state, an approval
+or a question to the user - can be an `AgentTool` instead: see [Typed Tools](agents/#typed-tools).
+
 ## 1. Anatomy of a tool
 
 A tool is a {% include api.html t="org.llm4s.toolapi.ToolFunction" %} with four parts, and `ToolBuilder` assembles them:
