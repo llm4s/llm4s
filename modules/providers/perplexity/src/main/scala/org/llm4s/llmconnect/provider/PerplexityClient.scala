@@ -136,11 +136,13 @@ class PerplexityClient(
                   // RFC 0009, Part 3: a reply `incomplete` at a limit while it made a call runs no call
                   BoundedJson.read(response.body).flatMap(parseReply).map(completion).flatMap(ToolCallRules.checked)
                 else
-                  HttpErrorMapper.mapHttpError(
-                    response.statusCode,
-                    Redaction.scrubRemote(response.body),
-                    providerName,
-                    response.headers
+                  Left(
+                    HttpErrorMapper.toError(
+                      response.statusCode,
+                      Redaction.scrubRemote(response.body),
+                      providerName,
+                      response.headers
+                    )
                   )
               recordExchange(startedAt, requestText, response.body, result)
               result
@@ -168,8 +170,10 @@ class PerplexityClient(
             else {
               val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
               raw.append(err)
-              HttpErrorMapper
-                .mapHttpError(response.statusCode, Redaction.scrubRemote(err), providerName, response.headers)
+              Left(
+                HttpErrorMapper
+                  .toError(response.statusCode, Redaction.scrubRemote(err), providerName, response.headers)
+              )
             }
           }
         recordExchange(startedAt, requestText, raw.result(), result)
@@ -378,11 +382,13 @@ class PerplexityClient(
         .flatMap { response =>
           if (response.statusCode >= 200 && response.statusCode < 300) Right(())
           else
-            HttpErrorMapper.mapHttpError(
-              response.statusCode,
-              Redaction.scrubRemote(response.body),
-              providerName,
-              response.headers
+            Left(
+              HttpErrorMapper.toError(
+                response.statusCode,
+                Redaction.scrubRemote(response.body),
+                providerName,
+                response.headers
+              )
             )
         }
     }

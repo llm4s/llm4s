@@ -561,7 +561,7 @@ class VertexAIClient(
     headers: Map[String, Seq[String]]
   ): Result[Nothing] = {
     logger.error(s"[VertexAI] Error response: $statusCode")
-    HttpErrorMapper.mapHttpError(statusCode, body, providerName, headers)
+    Left(HttpErrorMapper.toError(statusCode, body, providerName, headers))
   }
 
   private def recordExchange(

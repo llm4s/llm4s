@@ -781,7 +781,7 @@ class OpenAICompatibleClient(
           )
         )
       )
-    else HttpErrorMapper.mapHttpError(statusCode, scrubbed, providerName, headers)
+    else Left(HttpErrorMapper.toError(statusCode, scrubbed, providerName, headers))
   }
 
   /**

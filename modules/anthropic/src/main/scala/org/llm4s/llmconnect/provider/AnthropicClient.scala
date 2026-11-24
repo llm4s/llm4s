@@ -1290,9 +1290,10 @@ object AnthropicClient {
       case e: com.anthropic.errors.UnauthorizedException => AuthenticationError("anthropic", safe(e.getMessage))
       // the service's Retry-After, as HttpErrorMapper reads it for the other providers, so ReliableClient waits that long
       case e: com.anthropic.errors.RateLimitException =>
-        HttpErrorMapper
-          .mapHttpError(429, "", "anthropic", Try(headerMap(e.headers())).getOrElse(Map.empty))
-          .left
+        Left(
+          HttpErrorMapper
+            .toError(429, "", "anthropic", Try(headerMap(e.headers())).getOrElse(Map.empty))
+        ).left
           .getOrElse(RateLimitError("anthropic"))
       case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", safe(e.getMessage))
       // the service refused the request - a vendor limit (an image count, a request size) among others: typed, with

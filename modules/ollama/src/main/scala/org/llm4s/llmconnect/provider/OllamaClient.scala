@@ -217,7 +217,7 @@ class OllamaClient(
             TroubleshootingLinks.Entry.OllamaModelMissing
           )
       )
-    else HttpErrorMapper.mapHttpError(status, body, providerName, headers)
+    else Left(HttpErrorMapper.toError(status, body, providerName, headers))
 
   private def recordExchange(
     startedAt: Instant,

@@ -1038,16 +1038,17 @@ object OpenAIClient {
       // Azure OpenAI refuses a prompt its content filter blocks with a 400 whose code is `content_filter`
       ContentFilteredError.prompt(displayName(ProviderId(provider)), ChatCompletionsFinishReason.ContentFilter)
     case service: OpenAIServiceException =>
-      HttpErrorMapper
-        .mapHttpError(
-          service.statusCode(),
-          // Rendered as JSON: the SDK's `JsonValue.toString` is a Java map's (`{error={message=...}}`), which
-          // `HttpErrorMapper` cannot parse, so the service's message never reached the error.
-          Redaction.scrubRemote(Try(ObjectMappers.jsonMapper().writeValueAsString(service.body())).getOrElse("")),
-          provider,
-          Try(headerMap(service.headers())).getOrElse(Map.empty)
-        )
-        .left
+      Left(
+        HttpErrorMapper
+          .toError(
+            service.statusCode(),
+            // Rendered as JSON: the SDK's `JsonValue.toString` is a Java map's (`{error={message=...}}`), which
+            // `HttpErrorMapper` cannot parse, so the service's message never reached the error.
+            Redaction.scrubRemote(Try(ObjectMappers.jsonMapper().writeValueAsString(service.body())).getOrElse("")),
+            provider,
+            Try(headerMap(service.headers())).getOrElse(Map.empty)
+          )
+      ).left
         .getOrElse(redactMessage(SdkErrorMapper(service, provider), service))
     case io: OpenAIIoException if io.getCause != null =>
       redactMessage(SdkErrorMapper(io.getCause, provider), io.getCause)

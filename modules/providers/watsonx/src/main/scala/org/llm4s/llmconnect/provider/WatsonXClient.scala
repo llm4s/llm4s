@@ -310,11 +310,13 @@ class WatsonXClient(
                 if (response.statusCode >= 200 && response.statusCode < 300)
                   parseCompletion(response.body).flatMap(ToolCallRules.checked)
                 else
-                  HttpErrorMapper.mapHttpError(
-                    response.statusCode,
-                    Redaction.scrubRemote(response.body),
-                    providerName,
-                    response.headers
+                  Left(
+                    HttpErrorMapper.toError(
+                      response.statusCode,
+                      Redaction.scrubRemote(response.body),
+                      providerName,
+                      response.headers
+                    )
                   )
               recordExchange(startedAt, requestText, response.body, result)
               result
@@ -345,8 +347,10 @@ class WatsonXClient(
               val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
               raw.append(err)
               noteStatus(response.statusCode, token)
-              HttpErrorMapper
-                .mapHttpError(response.statusCode, Redaction.scrubRemote(err), providerName, response.headers)
+              Left(
+                HttpErrorMapper
+                  .toError(response.statusCode, Redaction.scrubRemote(err), providerName, response.headers)
+              )
             }
           }
         recordExchange(startedAt, requestText, raw.result(), result)
@@ -502,9 +506,10 @@ class WatsonXClient(
     status.foreach(noteStatus(_, token))
     status match {
       case Some(s) =>
-        HttpErrorMapper
-          .mapHttpError(s, ujson.Obj("message" -> safe).render(), providerName)
-          .left
+        Left(
+          HttpErrorMapper
+            .toError(s, ujson.Obj("message" -> safe).render(), providerName, Map.empty)
+        ).left
           .getOrElse(ServiceError(s, providerName, safe))
       case None => ServiceError(502, providerName, safe)
     }
