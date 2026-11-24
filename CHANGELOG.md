@@ -12,6 +12,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- The context compression pipeline in `org.llm4s.context` (`ContextManager`, `TokenWindow`, the compressors,
+  `SemanticBlocks`, `ArtifactStore`) is `@Experimental`; `ContextManager` is built only with `ContextManager.create`
+  (`withDefaults` and the public constructor are gone), `ContextConfig.enableSubjectiveEdits` is removed,
+  `ContextStep.name` is `stage: ContextStage`, `MessageTokenInfo.role` is a `MessageRole`, `TokenWindow` takes a
+  `HeadroomPercent`, and `StructuredInfo`, `HistoryDigest` and `PipelineStep` are private
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818));
+  [migration](docs/reference/migration.md#the-context-pipeline-is-experimental-and-token-counters-are-built-over-a-tokenizer-2818).
+- `ConversationTokenCounter.forModel`, `TokenizerMapping` and `TokenizerAccuracy` are removed from `llm4s-core`: use
+  `OpenAITokenizers.counterFor(model)` in `llm4s-openai`, or `ConversationTokenCounter.cl100k()` for another vendor's
+  model; `ConversationTokenCounter(tokenizerId)`, `openAI()` and `openAI_o200k()` are `create(tokenizerId)`,
+  `cl100k()` and `o200k()`; `TokenizerId` moves from `org.llm4s.identity` to `org.llm4s.context.tokens`
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818));
+  [migration](docs/reference/migration.md#the-context-pipeline-is-experimental-and-token-counters-are-built-over-a-tokenizer-2818).
+- `Modality`'s cases are nested (`Modality.Text`, `Modality.Image`, `Modality.Audio`, `Modality.Video`);
+  `MultimediaEmbeddingRequest`, `RawMediaInput` and `EmbeddingVector` move to `llm4s-rag` (`EmbeddingVector.values` is
+  a `Seq[Double]`, `dim` is derived), and `TextChunkInput`, `ImageInput`, `AudioInput`, `VideoInput` and `MMInput` are
+  removed; `EmbeddingProvider.embedMultimodal` is removed in favour of `MultimodalEmbeddingProvider` in `llm4s-rag`,
+  which `FileEmbedder.encodeFromPath` takes as an argument ([#2808](https://github.com/llm4s/llm4s/issues/2808));
+  [migration](docs/reference/migration.md#modality-is-an-enum-multimodal-embedding-lives-in-llm4s-rag-and-embeddingclient-is-final-2808).
+- `EmbeddingClient` is final with a private constructor: `EmbeddingClient(provider)` then `withTracing`,
+  `withOperation`, `withProviderId`; `EmbeddingClient.from` reports an unknown provider as a `ConfigurationError`, not
+  an `EmbeddingError` with code `400`; `EmbeddingError` moves from `org.llm4s.llmconnect.model` to `org.llm4s.error`
+  ([#2808](https://github.com/llm4s/llm4s/issues/2808));
+  [migration](docs/reference/migration.md#modality-is-an-enum-multimodal-embedding-lives-in-llm4s-rag-and-embeddingclient-is-final-2808).
+- `org.llm4s.types`: `HeadroomPercent` is built only with `HeadroomPercent.create` or a preset (`None` is renamed
+  `Zero`, `isValid` and `value` are gone, read it with `asRatio`); the aliases `TokenBudget`, `ContextWindowSize`,
+  `ByteCount` and `ExternalizationThreshold` are removed (use `Int` / `Long`); `ExternalizedContent` is private;
+  `SemanticBlockId`, `ArtifactKey` and `ContentSize` are opaque types read with `asString` / `asBytes`; `TraceId`
+  moves to `org.llm4s.trace.model` in `llm4s-observability`
+  ([#2822](https://github.com/llm4s/llm4s/issues/2822));
+  [migration](docs/reference/migration.md#newtypes-in-orgllm4stypes-are-opaque-and-headroompercent-is-always-valid-2822).
+- `ProviderDescriptor.buildConfig(providerName, section)(using ContextWindowResolver)` is
+  `buildConfig(section, context: ProviderConfigContext)` and `buildClient(config, options)(using
+  ModelRegistryService)` is `build(config, context: ProviderBuildContext)`;
+  `EmbeddingProviderDescriptor.buildConfig(section, modelOverride)` takes an `EmbeddingConfigContext` and
+  `build(config)` an `EmbeddingBuildContext` ([#2811](https://github.com/llm4s/llm4s/issues/2811));
+  [migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811).
+- `Llm4sProviderModule.chatProviders` is `providers`; `EmbeddingProviderSection.baseUrl` / `model` are
+  `Option[BaseUrl]` / `Option[ModelName]` ([#2811](https://github.com/llm4s/llm4s/issues/2811));
+  [migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811).
+- `AccessTokenProvider.token()` and `IdentityTokenSource.fetch()` are `current(): Result[Secret]`;
+  `IdentityTokenSource` is `IdentityTokenProvider`; `AccessToken.value`, `AccessTokenProvider.invalidate(rejected)`,
+  `IdentityTokenProvider.static(token)` and `IdentitySource.Literal(token)` take a `Secret`, not a `String`
+  ([#2811](https://github.com/llm4s/llm4s/issues/2811));
+  [migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811).
 - `AgentStatus.Blocked` and `TaskRefusal.Blocked` take `reason: Option[String]`, and `RunOutcome.Blocked` holds the guardrail's name only: a guardrail's reason is on the result of the run that was blocked and is never stored. Checkpoint format 9 ([#2853](https://github.com/llm4s/llm4s/issues/2853)); [migration](docs/reference/migration.md#a-guardrails-reason-is-never-stored-2853).
 - Input guardrails run when a turn is admitted, before it is stored and before any middleware's `beforeAgent`; `GuardrailBlocked.reason` is an `Option`; `Guardrail.validate(value, context)` takes a `UsageAccounting` ([#2854](https://github.com/llm4s/llm4s/issues/2854)); [migration](docs/reference/migration.md#a-turns-query-is-admitted-before-the-turn-is-stored-2854).
 - `llm4s.agent.runs.ended` and `llm4s.agent.run.duration` report the status the run's trace does: a guardrail block is
@@ -175,6 +220,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ProviderCollisionKind` and `ProviderId`; `EmbeddingProviderDescriptor.configSpec` is abstract;
   `AccessTokenProvider.invalidate` has a default; `CostEstimator.estimateFromMetadata` is internal
   ([migration](docs/reference/migration.md#provider-spi-error-mapping-published-helpers-report-types-2811)) [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Changed** Both provider descriptors have the same two methods: `buildConfig(section, context)` and
+  `build(config, context)`. `ProviderDescriptor.buildClient` is `build`, and the loose `using` parameters are
+  fields of `ProviderConfigContext` / `ProviderBuildContext` / `EmbeddingConfigContext` / `EmbeddingBuildContext`
+  ([migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811)) [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Added** `EmbeddingClientOptions.withHttpClient`: `EmbeddingClient.from(provider, config, options)` sends an
+  embedding provider's requests through the caller's own HTTP client. OpenAI, Ollama, Voyage, Jina and Cohere
+  honour it, and `llm4s-provider-testkit` has `assertEmbeddingUsesSuppliedHttpClient`
+  [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Changed** `EmbeddingProviderSection.baseUrl` and `model` are a `BaseUrl` and a `ModelName`. **Added**
+  `EmbeddingConfigSpec.extras`: an embedding provider declares its own `llm4s.embeddings.<id>` keys, which reach it
+  in `EmbeddingProviderSection.extras` and `EmbeddingProviderConfig.extras`
+  ([migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811)) [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Changed** `Llm4sProviderModule.chatProviders` is `providers`: across the SPI an unprefixed name is the chat half
+  and `embedding*` the embedding half
+  ([migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811)) [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Changed** `AccessTokenProvider.token()` and `IdentityTokenSource.fetch()` are `current()` and return a `Secret`;
+  `IdentityTokenSource` is `IdentityTokenProvider`; `AccessToken.value`, `AccessTokenProvider.invalidate` and
+  `IdentitySource.Literal` hold a `Secret`
+  ([migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811)) [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Added** `OpenAITokenizers` in `llm4s-openai`: `tokenizerFor(model)` and `counterFor(model)` map an OpenAI model
+  (or an Azure deployment named after one) to its tokenizer. **Fixed** `gpt-4.1`, `gpt-4.5`, `gpt-5`, `o3` and
+  `o4-mini` count with `o200k_base`; they counted with `cl100k_base`, some after an "Unknown model" warning
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818)).
 - **Removed** Vertex AI's `endpoint` / `organization` aliases for `project` / `location`, and with them
   `ProviderConfigKey.deprecatedAliases` and `ProviderConfigSpec.BuiltinAliasKeys` ([migration](docs/reference/migration.md#vertex-ai-no-longer-reads-endpoint-and-organization)).
 - **Fixed** `SSEParser`'s streaming parser reads CRLF and CR line endings, where a CRLF stream fed in raw chunks yielded
@@ -232,6 +300,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
+- **Changed** The context compression pipeline (`ContextManager`, `ContextConfig`, `ContextStep`,
+  `ManagedConversation`, `TokenWindow`, `DeterministicCompressor`, `ToolOutputCompressor`, `LLMCompressor`,
+  `HistoryCompressor`, `SemanticBlocks`, `ArtifactStore`) is `@Experimental`; token counting stays `@Stable`.
+  `ContextManager.create` is its one factory and validates the config; `ContextStep.stage` is a `ContextStage`
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818)).
+- **Added** `ConversationTokenCounter.of(tokenizer)` counts with any `StringTokenizer`, and `StringTokenizer.count`
+  lets a tokenizer count without building the token list (the bundled jtokkit ones do)
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818)).
+- **Removed** `TokenizerMapping`, `TokenizerAccuracy`, `ConversationTokenCounter.forModel` and the
+  `org.llm4s.identity` package: core names no vendor's models. `TokenizerId` is in `org.llm4s.context.tokens`
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818)).
+- **Removed** `ContextConfig.enableSubjectiveEdits`, which `ContextManager` never read; call
+  `DeterministicCompressor.compressToCap(..., enableSubjectiveEdits = true)` for the subjective rules
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818)).
+- **Changed** `HeadroomPercent` cannot hold an invalid value: `create` or a preset is the only way to build one.
+  The newtypes of `org.llm4s.types` are opaque types, as `ProviderModelTypes` already were; the bare aliases
+  `TokenBudget`, `ContextWindowSize`, `ByteCount` and `ExternalizationThreshold` are gone
+  ([#2822](https://github.com/llm4s/llm4s/issues/2822)).
 - **Removed** `LLMClientRetry` and `ErrorRecovery` (`recoverWithBackoff`, `CircuitBreaker`, `CircuitState`):
   `ReliableClient` with a `RetryPolicy` is the one retry and circuit-breaker mechanism
   ([migration](docs/reference/migration.md#one-retry-mechanism-llmclientretry-and-errorrecovery-are-removed-2798)) [#2798](https://github.com/llm4s/llm4s/issues/2798).
@@ -373,6 +459,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Embeddings & RAG
 
+- **Changed** `Modality` is an `enum`; a wildcard import of `org.llm4s.llmconnect.model` no longer brings a bare
+  `Text` and `Image` into scope ([#2808](https://github.com/llm4s/llm4s/issues/2808)).
+- **Changed** `MultimediaEmbeddingRequest`, `RawMediaInput` and `EmbeddingVector` live in `llm4s-rag` with
+  `FileEmbedder`, their one consumer. `RawMediaInput` copies its bytes and compares by content;
+  `EmbeddingVector.values` is a `Seq[Double]` ([#2808](https://github.com/llm4s/llm4s/issues/2808)).
+- **Changed** Multimodal embedding is the separate `MultimodalEmbeddingProvider` capability in `llm4s-rag`, passed to
+  `FileEmbedder.encodeFromPath`; `EmbeddingProvider.embedMultimodal` and its `501` default are removed
+  ([#2808](https://github.com/llm4s/llm4s/issues/2808)).
+- **Changed** `EmbeddingClient` is final: `EmbeddingClient(provider)` with `withTracing`, `withOperation` and
+  `withProviderId`. **Fixed** `EmbeddingClient.from` returns the registry's `ConfigurationError` for an unknown
+  provider, where it rewrote it to an `EmbeddingError` with an invented HTTP status. `EmbeddingError` is in
+  `org.llm4s.error` ([#2808](https://github.com/llm4s/llm4s/issues/2808)).
 - **Removed** the provider-only `EMBEDDING_PROVIDER` / `llm4s.embeddings.provider` selector; a config still setting it
   fails, naming `EMBEDDING_MODEL` ([migration](docs/reference/migration.md#the-legacy-embedding-provider-selector-is-removed)).
 - **Fixed** `RAGConfig.withTracing` traces the answer, LLM-rerank and `LLMQueryRewriter` calls, tagged `rag.answer`,
@@ -410,6 +508,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Observability
 
+- **Changed** `TraceId` is `org.llm4s.trace.model.TraceId` in `llm4s-observability`, its only user; it was in
+  `org.llm4s.types` in `llm4s-core` ([#2822](https://github.com/llm4s/llm4s/issues/2822)).
 - **Changed** `llm4s.agent.runs.ended` and `llm4s.agent.run.duration` report the status the run's trace does: a guardrail
   block is `blocked`, not `failed`, and a limited or cut-off turn `step_limit_reached`, `token_limit_reached` or
   `truncated`, not `completed`
@@ -430,10 +530,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **Added** The contributing guide states the naming conventions: what `apply`, `of`, `create`, `from` and `forX`
+  mean for a factory, `enum` or `sealed trait` for a sum type, plain accessor names, `PascalCase` constants and
+  opaque-type newtypes ([#2822](https://github.com/llm4s/llm4s/issues/2822)).
 - **Changed** the docs site groups the User Guide sidebar, and the contributor pages moved from `/reference/` to `/contribute/` (old addresses redirect) [#2834](https://github.com/llm4s/llm4s/issues/2834).
 
 ### Build & tooling
 
+- **Changed** The scalafix rule `ResultSyntaxMoved` also rewrites the imports of `TokenizerId`, `EmbeddingError`
+  and `TraceId` to where they moved ([#2818](https://github.com/llm4s/llm4s/issues/2818),
+  [#2808](https://github.com/llm4s/llm4s/issues/2808), [#2822](https://github.com/llm4s/llm4s/issues/2822)).
 - **Fixed** `scripts/mima-dry-run.sh`'s negative control resolves its probe baseline again: only `llm4s-core` takes the probe version, so its POM names `llm4s-media` at a version that was published;
   a control that fails before MiMa compares anything is reported as that, and `scripts/test-mima-dry-run.sh` models dependency resolution [#2794](https://github.com/llm4s/llm4s/issues/2794).
 - **Changed** a growth-prone type that gains a field adds no forwarding `apply` overload before the MiMa baseline (0.7.0), so the baseline freezes one `apply` per type
