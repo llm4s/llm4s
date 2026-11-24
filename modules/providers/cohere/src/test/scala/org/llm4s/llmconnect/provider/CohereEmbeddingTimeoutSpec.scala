@@ -25,7 +25,8 @@ class CohereEmbeddingTimeoutSpec extends AnyFlatSpec with Matchers {
       timeouts = timeouts
     )
 
-  private def request: EmbeddingRequest = EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("embed-english-v3.0", 3))
+  private def request: EmbeddingRequest =
+    EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("embed-english-v3.0"), 3))
 
   /** The timeout the provider passed to the HTTP client for one `embed`. */
   private def timeoutUsed(timeouts: ProviderTimeouts): Option[FiniteDuration] = {

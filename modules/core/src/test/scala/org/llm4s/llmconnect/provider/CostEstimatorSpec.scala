@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.model.{ ModelMetadata, ModelPricing, ModelCapabilities, ModelMode }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -27,8 +29,8 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
   )
 
   val pricedMetadata = ModelMetadata(
-    modelId = "test-model",
-    provider = "test-provider",
+    modelId = ModelName("test-model"),
+    provider = ProviderId("test-provider"),
     mode = ModelMode.Chat,
     maxInputTokens = Some(4096),
     maxOutputTokens = Some(4096),
@@ -41,8 +43,8 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
   )
 
   val unpricedMetadata = ModelMetadata(
-    modelId = "local-model",
-    provider = "ollama",
+    modelId = ModelName("local-model"),
+    provider = ProviderId("ollama"),
     mode = ModelMode.Chat,
     maxInputTokens = Some(4096),
     maxOutputTokens = Some(4096),
@@ -101,8 +103,8 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     )
 
     val metadata = ModelMetadata(
-      modelId = "test-model",
-      provider = "test-provider",
+      modelId = ModelName("test-model"),
+      provider = ProviderId("test-provider"),
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
@@ -133,8 +135,8 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     )
 
     val metadata = ModelMetadata(
-      modelId = "test-model",
-      provider = "test-provider",
+      modelId = ModelName("test-model"),
+      provider = ProviderId("test-provider"),
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
@@ -170,8 +172,8 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     )
 
     val metadata = ModelMetadata(
-      modelId = "test-model",
-      provider = "test-provider",
+      modelId = ModelName("test-model"),
+      provider = ProviderId("test-provider"),
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
@@ -207,8 +209,8 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     )
 
     val metadata = ModelMetadata(
-      modelId = "test-model",
-      provider = "test-provider",
+      modelId = ModelName("test-model"),
+      provider = ProviderId("test-provider"),
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
@@ -246,8 +248,8 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     )
 
     val metadata = ModelMetadata(
-      modelId = "test-model",
-      provider = "test-provider",
+      modelId = ModelName("test-model"),
+      provider = ProviderId("test-provider"),
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
@@ -285,8 +287,8 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     )
 
     val metadataWithReasoning = ModelMetadata(
-      modelId = "reasoning-model",
-      provider = "test",
+      modelId = ModelName("reasoning-model"),
+      provider = ProviderId("test"),
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
@@ -318,8 +320,8 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
 
   it should "preserve precision of micro-cost values" in {
     val precisePricing = ModelMetadata(
-      modelId = "precise-model",
-      provider = "test",
+      modelId = ModelName("precise-model"),
+      provider = ProviderId("test"),
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(4096),
@@ -362,7 +364,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.now(),
-      model = "test-model",
+      model = ModelName("test-model"),
       message = org.llm4s.llmconnect.model.AssistantMessage("test content"),
       usage = Some(sampleUsage),
       estimatedCost = Some(0.002)
@@ -376,7 +378,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.now(),
-      model = "test-model",
+      model = ModelName("test-model"),
       message = org.llm4s.llmconnect.model.AssistantMessage("test content"),
       usage = Some(sampleUsage)
     )
@@ -388,7 +390,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.now(),
-      model = "test-model",
+      model = ModelName("test-model"),
       message = org.llm4s.llmconnect.model.AssistantMessage("test content")
     )
 

@@ -1,5 +1,6 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import java.util.concurrent.CopyOnWriteArrayList
@@ -64,11 +65,11 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with TestTimeLimit with Matc
   }
 
   private def text(s: String): Completion =
-    Completion(id = "t", created = Instant.EPOCH, model = "m", message = AssistantMessage(Some(s)))
+    Completion(id = "t", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage(Some(s)))
 
   private def callWith(i: Int, args: ujson.Value): Completion = {
     val calls = Seq(ToolCall(id = ToolCallId(s"call-$i"), name = "echo", arguments = args))
-    Completion(id = s"t$i", created = Instant.EPOCH, model = "m", message = AssistantMessage("", calls))
+    Completion(id = s"t$i", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage("", calls))
   }
 
   private def toolResults(c: Conversation): Seq[ToolMessage] = c.messages.collect { case m: ToolMessage => m }

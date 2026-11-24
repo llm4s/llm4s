@@ -1,5 +1,7 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -13,51 +15,51 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
     defaultServiceResult().isRight shouldBe true
 
   it should "lookup models by exact ID" in:
-    defaultServiceResult().flatMap(_.lookup("gpt-4o")) match
+    defaultServiceResult().flatMap(_.lookup(ModelName("gpt-4o"))) match
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
-        metadata.modelId shouldBe "gpt-4o"
-        metadata.provider shouldBe "openai"
+        metadata.modelId shouldBe ModelName("gpt-4o")
+        metadata.provider shouldBe ProviderId("openai")
 
   it should "lookup models case-insensitively" in:
-    defaultServiceResult().flatMap(_.lookup("GPT-4O")) match
+    defaultServiceResult().flatMap(_.lookup(ModelName("GPT-4O"))) match
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
-        metadata.modelId shouldBe "gpt-4o"
+        metadata.modelId shouldBe ModelName("gpt-4o")
 
   it should "lookup models with provider prefix" in:
-    defaultServiceResult().flatMap(_.lookup("openai/gpt-4o")) match
+    defaultServiceResult().flatMap(_.lookup(ModelName("openai/gpt-4o"))) match
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
-        metadata.modelId shouldBe "gpt-4o"
+        metadata.modelId shouldBe ModelName("gpt-4o")
 
   it should "lookup models by provider and name" in:
-    defaultServiceResult().flatMap(_.lookup("openai", "gpt-4o")) match
+    defaultServiceResult().flatMap(_.lookup(ProviderId("openai"), ModelName("gpt-4o"))) match
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
-        metadata.modelId shouldBe "gpt-4o"
-        metadata.provider shouldBe "openai"
+        metadata.modelId shouldBe ModelName("gpt-4o")
+        metadata.provider shouldBe ProviderId("openai")
 
   it should "apply embedded overrides so gemini/gemini-1.5-flash stays a chat model" in:
-    defaultServiceResult().flatMap(_.lookup("gemini/gemini-1.5-flash")) match
+    defaultServiceResult().flatMap(_.lookup(ModelName("gemini/gemini-1.5-flash"))) match
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
-        metadata.provider shouldBe "gemini"
+        metadata.provider shouldBe ProviderId("gemini")
         metadata.mode shouldBe ModelMode.Chat
         metadata.contextWindow shouldBe Some(1048576)
         metadata.reserveCompletion shouldBe Some(8192)
 
   it should "apply embedded overrides so claude-3-7-sonnet-latest resolves to Anthropic metadata" in:
-    defaultServiceResult().flatMap(_.lookup("claude-3-7-sonnet-latest")) match
+    defaultServiceResult().flatMap(_.lookup(ModelName("claude-3-7-sonnet-latest"))) match
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
-        metadata.provider shouldBe "anthropic"
+        metadata.provider shouldBe ProviderId("anthropic")
         metadata.mode shouldBe ModelMode.Chat
         metadata.contextWindow shouldBe Some(200000)
 
@@ -78,25 +80,25 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
 
     ModelRegistryService
       .fromConfig(ModelRegistryConfig.default.withUrl(tempFile.toUri.toString))
-      .flatMap(_.lookup("custom-url-model")) match
+      .flatMap(_.lookup(ModelName("custom-url-model"))) match
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
-        metadata.modelId shouldBe "custom-url-model"
-        metadata.provider shouldBe "custom"
+        metadata.modelId shouldBe ModelName("custom-url-model")
+        metadata.provider shouldBe ProviderId("custom")
 
   it should "return error for unknown model" in:
-    defaultServiceResult().flatMap(_.lookup("unknown-model-xyz")) match
+    defaultServiceResult().flatMap(_.lookup(ModelName("unknown-model-xyz"))) match
       case Left(_)  => succeed
       case Right(_) => fail("Expected error for unknown model")
 
   it should "list models by provider" in:
-    defaultServiceResult().flatMap(_.listByProvider("openai")) match
+    defaultServiceResult().flatMap(_.listByProvider(ProviderId("openai"))) match
       case Left(error) =>
         fail(error.message)
       case Right(models) =>
         models should not be empty
-        models.foreach(_.provider shouldBe "openai")
+        models.foreach(_.provider shouldBe ProviderId("openai"))
 
   it should "list models by mode" in:
     defaultServiceResult().flatMap(_.listByMode(ModelMode.Chat)) match
@@ -125,8 +127,8 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
 
   it should "create a registry from custom models" in:
     val customModel = ModelMetadata(
-      modelId = "custom-model-123",
-      provider = "custom",
+      modelId = ModelName("custom-model-123"),
+      provider = ProviderId("custom"),
       mode = ModelMode.Chat,
       maxInputTokens = Some(10000),
       maxOutputTokens = Some(2000),
@@ -135,20 +137,20 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
       deprecationDate = None
     )
 
-    ModelRegistryService.fromModels(List(customModel)).lookup("custom-model-123") match
+    ModelRegistryService.fromModels(List(customModel)).lookup(ModelName("custom-model-123")) match
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
-        metadata.modelId shouldBe "custom-model-123"
-        metadata.provider shouldBe "custom"
+        metadata.modelId shouldBe ModelName("custom-model-123")
+        metadata.provider shouldBe ProviderId("custom")
 
   it should "allow later models to override earlier models in a snapshot" in:
-    val embeddedModel = defaultService().lookup("gpt-4o").toOption.get
+    val embeddedModel = defaultService().lookup(ModelName("gpt-4o")).toOption.get
     val overrideModel = embeddedModel.withMaxInputTokens(Some(999999))
 
     val service = ModelRegistryService.fromModels(List(embeddedModel, overrideModel))
 
-    service.lookup("gpt-4o") match
+    service.lookup(ModelName("gpt-4o")) match
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
@@ -157,8 +159,8 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
   it should "create a registry from multiple custom models" in:
     val customModels = List(
       ModelMetadata(
-        modelId = "custom-1",
-        provider = "custom",
+        modelId = ModelName("custom-1"),
+        provider = ProviderId("custom"),
         mode = ModelMode.Chat,
         maxInputTokens = Some(10000),
         maxOutputTokens = Some(2000),
@@ -167,8 +169,8 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         deprecationDate = None
       ),
       ModelMetadata(
-        modelId = "custom-2",
-        provider = "custom",
+        modelId = ModelName("custom-2"),
+        provider = ProviderId("custom"),
         mode = ModelMode.Embedding,
         maxInputTokens = Some(8192),
         maxOutputTokens = Some(8192),
@@ -179,13 +181,13 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
     )
 
     val service = ModelRegistryService.fromModels(customModels)
-    service.lookup("custom-1").isRight shouldBe true
-    service.lookup("custom-2").isRight shouldBe true
+    service.lookup(ModelName("custom-1")).isRight shouldBe true
+    service.lookup(ModelName("custom-2")).isRight shouldBe true
 
   it should "not resolve a partial model name, which only search finds" in:
     val customModel = ModelMetadata(
-      modelId = "my-unique-test-model-xyz",
-      provider = "custom",
+      modelId = ModelName("my-unique-test-model-xyz"),
+      provider = ProviderId("custom"),
       mode = ModelMode.Chat,
       maxInputTokens = Some(10000),
       maxOutputTokens = Some(2000),
@@ -195,15 +197,15 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
     )
 
     val service = ModelRegistryService.fromModels(List(customModel))
-    service.lookup("unique-test").isLeft shouldBe true
+    service.lookup(ModelName("unique-test")).isLeft shouldBe true
     service.search("unique-test").map(_.modelId) shouldBe List("my-unique-test-model-xyz")
 
   it should "not resolve a name several ids contain" in:
     val service = ModelRegistryService.fromModels(
       List(
         ModelMetadata(
-          modelId = "test-model-a",
-          provider = "custom",
+          modelId = ModelName("test-model-a"),
+          provider = ProviderId("custom"),
           mode = ModelMode.Chat,
           maxInputTokens = Some(10000),
           maxOutputTokens = Some(2000),
@@ -212,8 +214,8 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
           deprecationDate = None
         ),
         ModelMetadata(
-          modelId = "test-model-b",
-          provider = "custom",
+          modelId = ModelName("test-model-b"),
+          provider = ProviderId("custom"),
           mode = ModelMode.Chat,
           maxInputTokens = Some(10000),
           maxOutputTokens = Some(2000),
@@ -224,7 +226,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
       )
     )
 
-    service.lookup("test-model").isLeft shouldBe true
+    service.lookup(ModelName("test-model")).isLeft shouldBe true
 
   it should "load custom metadata from a JSON string" in:
     val customJson =
@@ -239,11 +241,11 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         |  }
         |}""".stripMargin
 
-    ModelRegistryService.fromJsonString(customJson).flatMap(_.lookup("custom-json-model")) match
+    ModelRegistryService.fromJsonString(customJson).flatMap(_.lookup(ModelName("custom-json-model"))) match
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
-        metadata.provider shouldBe "custom"
+        metadata.provider shouldBe ProviderId("custom")
         metadata.maxInputTokens shouldBe Some(50000)
 
   it should "return an error for malformed JSON from a URL source" in:
@@ -325,22 +327,32 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
       .obj
 
     for id <- List("claude-opus-4-7", "claude-opus-4-7-20260416", "claude-opus-4-8", "claude-fable-5") do
-      val metadata = service.lookup(id).toOption.get
+      val metadata = service.lookup(ModelName(id)).toOption.get
       metadata.capabilities.supportsBudgetThinking shouldBe Some(false)
-      metadata.provider shouldBe "anthropic"
+      metadata.provider shouldBe ProviderId("anthropic")
       metadata.pricing.inputCostPerToken shouldBe raw(id).obj.get("input_cost_per_token").map(_.num)
       metadata.capabilities.supportsAdaptiveThinking shouldBe Some(true)
 
-    service.lookup("us.anthropic.claude-opus-4-7").toOption.get.capabilities.supportsBudgetThinking shouldBe Some(false)
-    service.lookup("vertex_ai/claude-fable-5").toOption.get.capabilities.supportsBudgetThinking shouldBe Some(false)
+    service
+      .lookup(ModelName("us.anthropic.claude-opus-4-7"))
+      .toOption
+      .get
+      .capabilities
+      .supportsBudgetThinking shouldBe Some(false)
+    service
+      .lookup(ModelName("vertex_ai/claude-fable-5"))
+      .toOption
+      .get
+      .capabilities
+      .supportsBudgetThinking shouldBe Some(false)
 
   it should "leave a model that still takes a thinking budget unknown" in:
     val service = defaultService()
     for id <- List("claude-opus-4-6", "claude-sonnet-4-6", "claude-3-7-sonnet-latest") do
-      service.lookup(id).toOption.get.capabilities.supportsBudgetThinking shouldBe None
+      service.lookup(ModelName(id)).toOption.get.capabilities.supportsBudgetThinking shouldBe None
 
   it should "read the embedded effort metadata" in:
-    val sonnet = defaultService().lookup("claude-sonnet-4-6").toOption.get.capabilities
+    val sonnet = defaultService().lookup(ModelName("claude-sonnet-4-6")).toOption.get.capabilities
     sonnet.supportsOutputConfig shouldBe Some(true)
     sonnet.supportsAdaptiveThinking shouldBe Some(true)
 

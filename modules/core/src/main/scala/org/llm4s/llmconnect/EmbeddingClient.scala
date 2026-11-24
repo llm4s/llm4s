@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
@@ -48,7 +49,7 @@ final class EmbeddingClient private (
   // Emits the call's trace events when tracing is enabled: its usage and cost, or its failure
   private def traced(
     result: Result[EmbeddingResponse],
-    model: String,
+    model: ModelName,
     inputCount: Int,
     startedAt: Long
   ): Result[EmbeddingResponse] = {

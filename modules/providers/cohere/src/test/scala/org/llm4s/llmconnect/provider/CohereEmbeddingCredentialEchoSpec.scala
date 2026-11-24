@@ -23,7 +23,7 @@ final class CohereEmbeddingCredentialEchoSpec extends AnyFlatSpec with Matchers 
       )
       CohereEmbeddingProvider
         .fromConfig(config)
-        .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("embed-english-v3.0", 8)))
+        .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("embed-english-v3.0"), 8)))
     }
   }
 }

@@ -43,7 +43,7 @@ object CohereProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
-      config  <- CohereConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      config  <- CohereConfig.fromValues(section.model, apiKey, baseUrl)
     yield config
 
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =

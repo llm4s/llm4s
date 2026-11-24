@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
@@ -31,7 +32,7 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
       Completion(
         id = "answer",
         created = Instant.EPOCH,
-        model = "mock",
+        model = ModelName("mock"),
         message = AssistantMessage(text),
         usage = Some(TokenUsage(10, 2, 12))
       )

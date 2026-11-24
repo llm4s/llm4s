@@ -1,5 +1,6 @@
 package org.llm4s.mcp
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.it.tags.Local
 import org.llm4s.llmconnect.LLMClient
@@ -72,7 +73,7 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
         Completion(
           id = s"mock-$calls",
           created = Instant.EPOCH,
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = message,
           usage = None
         )

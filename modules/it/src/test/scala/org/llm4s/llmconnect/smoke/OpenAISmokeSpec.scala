@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
@@ -40,10 +42,10 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   private def config(key: String, model: String = "gpt-4o-mini"): OpenAIConfig =
     OpenAIConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret(key),
         organization = None,
-        baseUrl = "https://api.openai.com/v1"
+        baseUrl = BaseUrl("https://api.openai.com/v1")
       )
       .value
 

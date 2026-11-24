@@ -101,7 +101,7 @@ object EmbeddingCacheExample {
         for {
           descriptor <- registry.resolveEmbedding(config.providerId)
           provider   <- descriptor.build(config, EmbeddingBuildContext())
-          report     <- run(provider, EmbeddingModelConfig(config.model.asString, textModel.dimensions))
+          report     <- run(provider, EmbeddingModelConfig(config.model, textModel.dimensions))
         } yield report
       }
     } yield report

@@ -23,7 +23,7 @@ final class JinaEmbeddingCredentialEchoSpec extends AnyFlatSpec with Matchers {
       )
       JinaEmbeddingProvider
         .fromConfig(config)
-        .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("jina-embeddings-v3", 8)))
+        .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("jina-embeddings-v3"), 8)))
     }
   }
 }

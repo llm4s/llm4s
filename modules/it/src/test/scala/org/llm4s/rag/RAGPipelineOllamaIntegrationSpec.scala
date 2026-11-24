@@ -151,7 +151,12 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
 
   private def newOllamaClient(): OllamaClient =
     new OllamaClient(
-      OllamaConfig(model = ModelName(llmModel), baseUrl = ollamaBaseUrl, contextWindow = 8192, reserveCompletion = 4096)
+      OllamaConfig(
+        model = ModelName(llmModel),
+        baseUrl = BaseUrl(ollamaBaseUrl),
+        contextWindow = 8192,
+        reserveCompletion = 4096
+      )
     )
 
   private def buildInMemoryRag(): RAG = {

@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ConfigurationError
 import org.llm4s.javaapi.{ LlmResult, ProviderModules }
@@ -68,7 +69,7 @@ object ProviderConfigParser {
           apiKey = Secret(apiKey),
           model = ModelName(model),
           organization = org,
-          baseUrl = baseUrl,
+          baseUrl = BaseUrl(baseUrl),
           contextWindow = p.contextWindow,
           reserveCompletion = p.reserveCompletion
         )
@@ -86,7 +87,7 @@ object ProviderConfigParser {
         AnthropicConfig(
           apiKey = Secret(apiKey),
           model = ModelName(model),
-          baseUrl = baseUrl,
+          baseUrl = BaseUrl(baseUrl),
           contextWindow = p.contextWindow,
           reserveCompletion = p.reserveCompletion
         )
@@ -99,7 +100,7 @@ object ProviderConfigParser {
     LlmResult.success(
       OllamaConfig(
         model = ModelName(model),
-        baseUrl = baseUrl,
+        baseUrl = BaseUrl(baseUrl),
         contextWindow = p.contextWindow,
         reserveCompletion = p.reserveCompletion
       )

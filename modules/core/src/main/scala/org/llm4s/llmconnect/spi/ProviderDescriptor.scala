@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 import org.llm4s.config.{ NamedProviderConfig, ProviderModelLister, SharedCredentials }
 import org.llm4s.error.ConfigurationError
@@ -39,7 +40,7 @@ import scala.reflect.ClassTag
  *     given ContextWindowResolver = context.contextWindows
  *     ProviderDescriptor
  *       .requireExtra(context.providerName, section, "region")
- *       .flatMap(region => BedrockConfig.fromValues(section.model.asString, region, section.extra("profile")))
+ *       .flatMap(region => BedrockConfig.fromValues(section.model, region, section.extra("profile")))
  *
  *   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
  *     ProviderDescriptor.expectConfig[BedrockConfig](id, config).flatMap(BedrockClient(_, context.metrics))
@@ -192,10 +193,10 @@ object ProviderDescriptor:
     providerName: String,
     section: NamedProviderConfig,
     spec: ProviderConfigSpec
-  ): Result[String] =
+  ): Result[BaseUrl] =
     requireField(
       providerName,
       "base URL",
-      section.baseUrl.map(_.asUrl).orElse(spec.defaultBaseUrl),
+      section.baseUrl.map(_.asUrl).orElse(spec.defaultBaseUrl.map(_.asUrl)),
       s"llm4s.providers.$providerName.baseUrl"
-    )
+    ).map(BaseUrl(_))

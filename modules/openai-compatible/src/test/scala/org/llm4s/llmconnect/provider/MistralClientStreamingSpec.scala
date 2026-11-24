@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.RateLimitError
@@ -28,7 +29,7 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def config(baseUrl: String) =
-    MistralConfig(Secret("test-key"), ModelName("mistral-small-latest"), baseUrl, 128000, 4096)
+    MistralConfig(Secret("test-key"), ModelName("mistral-small-latest"), BaseUrl(baseUrl), 128000, 4096)
 
   private def event(delta: String, finish: String = "null", usage: String = ""): String =
     s"""data: {"id":"cmpl-s","object":"chat.completion.chunk","created":1700000000,"model":"mistral-small-latest",""" +
@@ -59,7 +60,7 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
           .value
 
       completion.content shouldBe "Bonjour le monde"
-      completion.model shouldBe "mistral-small-latest"
+      completion.model shouldBe ModelName("mistral-small-latest")
       completion.usage shouldBe Some(TokenUsage(12, 7, 19))
       chunks.flatMap(_.content).mkString shouldBe "Bonjour le monde"
       chunks.flatMap(_.finishReason) shouldBe Seq(FinishReason.Stop)

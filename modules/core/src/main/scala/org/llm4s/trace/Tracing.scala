@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ ConfigurationError, LLMError, UnknownError }
 import org.llm4s.llmconnect.config.TracingSettings
@@ -125,7 +126,7 @@ trait Tracing extends AutoCloseable {
    * @param completion the model response whose details are to be traced
    * @param model the model identifier to associate with this completion
    */
-  final def traceCompletion(completion: Completion, model: String): Result[Unit] =
+  final def traceCompletion(completion: Completion, model: ModelName): Result[Unit] =
     this.traceEvent(
       TraceEvent.CompletionReceived(
         id = completion.id,
@@ -143,7 +144,7 @@ trait Tracing extends AutoCloseable {
    * @param model the model identifier to associate with this usage
    * @param operation a caller-defined label describing the operation, such as "completion"
    */
-  final def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
+  final def traceTokenUsage(usage: TokenUsage, model: ModelName, operation: String): Result[Unit] =
     this.traceEvent(TraceEvent.TokenUsageRecorded(usage, model, operation))
 
   /**
@@ -170,7 +171,7 @@ trait Tracing extends AutoCloseable {
    */
   final def traceEmbeddingUsage(
     usage: EmbeddingUsage,
-    model: String,
+    model: ModelName,
     operation: String,
     inputCount: Int
   ): Result[Unit] = {
@@ -189,7 +190,7 @@ trait Tracing extends AutoCloseable {
    */
   final def traceCost(
     costUsd: Double,
-    model: String,
+    model: ModelName,
     operation: String,
     tokenCount: Int,
     costType: String

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.LLMClient
@@ -38,7 +39,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
         Completion(
           id = "comp-123",
           created = Instant.now(),
-          model = "gpt-model",
+          model = ModelName("gpt-model"),
           message = AssistantMessage("Response from LLM"),
           usage = None
         )
@@ -74,7 +75,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     }
   }
 
-  val embeddingModel = EmbeddingModelConfig("test-embedding", 3)
+  val embeddingModel = EmbeddingModelConfig(ModelName("test-embedding"), 3)
   val config         = CacheConfig.create(similarityThreshold = 0.9, ttl = 1.hour).getOrElse(fail("Invalid config"))
 
   test("Cache miss calls base client, caches result, and logs TraceEvent with correct reason") {

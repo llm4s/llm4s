@@ -54,7 +54,7 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
         case Right(cfg) =>
           cfg.baseUrl shouldBe None
           ProviderDescriptor.resolveBaseUrl("ollama-local", cfg, OllamaProvider.configSpec) shouldBe
-            Right("http://localhost:11434")
+            Right(BaseUrl("http://localhost:11434"))
         case Left(err) =>
           fail(s"Expected the section to validate with the default baseUrl, got error: ${err.message}")
     }
@@ -69,7 +69,7 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
           apiKey = None,
         )
       ).flatMap(ProviderDescriptor.resolveBaseUrl("ollama-remote", _, OllamaProvider.configSpec)) shouldBe
-        Right("http://gpu-box:11434")
+        Right(BaseUrl("http://gpu-box:11434"))
     }
   }
 

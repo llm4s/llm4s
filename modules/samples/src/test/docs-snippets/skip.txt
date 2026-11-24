@@ -207,7 +207,7 @@ guide/rag-evaluation.md | 27d416bdf9 | skip | API reference: the case class as d
 guide/rag-evaluation.md | 965bf6f7ad | skip | API reference: the case classes' fields and members without their bodies
 guide/rag-evaluation.md | bf46734ded | skip | API reference: the class's signature and members without their bodies
 guide/rag-evaluation.md | f2b322db11 | skip | API reference: the object's members without their bodies
-tutorials/support-assistant/part-4-help-centre.md | 95b1c19f04 | with | import org.llm4s.samples.tutorial.supportassistant.Part4HelpCentre.articles
+tutorials/support-assistant/part-4-help-centre.md | 256a3f8dde | with | import org.llm4s.samples.tutorial.supportassistant.Part4HelpCentre.articles
 tutorials/support-assistant/part-4-help-centre.md | ce8185ac81 | with | import org.llm4s.rag.RAG; import org.llm4s.types.Result
 tutorials/support-assistant/part-4-help-centre.md | 2c732129e1 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.rag.RAG; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools
 tutorials/support-assistant/part-5-safety-memory.md | 8eaffdfd48 | with | import org.llm4s.samples.tutorial.supportassistant.Part3Tools
@@ -245,12 +245,12 @@ guide/rag-query-transformers.md | a005eab676 | with | import org.llm4s.rag.RAG; 
 guide/observability/provider-exchange-logging.md | cd9f4a77b3 | with | import org.llm4s.llmconnect.ProviderExchange
 guide/agents/multiple-machines.md | df8910b85c | with | val store: org.llm4s.agent.graph.spi.CheckpointStore = ???; val runtime: org.llm4s.agent.graph.GraphRuntime = ???; val queue: org.llm4s.agent.service.RunQueue = ???; val metrics: org.llm4s.metrics.MetricsCollector = ???; val tenant: org.llm4s.agent.graph.TenantId = ???; val submitter: org.llm4s.agent.service.RunSubmitter = ???
 guide/agents/multiple-machines.md | cd981b6c6e | with | val registry: io.prometheus.metrics.model.registry.PrometheusRegistry = ???; val store: org.llm4s.agent.graph.spi.CheckpointStore = ???
-guide/caching.md | 04dc7bafeb | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
-guide/caching.md | 7afe8bbcb9 | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
+guide/caching.md | e622c0c859 | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
+guide/caching.md | 3b4e4ac09d | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
 guide/caching.md | 0912448d0c | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder; given org.llm4s.model.ModelRegistryService = ???
-guide/caching.md | 91ed15aa25 | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
-guide/caching.md | 3985cbf8dd | with | val embeddingClient: org.llm4s.llmconnect.EmbeddingClient = embedder; val cacheConfig: org.llm4s.llmconnect.caching.CacheConfig = ???; val tracing: org.llm4s.trace.Tracing = ???
-guide/caching.md | a48fa057f0 | with | val embeddingClient: org.llm4s.llmconnect.EmbeddingClient = embedder; val cacheConfig: org.llm4s.llmconnect.caching.CacheConfig = ???; val tracing: org.llm4s.trace.Tracing = ???; val clock: java.time.Clock = ???
+guide/caching.md | 29a2d91f8f | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
+guide/caching.md | b26c99f8bd | with | val embeddingClient: org.llm4s.llmconnect.EmbeddingClient = embedder; val cacheConfig: org.llm4s.llmconnect.caching.CacheConfig = ???; val tracing: org.llm4s.trace.Tracing = ???
+guide/caching.md | fa7f6dfff8 | with | val embeddingClient: org.llm4s.llmconnect.EmbeddingClient = embedder; val cacheConfig: org.llm4s.llmconnect.caching.CacheConfig = ???; val tracing: org.llm4s.trace.Tracing = ???; val clock: java.time.Clock = ???
 guide/jev.md | 975f60b158 | skip | sbt build definition, not Scala source
 guide/jev.md | f1e8f1ba15 | with | import org.llm4s.jev._; val config: JevConfig = ???
 guide/jev.md | 734f942306 | with | import org.llm4s.jev._
@@ -378,3 +378,4 @@ guide/agents/durable-checkpointers.md | 29db10aa18 | with | import org.llm4s.age
 guide/agents/durable-checkpointers.md | 2caffa6a80 | with | import org.llm4s.agent.encryption.*; import org.llm4s.agent.harness.{ CompositeBackend, StateFileBackend, StoreFileBackend, StoreLimits, VPath }; val store: org.llm4s.agent.graph.postgres.PostgresCheckpointer = ???; val keys: EncryptionKeySource = ???
 guide/agents/durable-checkpointers.md | 9e0a57f1f9 | with | object MyCheckpointer { def open(database: String, clock: java.time.Clock): org.llm4s.agent.graph.Checkpointer = ??? }; def freshDatabase(): String = ???
 guide/agents/durable-checkpointers.md | 1d660b1437 | skip | continues the spec above with MyCheckpointer, the reader's own store class, which the page does not define
+guide/agents/contract-suites.md | 9e0a57f1f9 | with | object MyCheckpointer { def open(database: String, clock: java.time.Clock): org.llm4s.agent.graph.Checkpointer = ??? }; def freshDatabase(): String = ???

@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import com.typesafe.config.{ ConfigFactory, ConfigResolveOptions }
 import org.llm4s.error.CancelledError
@@ -47,7 +48,7 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
     ProviderExchange(
       exchangeId = "exchange-1",
       provider = ProviderId("provider"),
-      model = Some("model"),
+      model = Some(ModelName("model")),
       requestId = None,
       correlationId = None,
       startedAt = now,
@@ -322,7 +323,7 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
         provider = ProviderId("provider"),
         startedAt = Instant.now(),
         requestBody = secret,
-        model = Some("model"),
+        model = Some(ModelName("model")),
         responseBody = Some(secret)
       ),
       Right("ok")

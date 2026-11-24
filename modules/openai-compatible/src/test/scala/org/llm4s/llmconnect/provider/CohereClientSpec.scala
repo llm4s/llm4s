@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
@@ -72,7 +73,7 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
     CohereConfig(
       apiKey = Secret("test-key"),
       model = ModelName("command-r"),
-      baseUrl = baseUrl,
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 128000,
       reserveCompletion = 4096
     )

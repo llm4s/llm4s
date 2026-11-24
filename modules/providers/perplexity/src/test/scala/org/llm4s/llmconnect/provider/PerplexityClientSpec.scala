@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ AuthenticationError, ProcessingError, RateLimitError, ServiceError, ValidationError }
 import org.llm4s.http.HttpResponse
 import org.llm4s.llmconnect.model.*
@@ -198,7 +199,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
       completion.content shouldBe "Answer [web:1]"
       completion.message.content shouldBe "Answer [web:1]"
       completion.id shouldBe "resp_1"
-      completion.model shouldBe "perplexity/sonar"
+      completion.model shouldBe ModelName("perplexity/sonar")
       completion.created.getEpochSecond shouldBe 1779391454L
       completion.citations shouldBe List(
         Citation(url = "https://b.example/2", title = Some("B!"), startIndex = Some(3), endIndex = Some(9)),
@@ -254,7 +255,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
           """{"object":"response","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"x"}]}]}"""
         )
       val completion = result.fold(e => fail(e.message), identity)
-      completion.model shouldBe "perplexity/sonar"
+      completion.model shouldBe ModelName("perplexity/sonar")
       completion.id should not be empty
       completion.usage shouldBe None
       completion.citations shouldBe empty

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -32,7 +34,11 @@ class AnthropicStructuredOutputSmokeSpec extends AnyFlatSpec with Matchers with 
   private def client(key: String): AnthropicClient =
     AnthropicClient(
       AnthropicConfig
-        .fromValues(modelName = "claude-3-haiku-20240307", apiKey = Secret(key), baseUrl = "https://api.anthropic.com")
+        .fromValues(
+          modelName = ModelName("claude-3-haiku-20240307"),
+          apiKey = Secret(key),
+          baseUrl = BaseUrl("https://api.anthropic.com")
+        )
         .value
     ).value
 

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ CohereConfig, ContextWindowResolver }
@@ -66,30 +67,44 @@ class CohereDialectSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   "CohereConfig.DEFAULT_BASE_URL" should "be the Compatibility API" in {
-    CohereConfig.DEFAULT_BASE_URL shouldBe "https://api.cohere.ai/compatibility/v1"
+    CohereConfig.DEFAULT_BASE_URL shouldBe BaseUrl("https://api.cohere.ai/compatibility/v1")
   }
 
   "CohereConfig.compatibilityBaseUrl" should "map a native API root, with or without a version, to the Compatibility API" in {
-    CohereConfig.compatibilityBaseUrl("https://api.cohere.com") shouldBe "https://api.cohere.com/compatibility/v1"
-    CohereConfig.compatibilityBaseUrl("https://api.cohere.com/") shouldBe "https://api.cohere.com/compatibility/v1"
-    CohereConfig.compatibilityBaseUrl("https://api.cohere.com/v2") shouldBe "https://api.cohere.com/compatibility/v1"
-    CohereConfig.compatibilityBaseUrl("https://api.cohere.ai/v1") shouldBe "https://api.cohere.ai/compatibility/v1"
-    CohereConfig.compatibilityBaseUrl("https://proxy.example/cohere") shouldBe
-      "https://proxy.example/cohere/compatibility/v1"
+    CohereConfig.compatibilityBaseUrl(BaseUrl("https://api.cohere.com")) shouldBe BaseUrl(
+      "https://api.cohere.com/compatibility/v1"
+    )
+    CohereConfig.compatibilityBaseUrl(BaseUrl("https://api.cohere.com/")) shouldBe BaseUrl(
+      "https://api.cohere.com/compatibility/v1"
+    )
+    CohereConfig.compatibilityBaseUrl(BaseUrl("https://api.cohere.com/v2")) shouldBe BaseUrl(
+      "https://api.cohere.com/compatibility/v1"
+    )
+    CohereConfig.compatibilityBaseUrl(BaseUrl("https://api.cohere.ai/v1")) shouldBe BaseUrl(
+      "https://api.cohere.ai/compatibility/v1"
+    )
+    CohereConfig.compatibilityBaseUrl(BaseUrl("https://proxy.example/cohere")) shouldBe
+      BaseUrl("https://proxy.example/cohere/compatibility/v1")
   }
 
   it should "leave a Compatibility API base as it is, and be idempotent" in {
     CohereConfig.compatibilityBaseUrl(CohereConfig.DEFAULT_BASE_URL) shouldBe CohereConfig.DEFAULT_BASE_URL
-    CohereConfig.compatibilityBaseUrl(s"${CohereConfig.DEFAULT_BASE_URL}/") shouldBe CohereConfig.DEFAULT_BASE_URL
-    val once = CohereConfig.compatibilityBaseUrl("https://api.cohere.com/v2")
+    CohereConfig.compatibilityBaseUrl(
+      BaseUrl(s"${CohereConfig.DEFAULT_BASE_URL}/")
+    ) shouldBe CohereConfig.DEFAULT_BASE_URL
+    val once = CohereConfig.compatibilityBaseUrl(BaseUrl("https://api.cohere.com/v2"))
     CohereConfig.compatibilityBaseUrl(once) shouldBe once
   }
 
   "CohereConfig.fromValues" should "store the Compatibility API base, so endpointUrl says where requests go" in {
-    val cfg = CohereConfig.fromValues("command-a-03-2025", Secret("key"), "https://api.cohere.com").value
-    cfg.baseUrl shouldBe "https://api.cohere.com/compatibility/v1"
+    val cfg =
+      CohereConfig.fromValues(ModelName("command-a-03-2025"), Secret("key"), BaseUrl("https://api.cohere.com")).value
+    cfg.baseUrl shouldBe BaseUrl("https://api.cohere.com/compatibility/v1")
     cfg.endpointUrl shouldBe Some("https://api.cohere.com/compatibility/v1")
-    CohereConfig.fromValues("command-a-03-2025", Secret("key"), CohereConfig.DEFAULT_BASE_URL).value.baseUrl shouldBe
+    CohereConfig
+      .fromValues(ModelName("command-a-03-2025"), Secret("key"), CohereConfig.DEFAULT_BASE_URL)
+      .value
+      .baseUrl shouldBe
       CohereConfig.DEFAULT_BASE_URL
   }
 

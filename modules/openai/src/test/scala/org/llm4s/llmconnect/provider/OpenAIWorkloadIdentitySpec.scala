@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import com.openai.auth.SubjectTokenType
 import org.llm4s.config.NamedProviderConfig
@@ -119,7 +121,7 @@ class OpenAIWorkloadIdentitySpec
           Secret(""),
           ModelName("gpt-4o-mini"),
           None,
-          "https://api.openai.com/v1",
+          BaseUrl("https://api.openai.com/v1"),
           128000,
           4096,
           workloadIdentity = Some(wi)
@@ -206,7 +208,7 @@ class OpenAIWorkloadIdentitySpec
           Secret(""),
           ModelName("gpt-4o-mini"),
           None,
-          "https://api.openai.com/v1",
+          BaseUrl("https://api.openai.com/v1"),
           128000,
           4096,
           workloadIdentity = Some(wi)
@@ -264,7 +266,7 @@ class OpenAIWorkloadIdentitySpec
           Secret(""),
           ModelName("gpt-4o-mini"),
           None,
-          baseUrl,
+          BaseUrl(baseUrl),
           128000,
           4096,
           workloadIdentity =
@@ -325,13 +327,13 @@ class OpenAIWorkloadIdentitySpec
 
     def fromValues(
       apiKey: String = "",
-      baseUrl: String = OpenAIProvider.DEFAULT_BASE_URL,
+      baseUrl: String = OpenAIProvider.DEFAULT_BASE_URL.asUrl,
       providerId: Option[org.llm4s.types.ProviderModelTypes.ProviderId] = None
     ) =
       OpenAIConfig.fromValues(
-        "gpt-4o-mini",
+        ModelName("gpt-4o-mini"),
         Secret(apiKey),
-        baseUrl,
+        BaseUrl(baseUrl),
         providerId = providerId,
         workloadIdentity = Some(identity)
       )
@@ -375,7 +377,7 @@ class OpenAIWorkloadIdentitySpec
           "http://127.0.0.1:9/v1",
           "http://localhost:9/v1"
         )
-      do withClue(url)(fromValues(baseUrl = url).value.baseUrl shouldBe url)
+      do withClue(url)(fromValues(baseUrl = url).value.baseUrl.asUrl shouldBe url)
     }
 
     "be refused by fromValues for a baseUrl that is not an OpenAI API host, though the config still reports openai" in {
@@ -397,7 +399,7 @@ class OpenAIWorkloadIdentitySpec
             Secret(""),
             ModelName("gpt-4o-mini"),
             None,
-            url,
+            BaseUrl(url),
             8192,
             4096,
             None,
@@ -410,7 +412,9 @@ class OpenAIWorkloadIdentitySpec
     }
 
     "leave a custom baseUrl alone with an apiKey" in {
-      OpenAIConfig.fromValues("gpt-4o-mini", Secret("sk-x"), "http://proxy.example/v1").isRight shouldBe true
+      OpenAIConfig
+        .fromValues(ModelName("gpt-4o-mini"), Secret("sk-x"), BaseUrl("http://proxy.example/v1"))
+        .isRight shouldBe true
     }
 
     "be refused by OpenAIClient and OpenRouterClient when built with apply or changed with a with* setter" in {
@@ -418,9 +422,9 @@ class OpenAIWorkloadIdentitySpec
       val bad = Seq(
         valid.withApiKey(Secret("sk-x")),
         valid.withExplicitProviderId(Some(org.llm4s.types.ProviderModelTypes.ProviderId("requesty"))),
-        valid.withBaseUrl("https://openrouter.ai/api/v1"),
-        valid.withBaseUrl("https://attacker.example/v1"),
-        valid.withBaseUrl("http://api.openai.com/v1")
+        valid.withBaseUrl(BaseUrl("https://openrouter.ai/api/v1")),
+        valid.withBaseUrl(BaseUrl("https://attacker.example/v1")),
+        valid.withBaseUrl(BaseUrl("http://api.openai.com/v1"))
       )
       for config <- bad do
         OpenAIClient(config).left.value shouldBe a[ConfigurationError]
@@ -428,7 +432,9 @@ class OpenAIWorkloadIdentitySpec
           config,
           org.llm4s.metrics.MetricsCollector.noop
         )
-      OpenRouterClient(valid.withBaseUrl("https://openrouter.ai/api/v1")).left.value shouldBe a[ConfigurationError]
+      OpenRouterClient(valid.withBaseUrl(BaseUrl("https://openrouter.ai/api/v1"))).left.value shouldBe a[
+        ConfigurationError
+      ]
       OpenAIClient(valid).value.close()
     }
 
@@ -449,7 +455,7 @@ class OpenAIWorkloadIdentitySpec
       for (field, blank) <- blanks do
         withClue(field) {
           val error = OpenAIConfig
-            .fromValues("gpt-4o-mini", Secret(""), OpenAIProvider.DEFAULT_BASE_URL, None, None, Some(blank))
+            .fromValues(ModelName("gpt-4o-mini"), Secret(""), OpenAIProvider.DEFAULT_BASE_URL, None, None, Some(blank))
             .left
             .value
           error shouldBe a[ConfigurationError]
@@ -487,7 +493,7 @@ class OpenAIWorkloadIdentitySpec
         OpenAIConfig(Secret("sk-x"), ModelName("gpt-4o-mini")).withWorkloadIdentity(identity),
         OpenAIConfig(Secret("sk-x"), ModelName("gpt-4o-mini")).withWorkloadIdentity(Some(identity)),
         federated.withApiKey(Secret("sk-x")),
-        federated.withBaseUrl("https://proxy.example/v1"),
+        federated.withBaseUrl(BaseUrl("https://proxy.example/v1")),
         federated.withExplicitProviderId(org.llm4s.types.ProviderModelTypes.ProviderId("requesty")),
         federated.withExplicitProviderId(Some(org.llm4s.types.ProviderModelTypes.ProviderId("openrouter"))),
         federated.withWorkloadIdentity(identity.withServiceAccountId(" ")),

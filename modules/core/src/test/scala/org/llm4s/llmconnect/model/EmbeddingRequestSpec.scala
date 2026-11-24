@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -7,7 +8,7 @@ import org.scalatest.matchers.should.Matchers
 /** [[EmbeddingRequest]] and [[InputPurpose]]: what the request says about the texts it carries. */
 class EmbeddingRequestSpec extends AnyFlatSpec with Matchers {
 
-  private val model = EmbeddingModelConfig("test-model", 8)
+  private val model = EmbeddingModelConfig(ModelName("test-model"), 8)
 
   "EmbeddingRequest" should "embed documents unless told otherwise" in {
     EmbeddingRequest(Seq("a"), model).purpose shouldBe InputPurpose.Document
@@ -24,8 +25,8 @@ class EmbeddingRequestSpec extends AnyFlatSpec with Matchers {
 
     base.withPurpose(InputPurpose.Document) shouldBe EmbeddingRequest(Seq("a", "b"), model, InputPurpose.Document)
     base.withInput(Seq("c")) shouldBe EmbeddingRequest(Seq("c"), model, InputPurpose.Query)
-    base.withModel(EmbeddingModelConfig("other", 4)) shouldBe
-      EmbeddingRequest(Seq("a", "b"), EmbeddingModelConfig("other", 4), InputPurpose.Query)
+    base.withModel(EmbeddingModelConfig(ModelName("other"), 4)) shouldBe
+      EmbeddingRequest(Seq("a", "b"), EmbeddingModelConfig(ModelName("other"), 4), InputPurpose.Query)
   }
 
   it should "treat requests that differ only in purpose as different requests" in {

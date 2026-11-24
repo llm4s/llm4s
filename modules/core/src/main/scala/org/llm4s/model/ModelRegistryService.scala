@@ -1,5 +1,7 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.types.Result
@@ -11,10 +13,20 @@ import scala.io.Source
 import scala.util.{ Try, Using }
 
 /**
- * Read-only service interface for model registry operations.
+ * What llm4s knows about each model: its context window, output limit, prices and capabilities
+ * ([[ModelMetadata]]), looked up by provider and model name.
  *
- * Implementations are immutable snapshots of model metadata that can be passed
- * through the application without relying on global process state.
+ * Provider clients read it to size a conversation to the model's context window and to price a call, so
+ * [[org.llm4s.llmconnect.LLMConnect.getClient LLMConnect.getClient]] takes one as a `using` parameter; code
+ * can also query it directly, for example to find the models that support a capability.
+ *
+ * Obtain one once, at the application's edge, and pass it on as a `given`:
+ * `Llm4sConfig.modelRegistryService()` reads the `llm4s.modelRegistry` block of the application's
+ * configuration (so an application can point it at its own catalogue), and [[ModelRegistryService.default]]
+ * loads the catalogue bundled with llm4s without reading any configuration.
+ *
+ * Each instance is an immutable snapshot, so it can be shared freely and never depends on global process
+ * state.
  */
 @Stable
 trait ModelRegistryService:
@@ -30,8 +42,8 @@ trait ModelRegistryService:
    */
   def findByCapability(capability: String): Result[List[ModelMetadata]]
 
-  /** Lists distinct provider names in sorted order, preserving their stored spelling; empty for an empty registry. */
-  def listProviders(): List[String]
+  /** Lists the distinct providers in sorted order; empty for an empty registry. */
+  def listProviders(): List[ProviderId]
 
   /**
    * Finds models with exactly the given [[ModelMode]]. Result order is unspecified.
@@ -47,7 +59,7 @@ trait ModelRegistryService:
    * @param provider the provider name to match
    * @return matching models, or a [[org.llm4s.error.ValidationError]] on `provider` when none match
    */
-  def listByProvider(provider: String): Result[List[ModelMetadata]]
+  def listByProvider(provider: ProviderId): Result[List[ModelMetadata]]
 
   /**
    * Looks up a model by its id, after trimming `modelId`. Matching tries, in order: an exact registry key, a
@@ -57,10 +69,10 @@ trait ModelRegistryService:
    * @param modelId a registry identifier, optionally `provider/`-prefixed
    * @return the model, or a [[org.llm4s.error.ValidationError]] on `modelId` when no key matches
    */
-  def lookup(modelId: String): Result[ModelMetadata]
+  def lookup(modelId: ModelName): Result[ModelMetadata]
 
   /**
-   * Tries [[lookup(modelId:String)* lookup]] with `provider/modelName`, then with `modelName` alone, then a model
+   * Tries [[lookup(modelId:org.llm4s.types.ProviderModelTypes.ModelName)* lookup]] with `provider/modelName`, then with `modelName` alone, then a model
    * whose stored provider and `modelId` equal the two arguments ignoring case. The unprefixed attempt is an exact
    * id match, so it can resolve the same model id listed under another provider (an `azure` deployment of an
    * `openai` model, say), but never a different model.
@@ -70,7 +82,7 @@ trait ModelRegistryService:
    * @return the first successful match, or a [[org.llm4s.error.ValidationError]] on `modelId` saying
    *         "Model not found" if all attempts fail
    */
-  def lookup(provider: String, modelName: String): Result[ModelMetadata]
+  def lookup(provider: ProviderId, modelName: ModelName): Result[ModelMetadata]
 
   /**
    * The models whose id contains `query`, ignoring case and surrounding whitespace, sorted by id; empty when none
@@ -87,7 +99,7 @@ final private[model] class DefaultModelRegistryService(
     if models.nonEmpty then Right(models)
     else Left(ValidationError(s"No models found with capability: $capability", "capability"))
 
-  override def listProviders(): List[String] =
+  override def listProviders(): List[ProviderId] =
     metadata.values.map(_.provider).toSet.toList.sorted
 
   override def listByMode(mode: ModelMode): Result[List[ModelMetadata]] =
@@ -95,8 +107,8 @@ final private[model] class DefaultModelRegistryService(
     if models.nonEmpty then Right(models)
     else Left(ValidationError(s"No models found for mode: ${mode.name}", "mode"))
 
-  override def listByProvider(provider: String): Result[List[ModelMetadata]] =
-    val models = metadata.values.filter(_.provider.equalsIgnoreCase(provider)).toList
+  override def listByProvider(provider: ProviderId): Result[List[ModelMetadata]] =
+    val models = metadata.values.filter(_.provider == provider).toList
     if models.nonEmpty then Right(models)
     else Left(ValidationError(s"No models found for provider: $provider", "provider"))
 
@@ -113,20 +125,22 @@ final private[model] class DefaultModelRegistryService(
       if resolved.size < DefaultModelRegistryService.MaxMemoized then resolved.putIfAbsent(key, result): Unit
       result
 
-  override def lookup(modelId: String): Result[ModelMetadata] =
-    metadata.get(modelId.trim) match
+  override def lookup(modelId: ModelName): Result[ModelMetadata] =
+    val id = modelId.asString
+    metadata.get(id.trim) match
       case Some(modelMetadata) => Right(modelMetadata)
-      case None                => memoized(modelId)(DefaultModelRegistryService.findModel(metadata, modelId))
+      case None                => memoized(id)(DefaultModelRegistryService.findModel(metadata, id))
 
-  override def lookup(provider: String, modelName: String): Result[ModelMetadata] =
-    memoized(s"$provider\u0000$modelName") {
+  override def lookup(provider: ProviderId, modelName: ModelName): Result[ModelMetadata] =
+    val name = modelName.asString
+    memoized(s"${provider.asString}\u0000$name") {
       DefaultModelRegistryService
-        .findModel(metadata, s"$provider/$modelName")
-        .orElse(DefaultModelRegistryService.findModel(metadata, modelName))
+        .findModel(metadata, s"${provider.asString}/$name")
+        .orElse(DefaultModelRegistryService.findModel(metadata, name))
         .orElse(
           metadata.values
-            .find(m => m.provider.equalsIgnoreCase(provider) && m.modelId.equalsIgnoreCase(modelName))
-            .toRight(ValidationError(s"Model not found: $provider/$modelName", "modelId"))
+            .find(m => m.provider == provider && m.modelId.asString.equalsIgnoreCase(name))
+            .toRight(ValidationError(s"Model not found: ${provider.asString}/$name", "modelId"))
         )
     }
 
@@ -188,7 +202,7 @@ object ModelRegistryService:
    * @return the registry directly, without additional metadata validation or a `Result` wrapper
    */
   def fromModels(models: Iterable[ModelMetadata]): ModelRegistryService =
-    DefaultModelRegistryService(models.iterator.map(model => model.modelId -> model).toMap)
+    DefaultModelRegistryService(models.iterator.map(model => model.modelId.asString -> model).toMap)
 
   /**
    * Parses a JSON object mapping identifiers to [[ModelMetadata]] entries, without applying overrides.
@@ -311,7 +325,7 @@ object ModelRegistryService:
       val modelEntries = json.value.view.filterKeys(_ != "sample_spec").toMap
 
       modelEntries.flatMap { case (modelId, data) =>
-        ModelMetadata.fromJson(modelId, data) match
+        ModelMetadata.fromJson(ModelName(modelId), data) match
           case Right(modelMetadata) => Some(modelId -> modelMetadata)
           case Left(error) =>
             logger.warn(s"Skipping model $modelId: ${error.message}")

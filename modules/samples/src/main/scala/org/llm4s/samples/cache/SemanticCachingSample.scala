@@ -53,7 +53,7 @@ object SemanticCachingSample extends App {
           conv3           <- Conversation.userOnly("What is the capital of Germany?")
         } yield {
           val tracing        = new ConsoleTracing()
-          val embeddingModel = EmbeddingModelConfig("text-embedding-3-small", 1536)
+          val embeddingModel = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)
           Using.resource(
             new CachingLLMClient(
               baseClient = baseLLMClient,
@@ -84,10 +84,10 @@ object SemanticCachingSample extends App {
     println("=== Semantic Caching Demo ===\n")
     OpenAIConfig
       .fromValues(
-        modelName = "gpt-5.6-luna",
+        modelName = ModelName("gpt-5.6-luna"),
         apiKey = Secret(apiKey),
         organization = None,
-        baseUrl = "https://api.openai.com"
+        baseUrl = BaseUrl("https://api.openai.com")
       )
       .flatMap(openAIConfig => OpenAIClient(openAIConfig))
   }

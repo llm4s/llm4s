@@ -44,15 +44,16 @@ def caption(c: Capable[Vision], image: ContentPart.Image): Result[String] =
 
 def altText(client: LLMClient, image: ContentPart.Image)(using ModelRegistryService): Result[String] =
   for {
-    capable <- client.requireCapabilities[Vision & Tools]("openai", "gpt-4o") // checked once, here
-    alt     <- caption(capable, image)                                         // compiles: Vision & Tools is a Vision
+    capable <- client
+      .requireCapabilities[Vision & Tools](ProviderId("openai"), ModelName("gpt-4o")) // checked once, here
+    alt <- caption(capable, image) // compiles: Vision & Tools is a Vision
   } yield alt
 ```
 
 `Capable` is covariant, so a `Capable[Vision & Tools]` is a `Capable[Vision]` and a `Capable[Tools]`. A client
 checked only for tools is not one with vision, and passing it is a compile error
 (`Found: Capable[Tools], Required: Capable[Vision]`). A set that holds anything other than the markers, or no
-set at all (`client.requireCapabilities("openai", "gpt-4o")`), does not compile either.
+set at all (`client.requireCapabilities(ProviderId("openai"), ModelName("gpt-4o"))`), does not compile either.
 
 The operations a capability allows are methods of `Capable`, thin layers over `LLMClient.complete`:
 

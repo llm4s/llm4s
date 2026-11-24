@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import ch.qos.logback.classic.Level
 import org.llm4s.llmconnect.config._
@@ -23,7 +24,9 @@ final class OpenAICompatibleDebugLoggingSpec extends AnyFlatSpec with Matchers w
     var outcome: (String, Vector[String]) = ("", Vector.empty)
     withServer("/")(exchange => sendJsonResponse(exchange, 200, openAICompletion(text))) { baseUrl =>
       val client =
-        OpenAICompatibleClient(OpenAICompatibleConfig(model = ModelName("local-model"), baseUrl = baseUrl)).value
+        OpenAICompatibleClient(
+          OpenAICompatibleConfig(model = ModelName("local-model"), baseUrl = BaseUrl(baseUrl))
+        ).value
       val (reply, built) = debugMessagesBuilt(client.getClass.getName, level) {
         client.complete(Conversation(Seq(UserMessage(text))), CompletionOptions())
       }

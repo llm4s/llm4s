@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.OptionValues.*
@@ -13,12 +14,13 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
 
   /** What the bundled registry says about a Bedrock model; the tests follow it rather than copy it. */
   private def registered(model: String) =
-    registry.lookup("bedrock", model).toOption.value
+    registry.lookup(ProviderId("bedrock"), ModelName(model)).toOption.value
 
   "BedrockConfig.fromValues" should {
 
     "take the context window and reserve from the model registry" in {
-      val config = BedrockConfig.fromValues("anthropic.claude-3-5-sonnet-20241022-v2:0", "us-east-1").toOption.value
+      val config =
+        BedrockConfig.fromValues(ModelName("anthropic.claude-3-5-sonnet-20241022-v2:0"), "us-east-1").toOption.value
       config.region shouldBe "us-east-1"
       config.model.asString shouldBe "anthropic.claude-3-5-sonnet-20241022-v2:0"
       val metadata = registered("anthropic.claude-3-5-sonnet-20241022-v2:0")
@@ -28,34 +30,50 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
     }
 
     "know the regional inference-profile ids, not only the base model ids" in {
-      val config = BedrockConfig.fromValues("us.anthropic.claude-3-5-sonnet-20241022-v2:0", "us-east-1").toOption.value
+      val config =
+        BedrockConfig.fromValues(ModelName("us.anthropic.claude-3-5-sonnet-20241022-v2:0"), "us-east-1").toOption.value
       config.contextWindow shouldBe registered("us.anthropic.claude-3-5-sonnet-20241022-v2:0").maxInputTokens.value
       config.contextWindow should not be 8192
     }
 
     "use one conservative default for a model the registry does not know" in {
-      val config = BedrockConfig.fromValues("vendor.unregistered-model-v99", "ap-southeast-1").toOption.value
+      val config = BedrockConfig.fromValues(ModelName("vendor.unregistered-model-v99"), "ap-southeast-1").toOption.value
       config.contextWindow shouldBe 8192
       config.reserveCompletion shouldBe 4096
     }
 
     "return a Left, not throw, for a blank region" in {
-      BedrockConfig.fromValues("amazon.titan-text-express-v1", "  ").left.toOption.value.message should include(
+      BedrockConfig
+        .fromValues(ModelName("amazon.titan-text-express-v1"), "  ")
+        .left
+        .toOption
+        .value
+        .message should include(
         "region"
       )
     }
 
     "return a Left for a blank model" in {
-      BedrockConfig.fromValues(" ", "us-east-1").left.toOption.value.message should include("model")
+      BedrockConfig.fromValues(ModelName(" "), "us-east-1").left.toOption.value.message should include("model")
     }
 
     "return a Left for blank credentials" in {
       val blankKey = Some(BedrockCredentials(Secret(""), Secret("secret")))
-      BedrockConfig.fromValues("m", "us-east-1", credentials = blankKey).left.toOption.value.message should include(
+      BedrockConfig
+        .fromValues(ModelName("m"), "us-east-1", credentials = blankKey)
+        .left
+        .toOption
+        .value
+        .message should include(
         "accessKeyId"
       )
       val blankSecret = Some(BedrockCredentials(Secret("AKID"), Secret("")))
-      BedrockConfig.fromValues("m", "us-east-1", credentials = blankSecret).left.toOption.value.message should include(
+      BedrockConfig
+        .fromValues(ModelName("m"), "us-east-1", credentials = blankSecret)
+        .left
+        .toOption
+        .value
+        .message should include(
         "secretAccessKey"
       )
     }
@@ -63,7 +81,7 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
     "return a Left for credentials together with a profile" in {
       BedrockConfig
         .fromValues(
-          "m",
+          ModelName("m"),
           "us-east-1",
           credentials = Some(BedrockCredentials(Secret("a"), Secret("b"))),
           profile = Some("work")
@@ -75,7 +93,8 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
   "BedrockConfig" should {
 
     "identify as the bedrock provider and expose its endpoint override" in {
-      val config = BedrockConfig.fromValues("m", "us-east-1", endpointUrl = Some("https://vpce")).toOption.value
+      val config =
+        BedrockConfig.fromValues(ModelName("m"), "us-east-1", endpointUrl = Some("https://vpce")).toOption.value
       config.providerId.asString shouldBe "bedrock"
       config.endpointUrl shouldBe Some("https://vpce")
     }
@@ -83,7 +102,7 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
     "keep its credentials, but switch model, with withModel" in {
       val config =
         BedrockConfig
-          .fromValues("m1", "us-east-1", credentials = Some(BedrockCredentials(Secret("a"), Secret("b"))))
+          .fromValues(ModelName("m1"), "us-east-1", credentials = Some(BedrockCredentials(Secret("a"), Secret("b"))))
           .toOption
           .value
       config.withModel(ModelName("m2")) shouldBe config.copy(model = ModelName("m2"))
@@ -92,7 +111,7 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
     "redact credentials in toString" in {
       val config = BedrockConfig
         .fromValues(
-          "amazon.titan-text-express-v1",
+          ModelName("amazon.titan-text-express-v1"),
           "us-east-1",
           credentials = Some(
             BedrockCredentials(
@@ -112,7 +131,7 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
     }
 
     "say it uses the default chain when it has no credentials" in {
-      BedrockConfig.fromValues("m", "us-east-1").toOption.value.toString should include("default chain")
+      BedrockConfig.fromValues(ModelName("m"), "us-east-1").toOption.value.toString should include("default chain")
     }
   }
 }

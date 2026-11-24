@@ -1,5 +1,6 @@
 package org.llm4s.capability
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -106,7 +107,7 @@ extension (client: LLMClient) {
    * with a [[org.llm4s.error.ValidationError]] on the field `capabilities` that names every capability the model
    * lacks.
    */
-  def requireCapabilities[C](provider: String, model: String)(using
+  def requireCapabilities[C](provider: ProviderId, model: ModelName)(using
     registry: ModelRegistryService,
     check: CapabilityCheck[C]
   ): Result[Capable[C]] =

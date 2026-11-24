@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ ProcessingError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.config.OllamaConfig
@@ -34,7 +35,12 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
   import OllamaToolCallingSpec._
 
   private def config(baseUrl: String): OllamaConfig =
-    OllamaConfig(model = ModelName("llama3.1"), baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512)
+    OllamaConfig(
+      model = ModelName("llama3.1"),
+      baseUrl = BaseUrl(baseUrl),
+      contextWindow = 4096,
+      reserveCompletion = 512
+    )
 
   private val bodyBuilder = new OllamaClient(config("http://localhost:11434"))
 

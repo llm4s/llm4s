@@ -1,5 +1,6 @@
 package org.llm4s.samples.reliability
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model._
@@ -51,7 +52,7 @@ object ReliableClientExample {
   private val dummyCompletion = Completion(
     id = "dummy-id",
     created = Instant.now(),
-    model = "mock-model",
+    model = ModelName("mock-model"),
     message = AssistantMessage(content = "Hello! I am a reliable assistant.", toolCalls = List.empty)
   )
 

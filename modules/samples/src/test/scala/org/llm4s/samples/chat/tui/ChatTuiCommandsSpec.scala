@@ -1,5 +1,6 @@
 package org.llm4s.samples.chat.tui
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.LLMClient
@@ -21,7 +22,7 @@ class ChatTuiCommandsSpec extends AnyFlatSpec with Matchers {
       apiKey = Secret("test"),
       model = ModelName("gpt-5.6-luna"),
       organization = None,
-      baseUrl = "https://api.openai.com/v1",
+      baseUrl = BaseUrl("https://api.openai.com/v1"),
       contextWindow = 4096,
       reserveCompletion = 1024
     ),

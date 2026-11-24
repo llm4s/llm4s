@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.javaapi.StreamFixtures.*
@@ -25,7 +26,7 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
     def reply(conversation: Conversation): Result[Completion] =
       if (n.getAndIncrement() == 0) {
         val message = AssistantMessage(text = None, toolCalls = Seq(call))
-        Right(Completion("id", Instant.EPOCH, "m", message))
+        Right(Completion("id", Instant.EPOCH, ModelName("m"), message))
       } else {
         val result = conversation.messages.collect { case t: ToolMessage => t.content }.lastOption.getOrElse("none")
         Right(completion(s"tool said: $result"))

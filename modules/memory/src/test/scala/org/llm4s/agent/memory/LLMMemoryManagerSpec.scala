@@ -1,5 +1,6 @@
 package org.llm4s.agent.memory
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -75,7 +76,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion",
           created = Instant.now(),
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = AssistantMessage(response),
           usage = None
         )
@@ -109,7 +110,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion-malformed",
           created = Instant.now(),
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = AssistantMessage(response),
           usage = None
         )
@@ -141,7 +142,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion-empty",
           created = Instant.now(),
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = AssistantMessage(response),
           usage = None
         )

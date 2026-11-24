@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
@@ -22,7 +23,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
   private val testConfig = AnthropicConfig(
     apiKey = Secret("test-key"),
     model = ModelName("claude-3-5-sonnet-latest"),
-    baseUrl = "https://api.anthropic.com",
+    baseUrl = BaseUrl("https://api.anthropic.com"),
     contextWindow = 200000,
     reserveCompletion = 4096
   )
@@ -101,7 +102,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
           exchanges += exchange
       }
       val client = new AnthropicClient(
-        testConfig.withBaseUrl(baseUrl),
+        testConfig.withBaseUrl(BaseUrl(baseUrl)),
         exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
 
@@ -132,7 +133,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
           exchanges += exchange
       }
       val client = new AnthropicClient(
-        testConfig.withBaseUrl(baseUrl),
+        testConfig.withBaseUrl(BaseUrl(baseUrl)),
         exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
 
@@ -157,7 +158,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
         os.write(bytes)
         os.close()
       } { baseUrl =>
-        val client = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+        val client = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
         val errors = Seq(
           client.complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions()),
           client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())(_ => ())
@@ -181,7 +182,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
     }
     // Nothing is listening on this port, so the SDK call fails before any bytes are read.
     val client = new AnthropicClient(
-      testConfig.withBaseUrl("http://localhost:1"),
+      testConfig.withBaseUrl(BaseUrl("http://localhost:1")),
       exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
@@ -227,7 +228,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
           exchanges += exchange
       }
       val client = new AnthropicClient(
-        testConfig.withBaseUrl(baseUrl),
+        testConfig.withBaseUrl(BaseUrl(baseUrl)),
         exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
       val chunks = ListBuffer.empty[String]
@@ -277,7 +278,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
       os.write(bytes)
       os.close()
     } { baseUrl =>
-      val client = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      val client = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
       val result = client.complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())
 
       result.isRight shouldBe true
@@ -308,7 +309,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
       os.write(bytes)
       os.close()
     } { baseUrl =>
-      val client = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      val client = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
       val options =
         CompletionOptions(maxTokens = Some(2048)).withReasoning(ReasoningEffort.Low)
       val result = client.complete(Conversation(Seq(UserMessage("hello"))), options)

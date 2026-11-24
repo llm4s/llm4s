@@ -27,14 +27,14 @@ import org.llm4s.types.Result
 @Stable
 final case class OllamaConfig private (
   model: ModelName,
-  baseUrl: String,
+  baseUrl: BaseUrl,
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
   override val network: HttpNetworkSettings
 ) extends ProviderConfig:
   override val providerId: ProviderId                                  = ProviderId("ollama")
-  override def endpointUrl: Option[BaseUrl]                            = Some(BaseUrl(baseUrl))
+  override def endpointUrl: Option[BaseUrl]                            = Some(baseUrl)
   override def withModel(model: ModelName): OllamaConfig               = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): OllamaConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): OllamaConfig = copy(network = network)
@@ -46,7 +46,7 @@ final case class OllamaConfig private (
   override def withApiKeyProvider(provider: org.llm4s.llmconnect.auth.ApiKeyProvider): Result[Nothing] =
     ProviderConfig.noApiKeyProvider(providerId)
 
-  def withBaseUrl(baseUrl: String): OllamaConfig                  = copy(baseUrl = baseUrl)
+  def withBaseUrl(baseUrl: BaseUrl): OllamaConfig                 = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): OllamaConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): OllamaConfig = copy(reserveCompletion = reserveCompletion)
 
@@ -67,7 +67,7 @@ object OllamaConfig {
    */
   def apply(
     model: ModelName,
-    baseUrl: String,
+    baseUrl: BaseUrl,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
     timeouts: ProviderTimeouts = ProviderTimeouts.default
@@ -87,13 +87,13 @@ object OllamaConfig {
    * from the model name alone (`llama3` is 8192); set them with the `with*` setters, or use
    * [[fromValues]] to consult the bundled model catalogue.
    */
-  def apply(model: ModelName, baseUrl: String): OllamaConfig = {
-    val ContextLimits(cw, rc) = ollamaFallback(model.asString)
+  def apply(model: ModelName, baseUrl: BaseUrl): OllamaConfig = {
+    val ContextLimits(cw, rc) = ollamaFallback(model)
     apply(model, baseUrl, contextWindow = cw, reserveCompletion = rc)
   }
 
-  private def ollamaFallback(modelName: String): ContextLimits =
-    modelName match {
+  private def ollamaFallback(modelName: ModelName): ContextLimits =
+    modelName.asString match {
       case name if name.contains("llama2")    => ContextLimits(4096, standardReserve)
       case name if name.contains("llama3")    => ContextLimits(8192, standardReserve)
       case name if name.contains("codellama") => ContextLimits(16384, standardReserve)
@@ -109,19 +109,19 @@ object OllamaConfig {
    * @param baseUrl   Ollama server URL; must be non-empty.
    */
   def fromValues(
-    modelName: String,
-    baseUrl: String
+    modelName: ModelName,
+    baseUrl: BaseUrl
   )(using resolver: ContextWindowResolver): Result[OllamaConfig] =
-    ProviderConfig.nonEmpty("Ollama", "baseUrl", baseUrl).map { _ =>
+    ProviderConfig.nonEmpty("Ollama", "baseUrl", baseUrl.asUrl).map { _ =>
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("ollama"),
+        lookupProviders = Seq(ProviderId("ollama")),
         modelName = modelName,
         defaultContextWindow = 8192,
         defaultReserve = standardReserve,
         fallbackResolver = ollamaFallback
       )
       OllamaConfig(
-        model = ModelName(modelName),
+        model = modelName,
         baseUrl = baseUrl,
         contextWindow = cw,
         reserveCompletion = rc

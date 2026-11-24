@@ -19,7 +19,7 @@ import org.llm4s.testutil.EchoedCredentials
 /** `OpenAIEmbeddingProvider` against a local server: the request it sends and every way the reply can go. */
 class OpenAIEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
 
-  private val request = EmbeddingRequest(Seq("a", "b"), EmbeddingModelConfig("text-embedding-3-small", 2))
+  private val request = EmbeddingRequest(Seq("a", "b"), EmbeddingModelConfig(ModelName("text-embedding-3-small"), 2))
 
   private def provider(baseUrl: String) =
     OpenAIEmbeddingProvider.fromConfig(

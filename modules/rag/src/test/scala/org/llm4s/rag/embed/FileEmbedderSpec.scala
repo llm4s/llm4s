@@ -1,5 +1,6 @@
 package org.llm4s.rag.embed
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, LocalEmbeddingModels }
 import org.llm4s.llmconnect.model._
@@ -28,7 +29,7 @@ class FileEmbedderSpec extends AnyFunSuite with Matchers {
   }
 
   private val mockClient      = EmbeddingClient(new MockEmbeddingProvider())
-  private val testTextModel   = EmbeddingModelConfig("test-model", 128)
+  private val testTextModel   = EmbeddingModelConfig(ModelName("test-model"), 128)
   private val defaultChunking = TextChunkingConfig(enabled = false, size = 1000, overlap = 100)
 
   private val testLocalModels = LocalEmbeddingModels(

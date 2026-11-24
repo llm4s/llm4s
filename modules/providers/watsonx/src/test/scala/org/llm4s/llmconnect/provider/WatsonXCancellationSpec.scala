@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
@@ -34,7 +35,7 @@ class WatsonXCancellationSpec extends AnyFunSuite with Matchers:
       projectId = "p",
       spaceId = None,
       model = ModelName("m"),
-      baseUrl = baseUrl,
+      baseUrl = BaseUrl(baseUrl),
       apiVersion = "2026-09-25",
       iamUrl = s"$baseUrl/iam",
       contextWindow = 4096,

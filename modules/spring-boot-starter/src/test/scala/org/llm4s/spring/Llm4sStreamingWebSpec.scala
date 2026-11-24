@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ServiceError
 import org.llm4s.javaapi.{ JLlmClient, JLlmClientTestFactory, LlmException }
 import org.llm4s.llmconnect.LLMClient
@@ -36,7 +37,7 @@ object Llm4sStreamingWebSpec {
       if (c.messages.lastOption.exists(_.content == "fail")) Left(ServiceError(503, "scripted", "the model is down"))
       else {
         Pieces.foreach(p => f(StreamedChunk(id = "c", content = Some(p))))
-        Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(Pieces.mkString)))
+        Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(Pieces.mkString)))
       }
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512

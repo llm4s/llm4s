@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
@@ -50,7 +51,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
       apiKey = Secret("key"),
       model = ModelName("gpt-4o"),
       organization = None,
-      baseUrl = "https://api.openai.com/v1",
+      baseUrl = BaseUrl("https://api.openai.com/v1"),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -63,7 +64,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
 
   test("Azure provider with AzureConfig returns OpenAIClient (Azure-backed)") {
     val cfg: ProviderConfig = AzureConfig(
-      endpoint = "https://example.azure.com",
+      endpoint = BaseUrl("https://example.azure.com"),
       apiKey = Secret("key"),
       model = ModelName("gpt-4o"),
       apiVersion = "V2025_01_01_PREVIEW",
@@ -89,7 +90,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
       apiKey = Secret("key"),
       model = ModelName("gpt-4o"),
       organization = None,
-      baseUrl = "https://api.openai.com/v1",
+      baseUrl = BaseUrl("https://api.openai.com/v1"),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -146,7 +147,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
         case openai: OpenAIConfig =>
           openai.model.asString shouldBe "gpt-4o"
           openai.apiKey.reveal shouldBe "test-key"
-          openai.baseUrl should startWith("https://api.openai.com/")
+          openai.baseUrl.asUrl should startWith("https://api.openai.com/")
         case other => fail(s"Expected OpenAIConfig, got $other")
       }
     }
@@ -157,7 +158,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
       apiKey = Secret("key"),
       model = ModelName("openai/gpt-4o-mini"),
       organization = None,
-      baseUrl = "https://router.requesty.ai/v1",
+      baseUrl = BaseUrl("https://router.requesty.ai/v1"),
       contextWindow = 128000,
       reserveCompletion = 4096
     )

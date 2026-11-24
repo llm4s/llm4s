@@ -9,8 +9,8 @@ import scalafix.v1._
  *
  *  - A provider config's `model` is a `ModelName`: `OpenAIConfig(apiKey = key, model = "gpt-4o", ...)` becomes
  *    `OpenAIConfig(apiKey = key, model = ModelName("gpt-4o"), ...)`, and `config.withModel("gpt-4o")` becomes
- *    `config.withModel(ModelName("gpt-4o"))`. A model passed by position is not rewritten, and `fromValues` still
- *    takes a `String`.
+ *    `config.withModel(ModelName("gpt-4o"))`. A model passed by position is not rewritten; `fromValues` is
+ *    [[ModelIdNewtypes]]'s.
  *  - `Llm4sConfig.provider("main")` and `Llm4sConfig.listModels("main")` (and the same on `Llm4sSettings`) take a
  *    `ProviderName`: the argument becomes `ProviderName("main")`.
  *

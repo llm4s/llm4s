@@ -106,7 +106,7 @@ object PerplexityProvider extends ProviderDescriptor:
   private[provider] def registryWindow(model: String)(using resolver: ContextWindowResolver): Option[Int] =
     model.split("/", 2) match
       case Array(vendor, name) if vendor.nonEmpty && name.nonEmpty =>
-        resolver.strictContextWindow(vendor.toLowerCase(Locale.ROOT), name)
+        resolver.strictContextWindow(ProviderId(vendor.toLowerCase(Locale.ROOT)), ModelName(name))
       case _ => None
 
   private def parseBoolean(raw: Option[String]): Result[Boolean] =

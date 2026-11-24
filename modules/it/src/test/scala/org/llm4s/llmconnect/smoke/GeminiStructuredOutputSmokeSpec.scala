@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 
 import org.llm4s.it.Tier
@@ -29,9 +31,9 @@ class GeminiStructuredOutputSmokeSpec extends AnyFlatSpec with Matchers with Eit
     Tier.require(apiKey.isDefined, "GEMINI_API_KEY not set")
     val config = GeminiConfig
       .fromValues(
-        modelName = "gemini-2.5-flash",
+        modelName = ModelName("gemini-2.5-flash"),
         apiKey = Secret(apiKey.get),
-        baseUrl = "https://generativelanguage.googleapis.com/v1beta"
+        baseUrl = BaseUrl("https://generativelanguage.googleapis.com/v1beta")
       )
       .value
     val result = SumTypeSmoke.decide(GeminiClient(config).value)

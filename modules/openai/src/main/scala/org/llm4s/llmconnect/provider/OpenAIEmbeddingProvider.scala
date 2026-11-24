@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
@@ -54,15 +56,15 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
    */
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some("https://api.openai.com/v1"),
+    defaultBaseUrl = Some(BaseUrl("https://api.openai.com/v1")),
     apiKeyEnv = Seq(OpenAIConfigKeys.OPENAI_API_KEY),
     modelEnv = Some(OpenAIConfigKeys.OPENAI_EMBEDDING_MODEL)
   )
 
-  override val modelDimensions: Map[String, Int] = Map(
-    "text-embedding-3-small" -> 1536,
-    "text-embedding-3-large" -> 3072,
-    "text-embedding-ada-002" -> 1536
+  override val modelDimensions: Map[ModelName, Int] = Map(
+    ModelName("text-embedding-3-small") -> 1536,
+    ModelName("text-embedding-3-large") -> 3072,
+    ModelName("text-embedding-ada-002") -> 1536
   )
 
   /**
@@ -136,7 +138,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     private val logger     = LoggerFactory.getLogger(getClass)
 
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = CancelledError.attempt("openai.embed") {
-      val model = request.model.name
+      val model = request.model.name.asString
       val input = request.input
       val payload = Obj(
         "input" -> Arr.from(input),

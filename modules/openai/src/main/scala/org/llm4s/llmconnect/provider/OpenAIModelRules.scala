@@ -22,7 +22,7 @@ private[llm4s] object OpenAIModelRules {
 
   /** The request transformer `OpenAIClient` uses: the registry's capabilities, adjusted by [[adjust]]. */
   def transformer(service: ModelRegistryService): RequestTransformer =
-    RequestTransformer.adjusted(service)(adjust)
+    RequestTransformer.adjusted(service)((modelId, capabilities) => adjust(modelId.asString, capabilities))
 
   /** Applies the o-series constraints on top of `capabilities`; other models pass through. */
   def adjust(modelId: String, capabilities: ModelCapabilities): ModelCapabilities =

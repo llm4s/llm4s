@@ -78,9 +78,9 @@ class ProviderContextSpec extends AnyWordSpec with Matchers with EitherValues:
 
     "have no model override unless given one" in {
       EmbeddingConfigContext().modelOverride shouldBe None
-      EmbeddingConfigContext(Some("m")).modelOverride shouldBe Some("m")
-      EmbeddingConfigContext().withModelOverride("m").modelOverride shouldBe Some("m")
-      EmbeddingConfigContext(Some("m")).withModelOverride(None).modelOverride shouldBe None
+      EmbeddingConfigContext(Some(ModelName("m"))).modelOverride shouldBe Some("m")
+      EmbeddingConfigContext().withModelOverride(ModelName("m")).modelOverride shouldBe Some("m")
+      EmbeddingConfigContext(Some(ModelName("m"))).withModelOverride(None).modelOverride shouldBe None
     }
   }
 
@@ -120,7 +120,7 @@ class ProviderContextSpec extends AnyWordSpec with Matchers with EitherValues:
       ModelName("m"),
       Some(Secret("k"))
     )
-    val request = EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("m", 1))
+    val request = EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("m"), 1))
 
     "hand the caller's HTTP client to the provider (#2811)" in {
       val http = new CountingHttpClient

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 
 import org.llm4s.it.Tier
@@ -29,10 +31,10 @@ class OpenAIStructuredOutputSmokeSpec extends AnyFlatSpec with Matchers with Eit
   private def client: OpenAIClient = {
     val config = OpenAIConfig
       .fromValues(
-        modelName = "gpt-4o-mini",
+        modelName = ModelName("gpt-4o-mini"),
         apiKey = Secret(apiKey.get),
         organization = None,
-        baseUrl = "https://api.openai.com/v1"
+        baseUrl = BaseUrl("https://api.openai.com/v1")
       )
       .value
     OpenAIClient(config).value

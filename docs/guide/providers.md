@@ -447,6 +447,8 @@ Every named section shares the built-in fields - `provider`, `model`, `baseUrl`,
 | Vertex AI | `project` (required), `location` |
 | Generic `openai-compatible` | `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` |
 | Perplexity | `webSearch`, `contextWindow`, `reserveCompletion` |
+| IBM watsonx.ai | `projectId` or `spaceId` (one required), `apiVersion`, `iamUrl` |
+| Amazon Bedrock | `region` (required), `profile`, `accessKeyId`, `secretAccessKey`, `sessionToken` |
 | Jlama | `modelDir`, `threads` |
 
 A required one that is missing fails the config with its name, the section and what it means; a
@@ -499,6 +501,25 @@ llm4s.providers.watsonx-main {
 and refreshes before it expires. The conversation goes as structured `messages` with roles
 (`system`, `user`, `assistant`, `tool`), so user content is data and cannot forge a turn.
 
+| Key | Required | Meaning |
+|---|---|---|
+| `model` | yes | A watsonx.ai model id, `<vendor>/<model>`, such as `ibm/granite-4-h-small` or `openai/gpt-oss-120b`. Which models a region serves, and which of them call tools, is in IBM's watsonx.ai documentation and changes over time; the module checks no list |
+| `apiKey` | no | An IBM Cloud API key; default `llm4s.credentials.watsonx.apiKey`, which `WATSONX_API_KEY` binds. A section with neither fails to load, naming both |
+| `projectId` | one of the two | The watsonx.ai project inference runs in, and is billed to |
+| `spaceId` | one of the two | A deployment space, used instead of a project. Setting both, or neither, fails the config |
+| `baseUrl` | no | The region's endpoint; default `https://us-south.ml.cloud.ibm.com` (Dallas). Another region is another host, such as `https://eu-de.ml.cloud.ibm.com`; the project or space must be in that region |
+| `apiVersion` | no | The `version` query parameter every request carries; default `2026-09-25` |
+| `iamUrl` | no | The IAM token endpoint; default `https://iam.cloud.ibm.com/identity/token` |
+| `timeouts` | no | `timeouts { request = 2m, stream = 10m }`, the defaults when the block is absent ([Timeouts](../getting-started/configuration#timeouts)) |
+
+**Not supported:**
+
+- **Embeddings.** `llm4s-watsonx` registers a chat provider only.
+- **Images by URL and documents.** A user message may carry text and inline images (sent as `data:` URLs); a
+  `MediaSource.Url` image or any document part is refused before the IAM exchange, so nothing is sent.
+- **Service tiers** have no counterpart and are reported as dropped on `Completion.adjustments`, as are the
+  reasoning and thinking settings the list below says are not sent.
+
 Behaviour to know about:
 
 - **Tools.** `CompletionOptions.tools` are sent as `tools` with `tool_choice_option: "auto"`, a reply's
@@ -507,9 +528,9 @@ Behaviour to know about:
   Whether a model supports tools depends on the model; a model that does not is answered by the service,
   and that error is returned as the HTTP status maps it. A call the service sends without an `id` is
   given a generated one.
-- **Sampling options.** `temperature` is always sent, `maxTokens` (as `max_tokens`) and `topP` (when not
-  1.0) when set. `presencePenalty` and `frequencyPenalty` go as `presence_penalty` and `frequency_penalty`
-  when not 0.0, their default, so leaving them alone sends nothing new; the service checks their range.
+- **Sampling options.** `temperature`, `maxTokens` (as `max_tokens`), `topP` (as `top_p`), `presencePenalty`
+  and `frequencyPenalty` (as `presence_penalty` and `frequency_penalty`) are sent only when set; unset, the
+  model's own defaults apply. The service checks their range.
 - **Structured output.** `responseFormat` goes as `response_format`: `ResponseFormat.Json` as
   `{"type": "json_object"}`, and `ResponseFormat.JsonSchema(schema, name, strict)` as
   `{"type": "json_schema", "json_schema": {"name": ..., "schema": ..., "strict": ...}}`, the shapes IBM's
@@ -551,6 +572,11 @@ Behaviour to know about:
 ---
 
 ## Perplexity
+
+> **Beta, never run against the live service** ([1.0 scope](../reference/v1-scope)). The request and reply shapes
+> are those of Perplexity's Agent API reference (read 2026-11-05) and are pinned by the module's unit tests, which
+> need no account; the `@Cloud` suite named at the end of this section has not been run. The module's API is
+> `@Experimental`.
 
 `llm4s-perplexity` calls Perplexity's [Agent API](https://docs.perplexity.ai/docs/agent-api/quickstart)
 (`POST https://api.perplexity.ai/v1/agent`), which replaced Sonar Chat Completions: Perplexity
@@ -2069,11 +2095,11 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.auth.azure.AzureEntraId
 import org.llm4s.llmconnect.config.AzureConfig
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
 
 def azureClient(using ModelRegistryService) =
   val tokens = AzureEntraId.defaultCredential() // or AzureEntraId.tokenProvider(anyTokenCredential)
-  LLMConnect.getClient(AzureConfig.keyless("https://my-resource.openai.azure.com", ModelName("gpt-5.6-terra"), tokens))
+  LLMConnect.getClient(AzureConfig.keyless(BaseUrl("https://my-resource.openai.azure.com"), ModelName("gpt-5.6-terra"), tokens))
 ```
 
 Embeddings take the same tokens: `OpenAIEmbeddingProvider.fromConfig(config, tokens)`, with the

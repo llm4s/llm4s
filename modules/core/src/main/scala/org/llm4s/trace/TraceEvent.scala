@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.model.{ CompletionOptions, EmbeddingUsage, Message, ServiceTier, TokenUsage, UsageSummary }
@@ -96,7 +97,7 @@ object TraceEvent {
    */
   final case class CompletionReceived private (
     id: String,
-    model: String,
+    model: ModelName,
     toolCalls: Int,
     content: String,
     timestamp: Instant,
@@ -104,7 +105,7 @@ object TraceEvent {
     serverAddress: Option[String],
     streamed: Boolean,
     duration: Option[FiniteDuration],
-    responseModel: Option[String],
+    responseModel: Option[ModelName],
     finishReasons: Seq[String],
     usage: Option[TokenUsage],
     options: Option[CompletionOptions],
@@ -112,7 +113,7 @@ object TraceEvent {
     servedTier: Option[ServiceTier]
   ) extends TraceEvent {
     def withId(id: String): CompletionReceived                               = copy(id = id)
-    def withModel(model: String): CompletionReceived                         = copy(model = model)
+    def withModel(model: ModelName): CompletionReceived                      = copy(model = model)
     def withToolCalls(toolCalls: Int): CompletionReceived                    = copy(toolCalls = toolCalls)
     def withContent(content: String): CompletionReceived                     = copy(content = content)
     def withTimestamp(timestamp: Instant): CompletionReceived                = copy(timestamp = timestamp)
@@ -123,16 +124,16 @@ object TraceEvent {
     def withStreamed(streamed: Boolean): CompletionReceived                  = copy(streamed = streamed)
     def withDuration(duration: FiniteDuration): CompletionReceived           = copy(duration = Some(duration))
     def withDuration(duration: Option[FiniteDuration]): CompletionReceived   = copy(duration = duration)
-    def withResponseModel(responseModel: String): CompletionReceived         = copy(responseModel = Some(responseModel))
-    def withResponseModel(responseModel: Option[String]): CompletionReceived = copy(responseModel = responseModel)
-    def withFinishReasons(finishReasons: Seq[String]): CompletionReceived    = copy(finishReasons = finishReasons)
-    def withUsage(usage: TokenUsage): CompletionReceived                     = copy(usage = Some(usage))
-    def withUsage(usage: Option[TokenUsage]): CompletionReceived             = copy(usage = usage)
-    def withOptions(options: CompletionOptions): CompletionReceived          = copy(options = Some(options))
-    def withOptions(options: Option[CompletionOptions]): CompletionReceived  = copy(options = options)
-    def withInput(input: Seq[Message]): CompletionReceived                   = copy(input = input)
-    def withServedTier(servedTier: ServiceTier): CompletionReceived          = copy(servedTier = Some(servedTier))
-    def withServedTier(servedTier: Option[ServiceTier]): CompletionReceived  = copy(servedTier = servedTier)
+    def withResponseModel(responseModel: ModelName): CompletionReceived      = copy(responseModel = Some(responseModel))
+    def withResponseModel(responseModel: Option[ModelName]): CompletionReceived = copy(responseModel = responseModel)
+    def withFinishReasons(finishReasons: Seq[String]): CompletionReceived       = copy(finishReasons = finishReasons)
+    def withUsage(usage: TokenUsage): CompletionReceived                        = copy(usage = Some(usage))
+    def withUsage(usage: Option[TokenUsage]): CompletionReceived                = copy(usage = usage)
+    def withOptions(options: CompletionOptions): CompletionReceived             = copy(options = Some(options))
+    def withOptions(options: Option[CompletionOptions]): CompletionReceived     = copy(options = options)
+    def withInput(input: Seq[Message]): CompletionReceived                      = copy(input = input)
+    def withServedTier(servedTier: ServiceTier): CompletionReceived             = copy(servedTier = Some(servedTier))
+    def withServedTier(servedTier: Option[ServiceTier]): CompletionReceived     = copy(servedTier = servedTier)
 
     def eventType: String = "completion_received"
     def toJson: ujson.Value = {
@@ -140,7 +141,7 @@ object TraceEvent {
         "event_type"    -> eventType,
         "timestamp"     -> timestamp.toString,
         "completion_id" -> id,
-        "model"         -> model,
+        "model"         -> model.asString,
         "tool_calls"    -> toolCalls,
         "content"       -> content
       )
@@ -148,7 +149,7 @@ object TraceEvent {
       serverAddress.foreach(a => json("server_address") = a)
       if (streamed) json("streamed") = true
       duration.foreach(d => json("duration_ms") = d.toMillis.toDouble)
-      responseModel.foreach(m => json("response_model") = m)
+      responseModel.foreach(m => json("response_model") = m.asString)
       if (finishReasons.nonEmpty) json("finish_reasons") = ujson.Arr(finishReasons.map(ujson.Str(_)): _*)
       usage.foreach { u =>
         json("prompt_tokens") = u.promptTokens
@@ -163,7 +164,7 @@ object TraceEvent {
   object CompletionReceived {
     def apply(
       id: String,
-      model: String,
+      model: ModelName,
       toolCalls: Int,
       content: String,
       timestamp: Instant = Instant.now(),
@@ -171,7 +172,7 @@ object TraceEvent {
       serverAddress: Option[String] = None,
       streamed: Boolean = false,
       duration: Option[FiniteDuration] = None,
-      responseModel: Option[String] = None,
+      responseModel: Option[ModelName] = None,
       finishReasons: Seq[String] = Seq.empty,
       usage: Option[TokenUsage] = None,
       options: Option[CompletionOptions] = None,
@@ -266,7 +267,7 @@ object TraceEvent {
     timestamp: Instant,
     override val span: Option[TraceSpan],
     operation: Option[String],
-    model: Option[String],
+    model: Option[ModelName],
     provider: Option[ProviderId],
     duration: Option[FiniteDuration],
     usage: Option[TokenUsage]
@@ -281,8 +282,8 @@ object TraceEvent {
     def withSpan(span: Option[TraceSpan]): ErrorOccurred              = copy(span = span)
     def withOperation(operation: String): ErrorOccurred               = copy(operation = Some(operation))
     def withOperation(operation: Option[String]): ErrorOccurred       = copy(operation = operation)
-    def withModel(model: String): ErrorOccurred                       = copy(model = Some(model))
-    def withModel(model: Option[String]): ErrorOccurred               = copy(model = model)
+    def withModel(model: ModelName): ErrorOccurred                    = copy(model = Some(model))
+    def withModel(model: Option[ModelName]): ErrorOccurred            = copy(model = model)
     def withProvider(provider: ProviderId): ErrorOccurred             = copy(provider = Some(provider))
     def withProvider(provider: Option[ProviderId]): ErrorOccurred     = copy(provider = provider)
     def withDuration(duration: FiniteDuration): ErrorOccurred         = copy(duration = Some(duration))
@@ -301,7 +302,7 @@ object TraceEvent {
         "stack_trace"   -> cause.fold("")(_.getStackTrace.take(5).mkString("\n"))
       )
       operation.foreach(o => json("operation") = o)
-      model.foreach(m => json("model") = m)
+      model.foreach(m => json("model") = m.asString)
       provider.foreach(p => json("provider") = p.asString)
       duration.foreach(d => json("duration_ms") = d.toMillis.toDouble)
       usage.foreach { u =>
@@ -322,7 +323,7 @@ object TraceEvent {
       timestamp: Instant = Instant.now(),
       span: Option[TraceSpan] = None,
       operation: Option[String] = None,
-      model: Option[String] = None,
+      model: Option[ModelName] = None,
       provider: Option[ProviderId] = None,
       duration: Option[FiniteDuration] = None,
       usage: Option[TokenUsage] = None
@@ -360,13 +361,13 @@ object TraceEvent {
 
   final case class TokenUsageRecorded private (
     usage: TokenUsage,
-    model: String,
+    model: ModelName,
     operation: String,
     timestamp: Instant,
     override val span: Option[TraceSpan]
   ) extends TraceEvent {
     def withUsage(usage: TokenUsage): TokenUsageRecorded      = copy(usage = usage)
-    def withModel(model: String): TokenUsageRecorded          = copy(model = model)
+    def withModel(model: ModelName): TokenUsageRecorded       = copy(model = model)
     def withOperation(operation: String): TokenUsageRecorded  = copy(operation = operation)
     def withTimestamp(timestamp: Instant): TokenUsageRecorded = copy(timestamp = timestamp)
     def withSpan(span: TraceSpan): TokenUsageRecorded         = copy(span = Some(span))
@@ -377,7 +378,7 @@ object TraceEvent {
       val json = ujson.Obj(
         "event_type"        -> eventType,
         "timestamp"         -> timestamp.toString,
-        "model"             -> model,
+        "model"             -> model.asString,
         "operation"         -> operation,
         "prompt_tokens"     -> usage.promptTokens,
         "completion_tokens" -> usage.completionTokens,
@@ -392,7 +393,7 @@ object TraceEvent {
   object TokenUsageRecorded {
     def apply(
       usage: TokenUsage,
-      model: String,
+      model: ModelName,
       operation: String,
       timestamp: Instant = Instant.now(),
       span: Option[TraceSpan] = None
@@ -616,7 +617,7 @@ object TraceEvent {
    */
   final case class EmbeddingUsageRecorded private (
     usage: EmbeddingUsage,
-    model: String,
+    model: ModelName,
     operation: String,
     inputCount: Int,
     timestamp: Instant,
@@ -624,7 +625,7 @@ object TraceEvent {
     duration: Option[FiniteDuration]
   ) extends TraceEvent {
     def withUsage(usage: EmbeddingUsage): EmbeddingUsageRecorded               = copy(usage = usage)
-    def withModel(model: String): EmbeddingUsageRecorded                       = copy(model = model)
+    def withModel(model: ModelName): EmbeddingUsageRecorded                    = copy(model = model)
     def withOperation(operation: String): EmbeddingUsageRecorded               = copy(operation = operation)
     def withInputCount(inputCount: Int): EmbeddingUsageRecorded                = copy(inputCount = inputCount)
     def withTimestamp(timestamp: Instant): EmbeddingUsageRecorded              = copy(timestamp = timestamp)
@@ -638,7 +639,7 @@ object TraceEvent {
       val json = ujson.Obj(
         "event_type"    -> eventType,
         "timestamp"     -> timestamp.toString,
-        "model"         -> model,
+        "model"         -> model.asString,
         "operation"     -> operation,
         "input_count"   -> inputCount,
         "prompt_tokens" -> usage.promptTokens,
@@ -653,7 +654,7 @@ object TraceEvent {
   object EmbeddingUsageRecorded {
     def apply(
       usage: EmbeddingUsage,
-      model: String,
+      model: ModelName,
       operation: String,
       inputCount: Int,
       timestamp: Instant = Instant.now(),
@@ -674,14 +675,14 @@ object TraceEvent {
    */
   final case class CostRecorded private (
     costUsd: Double,
-    model: String,
+    model: ModelName,
     operation: String,
     tokenCount: Int,
     costType: String,
     timestamp: Instant
   ) extends TraceEvent {
     def withCostUsd(costUsd: Double): CostRecorded      = copy(costUsd = costUsd)
-    def withModel(model: String): CostRecorded          = copy(model = model)
+    def withModel(model: ModelName): CostRecorded       = copy(model = model)
     def withOperation(operation: String): CostRecorded  = copy(operation = operation)
     def withTokenCount(tokenCount: Int): CostRecorded   = copy(tokenCount = tokenCount)
     def withCostType(costType: String): CostRecorded    = copy(costType = costType)
@@ -692,7 +693,7 @@ object TraceEvent {
       "event_type"  -> eventType,
       "timestamp"   -> timestamp.toString,
       "cost_usd"    -> costUsd,
-      "model"       -> model,
+      "model"       -> model.asString,
       "operation"   -> operation,
       "token_count" -> tokenCount,
       "cost_type"   -> costType
@@ -702,7 +703,7 @@ object TraceEvent {
   object CostRecorded {
     def apply(
       costUsd: Double,
-      model: String,
+      model: ModelName,
       operation: String,
       tokenCount: Int,
       costType: String,
@@ -822,7 +823,7 @@ object TraceEvent {
    * @param provider the id of the provider called (`openai`, `stability`, ...), when known
    */
   final case class ImageGenerationCompleted private (
-    model: String,
+    model: ModelName,
     operation: String,
     imageCount: Int,
     size: String,
@@ -834,7 +835,7 @@ object TraceEvent {
     timestamp: Instant,
     provider: Option[ProviderId]
   ) extends TraceEvent {
-    def withModel(model: String): ImageGenerationCompleted               = copy(model = model)
+    def withModel(model: ModelName): ImageGenerationCompleted            = copy(model = model)
     def withOperation(operation: String): ImageGenerationCompleted       = copy(operation = operation)
     def withImageCount(imageCount: Int): ImageGenerationCompleted        = copy(imageCount = imageCount)
     def withSize(size: String): ImageGenerationCompleted                 = copy(size = size)
@@ -854,7 +855,7 @@ object TraceEvent {
       val base = ujson.Obj(
         "event_type"  -> eventType,
         "timestamp"   -> timestamp.toString,
-        "model"       -> model,
+        "model"       -> model.asString,
         "operation"   -> operation,
         "image_count" -> imageCount,
         "size"        -> size,
@@ -871,7 +872,7 @@ object TraceEvent {
 
   object ImageGenerationCompleted {
     def apply(
-      model: String,
+      model: ModelName,
       operation: String,
       imageCount: Int,
       size: String,

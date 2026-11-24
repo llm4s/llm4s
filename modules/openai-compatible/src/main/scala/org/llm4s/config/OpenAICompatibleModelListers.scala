@@ -76,7 +76,7 @@ object MistralModelLister extends ProviderModelLister:
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
     // The same normalisation chat applies, so a base URL that already carries `/v1` does not
     // list `/v1/v1/models`.
-    val apiBase = config.baseUrl.map(url => BaseUrl(MistralConfig.apiBaseUrl(url.asUrl)))
+    val apiBase = config.baseUrl.map(MistralConfig.apiBaseUrl)
     delegate.listModels(config.withBaseUrl(apiBase), httpClient)
 
 /**
@@ -94,7 +94,7 @@ object OpenAICompatibleModelLister extends ProviderModelLister:
   private val delegate =
     ProviderModelListers.openAICompatible(
       ProviderId(OpenAICompatibleConfig.ProviderIdName),
-      defaultBaseUrl = "",
+      defaultBaseUrl = BaseUrl(""),
       apiKeyRequired = false
     )
 
@@ -125,7 +125,7 @@ object OpenAICompatibleModelLister extends ProviderModelLister:
             config.withApiKey(None).withHeaders(valid.headers.updated("Authorization", s"Bearer ${token.value.reveal}"))
           }
       models <- delegate.listModels(
-        listed.withAuth(None).withBaseUrl(Some(BaseUrl(valid.baseUrl))),
+        listed.withAuth(None).withBaseUrl(Some(valid.baseUrl)),
         httpClient
       )
     yield models

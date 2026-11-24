@@ -1,5 +1,6 @@
 package org.llm4s.chunking
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
@@ -31,7 +32,7 @@ class SemanticChunkerSpec extends AnyFlatSpec with Matchers {
   def createMockClient(embeddings: Map[String, Seq[Double]] = Map.empty): EmbeddingClient =
     EmbeddingClient(new MockEmbeddingProvider(embeddings))
 
-  val modelConfig: EmbeddingModelConfig = EmbeddingModelConfig("mock-model", 10)
+  val modelConfig: EmbeddingModelConfig = EmbeddingModelConfig(ModelName("mock-model"), 10)
 
   "SemanticChunker" should "have correct default values" in {
     SemanticChunker.DEFAULT_SIMILARITY_THRESHOLD shouldBe 0.5

@@ -25,7 +25,7 @@ class VoyageAIEmbeddingTimeoutSpec extends AnyFlatSpec with Matchers {
       timeouts = timeouts
     )
 
-  private def request: EmbeddingRequest = EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("voyage-3", 3))
+  private def request: EmbeddingRequest = EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("voyage-3"), 3))
 
   /** The timeout the provider passed to the HTTP client for one `embed`. */
   private def timeoutUsed(timeouts: ProviderTimeouts): Option[FiniteDuration] = {

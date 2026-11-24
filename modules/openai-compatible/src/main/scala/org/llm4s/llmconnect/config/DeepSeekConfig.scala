@@ -34,7 +34,7 @@ import org.slf4j.LoggerFactory
 final case class DeepSeekConfig private (
   apiKey: Secret,
   model: ModelName,
-  baseUrl: String,
+  baseUrl: BaseUrl,
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
@@ -42,7 +42,7 @@ final case class DeepSeekConfig private (
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
   override val providerId: ProviderId                                    = ProviderId("deepseek")
-  override def endpointUrl: Option[BaseUrl]                              = Some(BaseUrl(baseUrl))
+  override def endpointUrl: Option[BaseUrl]                              = Some(baseUrl)
   override def withModel(model: ModelName): DeepSeekConfig               = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): DeepSeekConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): DeepSeekConfig = copy(network = network)
@@ -52,7 +52,7 @@ final case class DeepSeekConfig private (
   def withApiKeyProvider(provider: Option[ApiKeyProvider]): DeepSeekConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): DeepSeekConfig                    = copy(apiKey = apiKey)
-  def withBaseUrl(baseUrl: String): DeepSeekConfig                  = copy(baseUrl = baseUrl)
+  def withBaseUrl(baseUrl: BaseUrl): DeepSeekConfig                 = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): DeepSeekConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): DeepSeekConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
@@ -63,7 +63,7 @@ object DeepSeekConfig {
   private val logger          = LoggerFactory.getLogger(getClass)
   private val standardReserve = 8192
 
-  val DEFAULT_BASE_URL: String = "https://api.deepseek.com"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://api.deepseek.com")
 
   /** The context window `apply` uses when none is given; [[fromValues]] resolves the model's own. */
   val DEFAULT_CONTEXT_WINDOW: Int = 128000
@@ -78,7 +78,7 @@ object DeepSeekConfig {
   def apply(
     apiKey: Secret,
     model: ModelName,
-    baseUrl: String = DEFAULT_BASE_URL,
+    baseUrl: BaseUrl = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
     timeouts: ProviderTimeouts = ProviderTimeouts.default
@@ -101,10 +101,10 @@ object DeepSeekConfig {
   def apply(apiKey: Secret, model: ModelName): DeepSeekConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
-  private def deepSeekFallback(modelName: String): ContextLimits =
+  private def deepSeekFallback(modelName: ModelName): ContextLimits =
     // Explicit allowlist based on official DeepSeek API (as of Feb 2026)
     // Source: https://api-docs.deepseek.com/quick_start/pricing
-    modelName.toLowerCase match {
+    modelName.asString.toLowerCase match {
       case "deepseek-chat" | "deepseek/deepseek-chat" | "deepseek-reasoner" | "deepseek/deepseek-reasoner" =>
         ContextLimits(128000, standardReserve)
       case "deepseek-chat-r1" | "deepseek/deepseek-chat-r1" | "deepseek-r1-distill" | "deepseek/deepseek-r1-distill" |
@@ -131,16 +131,16 @@ object DeepSeekConfig {
    *                  [[org.llm4s.config.Llm4sConfig]].
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     apiKey: Secret,
-    baseUrl: String
+    baseUrl: BaseUrl
   )(using resolver: ContextWindowResolver): Result[DeepSeekConfig] =
     for {
       _ <- ProviderConfig.nonEmpty("DeepSeek", "apiKey", apiKey.reveal)
-      _ <- ProviderConfig.nonEmpty("DeepSeek", "baseUrl", baseUrl)
+      _ <- ProviderConfig.nonEmpty("DeepSeek", "baseUrl", baseUrl.asUrl)
     } yield {
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("deepseek"),
+        lookupProviders = Seq(ProviderId("deepseek")),
         modelName = modelName,
         defaultContextWindow = 64000,
         defaultReserve = standardReserve,
@@ -148,7 +148,7 @@ object DeepSeekConfig {
       )
       DeepSeekConfig(
         apiKey = apiKey,
-        model = ModelName(modelName),
+        model = modelName,
         baseUrl = baseUrl,
         contextWindow = cw,
         reserveCompletion = rc
