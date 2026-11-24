@@ -136,10 +136,11 @@ price and the audio and image prices the metadata gives.
 
 ```scala
 import org.llm4s.model.{ ModelMode, ModelRegistryService }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 def survey(registry: ModelRegistryService): Unit = {
   registry.findByCapability("vision").foreach(models => println(s"${models.size} vision models"))
-  registry.listByProvider("openai").foreach(models => models.take(5).foreach(m => println(m.modelId)))
+  registry.listByProvider(ProviderId("openai")).foreach(models => models.take(5).foreach(m => println(m.modelId)))
   registry.listByMode(ModelMode.Embedding).foreach(models => println(s"${models.size} embedding models"))
   println(registry.listProviders().mkString(", "))
   registry.search("sonnet").foreach(m => println(m.modelId))
@@ -163,12 +164,12 @@ In code:
 ```scala
 import org.llm4s.model.{ ModelCapabilities, ModelMetadata, ModelMode, ModelPricing, ModelRegistryService }
 import org.llm4s.types.Result
-import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 
 // a closed set of models, for example in tests
 val inHouse = ModelMetadata(
   modelId = ModelName("my-custom-llm"),
-  provider = "custom",
+  provider = ProviderId("custom"),
   mode = ModelMode.Chat,
   maxInputTokens = Some(32000),
   maxOutputTokens = Some(8000),
@@ -229,11 +230,11 @@ Exactly one source is used; set one key, or none for the bundled catalogue.
 | `ModelRegistryService` | Description |
 |---|---|
 | `lookup(modelId: ModelName): Result[ModelMetadata]` | A model by id |
-| `lookup(provider: String, modelName: ModelName): Result[ModelMetadata]` | A model by provider and name |
-| `listByProvider(provider: String): Result[List[ModelMetadata]]` | Every model of a provider |
+| `lookup(provider: ProviderId, modelName: ModelName): Result[ModelMetadata]` | A model by provider and name |
+| `listByProvider(provider: ProviderId): Result[List[ModelMetadata]]` | Every model of a provider |
 | `listByMode(mode: ModelMode): Result[List[ModelMetadata]]` | Every model of a mode |
 | `findByCapability(capability: String): Result[List[ModelMetadata]]` | Every model with a capability |
-| `listProviders(): List[String]` | The providers present |
+| `listProviders(): List[ProviderId]` | The providers present |
 | `search(query: String): List[ModelMetadata]` | Every model whose id contains `query` |
 
 | `ModelRegistryService` companion | Description |

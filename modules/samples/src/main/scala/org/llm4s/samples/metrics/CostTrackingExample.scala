@@ -1,5 +1,6 @@
 package org.llm4s.samples.metrics
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
@@ -203,7 +204,7 @@ object CostTrackingExample {
     } yield {
       val custom = ModelMetadata(
         modelId = ModelName(modelId),
-        provider = provider,
+        provider = ProviderId(provider),
         mode = ModelMode.Chat,
         maxInputTokens = None,
         maxOutputTokens = None,

@@ -203,7 +203,7 @@ object AnthropicConfig {
       _ <- ProviderConfig.nonEmpty("Anthropic", "baseUrl", baseUrl.asUrl)
     } yield {
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("anthropic"),
+        lookupProviders = Seq(ProviderId("anthropic")),
         modelName = modelName,
         defaultContextWindow = 200000,
         defaultReserve = standardReserve,

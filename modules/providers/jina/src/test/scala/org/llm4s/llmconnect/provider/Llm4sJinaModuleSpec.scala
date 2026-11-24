@@ -74,7 +74,7 @@ class Llm4sJinaModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
 
     "answer through ModelDimensionRegistry" in {
       given ProviderRegistry = ProviderRegistry.default
-      ModelDimensionRegistry.getDimension("jina", ModelName("jina-embeddings-v3")) shouldBe Right(1024)
+      ModelDimensionRegistry.getDimension(ProviderId("jina"), ModelName("jina-embeddings-v3")) shouldBe Right(1024)
       JinaEmbeddingProvider.modelDimensions.values.foreach(_ should be > 0)
     }
   }

@@ -1,5 +1,6 @@
 package org.llm4s.samples.model
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.model.{ ModelMetadata, ModelMode, ModelRegistryService }
@@ -65,7 +66,7 @@ object ModelMetadataExample extends App:
       logger.info("Example 3: Listing OpenAI chat models")
       logger.info("-" * 80)
       val openaiModels = for
-        allOpenAI  <- service.listByProvider("openai")
+        allOpenAI  <- service.listByProvider(ProviderId("openai"))
         chatModels <- Right(allOpenAI.filter(_.mode == ModelMode.Chat))
       yield chatModels
 
@@ -122,7 +123,7 @@ object ModelMetadataExample extends App:
       logger.info("-" * 80)
       val customModel = ModelMetadata(
         modelId = ModelName("my-custom-llm-v1"),
-        provider = "custom",
+        provider = ProviderId("custom"),
         mode = ModelMode.Chat,
         maxInputTokens = Some(32000),
         maxOutputTokens = Some(8000),

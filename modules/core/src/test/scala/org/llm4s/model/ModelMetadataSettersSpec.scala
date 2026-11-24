@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.ReasoningEffort
 import org.scalatest.flatspec.AnyFlatSpec
@@ -21,7 +22,7 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
     deprecationDate: Option[LocalDate] = None
   ): ModelMetadata = ModelMetadata(
     modelId = ModelName(modelId),
-    provider = provider,
+    provider = ProviderId(provider),
     mode = mode,
     maxInputTokens = maxInputTokens,
     maxOutputTokens = maxOutputTokens,
@@ -39,7 +40,7 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "set provider without changing other fields" in {
-    baseMetadata.withProvider("replacement-provider") shouldBe metadata(provider = "replacement-provider")
+    baseMetadata.withProvider(ProviderId("replacement-provider")) shouldBe metadata(provider = "replacement-provider")
     baseMetadata shouldBe metadata()
   }
 
@@ -119,8 +120,8 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
       pricing = ModelPricing(outputCostPerToken = Some(0.003))
     )
 
-    original.withProvider("replacement-provider").withMaxOutputTokens(1024) shouldBe expected
-    original.withMaxOutputTokens(Some(1024)).withProvider("replacement-provider") shouldBe expected
+    original.withProvider(ProviderId("replacement-provider")).withMaxOutputTokens(1024) shouldBe expected
+    original.withMaxOutputTokens(Some(1024)).withProvider(ProviderId("replacement-provider")) shouldBe expected
     original shouldBe metadata(
       maxInputTokens = Some(4096),
       capabilities = ModelCapabilities(supportsVision = Some(false)),

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.OptionValues.*
@@ -13,7 +14,7 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
 
   /** What the bundled registry says about a Bedrock model; the tests follow it rather than copy it. */
   private def registered(model: String) =
-    registry.lookup("bedrock", ModelName(model)).toOption.value
+    registry.lookup(ProviderId("bedrock"), ModelName(model)).toOption.value
 
   "BedrockConfig.fromValues" should {
 

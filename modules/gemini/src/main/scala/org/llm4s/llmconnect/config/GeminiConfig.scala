@@ -141,7 +141,7 @@ object GeminiConfig {
     } yield {
       val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("gemini", "google"),
+        lookupProviders = Seq(ProviderId("gemini"), ProviderId("google")),
         modelName = modelName,
         defaultContextWindow = 1048576,
         defaultReserve = standardReserve,

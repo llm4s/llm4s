@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.llmconnect.provider.CostEstimator
@@ -14,7 +15,7 @@ class ModelRegistryMemoSpec extends AnyFlatSpec with Matchers:
   private def model(id: String, provider: String): ModelMetadata =
     ModelMetadata(
       modelId = ModelName(id),
-      provider = provider,
+      provider = ProviderId(provider),
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(1024),
@@ -69,9 +70,9 @@ class ModelRegistryMemoSpec extends AnyFlatSpec with Matchers:
 
   "lookup(provider, model)" should "scan once for a pair it does not know" in {
     val (map, registry) = counting()
-    registry.lookup("acme", ModelName("nope")).isLeft shouldBe true
+    registry.lookup(ProviderId("acme"), ModelName("nope")).isLeft shouldBe true
     val afterFirst = map.scans.get()
-    (1 to 10).foreach(_ => registry.lookup("acme", ModelName("nope")).isLeft shouldBe true)
+    (1 to 10).foreach(_ => registry.lookup(ProviderId("acme"), ModelName("nope")).isLeft shouldBe true)
     map.scans.get() shouldBe afterFirst
   }
 

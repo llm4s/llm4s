@@ -81,7 +81,7 @@ def embedTexts(texts: Seq[String]): Result[EmbeddingResponse] =
     config    <- Llm4sConfig.embeddings()
     registry  <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
-    dimensions <- ModelDimensionRegistry.getDimension(config.providerId.asString, config.model)
+    dimensions <- ModelDimensionRegistry.getDimension(config.providerId, config.model)
     client     <- EmbeddingClient.from(config)
     response   <- client.embed(EmbeddingRequest(texts, EmbeddingModelConfig(config.model, dimensions)))
   } yield response
@@ -144,9 +144,9 @@ answers which, from the dimensions each provider declares for its models:
 ```scala
 import org.llm4s.llmconnect.config.ModelDimensionRegistry
 import org.llm4s.types.Result
-import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 
-def dimensionsOf(provider: String, model: ModelName): Result[Int] =
+def dimensionsOf(provider: ProviderId, model: ModelName): Result[Int] =
   ModelDimensionRegistry.getDimension(provider, model)
 ```
 

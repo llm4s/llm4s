@@ -60,7 +60,7 @@ private[provider] object OpenAIReasoning {
 
   /** The registry's answer for `model`, if it resolves `model` to an OpenAI or Azure entry. */
   private def registrySupport(model: String, registry: ModelRegistryService): Option[Support] =
-    registry.lookup(ModelName(model)).toOption.filter(meta => openAIProviders.contains(meta.provider.toLowerCase)).map {
+    registry.lookup(ModelName(model)).toOption.filter(meta => openAIProviders.contains(meta.provider.asString)).map {
       meta => if (meta.capabilities.supportsReasoning.contains(true)) Support.Reasoning else Support.NonReasoning
     }
 
@@ -130,7 +130,7 @@ private[provider] object OpenAIReasoning {
     val candidates = if (base == model) Seq(model) else Seq(model, base, undated(base)).distinct
     candidates.iterator
       .flatMap(m =>
-        registry.lookup(ModelName(m)).toOption.filter(meta => openAIProviders.contains(meta.provider.toLowerCase))
+        registry.lookup(ModelName(m)).toOption.filter(meta => openAIProviders.contains(meta.provider.asString))
       )
       .map(_.capabilities)
       .nextOption()

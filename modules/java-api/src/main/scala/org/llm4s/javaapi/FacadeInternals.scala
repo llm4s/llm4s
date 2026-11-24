@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ AgentResult, AgentStatus }
 import org.llm4s.agent.delegation.{ ChildInterrupt, DelegatedRequest }
@@ -70,7 +71,9 @@ private[llm4s] object FacadeInternals {
    * refusal left is an unlisted model, which is not a failure here.
    */
   private def declaredDimensions(provider: String, model: String): OptionalInt =
-    ModelDimensionRegistry.getDimension(provider, ModelName(model)).fold(_ => OptionalInt.empty(), OptionalInt.of)
+    ModelDimensionRegistry
+      .getDimension(ProviderId(provider), ModelName(model))
+      .fold(_ => OptionalInt.empty(), OptionalInt.of)
 
   /**
    * What both public `Llm4s.createClient` overloads do: the client for `config`, reporting every call to `metrics` (a

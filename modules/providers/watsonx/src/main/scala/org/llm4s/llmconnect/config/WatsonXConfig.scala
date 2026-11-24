@@ -139,7 +139,7 @@ object WatsonXConfig:
       )
     yield
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("watsonx"),
+        lookupProviders = Seq(ProviderId("watsonx")),
         modelName = modelName,
         defaultContextWindow = DefaultContextWindow,
         defaultReserve = DefaultReserveCompletion,

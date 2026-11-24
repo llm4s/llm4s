@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.model.ModelRegistryService
@@ -45,7 +46,7 @@ final class ContextWindowResolver(service: ModelRegistryService):
    * @return the limits of the resolved model
    */
   def resolve(
-    lookupProviders: Seq[String],
+    lookupProviders: Seq[ProviderId],
     modelName: ModelName,
     defaultContextWindow: Int,
     defaultReserve: Int,
@@ -64,7 +65,7 @@ final class ContextWindowResolver(service: ModelRegistryService):
           metadata.maxOutputTokens.getOrElse(defaultReserve)
         )
         logger.debug(
-          s"Using model registry metadata for ${lookupProviders.headOption.fold("")(_ + "/")}$modelName: " +
+          s"Using model registry metadata for ${lookupProviders.headOption.fold("")(_.asString + "/")}$modelName: " +
             s"context=${limits.contextWindow}, reserve=${limits.reserveCompletion}"
         )
         limits
@@ -88,13 +89,13 @@ final class ContextWindowResolver(service: ModelRegistryService):
    * @param modelName the model id as the provider's API names it, without the `provider/` prefix
    * @return the entry's input limit when it is a positive number, otherwise `None`
    */
-  def strictContextWindow(provider: String, modelName: ModelName): Option[Int] =
+  def strictContextWindow(provider: ProviderId, modelName: ModelName): Option[Int] =
     service
       .listByProvider(provider)
       .toOption
       .flatMap(
         _.find(entry =>
-          entry.modelId.asString.equalsIgnoreCase(s"$provider/$modelName") ||
+          entry.modelId.asString.equalsIgnoreCase(s"${provider.asString}/$modelName") ||
             entry.modelId.asString.equalsIgnoreCase(modelName.asString)
         )
       )

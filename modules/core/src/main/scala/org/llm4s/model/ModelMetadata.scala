@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.ReasoningEffort
@@ -17,7 +18,7 @@ import java.time.LocalDate
  * pricing, and constraints that can be queried at runtime.
  *
  * @param modelId The unique identifier for this model (e.g., "gpt-4o", "claude-3-7-sonnet-latest")
- * @param provider The LLM provider (openai, anthropic, azure, etc.)
+ * @param provider The LLM provider (openai, anthropic, azure, etc.), as LiteLLM names it
  * @param mode The model mode (chat, embedding, image_generation, etc.)
  * @param maxInputTokens Maximum input tokens supported
  * @param maxOutputTokens Maximum output tokens supported
@@ -28,7 +29,7 @@ import java.time.LocalDate
 @Stable
 final case class ModelMetadata private (
   modelId: ModelName,
-  provider: String,
+  provider: ProviderId,
   mode: ModelMode = ModelMode.Chat,
   maxInputTokens: Option[Int] = None,
   maxOutputTokens: Option[Int] = None,
@@ -37,7 +38,7 @@ final case class ModelMetadata private (
   deprecationDate: Option[LocalDate] = None
 ) {
   def withModelId(modelId: ModelName): ModelMetadata                   = copy(modelId = modelId)
-  def withProvider(provider: String): ModelMetadata                    = copy(provider = provider)
+  def withProvider(provider: ProviderId): ModelMetadata                = copy(provider = provider)
   def withMode(mode: ModelMode): ModelMetadata                         = copy(mode = mode)
   def withMaxInputTokens(maxInputTokens: Int): ModelMetadata           = copy(maxInputTokens = Some(maxInputTokens))
   def withMaxInputTokens(maxInputTokens: Option[Int]): ModelMetadata   = copy(maxInputTokens = maxInputTokens)
@@ -110,7 +111,7 @@ object ModelMetadata {
   /** Creates a [[ModelMetadata]]: a chat model with no limits, capabilities, prices or deprecation unless given. */
   def apply(
     modelId: ModelName,
-    provider: String,
+    provider: ProviderId,
     mode: ModelMode = ModelMode.Chat,
     maxInputTokens: Option[Int] = None,
     maxOutputTokens: Option[Int] = None,
@@ -144,7 +145,7 @@ object ModelMetadata {
     scala.util
       .Try {
         val obj      = data.obj
-        val provider = obj.get("litellm_provider").map(_.str).getOrElse("unknown")
+        val provider = ProviderId(obj.get("litellm_provider").map(_.str).getOrElse("unknown"))
         val mode     = obj.get("mode").map(v => ModelMode.fromString(v.str)).getOrElse(ModelMode.Chat)
 
         val maxInputTokens  = obj.get("max_input_tokens").flatMap(v => if (v.isNull) None else Some(v.num.toInt))

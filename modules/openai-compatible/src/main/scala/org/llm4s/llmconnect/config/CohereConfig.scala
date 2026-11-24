@@ -155,7 +155,7 @@ object CohereConfig {
       _ <- ProviderConfig.nonEmpty("Cohere", "baseUrl", baseUrl.asUrl)
     } yield {
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("cohere"),
+        lookupProviders = Seq(ProviderId("cohere")),
         modelName = modelName,
         defaultContextWindow = DEFAULT_CONTEXT_WINDOW,
         defaultReserve = DEFAULT_RESERVE_COMPLETION,

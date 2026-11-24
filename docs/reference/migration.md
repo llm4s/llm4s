@@ -944,7 +944,7 @@ unchanged. The scalafix rule `ResultSyntaxMoved` rewrites the import.
 - **`TraceId`** is `org.llm4s.trace.model.TraceId`, in `llm4s-observability`, which was its only user. The scalafix
   rule `ResultSyntaxMoved` rewrites the import.
 
-## Model ids are `ModelName`, and provider configs' base URLs are `BaseUrl` (#2822)
+## Model ids are `ModelName`, provider ids `ProviderId`, and provider configs' base URLs `BaseUrl` (#2822)
 
 Every public signature that takes or returns a model id takes or returns an
 `org.llm4s.types.ProviderModelTypes.ModelName`, where it was a `String`; a provider config's base URL is a `BaseUrl`.
@@ -997,9 +997,39 @@ The scalafix rule `ModelIdNewtypes` (part of `Llm4sMigrate_1_0`) wraps the argum
 `byModel` map key, a function typed `String => ...` and a model compared with a `String` are left for the compiler to
 report.
 
-Left as `String` on purpose: `MetricsCollector`'s `model` and `provider` labels (and `MetricsRecording.withMetrics`,
-which passes them through), error messages' fields, and the model of the image, speech and RAG configs
-(`RAGConfig.embeddingModel`, `ImageGenerationConfig`), which are not ids a provider config or the registry reads.
+### Provider ids are `ProviderId`
+
+Where a value is a provider's id (the registry's vendor, such as `openai` or `bedrock_converse`), it is a
+`ProviderId`, canonicalised to trimmed lowercase as `ProviderId("OpenAI") == ProviderId("openai")`:
+
+- `ModelMetadata.provider` and `withProvider`;
+- `ModelRegistryService.listProviders()` (a `List[ProviderId]`), `listByProvider(provider)` and
+  `lookup(provider, modelName)`;
+- `ContextWindowResolver.resolve`'s `lookupProviders` (a `Seq[ProviderId]`) and `strictContextWindow(provider, ...)`;
+- `ModelDimensionRegistry.getDimension(provider, model)`;
+- `ModelRef.provider` and `requireCapabilities(provider, model)` (`llm4s-capabilities`).
+
+```scala
+// Before
+registry.lookup("openai", "gpt-4o")
+ModelDimensionRegistry.getDimension("openai", "text-embedding-3-small")
+
+// After
+registry.lookup(ProviderId("openai"), ModelName("gpt-4o"))
+ModelDimensionRegistry.getDimension(ProviderId("openai"), ModelName("text-embedding-3-small"))
+```
+
+A `ProviderId` is written as its string. A stored provider that was not lowercase reads back lowercased; LiteLLM's
+model data, the model-metadata JSON llm4s writes and the agent's events only ever hold lowercase ids. `ModelIdNewtypes`
+wraps `lookup`, `listByProvider`, `getDimension`, `withProvider` and `ModelMetadata`'s `provider`.
+
+Left as `String` on purpose, being labels rather than ids: `MetricsCollector`'s `model` and `provider` (and
+`MetricsRecording.withMetrics` and `ReliableClient`'s `providerName`, which pass them through); the `provider` of the
+error types (`ServiceError`, `RateLimitError`, `AuthenticationError`, ...) and of `HttpErrorMapper`, `SdkErrorMapper`
+and `PartEncoding`, which name the client or the configured section for a message; `OpenAICompatibleClient.Settings`'
+`providerName`; and `ThinkingBlock.Opaque.provider`, part of a stored message. The model of the image, speech and RAG
+configs (`RAGConfig.embeddingModel`, the image generation configs) also stays a `String`: no provider config or the
+registry reads it.
 
 ## One retry mechanism: `LLMClientRetry` and `ErrorRecovery` are removed (#2798)
 

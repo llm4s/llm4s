@@ -209,7 +209,7 @@ object AzureConfig {
       _ <- ProviderConfig.nonEmptyIfSet("Azure", "apiKey", apiKey.map(_.reveal))
     } yield {
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("azure", "openai"),
+        lookupProviders = Seq(ProviderId("azure"), ProviderId("openai")),
         modelName = modelName,
         defaultContextWindow = 8192,
         defaultReserve = standardReserve,

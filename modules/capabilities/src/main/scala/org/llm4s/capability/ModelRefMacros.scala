@@ -1,5 +1,6 @@
 package org.llm4s.capability
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.model.{ ModelMetadata, ModelRegistryService }
 import org.llm4s.types.Result
@@ -32,8 +33,8 @@ private[capability] object ModelRefMacros {
 
   private def qualifiedId(metadata: ModelMetadata): String =
     val id = metadata.modelId.asString
-    if (id.toLowerCase.startsWith(metadata.provider.toLowerCase + "/")) id
-    else s"${metadata.provider}/$id"
+    if (id.toLowerCase.startsWith(metadata.provider.asString + "/")) id
+    else s"${metadata.provider.asString}/$id"
 
   /**
    * The model a literal names, as `(provider, model, metadata)`, or the compile error to report: the literal is
@@ -46,7 +47,7 @@ private[capability] object ModelRefMacros {
     for {
       named <- providerAndModel(written)
       known <- bundled.left.map(error => s"model\"$written\" cannot be checked: $error.")
-      metadata <- known._1.lookup(named._1, ModelName(named._2)).left.map { _ =>
+      metadata <- known._1.lookup(ProviderId(named._1), ModelName(named._2)).left.map { _ =>
         val suggestion = closest(written, known._2).fold("")(id => s"; did you mean $id?")
         s"unknown model $written in the bundled model data$suggestion"
       }

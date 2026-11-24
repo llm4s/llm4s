@@ -137,7 +137,7 @@ object XaiConfig {
       _ <- ProviderConfig.nonEmpty("xAI", "baseUrl", baseUrl.asUrl)
     } yield {
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("xai"),
+        lookupProviders = Seq(ProviderId("xai")),
         modelName = modelName,
         defaultContextWindow = 131072,
         defaultReserve = standardReserve,

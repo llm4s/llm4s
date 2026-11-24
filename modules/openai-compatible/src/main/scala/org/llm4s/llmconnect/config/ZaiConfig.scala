@@ -125,7 +125,7 @@ object ZaiConfig {
       _ <- ProviderConfig.nonEmpty("Zai", "baseUrl", baseUrl.asUrl)
     } yield {
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("zai"),
+        lookupProviders = Seq(ProviderId("zai")),
         modelName = modelName,
         defaultContextWindow = 128000,
         defaultReserve = standardReserve,

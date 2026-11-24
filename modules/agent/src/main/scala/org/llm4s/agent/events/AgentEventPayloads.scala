@@ -14,7 +14,6 @@ import scala.util.Try
 // Durable payloads: committed with the task that emitted them, replayable. They carry no message content.
 
 // A provider id is stored as its canonical string, so an event written before the field was typed still reads (#2275).
-private given ReadWriter[ProviderId] = upickle.default.readwriter[String].bimap[ProviderId](_.asString, ProviderId(_))
 
 private val logger = LoggerFactory.getLogger("org.llm4s.agent.events.AgentEventPayloads")
 

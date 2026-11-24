@@ -4,14 +4,17 @@ import scala.meta._
 import scalafix.v1._
 
 /**
- * A model id that crosses the public API is a `ModelName`, and a provider config's base URL a `BaseUrl`, where 0.6.0
- * took a `String` (#2822). The argument is wrapped, whatever expression it is, at the common call sites:
+ * A model id that crosses the public API is a `ModelName`, a provider id a `ProviderId`, and a provider config's base
+ * URL a `BaseUrl`, where 0.6.0 took a `String` (#2822). The argument is wrapped, whatever expression it is, at the
+ * common call sites:
  *
  *  - `Completion(..., model = "gpt-4o", ...)` (named, or fourth by position, after 0.6.0's `content`) and
  *    `completion.withModel("gpt-4o")`;
- *  - `ModelMetadata(modelId = ...)` (named, or first by position) and `metadata.withModelId(...)`;
+ *  - `ModelMetadata(modelId = ..., provider = ...)` (named, or first and second by position), `withModelId` and
+ *    `withProvider`;
  *  - `EmbeddingModelConfig("text-embedding-3-small", 1536)` (the name, named or first by position);
- *  - `ModelRegistryService#lookup(id)` and the model of `lookup(provider, model)`, `CostEstimator.estimate(model, ...)`,
+ *  - `ModelRegistryService#lookup(id)`, `lookup(provider, model)` and `listByProvider(provider)`,
+ *    `ModelDimensionRegistry.getDimension(provider, model)`, `CostEstimator.estimate(model, ...)`,
  *    `UsageSummary#add(model, ...)`, `StreamingAccumulator(model)`, and `withModel` on `ProviderExchange`;
  *  - a provider config's `fromValues`: its model (first by position, or named `modelName`/`model`) and its base URL
  *    (`baseUrl`/`endpoint`, named or in its 0.6.0 position); a named `baseUrl`/`endpoint` of its constructor, and
@@ -27,7 +30,7 @@ class ModelIdNewtypes(leaveFromValuesOf: Set[String]) extends SemanticRule("Mode
   def this() = this(Set.empty)
 
   override def description: String =
-    "Wraps model ids in ModelName and provider configs' base URLs in BaseUrl at the common call sites"
+    "Wraps model ids in ModelName, provider ids in ProviderId and provider configs' base URLs in BaseUrl at the common call sites"
 
   import ModelIdNewtypes._
 
@@ -55,7 +58,8 @@ class ModelIdNewtypes(leaveFromValuesOf: Set[String]) extends SemanticRule("Mode
           // 0.5.x and 0.6.x: (id, created, content, model, message, ...); CompletionFromMessage drops the content
           named(Set("model"), Model) ++ positional(3, Model)
         else if (Migration.constructs(callee, Metadata))
-          named(Set("modelId"), Model) ++ positional(0, Model)
+          named(Set("modelId"), Model) ++ positional(0, Model) ++ named(Set("provider"), Provider) ++
+            positional(1, Provider)
         else if (Migration.constructs(callee, EmbeddingModel))
           named(Set("name"), Model) ++ positional(0, Model)
         else if (Migration.constructs(callee, Accumulator))
@@ -67,11 +71,19 @@ class ModelIdNewtypes(leaveFromValuesOf: Set[String]) extends SemanticRule("Mode
             case FromValues(config) if configs.contains(config) && !leaveFromValuesOf.contains(config) =>
               named(Set("modelName", "model"), Model) ++ positional(0, Model) ++
                 named(Set("baseUrl", "endpoint"), Url) ++ baseUrlPosition.get(config).toList.flatMap(positional(_, Url))
-            case WithBaseUrl(config) if configs.contains(config) => single(Url)
-            case WithModel(on) if modelOwners.contains(on)       => single(Model)
-            case s if s.startsWith(Metadata + "#withModelId(")   => single(Model)
+            case WithBaseUrl(config) if configs.contains(config)  => single(Url)
+            case WithModel(on) if modelOwners.contains(on)        => single(Model)
+            case s if s.startsWith(Metadata + "#withModelId(")    => single(Model)
+            case s if s.startsWith(Metadata + "#withProvider(")   => single(Provider)
+            case s if s.startsWith(Registry + "#listByProvider(") => single(Provider)
             case s if s.startsWith(Registry + "#lookup(") =>
-              if (args.size == 2) positional(1, Model) ++ named(Set("modelName"), Model) else single(Model)
+              if (args.size == 2)
+                positional(0, Provider) ++ named(Set("provider"), Provider) ++ positional(1, Model) ++
+                  named(Set("modelName"), Model)
+              else single(Model)
+            case s if s.startsWith(Dimensions + ".getDimension(") =>
+              positional(0, Provider) ++ named(Set("provider"), Provider) ++ positional(1, Model) ++
+                named(Set("model"), Model)
             case s if s.startsWith(Estimator + ".estimate(") => positional(0, Model) ++ named(Set("model"), Model)
             case s if s.startsWith(Summary + "#add(")        => positional(0, Model)
             case _                                           => Nil
@@ -91,6 +103,7 @@ object ModelIdNewtypes {
   private val Newtypes = "org.llm4s.types.ProviderModelTypes"
   private val Model    = "ModelName"
   private val Url      = "BaseUrl"
+  private val Provider = "ProviderId"
 
   private val Completion     = "org/llm4s/llmconnect/model/Completion"
   private val Metadata       = "org/llm4s/model/ModelMetadata"
@@ -99,6 +112,7 @@ object ModelIdNewtypes {
   private val Registry       = "org/llm4s/model/ModelRegistryService"
   private val Estimator      = "org/llm4s/llmconnect/provider/CostEstimator"
   private val Summary        = "org/llm4s/llmconnect/model/UsageSummary"
+  private val Dimensions     = "org/llm4s/llmconnect/config/ModelDimensionRegistry"
 
   private val FromValues  = """(.+)\.fromValues\((?:\+\d+)?\)\.""".r
   private val WithBaseUrl = """(.+)#withBaseUrl\((?:\+\d+)?\)\.""".r

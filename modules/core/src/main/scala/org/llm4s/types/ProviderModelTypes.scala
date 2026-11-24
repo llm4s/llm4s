@@ -100,6 +100,15 @@ object ProviderModelTypes:
      */
     def apply(raw: String): ProviderId = raw.trim.toLowerCase(Locale.ROOT)
 
+    /**
+     * Writes a [[ProviderId]] as its JSON string, and reads one back canonicalised, as [[apply]] does: a stored
+     * provider is a plain string.
+     */
+    given upickle.default.ReadWriter[ProviderId] = IdCodecs.providerId
+
+    /** Orders provider ids as their strings do. */
+    given Ordering[ProviderId] = Ordering.String
+
     /** Returns the canonical provider identifier string, e.g. `"openai"`. */
     extension (id: ProviderId) def asString: String = id
 
@@ -120,3 +129,5 @@ private[types] object IdCodecs:
       override def isJsonDictKey: Boolean                     = true
 
   val modelName: upickle.default.ReadWriter[ModelName] = stringId(ModelName(_), _.asString)
+
+  val providerId: upickle.default.ReadWriter[ProviderId] = stringId(ProviderId(_), _.asString)

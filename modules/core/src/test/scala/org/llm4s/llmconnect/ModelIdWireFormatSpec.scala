@@ -20,16 +20,17 @@ class ModelIdWireFormatSpec extends AnyFlatSpec with Matchers {
   private val at = Instant.parse("2026-01-02T03:04:05Z")
 
   "ModelMetadata JSON" should "write its model and provider ids as strings" in {
-    write(ModelMetadata(modelId = ModelName("gpt-4o"), provider = "openai")) shouldBe
+    write(ModelMetadata(modelId = ModelName("gpt-4o"), provider = ProviderId("openai"))) shouldBe
       """{"modelId":"gpt-4o","provider":"openai"}"""
   }
 
   it should "read what it wrote" in {
     val metadata =
-      ModelMetadata(modelId = ModelName("claude-sonnet-4-5"), provider = "anthropic").withMaxInputTokens(200000)
+      ModelMetadata(modelId = ModelName("claude-sonnet-4-5"), provider = ProviderId("anthropic"))
+        .withMaxInputTokens(200000)
     read[ModelMetadata](write(metadata)) shouldBe metadata
     read[ModelMetadata]("""{"modelId":"gpt-4o","provider":"openai"}""") shouldBe
-      ModelMetadata(modelId = ModelName("gpt-4o"), provider = "openai")
+      ModelMetadata(modelId = ModelName("gpt-4o"), provider = ProviderId("openai"))
   }
 
   "A ModelName" should "be written as its string, and as an object key in a map keyed by it" in {

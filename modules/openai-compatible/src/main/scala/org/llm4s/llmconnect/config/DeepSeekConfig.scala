@@ -140,7 +140,7 @@ object DeepSeekConfig {
       _ <- ProviderConfig.nonEmpty("DeepSeek", "baseUrl", baseUrl.asUrl)
     } yield {
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("deepseek"),
+        lookupProviders = Seq(ProviderId("deepseek")),
         modelName = modelName,
         defaultContextWindow = 64000,
         defaultReserve = standardReserve,

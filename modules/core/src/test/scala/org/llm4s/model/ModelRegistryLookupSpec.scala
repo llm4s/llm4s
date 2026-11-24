@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ValidationError
 import org.scalatest.flatspec.AnyFlatSpec
@@ -16,7 +17,7 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
   ): ModelMetadata =
     ModelMetadata(
       modelId = ModelName(modelId),
-      provider = provider,
+      provider = ProviderId(provider),
       mode = mode,
       maxInputTokens = Some(4096),
       maxOutputTokens = Some(1024),
@@ -74,14 +75,14 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
         fail(s"Expected Left(ValidationError), got $other")
 
   it should "return Left with ValidationError for unknown provider" in:
-    registry.listByProvider("nonexistent-provider") match
+    registry.listByProvider(ProviderId("nonexistent-provider")) match
       case Left(err: ValidationError) =>
         err.message should include("No models found for provider: nonexistent-provider")
       case other =>
         fail(s"Expected Left(ValidationError), got $other")
 
   it should "match listByProvider case-insensitively and return listProviders sorted without duplicates" in:
-    registry.listByProvider("OPENAI") shouldBe registry.listByProvider("openai")
+    registry.listByProvider(ProviderId("OPENAI")) shouldBe registry.listByProvider(ProviderId("openai"))
     registry.listProviders() shouldBe List("acme", "openai", "zebra")
 
   it should "resolve lookup with whitespace, case differences, and provider prefixes" in:
@@ -97,11 +98,11 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
         fail(s"Expected Left(ValidationError), got $other")
 
   it should "lookup by provider and modelName for prefixed and plain IDs" in:
-    registry.lookup("acme", ModelName("model-a")) shouldBe Right(modelA)
-    registry.lookup("acme", ModelName("model-b")) shouldBe Right(modelB)
+    registry.lookup(ProviderId("acme"), ModelName("model-a")) shouldBe Right(modelA)
+    registry.lookup(ProviderId("acme"), ModelName("model-b")) shouldBe Right(modelB)
 
   it should "return Left with ValidationError when lookup by provider and modelName finds nothing" in:
-    registry.lookup("acme", ModelName("nonexistent")) match
+    registry.lookup(ProviderId("acme"), ModelName("nonexistent")) match
       case Left(err: ValidationError) =>
         err.message should include("Model not found: acme/nonexistent")
       case other =>

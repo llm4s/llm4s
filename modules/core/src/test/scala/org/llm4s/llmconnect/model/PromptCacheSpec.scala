@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.provider.CostEstimator
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
@@ -64,7 +65,7 @@ class PromptCacheSpec extends AnyFlatSpec with Matchers with org.scalatest.Eithe
   private def metadata(pricing: ModelPricing) =
     ModelMetadata(
       modelId = ModelName("m"),
-      provider = "anthropic",
+      provider = ProviderId("anthropic"),
       mode = ModelMode.Chat,
       maxInputTokens = None,
       maxOutputTokens = None,

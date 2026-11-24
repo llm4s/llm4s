@@ -159,7 +159,7 @@ object VertexAIConfig:
       _ <- ProviderConfig.nonEmpty("Vertex AI", "location", location)
     } yield {
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("gemini", "vertexai"),
+        lookupProviders = Seq(ProviderId("gemini"), ProviderId("vertexai")),
         modelName = modelName,
         defaultContextWindow = DefaultContextWindow,
         defaultReserve = DefaultReserveCompletion,

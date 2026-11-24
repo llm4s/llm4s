@@ -114,7 +114,7 @@ object OllamaConfig {
   )(using resolver: ContextWindowResolver): Result[OllamaConfig] =
     ProviderConfig.nonEmpty("Ollama", "baseUrl", baseUrl.asUrl).map { _ =>
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("ollama"),
+        lookupProviders = Seq(ProviderId("ollama")),
         modelName = modelName,
         defaultContextWindow = 8192,
         defaultReserve = standardReserve,

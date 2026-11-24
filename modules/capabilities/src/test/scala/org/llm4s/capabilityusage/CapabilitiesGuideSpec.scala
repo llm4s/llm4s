@@ -1,5 +1,6 @@
 package org.llm4s.capabilityusage
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.capability.{ model, requireCapabilities, Capability, Capable, ModelRef, Vision }
 import org.llm4s.capability.{ ParallelTools, PromptCaching, StructuredOutput, SystemMessages, Tools }
@@ -36,7 +37,8 @@ class CapabilitiesGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
 
     def altText(client: LLMClient, image: ContentPart.Image)(using ModelRegistryService): Result[String] =
       for {
-        capable <- client.requireCapabilities[Vision & Tools]("openai", ModelName("gpt-4o")) // checked once, here
+        capable <- client
+          .requireCapabilities[Vision & Tools](ProviderId("openai"), ModelName("gpt-4o")) // checked once, here
         alt <- caption(capable, image) // compiles: Vision & Tools is a Vision
       } yield alt
   }
@@ -109,7 +111,11 @@ class CapabilitiesGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   it should "refuse a model the bundled data does not mark as seeing images, before any call" in {
     val client = ScriptedLLMClient.always(Reply.text("unused"))
-    client.requireCapabilities[Vision]("openai", ModelName("gpt-3.5-turbo")).left.value.message should include(
+    client
+      .requireCapabilities[Vision](ProviderId("openai"), ModelName("gpt-3.5-turbo"))
+      .left
+      .value
+      .message should include(
       "does not support Vision"
     )
     client.callCount shouldBe 0

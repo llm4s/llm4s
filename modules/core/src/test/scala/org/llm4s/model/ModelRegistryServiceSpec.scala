@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -19,7 +20,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         fail(error.message)
       case Right(metadata) =>
         metadata.modelId shouldBe ModelName("gpt-4o")
-        metadata.provider shouldBe "openai"
+        metadata.provider shouldBe ProviderId("openai")
 
   it should "lookup models case-insensitively" in:
     defaultServiceResult().flatMap(_.lookup(ModelName("GPT-4O"))) match
@@ -36,19 +37,19 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         metadata.modelId shouldBe ModelName("gpt-4o")
 
   it should "lookup models by provider and name" in:
-    defaultServiceResult().flatMap(_.lookup("openai", ModelName("gpt-4o"))) match
+    defaultServiceResult().flatMap(_.lookup(ProviderId("openai"), ModelName("gpt-4o"))) match
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
         metadata.modelId shouldBe ModelName("gpt-4o")
-        metadata.provider shouldBe "openai"
+        metadata.provider shouldBe ProviderId("openai")
 
   it should "apply embedded overrides so gemini/gemini-1.5-flash stays a chat model" in:
     defaultServiceResult().flatMap(_.lookup(ModelName("gemini/gemini-1.5-flash"))) match
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
-        metadata.provider shouldBe "gemini"
+        metadata.provider shouldBe ProviderId("gemini")
         metadata.mode shouldBe ModelMode.Chat
         metadata.contextWindow shouldBe Some(1048576)
         metadata.reserveCompletion shouldBe Some(8192)
@@ -58,7 +59,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
-        metadata.provider shouldBe "anthropic"
+        metadata.provider shouldBe ProviderId("anthropic")
         metadata.mode shouldBe ModelMode.Chat
         metadata.contextWindow shouldBe Some(200000)
 
@@ -84,7 +85,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         fail(error.message)
       case Right(metadata) =>
         metadata.modelId shouldBe ModelName("custom-url-model")
-        metadata.provider shouldBe "custom"
+        metadata.provider shouldBe ProviderId("custom")
 
   it should "return error for unknown model" in:
     defaultServiceResult().flatMap(_.lookup(ModelName("unknown-model-xyz"))) match
@@ -92,12 +93,12 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
       case Right(_) => fail("Expected error for unknown model")
 
   it should "list models by provider" in:
-    defaultServiceResult().flatMap(_.listByProvider("openai")) match
+    defaultServiceResult().flatMap(_.listByProvider(ProviderId("openai"))) match
       case Left(error) =>
         fail(error.message)
       case Right(models) =>
         models should not be empty
-        models.foreach(_.provider shouldBe "openai")
+        models.foreach(_.provider shouldBe ProviderId("openai"))
 
   it should "list models by mode" in:
     defaultServiceResult().flatMap(_.listByMode(ModelMode.Chat)) match
@@ -127,7 +128,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
   it should "create a registry from custom models" in:
     val customModel = ModelMetadata(
       modelId = ModelName("custom-model-123"),
-      provider = "custom",
+      provider = ProviderId("custom"),
       mode = ModelMode.Chat,
       maxInputTokens = Some(10000),
       maxOutputTokens = Some(2000),
@@ -141,7 +142,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         fail(error.message)
       case Right(metadata) =>
         metadata.modelId shouldBe ModelName("custom-model-123")
-        metadata.provider shouldBe "custom"
+        metadata.provider shouldBe ProviderId("custom")
 
   it should "allow later models to override earlier models in a snapshot" in:
     val embeddedModel = defaultService().lookup(ModelName("gpt-4o")).toOption.get
@@ -159,7 +160,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
     val customModels = List(
       ModelMetadata(
         modelId = ModelName("custom-1"),
-        provider = "custom",
+        provider = ProviderId("custom"),
         mode = ModelMode.Chat,
         maxInputTokens = Some(10000),
         maxOutputTokens = Some(2000),
@@ -169,7 +170,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
       ),
       ModelMetadata(
         modelId = ModelName("custom-2"),
-        provider = "custom",
+        provider = ProviderId("custom"),
         mode = ModelMode.Embedding,
         maxInputTokens = Some(8192),
         maxOutputTokens = Some(8192),
@@ -186,7 +187,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
   it should "not resolve a partial model name, which only search finds" in:
     val customModel = ModelMetadata(
       modelId = ModelName("my-unique-test-model-xyz"),
-      provider = "custom",
+      provider = ProviderId("custom"),
       mode = ModelMode.Chat,
       maxInputTokens = Some(10000),
       maxOutputTokens = Some(2000),
@@ -204,7 +205,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
       List(
         ModelMetadata(
           modelId = ModelName("test-model-a"),
-          provider = "custom",
+          provider = ProviderId("custom"),
           mode = ModelMode.Chat,
           maxInputTokens = Some(10000),
           maxOutputTokens = Some(2000),
@@ -214,7 +215,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         ),
         ModelMetadata(
           modelId = ModelName("test-model-b"),
-          provider = "custom",
+          provider = ProviderId("custom"),
           mode = ModelMode.Chat,
           maxInputTokens = Some(10000),
           maxOutputTokens = Some(2000),
@@ -244,7 +245,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
       case Left(error) =>
         fail(error.message)
       case Right(metadata) =>
-        metadata.provider shouldBe "custom"
+        metadata.provider shouldBe ProviderId("custom")
         metadata.maxInputTokens shouldBe Some(50000)
 
   it should "return an error for malformed JSON from a URL source" in:
@@ -328,7 +329,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
     for id <- List("claude-opus-4-7", "claude-opus-4-7-20260416", "claude-opus-4-8", "claude-fable-5") do
       val metadata = service.lookup(ModelName(id)).toOption.get
       metadata.capabilities.supportsBudgetThinking shouldBe Some(false)
-      metadata.provider shouldBe "anthropic"
+      metadata.provider shouldBe ProviderId("anthropic")
       metadata.pricing.inputCostPerToken shouldBe raw(id).obj.get("input_cost_per_token").map(_.num)
       metadata.capabilities.supportsAdaptiveThinking shouldBe Some(true)
 

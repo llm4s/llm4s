@@ -1,5 +1,6 @@
 package org.llm4s.samples.metrics
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderName
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
@@ -138,7 +139,7 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
   private def metadata(model: String, pricing: ModelPricing): ModelMetadata =
     ModelMetadata(
       modelId = ModelName(model),
-      provider = "openai-compatible",
+      provider = ProviderId("openai-compatible"),
       mode = ModelMode.Chat,
       maxInputTokens = None,
       maxOutputTokens = None,

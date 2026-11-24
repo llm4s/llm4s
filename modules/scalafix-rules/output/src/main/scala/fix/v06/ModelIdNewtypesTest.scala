@@ -2,13 +2,14 @@ package fix.v06
 
 import java.time.Instant
 
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, EmbeddingModelConfig, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, EmbeddingModelConfig, ModelDimensionRegistry, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, TokenUsage, UsageSummary }
 import org.llm4s.llmconnect.provider.CostEstimator
+import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.{ ModelMetadata, ModelRegistryService }
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
-import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 
 object ModelIdNewtypesTest {
   val named = Completion(id = "1", created = Instant.EPOCH, model = ModelName("gpt-4o"), message = AssistantMessage("hi"))
@@ -23,7 +24,13 @@ object ModelIdNewtypesTest {
 
   def known(registry: ModelRegistryService): Result[ModelMetadata] = registry.lookup(ModelName("gpt-4o"))
 
-  def underProvider(registry: ModelRegistryService): Result[ModelMetadata] = registry.lookup("openai", ModelName("gpt-4o"))
+  def underProvider(registry: ModelRegistryService): Result[ModelMetadata] = registry.lookup(ProviderId("openai"), ModelName("gpt-4o"))
+
+  def listed(registry: ModelRegistryService): Result[List[ModelMetadata]] = registry.listByProvider(ProviderId("openai"))
+
+  def moved(metadata: ModelMetadata): ModelMetadata = metadata.withProvider(ProviderId("acme"))
+
+  def dimensions(using ProviderRegistry): Result[Int] = ModelDimensionRegistry.getDimension(ProviderId("openai"), ModelName("text-embedding-3-small"))
 
   def cost(usage: TokenUsage)(using ModelRegistryService) = CostEstimator.estimate(ModelName("gpt-4o"), usage)
 

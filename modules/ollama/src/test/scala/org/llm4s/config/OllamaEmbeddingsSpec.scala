@@ -222,17 +222,17 @@ class OllamaEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
   "ModelDimensionRegistry" should {
 
     "know the documented Ollama embedding models" in {
-      ModelDimensionRegistry.getDimension("ollama", ModelName("nomic-embed-text")).value shouldBe 768
-      ModelDimensionRegistry.getDimension("ollama", ModelName("mxbai-embed-large")).value shouldBe 1024
-      ModelDimensionRegistry.getDimension("ollama", ModelName("all-minilm")).value shouldBe 384
+      ModelDimensionRegistry.getDimension(ProviderId("ollama"), ModelName("nomic-embed-text")).value shouldBe 768
+      ModelDimensionRegistry.getDimension(ProviderId("ollama"), ModelName("mxbai-embed-large")).value shouldBe 1024
+      ModelDimensionRegistry.getDimension(ProviderId("ollama"), ModelName("all-minilm")).value shouldBe 384
     }
 
     "fold an Ollama :latest tag onto the untagged name, and no other tag" in {
       // Other tags of one model can differ in size, so guessing from the base name
       // would be wrong for some of them.
-      ModelDimensionRegistry.getDimension("ollama", ModelName("nomic-embed-text:latest")).value shouldBe 768
+      ModelDimensionRegistry.getDimension(ProviderId("ollama"), ModelName("nomic-embed-text:latest")).value shouldBe 768
       ModelDimensionRegistry
-        .getDimension("ollama", ModelName("nomic-embed-text:v1.5"))
+        .getDimension(ProviderId("ollama"), ModelName("nomic-embed-text:v1.5"))
         .left
         .value
         .formatted should include(

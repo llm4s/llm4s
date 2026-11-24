@@ -270,7 +270,7 @@ object OpenAIConfig {
       _ <- ProviderConfig.nonEmpty("OpenAI", "baseUrl", baseUrl.asUrl)
     } yield {
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("openai"),
+        lookupProviders = Seq(ProviderId("openai")),
         modelName = modelName,
         defaultContextWindow = 8192,
         defaultReserve = standardReserve,

@@ -289,7 +289,7 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
     explicit: Option[String]
   )(using resolver: ContextWindowResolver): Option[Int] =
     explicit.orElse(inferRegistryProvider(baseUrl)).flatMap { registryProvider =>
-      resolver.strictContextWindow(registryProvider, ModelName(model)) match
+      resolver.strictContextWindow(ProviderId(registryProvider), ModelName(model)) match
         case Some(window) if window < OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW =>
           val message =
             s"Configured provider '$providerName': ignoring the model registry's contextWindow $window for " +

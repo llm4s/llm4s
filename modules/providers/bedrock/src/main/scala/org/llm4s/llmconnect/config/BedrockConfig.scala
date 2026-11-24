@@ -112,7 +112,7 @@ object BedrockConfig:
       )
     yield
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("bedrock_converse", "bedrock"),
+        lookupProviders = Seq(ProviderId("bedrock_converse"), ProviderId("bedrock")),
         modelName = modelName,
         defaultContextWindow = DefaultContextWindow,
         defaultReserve = DefaultReserveCompletion,

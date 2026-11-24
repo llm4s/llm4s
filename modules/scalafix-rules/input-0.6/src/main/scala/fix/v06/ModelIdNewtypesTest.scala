@@ -5,9 +5,10 @@ package fix.v06
 
 import java.time.Instant
 
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, EmbeddingModelConfig, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, EmbeddingModelConfig, ModelDimensionRegistry, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, TokenUsage, UsageSummary }
 import org.llm4s.llmconnect.provider.CostEstimator
+import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.{ ModelMetadata, ModelRegistryService }
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
@@ -26,6 +27,12 @@ object ModelIdNewtypesTest {
   def known(registry: ModelRegistryService): Result[ModelMetadata] = registry.lookup("gpt-4o")
 
   def underProvider(registry: ModelRegistryService): Result[ModelMetadata] = registry.lookup("openai", "gpt-4o")
+
+  def listed(registry: ModelRegistryService): Result[List[ModelMetadata]] = registry.listByProvider("openai")
+
+  def moved(metadata: ModelMetadata): ModelMetadata = metadata.withProvider("acme")
+
+  def dimensions(using ProviderRegistry): Result[Int] = ModelDimensionRegistry.getDimension("openai", "text-embedding-3-small")
 
   def cost(usage: TokenUsage)(using ModelRegistryService) = CostEstimator.estimate("gpt-4o", usage)
 

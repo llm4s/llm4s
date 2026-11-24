@@ -136,7 +136,7 @@ object MistralConfig:
       _ <- ProviderConfig.nonEmpty("Mistral", "baseUrl", baseUrl.asUrl)
     } yield {
       val ContextLimits(cw, rc) = resolver.resolve(
-        lookupProviders = Seq("mistral"),
+        lookupProviders = Seq(ProviderId("mistral")),
         modelName = modelName,
         defaultContextWindow = DEFAULT_CONTEXT_WINDOW,
         defaultReserve = DEFAULT_RESERVE_COMPLETION,

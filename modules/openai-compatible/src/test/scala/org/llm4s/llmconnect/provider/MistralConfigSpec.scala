@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
@@ -56,7 +57,7 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers with EitherValues:
   "MistralConfig context window fallback" should "return conservative fallback from registry for mistral-small models" in {
     val canonical = ModelRegistryService
       .default()
-      .flatMap(_.lookup("mistral", ModelName("mistral-small-latest")))
+      .flatMap(_.lookup(ProviderId("mistral"), ModelName("mistral-small-latest")))
       .getOrElse(fail("mistral-small-latest not found via service"))
 
     val maxTokens = canonical.contextWindow.getOrElse(fail("contextWindow not defined for mistral-small-latest"))
@@ -70,7 +71,7 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers with EitherValues:
   it should "return conservative fallback from registry for codestral models" in {
     val canonical = ModelRegistryService
       .default()
-      .flatMap(_.lookup("mistral", ModelName("codestral-latest")))
+      .flatMap(_.lookup(ProviderId("mistral"), ModelName("codestral-latest")))
       .getOrElse(fail("codestral-latest not found via service"))
 
     val maxTokens = canonical.contextWindow.getOrElse(fail("contextWindow not defined for codestral-latest"))
