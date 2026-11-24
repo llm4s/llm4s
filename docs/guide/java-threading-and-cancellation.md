@@ -5,6 +5,7 @@ description: "Which thread an llm4s-java-api call blocks, whether a client can b
 parent: Java and Kotlin
 nav_order: 405
 grand_parent: User Guide
+cites_closed_issues: [1330]
 ---
 
 # Java Threading and Cancellation

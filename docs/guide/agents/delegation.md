@@ -40,7 +40,9 @@ The API is `@Experimental` (design [§4.44](https://github.com/llm4s/llm4s/blob/
 ```scala
 import org.llm4s.agent.Agent
 import org.llm4s.agent.delegation.{ DelegationConfig, TypedAgent }
+import org.llm4s.agent.graph.ThreadId
 import org.llm4s.schema.SchemaOf
+import upickle.default.ReadWriter
 
 final case class ResearchQuestion(topic: String) derives ReadWriter, SchemaOf
 final case class Findings(summary: String, sources: Vector[String]) derives ReadWriter, SchemaOf

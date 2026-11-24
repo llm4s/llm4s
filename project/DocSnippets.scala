@@ -15,10 +15,11 @@ import sbt._
  *
  * Two kinds of block are listed in `modules/samples/src/test/docs-snippets/skip.txt`, as `page | block hash | action |
  * detail`, because they cannot compile as written. `skip | reason` leaves the block out (an sbt build definition, a
- * few lines of a for-comprehension shown on their own). `with | imports` compiles it after those imports, for a
- * fragment that relies on an import shown in a block before it (separate imports with `;`). The hash is of the block's
- * text with whitespace collapsed, so editing a listed block makes its entry stale and the build fails until someone
- * decides again.
+ * few lines of a for-comprehension shown on their own). `with | preamble` compiles it after those statements, for a
+ * fragment that relies on an import shown in a block before it, or on a value an earlier block defines, declared as a
+ * typed stand-in that is never evaluated (`val store: InMemoryTraceStore = ???`); separate statements with `;`. The
+ * hash is of the block's text with whitespace collapsed, so editing a listed block makes its entry stale and the build
+ * fails until someone decides again.
  *
  * Everything here fails loudly: an unreadable page, a page with no Scala blocks, a skip entry that matches nothing or
  * has no reason, and a malformed manifest line are build errors, never a silent no-op.
@@ -28,8 +29,9 @@ object DocSnippets {
   /** The pages whose snippets are compiled. Paths are relative to `docs/`. */
   val pages: Seq[String] = Seq(
     "ai-assistants.md",
-    "getting-started/configuration.md",
+    "examples/index.md",
     "getting-started/configuration-in-code.md",
+    "getting-started/configuration.md",
     "getting-started/first-example.md",
     "getting-started/installation.md",
     "getting-started/local-jlama.md",
@@ -37,13 +39,23 @@ object DocSnippets {
     "getting-started/ollama-quickstart.md",
     "getting-started/repl.md",
     "getting-started/testing-guide.md",
+    "guide/agents/delegation.md",
+    "guide/agents/durable-checkpointers.md",
     "guide/agents/graphs.md",
     "guide/agents/guardrails.md",
     "guide/agents/handoffs.md",
     "guide/agents/human-review.md",
     "guide/agents/index.md",
+    "guide/agents/memory.md",
     "guide/agents/middleware.md",
+    "guide/agents/multiple-machines.md",
+    "guide/agents/streaming.md",
     "guide/basic-usage.md",
+    "guide/builtin-tools.md",
+    "guide/caching.md",
+    "guide/cats-effect.md",
+    "guide/context-window-pruning.md",
+    "guide/cost-controls.md",
     "guide/custom-tools.md",
     "guide/data-protection.md",
     "guide/direct-style.md",
@@ -52,25 +64,37 @@ object DocSnippets {
     "guide/error-handling.md",
     "guide/for-python-developers.md",
     "guide/http-transport.md",
+    "guide/image-generation.md",
+    "guide/jev.md",
     "guide/kafka.md",
+    "guide/modular-rag-example.md",
+    "guide/multimodal.md",
     "guide/observability/agents.md",
+    "guide/observability/enhanced-tracing-use-cases.md",
+    "guide/observability/provider-exchange-logging.md",
     "guide/patterns/error-recovery.md",
     "guide/patterns/multi-agent-orchestration.md",
     "guide/patterns/production-monitoring.md",
     "guide/patterns/rag-enterprise.md",
     "guide/patterns/scaling-strategies.md",
     "guide/patterns/security-best-practices.md",
+    "guide/permission-based-rag.md",
     "guide/prompts.md",
     "guide/providers.md",
-    "guide/secrets.md",
     "guide/rag-evaluation.md",
+    "guide/rag-query-transformers.md",
     "guide/reference-architecture.md",
+    "guide/reliability.md",
     "guide/replacing-a-python-sidecar.md",
+    "guide/secrets.md",
+    "guide/speech.md",
+    "guide/stt-domain-model.md",
     "guide/tapir-tools.md",
     "guide/vector-store.md",
+    "guide/zio.md",
     "index.md",
     "reference/doctor.md",
-    "guide/reliability.md",
+    "reference/model-metadata.md",
     "scala-ai/agents.md",
     "scala-ai/llm-framework.md",
     "scala-ai/providers.md",

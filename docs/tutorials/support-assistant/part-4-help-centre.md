@@ -5,7 +5,7 @@ parent: Build a Support Assistant
 grand_parent: Tutorials
 nav_order: 4
 description: "Support assistant tutorial, part 4: answer from the shop's help-centre articles with an LLM4S RAG pipeline that ingests, embeds, retrieves and cites its sources."
-search_title: "Support assistant tutorial 4: RAG over help-centre docs in Scala"
+search_title: "Support assistant tutorial 4: RAG over help-centre docs"
 ---
 
 # Part 4: answers from the help centre

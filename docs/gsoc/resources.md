@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Student Resources
+description: "Resources for students joining LLM4S or applying to Google Summer of Code: how to apply, where to ask, and how to make a first contribution."
 parent: Google Summer of Code
 nav_order: 2
 permalink: /gsoc/resources/

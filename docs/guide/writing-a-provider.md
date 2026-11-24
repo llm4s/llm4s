@@ -6,6 +6,7 @@ search_title: "Write a custom LLM provider module for LLM4S"
 parent: Core
 nav_order: 115
 grand_parent: User Guide
+cites_closed_issues: [1493, 1818]
 ---
 
 # Writing a Provider

@@ -6,6 +6,7 @@ search_title: "Use LLM4S with Helidon SE 4: blocking and streamed routes"
 parent: Java and Kotlin
 nav_order: 411
 grand_parent: User Guide
+cites_open_issues: [1463]
 ---
 
 # Using LLM4S with Helidon

@@ -4,6 +4,7 @@ title: Legal and IP FAQ
 parent: Reference
 nav_order: 27
 description: "Which licence covers LLM4S, who holds copyright, how contributions come in (DCO), MIT's patent position, provider terms, cryptography, and what is still undecided."
+cites_open_issues: [2310]
 ---
 
 # Legal and IP FAQ
