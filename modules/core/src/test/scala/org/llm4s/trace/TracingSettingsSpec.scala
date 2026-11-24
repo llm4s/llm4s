@@ -11,14 +11,14 @@ class TracingSettingsSpec extends AnyWordSpec with Matchers {
     Option(System.getenv("TRACING_MODE")).exists(_.trim.nonEmpty) ||
       Option(System.getProperty("llm4s.tracing.mode")).exists(_.trim.nonEmpty)
 
-  "Llm4sConfig.tracing + Tracing.create" should {
+  "Llm4sConfig.tracing + Tracing.fromSettings" should {
     "return Console tracing by default" in {
       // Skip test if a tracing mode is configured in the environment
       if (isTracingModeSet) {
         cancel("Test skipped: TRACING_MODE or llm4s.tracing.mode is set in the environment")
       }
 
-      val res = Llm4sConfig.tracing().map(Tracing.create)
+      val res = Llm4sConfig.tracing().flatMap(Tracing.fromSettings)
       res.fold(err => fail(err.toString), tracer => tracer shouldBe a[ConsoleTracing])
     }
   }

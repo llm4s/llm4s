@@ -3,7 +3,7 @@ package org.llm4s.samples.basic
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.llmconnect.model.TokenUsage
-import org.llm4s.trace.{ Tracing, TraceEvent, TracingComposer, TracingMode }
+import org.llm4s.trace.{ NoOpTracing, Tracing, TraceEvent, TracingComposer, TracingMode }
 import org.slf4j.LoggerFactory
 
 object TracingExample {
@@ -16,7 +16,7 @@ object TracingExample {
       settings <- Llm4sConfig.tracing()
       _ = {
         logger.info("1. Basic Enhanced Tracing")
-        val basicTracer = Tracing.create(settings.withMode(TracingMode.Console))
+        val basicTracer = Tracing.fromSettings(settings.withMode(TracingMode.Console)).getOrElse(new NoOpTracing())
 
         val agentEvent = TraceEvent.CustomEvent(
           "query_received",
@@ -41,7 +41,7 @@ object TracingExample {
         example5(consoleTracer, noOpTracer)
         example6(basicTracer, agentEvent)
         example7(settings)
-        example8(settings)
+        example8()
       }
     } yield ()
     result.fold(err => logger.error(s"Error: ${err.formatted}"), identity)
@@ -50,8 +50,8 @@ object TracingExample {
   private def example2(settings: TracingSettings, agentEvent: TraceEvent) = {
     // Example 2: Composed tracing (multiple tracers)
     logger.info("2. Composed Tracing (Console + NoOp)")
-    val consoleTracer  = Tracing.create(settings.withMode(TracingMode.Console))
-    val noOpTracer     = Tracing.create(settings.withMode(TracingMode.NoOp))
+    val consoleTracer  = Tracing.fromSettings(settings.withMode(TracingMode.Console)).getOrElse(new NoOpTracing())
+    val noOpTracer     = Tracing.fromSettings(settings.withMode(TracingMode.NoOp)).getOrElse(new NoOpTracing())
     val composedTracer = TracingComposer.combine(consoleTracer, noOpTracer)
 
     composedTracer.traceEvent(agentEvent)
@@ -129,21 +129,21 @@ object TracingExample {
   private def example7(settings: TracingSettings): Unit = {
     // Example 7: Type-safe mode creation
     logger.info("7. Type-Safe Mode Creation")
-    // Langfuse is a Named mode served by llm4s-observability; without keys it falls back to NoOp.
+    // Langfuse is a Named mode served by llm4s-observability; without keys this sample falls back to NoOp, visibly.
     val modes = Seq(TracingMode.Console, TracingMode.NoOp, TracingMode.Named("langfuse"))
     modes.foreach { mode =>
-      val tracer = Tracing.create(settings.withMode(mode))
+      val tracer = Tracing.fromSettings(settings.withMode(mode)).getOrElse(new NoOpTracing())
       logger.info(s"Created tracer for mode: $mode - ${tracer.getClass.getSimpleName}")
     }
   }
 
-  private def example8(settings: TracingSettings): Unit = {
+  private def example8(): Unit = {
     // Example 8: Environment-based configuration
     logger.info("8. Environment-Based Configuration")
     val envTracer = Llm4sConfig
       .tracing()
-      .map(Tracing.create)
-      .fold(_ => Tracing.create(settings.withMode(TracingMode.NoOp)), identity)
+      .flatMap(Tracing.fromSettings)
+      .getOrElse(new NoOpTracing())
     logger.info(s"Created tracer from environment: ${envTracer.getClass.getSimpleName}")
 
     logger.info("Enhanced Tracing Example Complete!")

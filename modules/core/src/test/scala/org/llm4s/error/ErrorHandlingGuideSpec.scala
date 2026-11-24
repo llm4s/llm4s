@@ -62,7 +62,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
   private val client = new SimpleMock("recovered")
 
-  private val reliable = new ReliableClient(
+  private val reliable = ReliableClient(
     client,
     providerName = "openai",
     config = ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second))
@@ -86,7 +86,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
   /** A `ReliableClient` over `scripted` that waits no time between attempts. */
   private def reliably(scripted: Scripted, config: ReliabilityConfig): ReliableClient =
-    new ReliableClient(scripted, "guide", config, sleep = _ => ())
+    ReliableClient(scripted, "guide", config).withSleep(_ => ())
 
   private def retrying(maxAttempts: Int): ReliabilityConfig =
     ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = maxAttempts, baseDelay = 1.millis))
@@ -335,13 +335,11 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
     "end with a TimeoutError once the deadline has passed" in {
       val now     = new java.util.concurrent.atomic.AtomicReference(java.time.Instant.parse("2026-01-01T00:00:00Z"))
       val failing = new Scripted(_ => Left(NetworkError("down", None, "https://x")))
-      val client = new ReliableClient(
+      val client = ReliableClient(
         failing,
         "guide",
-        retrying(5).withDeadline(1.second),
-        clock = () => now.get(),
-        sleep = _ => now.updateAndGet(_.plusSeconds(2)): Unit
-      )
+        retrying(5).withDeadline(1.second)
+      ).withClock(() => now.get()).withSleep(_ => now.updateAndGet(_.plusSeconds(2)): Unit)
       client.complete(conversation).left.value shouldBe a[TimeoutError]
     }
 

@@ -101,11 +101,10 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   "ReliableClient.streamComplete" should "apply reliability to streaming" in {
     val mockClient = new MockClient(() => Right(testCompletion))
-    val reliable = new ReliableClient(
+    val reliable = ReliableClient(
       mockClient,
       "test",
-      ReliabilityConfig.default,
-      None
+      ReliabilityConfig.default
     )
 
     val result = reliable.streamComplete(testConversation, onChunk = _ => ())
@@ -127,7 +126,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
       deadline = None
     )
 
-    val reliable = new ReliableClient(mockClient, "test", config, None)
+    val reliable = ReliableClient(mockClient, "test", config)
     val result   = reliable.streamComplete(testConversation, onChunk = _ => ())
     result shouldBe Right(testCompletion)
     mockClient.callCount.get() shouldBe 2
@@ -135,7 +134,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   it should "pass through directly when disabled" in {
     val mockClient = new MockClient(() => Right(testCompletion))
-    val reliable   = new ReliableClient(mockClient, "test", ReliabilityConfig.disabled, None)
+    val reliable   = ReliableClient(mockClient, "test", ReliabilityConfig.disabled)
 
     val result = reliable.streamComplete(testConversation, onChunk = _ => ())
     result shouldBe Right(testCompletion)
@@ -147,7 +146,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   "ReliableClient.validate" should "delegate to underlying" in {
     val mockClient = new MockClient(() => Right(testCompletion))
-    val reliable   = new ReliableClient(mockClient, "test", ReliabilityConfig.default, None)
+    val reliable   = ReliableClient(mockClient, "test", ReliabilityConfig.default)
     reliable.validate() shouldBe Right(())
   }
 
@@ -156,20 +155,20 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockClient(() => Right(testCompletion)) {
       override def close(): Unit = closed = true
     }
-    val reliable = new ReliableClient(mockClient, "test", ReliabilityConfig.default, None)
+    val reliable = ReliableClient(mockClient, "test", ReliabilityConfig.default)
     reliable.close()
     closed shouldBe true
   }
 
   "ReliableClient.getContextWindow" should "delegate to underlying" in {
     val mockClient = new MockClient(() => Right(testCompletion))
-    val reliable   = new ReliableClient(mockClient, "test", ReliabilityConfig.default, None)
+    val reliable   = ReliableClient(mockClient, "test", ReliabilityConfig.default)
     reliable.getContextWindow() shouldBe 8192
   }
 
   "ReliableClient.getReserveCompletion" should "delegate to underlying" in {
     val mockClient = new MockClient(() => Right(testCompletion))
-    val reliable   = new ReliableClient(mockClient, "test", ReliabilityConfig.default, None)
+    val reliable   = ReliableClient(mockClient, "test", ReliabilityConfig.default)
     reliable.getReserveCompletion() shouldBe 1024
   }
 
@@ -189,7 +188,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     var fakeTime = 0L
     val metrics  = new TestMetricsCollector()
     val reliable =
-      new ReliableClient(mockClient, "test", config, Some(metrics), clock = () => Instant.ofEpochMilli(fakeTime))
+      ReliableClient(mockClient, "test", config).withMetrics(metrics).withClock(() => Instant.ofEpochMilli(fakeTime))
 
     // Open the circuit
     reliable.complete(testConversation)
@@ -219,7 +218,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     )
 
     var fakeTime = 0L
-    val reliable = new ReliableClient(mockClient, "test", config, None, clock = () => Instant.ofEpochMilli(fakeTime))
+    val reliable = ReliableClient(mockClient, "test", config).withClock(() => Instant.ofEpochMilli(fakeTime))
 
     // Open the circuit
     reliable.complete(testConversation)
@@ -250,17 +249,15 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
     var fakeTime = 0L
     val metrics  = new TestMetricsCollector()
-    val reliable = new ReliableClient(
+    val reliable = ReliableClient(
       mockClient,
       "test",
-      config,
-      Some(metrics),
-      clock = () => {
-        val t = fakeTime
-        fakeTime += 100 // advance 100ms per clock read
-        Instant.ofEpochMilli(t)
-      }
-    )
+      config
+    ).withMetrics(metrics).withClock { () =>
+      val t = fakeTime
+      fakeTime += 100 // advance 100ms per clock read
+      Instant.ofEpochMilli(t)
+    }
 
     val result = reliable.complete(testConversation)
     result match {
@@ -283,7 +280,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     )
 
     val metrics  = new TestMetricsCollector()
-    val reliable = new ReliableClient(mockClient, "test", config, Some(metrics))
+    val reliable = ReliableClient(mockClient, "test", config).withMetrics(metrics)
 
     val result = reliable.complete(testConversation)
     result.isLeft shouldBe true
@@ -301,7 +298,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     )
 
     val metrics  = new TestMetricsCollector()
-    val reliable = new ReliableClient(mockClient, "test", config, Some(metrics))
+    val reliable = ReliableClient(mockClient, "test", config).withMetrics(metrics)
 
     reliable.complete(testConversation)
     metrics.recordedErrors should not be empty
@@ -321,7 +318,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     )
 
     val metrics  = new TestMetricsCollector()
-    val reliable = new ReliableClient(mockClient, "test", config, Some(metrics))
+    val reliable = ReliableClient(mockClient, "test", config).withMetrics(metrics)
 
     // Open the circuit
     reliable.complete(testConversation)
@@ -350,7 +347,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
       deadline = Some(30.seconds)
     )
 
-    val reliable = new ReliableClient(mockClient, "test", config, None)
+    val reliable = ReliableClient(mockClient, "test", config)
     val result   = reliable.complete(testConversation)
     result shouldBe Right(testCompletion)
     mockClient.callCount.get() shouldBe 2
@@ -375,7 +372,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
       deadline = None
     )
 
-    val reliable = new ReliableClient(mockClient, "test", config, None)
+    val reliable = ReliableClient(mockClient, "test", config)
 
     // Fail once
     reliable.complete(testConversation)

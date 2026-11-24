@@ -89,12 +89,15 @@ val calls = meterRegistry.find("llm4s.requests").tag("status", "success").counte
 | `llm4s.image.generation.cost.usd` | counter | `provider`, `model` | `llm4s_image_generation_cost_usd_total` |
 | `llm4s.image.generation.errors` | counter | `provider`, `model`, `operation`, `error_type` | `llm4s_image_generation_errors_total` |
 
-The last column is what a Micrometer `PrometheusMeterRegistry` exposes for the meter. Tag values:
+The last column is what a Micrometer `PrometheusMeterRegistry` exposes for the meter. The five image meters are
+declared by `llm4s-image` (`ImageMetrics`) and recorded by its `InstrumentedImageGenerationClient` through the
+collector's generic `increment` and `observe`; they are in the registry once an instrumented image client has run.
+Tag values:
 
 - `status` is `success` or `error_<kind>`, and `error_type` is `<kind>`, where `<kind>` is one of `rate_limit`, `timeout`,
   `authentication`, `network`, `validation`, `service_error`, `execution_error`, `cancelled` or `unknown`.
 - `type` is `input` or `output`.
-- `operation` is `generate`, `edit` or `other`.
+- `operation` is `generate` or `edit`.
 - `state` is `open`, `closed`, `half-open` or `other`.
 
 The request timer is published with the same bucket boundaries as the Prometheus module (0.1, 0.5, 1, 2, 5, 10, 30, 60
@@ -121,7 +124,8 @@ One difference:
 ## Errors and `ReliableClient`
 
 `llm4s.errors` counts failed requests and failed image generations, exactly as `llm4s_errors_total` does in the
-Prometheus module: one increment per call the provider client observed failing.
+Prometheus module: one increment per call the provider client observed failing. It is `MetricsCollector.Errors`, so
+a module of your own can add its failed operations to it with `metrics.increment(MetricsCollector.Errors, Seq(provider, errorType))`.
 
 `llm4s.reliability.errors` (`ReliabilityMetrics.Errors`) counts what `ReliableClient` reports instead: a
 call its local rate limit or open circuit rejected, a deadline exceeded, and the final failure once retries are
@@ -131,7 +135,7 @@ exhausted. Pass the same collector to both layers:
 val metrics = new MicrometerMetrics(meterRegistry)
 val client = LLMConnect
   .getClient(providerConfig, metrics)
-  .map(c => new ReliableClient(c, "openai", ReliabilityConfig.default, Some(metrics)))
+  .map(c => ReliableClient(c, "openai", ReliabilityConfig.default).withMetrics(metrics))
 ```
 
 and a call that fails on all three attempts records three `llm4s.errors` (one per attempt), one
@@ -145,8 +149,8 @@ Tags are provider, model and values from a fixed set, so the number of meters st
 ids are never tags. Guards apply to values the caller supplies:
 
 - A null or blank provider or model is recorded as `unknown` (Micrometer rejects null tag values).
-- An image operation outside the set above is recorded as `other`, so a stray value cannot create
-  a new meter. A test sends a thousand distinct values and checks the meter count does not grow.
+- A generic metric's tags (the image meters', the agent runtime's) are capped at 256 distinct values each, and a
+  null or blank value is recorded as `unknown`.
 - `provider` and `model` come from your configuration, so they are normally a handful of values. They are capped anyway:
   one collector records at most 64 distinct providers and 256 distinct models, and records any further value as `other`
   (logged once at WARN). A value seen before the cap was reached keeps its own series.

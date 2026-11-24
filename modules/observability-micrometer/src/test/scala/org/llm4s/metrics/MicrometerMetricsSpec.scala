@@ -84,7 +84,7 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
         .map(_.getName)
         .toSet
     val contract = methods(classOf[MetricsCollector])
-    (contract should contain).allOf("observeRequest", "addTokens", "recordCost", "recordImageGenerationCost")
+    (contract should contain).allOf("observeRequest", "addTokens", "recordCost", "increment")
     (contract -- methods(classOf[MicrometerMetrics])) shouldBe empty
   }
 
@@ -305,78 +305,20 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  // --- images -----------------------------------------------------------------------------------
+  // --- the shared error counter ----------------------------------------------------------------
 
-  "observeImageGeneration" should "count, time and total the images of a successful operation" in {
+  // The image metrics are `ImageMetrics` in llm4s-image, recorded as generic metrics: `ImageMetricsSeriesSpec` there
+  // pins the series this collector exports for them (#2801).
+  "MetricsCollector.Errors" should "be recorded into llm4s.errors, the meter observeRequest counts failures in" in {
     val (registry, metrics) = fresh()
-    metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 4.seconds, 3)
+    metrics.observeRequest("openai", "gpt-4o", Outcome.Error(ErrorKind.Network), 1.second)
+    metrics.increment(MetricsCollector.Errors, Seq("openai", "network"))
+    metrics.increment(MetricsCollector.Errors, Seq("openai", "timeout"))
 
-    counter(
-      registry,
-      Names.ImageGenerations,
-      "provider"  -> "openai",
-      "model"     -> "dall-e-3",
-      "operation" -> "generate",
-      "status"    -> "success"
-    ) shouldBe Some(1.0)
-    val t = timer(registry, Names.ImageGenerationDuration, "operation" -> "generate").value
-    t.count() shouldBe 1L
-    t.totalTime(TimeUnit.SECONDS) shouldBe 4.0
-    counter(registry, Names.ImagesGenerated, "provider" -> "openai", "model" -> "dall-e-3") shouldBe Some(3.0)
-    meters(registry, Names.ImageGenerationErrors) shouldBe 0
-    meters(registry, Names.Errors) shouldBe 0
-  }
-
-  it should "not count images for a success that produced none" in {
-    val (registry, metrics) = fresh()
-    metrics.observeImageGeneration("openai", "dall-e-3", "edit", Outcome.Success, 1.second, 0)
-    meters(registry, Names.ImagesGenerated) shouldBe 0
-    counter(registry, Names.ImageGenerations, "operation" -> "edit") shouldBe Some(1.0)
-  }
-
-  it should "count a failure under both error meters and add no images" in {
-    val (registry, metrics) = fresh()
-    metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Error(ErrorKind.RateLimit), 1.second, 5)
-
-    counter(registry, Names.ImageGenerations, "status" -> "error_rate_limit") shouldBe Some(1.0)
-    counter(
-      registry,
-      Names.ImageGenerationErrors,
-      "provider"   -> "openai",
-      "model"      -> "dall-e-3",
-      "operation"  -> "generate",
-      "error_type" -> "rate_limit"
-    ) shouldBe Some(1.0)
-    counter(registry, Names.Errors, "provider" -> "openai", "error_type" -> "rate_limit") shouldBe Some(1.0)
-    meters(registry, Names.ImagesGenerated) shouldBe 0
-  }
-
-  it should "record an operation other than generate or edit as `other`" in {
-    val (registry, metrics) = fresh()
-    metrics.observeImageGeneration("openai", "dall-e-3", "variation", Outcome.Success, 1.second, 1)
-    metrics.observeImageGeneration("openai", "dall-e-3", null, Outcome.Success, 1.second, 1)
-    metrics.observeImageGeneration("openai", "dall-e-3", " EDIT ", Outcome.Success, 1.second, 1)
-    counter(registry, Names.ImageGenerations, "operation" -> "other") shouldBe Some(2.0)
-    counter(registry, Names.ImageGenerations, "operation" -> "edit") shouldBe Some(1.0)
-  }
-
-  it should "use the tags documented for each image meter" in {
-    val (registry, metrics) = fresh()
-    metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Error(ErrorKind.Network), 1.second, 1)
-    metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 1.second, 1)
-    tagKeys(registry, Names.ImageGenerations) shouldBe Set("provider", "model", "operation", "status")
-    tagKeys(registry, Names.ImageGenerationDuration) shouldBe Set("provider", "model", "operation")
-    tagKeys(registry, Names.ImagesGenerated) shouldBe Set("provider", "model")
-    tagKeys(registry, Names.ImageGenerationErrors) shouldBe Set("provider", "model", "operation", "error_type")
-  }
-
-  "recordImageGenerationCost" should "add the cost and drop an invalid amount" in {
-    val (registry, metrics) = fresh()
-    metrics.recordImageGenerationCost("openai", "dall-e-3", 0.04, 1)
-    metrics.recordImageGenerationCost("openai", "dall-e-3", 0.04, 1)
-    metrics.recordImageGenerationCost("openai", "dall-e-3", -1.0, 1)
-    metrics.recordImageGenerationCost("openai", "dall-e-3", Double.NaN, 1)
-    counter(registry, Names.ImageGenerationCostUsd, "provider" -> "openai", "model" -> "dall-e-3") shouldBe Some(0.08)
+    Names.Errors shouldBe MetricsCollector.Errors.name
+    counter(registry, Names.Errors, "provider" -> "openai", "error_type" -> "network") shouldBe Some(2.0)
+    counter(registry, Names.Errors, "provider" -> "openai", "error_type" -> "timeout") shouldBe Some(1.0)
+    tagKeys(registry, Names.Errors) shouldBe Set("provider", "error_type")
   }
 
   // --- safety, cardinality, concurrency ---------------------------------------------------------
@@ -398,8 +340,7 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
       metrics.increment(ReliabilityMetrics.Retries, Seq("openai"))
       metrics.increment(ReliabilityMetrics.CircuitBreakerTransitions, Seq("openai", "open"))
       metrics.increment(ReliabilityMetrics.Errors, Seq("openai", ReliabilityMetrics.errorTypeLabel(ErrorKind.Network)))
-      metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 1.second, 1)
-      metrics.recordImageGenerationCost("openai", "dall-e-3", 1.0, 1)
+      metrics.increment(MetricsCollector.Errors, Seq("openai", "network"))
     }
     registry.getMeters.size() shouldBe 0
   }
@@ -410,15 +351,6 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
     val metrics = new MicrometerMetrics(registry)
     noException should be thrownBy metrics.observeRequest("openai", "gpt-4o", Outcome.Success, 1.second)
     registry.getMeters.size() shouldBe 0
-  }
-
-  it should "stay within a fixed set of meters however many distinct operations it is given" in {
-    val (registry, metrics) = fresh()
-    (1 to 1000).foreach { i =>
-      metrics.observeImageGeneration("openai", "dall-e-3", s"operation-$i", Outcome.Success, 1.millis, 1)
-    }
-    meters(registry, Names.ImageGenerations) shouldBe 1 // all `other`
-    meters(registry, Names.ImageGenerationDuration) shouldBe 1
   }
 
   it should "cap the distinct model and provider values it records, and keep the ones already admitted" in {
@@ -554,17 +486,15 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
   "With ReliableClient and the provider client on one collector" should "count each failed attempt once in llm4s.errors and the final failure once in llm4s.reliability.errors" in {
     val (registry, metrics) = fresh()
     val provider            = new FailingClient(metrics, ServiceError(503, "probe", "unavailable"))
-    val reliable = new ReliableClient(
+    val reliable = ReliableClient(
       provider,
       "probe",
       ReliabilityConfig(
         retryPolicy = RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millisecond),
         circuitBreaker = CircuitBreakerConfig.disabled,
         deadline = None
-      ),
-      Some(metrics),
-      sleep = _ => ()
-    )
+      )
+    ).withMetrics(metrics).withSleep(_ => ())
 
     reliable.complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions()).isLeft shouldBe true
 

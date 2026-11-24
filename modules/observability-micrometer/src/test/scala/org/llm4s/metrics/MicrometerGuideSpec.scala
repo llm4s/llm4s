@@ -40,7 +40,7 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
     val metrics = new MicrometerMetrics(meterRegistry)
     val client = LLMConnect
       .getClient(providerConfig, metrics)
-      .map(c => new ReliableClient(c, "openai", ReliabilityConfig.default, Some(metrics)))
+      .map(c => ReliableClient(c, "openai", ReliabilityConfig.default).withMetrics(metrics))
     client
   }
 
@@ -48,7 +48,7 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
     "val metrics = new MicrometerMetrics(meterRegistry)",
     "val client = LLMConnect",
     ".getClient(providerConfig, metrics)",
-    """.map(c => new ReliableClient(c, "openai", ReliabilityConfig.default, Some(metrics)))"""
+    """.map(c => ReliableClient(c, "openai", ReliabilityConfig.default).withMetrics(metrics))"""
   )
 
   /** The lines of the quick start as the page shows them; the page must contain each. */
@@ -94,7 +94,7 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
       .toMap
   }
 
-  private val allNames: Seq[String] = {
+  private lazy val allNames: Seq[String] = {
     import MicrometerMetrics.Names.*
     Seq(
       Requests,
@@ -104,14 +104,37 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
       Errors,
       ReliabilityErrors,
       Retries,
-      CircuitBreakerTransitions,
-      ImageGenerations,
-      ImagesGenerated,
-      ImageGenerationDuration,
-      ImageGenerationCostUsd,
-      ImageGenerationErrors
-    )
+      CircuitBreakerTransitions
+    ) ++ ImageMeters.map(_.name)
   }
+
+  /**
+   * `ImageMetrics` of `llm4s-image`, which this module cannot depend on: the guide's rows for the image meters are
+   * checked against these copies. `ImageMetricsSeriesSpec` in `llm4s-image` pins the real definitions to the same
+   * series, through this collector.
+   */
+  private val imageGenerations =
+    Metric.counter("llm4s.image.generations", "Image generation operations", "provider", "model", "operation", "status")
+  private val imagesGenerated = Metric.counter("llm4s.images.generated", "Images generated", "provider", "model")
+  private val imageDuration = Metric.timer(
+    "llm4s.image.generation.duration",
+    "Image generation duration",
+    Seq(1.second, 300.seconds),
+    "provider",
+    "model",
+    "operation"
+  )
+  private val imageCost = Metric.counter("llm4s.image.generation.cost.usd", "Image cost", "provider", "model")
+  private val imageErrors = Metric.counter(
+    "llm4s.image.generation.errors",
+    "Image generation errors",
+    "provider",
+    "model",
+    "operation",
+    "error_type"
+  )
+  private val ImageMeters: Seq[Metric] =
+    Seq(imageGenerations, imagesGenerated, imageDuration, imageCost, imageErrors)
 
   private def exerciseEverything(metrics: MetricsCollector): Unit = {
     metrics.observeRequest("openai", "gpt-4o", Outcome.Success, 1.second)
@@ -121,9 +144,11 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
     metrics.increment(ReliabilityMetrics.Retries, Seq("openai"))
     metrics.increment(ReliabilityMetrics.CircuitBreakerTransitions, Seq("openai", "open"))
     metrics.increment(ReliabilityMetrics.Errors, Seq("openai", ReliabilityMetrics.errorTypeLabel(ErrorKind.Timeout)))
-    metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 1.second, 1)
-    metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Error(ErrorKind.Network), 1.second, 1)
-    metrics.recordImageGenerationCost("openai", "dall-e-3", 0.1, 1)
+    metrics.increment(imageGenerations, Seq("openai", "dall-e-3", "generate", "success"))
+    metrics.increment(imagesGenerated, Seq("openai", "dall-e-3"))
+    metrics.observe(imageDuration, Seq("openai", "dall-e-3", "generate"), 1.second)
+    metrics.increment(imageCost, Seq("openai", "dall-e-3"), 0.1)
+    metrics.increment(imageErrors, Seq("openai", "dall-e-3", "generate", "network"))
   }
 
   "The guide" should "show the quick start that compiles" in {
@@ -139,7 +164,8 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
     val declared = MicrometerMetrics.Names.getClass.getDeclaredMethods
       .filter(m => m.getParameterCount == 0 && m.getReturnType == classOf[String] && !m.getName.contains("$"))
       .size
-    declared shouldBe allNames.size
+    // ...plus the image meters, which `llm4s-image` declares
+    (declared + ImageMeters.size) shouldBe allNames.size
     documented.keySet shouldBe allNames.toSet
   }
 

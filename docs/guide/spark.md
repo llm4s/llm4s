@@ -153,7 +153,7 @@ once (`spark.executor.cores` x executors, or the `n` of `local[n]`). Bound it wi
 `ReliableClient` wraps each partition's client with retries, a deadline and a local rate limit:
 
 ```scala
-new ReliableClient(
+ReliableClient(
   underlying,
   "spark-example",
   ReliabilityConfig(

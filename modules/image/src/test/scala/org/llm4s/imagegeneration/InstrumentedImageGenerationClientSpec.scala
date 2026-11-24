@@ -3,7 +3,7 @@ package org.llm4s.imagegeneration
 import org.llm4s.security.Secret
 import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.media.MediaType
-import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
+import org.llm4s.metrics.{ ErrorKind, Metric, MetricsCollector, Outcome }
 import org.llm4s.trace.{ Tracing, TraceEvent }
 import org.llm4s.types.Result
 import org.scalatest.funsuite.AnyFunSuite
@@ -14,6 +14,20 @@ import java.nio.file.{ Path, Paths }
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.concurrent.duration._
+
+private object ImageSpecKinds {
+  val all: Seq[ErrorKind] = Seq(
+    ErrorKind.RateLimit,
+    ErrorKind.Timeout,
+    ErrorKind.Authentication,
+    ErrorKind.Network,
+    ErrorKind.Validation,
+    ErrorKind.ServiceError,
+    ErrorKind.ExecutionError,
+    ErrorKind.Cancelled,
+    ErrorKind.Unknown
+  )
+}
 
 class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
 
@@ -36,21 +50,43 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
   private val healthy = ServiceStatus(HealthStatus.Healthy, "ok")
 
   private class RecordingMetricsCollector extends MetricsCollector {
-    val imageGenerationCalls: ListBuffer[(String, String, String, Outcome, FiniteDuration, Int)] = ListBuffer.empty
-
     override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit =
       ()
     override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit = ()
     override def recordCost(provider: String, model: String, costUsd: Double): Unit                      = ()
-    override def observeImageGeneration(
-      provider: String,
-      model: String,
-      operation: String,
-      outcome: Outcome,
-      duration: FiniteDuration,
-      imageCount: Int
-    ): Unit =
-      imageGenerationCalls += ((provider, model, operation, outcome, duration, imageCount))
+    // What the client records, read back from the generic recordings of `ImageMetrics`: the operation from
+    // `Generations` and `Duration`, the number of images from `ImagesGenerated`.
+    private val statuses: ListBuffer[(String, String, String, String)] = ListBuffer.empty
+    private val durations: ListBuffer[FiniteDuration]                  = ListBuffer.empty
+    private val images: ListBuffer[Int]                                = ListBuffer.empty
+    val errorTypes: ListBuffer[String]                                 = ListBuffer.empty
+    val costs: ListBuffer[Double]                                      = ListBuffer.empty
+
+    override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit = metric match {
+      case ImageMetrics.Generations =>
+        statuses += ((labelValues(0), labelValues(1), labelValues(2), labelValues(3))); images += 0
+      case ImageMetrics.ImagesGenerated => images(images.size - 1) = amount.toInt
+      case ImageMetrics.Errors          => errorTypes += labelValues(3)
+      case ImageMetrics.CostUsd         => costs += amount
+      case _                            => ()
+    }
+    override def observe(metric: Metric.Timer, labelValues: Seq[String], duration: FiniteDuration): Unit =
+      if (metric == ImageMetrics.Duration) durations += duration
+
+    private def outcomeOf(status: String): Outcome =
+      if (status == "success") Outcome.Success
+      else
+        Outcome.Error(
+          ImageSpecKinds.all
+            .find(kind => ImageMetrics.statusLabel(Outcome.Error(kind)) == status)
+            .getOrElse(ErrorKind.Unknown)
+        )
+
+    def imageGenerationCalls: List[(String, String, String, Outcome, FiniteDuration, Int)] =
+      statuses.toList.zip(durations.toList).zip(images.toList).map {
+        case (((provider, model, operation, status), d), n) =>
+          (provider, model, operation, outcomeOf(status), d, n)
+      }
   }
 
   private class RecordingTracing extends Tracing {

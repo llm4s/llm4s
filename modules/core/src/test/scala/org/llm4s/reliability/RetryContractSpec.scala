@@ -183,12 +183,11 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
     rows.foreach { row =>
       withClue(row.label) {
         val client = new AlwaysFailing(row.error)
-        val reliable = new ReliableClient(
+        val reliable = ReliableClient(
           client,
           "contract",
-          ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis)),
-          sleep = _ => ()
-        )
+          ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
+        ).withSleep(_ => ())
         val result = reliable.complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())
 
         result shouldBe Left(row.error)

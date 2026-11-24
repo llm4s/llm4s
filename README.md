@@ -491,7 +491,6 @@ Preferred typed entry points (PureConfig-backed via `Llm4sConfig`):
 - Tracing:
   - `Llm4sConfig.tracing(): Result[TracingSettings]` – returns typed tracing settings.
   - `Tracing.fromSettings(settings: TracingSettings): Result[Tracing]` – builds the tracer the mode selects; a missing backend is an error.
-  - `Tracing.create(settings: TracingSettings): Tracing` – the same, falling back to `NoOpTracing` with an error logged.
 - Embeddings:
   - `Llm4sConfig.embeddings(): Result[(String, EmbeddingProviderConfig)]` – returns `(provider, config)` with validation.
   - `EmbeddingClient.from(provider: String, cfg: EmbeddingProviderConfig): Result[EmbeddingClient]` – builds an embeddings client from typed config.
@@ -500,7 +499,7 @@ Recommended usage patterns:
 
 - Model name for display: `Llm4sConfig.defaultProvider().map(_.model)` or prefer `completion.model` from API responses.
 - Tracing:
-  - `Llm4sConfig.tracing().flatMap(Tracing.fromSettings)`, or `.map(Tracing.create)` to fall back to no tracing.
+  - `Llm4sConfig.tracing().flatMap(Tracing.fromSettings)`; add `.getOrElse(new NoOpTracing())` to run untraced when the backend is missing.
 - Workspace (samples): `WorkspaceConfigSupport.load()` to get `workspaceDir`, `imageName`, `hostPort`.
 - Embeddings sample (samples): `EmbeddingUiSettings.loadFromEnv`, `EmbeddingTargets.loadFromEnv`, `EmbeddingQuery.loadFromEnv` (sample helpers backed by `Llm4sConfig`).
 
@@ -517,7 +516,7 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
 - Tracing configuration
   - Keys: `llm4s.tracing.mode` | `TRACING_MODE` (`llm4s-core`); `llm4s.tracing.langfuse.*` | `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION` (bound by `llm4s-observability`); `llm4s.tracing.opentelemetry.*` | `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` (bound by `llm4s-observability-otel`)
   - Type: `TracingSettings` (the mode, plus the selected mode's block as `extras`); `LangfuseConfig` via `LangfuseConfigLoader.default()`
-  - Loader: `Llm4sConfig.tracing()` → then `Tracing.fromSettings` or `Tracing.create`
+  - Loader: `Llm4sConfig.tracing()` → then `Tracing.fromSettings`
 
 - Workspace settings (samples)
   - Keys: `llm4s.workspace.dir` | `WORKSPACE_DIR`, `llm4s.workspace.image` | `WORKSPACE_IMAGE`, `llm4s.workspace.port` | `WORKSPACE_PORT`
@@ -561,7 +560,7 @@ Tracing
 - Override with env: `TRACING_MODE=langfuse` (or system property `-Dllm4s.tracing.mode=langfuse`).
 - Build tracers:
   - Checked: `Llm4sConfig.tracing().flatMap(Tracing.fromSettings)` → `Result[Tracing]`
-  - Falling back to no tracing: `Llm4sConfig.tracing().map(Tracing.create)`
+  - Falling back to no tracing is the caller's choice, written where the tracer is built: `.getOrElse(new NoOpTracing())`
   - Low-level: `LangfuseConfigLoader.default().map(LangfuseTracing.from)` (`llm4s-observability`)
 
 Example (no application.conf required):

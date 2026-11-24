@@ -12,7 +12,7 @@ object BasicLLMCallingWithTrace {
   def main(args: Array[String]): Unit = {
     val result = for {
       tracingSettings <- Llm4sConfig.tracing()
-      tracer = Tracing.create(tracingSettings)
+      tracer          <- Tracing.fromSettings(tracingSettings)
       providerCfg     <- Llm4sConfig.defaultProvider()
       registryService <- Llm4sConfig.modelRegistryService()
       given org.llm4s.model.ModelRegistryService = registryService

@@ -16,7 +16,9 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
 
   "TracingMode" should "parse opentelemetry strings correctly" in {
     TracingMode.fromString("opentelemetry") shouldBe TracingMode.Named("opentelemetry")
-    TracingMode.fromString("otel") shouldBe TracingMode.Named("opentelemetry")
+    // `otel` is the backend's alias, not core's: it parses as itself and the backend answers to it
+    TracingMode.fromString("otel") shouldBe TracingMode.Named("otel")
+    new OpenTelemetryTracingBackend().aliases shouldBe Set("otel")
     TracingMode.fromString("OpenTelemetry") shouldBe TracingMode.Named("opentelemetry")
   }
 
@@ -122,14 +124,14 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
     otel.close()
   }
 
-  it should "be loaded correctly via Tracing.create when configured" in {
+  it should "be loaded correctly via Tracing.fromSettings when configured" in {
     // The llm4s.tracing.opentelemetry block, as core hands it to the backend (#1133).
     val settings = TracingSettings(
       mode = TracingMode.fromString("opentelemetry"),
       extras = Map("serviceName" -> "integration-test", "endpoint" -> "http://localhost:4317")
     )
 
-    val tracingInstance = Tracing.create(settings)
+    val tracingInstance = Tracing.fromSettings(settings).fold(e => fail(e.message), identity)
     tracingInstance shouldBe a[OpenTelemetryTracing]
 
     // Cleanup

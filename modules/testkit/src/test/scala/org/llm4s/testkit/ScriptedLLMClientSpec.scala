@@ -319,21 +319,21 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   "a ScriptedLLMClient under ReliableClient" should "be retried after a rate limit and then succeed" in {
     val scripted = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("p")), Reply.text("recovered"))
-    val reliable = new ReliableClient(scripted, "p", ReliabilityConfig.default, sleep = _ => ())
+    val reliable = ReliableClient(scripted, "p", ReliabilityConfig.default).withSleep(_ => ())
     reliable.complete(conversation("q"), options).value.content shouldBe "recovered"
     scripted.callCount shouldBe 2
   }
 
   it should "not retry an authentication error" in {
     val scripted = ScriptedLLMClient.sequence(Reply.failure(AuthenticationError("p", "bad key")), Reply.text("unused"))
-    val reliable = new ReliableClient(scripted, "p", ReliabilityConfig.default, sleep = _ => ())
+    val reliable = ReliableClient(scripted, "p", ReliabilityConfig.default).withSleep(_ => ())
     reliable.complete(conversation("q"), options).left.value shouldBe an[AuthenticationError]
     scripted.callCount shouldBe 1
   }
 
   it should "not retry a call the script has no reply for" in {
     val scripted = ScriptedLLMClient.sequence()
-    val reliable = new ReliableClient(scripted, "p", ReliabilityConfig.default, sleep = _ => ())
+    val reliable = ReliableClient(scripted, "p", ReliabilityConfig.default).withSleep(_ => ())
     reliable.complete(conversation("q"), options).left.value shouldBe an[UnscriptedCallError]
     scripted.callCount shouldBe 1
   }

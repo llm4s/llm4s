@@ -127,7 +127,7 @@ object EnrichTickets {
       models <- Llm4sConfig.modelRegistryService()
       config <- Llm4sConfig.defaultProvider()(using registry)
       client <- LLMConnect.getClient(config)(using models, registry)
-    } yield new ReliableClient(
+    } yield ReliableClient(
       client,
       "flink-example",
       ReliabilityConfig(

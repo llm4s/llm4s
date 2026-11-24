@@ -26,7 +26,7 @@ object LangfuseSampleTraceRunner {
     )
     val tracer = Llm4sConfig
       .tracing()
-      .map(Tracing.create)
+      .flatMap(Tracing.fromSettings)
       .fold(_ => new ConsoleTracing(), identity)
     tracer.traceEvent(fakeState)
   }

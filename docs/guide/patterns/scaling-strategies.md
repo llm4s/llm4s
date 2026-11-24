@@ -46,7 +46,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.reliability.{ RateLimitConfig, ReliabilityConfig, ReliableClient }
 
 def throttled(client: LLMClient): ReliableClient =
-  new ReliableClient(
+  ReliableClient(
     client,
     "openai-main",
     ReliabilityConfig.default.withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 500, burstCapacity = 50))
