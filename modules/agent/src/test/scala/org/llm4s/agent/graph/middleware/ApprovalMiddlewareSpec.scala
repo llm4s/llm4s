@@ -38,7 +38,7 @@ class ApprovalMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues
   }
 
   private def call(id: String, name: String, env: String): Vector[Message] => AssistantMessage =
-    _ => AssistantMessage(None, Seq(ToolCall(id, name, ujson.Obj("env" -> env))))
+    _ => AssistantMessage(None, Seq(ToolCall(ToolCallId(id), name, ujson.Obj("env" -> env))))
 
   private val summarise: Vector[Message] => AssistantMessage = history =>
     AssistantMessage("done: " + history.collect { case t: ToolMessage => t.content }.mkString(" | "))

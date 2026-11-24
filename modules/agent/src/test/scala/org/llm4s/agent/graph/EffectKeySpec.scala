@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.toolapi.IdempotencyKey
+import org.llm4s.llmconnect.model.ToolCallId
 import org.llm4s.agent.graph.tool.ToolContext
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -32,7 +34,7 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "RunContext.taskKey" should "be the same in every run of a task, whatever its run, checkpoint, token or superstep" in {
     val key = context().taskKey
-    (key.value should fullyMatch).regex("[0-9a-f]{64}")
+    (key.asString should fullyMatch).regex("[0-9a-f]{64}")
     // recover writes a new checkpoint and claim; updateState moves the superstep on, keeping the task id
     context(run = "other", checkpoint = "other/9", token = Some(99L), superstep = 4).taskKey shouldBe key
     context(thread = "u").taskKey should not be key
@@ -132,8 +134,8 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     val state   = ThreadState.empty(Map.empty)
     val q       = CompiledGraph.questionDigest(Some(VersionedJson(1, ujson.Obj("prompt" -> "sure?"))))
     val resume  = CompiledGraph.resumeDigest(Some(q), ujson.True)
-    val first   = IdempotencyKey.ofResume(call, None, resume)
-    val second  = IdempotencyKey.ofResume(call, Some(first), resume)
+    val first   = IdempotencyKeys.ofResume(call, None, resume)
+    val second  = IdempotencyKeys.ofResume(call, Some(first), resume)
     val execute = ToolContext(context(), ToolCallId("c"), call, state)
     def resuming(phase: IdempotencyKey, thread: String = "t") =
       ToolContext.resuming(context(thread = thread), ToolCallId("c"), call, state, approved = false, phase)
@@ -144,8 +146,8 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
       Some(CompiledGraph.questionDigest(Some(VersionedJson(1, ujson.Obj("prompt" -> "sure?"))))),
       ujson.True
     )
-    resuming(IdempotencyKey.ofResume(call, None, again)).effectKey("op", "x") shouldBe keys(1)
-    IdempotencyKey.ofResume(call, None, CompiledGraph.resumeDigest(Some(q), ujson.False)) should not be first
+    resuming(IdempotencyKeys.ofResume(call, None, again)).effectKey("op", "x") shouldBe keys(1)
+    IdempotencyKeys.ofResume(call, None, CompiledGraph.resumeDigest(Some(q), ujson.False)) should not be first
     // a fork resuming the same question is a new effect
     resuming(first, thread = "fork").effectKey("op", "x") should not be keys(1)
     // an approval re-run of execute keeps execute's key
@@ -227,11 +229,11 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     val call  = IdempotencyKey("call")
     val state = ThreadState.empty(Map.empty)
     // a call's key carries the issuing model task's lineage
-    val issued = org.llm4s.llmconnect.model.ToolCall("c", "tool", ujson.Obj("x" -> 1))
-    IdempotencyKey.ofCall(ThreadId("t"), at("a").taskKey, issued) should not be
-      IdempotencyKey.ofCall(ThreadId("t"), at("b").taskKey, issued)
-    IdempotencyKey.ofCall(ThreadId("t"), at("a").taskKey, issued) should not be
-      IdempotencyKey.ofCall(ThreadId("t"), at("a").taskKey, issued.withArguments(ujson.Obj("x" -> 2)))
+    val issued = org.llm4s.llmconnect.model.ToolCall(ToolCallId("c"), "tool", ujson.Obj("x" -> 1))
+    IdempotencyKeys.ofCall(ThreadId("t"), at("a").taskKey, issued) should not be
+      IdempotencyKeys.ofCall(ThreadId("t"), at("b").taskKey, issued)
+    IdempotencyKeys.ofCall(ThreadId("t"), at("a").taskKey, issued) should not be
+      IdempotencyKeys.ofCall(ThreadId("t"), at("a").taskKey, issued.withArguments(ujson.Obj("x" -> 2)))
     // a tool's effects follow the call's key, which already carries the lineage
     ToolContext(at("a"), ToolCallId("c"), call, state).effectKey("op") shouldBe
       ToolContext(at("b"), ToolCallId("c"), call, state).effectKey("op")
@@ -289,22 +291,22 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     scheduled(graph(ujson.Obj("a" -> 1))) should not be scheduled(graph(ujson.Obj("a" -> 2)))
     // and a call's key, whatever the order of its arguments' members
     val task = IdempotencyKey("model-task")
-    IdempotencyKey.ofCall(
+    IdempotencyKeys.ofCall(
       ThreadId("t"),
       task,
-      org.llm4s.llmconnect.model.ToolCall("c", "w", ujson.Obj("p" -> 1, "q" -> 2))
+      org.llm4s.llmconnect.model.ToolCall(ToolCallId("c"), "w", ujson.Obj("p" -> 1, "q" -> 2))
     ) shouldBe
-      IdempotencyKey.ofCall(
+      IdempotencyKeys.ofCall(
         ThreadId("t"),
         task,
-        org.llm4s.llmconnect.model.ToolCall("c", "w", ujson.Obj("q" -> 2, "p" -> 1))
+        org.llm4s.llmconnect.model.ToolCall(ToolCallId("c"), "w", ujson.Obj("q" -> 2, "p" -> 1))
       )
   }
 
   it should "hash a call's null parts, as a Java caller may build it, rather than fail" in {
     val task  = IdempotencyKey("model-task")
-    val nulls = org.llm4s.llmconnect.model.ToolCall(null, null, null)
-    IdempotencyKey.ofCall(ThreadId("t"), task, nulls) shouldBe IdempotencyKey.ofCall(ThreadId("t"), task, nulls)
+    val nulls = org.llm4s.llmconnect.model.ToolCall(org.llm4s.llmconnect.model.ToolCallId(null), null, null)
+    IdempotencyKeys.ofCall(ThreadId("t"), task, nulls) shouldBe IdempotencyKeys.ofCall(ThreadId("t"), task, nulls)
     KeyDigest.canonical(ujson.Obj("a" -> (null: ujson.Value))) shouldBe KeyDigest.canonical(
       ujson.Obj("a" -> ujson.Null)
     )
@@ -331,15 +333,15 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
       CompiledGraph.resumeDigest(question("q"), ujson.Str("a?"))
     ).size shouldBe 4
     Set(
-      IdempotencyKey.ofCall(
+      IdempotencyKeys.ofCall(
         ThreadId("t"),
         IdempotencyKey("m"),
-        org.llm4s.llmconnect.model.ToolCall("call_\uD800", "f", ujson.Obj())
+        org.llm4s.llmconnect.model.ToolCall(ToolCallId("call_\uD800"), "f", ujson.Obj())
       ),
-      IdempotencyKey.ofCall(
+      IdempotencyKeys.ofCall(
         ThreadId("t"),
         IdempotencyKey("m"),
-        org.llm4s.llmconnect.model.ToolCall("call_?", "f", ujson.Obj())
+        org.llm4s.llmconnect.model.ToolCall(ToolCallId("call_?"), "f", ujson.Obj())
       )
     ).size shouldBe 2
     StateCheck.of("a\uD800") should not be StateCheck.of("a?")

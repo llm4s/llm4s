@@ -29,7 +29,7 @@ object CodingModel {
   private val usage = TokenUsage(promptTokens = 100, completionTokens = 20, totalTokens = 120)
 
   private def call(id: String, name: String, args: (String, ujson.Value)*): ToolCall =
-    ToolCall(id, name, ujson.Obj.from(args))
+    ToolCall(ToolCallId(id), name, ujson.Obj.from(args))
 
   private def todos(statuses: (String, String)*): ujson.Value =
     ujson.Arr.from(statuses.map((content, status) => ujson.Obj("content" -> content, "status" -> status)))
@@ -54,9 +54,9 @@ object CodingModel {
             )
           )
         )
-      case t: ToolMessage if t.toolCallId == "plan" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("plan") =>
         Some(calls(call("read", "read_file", "path" -> CodingWorkspace.SourcePath)))
-      case t: ToolMessage if t.toolCallId == "read" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("read") =>
         // one message, three calls: the fix and the test, and a write outside /src the rules deny
         Some(
           calls(
@@ -71,9 +71,9 @@ object CodingModel {
             call("readme", "write_file", "path" -> "/README.md", "content"             -> "Fixed.")
           )
         )
-      case t: ToolMessage if t.toolCallId == "readme" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("readme") =>
         Some(calls(call("check", "execute", "command" -> CheckCommand)))
-      case t: ToolMessage if t.toolCallId == "check" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("check") =>
         Some(
           calls(
             call(
@@ -88,10 +88,10 @@ object CodingModel {
             )
           )
         )
-      case t: ToolMessage if t.toolCallId == "done" => Some(Reply.text(Answer).withUsage(usage))
+      case t: ToolMessage if t.toolCallId == ToolCallId("done") => Some(Reply.text(Answer).withUsage(usage))
       case u: UserMessage if u.content == LeakQuery =>
         Some(calls(call("leak-read", "read_file", "path" -> CodingWorkspace.SourcePath)))
-      case t: ToolMessage if t.toolCallId == "leak-read" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("leak-read") =>
         Some(
           calls(
             call("leak-src", "write_file", "path" -> "/src/Deploy.scala", "content" -> "object Deploy"),
@@ -99,7 +99,7 @@ object CodingModel {
             call("leak-plan", "write_todos", "todos" -> todos("Add the deploy key" -> "in_progress"))
           )
         )
-      case t: ToolMessage if t.toolCallId == "leak-plan" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("leak-plan") =>
         Some(Reply.text("Added AKIAIOSFODNN7EXAMPLE to /src/Deploy.scala.").withUsage(usage))
       case _ => None
     }

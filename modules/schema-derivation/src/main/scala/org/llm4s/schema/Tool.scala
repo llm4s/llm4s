@@ -110,7 +110,7 @@ object Tool {
         parameters,
         extractor =>
           decode[A](parameters, extractor.params).left.map(refused).flatMap { arguments =>
-            val key = extractor.call.fold(ToolScope.fallbackKey(name, extractor.params))(_.idempotencyKey)
+            val key = extractor.call.fold(ToolScope.fallbackKey(name, extractor.params))(_.idempotencyKey.asString)
             boundary[Either[String, R]] {
               given ToolScope = new ToolScope(extractor.call, key, summon[boundary.Label[Either[String, R]]])
               Right(handler(arguments))

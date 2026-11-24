@@ -159,8 +159,8 @@ guide/agents/human-review.md | 25590550c3 | skip | runtime, graph and input stan
 guide/agents/index.md | 32e48b77f6 | skip | sbt build definition, not Scala source
 guide/agents/middleware.md | 7316ca7315 | skip | sbt build definition, not Scala source
 guide/agents/index.md | 8f4ed128d4 | with | import org.llm4s.agent.Agent; import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService
-guide/agents/index.md | 03517fa0d9 | skip | chargeSpec and payments stand for the reader's own tool spec and payment client
-guide/agents/index.md | 6066fbfb68 | skip | chargeSchema and payments stand for the reader's own schema and payment client
+guide/agents/index.md | 82582ede43 | skip | chargeSpec and payments stand for the reader's own tool spec and payment client
+guide/agents/index.md | 851d4f4d00 | skip | chargeSchema and payments stand for the reader's own schema and payment client
 guide/agents/index.md | 6774605f9e | skip | appendSpec, read and writeIfUnchanged stand for the reader's own tool spec and file access
 guide/agents/index.md | b76f20c767 | skip | dir, image and port stand for the workspace directory, runner image and port the reader starts
 guide/agents/index.md | 15ca9efc01 | skip | baseSpec and workspaceId stand for the reader's own tool spec and workspace

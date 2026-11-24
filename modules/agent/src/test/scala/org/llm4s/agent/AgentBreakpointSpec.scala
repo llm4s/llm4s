@@ -156,7 +156,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     )
     val agent = built(
       builder(client)
-        .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == "c1")("check c1")))
+        .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == ToolCallId("c1"))("check c1")))
         .withInterruptAfter(AgentNode.Tool)
     )
     val parked = agent.run("deploy").value

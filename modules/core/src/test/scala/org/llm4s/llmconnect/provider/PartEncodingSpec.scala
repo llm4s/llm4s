@@ -27,11 +27,11 @@ class PartEncodingSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "name the first part a role does not cover" in {
-    val assistant = AssistantMessage(None, Seq(ToolCall("c", "t", ujson.Obj())))
+    val assistant = AssistantMessage(None, Seq(ToolCall(ToolCallId("c"), "t", ujson.Obj())))
     PartEncoding
       .check(
         "p",
-        Seq(UserMessage("go"), assistant, ToolMessage(Vector(image), "c")),
+        Seq(UserMessage("go"), assistant, ToolMessage(Vector(image), ToolCallId("c"))),
         { case _ => 1 },
         PartEncoding.textOnly
       )

@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
 
@@ -59,8 +60,8 @@ object GraphError:
   final case class ToolFailed private (tool: ToolName, toolCallId: ToolCallId, cause: LLMError)
       extends GraphError
       with NonRecoverableError:
-    override val message: String          = s"Tool '${tool.value}' (call ${toolCallId.value}) failed: ${cause.message}"
-    def withTool(t: ToolName): ToolFailed = copy(tool = t)
+    override val message: String = s"Tool '${tool.value}' (call ${toolCallId.asString}) failed: ${cause.message}"
+    def withTool(t: ToolName): ToolFailed          = copy(tool = t)
     def withToolCallId(id: ToolCallId): ToolFailed = copy(toolCallId = id)
     def withCause(c: LLMError): ToolFailed         = copy(cause = c)
 

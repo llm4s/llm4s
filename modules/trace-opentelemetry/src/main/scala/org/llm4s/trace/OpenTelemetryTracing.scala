@@ -507,13 +507,15 @@ class OpenTelemetryTracing private[trace] (
             text ++ a.toolCalls.map(c =>
               ujson.Obj(
                 "type"      -> "tool_call",
-                "id"        -> c.id,
+                "id"        -> c.id.asString,
                 "name"      -> c.name,
                 "arguments" -> content(c.arguments.render())
               )
             )
           case t: ToolMessage =>
-            Seq(ujson.Obj("type" -> "tool_call_response", "id" -> t.toolCallId, "response" -> content(t.content)))
+            Seq(
+              ujson.Obj("type" -> "tool_call_response", "id" -> t.toolCallId.asString, "response" -> content(t.content))
+            )
           case other => Seq(textPart(other.content))
         }
         ujson.Obj("role" -> m.role.name, "parts" -> ujson.Arr(parts*))

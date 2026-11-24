@@ -1,5 +1,7 @@
 package org.llm4s.toolapi
 
+import org.llm4s.llmconnect.model.ToolCallId
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -224,7 +226,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
     val keyed = adder(args =>
       args.call.map(_.idempotencyKey).toRight("no call").flatMap(_ => args.getDouble("a")).map(MathResult(_))
     )
-    keyed.execute(ujson.Obj(), ToolCallInfo("call-1", "key-1")) shouldBe Left(
+    keyed.execute(ujson.Obj(), ToolCallInfo(ToolCallId("call-1"), IdempotencyKey("key-1"))) shouldBe Left(
       ToolCallError.InvalidArguments("add", List(ToolParameterError.MissingParameter("a", "number", Nil)))
     )
     keyed.execute(ujson.Obj("a" -> 1)) shouldBe Left(ToolCallError.HandlerError("add", "no call"))

@@ -142,7 +142,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
       withServer("/")(sendJsonResponse(_, 200, body)) { url =>
         val completion = new BedrockClient(config(url)).complete(conversation, CompletionOptions()).toOption.value
         completion.toolCalls should have size 1
-        completion.toolCalls.head.id shouldBe "tc-42"
+        completion.toolCalls.head.id shouldBe ToolCallId("tc-42")
         completion.toolCalls.head.name shouldBe "get_weather"
         completion.toolCalls.head.arguments("location").str shouldBe "Paris"
         completion.toolCalls.head.arguments("days").num shouldBe 3.0
@@ -165,8 +165,8 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         val conv = Conversation(
           Seq(
             UserMessage("What is the weather in London?"),
-            AssistantMessage(None, Seq(ToolCall("tc-1", "get_weather", ujson.Obj("location" -> "London")))),
-            ToolMessage(toolCallId = "tc-1", content = """{"temp": 22}""")
+            AssistantMessage(None, Seq(ToolCall(ToolCallId("tc-1"), "get_weather", ujson.Obj("location" -> "London")))),
+            ToolMessage(toolCallId = ToolCallId("tc-1"), content = """{"temp": 22}""")
           )
         )
         new BedrockClient(config(url)).complete(conv, CompletionOptions(tools = Seq(tool)))
@@ -302,7 +302,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         val completion = result.toOption.value
         completion.toolCalls should have size 1
         completion.message.toolCalls shouldBe completion.toolCalls
-        completion.toolCalls.head.id shouldBe "tc-9"
+        completion.toolCalls.head.id shouldBe ToolCallId("tc-9")
         completion.toolCalls.head.name shouldBe "get_weather"
         completion.toolCalls.head.arguments("location").str shouldBe "Rome"
       }

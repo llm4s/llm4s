@@ -1,17 +1,16 @@
 package org.llm4s.agent.delegation
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.{ Suspension, AgentId, AgentResult, AgentStatus, CompletionFixture }
 import org.llm4s.agent.graph.{
   BreakpointPhase,
   CheckpointStatus,
   GraphError,
   GraphRuntime,
-  IdempotencyKey,
   InterruptId,
   NodeId,
   RunId,
-  ThreadId,
-  ToolCallId
+  ThreadId
 }
 import org.llm4s.agent.graph.toolloop.{ ApprovalRequest, ApprovalSource, BreakpointRequest }
 import org.llm4s.agent.graph.middleware.{
@@ -104,7 +103,7 @@ class DelegatedSuspensionSpec extends AnyFlatSpec with Matchers with EitherValue
         )
       case Lead(messages) => Right(CompletionFixture.simple(s"composed ${toolResults(messages).mkString(" | ")}"))
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
-        Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "probe", ujson.Obj("text" -> "x"))))
       case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"done","sources":1}"""))
     }
     val agent = lead(client).withSubagents(asking(probe(runs))).build().value
@@ -133,8 +132,8 @@ class DelegatedSuspensionSpec extends AnyFlatSpec with Matchers with EitherValue
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
         Right(
           calling(
-            ToolCall("k1", "probe", ujson.Obj("text" -> "x")),
-            ToolCall("k2", "probe", ujson.Obj("text" -> "y"))
+            ToolCall(ToolCallId("k1"), "probe", ujson.Obj("text" -> "x")),
+            ToolCall(ToolCallId("k2"), "probe", ujson.Obj("text" -> "y"))
           )
         )
       case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"both","sources":2}"""))
@@ -165,7 +164,7 @@ class DelegatedSuspensionSpec extends AnyFlatSpec with Matchers with EitherValue
         Right(calling(call("g1", "task_researcher", ujson.Obj("topic" -> "deep"))))
       case Child("general", messages) => Right(CompletionFixture.simple(s"general: ${toolResults(messages).mkString}"))
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
-        Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "probe", ujson.Obj("text" -> "x"))))
       case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"deep","sources":3}"""))
     }
     val grandchild = asking(probe(runs)).bind(client, runtime).value
@@ -219,8 +218,8 @@ class DelegatedSuspensionSpec extends AnyFlatSpec with Matchers with EitherValue
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
         Right(
           calling(
-            ToolCall("k1", "probe", ujson.Obj("text" -> "x")),
-            ToolCall("k2", "probe", ujson.Obj("text" -> "y"))
+            ToolCall(ToolCallId("k1"), "probe", ujson.Obj("text" -> "x")),
+            ToolCall(ToolCallId("k2"), "probe", ujson.Obj("text" -> "y"))
           )
         )
       case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"both","sources":2}"""))
@@ -248,7 +247,7 @@ class DelegatedSuspensionSpec extends AnyFlatSpec with Matchers with EitherValue
         Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
       case Lead(messages) => Right(CompletionFixture.simple(s"composed ${toolResults(messages).mkString}"))
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
-        Right(calling(ToolCall("k1", "convert", ujson.Obj("text" -> "10"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "convert", ujson.Obj("text" -> "10"))))
       case Child("researcher", messages) =>
         Right(CompletionFixture.simple(s"""{"summary":"${toolResults(messages).mkString}","sources":1}"""))
     }
@@ -298,7 +297,7 @@ class DelegatedSuspensionSpec extends AnyFlatSpec with Matchers with EitherValue
 
   "a DelegatedQuestion" should "round-trip through its codec with every kind of child interrupt" in {
     val ref  = ChildRef(ThreadId("c"), RunId("r"), AgentId.unsafe("a"), Some(ToolCallId("call")), 1)
-    val call = ToolCall("k", "probe", ujson.Obj())
+    val call = ToolCall(ToolCallId("k"), "probe", ujson.Obj())
     val held = BreakpointRequest(NodeId("n"), BreakpointPhase.Before, Some(call))
     val question = DelegatedQuestion(
       ref,
@@ -343,7 +342,7 @@ object DelegatedSuspensionSpec extends EitherValues {
       Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
     case Lead(messages) => Right(CompletionFixture.simple(s"composed ${toolResults(messages).mkString}"))
     case Child("researcher", messages) if toolResults(messages).isEmpty =>
-      Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+      Right(calling(ToolCall(ToolCallId("k1"), "probe", ujson.Obj("text" -> "x"))))
     case Child("researcher", messages) =>
       val seen = toolResults(messages).mkString.replace("\"", "")
       Right(CompletionFixture.simple(s"""{"summary":"$seen","sources":1}"""))

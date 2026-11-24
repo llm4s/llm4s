@@ -34,11 +34,11 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
     reserveCompletion = 4096
   )
 
-  private val call = ToolCall("toolu_1", "get_weather", ujson.Obj("city" -> "Paris"))
+  private val call = ToolCall(ToolCallId("toolu_1"), "get_weather", ujson.Obj("city" -> "Paris"))
 
   private val sealedThinking =
     Seq(ThinkingBlock.Text("Weather and time.", Some("sig-pair")), ThinkingBlock.Redacted("opaque-pair"))
-  private val timeCall = ToolCall("toolu_2", "get_time", ujson.Obj("zone" -> "CET"))
+  private val timeCall = ToolCall(ToolCallId("toolu_2"), "get_time", ujson.Obj("zone" -> "CET"))
 
   private def requestBody(messages: Message*): ujson.Value = requestBodyWith(CompletionOptions())(messages*)
 
@@ -153,7 +153,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
       val client = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
       val ask    = UserMessage("Weather in Paris?")
       val first  = client.complete(Conversation(Seq(ask)), CompletionOptions()).toOption.get
-      val answer = ToolMessage("sunny", "toolu_1")
+      val answer = ToolMessage("sunny", ToolCallId("toolu_1"))
       client.complete(Conversation(Seq(ask, first.message, answer)), CompletionOptions()).isRight shouldBe true
 
       val messages = seen()(1)("messages").arr
@@ -203,7 +203,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "put the results of parallel tool calls in one user turn, in order" in {
-    val second = ToolCall("toolu_2", "get_time", ujson.Obj("zone" -> "CET"))
+    val second = ToolCall(ToolCallId("toolu_2"), "get_time", ujson.Obj("zone" -> "CET"))
     val body = requestBody(
       UserMessage("Weather and time in Paris?"),
       AssistantMessage(None, Seq(call, second)),
@@ -233,7 +233,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "pair a result only with the turn straight before it" in {
-    val second = ToolCall("toolu_2", "get_time", ujson.Obj("zone" -> "CET"))
+    val second = ToolCall(ToolCallId("toolu_2"), "get_time", ujson.Obj("zone" -> "CET"))
     val body = requestBody(
       UserMessage("Weather, then time?"),
       AssistantMessage(None, Seq(call)),
@@ -391,7 +391,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
       val history = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather in Paris?"))
       val first   = client.complete(Conversation(history), CompletionOptions()).toOption.get
       first.message.thinkingBinding shouldBe defined
-      val answer = ToolMessage("sunny", "toolu_1")
+      val answer = ToolMessage("sunny", ToolCallId("toolu_1"))
       client.complete(Conversation(history :+ first.message :+ answer), CompletionOptions()).isRight shouldBe true
       client
         .complete(Conversation(history.drop(2) :+ first.message :+ answer), CompletionOptions())
@@ -410,9 +410,10 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
         .streamComplete(Conversation(Seq(ask)), CompletionOptions())(_ => ())
         .toOption
         .get
-      val body = requestBody(ask, completion.message, ToolMessage("sunny", "toolu_1"))
+      val body = requestBody(ask, completion.message, ToolMessage("sunny", ToolCallId("toolu_1")))
       body.render() should include("sig-streamed")
-      (requestBody(UserMessage("Other"), completion.message, ToolMessage("sunny", "toolu_1")).render() should not)
+      (requestBody(UserMessage("Other"), completion.message, ToolMessage("sunny", ToolCallId("toolu_1")))
+        .render() should not)
         .include("sig-streamed")
     }
   }

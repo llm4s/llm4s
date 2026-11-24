@@ -26,7 +26,7 @@ class AgentAbandonSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def ok(text: String) = ToolOutcome.success(ToolContent.Json(ujson.Str(text)))
 
   private def results(messages: Seq[Message]): Vector[(String, String)] =
-    messages.collect { case t: ToolMessage => t.toolCallId -> ContentPart.text(t.parts) }.toVector
+    messages.collect { case t: ToolMessage => t.toolCallId.asString -> ContentPart.text(t.parts) }.toVector
 
   /** An agent whose `flaky` tool fails `Fatal` and whose `good` tool counts its runs, over `store`. */
   private def failing(

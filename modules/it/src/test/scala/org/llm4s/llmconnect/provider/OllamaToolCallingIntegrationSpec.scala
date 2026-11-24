@@ -71,7 +71,7 @@ class OllamaToolCallingIntegrationSpec extends AnyFlatSpec with Matchers {
       val calls = result.toOption.get.toolCalls
       assumeToolCalled(calls)
       calls.foreach { call =>
-        call.id should not be empty
+        call.id.asString should not be empty
         call.name shouldBe "get_weather"
         call.arguments shouldBe a[ujson.Obj]
       }
@@ -87,7 +87,7 @@ class OllamaToolCallingIntegrationSpec extends AnyFlatSpec with Matchers {
       val calls = result.toOption.get.toolCalls
       assumeToolCalled(calls)
       calls.foreach { call =>
-        call.id should not be empty
+        call.id.asString should not be empty
         call.name shouldBe "get_weather"
       }
     }

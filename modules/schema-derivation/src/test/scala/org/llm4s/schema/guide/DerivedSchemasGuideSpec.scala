@@ -450,7 +450,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
   "The scoped tool of the guide" should "pass the call's idempotency key on and end the call on each check" in {
     import ScopedTools.*
     import org.llm4s.error.NotFoundError
-    import org.llm4s.toolapi.{ ToolCallError, ToolCallInfo }
+    import org.llm4s.toolapi.{ IdempotencyKey, ToolCallError, ToolCallInfo }
 
     val charged = scala.collection.mutable.ListBuffer.empty[(String, Long, String)]
     val customers = new Customers {
@@ -470,7 +470,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     def call(id: String, cents: Long, currency: String = "EUR") =
       tool.execute(
         ujson.Obj("customerId" -> id, "amountCents" -> ujson.Num(cents.toDouble), "currency" -> currency),
-        ToolCallInfo("t-1", "k-1")
+        ToolCallInfo(ToolCallId("t-1"), IdempotencyKey("k-1"))
       )
     def error(message: String) = Left(ToolCallError.HandlerError("charge_card", message))
 

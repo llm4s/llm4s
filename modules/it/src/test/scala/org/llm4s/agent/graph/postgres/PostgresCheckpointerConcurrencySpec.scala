@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.postgres
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.graph.*
 import org.llm4s.it.tags.Docker
 import org.llm4s.types.Result

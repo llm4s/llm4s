@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.{ CancelledError, ValidationError }
@@ -337,12 +338,12 @@ final class RunContext private[graph] (
    * time: after `deleteThread`, or work after the last durable checkpoint planned again under
    * `Async`/`OnExit`, a task id can name new work.
    */
-  lazy val taskKey: IdempotencyKey = IdempotencyKey.ofTask(position.threadId, effectOwner, effectLineage)
+  lazy val taskKey: IdempotencyKey = IdempotencyKeys.ofTask(position.threadId, effectOwner, effectLineage)
 
   /**
    * The key of one external effect of this task - `operation`, such as `memory.record`, on what
    * `discriminator` names - for [[ReplayGuard]]. A tool uses `ToolContext.effectKey`, whose base is its
-   * call's [[IdempotencyKey]]. Give each effect of a task its own operation or discriminator, and pass
+   * call's [[org.llm4s.toolapi.IdempotencyKey]]. Give each effect of a task its own operation or discriminator, and pass
    * a set (memory ids) sorted.
    */
   def effectKey(operation: String, discriminator: String*): EffectKey =

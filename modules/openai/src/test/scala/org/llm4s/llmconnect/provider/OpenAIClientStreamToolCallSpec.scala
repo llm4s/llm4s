@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, ToolCallId, UserMessage }
 import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ chunk, stream, transport }
 import org.llm4s.model.ModelRegistryService
 import org.scalatest.EitherValues
@@ -68,7 +68,7 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
 
     completion.toolCalls should have size 1
     val call = completion.toolCalls.head
-    call.id shouldBe "call_1"
+    call.id shouldBe ToolCallId("call_1")
     call.name shouldBe "get_weather"
     call.arguments shouldBe ujson.Obj("city" -> "Paris")
 
@@ -95,11 +95,11 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
       finish
     )
 
-    completion.toolCalls.map(tc => tc.id -> (tc.name, tc.arguments)).toMap shouldBe Map(
+    completion.toolCalls.map(tc => tc.id.asString -> (tc.name, tc.arguments)).toMap shouldBe Map(
       "call_a" -> ("get_weather", ujson.Obj("city" -> "Paris")),
       "call_b" -> ("get_time", ujson.Obj("zone" -> "CET"))
     )
-    chunks.flatMap(_.toolCall).map(tc => tc.id -> tc.name).distinct.toMap shouldBe Map(
+    chunks.flatMap(_.toolCall).map(tc => tc.id.asString -> tc.name).distinct.toMap shouldBe Map(
       "call_a" -> "get_weather",
       "call_b" -> "get_time"
     )
@@ -115,8 +115,8 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
     completion.toolCalls should not be empty
     completion.toolCalls.toSet shouldBe completion.message.toolCalls.toSet
     completion.toolCalls.foreach(tc => tc.arguments shouldBe a[ujson.Obj])
-    completion.toolCalls.find(_.id == "call_1").map(_.arguments("limit").num) shouldBe Some(10.0)
-    completion.toolCalls.find(_.id == "call_2").map(_.arguments("b").num) shouldBe Some(3.0)
+    completion.toolCalls.find(_.id == ToolCallId("call_1")).map(_.arguments("limit").num) shouldBe Some(10.0)
+    completion.toolCalls.find(_.id == ToolCallId("call_2")).map(_.arguments("b").num) shouldBe Some(3.0)
     completion.usage.map(_.totalTokens) shouldBe Some(19)
     completion.model shouldBe model
   }

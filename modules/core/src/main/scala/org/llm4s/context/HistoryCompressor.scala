@@ -148,7 +148,7 @@ object HistoryCompressor {
    * tool call id, transitively, to one of them or to a `recent` block.
    */
   private def keptBlocks(older: Seq[SemanticBlock], recent: Seq[SemanticBlock]): Set[SemanticBlockId] = {
-    def callIds(block: SemanticBlock): Set[String] =
+    def callIds(block: SemanticBlock): Set[ToolCallId] =
       block.messages.flatMap {
         case a: AssistantMessage => a.toolCalls.map(_.id)
         case t: ToolMessage      => Seq(t.toolCallId)

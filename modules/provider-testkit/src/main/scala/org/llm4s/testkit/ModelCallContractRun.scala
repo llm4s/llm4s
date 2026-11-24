@@ -77,8 +77,8 @@ private[testkit] object ModelCallContractRun:
     val lastReason = chunks.flatMap(_.finishReason).lastOption
     if !lastReason.contains(completion.finishReason) then
       fail(s"the last finish reason a chunk carried is $lastReason, the Completion's is ${completion.finishReason}")
-    val streamedIds  = chunks.flatMap(_.toolCall).map(_.id).filter(_.nonEmpty).distinct
-    val completedIds = calls(completion).map(_.id).filter(_.nonEmpty)
+    val streamedIds  = chunks.flatMap(_.toolCall).map(_.id).filter(_.asString.nonEmpty).distinct
+    val completedIds = calls(completion).map(_.id).filter(_.asString.nonEmpty)
     if streamedIds.toSet != completedIds.toSet then
       fail(s"the chunks name tool calls $streamedIds, the Completion has $completedIds")
 

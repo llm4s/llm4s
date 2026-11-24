@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.model.{ AssistantMessage, Message, SystemMessage, ToolMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Message, SystemMessage, ToolCallId, ToolMessage }
 
 /**
  * Which tool calls and tool results of a conversation can go to a provider as native, paired
@@ -18,10 +18,10 @@ import org.llm4s.llmconnect.model.{ AssistantMessage, Message, SystemMessage, To
  * @param calls   For each assistant message's index in the conversation, the ids of its paired calls.
  * @param results The indices of the paired tool messages.
  */
-final private[llm4s] case class ToolResultPairing(calls: Map[Int, Set[String]], results: Set[Int]) {
+final private[llm4s] case class ToolResultPairing(calls: Map[Int, Set[ToolCallId]], results: Set[Int]) {
 
   /** Whether the call `id` of the assistant message at `assistantIndex` is paired. */
-  def callPaired(assistantIndex: Int, id: String): Boolean = calls.get(assistantIndex).exists(_.contains(id))
+  def callPaired(assistantIndex: Int, id: ToolCallId): Boolean = calls.get(assistantIndex).exists(_.contains(id))
 
   /** Whether the tool message at `index` is paired. */
   def resultPaired(index: Int): Boolean = results.contains(index)

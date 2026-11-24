@@ -26,3 +26,4 @@ org.llm4s.scalafix.CompletionFromMessage
 org.llm4s.scalafix.MessageAndConversationShapes
 org.llm4s.scalafix.ClientEntryPoints
 org.llm4s.scalafix.ToolFunctionOneTypeParameter
+org.llm4s.scalafix.ToolCallIdTyped

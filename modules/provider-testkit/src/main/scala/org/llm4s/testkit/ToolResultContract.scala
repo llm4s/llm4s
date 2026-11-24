@@ -1,6 +1,6 @@
 package org.llm4s.testkit
 
-import org.llm4s.llmconnect.model.{ AssistantMessage, Conversation, ToolCall, ToolMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Conversation, ToolCall, ToolCallId, ToolMessage, UserMessage }
 
 /**
  * A chat API's wire format for tool calls and their results, as the tool-result contract reads a
@@ -64,7 +64,8 @@ object ToolResultContract:
    * call begins. Error results carry `{"error": ...}`, as the agent's tool loop writes them.
    */
   val cases: Vector[ToolResultCase] =
-    def call(id: String, name: String, args: ujson.Value = ujson.Obj("query" -> "llm4s")) = ToolCall(id, name, args)
+    def call(id: String, name: String, args: ujson.Value = ujson.Obj("query" -> "llm4s")) =
+      ToolCall(ToolCallId(id), name, args)
     def error(message: String) = ujson.Obj("error" -> message).render()
     Vector(
       ToolResultCase(
@@ -73,7 +74,7 @@ object ToolResultContract:
           Seq(
             UserMessage("Look up llm4s."),
             AssistantMessage(text = None, toolCalls = Seq(call("call_a1", "lookup"))),
-            ToolMessage("""{"found":true}""", "call_a1")
+            ToolMessage("""{"found":true}""", ToolCallId("call_a1"))
           )
         )
       ),
@@ -91,10 +92,10 @@ object ToolResultContract:
                 call("call_b4", "send_mail")
               )
             ),
-            ToolMessage("found", "call_b1"),
-            ToolMessage(error("Tool 'fetch' failed: connection reset"), "call_b2"),
-            ToolMessage(error("Rejected: not today"), "call_b3"),
-            ToolMessage(error("Denied: mail is not allowed"), "call_b4")
+            ToolMessage("found", ToolCallId("call_b1")),
+            ToolMessage(error("Tool 'fetch' failed: connection reset"), ToolCallId("call_b2")),
+            ToolMessage(error("Rejected: not today"), ToolCallId("call_b3")),
+            ToolMessage(error("Denied: mail is not allowed"), ToolCallId("call_b4"))
           )
         )
       ),
@@ -107,8 +108,11 @@ object ToolResultContract:
               text = None,
               toolCalls = Seq(call("call_c1", "no_such_tool"), call("call_c2", "lookup", ujson.Obj("limit" -> 500)))
             ),
-            ToolMessage(error("Unknown tool 'no_such_tool'"), "call_c1"),
-            ToolMessage(error("Invalid arguments for 'lookup': $.limit: 500 is above maximum 100"), "call_c2")
+            ToolMessage(error("Unknown tool 'no_such_tool'"), ToolCallId("call_c1")),
+            ToolMessage(
+              error("Invalid arguments for 'lookup': $.limit: 500 is above maximum 100"),
+              ToolCallId("call_c2")
+            )
           )
         )
       ),
@@ -118,12 +122,12 @@ object ToolResultContract:
           Seq(
             UserMessage("First question."),
             AssistantMessage(text = None, toolCalls = Seq(call("call_0", "lookup"))),
-            ToolMessage("first", "call_0"),
+            ToolMessage("first", ToolCallId("call_0")),
             AssistantMessage("First answer."),
             UserMessage("Second question."),
             AssistantMessage(text = None, toolCalls = Seq(call("call_0", "lookup"), call("call_1", "fetch"))),
-            ToolMessage("second", "call_0"),
-            ToolMessage("third", "call_1")
+            ToolMessage("second", ToolCallId("call_0")),
+            ToolMessage("third", ToolCallId("call_1"))
           )
         )
       ),
@@ -136,9 +140,9 @@ object ToolResultContract:
               text = None,
               toolCalls = Seq(call("call_d1", "handoff_to_billing", ujson.Obj("reason" -> "refund")))
             ),
-            ToolMessage("Transferred to billing", "call_d1"),
+            ToolMessage("Transferred to billing", ToolCallId("call_d1")),
             AssistantMessage(text = None, toolCalls = Seq(call("call_d2", "refund"))),
-            ToolMessage("refunded", "call_d2")
+            ToolMessage("refunded", ToolCallId("call_d2"))
           )
         )
       ),
@@ -151,10 +155,10 @@ object ToolResultContract:
               text = None,
               toolCalls = Seq(call("call_e1", "handoff_to_billing"), call("call_e2", "lookup"))
             ),
-            ToolMessage(error("A handoff must be the only tool call in its message"), "call_e1"),
-            ToolMessage(error("A handoff must be the only tool call in its message"), "call_e2"),
+            ToolMessage(error("A handoff must be the only tool call in its message"), ToolCallId("call_e1")),
+            ToolMessage(error("A handoff must be the only tool call in its message"), ToolCallId("call_e2")),
             AssistantMessage(text = None, toolCalls = Seq(call("call_e3", "lookup"))),
-            ToolMessage("found", "call_e3")
+            ToolMessage("found", ToolCallId("call_e3"))
           )
         )
       )

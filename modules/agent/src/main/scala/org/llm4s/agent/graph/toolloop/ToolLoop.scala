@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.toolloop
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.annotation.Experimental
 import org.llm4s.agent.{ AgentId, AgentNode }
 import org.llm4s.agent.delegation.{
@@ -60,7 +61,7 @@ enum ApprovalSource derives ReadWriter:
 
 /**
  * The question an approval interrupt asks: one tool call, from one assistant message, with the
- * call's [[org.llm4s.agent.graph.IdempotencyKey]], which the call keeps when it is approved or edited.
+ * call's [[org.llm4s.toolapi.IdempotencyKey]], which the call keeps when it is approved or edited.
  * `answered` carries the answers middleware questions of the call were given before it asked, so its
  * chain runs again with them once it is approved.
  */
@@ -106,7 +107,7 @@ enum ApprovalDecision derives ReadWriter:
 
 /**
  * One model-issued tool call, scheduled as its own task, with the
- * [[org.llm4s.agent.graph.IdempotencyKey]] the model step derived for it. The key is recorded with
+ * [[org.llm4s.toolapi.IdempotencyKey]] the model step derived for it. The key is recorded with
  * the call rather than derived again where it runs, because `recover` runs the call at a new
  * checkpoint: every run of the call reads the same key from here.
  */
@@ -135,7 +136,7 @@ final private[agent] case class LockSchedule(
 ) derives ReadWriter:
 
   /** The locks call `callId` was scheduled with; none if it is not in the schedule. */
-  def locksOf(callId: String): Set[LockKey] = locks.getOrElse(callId, Vector.empty).map(LockKey(_)).toSet
+  def locksOf(callId: ToolCallId): Set[LockKey] = locks.getOrElse(callId.asString, Vector.empty).map(LockKey(_)).toSet
 
   def withWaiting(w: Vector[ToolTask]): LockSchedule = copy(waiting = w)
 
@@ -149,13 +150,17 @@ private[agent] object LockSchedule:
    * The schedule of calls with these locks, none waiting yet; `refused` are the calls of a locking tool
    * whose arguments were refused, so scheduled without locks.
    */
-  def of(locks: Map[String, Set[LockKey]], refused: Set[String]): LockSchedule =
-    LockSchedule(locks.view.mapValues(_.map(_.render).toVector.sorted).toMap, Vector.empty, refused)
+  def of(locks: Map[ToolCallId, Set[LockKey]], refused: Set[ToolCallId]): LockSchedule =
+    LockSchedule(
+      locks.map((id, keys) => id.asString -> keys.map(_.render).toVector.sorted),
+      Vector.empty,
+      refused.map(_.asString)
+    )
 
 /**
  * The question a tool's `Ask` interrupt carries: the call that asked, from one assistant message,
  * the question encoded with the tool's declared question codec, the call's
- * [[org.llm4s.agent.graph.IdempotencyKey]], and whether the call was approved before it asked -
+ * [[org.llm4s.toolapi.IdempotencyKey]], and whether the call was approved before it asked -
  * `resume` sees the same `ToolContext.approved` and `ToolContext.idempotencyKey`. Find it with
  * [[ToolLoop.questions]], read its question as the tool's type with [[ToolLoop.question]], and
  * answer it with [[ToolLoop.answer]].
@@ -303,7 +308,7 @@ object BreakpointRequest:
  */
 final private[agent] case class ToolResult(
   assistantMessageId: String,
-  toolCallId: String,
+  toolCallId: ToolCallId,
   parts: Vector[ContentPart],
   isError: Boolean
 ) derives ReadWriter
@@ -449,7 +454,7 @@ object ModelStep:
  *    has exactly one result, and appends the `ToolMessage`s in call order. The model never sees a partial batch.
  *    A call cut short by cancellation, a `Fatal` or a crash records no result, so the batch stays
  *    open and the thread waits for `recover`, which re-runs only that call (design 4.4, 5.3).
- *  - Every call carries an [[org.llm4s.agent.graph.IdempotencyKey]], derived by the model step
+ *  - Every call carries an [[org.llm4s.toolapi.IdempotencyKey]], derived by the model step
  *    from where it ran on the thread (checkpoint, superstep, task) and the call's id, and recorded
  *    with the call: each run of the call - a retrying wrapper, approval, an answered question,
  *    `recover` - sees the same key in `ToolContext.idempotencyKey`, and a call of another model
@@ -1928,7 +1933,7 @@ object ToolLoop:
   private def issued(messageId: String, call: ToolCall, context: RunContext): ToolTask =
     val at = context.position
     // the model task's identity, lineage included, so the same work issues the same keys (design §4.24)
-    ToolTask(messageId, call, IdempotencyKey.ofCall(at.threadId, context.taskKey, call))
+    ToolTask(messageId, call, IdempotencyKeys.ofCall(at.threadId, context.taskKey, call))
 
   /**
    * Runs `body`, returning what it throws as `Left`: a NonFatal exception, or a bare
@@ -2028,7 +2033,7 @@ object ToolLoop:
      */
     def refusedInBatch(call: ToolCall, error: String, context: RunContext): Unit =
       // refused in the model step that issued it: the key that step gives the call (`issued`)
-      val key = IdempotencyKey.ofCall(context.position.threadId, context.taskKey, call)
+      val key = IdempotencyKeys.ofCall(context.position.threadId, context.taskKey, call)
       announce(call, key, error, isError = true, context, ToolExecutionOutcome.Errored, Duration.Zero)
 
     /**
@@ -2046,7 +2051,7 @@ object ToolLoop:
       val tool = if tools.get(call.name).isDefined then call.name else ToolLoop.UnknownTool
       AgentEvents.ToolExecuted.emit(
         context,
-        events.ToolExecuted(agent.value, call.id, tool, duration, outcome, Some(key.value))
+        events.ToolExecuted(agent.value, call.id, tool, duration, outcome, Some(key))
       )
 
     /** Announces the call live, runs the middleware chain around `innermost`, and times it. */
@@ -2151,7 +2156,7 @@ object ToolLoop:
                   outsideSchedule(tool, task, request.call, args, state, context).getOrElse {
                     // an answered resume is a phase of the call of its own: its effects never replay `execute`'s
                     val phase =
-                      IdempotencyKey.ofResume(
+                      IdempotencyKeys.ofResume(
                         request.idempotencyKey,
                         request.phase,
                         // recorded with the continuation when the answer was applied; a resume without one is
@@ -2160,7 +2165,7 @@ object ToolLoop:
                       )
                     val toolContext = ToolContext.resuming(
                       stepped(answering(agent, context, request.answered), state),
-                      ToolCallId(request.call.id),
+                      request.call.id,
                       request.idempotencyKey,
                       state,
                       request.approved,
@@ -2327,7 +2332,7 @@ object ToolLoop:
     ): Option[NodeResult] =
       tool.spec.locksOf.flatMap { locks =>
         val schedule = scheduleOf(state)
-        if schedule.refused(call.id) then Some(error(task, ToolLoop.RefusedWhenScheduled, context))
+        if schedule.refused(call.id.asString) then Some(error(task, ToolLoop.RefusedWhenScheduled, context))
         else
           val scheduled = schedule.locksOf(call.id)
           val now       = Try(locks(args)).getOrElse(Set(LockKey("")))
@@ -2380,7 +2385,7 @@ object ToolLoop:
         val toolContext =
           ToolContext(
             stepped(answering(agent, context, answers), state),
-            ToolCallId(call.id),
+            call.id,
             task.idempotencyKey,
             state,
             approved
@@ -2408,24 +2413,24 @@ object ToolLoop:
       timeout: CallTimeout,
       state: ThreadState,
       name: String,
-      callId: String,
+      callId: ToolCallId,
       context: RunContext
     )(result: NodeResult): NodeResult =
-      val recorded = state.get(DelegationKeys.timedOut).toOption.flatMap(_.get(callId))
+      val recorded = state.get(DelegationKeys.timedOut).toOption.flatMap(_.get(callId.asString))
       val pending  = timeout.reached.getOrElse(recorded)
       def record(next: Option[TimedOutChild]): StateUpdate =
         if next == recorded then StateUpdate.empty
         else
           StateUpdate.update(
             DelegationKeys.timedOut,
-            next.fold(TimedOutUpdate.Cleared(callId))(TimedOutUpdate.Pending(callId, _))
+            next.fold(TimedOutUpdate.Cleared(callId.asString))(TimedOutUpdate.Pending(callId.asString, _))
           )
       result match
         case NodeResult.Continue(command) =>
           pending.fold(Right(()))(settleTimedOut(_, callId, context)) match
             case Right(_) => NodeResult.Continue(command.withUpdate(command.update.combine(record(None))))
             case Left(error) =>
-              NodeResult.Fail(GraphError.ToolFailed(ToolName(name), ToolCallId(callId), error))
+              NodeResult.Fail(GraphError.ToolFailed(ToolName(name), callId, error))
         case NodeResult.Suspend(update, question, resumeAt) =>
           NodeResult.Suspend(update.combine(record(pending)), question, resumeAt)
         case other => other
@@ -2445,11 +2450,11 @@ object ToolLoop:
         case other => other
 
     /** Settles `child`, which the call's own timeout left `Running` ([[afterTimeout]]), and announces the run that did. */
-    private def settleTimedOut(child: TimedOutChild, callId: String, context: RunContext): Result[Unit] =
+    private def settleTimedOut(child: TimedOutChild, callId: ToolCallId, context: RunContext): Result[Unit] =
       val message = s"timed-out: its call '$callId' timed out, and never runs again"
       def announce(runId: RunId): Unit =
         val ref =
-          ChildRef(ThreadId(child.thread), runId, AgentId.unsafe(child.agent), Some(ToolCallId(callId)), child.depth)
+          ChildRef(ThreadId(child.thread), runId, AgentId.unsafe(child.agent), Some(callId), child.depth)
         val started = events.SubagentEvents.TaskStarted
         context.childStarted(ref, started.name, started.version, started.encode(events.TaskStarted(ref)))
         context.nested(StreamEvent.Nested(ref, StreamEvent.LiveGap(0)))
@@ -2546,7 +2551,7 @@ object ToolLoop:
     ): NodeResult =
       val name = tool.spec.name
       def failRun(error: LLMError): NodeResult =
-        NodeResult.Fail(GraphError.ToolFailed(ToolName(name), ToolCallId(call.id), error))
+        NodeResult.Fail(GraphError.ToolFailed(ToolName(name), call.id, error))
       chain.outcome match
         case ToolOutcome.Success(success) =>
           val allowed = tool.writes ++ stack.writes

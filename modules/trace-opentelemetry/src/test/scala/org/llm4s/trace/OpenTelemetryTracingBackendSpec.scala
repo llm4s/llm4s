@@ -1,7 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.llmconnect.config.{ OpenTelemetryConfig, TracingSettings }
-import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary, UserMessage }
+import org.llm4s.llmconnect.model.{ TokenUsage, ToolCallId, UsageSummary, UserMessage }
 import org.llm4s.trace.spi.TracingBackends
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -119,7 +119,13 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
     "map a tool execution to an execute_tool span" in {
       val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
       val (name, attributes) = tracing.mapEventToAttributes(
-        TraceEvent.ToolExecuted("search", "{}", "[]", scala.concurrent.duration.Duration(3, "ms"), success = true)
+        TraceEvent.ToolExecuted(
+          "search",
+          ToolCallId("{}").asString,
+          "[]",
+          scala.concurrent.duration.Duration(3, "ms"),
+          success = true
+        )
       )
       name shouldBe "execute_tool search"
       attributes.get(key("gen_ai.operation.name")) shouldBe "execute_tool"

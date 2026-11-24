@@ -20,7 +20,7 @@ import org.llm4s.agent.graph.tool.*
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
-import org.llm4s.toolapi.{ Schema, SchemaDefinition, ToolBuilder }
+import org.llm4s.toolapi.{ IdempotencyKey, Schema, SchemaDefinition, ToolBuilder }
 import org.llm4s.types.Result
 import org.scalatest.Assertions.fail
 import org.scalatest.{ EitherValues, OptionValues }
@@ -86,7 +86,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
   }
 
   private def calls(specs: (String, String, ujson.Value)*): Vector[Message] => AssistantMessage =
-    _ => AssistantMessage(None, specs.map((id, name, args) => ToolCall(id, name, args)))
+    _ => AssistantMessage(None, specs.map((id, name, args) => ToolCall(ToolCallId(id), name, args)))
 
   /** The final turn: a summary of the tool results it was given, in order. */
   private val summarise: Vector[Message] => AssistantMessage = history =>
@@ -174,7 +174,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
 
   /** The error each call's result carries, from the model's second turn. */
   private def errors(model: ScriptedModel): Vector[(String, String)] =
-    model.seen.get(1).collect { case t: ToolMessage => t.toolCallId -> ujson.read(t.content)("error").str }
+    model.seen.get(1).collect { case t: ToolMessage => t.toolCallId.asString -> ujson.read(t.content)("error").str }
 
   /** The run's failure, unwrapped to the `ToolFailed` its call-tool task failed with. */
   private def toolFailure(result: RunResult[?]): GraphError.ToolFailed =
@@ -260,9 +260,12 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val l        = loop(model)
     val first    = runInMemory(l.graph, AgentInput("go")).suspended
     val requests = l.requests(first).value.map((id, r) => r.call.id -> id).toMap
-    requests.keySet shouldBe Set("d5", "d6")
+    requests.keySet shouldBe Set("d5", ToolCallId("d6"))
     val answers =
-      l.answers(requests("d5") -> ApprovalDecision.Reject("too expensive"), requests("d6") -> ApprovalDecision.Approve)
+      l.answers(
+        requests(ToolCallId("d5")) -> ApprovalDecision.Reject("too expensive"),
+        requests(ToolCallId("d6")) -> ApprovalDecision.Approve
+      )
     val (state, _) = drive(l.graph, l.graph.resume(first.execution, answers).value).answered
 
     errors(model) shouldBe Vector(
@@ -347,13 +350,13 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       .resume(
         thread,
         again.graph,
-        again.answers(requests("c1") -> ApprovalDecision.Approve),
+        again.answers(requests(ToolCallId("c1")) -> ApprovalDecision.Approve),
         RunConfig().withRunId(RunId("run-2")),
         Durability.OnExit
       )
       .awaited
       .value
-    second.suspended.interrupts.map(_.id) shouldBe Vector(requests("c2"))
+    second.suspended.interrupts.map(_.id) shouldBe Vector(requests(ToolCallId("c2")))
     store.latest(thread).value.map(s => s.checkpoint.status -> s.checkpoint.runId) shouldBe
       Some(CheckpointStatus.Suspended -> "run-2")
 
@@ -362,7 +365,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       .resume(
         thread,
         last.graph,
-        last.answers(requests("c2") -> ApprovalDecision.Approve),
+        last.answers(requests(ToolCallId("c2")) -> ApprovalDecision.Approve),
         RunConfig().withRunId(RunId("run-3"))
       )
       .awaited
@@ -376,7 +379,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       .resume(
         thread,
         last.graph,
-        last.answers(requests("c2") -> ApprovalDecision.Approve),
+        last.answers(requests(ToolCallId("c2")) -> ApprovalDecision.Approve),
         RunConfig().withRunId(RunId("run-4"))
       )
       .awaited
@@ -418,7 +421,12 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val stale = store.latest(thread).value
 
     GraphRuntime(store)
-      .resume(thread, l.graph, l.answers(ids("c1") -> ApprovalDecision.Approve), RunConfig().withRunId(RunId("run-2")))
+      .resume(
+        thread,
+        l.graph,
+        l.answers(ids(ToolCallId("c1")) -> ApprovalDecision.Approve),
+        RunConfig().withRunId(RunId("run-2"))
+      )
       .awaited
       .value
       .suspended
@@ -462,7 +470,12 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       def prune(threadId: ThreadId, policy: RetentionPolicy)              = store.prune(threadId, policy)
     }
     GraphRuntime(racing)
-      .resume(thread, l.graph, l.answers(ids("c2") -> ApprovalDecision.Approve), RunConfig().withRunId(RunId("run-3")))
+      .resume(
+        thread,
+        l.graph,
+        l.answers(ids(ToolCallId("c2")) -> ApprovalDecision.Approve),
+        RunConfig().withRunId(RunId("run-3"))
+      )
       .awaited
       .left
       .value shouldBe
@@ -490,8 +503,9 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
         .awaited
         .value
         .suspended
-    val ids     = l.requests(first).value.map((id, r) => r.call.id -> id).toMap
-    val answers = l.answers(ids("c1") -> ApprovalDecision.Approve, ids("c2") -> ApprovalDecision.Approve)
+    val ids = l.requests(first).value.map((id, r) => r.call.id -> id).toMap
+    val answers =
+      l.answers(ids(ToolCallId("c1")) -> ApprovalDecision.Approve, ids(ToolCallId("c2")) -> ApprovalDecision.Approve)
     // a thrown tool is a tool-level failure, not a failed run: it becomes that call's error result
     GraphRuntime(store)
       .resume(thread, l.graph, answers, RunConfig().withRunId(RunId("run-2")))
@@ -627,7 +641,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
   it should "fail the run on Fatal, and recover re-runs only that call" in {
     val runs = new ConcurrentHashMap[String, AtomicInteger]()
     def count(context: ToolContext): Int =
-      runs.computeIfAbsent(context.toolCallId.value, _ => new AtomicInteger()).incrementAndGet()
+      runs.computeIfAbsent(context.toolCallId.asString, _ => new AtomicInteger()).incrementAndGet()
     val flaky = bare("flaky") { context =>
       if count(context) == 1 then ToolOutcome.Fatal(ValidationError("upstream", "down")) else text("ok")
     }
@@ -677,7 +691,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val first = runInMemory(l.graph, AgentInput("go")).suspended
     l.requests(first).value shouldBe empty
     val Vector((q1, request)) = l.questions(first).value
-    request.call.id shouldBe "a1"
+    request.call.id shouldBe ToolCallId("a1")
     ToolLoop.question[Confirm](request).value shouldBe Confirm("deploy to prod?")
     first.interrupts.map(_.resumeNode) shouldBe Vector(NodeId("a/ask/confirm"))
 
@@ -1013,7 +1027,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     runInMemory(l.graph, AgentInput("go")).answered
     log.asScala.toVector shouldBe Vector("a:before:w1", "b:before:w1", "tool:hi", "b:after:w1", "a:after:w1")
     model.seen.get(2).collect {
-      case t: ToolMessage if t.toolCallId == "w2" => "w2" -> ujson.read(t.content)("error").str
+      case t: ToolMessage if t.toolCallId == ToolCallId("w2") => "w2" -> ujson.read(t.content)("error").str
     } shouldBe
       Vector("w2" -> "Invalid arguments for 'echo': $.text: expected string, got integer")
   }
@@ -1632,7 +1646,11 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val agentB = AgentId.unsafe("b")
     val modelA = ScriptedModel(
       _ => AssistantMessage("hello"),
-      _ => AssistantMessage(None, Seq(ToolCall("h1", HandoffTools.toolName(agentB), ujson.Obj("reason" -> "x")))),
+      _ =>
+        AssistantMessage(
+          None,
+          Seq(ToolCall(ToolCallId("h1"), HandoffTools.toolName(agentB), ujson.Obj("reason" -> "x")))
+        ),
       _ => AssistantMessage("after")
     )
     val modelB = ScriptedModel(_ => AssistantMessage("SECRET from b"))
@@ -1670,7 +1688,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
   it should "restore a non-empty transfer when an output Block removes a later turn of a handed-off thread" in {
     val agentB = AgentId.unsafe("b")
     val modelA = ScriptedModel(_ =>
-      AssistantMessage(None, Seq(ToolCall("h1", HandoffTools.toolName(agentB), ujson.Obj("reason" -> "x"))))
+      AssistantMessage(None, Seq(ToolCall(ToolCallId("h1"), HandoffTools.toolName(agentB), ujson.Obj("reason" -> "x"))))
     )
     val modelB = ScriptedModel(
       _ => AssistantMessage("from b"),
@@ -1769,7 +1787,10 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       wrapTool = (request, _, next) =>
         next() match {
           case ToolOutcome.Success(success) =>
-            ToolOutcome.success(success.content, success.update.combine(StateUpdate.update(audits, request.call.id)))
+            ToolOutcome.success(
+              success.content,
+              success.update.combine(StateUpdate.update(audits, request.call.id.asString))
+            )
           case other => other
         }
     )
@@ -1879,7 +1900,10 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val user = StoredMessage("u", UserMessage("hi"))
     val assistant = StoredMessage(
       "a",
-      AssistantMessage(None, Seq(ToolCall("t1", "x", ujson.Obj()), ToolCall("t2", "y", ujson.Obj())))
+      AssistantMessage(
+        None,
+        Seq(ToolCall(ToolCallId("t1"), "x", ujson.Obj()), ToolCall(ToolCallId("t2"), "y", ujson.Obj()))
+      )
     )
     def apply(history: Vector[StoredMessage], update: MessageUpdate) = Messages.key.applyUpdate(history, update)
 
@@ -1893,20 +1917,24 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     apply(Vector(user, assistant), MessageUpdate.RemoveThrough("u")).value shouldBe Vector(assistant)
 
     // two edits to one message compose
-    val once  = apply(Vector(user, assistant), MessageUpdate.EditToolCall("a", "t1", ujson.Obj("n" -> 1))).value
-    val twice = apply(once, MessageUpdate.EditToolCall("a", "t2", ujson.Obj("n" -> 2))).value
+    val once =
+      apply(Vector(user, assistant), MessageUpdate.EditToolCall("a", ToolCallId("t1"), ujson.Obj("n" -> 1))).value
+    val twice = apply(once, MessageUpdate.EditToolCall("a", ToolCallId("t2"), ujson.Obj("n" -> 2))).value
     twice(1).message.asInstanceOf[AssistantMessage].toolCalls.map(_.arguments) shouldBe Seq(
       ujson.Obj("n" -> 1),
       ujson.Obj("n" -> 2)
     )
-    apply(Vector(user), MessageUpdate.EditToolCall("u", "t1", ujson.Obj())).left.value.message should include(
+    apply(
+      Vector(user),
+      MessageUpdate.EditToolCall("u", ToolCallId("t1"), ujson.Obj())
+    ).left.value.message should include(
       "no tool call 't1'"
     )
     upickle.default.read[StoredMessage](upickle.default.write(assistant)) shouldBe assistant
   }
 
   "ToolLoop.results" should "refuse a second result for the same call" in {
-    val result = ToolResult("a", "t1", Vector(ContentPart.Text("ok")), isError = false)
+    val result = ToolResult("a", ToolCallId("t1"), Vector(ContentPart.Text("ok")), isError = false)
     ToolLoop.results
       .applyUpdate(Vector(result), result.copy(parts = Vector(ContentPart.Text("again"))))
       .left
@@ -1918,7 +1946,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
   "ToolQuestionRequest" should "round-trip through JSON" in {
     val request = ToolQuestionRequest(
       "m",
-      ToolCall("c", "confirm", ujson.Obj("env" -> "prod")),
+      ToolCall(ToolCallId("c"), "confirm", ujson.Obj("env" -> "prod")),
       ujson.Obj("p" -> 1),
       IdempotencyKey("k")
     )

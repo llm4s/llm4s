@@ -1,8 +1,9 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
-import org.llm4s.agent.graph.{ GraphRuntime, IdempotencyKey, InMemoryCheckpointer, InterruptId, ThreadId }
+import org.llm4s.agent.graph.{ GraphRuntime, InMemoryCheckpointer, InterruptId, ThreadId }
 import org.llm4s.agent.graph.middleware._
 import org.llm4s.agent.graph.tool.{ ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.agent.graph.toolloop.{ ApprovalRequest, MiddlewareQuestionRequest }

@@ -47,7 +47,7 @@ class WatsonXContractSpec extends AnyFunSuite with Matchers:
         )
     )
     val result = new WatsonXClient(config, httpClient = http).complete(hi, CompletionOptions().withTools(Seq(tool)))
-    val call   = ToolCall("call-1", "ping", ujson.Obj("x" -> 1))
+    val call   = ToolCall(ToolCallId("call-1"), "ping", ujson.Obj("x" -> 1))
     val c      = result.getOrElse(fail(s"expected success, got $result"))
     c.toolCalls shouldBe List(call)
     c.message.toolCalls shouldBe Seq(call)
@@ -70,7 +70,7 @@ class WatsonXContractSpec extends AnyFunSuite with Matchers:
 
   test("a call without an id gets a generated one; an empty or null tool_calls is no calls") {
     val withoutId = complete(reply("""{"content":"x","tool_calls":[{"function":{"name":"ping"}}]}"""))
-    withoutId.map(_.toolCalls.map(call => (call.id.startsWith("call_"), call.name, call.arguments))) shouldBe
+    withoutId.map(_.toolCalls.map(call => (call.id.asString.startsWith("call_"), call.name, call.arguments))) shouldBe
       Right(List((true, "ping", ujson.Obj())))
     Seq("""{"content":"x","tool_calls":[]}""", """{"content":"x","tool_calls":null}""", """{"content":"x"}""")
       .foreach(message => withClue(message)(complete(reply(message)).map(_.toolCalls) shouldBe Right(Nil)))

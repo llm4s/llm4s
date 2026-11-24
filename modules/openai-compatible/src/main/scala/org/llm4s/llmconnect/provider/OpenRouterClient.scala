@@ -13,7 +13,8 @@ import org.llm4s.llmconnect.model.{
   RequestOption,
   Thinking,
   ThinkingBlock,
-  ToolCall
+  ToolCall,
+  ToolCallId
 }
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.metrics.MetricsCollector
@@ -344,5 +345,5 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
         for {
           calls     <- done
           arguments <- OpenAICompatibleDialect.toolArguments(name, function.obj.get("arguments"))
-        } yield calls :+ ToolCall(id, name, arguments)
+        } yield calls :+ ToolCall(ToolCallId(id), name, arguments)
       })

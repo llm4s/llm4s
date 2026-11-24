@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.serialization
 
 import org.llm4s.annotation.Stable
-import org.llm4s.llmconnect.model.ToolCall
+import org.llm4s.llmconnect.model.{ ToolCall, ToolCallId }
 import org.llm4s.util.BoundedJson
 import ujson._
 
@@ -41,7 +41,7 @@ object StandardToolCallDeserializer extends ToolCallDeserializer {
   def deserializeToolCalls(toolCallsJson: Value): Vector[ToolCall] =
     toolCallsJson.arr.map { call =>
       ToolCall(
-        id = call("id").str,
+        id = ToolCallId(call("id").str),
         name = call("function")("name").str,
         arguments = parseArguments(call("function")("arguments").str)
       )

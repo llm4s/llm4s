@@ -84,7 +84,7 @@ object Message {
         AssistantMessage.fields(am).value.foreach { case (key, value) => obj(key) = value }
         obj
       case tm: ToolMessage =>
-        partsJson(tm.parts, ujson.Obj("type" -> ujson.Str("tool"), "toolCallId" -> ujson.Str(tm.toolCallId)))
+        partsJson(tm.parts, ujson.Obj("type" -> ujson.Str("tool"), "toolCallId" -> ujson.Str(tm.toolCallId.asString)))
     },
     json => {
       val obj = json.obj
@@ -93,7 +93,7 @@ object Message {
         case "system" => SystemMessage(obj("content").str)
         // nested under "data" until #2809, flat since: both are read
         case "assistant" => read[AssistantMessage](obj.getOrElse("data", json))
-        case "tool"      => ToolMessage(readParts(obj), obj("toolCallId").str)
+        case "tool"      => ToolMessage(readParts(obj), ToolCallId(obj("toolCallId").str))
       }
     }
   )
@@ -242,8 +242,8 @@ object Message {
     val errors = scala.collection.mutable.ListBuffer[String]()
 
     // Collect all tool calls and their responses
-    val toolCalls     = scala.collection.mutable.Map[String, (AssistantMessage, Int)]()
-    val toolResponses = scala.collection.mutable.Map[String, (ToolMessage, Int)]()
+    val toolCalls     = scala.collection.mutable.Map[ToolCallId, (AssistantMessage, Int)]()
+    val toolResponses = scala.collection.mutable.Map[ToolCallId, (ToolMessage, Int)]()
 
     messages.zipWithIndex.foreach { case (message, index) =>
       message match {
@@ -298,10 +298,10 @@ object Message {
       Right(AssistantMessage(content, toolCalls))
     }
 
-  def tool(content: String, toolCallId: String): Result[ToolMessage] =
+  def tool(content: String, toolCallId: ToolCallId): Result[ToolMessage] =
     if (content.trim.isEmpty) {
       Left(ValidationError("content", "Tool message content cannot be empty"))
-    } else if (toolCallId.trim.isEmpty) {
+    } else if (toolCallId.asString.trim.isEmpty) {
       Left(ValidationError("toolCallId", "Tool call ID cannot be empty"))
     } else {
       Right(ToolMessage(content = content, toolCallId = toolCallId))
@@ -624,7 +624,7 @@ object AssistantMessage {
 @Stable
 final class ToolMessage(
   val parts: Vector[ContentPart],
-  val toolCallId: String
+  val toolCallId: ToolCallId
 ) extends Message
     with Serializable {
   val role: MessageRole = MessageRole.Tool
@@ -665,7 +665,7 @@ final class ToolMessage(
   override def validate: Result[Message] = {
     val validations = List(
       if (!Message.hasContent(parts)) Some("Tool message content cannot be empty") else None,
-      if (toolCallId.trim.isEmpty) Some("Tool call ID cannot be empty") else None
+      if (toolCallId.asString.trim.isEmpty) Some("Tool call ID cannot be empty") else None
     ).flatten
 
     if (validations.nonEmpty) {
@@ -681,15 +681,15 @@ final class ToolMessage(
 object ToolMessage {
 
   /** A tool result of `parts`. */
-  def apply(parts: Vector[ContentPart], toolCallId: String): ToolMessage = new ToolMessage(parts, toolCallId)
+  def apply(parts: Vector[ContentPart], toolCallId: ToolCallId): ToolMessage = new ToolMessage(parts, toolCallId)
 
   /** A tool result of one text part. */
-  def apply(content: String, toolCallId: String): ToolMessage =
+  def apply(content: String, toolCallId: ToolCallId): ToolMessage =
     new ToolMessage(Vector(ContentPart.Text(content)), toolCallId)
 
   implicit val rw: RW[ToolMessage] = readwriter[ujson.Value].bimap[ToolMessage](
-    tm => Message.partsJson(tm.parts, ujson.Obj("toolCallId" -> ujson.Str(tm.toolCallId))),
-    json => ToolMessage(Message.readParts(json.obj), json("toolCallId").str)
+    tm => Message.partsJson(tm.parts, ujson.Obj("toolCallId" -> ujson.Str(tm.toolCallId.asString))),
+    json => ToolMessage(Message.readParts(json.obj), ToolCallId(json("toolCallId").str))
   )
 }
 
@@ -711,14 +711,14 @@ object ToolMessage {
  */
 @Stable
 final case class ToolCall private (
-  id: String,
+  id: ToolCallId,
   name: String,
   arguments: ujson.Value
 ) {
   override def toString: String = s"ToolCall($id, $name, $arguments)"
 
   /** Sets the identifier. */
-  def withId(id: String): ToolCall = copy(id = id)
+  def withId(id: ToolCallId): ToolCall = copy(id = id)
 
   /** Sets the tool name. */
   def withName(name: String): ToolCall = copy(name = name)
@@ -730,7 +730,7 @@ final case class ToolCall private (
 object ToolCall {
 
   /** Creates a [[ToolCall]] of tool `name` with `arguments`, correlated by `id`. */
-  def apply(id: String, name: String, arguments: ujson.Value): ToolCall = new ToolCall(id, name, arguments)
+  def apply(id: ToolCallId, name: String, arguments: ujson.Value): ToolCall = new ToolCall(id, name, arguments)
 
   implicit val rw: RW[ToolCall] = macroRW
 }

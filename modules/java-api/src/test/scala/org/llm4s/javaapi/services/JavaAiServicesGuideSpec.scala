@@ -104,7 +104,10 @@ class JavaAiServicesGuideSpec extends AnyWordSpec with TestTimeLimit with Matche
     "run a tool in the agent turn" in {
       val client = new Scripted(n =>
         if (n == 0)
-          AssistantMessage(None, toolCalls = Seq(ToolCall("c1", "orderStatus", ujson.Obj("orderId" -> "42"))))
+          AssistantMessage(
+            None,
+            toolCalls = Seq(ToolCall(ToolCallId("c1"), "orderStatus", ujson.Obj("orderId" -> "42")))
+          )
         else AssistantMessage("It shipped yesterday.")
       )
       AiServiceSnippets.tools(Llm4s.wrapClient(client)) shouldBe "It shipped yesterday."
