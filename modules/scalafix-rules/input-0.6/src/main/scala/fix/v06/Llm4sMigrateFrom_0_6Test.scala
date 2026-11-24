@@ -1,5 +1,5 @@
 /*
-rule = Llm4sMigrate_1_0
+rule = Llm4sMigrateFrom_0_6
 */
 package fix.v06
 
@@ -7,7 +7,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ReasoningEffort }
 
 // The snippets of docs/reference/migration.md's notes since 0.6.0 that a rule rewrites, as 0.6.0 code.
-object Llm4sMigrate_1_0Test {
+object Llm4sMigrateFrom_0_6Test {
   val options = CompletionOptions().withReasoning(ReasoningEffort.None)
 
   def warnOnLength(client: LLMClient, conversation: Conversation, warn: () => Unit) =

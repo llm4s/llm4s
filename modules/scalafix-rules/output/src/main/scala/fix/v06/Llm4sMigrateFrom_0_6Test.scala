@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ReasoningEf
 import org.llm4s.llmconnect.model.{ FinishReason, Thinking }
 
 // The snippets of docs/reference/migration.md's notes since 0.6.0 that a rule rewrites, as 0.6.0 code.
-object Llm4sMigrate_1_0Test {
+object Llm4sMigrateFrom_0_6Test {
   val options = CompletionOptions().withThinking(Thinking.Off)
 
   def warnOnLength(client: LLMClient, conversation: Conversation, warn: () => Unit) =

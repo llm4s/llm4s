@@ -3254,9 +3254,9 @@ lazy val gradleDemo = (project in file("modules/gradle-demo"))
 // The other projects are the scalafix-testkit layout: `scalafixInput` is user code compiled with SemanticDB
 // against the *old* release (llm4s-core 0.4.1 from Maven Central), `scalafixOutput` is what the rules must produce,
 // compiled against this checkout, and `scalafixTests` runs every rule on the input and compares the result with the
-// output. `scalafixInput05` and `scalafixTests05` are the same for the rules from 0.5.x (`Llm4sMigrate_1_0`), whose
+// output. `scalafixInput05` and `scalafixTests05` are the same for the rules from 0.5.x (`Llm4sMigrateFrom_0_5`), whose
 // input compiles against the 0.5.1 artifacts; their expected output is in `scalafixOutput` too, under `fix/v1`.
-// `scalafixInput06` and `scalafixTests06` test the `Llm4sMigrate_1_0` rules for the breaks since 0.6.0 on code compiled
+// `scalafixInput06` and `scalafixTests06` test `Llm4sMigrateFrom_0_6` and the rules for the breaks since 0.6.0 on code compiled
 // against the 0.6.0 artifacts, with the expected output under `fix/v06`. Neither input nor output is formatted
 // (.scalafmt.conf excludes them), because the rules' output is compared byte for byte.
 lazy val scalafixScala213 = "2.13.14"

@@ -33,7 +33,8 @@ the baseline and 1.0 then promise is in the [Compatibility and Deprecation Polic
 **Scalafix.** The mechanical source breaks since 0.4.1 have Scalafix rules
 ([Scalafix: migration rules](../reference/scalafix#migration-rules)). They are first published at 1.0, as
 `org.llm4s::llm4s-scalafix`; until then they exist only as source in this repository, and each note says what to
-change by hand.
+change by hand. Run the one umbrella rule for the version you start from: `Llm4sMigrateFrom_0_5` from 0.5.x,
+`Llm4sMigrateFrom_0_6` from 0.6.x.
 
 ---
 

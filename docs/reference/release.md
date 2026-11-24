@@ -101,6 +101,9 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
       ([The Baseline](../reference/api-stability#the-baseline)).
 - [ ] Run `scripts/mima-dry-run.sh` on the commit to tag ([Release readiness](#release-readiness-a-mima-dry-run)).
 - [ ] After the release is on Central, set `mimaBaselineVersion = Some("0.7.0")` in a follow-up pull request
+- [ ] Add the umbrella Scalafix rule `Llm4sMigrateFrom_0_7`, for code compiled against 0.7.x, the way
+      `Llm4sMigrateFrom_0_6` is built: each rule for a break after 0.7.0 joins it and every older umbrella
+      ([Scalafix](../reference/scalafix#migration-rules)).
       ([Setting and bumping the baseline](../reference/api-stability#setting-and-bumping-the-baseline)), and change the pages that
       say no baseline is set yet ([API Stability](../reference/api-stability), [Compatibility and Deprecation Policy](../reference/compatibility-policy),
       [1.0 Scope](../reference/v1-scope), [Enterprise Evaluation](../reference/enterprise-evaluation), `SECURITY.md`, this page).

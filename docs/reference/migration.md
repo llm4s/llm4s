@@ -476,7 +476,7 @@ val t: Option[Double] = options.temperature
 - **Tracing.** The OpenTelemetry `gen_ai.request.temperature`, `top_p` and penalty attributes are present only
   for an option that was set.
 
-`SamplingOptionsOptional` (in `Llm4sMigrate_1_0`) wraps the named arguments in `Some`. A read of one of the four
+`SamplingOptionsOptional` (in `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`) wraps the named arguments in `Some`. A read of one of the four
 is left to you.
 
 ## `Completion` reads `content` and `toolCalls` from its message (#2807)
@@ -2203,7 +2203,7 @@ val drop = keep.withTransform(_ => Seq.empty)
 ```
 
 A rule built positionally, `CompressionRule(name, f)`, is unchanged. The Scalafix rule `CompressionRuleTransform`
-(in `Llm4sMigrate_1_0`) makes these edits.
+(in `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`) makes these edits.
 
 ## A RAG with a `SearchIndex` ingests only with permissions (#2716)
 
@@ -2254,7 +2254,7 @@ open question 6).
   `ValidationError`. The partial text is `Truncated.partialAnswer`, and stays in the thread's messages, so the next
   turn (`continueConversation`, "go on") sees it; the turn is a completed one, like `StepLimitReached`.
 - **A `match` on `AgentStatus` without a catch-all** needs a `Truncated` case. Scala 3 warns that the match is not
-  exhaustive; the `AgentStatusGainsTruncated` Scalafix rule (in `Llm4sMigrate_1_0`) reports each one.
+  exhaustive; the `AgentStatusGainsTruncated` Scalafix rule (in `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`) reports each one.
 - **Delegation**: a child that ends `Truncated` is refused `TaskRefusal.Truncated`, as a child at its step limit is,
   and `SubagentEvents.TaskEnded`'s status is `truncated`.
 - **Tracing**: `TraceEvent.AgentRunEnded.status` is `truncated`.
@@ -2420,13 +2420,13 @@ The `PositionalPatternsGainFields` Scalafix rule adds these binders ([Scalafix](
 
 ## Changes since 0.5.1 that no rule automates
 
-The Scalafix rule `Llm4sMigrate_1_0` ([Scalafix](scalafix#migration-rules); published at 1.0; before that only as
+The Scalafix rule `Llm4sMigrateFrom_0_5` ([Scalafix](scalafix#migration-rules); published at 1.0; before that only as
 source in this repository) rewrites the mechanical source breaks
 below: `.copy` on the newly growth-safe types, `String` API keys of the provider configs, the `fromValues` argument
 order, `Completion.created`, positional patterns on types that gained fields, the `ServiceErrorOps` import and
 `loadTextEmbeddingModel`, and since 0.6.0 `ReasoningEffort.None` and the string comparisons of
 `StreamedChunk.finishReason`. It reports the removed APIs it cannot replace, and `budgetTokens`. It assumes 0.5.x code:
-on 0.6.x, run only the rules for the breaks since 0.6.0 ([Scalafix](scalafix#migration-rules)). These need a hand edit:
+on 0.6.x, run `Llm4sMigrateFrom_0_6` instead ([Scalafix](scalafix#migration-rules)). These need a hand edit:
 
 - Behaviour and configuration, not source: a supplied HTTP client is the caller's to close (#2341), the proxy settings
   (#2273), the file tools' default `blockedPaths` (#1408), console and OpenTelemetry tracing content, span names and

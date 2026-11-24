@@ -66,9 +66,21 @@ can also be applied by hand.
 Where a rewrite cannot be made safely, the rule reports a lint instead: a `copy` with a positional argument, a field
 that has no setter any more (`Completion.thinking`, `NamedProviderConfig.organization`), or a message extractor
 nested inside another pattern. These 0.5 rules change names, not types; the `Secret` keys and the `Instant` of
-`Completion.created` are `Llm4sMigrate_1_0`'s.
+`Completion.created` are `Llm4sMigrateFrom_0_5`'s.
 
-`Llm4sMigrate_1_0` runs every rule for the breaking changes since 0.5.1 (the notes in the
+From 0.5.x on there is one umbrella rule per starting version. Each runs every rule needed to bring code from that
+version to the current release, so you run one rule, once, and no rule runs twice:
+
+| Your code is on | Run | Runs |
+|---|---|---|
+| 0.5.x | `Llm4sMigrateFrom_0_5` | every rule in the table below |
+| 0.6.x | `Llm4sMigrateFrom_0_6` | the rules marked "Since 0.6.0" below, and `PositionalPatternsGainFields` |
+| 0.7.x | `Llm4sMigrateFrom_0_7` | added at 0.7.0: the rules for the breaks since 0.7.0 |
+
+A rule for a later break is added to every umbrella whose starting version is older than the break. Code on 0.4.x runs
+`Llm4sMigrate_0_5` first, compiles against 0.5.1, then runs `Llm4sMigrateFrom_0_5`.
+
+`Llm4sMigrateFrom_0_5` runs every rule for the breaking changes since 0.5.1 (the notes in the
 [Migration Guide](migration)), those since 0.6.0 among them, and grows as the 1.0 breaks land:
 
 | Rule | Rewrites |
@@ -97,10 +109,10 @@ A key passed by position (`OpenAIConfig("sk-...", "gpt-4o")`), and the other cre
 (Langfuse, search-tool and store keys), still need a hand edit. The breaks that change behaviour or add cases have no
 rule: see [Changes since 0.5.1 that no rule automates](migration#changes-since-051-that-no-rule-automates).
 
-`Llm4sMigrate_1_0` assumes code compiled against 0.5.x. `CredentialsToSecret`, `CompletionCreatedToInstant` and
-`FromValuesKeyFirst` cannot tell 0.6.x code, where the key is already a `Secret` and `created` an `Instant`, from
-0.5.x code (Scalafix sees no types from Scala 3 dependencies), and would rewrite it again: `config.apiKey.reveal` to
-`config.apiKey.reveal.reveal`. Code on 0.6.x runs the rules for the breaks since 0.6.0 by name instead:
+Run the umbrella for the version your code compiles against, not an older one. `CredentialsToSecret`,
+`CompletionCreatedToInstant` and `FromValuesKeyFirst` cannot tell 0.6.x code, where the key is already a `Secret` and
+`created` an `Instant`, from 0.5.x code (Scalafix sees no types from Scala 3 dependencies), and would rewrite it again:
+`config.apiKey.reveal` to `config.apiKey.reveal.reveal`. `Llm4sMigrateFrom_0_6` leaves those three out:
 `ThinkingReplacesBudgetTokens`, `FinishReasonTyped`, `CompressionRuleTransform`, `AgentCopyToWithSetters`,
 `ResultSyntaxMoved`, `ProviderConfigNewtypes`, `ToolFunctionOneTypeParameter`, `AgentStatusGainsTruncated`,
 `PositionalPatternsGainFields`, `SamplingOptionsOptional`, `CompletionFromMessage`,
@@ -116,10 +128,11 @@ neither rewritten nor reported.
 Each rule is tested by `scalafixTests` (`sbt scalafixTests/test`): the files in `modules/scalafix-rules/input` are
 compiled with SemanticDB against llm4s-core 0.4.1 from Maven Central, each rule named in a file's header is run on
 it, and the result must equal the file of the same name in `modules/scalafix-rules/output`, which is compiled against
-the current sources. `scalafixTests05` does the same for the `Llm4sMigrate_1_0` rules, with
+the current sources. `scalafixTests05` does the same for the `Llm4sMigrateFrom_0_5` rules, with
 `modules/scalafix-rules/input-0.5` compiled against the 0.5.1 artifacts and its expected output under
-`output/.../fix/v1`, and `scalafixTests06` for the breaks since 0.6.0, with `modules/scalafix-rules/input-0.6`
-compiled against the 0.6.0 artifacts and its expected output under `output/.../fix/v06`.
+`output/.../fix/v1`, and `scalafixTests06` for `Llm4sMigrateFrom_0_6` and the rules for the breaks since 0.6.0, with `modules/scalafix-rules/input-0.6`
+compiled against the 0.6.0 artifacts and its expected output under `output/.../fix/v06`
+(`Llm4sMigrateFrom_0_6KeepsSecretsTest` pins that it leaves code already past the 0.5.1 breaks alone).
 
 ## Notes
 - CI and pre-commit run scalafix checks.

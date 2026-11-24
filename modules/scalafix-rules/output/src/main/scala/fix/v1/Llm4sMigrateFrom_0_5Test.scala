@@ -8,7 +8,7 @@ import java.time.Instant
 import org.llm4s.security.Secret
 
 // The snippets of docs/reference/migration.md's notes since 0.5.1 that a rule rewrites, as 0.5.1 code.
-object Llm4sMigrate_1_0Test {
+object Llm4sMigrateFrom_0_5Test {
   def configs(apiKey: String, baseUrl: String)(using ContextWindowResolver) = Seq(
     OpenAIConfig.fromValues("gpt-4o", Secret(apiKey), OpenAIConfig.DEFAULT_BASE_URL),
     OpenAIConfig.fromValues("gpt-4o", Secret(apiKey), baseUrl, Some("org-1"))

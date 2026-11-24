@@ -5,7 +5,8 @@ org.llm4s.scalafix.IsRecoverableToTotal
 org.llm4s.scalafix.MovedConfigLoaders
 org.llm4s.scalafix.MessageExtractorToTypePattern
 org.llm4s.scalafix.RemovedApis
-org.llm4s.scalafix.Llm4sMigrate_1_0
+org.llm4s.scalafix.Llm4sMigrateFrom_0_5
+org.llm4s.scalafix.Llm4sMigrateFrom_0_6
 org.llm4s.scalafix.CopyToWithSetters_1_0
 org.llm4s.scalafix.CredentialsToSecret
 org.llm4s.scalafix.FromValuesKeyFirst
