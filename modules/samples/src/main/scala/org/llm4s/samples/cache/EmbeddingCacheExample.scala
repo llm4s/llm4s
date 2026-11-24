@@ -6,7 +6,7 @@ import org.llm4s.llmconnect.caching.{ CacheStats, CachedEmbeddingClient, InMemor
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -101,7 +101,7 @@ object EmbeddingCacheExample {
         val registry               = summon[ProviderRegistry]
         for {
           descriptor <- registry.resolveEmbedding(ProviderId(providerName))
-          provider   <- descriptor.build(config)
+          provider   <- descriptor.build(config, EmbeddingBuildContext())
           report     <- run(provider, EmbeddingModelConfig(config.model, textModel.dimensions))
         } yield report
       }

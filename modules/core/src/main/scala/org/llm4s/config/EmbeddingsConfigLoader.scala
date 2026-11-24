@@ -4,6 +4,7 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.spi.{
+  EmbeddingConfigContext,
   EmbeddingConfigSpec,
   EmbeddingProviderDescriptor,
   EmbeddingProviderSection,
@@ -147,8 +148,11 @@ private[config] object EmbeddingsConfigLoader {
       section  <- readSection(source, descriptor)
       keyFile  <- readApiKeyFile(source, descriptor)
       resolved <- resolveApiKey(section, keyFile, descriptor, source)
-      config   <- descriptor.buildConfig(section.withApiKey(resolved.map(_.value)), selected.modelOverride)
-      network  <- HttpNetworkReader.load(source)
+      config <- descriptor.buildConfig(
+        section.withApiKey(resolved.map(_.value)),
+        EmbeddingConfigContext(selected.modelOverride)
+      )
+      network <- HttpNetworkReader.load(source)
       // The timeouts block is read once, for every provider, as a chat section's is; the proxy and TLS
       // settings are `llm4s.http`'s.
     } yield {

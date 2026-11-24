@@ -4,6 +4,8 @@ import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
+  EmbeddingConfigContext,
   EmbeddingConfigSpec,
   EmbeddingProviderDescriptor,
   EmbeddingProviderSection,
@@ -42,7 +44,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       apiKeyEnv = Seq("FIXTURE_API_KEY")
     )
 
-    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
       Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
   }
 
@@ -56,7 +58,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       defaultApiKey = Some("fixture-not-required")
     )
 
-    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
       Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
   }
 
@@ -160,7 +162,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       // lookup, so a descriptor cannot reach for a key even if it wanted to - which is why
       // the shared `llm4s.credentials.<id>.apiKey` fallback happens in the loader.
       val config = FixtureEmbeddings
-        .buildConfig(EmbeddingProviderSection(apiKey = Some(Secret("fk-direct"))), Some("m"))
+        .buildConfig(EmbeddingProviderSection(apiKey = Some(Secret("fk-direct"))), EmbeddingConfigContext(Some("m")))
         .value
 
       config shouldBe EmbeddingProviderConfig(
@@ -182,7 +184,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
         defaultBaseUrl = Some("https://acme.example/v1")
       )
 
-      def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+      def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
         Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
     }
 

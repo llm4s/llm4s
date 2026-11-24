@@ -16,7 +16,8 @@ import org.llm4s.types.Result
  * Ollama supply both a chat client and an embedding provider, Voyage supplies
  * only embeddings, and Anthropic only chat. Folding embeddings into
  * `ProviderDescriptor` would force an embedding-only provider to implement
- * `buildClient` and `buildConfig` only to fail them.
+ * the chat `build` and `buildConfig` only to fail them. The two traits do share a shape: each has
+ * `buildConfig(section, context)` and `build(config, context)`.
  *
  * Register it by listing it in an [[Llm4sProviderModule]]'s
  * [[Llm4sProviderModule.embeddingProviders]], exactly as a chat provider is
@@ -40,8 +41,8 @@ import org.llm4s.types.Result
  *     apiKeyEnv      = Seq("JINA_API_KEY")   // what llm4s.credentials.jina.apiKey binds
  *   )
  *
- *   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
- *     Right(JinaEmbeddingProvider.fromConfig(config))
+ *   def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+ *     Right(JinaEmbeddingProvider.fromConfig(config, context.httpClient))
  * }}}
  */
 @Stable
@@ -99,12 +100,13 @@ trait EmbeddingProviderDescriptor:
    *                      when it sets none. Empty rather than absent when the user configured
    *                      nothing. Everything this method needs arrives typed, in here:
    *                      a descriptor never reads configuration itself.
-   * @param modelOverride the `<model>` half of `EMBEDDING_MODEL=<id>/<model>`, when the
-   *                      unified form was used. Takes precedence over the section.
+   * @param context       `context.modelOverride`: the `<model>` half of
+   *                      `EMBEDDING_MODEL=<id>/<model>`, when the unified form was used. It takes
+   *                      precedence over the section.
    */
-  def buildConfig(section: EmbeddingProviderSection, modelOverride: Option[String]): Result[EmbeddingProviderConfig] =
+  def buildConfig(section: EmbeddingProviderSection, context: EmbeddingConfigContext): Result[EmbeddingProviderConfig] =
     for
-      model   <- EmbeddingConfigSpec.resolveModel(id, section, modelOverride, configSpec)
+      model   <- EmbeddingConfigSpec.resolveModel(id, section, context.modelOverride, configSpec)
       baseUrl <- EmbeddingConfigSpec.resolveBaseUrl(id, section, configSpec)
       apiKey  <- EmbeddingConfigSpec.resolveApiKey(id, section, configSpec)
     yield EmbeddingProviderConfig(baseUrl = baseUrl, model = model, apiKey = apiKey, timeouts = section.timeouts)
@@ -115,5 +117,11 @@ trait EmbeddingProviderDescriptor:
    * The config has been read and validated by the caller, so a `Left` here
    * means something only this provider can detect — a model its API does not
    * offer, say.
+   *
+   * A provider that sends HTTP requests sends them through `context.httpClient` when the caller supplied
+   * one, and does not close that client; with none it builds its own from `config.network`.
+   *
+   * @param config  a config, normally one [[buildConfig]] returned
+   * @param context the caller's options: `context.httpClient`
    */
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider]
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider]

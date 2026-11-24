@@ -3,13 +3,14 @@ package org.llm4s.config
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.provider.{ OpenRouterClient, OpenRouterProvider }
-import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
+import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import pureconfig.ConfigSource
+import org.llm4s.llmconnect.spi.ProviderBuildContext
 
 /**
  * Which provider an `OpenAIConfig` reports (#1132 follow-up).
@@ -73,6 +74,6 @@ class OpenAIConfigProviderIdSpec extends AnyWordSpec with Matchers with EitherVa
     "reach the OpenRouter client through LLMConnect" in {
       val cfg = Llm4sConfig.provider(ConfigSource.string(hocon), "or-proxy").value
       LLMConnect.getClient(cfg).value shouldBe an[OpenRouterClient]
-      OpenRouterProvider.buildClient(cfg, LlmClientOptions()).value shouldBe an[OpenRouterClient]
+      OpenRouterProvider.build(cfg, ProviderBuildContext.of()).value shouldBe an[OpenRouterClient]
     }
   }

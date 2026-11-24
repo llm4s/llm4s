@@ -3,7 +3,7 @@ package org.llm4s.config
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.llmconnect.config.*
-import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.spi.{ ProviderConfigContext, ProviderRegistry }
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 import org.slf4j.LoggerFactory
@@ -82,7 +82,7 @@ private[config] object NamedProviderLoader:
       .resolve(section.provider, Some(s"llm4s.providers.$providerName.provider"))
       .flatMap(descriptor =>
         descriptor
-          .buildConfig(providerName, section)
+          .buildConfig(section, ProviderConfigContext.of(providerName))
           // The timeouts block is read once, for every provider; a config that carries it takes it here.
           .map(_.withTimeouts(section.timeouts))
           .flatMap(withKeyFile(providerName, section, descriptor.configSpec.requiresApiKey, _))

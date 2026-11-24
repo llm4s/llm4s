@@ -65,6 +65,13 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
       }
     }
 
+    "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
+      assertEmbeddingUsesSuppliedHttpClient(
+        VoyageAIEmbeddingProvider,
+        EmbeddingProviderConfig(baseUrl = "http://localhost:1", model = "test-model", apiKey = Secret("test-key"))
+      )
+    }
+
     "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {
       assertEmbeddingHonoursApiKeyProvider(
         LocalProviderTestServer.sendJsonResponse(_, 200, """{"data":[{"embedding":[0.1,0.2]}]}""")

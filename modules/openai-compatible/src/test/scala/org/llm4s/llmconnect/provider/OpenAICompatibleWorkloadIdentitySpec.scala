@@ -8,7 +8,7 @@ import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentitySource, TokenExc
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
-import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.spi.{ ProviderConfigContext, ProviderRegistry }
 import org.llm4s.security.{ KnownSecrets, Secret }
 import org.llm4s.testkit.{ FakeTokenExchangeServer, ProviderModuleChecks, ProviderTestConfig, TestJwt }
 import org.llm4s.types.Result
@@ -752,7 +752,7 @@ class OpenAICompatibleWorkloadIdentitySpec
       ).withHeaders(Map("Authorization" -> "Bearer stale"))
       given org.llm4s.llmconnect.config.ContextWindowResolver =
         org.llm4s.llmconnect.config.ContextWindowResolver(summon[org.llm4s.model.ModelRegistryService])
-      OpenAICompatibleProvider.buildConfig("main", section).left.value.message should
+      OpenAICompatibleProvider.buildConfig(section, ProviderConfigContext.of("main")).left.value.message should
         (include("llm4s.providers.main.headers").and(include("Authorization header")))
       OpenAICompatibleModelLister.listModels(section, Llm4sHttpClient.create()).left.value shouldBe
         a[ConfigurationError]

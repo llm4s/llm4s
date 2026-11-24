@@ -38,6 +38,13 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
       }
     }
 
+    "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
+      assertEmbeddingUsesSuppliedHttpClient(
+        CohereEmbeddingProvider,
+        EmbeddingProviderConfig(baseUrl = "http://localhost:1", model = "test-model", apiKey = Secret("test-key"))
+      )
+    }
+
     "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {
       assertEmbeddingHonoursApiKeyProvider(
         LocalProviderTestServer.sendJsonResponse(

@@ -2,13 +2,13 @@ package org.llm4s.llmconnect.spi
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+import org.llm4s.llmconnect.spi.{ ProviderBuildContext, ProviderConfigContext }
 
 /**
  * Covers the registry that replaced core's central provider tables in #1131.
@@ -26,13 +26,13 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
     val id: ProviderId                 = ProviderId(name)
     val configSpec: ProviderConfigSpec = ProviderConfigSpec()
 
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] = Left(ConfigurationError(s"stub $name"))
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] = Left(
+      ConfigurationError(s"stub $name")
+    )
 
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-      ModelRegistryService
-    ): Result[LLMClient] = Left(ConfigurationError(s"stub $name"))
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] = Left(
+      ConfigurationError(s"stub $name")
+    )
 
   "ProviderRegistry.of" should {
     "resolve a descriptor by its id" in {

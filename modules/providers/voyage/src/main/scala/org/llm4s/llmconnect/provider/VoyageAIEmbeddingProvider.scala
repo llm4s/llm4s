@@ -4,7 +4,7 @@ import org.llm4s.config.VoyageConfigKeys
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
 import org.llm4s.http.{ HttpClientOptions, HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.llmconnect.model._
@@ -77,8 +77,13 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     case InputPurpose.Query    => "query"
   }
 
-  /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
+  /**
+   * Builds the provider for the SPI; see [[fromConfig]] for the direct route. Requests go through the caller's
+   * HTTP client when `EmbeddingClientOptions` supplied one, else through one built from the config's proxy and
+   * TLS settings.
+   */
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+    Right(create(config, context.httpClient.getOrElse(Llm4sHttpClient.create(HttpClientOptions(config.network)))))
 
   /** Creates an [[EmbeddingProvider]] backed by Voyage AI using the given configuration. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =

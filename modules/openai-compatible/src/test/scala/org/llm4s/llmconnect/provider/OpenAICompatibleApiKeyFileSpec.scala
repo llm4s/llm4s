@@ -1,9 +1,8 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
-import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.spi.{ ProviderBuildContext, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{ openAICompletion, sendJsonResponse, withServer }
 import org.llm4s.testkit.{ ProviderModuleChecks, ProviderTestConfig }
@@ -48,7 +47,7 @@ class OpenAICompatibleApiKeyFileSpec extends AnyWordSpec with Matchers with Eith
           )
           .value
         given ModelRegistryService = ProviderModuleChecks.defaultModelRegistry
-        val client                 = OpenAICompatibleProvider.buildClient(config, LlmClientOptions.default).value
+        val client                 = OpenAICompatibleProvider.build(config, ProviderBuildContext.of()).value
 
         client.complete(hello).isRight shouldBe true
         Files.writeString(file, "sk-openai-rotated-00002")
@@ -94,7 +93,7 @@ class OpenAICompatibleApiKeyFileSpec extends AnyWordSpec with Matchers with Eith
             .value
           config.apiKeyProvider shouldBe defined
           given ModelRegistryService = ProviderModuleChecks.defaultModelRegistry
-          val client                 = descriptor.buildClient(config, LlmClientOptions.default).value
+          val client                 = descriptor.build(config, ProviderBuildContext.of()).value
 
           withClue(s"$id: ")(client.complete(hello).isRight shouldBe true)
           Files.writeString(file, s"sk-$id-rotated-00002")

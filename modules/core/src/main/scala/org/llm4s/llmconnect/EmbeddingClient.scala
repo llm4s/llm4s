@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.trace.{ TraceAttributeNames, TraceEvent, Tracing }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -136,8 +136,14 @@ object EmbeddingClient {
    * @param provider the provider name as configured, e.g. the `openai` in
    *                 `EMBEDDING_MODEL=openai/text-embedding-3-small`. Aliases are folded
    *                 onto the canonical id.
+   * @param options  construction options: `EmbeddingClientOptions().withHttpClient(client)` sends the
+   *                 provider's requests through the caller's own HTTP client, which the caller closes.
    */
-  def from(provider: String, cfg: EmbeddingProviderConfig)(using
+  def from(
+    provider: String,
+    cfg: EmbeddingProviderConfig,
+    options: EmbeddingClientOptions = EmbeddingClientOptions.default
+  )(using
     ModelRegistryService,
     ProviderRegistry
   ): Result[EmbeddingClient] = {
@@ -151,7 +157,7 @@ object EmbeddingClient {
         // handed an EmbeddingError here, and the message carries the registry's diagnostics.
         EmbeddingError(code = Some("400"), message = error.message, provider = "config")
       )
-      .flatMap(_.build(cfg))
+      .flatMap(_.build(cfg, EmbeddingBuildContext(options)))
       .map(new EmbeddingClient(_, providerId = Some(id)))
   }
 

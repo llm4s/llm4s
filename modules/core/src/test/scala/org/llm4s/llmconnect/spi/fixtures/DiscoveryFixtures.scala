@@ -2,17 +2,19 @@ package org.llm4s.llmconnect.spi.fixtures
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
+import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
   EmbeddingProviderDescriptor,
   Llm4sProviderModule,
+  ProviderBuildContext,
+  ProviderConfigContext,
   ProviderConfigSpec,
   ProviderDescriptor
 }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -27,14 +29,10 @@ object FixtureProvider extends ProviderDescriptor:
   val id: ProviderId                 = ProviderId("fixturecloud")
   val configSpec: ProviderConfigSpec = ProviderConfigSpec(requiresApiKey = true)
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     Left(ConfigurationError("fixture provider builds no config"))
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
     Left(ConfigurationError("fixture provider builds no client"))
 
 /**
@@ -75,7 +73,7 @@ object FixtureEmbeddings extends EmbeddingProviderDescriptor:
   val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
   override val aliases: Set[String]                            = Set("fixture-embeddings")
 
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
     Right(
       new EmbeddingProvider:
         def embed(request: org.llm4s.llmconnect.model.EmbeddingRequest) =
@@ -101,14 +99,10 @@ object CollidingProvider extends ProviderDescriptor:
   val id: ProviderId                 = ProviderId("fixturecloud")
   val configSpec: ProviderConfigSpec = ProviderConfigSpec(requiresApiKey = true)
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     Left(ConfigurationError("colliding provider builds no config"))
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
     Left(ConfigurationError("colliding provider builds no client"))
 
 /** A second module claiming `fixturecloud`, the same id [[FixtureProviderModule]] supplies. */
@@ -120,7 +114,7 @@ object CollidingEmbeddings extends EmbeddingProviderDescriptor:
   val id: ProviderId                                           = ProviderId("fixtureembed")
   val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
 
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
     Left(ConfigurationError("colliding embedding provider builds no embedding provider"))
 
 /** A second module claiming `fixtureembed`, the same id [[FixtureEmbeddingModule]] supplies. */
@@ -149,14 +143,10 @@ object SkewedProvider extends ProviderDescriptor:
   override def aliases: Set[String] =
     throw new AbstractMethodError("org.llm4s.llmconnect.spi.ProviderDescriptor.aliases()")
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     Left(ConfigurationError("skewed provider builds no config"))
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
     Left(ConfigurationError("skewed provider builds no client"))
 
 /** An embedding provider whose id throws, as a version-skewed descriptor's can (#2812). */
@@ -164,7 +154,8 @@ object SkewedEmbeddings extends EmbeddingProviderDescriptor:
   def id: ProviderId = throw new AbstractMethodError("org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor.id()")
   val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
 
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = FixtureEmbeddings.build(config)
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+    FixtureEmbeddings.build(config, context)
 
 /** A module whose skewed descriptors sit beside a working one: only the skewed ones are dropped. */
 final class SkewedProviderModule extends Llm4sProviderModule:

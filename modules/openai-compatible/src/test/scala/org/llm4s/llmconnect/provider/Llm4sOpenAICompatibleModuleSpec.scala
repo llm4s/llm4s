@@ -3,8 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.ContextWindowResolver
-import org.llm4s.llmconnect.LlmClientOptions
-import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{ ProviderBuildContext, ProviderConfigContext, ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{
   holdOpen,
@@ -76,7 +75,7 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
 
     "build their own config from a config section" in {
       expectations.foreach { (descriptor, configClass, _) =>
-        descriptor.buildConfig("test-instance", section(descriptor)) match
+        descriptor.buildConfig(section(descriptor), ProviderConfigContext.of("test-instance")) match
           case Right(config) => config.getClass.getSimpleName shouldBe configClass
           case Left(error)   => fail(s"${descriptor.id.asString} failed to build a config: ${error.message}")
       }
@@ -146,8 +145,11 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
         withClue(s"${descriptor.id.asString}: ") {
           assertHonoursApiKeyProvider(sendJsonResponse(_, 200, openAICompletion("done"))) { (baseUrl, keys) =>
             descriptor
-              .buildConfig("rotation", section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))))
-              .flatMap(config => descriptor.buildClient(config.withApiKeyProvider(keys), LlmClientOptions.default))
+              .buildConfig(
+                section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))),
+                ProviderConfigContext.of("rotation")
+              )
+              .flatMap(config => descriptor.build(config.withApiKeyProvider(keys), ProviderBuildContext.of()))
               .fold(error => fail(error.message), identity)
           }
         }

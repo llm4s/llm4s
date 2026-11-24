@@ -5,7 +5,12 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
+  EmbeddingConfigSpec,
+  EmbeddingProviderDescriptor,
+  ProviderRegistry
+}
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -34,7 +39,7 @@ class RAGEmbeddingResolutionSpec extends AnyFlatSpec with Matchers with EitherVa
     override val configSpec                        = EmbeddingConfigSpec(defaultModel = Some("fake-default"))
     override val modelDimensions: Map[String, Int] = Map("fake-default" -> 4, "fake-big" -> 6)
 
-    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
       built += config
       Right(
         new EmbeddingProvider:
@@ -121,7 +126,7 @@ class RAGEmbeddingResolutionSpec extends AnyFlatSpec with Matchers with EitherVa
     given ProviderRegistry = ProviderRegistry.ofEmbeddings(new EmbeddingProviderDescriptor:
       val id: ProviderId                                           = ProviderId("modelless")
       val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
-      def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+      def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
         Left(ConfigurationError("unreachable"))
     )
     val error = RAG.build(RAGConfig().withEmbeddings("modelless"), resolver()).left.value
