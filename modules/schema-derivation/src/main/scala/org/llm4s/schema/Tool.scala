@@ -3,12 +3,14 @@ package org.llm4s.schema
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
 import org.llm4s.toolapi.{
+  AnyOfSchema,
   ArraySchema,
   BooleanSchema,
   IntegerSchema,
   NullableSchema,
   NumberSchema,
   ObjectSchema,
+  RawJsonSchema,
   SchemaDefinition,
   StringSchema,
   ToolFunction,
@@ -69,7 +71,7 @@ object Tool {
         name,
         description,
         parameters,
-        extractor => decode[A](parameters, extractor.params).left.map(message).flatMap(handler)
+        extractor => decode[A](parameters, extractor.params).left.map(refused).flatMap(handler)
       )
     }
 
@@ -107,7 +109,7 @@ object Tool {
         description,
         parameters,
         extractor =>
-          decode[A](parameters, extractor.params).left.map(message).flatMap { arguments =>
+          decode[A](parameters, extractor.params).left.map(refused).flatMap { arguments =>
             val key = extractor.call.fold(ToolScope.fallbackKey(name, extractor.params))(_.idempotencyKey)
             boundary[Either[String, R]] {
               given ToolScope = new ToolScope(extractor.call, key, summon[boundary.Label[Either[String, R]]])
@@ -169,9 +171,11 @@ object Tool {
           )
       }
 
-  private[schema] def message(errors: List[ToolParameterError]): String = errors match {
-    case single :: Nil => single.getMessage
-    case several       => ToolParameterError.MultipleErrors(several).getMessage
+  // The arguments' errors as the one error a handler returns: the call is then refused as InvalidArguments,
+  // with each of them listed, exactly as a hand-written handler's `validateRequired` has it refused.
+  private[schema] def refused(errors: List[ToolParameterError]): ToolParameterError = errors match {
+    case single :: Nil => single
+    case several       => ToolParameterError.MultipleErrors(several)
   }
 
   /**
@@ -280,6 +284,13 @@ object Tool {
       case _: BooleanSchema   => expect(value.boolOpt.isDefined, "boolean")
       case a: ArraySchema[?]  => checkArray(a.itemSchema, value, path)
       case o: ObjectSchema[?] => checkObject(o, value, path)
+      // the first alternative the value satisfies; with none, what was expected of it
+      case a: AnyOfSchema[?] =>
+        a.alternatives.iterator
+          .map(check(_, value, path))
+          .find(_._1.isEmpty)
+          .getOrElse(expect(ok = false, expectedType(a)))
+      case _: RawJsonSchema => (Nil, value)
     }
   }
 
@@ -315,6 +326,8 @@ object Tool {
     case _: BooleanSchema               => "boolean"
     case _: ArraySchema[?]              => "array"
     case _: ObjectSchema[?]             => "object"
+    case a: AnyOfSchema[?]              => a.alternatives.map(expectedType).distinct.mkString(" or ")
+    case _: RawJsonSchema               => "value"
   }
 
   private def jsonType(value: ujson.Value): String = value match {

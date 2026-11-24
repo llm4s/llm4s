@@ -6,7 +6,8 @@ import org.llm4s.speech.{ AudioInput, CloudSpeechSupport }
 import org.llm4s.speech.config.STTConfig
 import org.llm4s.speech.io.WavFileGenerator
 import org.llm4s.speech.stt.{ STTError, STTOptions, SpeechToText, Transcription, WordTimestamp }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 
 import java.nio.file.{ Files, Path }
 import scala.concurrent.duration._

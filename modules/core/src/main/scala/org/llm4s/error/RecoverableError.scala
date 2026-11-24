@@ -15,7 +15,7 @@ import scala.concurrent.duration.FiniteDuration
  * something first (waits, re-reads a record, corrects a request). It does not promise that repeating the identical
  * request is enough: the library's automatic retry, [[org.llm4s.reliability.RetryPolicy.isRetryable]], retries the
  * recoverable errors for which it is, and is never wider than this trait. Two recoverable errors are deliberately
- * not retried automatically: a response with a client-error HTTP status (`ServiceError`, `APIError`), because the
+ * not retried automatically: a response with a client-error HTTP status (`ServiceError`), because the
  * request itself is wrong, and an [[OptimisticLockFailure]], because the caller must re-read first.
  *
  * Use pattern matching or [[LLMError.isRecoverable]] to check recoverability:
@@ -34,7 +34,4 @@ trait RecoverableError extends LLMError {
 
   /** Suggested delay before retrying. */
   def retryDelay: Option[FiniteDuration] = None
-
-  /** Maximum number of retry attempts recommended. */
-  def maxRetries: Int = 3
 }

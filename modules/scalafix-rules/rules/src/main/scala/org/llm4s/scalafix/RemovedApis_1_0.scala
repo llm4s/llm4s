@@ -6,7 +6,10 @@ import scalafix.v1._
 /**
  * Reports each use of a 0.5.1 API removed (or made internal) since then with no mechanical replacement, with a link
  * to its migration note: the `org.llm4s.types.typeclass` package and `CompletionChunk`/`ChunkDelta` (#2345),
- * `OpenAIToolHelper` (#2360), `AnsiColors` (#2358), and the embeddings sample's settings on `Llm4sConfig` (#2265).
+ * `OpenAIToolHelper` (#2360), `AnsiColors` (#2358), the embeddings sample's settings on `Llm4sConfig` (#2265), and
+ * `APIError`, `SystemError` and the `LLMError.processingFailed` / `invalidImageInput` / `apiCallFailed` constructors
+ * (#2819), and `ErrorMapper`, `DefaultErrorMapper`, the `AsyncResult` object and `Result.combine` / `fromBoolean` /
+ * `fromBooleanWithValue` / `fromFuture` (#2821).
  */
 class RemovedApis_1_0 extends SemanticRule("RemovedApis_1_0") {
 
@@ -31,6 +34,15 @@ object RemovedApis_1_0 {
   private val typeclass = """org/llm4s/types/typeclass/[^/#.]+[#.]""".r
 
   private val chunk = """org/llm4s/llmconnect/model/(CompletionChunk|ChunkDelta)[#.]""".r
+
+  private val errorType = """org/llm4s/error/(APIError|SystemError)[#.]""".r
+
+  private val errorShim = """org/llm4s/error/LLMError\.(processingFailed|invalidImageInput|apiCallFailed)\(\)\.""".r
+
+  private val errorMapper = """org/llm4s/core/safety/(ErrorMapper|DefaultErrorMapper)[#.]""".r
+
+  private val resultHelper =
+    """org/llm4s/(AsyncResult\.|Result\.(combine|fromBoolean|fromBooleanWithValue|fromFuture)\((\+\d+)?\)\.)""".r
 
   private val config = "org/llm4s/config/Llm4sConfig."
 
@@ -69,7 +81,7 @@ object RemovedApis_1_0 {
     else if (symbol == "org/llm4s/toolapi/OpenAIToolHelper.")
       Some(
         "openAIToolHelperInternal" ->
-          ("OpenAIToolHelper is internal; take the tool definitions as JSON with ToolRegistry.getOpenAITools(): " +
+          ("OpenAIToolHelper is internal; take the tool definitions as JSON with ToolFunction.toolDefinitions(tools, strict = true): " +
             Migration.guide10("openaitoolhelper-is-internal-2360"))
       )
     else if (symbol == "org/llm4s/trace/AnsiColors.")
@@ -77,6 +89,35 @@ object RemovedApis_1_0 {
         "ansiColorsInternal" ->
           ("AnsiColors is internal; define the escape codes you need, or use a library such as fansi: " +
             Migration.guide10("tier-hygiene-before-the-baseline-2358"))
+      )
+    else if (errorType.matches(symbol))
+      Some(
+        "errorTypeRemoved" ->
+          ("APIError and SystemError are removed; a provider's error response is a ServiceError(httpStatus, " +
+            "provider, details), and an error of your own extends LLMError with RecoverableError: " +
+            Migration.guide10("error-hierarchy-cleanup-2819"))
+      )
+    else if (errorShim.matches(symbol))
+      Some(
+        "errorShimRemoved" ->
+          ("LLMError.processingFailed, invalidImageInput and apiCallFailed are removed; call ProcessingError(...), " +
+            "InvalidInputError(...) and ServiceError(httpStatus, provider, details): " +
+            Migration.guide10("error-hierarchy-cleanup-2819"))
+      )
+    else if (errorMapper.matches(symbol))
+      Some(
+        "errorMapperRemoved" ->
+          ("ErrorMapper and DefaultErrorMapper are removed; Safety.fromThrowable(t) is the default mapping, which no " +
+            "longer reads a 401 or 429 out of a message: " + Migration.guide10(
+              "result-helpers-and-conversions-move-and-errormapper-is-removed-2821"
+            ))
+      )
+    else if (resultHelper.matches(symbol))
+      Some(
+        "resultHelperRemoved" ->
+          ("Result.combine, fromBoolean, fromBooleanWithValue, fromFuture and the AsyncResult object are removed; use a " +
+            "for comprehension, Either.cond, or future.toResult (import org.llm4s.syntax.toResult): " +
+            Migration.guide10("result-helpers-and-conversions-move-and-errormapper-is-removed-2821"))
       )
     else if (sampleSettings.contains(symbol))
       Some(

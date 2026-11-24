@@ -150,7 +150,7 @@ private[llm4s] object ThinkingReplay {
     update(digest, "\u0000system")
     messages.foreach { case s: SystemMessage => feed(digest, s); case _ => () }
     update(digest, "\u0000tools")
-    options.tools.foreach(t => update(digest, t.toOpenAITool(strict = false).render()))
+    options.tools.foreach(t => update(digest, t.toolDefinition(strict = false).render()))
     update(digest, "\u0000format")
     options.responseFormat.foreach(f => update(digest, f.toString))
     update(digest, "\u0000messages")

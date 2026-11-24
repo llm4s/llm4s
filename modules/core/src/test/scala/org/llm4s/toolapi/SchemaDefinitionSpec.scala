@@ -27,7 +27,7 @@ class SchemaDefinitionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "include length constraints when specified" in {
-    val schema = StringSchema("Username").withLengthConstraints(min = Some(3), max = Some(20))
+    val schema = StringSchema("Username").withMinLength(3).withMaxLength(20)
     val json   = schema.toJsonSchema(strict = false)
 
     json("minLength").num.toInt shouldBe 3
@@ -37,7 +37,8 @@ class SchemaDefinitionSpec extends AnyFlatSpec with Matchers {
   it should "support chained configuration" in {
     val schema = StringSchema("Color")
       .withEnum(Seq("red", "green", "blue"))
-      .withLengthConstraints(min = Some(3), max = Some(5))
+      .withMinLength(3)
+      .withMaxLength(5)
     val json = schema.toJsonSchema(strict = false)
 
     json("enum").arr.map(_.str) shouldBe Seq("red", "green", "blue")
@@ -63,7 +64,7 @@ class SchemaDefinitionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "include range constraints" in {
-    val schema = NumberSchema("Price").withRange(min = Some(0.0), max = Some(1000.0))
+    val schema = NumberSchema("Price").withMinimum(0.0).withMaximum(1000.0)
     val json   = schema.toJsonSchema(strict = false)
 
     json("minimum").num shouldBe 0.0
@@ -71,7 +72,7 @@ class SchemaDefinitionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "include exclusive range constraints" in {
-    val schema = NumberSchema("Rate").withExclusiveRange(min = Some(0.0), max = Some(1.0))
+    val schema = NumberSchema("Rate").withExclusiveMinimum(0.0).withExclusiveMaximum(1.0)
     val json   = schema.toJsonSchema(strict = false)
 
     json("exclusiveMinimum").num shouldBe 0.0
@@ -96,7 +97,7 @@ class SchemaDefinitionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "include range constraints" in {
-    val schema = IntegerSchema("Age").withRange(min = Some(0), max = Some(150))
+    val schema = IntegerSchema("Age").withMinimum(0).withMaximum(150)
     val json   = schema.toJsonSchema(strict = false)
 
     json("minimum").num.toInt shouldBe 0
@@ -104,7 +105,7 @@ class SchemaDefinitionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "include exclusive range constraints" in {
-    val schema = IntegerSchema("Score").withExclusiveRange(min = Some(0), max = Some(100))
+    val schema = IntegerSchema("Score").withExclusiveMinimum(0).withExclusiveMaximum(100)
     val json   = schema.toJsonSchema(strict = false)
 
     json("exclusiveMinimum").num.toInt shouldBe 0
@@ -142,7 +143,8 @@ class SchemaDefinitionSpec extends AnyFlatSpec with Matchers {
 
   it should "include size constraints" in {
     val schema = ArraySchema("Tags", StringSchema("Tag"))
-      .withSizeConstraints(min = Some(1), max = Some(10))
+      .withMinItems(1)
+      .withMaxItems(10)
     val json = schema.toJsonSchema(strict = false)
 
     json("minItems").num.toInt shouldBe 1

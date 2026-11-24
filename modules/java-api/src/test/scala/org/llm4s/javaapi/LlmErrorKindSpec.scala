@@ -55,29 +55,27 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
     (TimeoutError("slow", 5.seconds, "complete"), LlmErrorKind.TIMEOUT, true),
     (NetworkError("down", None, "http://x"), LlmErrorKind.NETWORK, true),
     (ServiceError(503, "openai", "overloaded"), LlmErrorKind.SERVICE, true),
-    (APIError("openai", "odd reply"), LlmErrorKind.SERVICE, true),
     (ValidationError.required("query"), LlmErrorKind.VALIDATION, false),
     (InvalidInputError("image", "x", "not an image"), LlmErrorKind.VALIDATION, false),
     (UnsupportedContentPartError("ollama", "image (url, image/png)", "user"), LlmErrorKind.VALIDATION, false),
     (ContentFilteredError.reply("Gemini", "SAFETY"), LlmErrorKind.VALIDATION, false),
     (ConfigurationError("no provider"), LlmErrorKind.CONFIGURATION, false),
     (CancelledError("complete"), LlmErrorKind.CANCELLED, false),
-    (ContextError.invalidTrimming("empty"), LlmErrorKind.OTHER, false),
+    (ContextError.artifactStoreFailed("store", "key", "disk full"), LlmErrorKind.OTHER, false),
     (ExecutionError("exit 1", "shell"), LlmErrorKind.OTHER, true),
     (NotFoundError("Memory not found", "m1"), LlmErrorKind.OTHER, false),
     (OptimisticLockFailure("stale", "m1", 2L), LlmErrorKind.OTHER, true),
     (CircuitOpenError.open("openai", 30.seconds), LlmErrorKind.OTHER, true),
     (ProcessingError("parse", "bad json"), LlmErrorKind.OTHER, false),
     (SimpleError("plain"), LlmErrorKind.OTHER, false),
-    (SystemError("disk full"), LlmErrorKind.OTHER, true),
-    (TokenizerError.notFound("cl100k"), LlmErrorKind.OTHER, false),
+    (TokenizerError.notAvailable("cl100k"), LlmErrorKind.OTHER, false),
     (UnknownError("what", new RuntimeException("x")), LlmErrorKind.OTHER, false),
     (ValidationUnsupportedError("BedrockClient"), LlmErrorKind.OTHER, false)
   )
 
   /** Provider error responses whose status gives them a kind other than their class's `SERVICE`. */
   private val remapped: List[LLMError] =
-    List(401, 403, 400, 429).flatMap(s => List(ServiceError(s, "p", "x"), APIError("p", "x", Some(s))))
+    List(401, 403, 400, 429).map(s => ServiceError(s, "p", "x"))
 
   "the scan of org.llm4s.error" should "find the error classes, so an empty scan cannot pass the exhaustiveness check" in {
     concreteErrorClasses.size should be >= 19
@@ -117,10 +115,6 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
     kind(ServiceError(400, "p", "bad request")) shouldBe LlmErrorKind.VALIDATION
     Seq(404, 500, 502, 503).foreach(s => kind(ServiceError(s, "p", "x")) shouldBe LlmErrorKind.SERVICE)
 
-    kind(APIError("p", "no", Some(401))) shouldBe LlmErrorKind.AUTHENTICATION
-    kind(APIError("p", "slow", Some(429))) shouldBe LlmErrorKind.RATE_LIMIT
-    kind(APIError("p", "bad", Some(400))) shouldBe LlmErrorKind.VALIDATION
-    kind(APIError("p", "down", Some(500))) shouldBe LlmErrorKind.SERVICE
   }
 
   it should "keep the error class's recoverability when a status gives it another kind" in {
@@ -210,8 +204,7 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
   "getStatusCode" should "give the HTTP status of a provider's error response, and be empty otherwise" in {
     new LlmException(ServiceError(502, "p", "x")).getStatusCode shouldBe OptionalInt.of(502)
     new LlmException(ServiceError(429, "p", "x")).getStatusCode shouldBe OptionalInt.of(429)
-    new LlmException(APIError("p", "x", Some(500))).getStatusCode shouldBe OptionalInt.of(500)
-    new LlmException(APIError("p", "x")).getStatusCode shouldBe OptionalInt.empty()
+    new LlmException(NetworkError("down", None, "x")).getStatusCode shouldBe OptionalInt.empty()
     new LlmException(AuthenticationError("p", "x")).getStatusCode shouldBe OptionalInt.empty()
   }
 

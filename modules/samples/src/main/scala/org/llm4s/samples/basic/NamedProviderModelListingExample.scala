@@ -26,7 +26,8 @@ object NamedProviderModelListingExample:
 
     val result = for
       loaded <- Llm4sConfig.providerConfigs()
-      (errors, configs) = loaded
+      errors  = loaded.collect { case (name, Left(err)) => name -> err }
+      configs = loaded.collect { case (name, Right(config)) => name -> config }
       _ = errors.toSeq
         .sortBy(_._1.asName)
         .foreach((name, err) => logger.warn("Section '{}' did not load: {}", name.asName, err.formatted))

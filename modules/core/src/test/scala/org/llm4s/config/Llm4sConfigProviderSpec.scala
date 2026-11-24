@@ -129,7 +129,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       val cfg = Llm4sConfig.providers(ConfigSource.string(hocon)).fold(err => fail(err.toString), identity)
 
-      cfg.selectedProvider shouldBe Some(ProviderName("fixturechat-primary"))
+      cfg.defaultProvider shouldBe Some(ProviderName("fixturechat-primary"))
       cfg.namedProviders.keySet.map(_.asName) shouldBe Set("fixturechat-primary", "fixturechat-main")
     }
 

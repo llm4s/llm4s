@@ -139,7 +139,8 @@ object CancellationSpec extends ZIOSpecDefault {
           def getReserveCompletion(): Int = 256
         }
         val (capture, thread) = threadCapture()
-        val agent = AgentZ(agentOf(scripted)(_.withTools(new ToolRegistry(Seq(blocking))).withMiddleware(capture)))
+        val agent =
+          AgentZ(agentOf(scripted)(_.withTools(ToolRegistry.of(Seq(blocking)).toOption.get).withMiddleware(capture)))
         for {
           fiber     <- agent.run("go").fork
           started   <- ZIO.attemptBlocking(toolStarted.await(DeadlineSeconds, TimeUnit.SECONDS)).orDie

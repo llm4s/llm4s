@@ -85,7 +85,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         )
       )
 
-    def addInventoryHandler(params: SafeParameterExtractor): Either[String, InventoryModifyResult] =
+    def addInventoryHandler(params: SafeParameterExtractor): Either[ToolHandlerError, InventoryModifyResult] =
       for {
         item <- params.getString("item")
       } yield
@@ -123,7 +123,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         )
       )
 
-    def removeInventoryHandler(params: SafeParameterExtractor): Either[String, InventoryModifyResult] =
+    def removeInventoryHandler(params: SafeParameterExtractor): Either[ToolHandlerError, InventoryModifyResult] =
       for {
         item <- params.getString("item")
       } yield
@@ -232,7 +232,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
     TestGameTools.listInventoryTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val openAITool = tool.toOpenAITool(strict = true)
+        val openAITool = tool.toolDefinition(strict = true)
 
         openAITool("type").str shouldBe "function"
         val function = openAITool("function").obj
@@ -251,7 +251,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
     TestGameTools.addInventoryItemTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val openAITool = tool.toOpenAITool(strict = true)
+        val openAITool = tool.toolDefinition(strict = true)
 
         openAITool("type").str shouldBe "function"
         val function = openAITool("function").obj
@@ -275,7 +275,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
     TestGameTools.removeInventoryItemTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val openAITool = tool.toOpenAITool(strict = true)
+        val openAITool = tool.toolDefinition(strict = true)
 
         openAITool("type").str shouldBe "function"
         val function = openAITool("function").obj
@@ -304,7 +304,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         val result = tool.execute(ujson.Null)
 
         result shouldBe a[Right[_, _]]
-        val json = result.fold(e => fail(s"Expected successful execution: ${e.getMessage}"), identity)
+        val json = result.fold(e => fail(s"Expected successful execution: ${e.message}"), identity)
 
         json("inventory").arr shouldBe empty
         json("count").num shouldBe 0
@@ -320,7 +320,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         val result = tool.execute(ujson.Obj())
 
         result shouldBe a[Right[_, _]]
-        val json = result.fold(e => fail(s"Expected successful execution: ${e.getMessage}"), identity)
+        val json = result.fold(e => fail(s"Expected successful execution: ${e.message}"), identity)
 
         json("inventory").arr shouldBe empty
         json("count").num shouldBe 0
@@ -336,7 +336,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
 
         result shouldBe a[Left[_, _]]
         val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
-        val message = error.getFormattedMessage
+        val message = error.formatted
 
         message should include("add_inventory_item")
         message should include("null arguments")
@@ -353,7 +353,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
 
         result shouldBe a[Left[_, _]]
         val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
-        val message = error.getMessage
+        val message = error.message
 
         message should include("item")
         message should include("missing")
@@ -369,7 +369,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
 
         result shouldBe a[Left[_, _]]
         val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
-        val message = error.getFormattedMessage
+        val message = error.formatted
 
         message should include("remove_inventory_item")
         message should include("null arguments")
@@ -386,7 +386,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
 
         result shouldBe a[Left[_, _]]
         val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
-        val message = error.getMessage
+        val message = error.message
 
         message should include("item")
         message should include("missing")
@@ -403,7 +403,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         val result = tool.execute(ujson.Obj("item" -> "emergency beacon"))
 
         result shouldBe a[Right[_, _]]
-        val json = result.fold(e => fail(s"Expected successful execution: ${e.getMessage}"), identity)
+        val json = result.fold(e => fail(s"Expected successful execution: ${e.message}"), identity)
 
         json("success").bool shouldBe true
         json("item").str shouldBe "emergency beacon"
@@ -426,7 +426,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         val result2 = tool.execute(ujson.Obj("item" -> "supply manifest"))
         result2 shouldBe a[Right[_, _]]
 
-        val json = result2.fold(e => fail(s"Expected successful execution: ${e.getMessage}"), identity)
+        val json = result2.fold(e => fail(s"Expected successful execution: ${e.message}"), identity)
         json("success").bool shouldBe false
         json("message").str shouldBe "You already have 'supply manifest' in your inventory"
       }
@@ -443,7 +443,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         val result = tool.execute(ujson.Obj("item" -> "emergency beacon"))
 
         result shouldBe a[Right[_, _]]
-        val json = result.fold(e => fail(s"Expected successful execution: ${e.getMessage}"), identity)
+        val json = result.fold(e => fail(s"Expected successful execution: ${e.message}"), identity)
 
         json("success").bool shouldBe true
         json("item").str shouldBe "emergency beacon"
@@ -461,7 +461,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         val result = tool.execute(ujson.Obj("item" -> "nonexistent item"))
 
         result shouldBe a[Right[_, _]]
-        val json = result.fold(e => fail(s"Expected successful execution: ${e.getMessage}"), identity)
+        val json = result.fold(e => fail(s"Expected successful execution: ${e.message}"), identity)
 
         json("success").bool shouldBe false
         json("message").str shouldBe "You don't have 'nonexistent item' in your inventory"
@@ -479,7 +479,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         val result = tool.execute(ujson.Null) // null is OK for zero-param tool
 
         result shouldBe a[Right[_, _]]
-        val json = result.fold(e => fail(s"Expected successful execution: ${e.getMessage}"), identity)
+        val json = result.fold(e => fail(s"Expected successful execution: ${e.message}"), identity)
 
         json("count").num shouldBe 3
         json("inventory").arr should have size 3
@@ -505,33 +505,33 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
       { case (listTool, addTool, removeTool) =>
         // Start with empty inventory
         val listResult1 = listTool.execute(ujson.Null)
-        listResult1.fold(e => fail(s"Expected Right but got Left: ${e.getMessage}"), identity)("count").num shouldBe 0
+        listResult1.fold(e => fail(s"Expected Right but got Left: ${e.message}"), identity)("count").num shouldBe 0
 
         // Add first item
         val addResult1 = addTool.execute(ujson.Obj("item" -> "emergency beacon"))
         addResult1
-          .fold(e => fail(s"Expected Right but got Left: ${e.getMessage}"), identity)("success")
+          .fold(e => fail(s"Expected Right but got Left: ${e.message}"), identity)("success")
           .bool shouldBe true
 
         // Add second item
         val addResult2 = addTool.execute(ujson.Obj("item" -> "supply manifest"))
         addResult2
-          .fold(e => fail(s"Expected Right but got Left: ${e.getMessage}"), identity)("success")
+          .fold(e => fail(s"Expected Right but got Left: ${e.message}"), identity)("success")
           .bool shouldBe true
 
         // List inventory - should have 2 items
         val listResult2 = listTool.execute(ujson.Obj())
-        listResult2.fold(e => fail(s"Expected Right but got Left: ${e.getMessage}"), identity)("count").num shouldBe 2
+        listResult2.fold(e => fail(s"Expected Right but got Left: ${e.message}"), identity)("count").num shouldBe 2
 
         // Remove one item
         val removeResult = removeTool.execute(ujson.Obj("item" -> "emergency beacon"))
         removeResult
-          .fold(e => fail(s"Expected Right but got Left: ${e.getMessage}"), identity)("success")
+          .fold(e => fail(s"Expected Right but got Left: ${e.message}"), identity)("success")
           .bool shouldBe true
 
         // List inventory - should have 1 item left
         val listResult3 = listTool.execute(ujson.Null)
-        val finalJson   = listResult3.fold(e => fail(s"Expected Right but got Left: ${e.getMessage}"), identity)
+        val finalJson   = listResult3.fold(e => fail(s"Expected Right but got Left: ${e.message}"), identity)
         finalJson("count").num shouldBe 1
         finalJson("inventory").arr.head.str shouldBe "supply manifest"
       }
@@ -544,7 +544,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
     TestGameTools.allTools.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tools => {
-        val registry = new ToolRegistry(tools)
+        val registry = ToolRegistry.of(tools).toOption.get
 
         // List inventory via registry
         val listRequest = ToolCallRequest("list_inventory", ujson.Null)
@@ -556,12 +556,12 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
         val addResult  = registry.execute(addRequest)
         addResult shouldBe a[Right[_, _]]
         addResult
-          .fold(e => fail(s"Expected Right but got Left: ${e.getMessage}"), identity)("success")
+          .fold(e => fail(s"Expected Right but got Left: ${e.message}"), identity)("success")
           .bool shouldBe true
 
         // Verify via list
         val verifyResult = registry.execute(listRequest)
-        verifyResult.fold(e => fail(s"Expected Right but got Left: ${e.getMessage}"), identity)("count").num shouldBe 1
+        verifyResult.fold(e => fail(s"Expected Right but got Left: ${e.message}"), identity)("count").num shouldBe 1
       }
     )
   }
@@ -570,7 +570,7 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
     TestGameTools.allTools.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tools => {
-        val registry = new ToolRegistry(tools)
+        val registry = ToolRegistry.of(tools).toOption.get
 
         val request = ToolCallRequest("unknown_tool", ujson.Obj())
         val result  = registry.execute(request)
@@ -588,8 +588,8 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
     TestGameTools.allTools.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tools => {
-        val registry    = new ToolRegistry(tools)
-        val openAITools = registry.getOpenAITools(strict = true)
+        val registry    = ToolRegistry.of(tools).toOption.get
+        val openAITools = ToolFunction.toolDefinitions(registry.tools, strict = true)
 
         openAITools.arr should have size 3
 

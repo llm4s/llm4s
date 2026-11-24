@@ -5,7 +5,8 @@ import org.llm4s.error.ValidationError
 import org.llm4s.http.{ HttpRawResponse, HttpResponse }
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.provider.HttpErrorMapper
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files

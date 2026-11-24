@@ -1,6 +1,6 @@
 package org.llm4s.javaapi.rag
 
-import org.llm4s.core.safety.Safety
+import org.llm4s.error.Safety
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.javaapi.{ FacadeInternals, LlmException, LlmResult }
 import org.llm4s.llmconnect.model.StreamedChunk

@@ -802,11 +802,6 @@ object StabilityTiers {
       "org.llm4s.context.tokens.TokenizerAccuracy.Unknown",
       "a fixed accuracy case holding only its description"
     ),
-    GrowthExempt(
-      "org.llm4s.http.MultipartPart.FilePart",
-      "a multipart file part is exactly a name, a path and a filename"
-    ),
-    GrowthExempt("org.llm4s.http.MultipartPart.TextField", "a multipart text field is exactly a name and a value"),
     GrowthExempt("org.llm4s.identity.TokenizerId", "a single-name identifier"),
     GrowthExempt("org.llm4s.llmconnect.ProviderExchangeLogging.Enabled", "a single-value wrapper over the sink"),
     GrowthExempt(
@@ -889,10 +884,6 @@ object StabilityTiers {
       "an error case holding only the tool name and the timeout it exceeded"
     ),
     GrowthExempt(
-      "org.llm4s.toolapi.ToolExecutionStrategy.ParallelWithLimit",
-      "a strategy case holding only its concurrency limit"
-    ),
-    GrowthExempt(
       "org.llm4s.toolapi.ToolParameterError.InvalidNesting",
       "an error case naming the parameter, its parent path and the parent type found"
     ),
@@ -908,7 +899,10 @@ object StabilityTiers {
       "org.llm4s.toolapi.ToolParameterError.TypeMismatch",
       "an error case naming only the parameter, its expected type and the type received"
     ),
-    GrowthExempt("org.llm4s.trace.TracingMode.Named", "a TracingMode case holding only the backend name")
+    GrowthExempt("org.llm4s.trace.TracingMode.Named", "a TracingMode case holding only the backend name"),
+    GrowthExempt("org.llm4s.types.DirectoryPath", "a newtype over one String"),
+    GrowthExempt("org.llm4s.types.FilePath", "a newtype over one String"),
+    GrowthExempt("org.llm4s.types.SessionId", "a newtype over one String")
   )
 
   private val PackageLine = "^package\\s+([\\w.]+)$".r

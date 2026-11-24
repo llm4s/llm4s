@@ -2,7 +2,8 @@ package org.llm4s.rag.evaluation
 
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
 
 import java.nio.file.{ Files, Paths }

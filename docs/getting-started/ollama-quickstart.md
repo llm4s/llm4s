@@ -477,7 +477,7 @@ object OllamaTools extends App {
 
   val result = for {
     weatherTool    <- getWeather
-    tools          = new ToolRegistry(Seq(weatherTool))
+    tools <- ToolRegistry.of(Seq(weatherTool))
     providerConfig <- Llm4sConfig.defaultProvider()
     registry       <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry

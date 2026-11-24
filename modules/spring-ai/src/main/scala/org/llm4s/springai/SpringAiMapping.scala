@@ -26,7 +26,8 @@ import org.llm4s.toolapi.{
   StringSchema,
   ToolFunction
 }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.springframework.ai.chat.messages.{
   AssistantMessage as SpringAssistantMessage,
   Message as SpringMessage,
@@ -339,7 +340,7 @@ private[springai] object SpringAiMapping {
     override def getToolDefinition: ToolDefinition = definition
     override def call(toolInput: String): String =
       arguments(tool.name, toolInput).flatMap(args =>
-        tool.execute(args).left.map(e => ValidationError("tool", e.getMessage))
+        tool.execute(args).left.map(e => ValidationError("tool", e.message))
       ) match {
         case Right(result) => result.render()
         case Left(error)   => throw failure(error)

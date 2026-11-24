@@ -51,9 +51,9 @@ object BuiltinToolsExample {
     logger.info("--- Core Utilities ---")
 
     val result = for {
-      tools <- BuiltinTools.coreSafe
+      tools    <- BuiltinTools.coreSafe
+      registry <- ToolRegistry.of(tools)
     } yield {
-      val registry = new ToolRegistry(tools)
 
       // DateTime tool
       logger.info("Getting current date/time...")
@@ -132,8 +132,8 @@ object BuiltinToolsExample {
         fileConfig = Some(fileConfig),
         writeConfig = Some(writeConfig)
       )
+      registry <- ToolRegistry.of(tools)
     } yield {
-      val registry = new ToolRegistry(tools)
 
       // List directory
       logger.info("Listing /tmp directory...")
@@ -201,8 +201,8 @@ object BuiltinToolsExample {
       tools <- BuiltinTools.customSafe(
         shellConfig = Some(config)
       )
+      registry <- ToolRegistry.of(tools)
     } yield {
-      val registry = new ToolRegistry(tools)
 
       // Execute 'pwd' command
       logger.info("Executing 'pwd' command...")

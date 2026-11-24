@@ -182,7 +182,7 @@ A call whose arguments do not match the type never reaches your function. Each p
 | arguments that are not an object | `InvalidNesting(<field>, "root", <the JSON type sent>)` for each field |
 | a key `ForecastQuery` has no field for | nothing: it is ignored, as a hand-written tool ignores it |
 
-The problems are collected, every field at once, in declaration order: one is reported as its own message, as a hand-written handler's `Left` would be, several as `ToolParameterError.MultipleErrors`'s. A nested field is named by its path (`address.city`, `lines[0].quantity`), as a dotted `getString("address.city")` names it; a nested object or an array that is not one is a `TypeMismatch` naming the object, as `getObject` reports it. A value outside an enum's cases is a `TypeMismatch` that lists the cases, and a value of the right JSON type that the reader still refuses (`"abc"` for a `BigDecimal`) is a `TypeMismatch` with the reader's reason. An `Option` field may be absent or `null`, and is `None`; every other field is required, including one with a default value, as the schema says.
+The problems are collected, every field at once, in declaration order, and the call is refused as `ToolCallError.InvalidArguments`, whose `parameterErrors` lists them, as a hand-written handler that returns `validateRequired`'s error has it refused. A nested field is named by its path (`address.city`, `lines[0].quantity`), as a dotted `getString("address.city")` names it; a nested object or an array that is not one is a `TypeMismatch` naming the object, as `getObject` reports it. A value outside an enum's cases is a `TypeMismatch` that lists the cases, and a value of the right JSON type that the reader still refuses (`"abc"` for a `BigDecimal`) is a `TypeMismatch` with the reader's reason. An `Option` field may be absent or `null`, and is `None`; every other field is required, including one with a default value, as the schema says.
 
 The built-in calculator, re-expressed this way next to the hand-built original, is the `TypedCalculatorExample` sample (`sbt "samples/runMain org.llm4s.samples.toolapi.TypedCalculatorExample"`).
 
@@ -261,7 +261,7 @@ trait CustomerService {
 }
 
 def supportTools(service: CustomerService): Result[ToolRegistry] =
-  Tools.derive[CustomerService](service).map(tools => new ToolRegistry(tools))
+  Tools.derive[CustomerService](service).flatMap(ToolRegistry.of)
 
 def cancelTool(service: CustomerService): Result[ToolFunction[?, Cancellation]] =
   Tool.fromMethod(service.cancelOrder)
@@ -338,7 +338,7 @@ Sum types nest: a case class field, a `List` or an `Option` of a sum type is des
 
 OpenAI's strict mode refuses an `anyOf` at the root of a schema, so `completeStructuredOf` asks for a sum type wrapped in an object, `{"value": <the case>}`, sends that schema as a `ResponseFormat.JsonSchema`, and reads the reply's `value` into the type: the caller never sees the wrapper. A case class that holds a sum type is an object already and is sent as it is. A case class without one goes through `completeStructured` as before. The wrapped schema is within the subset OpenAI's strict mode accepts (`anyOf` below the root, `additionalProperties: false` and every property required on each object), and Gemini accepts it too; the module's tests check both the subset and the round trip with uPickle for every case.
 
-A sum type has no schema in `llm4s-core`'s model, which has no union node: `SchemaOf[Action].toJsonSchema()` is its schema, while `SchemaOf[Action].definition` throws an `UnsupportedOperationException`. So a tool's parameters cannot hold a sum type yet, and `Tool.of` returns a `Left` for one.
+In `llm4s-core`'s schema model a sum type is an `AnyOfSchema`: `SchemaOf[Action].definition` is one, and writes the same JSON as `SchemaOf[Action].toJsonSchema()`. A tool's parameters may hold a sum type (a field, a `List` or an `Option` of one), and each value is checked against the cases. They cannot be one: a tool's arguments are a JSON object, so `Tool.of[Action, R]` returns a `Left`.
 
 ## Named tuples
 

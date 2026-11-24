@@ -1,6 +1,6 @@
 package org.llm4s.samples.basic
 
-import org.llm4s.core.safety.Safety
+import org.llm4s.error.Safety
 import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.config.LangfuseConfigLoader
 import org.llm4s.llmconnect.config.LangfuseConfig
@@ -107,14 +107,14 @@ object AgentLLMCallingExample {
           agentExecutionResult <- {
             val calcToolResult = CalculatorTool.toolSafe
             calcToolResult.flatMap { calcTool =>
-              val tools        = Seq(calcTool)
-              val toolRegistry = new ToolRegistry(tools)
+              val tools = Seq(calcTool)
 
               logger.info("🔧 Available Tools:")
               tools.foreach(tool => logger.info("• {}: {}", tool.name, tool.description))
               val query = "Calculate 15 to the power of 3, and then calculate the square root of that result."
 
               for {
+                toolRegistry <- ToolRegistry.of(tools)
                 agent <- Agent
                   .builder("calculator-agent", llmClient)
                   .withTools(toolRegistry)

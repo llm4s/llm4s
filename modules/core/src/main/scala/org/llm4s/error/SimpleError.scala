@@ -30,7 +30,6 @@ object SimpleError {
   /** Creates a simple error with the given message. */
   def apply(message: String): SimpleError = new SimpleError(message)
 
-  /** Pattern matching extractor returning message and context. */
-  def unapply(error: SimpleError): Option[(String, Map[String, String])] =
-    Some((error.message, error.context))
+  /** Extracts the message. */
+  def unapply(error: SimpleError): Option[String] = Some(error.message)
 }

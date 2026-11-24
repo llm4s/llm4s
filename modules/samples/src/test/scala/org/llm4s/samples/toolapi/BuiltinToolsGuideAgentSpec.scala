@@ -66,9 +66,10 @@ class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherVa
 
     // The snippet of the guide, from here ...
     val result = for {
-      tools <- BuiltinTools.coreSafe
-      agent <- Agent.builder("calculator-agent", client).withTools(new ToolRegistry(tools)).build()
-      state <- agent.run("What is 15% of 850?")
+      tools        <- BuiltinTools.coreSafe
+      toolRegistry <- ToolRegistry.of(tools)
+      agent        <- Agent.builder("calculator-agent", client).withTools(toolRegistry).build()
+      state        <- agent.run("What is 15% of 850?")
     } yield state
     // ... to here.
 

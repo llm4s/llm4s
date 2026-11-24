@@ -6,7 +6,7 @@ import ch.qos.logback.classic.{ Logger => LogbackLogger }
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.sun.net.httpserver.{ HttpExchange, HttpHandler, HttpServer }
-import org.llm4s.error.{ APIError, CancelledError, ConfigurationError, LLMError, NetworkError, TimeoutError }
+import org.llm4s.error.{ CancelledError, ConfigurationError, LLMError, NetworkError, ServiceError, TimeoutError }
 import org.llm4s.imageprocessing.config.GeminiVisionConfig
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.BeforeAndAfterEach
@@ -424,14 +424,14 @@ class GeminiVisionClientHttpSpec extends AnyFlatSpec with Matchers with BeforeAn
   // ---- status code table ---------------------------------------------------------------
 
   for ((code, st) <- statuses)
-    "GeminiVisionClient errors" should s"map HTTP $code to an APIError carrying the status code and Google's message" in {
+    "GeminiVisionClient errors" should s"map HTTP $code to a ServiceError carrying the status code and Google's message" in {
       reply = Reply(code, googleError(code, st), Map("Retry-After" -> "7"))
       val p = image(".png", "png")
       val e = new GeminiVisionClient(cfg()).analyzeImage(p.toString).left.toOption.get
-      e shouldBe a[APIError]
-      val api = e.asInstanceOf[APIError]
+      e shouldBe a[ServiceError]
+      val api = e.asInstanceOf[ServiceError]
       api.provider shouldBe "Gemini"
-      api.statusCode shouldBe Some(code)
+      api.httpStatus shouldBe code
       e.message should include(s"msg for $code")
       e.message should include(st)
       (errString(e) should not).include(Key)
@@ -442,7 +442,7 @@ class GeminiVisionClientHttpSpec extends AnyFlatSpec with Matchers with BeforeAn
     reply = Reply(502, "<html>Bad Gateway</html>")
     val p = image(".png", "png")
     val e = new GeminiVisionClient(cfg()).analyzeImage(p.toString).left.toOption.get
-    e.asInstanceOf[APIError].statusCode shouldBe Some(502)
+    e.asInstanceOf[ServiceError].httpStatus shouldBe 502
     e.message should include("Bad Gateway")
   }
 

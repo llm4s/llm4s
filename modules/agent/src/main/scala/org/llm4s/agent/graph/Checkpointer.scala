@@ -2,7 +2,8 @@ package org.llm4s.agent.graph
 
 import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.error.{ CancelledError, ValidationError }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 
 import java.time.{ Clock, Instant }
 import java.util.concurrent.TimeUnit

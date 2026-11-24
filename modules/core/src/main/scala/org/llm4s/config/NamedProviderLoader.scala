@@ -1,16 +1,15 @@
 package org.llm4s.config
 
-import org.llm4s.error.{ ConfigurationError, LLMError }
+import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.llmconnect.config.*
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 import org.slf4j.LoggerFactory
-import pureconfig.ConfigSource
 
 /**
- * Loads and resolves a named provider's `ProviderConfig` from a `ConfigSource`.
+ * Builds a named provider's `ProviderConfig` from the providers block, as read.
  *
  * Only the section being resolved is validated (#1132): another section's missing API key,
  * unregistered provider or unreadable key fails lookups of that section and nothing else.
@@ -20,26 +19,8 @@ private[config] object NamedProviderLoader:
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
-   * Loads the `ProviderConfig` for a single named provider from the given config source.
-   *
-   *  @param source       the PureConfig source to read from
-   *  @param providerName the name of the provider entry to look up
-   *  @return `Right(ProviderConfig)` on success, or `Left` with a `ConfigurationError`
-   */
-  def load(source: ConfigSource, providerName: String)(using
-    ContextWindowResolver,
-    ProviderRegistry
-  ): Result[ProviderConfig] =
-    if providerName.trim.isEmpty then
-      Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
-    else ProvidersConfigLoader.loadSections(source).flatMap(select(_, providerName))
-
-  /**
    * Builds the `ProviderConfig` for a single named provider from an already-read providers block,
    * validating that section and no other.
-   *
-   * Callers that need the block for something else as well - the default provider's name, say -
-   * read it once and pass it here, rather than calling [[load]] and so reading it a second time.
    *
    *  @param sections     the providers block, as read
    *  @param providerName the name of the provider entry to look up
@@ -59,59 +40,37 @@ private[config] object NamedProviderLoader:
       yield config.withNetwork(network)
 
   /**
-   * Loads all named provider configs from the given config source, returning errors and successes separately.
+   * The provider config of every section of an already-read providers block, each built on its own.
    *
-   * Each section is read, validated and built on its own, so one that fails at any of those
-   * steps is reported in the error map and does not stop the others loading. Only a providers
-   * block that cannot be read at all is a `Left`.
+   * Each section is validated and built separately, so one that fails at either step is a `Left` under its
+   * name and does not stop the others.
    *
-   *  @param source the PureConfig source to read from
-   *  @return `Right` of a pair: failed entries mapped to their errors, and successful entries mapped to their configs
+   *  @param sections the providers block, as read
+   *  @return each section's config, or the error loading it, by name
    */
-  def loadProviderConfigs(
-    source: ConfigSource
-  )(using
+  def selectAll(sections: ProviderSections)(using
     ContextWindowResolver,
     ProviderRegistry
-  ): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
-    ProvidersConfigLoader.loadSections(source).map { sections =>
-      val results = sections.sections.keys.toList.map { name =>
-        name -> (for
-          normalized <- sections.validated(name)
-          network    <- sections.network(name)
-          config     <- buildConfigFromNamedConfig(name.asName, normalized)
-        yield config.withNetwork(network))
-      }
-      (
-        results.collect { case (name, Left(error)) => name -> error }.toMap,
-        results.collect { case (name, Right(config)) => name -> config }.toMap
-      )
-    }
+  ): Map[ProviderName, Result[ProviderConfig]] =
+    sections.sections.keys.map { name =>
+      name -> (for
+        normalized <- sections.validated(name)
+        network    <- sections.network(name)
+        config     <- buildConfigFromNamedConfig(name.asName, normalized)
+      yield config.withNetwork(network))
+    }.toMap
 
   /**
-   * Converts a map of validated named provider configs into separate error and success maps.
+   * The provider config of one validated section, without any network settings: the caller applies them.
    *
-   *  @param namedProviders the validated named providers to process
-   *  @return a pair: provider names mapped to build errors, and provider names mapped to resolved `ProviderConfig`s
+   *  @param name    the section's name, for error messages
+   *  @param section the validated section
    */
-  def getProviderConfigs(
-    namedProviders: Map[ProviderName, NamedProviderConfig]
-  )(using
+  def build(name: ProviderName, section: NamedProviderConfig)(using
     ContextWindowResolver,
     ProviderRegistry
-  ): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
-    namedProviders.toList.foldLeft((Map.empty[ProviderName, LLMError], Map.empty[ProviderName, ProviderConfig]))(
-      (x, y) =>
-        buildConfigFromNamedConfig(y._1.asName, y._2).fold(
-          (error: LLMError) =>
-            val kv = (y._1, error)
-            (x._1 + kv, x._2)
-          ,
-          (providerConfig: ProviderConfig) =>
-            val kv: (ProviderName, ProviderConfig) = (y._1, providerConfig)
-            (x._1, x._2 + kv)
-        )
-    )
+  ): Result[ProviderConfig] =
+    buildConfigFromNamedConfig(name.asName, section)
 
   private def buildConfigFromNamedConfig(
     providerName: String,

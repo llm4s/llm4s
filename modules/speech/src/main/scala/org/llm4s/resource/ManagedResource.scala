@@ -2,7 +2,7 @@ package org.llm4s.resource
 
 import org.llm4s.types.Result
 import scala.util.Try
-import org.llm4s.types.TryOps
+import org.llm4s.syntax.toResult
 
 /**
  * A resource acquired and released around a computation, returning `Result` throughout.

@@ -175,7 +175,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       conversation: Conversation,
       options: CompletionOptions
     ): Result[Completion] =
-      Left(org.llm4s.error.APIError("test-provider", "Mock LLM failure for testing"))
+      Left(org.llm4s.error.ServiceError(503, "test-provider", "Mock LLM failure for testing"))
 
     def streamComplete(
       conversation: Conversation,

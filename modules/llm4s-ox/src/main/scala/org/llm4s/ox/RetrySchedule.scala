@@ -15,8 +15,8 @@ import scala.concurrent.duration.{ DurationInt, FiniteDuration }
  * Ox retry presets for `Result`-returning llm4s calls.
  *
  * What is retried is the library's one rule for automatic retry, the one `ReliableClient` and the agent graph use
- * ([[org.llm4s.reliability.RetryPolicy]]'s `isRetryable`): a recoverable error, except a `ServiceError` or an
- * `APIError` with a client-error status (any 4xx but 408 and 429) and an `OptimisticLockFailure`. Every other
+ * ([[org.llm4s.reliability.RetryPolicy]]'s `isRetryable`): a recoverable error, except a `ServiceError`
+ * with a client-error status (any 4xx but 408 and 429) and an `OptimisticLockFailure`. Every other
  * error, a `CancelledError` included, is returned at once.
  *
  * {{{

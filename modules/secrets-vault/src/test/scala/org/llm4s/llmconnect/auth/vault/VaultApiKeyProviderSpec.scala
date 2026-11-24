@@ -252,9 +252,9 @@ class VaultApiKeyProviderSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     replies.put("/v1/secret/data/closing", 200 -> kv2("apiKey" -> "sk-closing-key"))
     val closedFlag = new java.util.concurrent.atomic.AtomicBoolean(false)
     val supplied = new Llm4sHttpClient {
-      private val inner = Llm4sHttpClient.create()
-      export inner.{ close as _, * }
-      override def close(): Unit = closedFlag.set(true)
+      private val inner                             = Llm4sHttpClient.create()
+      def send(request: org.llm4s.http.HttpRequest) = inner.send(request)
+      override def close(): Unit                    = closedFlag.set(true)
     }
     val p = VaultApiKeyProvider(settings("closing"), supplied).fold(e => fail(e.formatted), identity)
     key(p) shouldBe "sk-closing-key"

@@ -21,10 +21,11 @@ package org.llm4s.toolapi.builtin
  *   calculator <- CalculatorTool.toolSafe
  *   uuid       <- UUIDTool.toolSafe
  *   json       <- JSONTool.toolSafe
- * } yield new ToolRegistry(Seq(dateTime, calculator, uuid, json))
+ *   registry <- ToolRegistry.of(Seq(dateTime, calculator, uuid, json))
+ * } yield registry
  *
  * // Or use the convenience val
- * allToolsSafe.map(tools => new ToolRegistry(tools))
+ * allToolsSafe.flatMap(ToolRegistry.of)
  * }}}
  */
 package object core {

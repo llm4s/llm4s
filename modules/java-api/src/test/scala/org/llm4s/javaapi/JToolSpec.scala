@@ -70,7 +70,7 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
 
   it should "check the arguments itself when called directly, outside an agent" in {
     val weather = JTool.fromAnnotated(new ToolsCheck.WeatherTools).get().asScala.find(_.name() == "weather").get
-    def error(args: ujson.Value) = weather.function.execute(args).left.map(_.getMessage).left.getOrElse("")
+    def error(args: ujson.Value) = weather.function.execute(args).left.map(_.message).left.getOrElse("")
     error(ujson.Obj("unit" -> "CELSIUS")) should include("missing required parameter 'city'")
     error(ujson.Obj("city" -> 5, "unit" -> "CELSIUS")) should include("parameter 'city': expected a string")
     error(ujson.Obj("city" -> "x", "unit" -> "KELVIN")) should include("'KELVIN' is not one of CELSIUS, FAHRENHEIT")
@@ -87,7 +87,7 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
     run(ToolCall("c1", "add", ujson.Obj("a" -> 2, "b" -> 0.5, "round" -> true))) shouldBe """tool said: {"sum":3}"""
     ToolsCheck.CALLS.asScala.toList shouldBe List("add:2,0.5,false", "add:2,0.5,true")
     val add                      = ToolsCheck.calculator().get()
-    def error(args: ujson.Value) = add.function.execute(args).left.map(_.getMessage).left.getOrElse("")
+    def error(args: ujson.Value) = add.function.execute(args).left.map(_.message).left.getOrElse("")
     error(ujson.Obj("a" -> 2, "b" -> "x")) should include("parameter 'b': expected a number")
     error(ujson.Obj("a" -> 1e30, "b" -> 1)) should include("an integer that fits a long")
     error(ujson.Obj("a" -> 1, "b" -> 1, "round" -> "yes")) should include("parameter 'round': expected a boolean")
@@ -95,7 +95,7 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
 
   it should "turn its handler's exception into a tool error naming it" in {
     val tool = JTool.builder("boom", "Fails").handler(_ => throw new IllegalArgumentException("no luck")).build().get()
-    tool.function.execute(ujson.Obj()).left.map(_.getMessage).left.getOrElse("") should include(
+    tool.function.execute(ujson.Obj()).left.map(_.message).left.getOrElse("") should include(
       "IllegalArgumentException: no luck"
     )
   }
@@ -105,7 +105,7 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
     tool.name() shouldBe "add"
     tool.description() shouldBe "Adds two numbers"
     tool.toString shouldBe "JTool(add)"
-    val schema = tool.function.toOpenAITool(strict = false)("function")("parameters")
+    val schema = tool.function.toolDefinition(strict = false)("function")("parameters")
     schema("properties")("a")("type").str shouldBe "integer"
     schema("properties")("b")("type").str shouldBe "number"
     schema("properties")("round")("type").str shouldBe "boolean"
@@ -136,19 +136,19 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
     tool.function
       .execute(ujson.Obj("s" -> "a", "i" -> 1, "bi" -> 2, "sh" -> 70000, "by" -> 4, "f" -> 1, "u" -> "CELSIUS"))
       .left
-      .map(_.getMessage)
+      .map(_.message)
       .left
       .getOrElse("") should include("fits a short")
     tool.function
       .execute(ujson.Obj("s" -> "a", "i" -> 1, "bi" -> 2, "sh" -> 1, "by" -> 400, "f" -> 1, "u" -> "CELSIUS"))
       .left
-      .map(_.getMessage)
+      .map(_.message)
       .left
       .getOrElse("") should include("fits a Byte")
     tool.function
       .execute(ujson.Obj("s" -> "a", "i" -> 1, "bi" -> 2, "sh" -> 1, "by" -> 4, "f" -> 1, "u" -> 1))
       .left
-      .map(_.getMessage)
+      .map(_.message)
       .left
       .getOrElse("") should include("parameter 'u': expected a string")
   }
@@ -277,7 +277,7 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
 
   "An annotated tool's JToolArgs parameter" should "not be shown to the model" in {
     val charge = JTool.fromAnnotated(new ToolsCheck.KeyedTools).get().get(0)
-    val schema = charge.function.toOpenAITool(strict = false)("function")("parameters")
+    val schema = charge.function.toolDefinition(strict = false)("function")("parameters")
     schema("properties").obj.keySet shouldBe Set("cents")
     schema("required").arr.map(_.str).toList shouldBe List("cents")
   }

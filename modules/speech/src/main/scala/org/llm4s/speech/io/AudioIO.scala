@@ -7,7 +7,7 @@ import org.llm4s.resource.ManagedResource
 
 import java.nio.file.Path
 import scala.util.Try
-import org.llm4s.types.TryOps
+import org.llm4s.syntax.toResult
 
 object AudioIO {
 

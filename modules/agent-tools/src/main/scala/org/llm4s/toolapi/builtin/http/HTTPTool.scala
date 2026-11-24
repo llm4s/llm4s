@@ -60,7 +60,7 @@ object HTTPResult {
  *   allowedMethods = Seq("GET", "POST")
  * ))
  *
- * val tools = new ToolRegistry(Seq(httpTool))
+ * val tools = ToolRegistry.of(Seq(httpTool))
  * agent.run("Fetch data from https://api.example.com/data", tools)
  * }}}}
  */

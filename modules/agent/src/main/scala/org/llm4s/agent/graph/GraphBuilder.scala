@@ -1,7 +1,8 @@
 package org.llm4s.agent.graph
 
 import org.llm4s.annotation.Stable
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
 import scala.annotation.tailrec

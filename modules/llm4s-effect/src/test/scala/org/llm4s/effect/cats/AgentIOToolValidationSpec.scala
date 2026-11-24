@@ -47,7 +47,7 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with TestTimeLimit with Matc
     case Left(e)  => fail(s"could not build tool: $e")
   }
 
-  private def tools: ToolRegistry = new ToolRegistry(Seq(echoTool))
+  private def tools: ToolRegistry = ToolRegistry.of(Seq(echoTool)).toOption.get
 
   final private class Recording(reply: Int => Completion) extends LLMClient {
     val conversations = new CopyOnWriteArrayList[Conversation]()

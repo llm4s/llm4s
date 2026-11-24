@@ -74,6 +74,20 @@ object Schema {
   def nullable[T](schema: SchemaDefinition[T]): NullableSchema[T] =
     NullableSchema(schema)
 
+  /**
+   * A union: a value that matches `first` or any of `rest` (JSON Schema `anyOf`).
+   *
+   * @param description Human-readable description shown to the LLM
+   */
+  def anyOf[T](description: String, first: SchemaDefinition[_], rest: SchemaDefinition[_]*): AnyOfSchema[T] =
+    AnyOfSchema[T](description, first, rest: _*)
+
+  /**
+   * A JSON Schema written out as JSON, emitted as it is: for a keyword the other schemas have no setter for, or
+   * a schema received from elsewhere. See [[RawJsonSchema]].
+   */
+  def raw(json: ujson.Obj): RawJsonSchema = RawJsonSchema(json)
+
   // ---- Property helpers --------------------------------------------------
 
   /**

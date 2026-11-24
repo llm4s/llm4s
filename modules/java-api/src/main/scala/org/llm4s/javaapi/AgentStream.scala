@@ -1,7 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.agent.{ AgentEventBuffer, AgentRun }
-import org.llm4s.core.safety.Safety
+import org.llm4s.error.Safety
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory

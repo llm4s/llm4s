@@ -42,7 +42,7 @@ Check first whether you need a module at all:
 Three rules hold throughout:
 
 1. **Return `Result[A]`, never throw.** `type Result[+A] = Either[LLMError, A]`. Wrap calls that
-   can throw with `Try(...).toResult` (`import org.llm4s.types.TryOps`).
+   can throw with `Try(...).toResult` (`import org.llm4s.syntax.toResult`).
 2. **Never read the environment.** No `sys.env`, `System.getenv` or `ConfigFactory.load()` in
    provider code. Configuration arrives typed, through the descriptor; environment variables are
    bound in your module's `reference.conf`.
@@ -402,8 +402,11 @@ in the request body you record; send them in headers.
 ### `Llm4sHttpClient`
 
 `org.llm4s.http.Llm4sHttpClient` is the JDK-backed HTTP client (`Llm4sHttpClient.create()`), with
-`get`, `post`, `postBytes`, `postMultipart`, `put`, `delete`, `postRaw` and `postStream`. Take one
-as a constructor parameter so tests can inject a stub. When `LlmClientOptions.httpClient` is set, send your requests
+`get`, `post`, `postBytes`, `postMultipart`, `put`, `delete`, `postRaw` and `postStream`. Those are final
+conveniences over the one method an implementation writes, `send(request: HttpRequest): Result[StreamingHttpResponse]`;
+a request they do not cover (a PATCH, a HEAD, a GET of bytes) is an `HttpRequest` passed to `send`, `sendText` or
+`sendRaw`. Take one as a constructor parameter so tests can inject a stub: a test double implements `send` alone,
+answering with `Right(HttpResponse(200, body).toStreaming)`. When `LlmClientOptions.httpClient` is set, send your requests
 through that client and do not close it - the caller owns it; otherwise build your own and close it in
 `releaseResources`. A provider that does so opts in by overriding `features` with
 `ProviderFeatures.default.withCustomHttpClient(true)` and runs `assertUsesSuppliedHttpClient` in its module spec;
@@ -431,7 +434,10 @@ Every method returns a `Result` and never throws for a transport failure, so the
 A non-2xx status is **not** an error at this layer: it is a `Right` response for you to inspect
 (`HttpResponse.ensureSuccess`, or `HttpErrorMapper` below). Timeouts are
 `scala.concurrent.duration.FiniteDuration`; the default is 10 seconds, and 10 minutes for
-`postStream`. `HttpResponse`, `HttpRawResponse` and `StreamingHttpResponse` all carry `headers`
+`postStream`. A `timeout` bounds two waits, and is not a deadline for the whole call: the wait for the
+response's status line and headers, and each wait for more of the body, so a stream that keeps delivering may
+run for any length of time while one that stalls fails its read with a `SocketTimeoutException`. An
+`HttpRequest` sets the two apart (`withResponseTimeout`, `withIdleTimeout`). `HttpResponse`, `HttpRawResponse` and `StreamingHttpResponse` all carry `headers`
 (lower-case keys); `response.header("Retry-After")` looks one up case-insensitively. A
 `StreamingHttpResponse`'s body is yours to close, on an error status too.
 

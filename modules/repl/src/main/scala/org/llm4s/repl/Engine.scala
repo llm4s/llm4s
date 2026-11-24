@@ -1,6 +1,6 @@
 package org.llm4s.repl
 
-import org.llm4s.error.LLMError
+import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.model.{ Conversation, Message, SystemMessage, ToolMessage, UserMessage }
 import org.llm4s.schema.{ completeStructuredOf, SchemaOf }
 import org.llm4s.toolapi.{ ToolCallRequest, ToolRegistry }
@@ -54,7 +54,7 @@ private[repl] object Engine {
               Right((completion.content, answered))
             } else if (step >= session.maxToolSteps) {
               Left(
-                LLMError.processingFailed(
+                ProcessingError(
                   "ask",
                   s"the model was still calling tools after ${session.maxToolSteps} model calls; " +
                     "Session.withMaxToolSteps raises the limit"
@@ -69,8 +69,8 @@ private[repl] object Engine {
                     out.println(Render.toolResult(rendered))
                     rendered
                   case Left(failure) =>
-                    out.println(Render.toolFailure(failure.getFormattedMessage))
-                    ujson.Obj("error" -> ujson.Str(failure.getFormattedMessage)).render()
+                    out.println(Render.toolFailure(failure.formatted))
+                    ujson.Obj("error" -> ujson.Str(failure.formatted)).render()
                 }
                 ToolMessage(content, call.id)
               }

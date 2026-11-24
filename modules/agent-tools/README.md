@@ -17,9 +17,9 @@ import org.llm4s.toolapi._
 import org.llm4s.toolapi.builtin._
 
 val result = for {
-  tools <- BuiltinTools.coreSafe
+  tools    <- BuiltinTools.coreSafe
+  registry <- ToolRegistry.of(tools)
 } yield {
-  val registry = new ToolRegistry(tools)
   registry.execute(
     ToolCallRequest(
       functionName = "calculator",

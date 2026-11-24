@@ -43,10 +43,10 @@ class CalculatorToolEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   private def calc(operation: String, a: Double, b: Option[Double] = None): Either[String, CalculatorResult] =
-    tool.handler(SafeParameterExtractor(params(operation, a, b)))
+    tool.handler(SafeParameterExtractor(params(operation, a, b))).left.map(org.llm4s.toolapi.ToolHandlerError.message)
 
   private def raw(p: ujson.Value): Either[String, CalculatorResult] =
-    tool.handler(SafeParameterExtractor(p))
+    tool.handler(SafeParameterExtractor(p)).left.map(org.llm4s.toolapi.ToolHandlerError.message)
 
   private def ok(operation: String, a: Double, b: Option[Double] = None): CalculatorResult =
     calc(operation, a, b).fold(err => fail(s"Expected Right for $operation($a, $b) but got Left: $err"), identity)
@@ -341,7 +341,7 @@ class CalculatorToolEdgeCasesSpec extends AnyFlatSpec with Matchers {
   it should "report overflow through the tool's entry point as an error, not as the text Infinity" in {
     val reply = tool.execute(params("power", 10.0, Some(400.0)))
     reply.isLeft shouldBe true
-    reply.left.map(_.getMessage).left.getOrElse("") should include("finite")
+    reply.left.map(_.message).left.getOrElse("") should include("finite")
   }
 
   it should "still return the other errors unchanged" in {

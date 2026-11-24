@@ -54,7 +54,7 @@ class PythonToolBridgeExampleSpec extends AnyFlatSpec with Matchers with BeforeA
     val tool = registry.tools.find(_.name == PythonToolBridgeExample.ToolName)
     tool shouldBe defined
     tool.get.description should include("sentiment")
-    val parameters = tool.get.toOpenAITool()("function")("parameters")
+    val parameters = tool.get.toolDefinition(strict = true)("function")("parameters")
     parameters("properties").obj.keySet shouldBe Set("text")
     parameters("required").arr.map(_.str) shouldBe Seq("text")
   }

@@ -35,10 +35,11 @@ object Part5SafetyMemory {
     for {
       order  <- Part3Tools.orderTool
       policy <- Part3Tools.policyTool
+      registry <- ToolRegistry.of(Seq(order, policy))
       agent <- Agent
         .builder("support", client)
         .withSystemPrompt("You are the support assistant of Acme Shop. Use the tools; never guess an order's status.")
-        .withTools(new ToolRegistry(Seq(order, policy)))
+        .withTools(registry)
         .withMiddleware(guardrails)
         .build()
     } yield agent

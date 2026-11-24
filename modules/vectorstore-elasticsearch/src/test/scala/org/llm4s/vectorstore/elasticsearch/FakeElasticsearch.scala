@@ -1,11 +1,9 @@
 package org.llm4s.vectorstore.elasticsearch
 
-import org.llm4s.error.ValidationError
-import org.llm4s.http.{ HttpRawResponse, HttpResponse, Llm4sHttpClient, MultipartPart, StreamingHttpResponse }
+import org.llm4s.http.{ HttpBody, HttpRequest, HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
 import org.llm4s.types.Result
 
 import scala.collection.mutable
-import scala.concurrent.duration.FiniteDuration
 
 /** One request the store sent. */
 final case class SentRequest(method: String, url: String, headers: Map[String, String], body: String) {
@@ -33,59 +31,13 @@ final class FakeElasticsearch(respond: PartialFunction[(String, String), Result[
   def sent(method: String, url: String): Seq[SentRequest] =
     requests.filter(r => r.method == method && r.url == url).toSeq
 
-  override def get(
-    url: String,
-    headers: Map[String, String],
-    params: Map[String, String],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = handle("GET", url, headers, "")
-
-  override def post(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = handle("POST", url, headers, body)
-
-  override def put(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = handle("PUT", url, headers, body)
-
-  override def delete(url: String, headers: Map[String, String], timeout: FiniteDuration): Result[HttpResponse] =
-    handle("DELETE", url, headers, "")
-
-  private def unused: Left[ValidationError, Nothing] = Left(ValidationError("request", "not used by the store"))
-
-  override def postBytes(
-    url: String,
-    headers: Map[String, String],
-    data: Array[Byte],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = unused
-
-  override def postMultipart(
-    url: String,
-    headers: Map[String, String],
-    parts: Seq[MultipartPart],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = unused
-
-  override def postRaw(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[HttpRawResponse] = unused
-
-  override def postStream(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[StreamingHttpResponse] = unused
+  override def send(request: HttpRequest): Result[StreamingHttpResponse] = {
+    val body = request.body match {
+      case HttpBody.Text(text) => text
+      case _                   => ""
+    }
+    handle(request.method.name, request.url, request.headers, body).map(_.toStreaming)
+  }
 
   override def close(): Unit = closed = true
 }

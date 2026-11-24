@@ -45,7 +45,7 @@ import org.llm4s.error.{
   ValidationUnsupportedError
 }
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
-import org.llm4s.error.ThrowableOps._
+import org.llm4s.syntax.toLLMError
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.auth.{
@@ -68,7 +68,7 @@ import org.llm4s.llmconnect.streaming._
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult, UnmappedOptions }
 import org.llm4s.security.{ KnownSecrets, TokenGenerations }
-import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
+import org.llm4s.toolapi.OpenAIToolHelper
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
@@ -690,7 +690,7 @@ class OpenAIClient private[provider] (
       if (streaming && OpenAIClient.acceptsStreamUsage(config))
         builder.streamOptions(ChatCompletionStreamOptions.builder().includeUsage(true).build())
 
-      if (options.tools.nonEmpty) OpenAIToolHelper.addToolsToParams(new ToolRegistry(options.tools), builder)
+      if (options.tools.nonEmpty) OpenAIToolHelper.addToolsToParams(options.tools, builder)
 
       options.responseFormat.foreach {
         case ResponseFormat.Json =>
@@ -975,7 +975,7 @@ class OpenAIClient private[provider] (
  * Provides safe construction of OpenAI clients with error handling via Result type.
  */
 object OpenAIClient {
-  import org.llm4s.types.TryOps
+  import org.llm4s.syntax.toResult
 
   /**
    * Registers with `KnownSecrets` the workload-identity ids of an [[OpenAIConfig]] (identity provider, service
@@ -1055,9 +1055,10 @@ object OpenAIClient {
           Try(headerMap(service.headers())).getOrElse(Map.empty)
         )
         .left
-        .getOrElse(redactMessage(service.toLLMError, service))
-    case io: OpenAIIoException if io.getCause != null => redactMessage(io.getCause.toLLMError, io.getCause)
-    case other                                        => redactMessage(other.toLLMError, other)
+        .getOrElse(redactMessage(SdkErrorMapper(service, provider), service))
+    case io: OpenAIIoException if io.getCause != null =>
+      redactMessage(SdkErrorMapper(io.getCause, provider), io.getCause)
+    case other => redactMessage(SdkErrorMapper(other, provider), other)
   }
 
   /**

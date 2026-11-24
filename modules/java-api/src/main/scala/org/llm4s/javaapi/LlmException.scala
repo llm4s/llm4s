@@ -47,7 +47,7 @@ final class LlmException(val error: LLMError) extends RuntimeException(error.mes
 
   /**
    * The HTTP status of the provider's error response, or empty when the error carries none. Present for a provider's
-   * error response that kept its status (a `ServiceError`, an `APIError` that has one, or an embedding provider's
+   * error response that kept its status (a `ServiceError`, or an embedding provider's
    * `EmbeddingError` whose code is a status), whose kind is `SERVICE` - or, for `400`, `401`, `403` and `429`, the kind
    * that status means (see [[getKind]]).
    */
@@ -81,7 +81,6 @@ private[javaapi] object LlmErrorKinds {
     classOf[TimeoutError]                -> LlmErrorKind.TIMEOUT,
     classOf[NetworkError]                -> LlmErrorKind.NETWORK,
     classOf[ServiceError]                -> LlmErrorKind.SERVICE,
-    classOf[APIError]                    -> LlmErrorKind.SERVICE,
     classOf[ValidationError]             -> LlmErrorKind.VALIDATION,
     classOf[InvalidInputError]           -> LlmErrorKind.VALIDATION,
     classOf[UnsupportedContentPartError] -> LlmErrorKind.VALIDATION,
@@ -96,7 +95,6 @@ private[javaapi] object LlmErrorKinds {
     classOf[CircuitOpenError]            -> LlmErrorKind.OTHER,
     classOf[ProcessingError]             -> LlmErrorKind.OTHER,
     classOf[SimpleError]                 -> LlmErrorKind.OTHER,
-    classOf[SystemError]                 -> LlmErrorKind.OTHER,
     classOf[TokenizerError]              -> LlmErrorKind.OTHER,
     classOf[UnknownError]                -> LlmErrorKind.OTHER
   )
@@ -104,7 +102,7 @@ private[javaapi] object LlmErrorKinds {
   /**
    * The kind of `error`. A provider's error response whose status core's `HttpErrorMapper` gives a class of its own -
    * `401`/`403` an `AuthenticationError`, `429` a `RateLimitError`, `400` a `ValidationError` - has that class's kind
-   * even when a client reported it as a `ServiceError` or an `APIError`.
+   * even when a client reported it as a `ServiceError`.
    */
   def of(error: LLMError): LlmErrorKind = error match {
     // an embedding provider's error response, which the embedding clients report as an `EmbeddingError` carrying the
@@ -124,7 +122,6 @@ private[javaapi] object LlmErrorKinds {
   /** The HTTP status of a provider's error response. */
   def statusCode(error: LLMError): Option[Int] = error match {
     case e: ServiceError   => Some(e.httpStatus)
-    case e: APIError       => e.statusCode
     case e: EmbeddingError => e.code.flatMap(_.trim.toIntOption).filter(s => s >= 100 && s <= 599)
     case _                 => None
   }

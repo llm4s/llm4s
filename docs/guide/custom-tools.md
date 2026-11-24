@@ -32,11 +32,12 @@ A tool is a {% include api.html t="org.llm4s.toolapi.ToolFunction" %} with four 
 - a **name**, which is how the model calls it (`convert_temperature`);
 - a **description**, which is the model's only guide to when to call it;
 - a **parameter schema**, built with the `Schema` DSL, which tells the model the arguments it may send;
-- a **handler**, a function from a `SafeParameterExtractor` to `Either[String, R]`: `Right` is the result,
-  `Left` is an error message.
+- a **handler**, a function from a `SafeParameterExtractor` to `Either[ToolHandlerError, R]`: `Right` is the
+  result, `Left` is an error: the one a getter returned for a missing or mistyped argument, or a message of your
+  own.
 
 ```scala
-import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolFunction }
+import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolFunction, ToolHandlerError }
 import org.llm4s.types.Result
 
 def temperatureTool: Result[ToolFunction[Map[String, Any], String]] = {
@@ -52,16 +53,16 @@ def temperatureTool: Result[ToolFunction[Map[String, Any], String]] = {
     .withProperty(
       Schema.property(
         "precision",
-        Schema.integer("Digits after the decimal point, 0 to 4 (default 1)").withRange(Some(0), Some(4)),
+        Schema.integer("Digits after the decimal point, 0 to 4 (default 1)").withMinimum(0).withMaximum(4),
         required = false
       )
     )
 
-  def handler(params: SafeParameterExtractor): Either[String, String] =
+  def handler(params: SafeParameterExtractor): Either[ToolHandlerError, String] =
     for {
       value     <- params.getDouble("value")
       unit      <- params.getString("unit")
-      precision <- params.getOptionalInt("precision").left.map(_.getMessage)
+      precision <- params.getOptionalInt("precision")
       converted <- unit match {
         case "celsius"    => Right(value * 9 / 5 + 32)
         case "fahrenheit" => Right((value - 32) * 5 / 9)
@@ -91,11 +92,13 @@ throws.
 | You need | Use |
 |---|---|
 | text | `Schema.string("...")`, with `.withEnum(Seq("a", "b"))` for a fixed set of values |
-| a whole number | `Schema.integer("...")`, with `.withRange(Some(min), Some(max))` |
+| a whole number | `Schema.integer("...")`, with `.withMinimum(min).withMaximum(max)` |
 | a decimal number | `Schema.number("...")` |
 | true or false | `Schema.boolean("...")` |
 | a list | `Schema.array("...", itemSchema)` |
 | a value that may be `null` | `Schema.nullable(schema)` |
+| one of several shapes | `Schema.anyOf("...", first, second)` |
+| a JSON Schema keyword `Schema` has no setter for | `Schema.raw(ujson.Obj(...))`, sent as written |
 | a nested object | ``Schema.`object` `` with a type parameter and a description, plus its own properties |
 
 An object schema adds fields with `withProperty`, or with `withRequiredField(name, schema)` and
@@ -116,26 +119,31 @@ def lookupSchema: ObjectSchema[Map[String, Any]] =
     )
     .withOptionalField("tags", Schema.array("Labels to match", Schema.string("One label")))
 
-def city(params: SafeParameterExtractor): Either[String, String] = params.getString("location.city")
+def city(params: SafeParameterExtractor): Either[ToolParameterError, String] = params.getString("location.city")
 
 def country(params: SafeParameterExtractor): Either[ToolParameterError, Option[String]] =
   params.getOptionalString("location.country")
 ```
 
-Optional fields have a catch: `toOpenAITool` and `ToolRegistry.getOpenAITools` default to `strict = true`, which
-lists every property as required in the JSON schema it sends. Read an optional parameter with `getOptional*` either
-way, so the handler copes whether or not the model sent it, and call `toOpenAITool(strict = false)` where a provider
-should see the `required = false` flag.
+An optional field reaches the model in one of two ways. `toolDefinition(strict = false)` leaves it out of
+`required`, and the model omits it. `toolDefinition(strict = true)`, which the OpenAI-compatible clients send, must
+list every property as required, so it marks the optional ones as nullable and the model sends `null` instead. Read
+an optional parameter with `getOptional*`: it returns `None` for both.
 
 ## 3. Reading arguments
 
 `SafeParameterExtractor` reads one argument by name: `getString`, `getInt`, `getDouble`, `getBoolean`, `getArray`
-and `getObject`, each returning `Either[String, A]`, so they chain in a for-comprehension that stops at the first
-problem. `getOptionalString`, `getOptionalInt`, `getOptionalDouble` and `getOptionalBoolean` return
+and `getObject`, each returning `Either[ToolParameterError, A]`, so they chain in a for-comprehension that stops at
+the first problem. `getOptionalString`, `getOptionalInt`, `getOptionalDouble` and `getOptionalBoolean` return
 `Either[ToolParameterError, Option[A]]`: an absent or `null` argument is `Right(None)`, and only a wrong type fails.
-Map that error with `.left.map(_.getMessage)` as the handler above does.
+`validateRequired("value" -> ToolParameterType.Number, "unit" -> ToolParameterType.String)` checks several at once
+and reports every problem rather than the first.
 
-A missing or mistyped argument does not throw; it is a `Left` with a message written for the model to act on:
+A handler's `Left` is a `ToolHandlerError`, which is `String | ToolParameterError`: return a getter's error as it
+is, and write a message for a failure of your own, as the handler above does for an unknown unit. Give a handler
+written as a `def` its return type, `Either[ToolHandlerError, R]`.
+
+A missing or mistyped argument does not throw; it is a `Left` whose `message` is written for the model to act on:
 
 | Arguments | Message |
 |---|---|
@@ -144,18 +152,20 @@ A missing or mistyped argument does not throw; it is a `Left` with a message wri
 | `value` is `null` | `parameter 'value' (type: number) is required but value was null` |
 
 The message names what was expected and what arrived, and lists the argument names that were sent, so the model
-can correct itself and call again. The `*Enhanced` getters and `ToolFunction.executeEnhanced` return the same
-problems as structured `ToolParameterError`s, and `ToolCallErrorJson` renders them as JSON.
+can correct itself and call again. The error is a structured `ToolParameterError` (`MissingParameter`,
+`TypeMismatch`, `NullParameter`, `InvalidNesting`), and `ToolCallErrorJson` renders it as JSON.
 
 ## 4. Returning a result or an error
 
 The handler's `Right` value is written to JSON and handed to the model; a `Left(message)` becomes a
-`ToolCallError.HandlerError`. Return a `Left` for anything the model can fix or should know: a bad argument, a
-missing record, a refused action. The model never sees a stack trace:
+`ToolCallError.HandlerError`, and a getter's `Left` a `ToolCallError.InvalidArguments`. Return a `Left` for anything
+the model can fix or should know: a bad argument, a missing record, a refused action. The model never sees a stack
+trace:
 
-- `tool.execute(args)` returns `Either[ToolCallError, ujson.Value]`, and a `Left(message)` from the handler is a
-  `Left(HandlerError(toolName, message))`.
-- Run through an agent, the model is shown `error.getFormattedMessage`, which here reads
+- `tool.execute(args)` returns `Either[ToolCallError, ujson.Value]`. A `Left(message)` from the handler is a
+  `Left(HandlerError(toolName, message))`, and a `Left` of a `ToolParameterError` is a
+  `Left(InvalidArguments(toolName, parameterErrors))` that lists each argument at fault.
+- Run through an agent, the model is shown `error.formatted`, which here reads
   `Tool call 'convert_temperature' failed with error: unit must be 'celsius' or 'fahrenheit', not 'kelvin'`.
 - An exception your handler throws is not a `Left` you chose. A {% include api.html t="org.llm4s.toolapi.ToolRegistry" %} catches it and reports a
   `ToolCallError.ExecutionError` with the exception's message; calling `tool.execute` directly lets it escape.
@@ -182,7 +192,8 @@ def askWithTool(tool: ToolFunction[?, ?], question: String): Result[Option[Strin
     registry       <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
-    agent  <- Agent.builder("assistant", client).withTools(new ToolRegistry(Seq(tool))).build()
+    toolRegistry <- ToolRegistry.of(Seq(tool))
+    agent  <- Agent.builder("assistant", client).withTools(toolRegistry).build()
     result <- agent.run(question)
   } yield result.answer
 ```
@@ -192,11 +203,13 @@ receives:
 
 ```scala
 import org.llm4s.toolapi.{ ToolCallError, ToolCallRequest, ToolFunction, ToolRegistry }
+import org.llm4s.types.Result
 
-def callByName(tool: ToolFunction[?, ?]): Either[ToolCallError, ujson.Value] = {
-  val registry = new ToolRegistry(Seq(tool))
-  println(registry.getOpenAITools().render(indent = 2)) // what the model is told about the tool
-  registry.execute(ToolCallRequest(tool.name, ujson.Obj("value" -> 100, "unit" -> "celsius")))
+def callByName(tool: ToolFunction[?, ?]): Result[Either[ToolCallError, ujson.Value]] = {
+  println(tool.toolDefinition(strict = true).render(indent = 2)) // what the model is told about the tool
+  ToolRegistry
+    .of(Seq(tool)) // a Left when two tools share a name
+    .map(_.execute(ToolCallRequest(tool.name, ujson.Obj("value" -> 100, "unit" -> "celsius"))))
 }
 ```
 
@@ -217,22 +230,26 @@ def checkTemperatureTool(tool: ToolFunction[Map[String, Any], String]): Unit = {
   assert(tool.execute(ujson.Obj("value" -> 100, "unit" -> "celsius")) == Right(ujson.Str("212.0")))
   assert(tool.execute(ujson.Obj("value" -> 100, "unit" -> "celsius", "precision" -> 3)) == Right(ujson.Str("212.000")))
 
-  // a missing argument is a HandlerError whose message names it
+  // a missing argument is InvalidArguments: the parameter error names it
   tool.execute(ujson.Obj("unit" -> "celsius")) match {
-    case Left(ToolCallError.HandlerError(name, message)) =>
+    case Left(error @ ToolCallError.InvalidArguments(name, List(parameter))) =>
       assert(name == "convert_temperature")
-      assert(message.contains("'value'") && message.contains("missing"))
-    case other => assert(false, s"expected a HandlerError, got $other")
+      assert(parameter.parameterName == "value")
+      assert(error.message.contains("'value'") && error.message.contains("missing"))
+    case other => assert(false, s"expected InvalidArguments, got $other")
   }
 
   // a wrong type is one too
   tool.execute(ujson.Obj("value" -> "hot", "unit" -> "celsius")) match {
-    case Left(ToolCallError.HandlerError(_, message)) => assert(message.contains("wrong type"))
-    case other                                        => assert(false, s"expected a HandlerError, got $other")
+    case Left(error: ToolCallError.InvalidArguments) => assert(error.message.contains("wrong type"))
+    case other                                       => assert(false, s"expected InvalidArguments, got $other")
   }
 
-  // so is the handler's own refusal
-  assert(tool.execute(ujson.Obj("value" -> 1, "unit" -> "kelvin")).isLeft)
+  // the handler's own refusal is a HandlerError with its message
+  tool.execute(ujson.Obj("value" -> 1, "unit" -> "kelvin")) match {
+    case Left(ToolCallError.HandlerError(_, message)) => assert(message.contains("kelvin"))
+    case other                                        => assert(false, s"expected a HandlerError, got $other")
+  }
 }
 ```
 
@@ -270,7 +287,7 @@ def declaredParameters: Either[org.llm4s.error.LLMError, List[String]] =
     Schema.`object`[Map[String, Any]]("Temperature").withRequiredField("value", Schema.number("The temperature"))
   ).withHandler(params => params.getString("unit")) // reads `unit`, which the schema never declares
     .buildSafe()
-    .map(tool => tool.toOpenAITool()("function")("parameters")("properties").obj.keys.toList)
+    .map(tool => tool.toolDefinition(strict = true)("function")("parameters")("properties").obj.keys.toList)
 ```
 
 The list is `List("value")`: add every parameter the handler reads to the schema.
@@ -280,13 +297,12 @@ running on, and one hung call stalls the whole turn. Run the registry with a tim
 an error the model can see:
 
 ```scala
-import org.llm4s.toolapi.{ ToolCallError, ToolCallRequest, ToolExecutionConfig, ToolRegistry }
+import org.llm4s.toolapi.{ ToolCallError, ToolCallRequest, ToolExecutionConfig, ToolExecutor, ToolRegistry }
 
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.*
 
 def callWithLimit(registry: ToolRegistry, request: ToolCallRequest): Either[ToolCallError, ujson.Value] =
-  registry.execute(request, ToolExecutionConfig(timeout = Some(5.seconds)))
+  ToolExecutor.execute(registry, request, ToolExecutionConfig(timeout = Some(5.seconds)))
 ```
 
 A call that runs past the limit returns `Left(ToolCallError.Timeout(name, 5.seconds))`. Give the underlying client

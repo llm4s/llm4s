@@ -1,6 +1,6 @@
 package org.llm4s.spring
 
-import org.llm4s.error.APIError
+import org.llm4s.error.ServiceError
 import org.llm4s.javaapi.{ JLlmClient, JLlmClientTestFactory, LlmErrorKind, LlmException }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -163,7 +163,7 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "complete exceptionally with the LlmException and the original error" in {
-    val error    = APIError("openai", "service unavailable")
+    val error    = ServiceError(503, "openai", "service unavailable")
     val provider = new FakeProvider(_ => Left(error))
     withPool(pool(1)) { ex =>
       val template = new LLM4STemplate(provider.client, ex)
@@ -385,7 +385,7 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
 
   it should "be DOWN with the key redacted when the probe fails" in {
     val provider =
-      new FakeProvider(_ => Left(APIError("openai", s"401 for key $secret and token sk-anotherSecret123456")))
+      new FakeProvider(_ => Left(ServiceError(503, "openai", s"401 for key $secret and token sk-anotherSecret123456")))
     withPool(pool(1)) { ex =>
       val h = indicator(provider, probe = true, ex).health()
       h.getStatus shouldBe Status.DOWN
@@ -402,7 +402,7 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
     org.llm4s.security.KnownSecrets.isolated {
       val registered = "plain-registered-credential-77"
       org.llm4s.security.Secret(registered)
-      val provider = new FakeProvider(_ => Left(APIError("openai", s"rejected $registered")))
+      val provider = new FakeProvider(_ => Left(ServiceError(503, "openai", s"rejected $registered")))
       withPool(pool(1)) { ex =>
         val error = indicator(provider, probe = true, ex).health().getDetails.get("error").toString
         error should include("rejected")
@@ -412,7 +412,7 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
 
   it should "redact a configured key even when it does not look like a token" in {
     val plain    = "correct-horse-battery"
-    val provider = new FakeProvider(_ => Left(APIError("openai", s"rejected credential $plain")))
+    val provider = new FakeProvider(_ => Left(ServiceError(503, "openai", s"rejected credential $plain")))
     withPool(pool(1)) { ex =>
       val ind = new LlmIndicator(
         provider.client,

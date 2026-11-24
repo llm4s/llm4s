@@ -208,7 +208,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val agent = ok(
       Agent
         .builder("assistant", Scripted(open, Right(calling), Right(answer("fine"))))
-        .withTools(new ToolRegistry(Seq(echoTool)))
+        .withTools(ToolRegistry.of(Seq(echoTool)).toOption.get)
         .withMiddleware(ApprovalMiddleware.unlessReadOnly)
         .build()
     )

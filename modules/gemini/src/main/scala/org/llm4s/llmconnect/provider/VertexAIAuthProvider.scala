@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ AuthenticationError, NetworkError }
-import org.llm4s.error.ThrowableOps._
+import org.llm4s.syntax.toLLMError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.security.{ Secret, TokenGenerations }
 import org.llm4s.types.Result

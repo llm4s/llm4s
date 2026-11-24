@@ -24,13 +24,14 @@ class JdkHttpClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValu
 
   "A client with a proxy" should "send every request to the proxy, in absolute form" in {
     Using.resource(RecordingProxy.start(body = """{"ok":true}""")) { proxy =>
-      Using.resource(Llm4sHttpClient.create(through(HttpProxy("127.0.0.1", proxy.port).withNonProxyHosts(Nil)))) {
-        client =>
-          val response = client.post(Target, Map("Content-Type" -> "application/json"), """{"q":1}""").value
-          response.statusCode shouldBe 200
-          response.body shouldBe """{"ok":true}"""
-          proxy.requests.map(r => (r.method, r.target)) shouldBe Vector(("POST", Target))
-          proxy.requests.head.body shouldBe """{"q":1}"""
+      Using.resource(
+        Llm4sHttpClient.create(HttpClientOptions(through(HttpProxy("127.0.0.1", proxy.port).withNonProxyHosts(Nil))))
+      ) { client =>
+        val response = client.post(Target, Map("Content-Type" -> "application/json"), """{"q":1}""").value
+        response.statusCode shouldBe 200
+        response.body shouldBe """{"ok":true}"""
+        proxy.requests.map(r => (r.method, r.target)) shouldBe Vector(("POST", Target))
+        proxy.requests.head.body shouldBe """{"q":1}"""
       }
     }
   }
@@ -39,7 +40,7 @@ class JdkHttpClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValu
     Using.resource(RecordingProxy.start(credentials = Some(("alice", "s3cret")))) { proxy =>
       val settings =
         through(HttpProxy.fromUrl(s"http://alice:s3cret@127.0.0.1:${proxy.port}").value.withNonProxyHosts(Nil))
-      Using.resource(Llm4sHttpClient.create(settings, 5.seconds)) { client =>
+      Using.resource(Llm4sHttpClient.create(HttpClientOptions(settings, Some(5.seconds)))) { client =>
         client.get(Target).value.statusCode shouldBe 200
         proxy.requests.head.header("proxy-authorization") shouldBe None
         proxy.authorized.map(_.target) shouldBe Vector(Target)
@@ -49,10 +50,11 @@ class JdkHttpClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValu
 
   it should "get the proxy's 407 back when it has no credentials" in {
     Using.resource(RecordingProxy.start(credentials = Some(("alice", "s3cret")))) { proxy =>
-      Using.resource(Llm4sHttpClient.create(through(HttpProxy("127.0.0.1", proxy.port).withNonProxyHosts(Nil)))) {
-        client =>
-          client.get(Target).value.statusCode shouldBe 407
-          proxy.authorized shouldBe empty
+      Using.resource(
+        Llm4sHttpClient.create(HttpClientOptions(through(HttpProxy("127.0.0.1", proxy.port).withNonProxyHosts(Nil))))
+      ) { client =>
+        client.get(Target).value.statusCode shouldBe 407
+        proxy.authorized shouldBe empty
       }
     }
   }
@@ -60,7 +62,7 @@ class JdkHttpClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValu
   it should "call a host in nonProxyHosts directly" in {
     Using.resources(RecordingProxy.start(), RecordingProxy.start(body = "direct")) { (proxy, ollama) =>
       // The default nonProxyHosts send loopback direct, as a local Ollama needs.
-      Using.resource(Llm4sHttpClient.create(through(HttpProxy("127.0.0.1", proxy.port)))) { client =>
+      Using.resource(Llm4sHttpClient.create(HttpClientOptions(through(HttpProxy("127.0.0.1", proxy.port))))) { client =>
         client.get(s"${ollama.url}/api/tags").value.body shouldBe "direct"
         proxy.requests shouldBe empty
         ollama.requests.map(_.target) shouldBe Vector("/api/tags")
@@ -71,11 +73,11 @@ class JdkHttpClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValu
   "A client with a trust store" should "reach an HTTPS server signed by the store's CA, which it refuses without one" in {
     val server = TestTls.httpsServer(body = """{"tls":true}""")
     val url    = s"https://localhost:${server.getAddress.getPort}/v1/models"
-    Using.resource(Llm4sHttpClient.create(HttpNetworkSettings.default)) { plain =>
+    Using.resource(Llm4sHttpClient.create(HttpClientOptions(HttpNetworkSettings.default))) { plain =>
       plain.get(url).left.value shouldBe a[NetworkError]
     }
     val trusting = HttpNetworkSettings(tls = HttpTls(Some(TestTls.trustStore), Some(Secret(TestTls.Password))))
-    Using.resource(Llm4sHttpClient.create(trusting)) { client =>
+    Using.resource(Llm4sHttpClient.create(HttpClientOptions(trusting))) { client =>
       client.get(url).value.body shouldBe """{"tls":true}"""
     }
     server.stop(0)
@@ -85,11 +87,11 @@ class JdkHttpClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValu
     val server    = TestTls.httpsServer(body = "mtls", requireClientCertificate = true)
     val url       = s"https://localhost:${server.getAddress.getPort}/"
     val trustOnly = HttpTls(Some(TestTls.trustStore), Some(Secret(TestTls.Password)))
-    Using.resource(Llm4sHttpClient.create(HttpNetworkSettings(tls = trustOnly))) { client =>
+    Using.resource(Llm4sHttpClient.create(HttpClientOptions(HttpNetworkSettings(tls = trustOnly)))) { client =>
       client.get(url).isLeft shouldBe true
     }
     val withCertificate = trustOnly.withKeyStore(TestTls.clientStore).withKeyStorePassword(Secret(TestTls.Password))
-    Using.resource(Llm4sHttpClient.create(HttpNetworkSettings(tls = withCertificate))) { client =>
+    Using.resource(Llm4sHttpClient.create(HttpClientOptions(HttpNetworkSettings(tls = withCertificate)))) { client =>
       client.get(url).value.body shouldBe "mtls"
     }
     server.stop(0)
@@ -99,7 +101,7 @@ class JdkHttpClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValu
     val broken = HttpNetworkSettings(tls =
       HttpTls(trustStore = Some(Path.of("missing-ca.p12")), trustStorePassword = Some(Secret("do-not-print")))
     )
-    Using.resource(Llm4sHttpClient.create(broken)) { client =>
+    Using.resource(Llm4sHttpClient.create(HttpClientOptions(broken))) { client =>
       val calls = Seq(
         client.get(Target),
         client.post(Target),

@@ -43,7 +43,7 @@ class Part4Spec extends AnyFlatSpec with Matchers with TutorialSpecSupport {
   "Part 4's help tool" should "return the passages for a query, with their article" in {
     val passages = withHelpCentre(ScriptedLLMClient.sequence()) { rag =>
       helpTool(rag).flatMap(
-        _.execute(ujson.Obj("question" -> "change my email address")).left.map(e => fail(e.getMessage))
+        _.execute(ujson.Obj("question" -> "change my email address")).left.map(e => fail(e.message))
       )
     }
     passages.map(json => json.arr.head("article").str) shouldBe Right("account")

@@ -3,7 +3,8 @@ package org.llm4s.agent.harness
 import org.llm4s.agent.graph.{ AppliedKeys, EffectKey, FencingToken, ReplayGuard, ReplaySupport, TenantId }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ ProcessingError, ValidationError }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
 import java.time.{ Clock, Instant }

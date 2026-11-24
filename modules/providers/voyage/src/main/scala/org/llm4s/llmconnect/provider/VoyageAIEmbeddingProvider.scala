@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.VoyageConfigKeys
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
-import org.llm4s.http.{ HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
+import org.llm4s.http.{ HttpClientOptions, HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -82,7 +82,7 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   /** Creates an [[EmbeddingProvider]] backed by Voyage AI using the given configuration. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
-    create(cfg, Llm4sHttpClient.create(cfg.network))
+    create(cfg, Llm4sHttpClient.create(HttpClientOptions(cfg.network)))
 
   private[provider] def forTest(cfg: EmbeddingProviderConfig, httpClient: Llm4sHttpClient): EmbeddingProvider =
     create(cfg, httpClient)

@@ -6,7 +6,6 @@ import org.llm4s.types.Result
 
 import java.nio.file.{ Files, Path }
 import scala.collection.mutable
-import scala.concurrent.duration.FiniteDuration
 
 /**
  * Test double for the HTTP layer of the cloud speech clients: no network.
@@ -52,7 +51,7 @@ final class StubHttpClient(
     requestBody: Array[Byte] = Array.emptyByteArray,
     parts: Seq[MultipartPart] = Seq.empty
   ): Unit = {
-    val files = parts.collect { case MultipartPart.FilePart(n, path, _) => n -> path }
+    val files = parts.collect { case MultipartPart.FilePart(n, MultipartPart.Content.File(path), _, _) => n -> path }
     requests += Recorded(
       method,
       url,
@@ -64,77 +63,23 @@ final class StubHttpClient(
     )
   }
 
-  private def text: Result[HttpResponse] =
-    failure.toLeft(HttpResponse(status, new String(body, "UTF-8"), responseHeaders))
-
-  override def get(
-    url: String,
-    headers: Map[String, String],
-    params: Map[String, String],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = { record("GET", url, headers); text }
-
-  override def post(
-    url: String,
-    headers: Map[String, String],
-    b: String,
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = {
-    record("POST", url, headers, b.getBytes("UTF-8")); text
-  }
-
-  override def postBytes(
-    url: String,
-    headers: Map[String, String],
-    data: Array[Byte],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = { record("POST", url, headers, data); text }
-
-  override def postMultipart(
-    url: String,
-    headers: Map[String, String],
-    parts: Seq[MultipartPart],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = {
-    // As the JDK client does, an unreadable file part is a ValidationError, not an exception.
-    val missing = parts.collectFirst { case MultipartPart.FilePart(_, path, _) if !Files.isReadable(path) => path }
-    missing match {
-      case Some(path) => Left(org.llm4s.error.ValidationError("multipart", s"unreadable file: $path"))
-      case None       => record("POST", url, headers, parts = parts); text
+  override def send(request: HttpRequest): Result[StreamingHttpResponse] = {
+    val method = request.method.name
+    val unreadable = request.body match {
+      case HttpBody.Text(text)       => record(method, request.url, request.headers, text.getBytes("UTF-8")); None
+      case HttpBody.Bytes(bytes)     => record(method, request.url, request.headers, bytes); None
+      case HttpBody.Empty            => record(method, request.url, request.headers); None
+      case HttpBody.Multipart(parts) =>
+        // As the JDK client does, an unreadable file part is a ValidationError, not an exception.
+        val missing = parts.collectFirst {
+          case MultipartPart.FilePart(_, MultipartPart.Content.File(path), _, _) if !Files.isReadable(path) => path
+        }
+        if (missing.isEmpty) record(method, request.url, request.headers, parts = parts)
+        missing.map(path => org.llm4s.error.ValidationError("multipart", s"unreadable file: $path"))
     }
-  }
-
-  override def put(
-    url: String,
-    headers: Map[String, String],
-    b: String,
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = {
-    record("PUT", url, headers, b.getBytes("UTF-8")); text
-  }
-
-  override def delete(url: String, headers: Map[String, String], timeout: FiniteDuration): Result[HttpResponse] = {
-    record("DELETE", url, headers); text
-  }
-
-  override def postRaw(
-    url: String,
-    headers: Map[String, String],
-    b: String,
-    timeout: FiniteDuration
-  ): Result[HttpRawResponse] = {
-    record("POST", url, headers, b.getBytes("UTF-8"))
-    failure.toLeft(HttpRawResponse(status, body, responseHeaders))
-  }
-
-  override def postStream(
-    url: String,
-    headers: Map[String, String],
-    b: String,
-    timeout: FiniteDuration
-  ): Result[StreamingHttpResponse] = {
-    record("POST", url, headers, b.getBytes("UTF-8"))
-    failure.toLeft(StreamingHttpResponse(status, new java.io.ByteArrayInputStream(body), responseHeaders))
+    unreadable
+      .orElse(failure)
+      .toLeft(StreamingHttpResponse(status, new java.io.ByteArrayInputStream(body), responseHeaders))
   }
 }
 

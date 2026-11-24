@@ -116,8 +116,8 @@ class IronGuideSpec extends AnyFlatSpec with Matchers {
     val tool = Refinements.book.fold(e => fail(e.message), identity)
     tool.execute(ujson.Obj("guest" -> "Ada", "nights" -> 2)) shouldBe Right(ujson.Str("Booked 2 nights for Ada"))
     tool.execute(ujson.Obj("guest" -> "Ada", "nights" -> 15)) match {
-      case Left(ToolCallError.HandlerError("book_stay", message)) => message should include("nights")
-      case other                                                  => fail(s"expected the tool's error, got $other")
+      case Left(error @ ToolCallError.InvalidArguments("book_stay", List(_))) => error.message should include("nights")
+      case other => fail(s"expected the tool's error, got $other")
     }
   }
 }

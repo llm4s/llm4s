@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
-import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 import org.llm4s.llmconnect.auth.AccessTokenProvider
 import org.llm4s.security.{ Secret, TokenGenerations }
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
@@ -125,7 +125,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     bearer: () => Result[String],
     rejected: String => Unit
   ): EmbeddingProvider = new EmbeddingProvider {
-    private val httpClient = Llm4sHttpClient.create(cfg.network)
+    private val httpClient = Llm4sHttpClient.create(HttpClientOptions(cfg.network))
     private val logger     = LoggerFactory.getLogger(getClass)
 
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = CancelledError.attempt("openai.embed") {

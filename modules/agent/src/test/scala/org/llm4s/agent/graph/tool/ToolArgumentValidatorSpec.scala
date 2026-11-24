@@ -69,12 +69,12 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "check string lengths in code points" in {
-    val schema = StringSchema("q").withLengthConstraints(Some(1), Some(2)).toJsonSchema(true)
+    val schema = StringSchema("q").withMinLength(1).withMaxLength(2).toJsonSchema(true)
     check(schema, ujson.Str("")) shouldBe Vector("$: length 0 is below minLength 1")
     check(schema, ujson.Str("😀")) shouldBe Vector.empty
     check(schema, ujson.Str("😀😀")) shouldBe Vector.empty
     check(schema, ujson.Str("abc")) shouldBe Vector("$: length 3 is above maxLength 2")
-    val o = ObjectSchema[Unit]("o", Seq.empty).withRequiredField("q", StringSchema("q").withLengthConstraints(Some(1)))
+    val o = ObjectSchema[Unit]("o", Seq.empty).withRequiredField("q", StringSchema("q").withMinLength(1))
     check(o.toJsonSchema(true), obj("q" -> "")) shouldBe Vector("$.q: length 0 is below minLength 1")
   }
 
@@ -115,7 +115,7 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
     val tags = ObjectSchema[Unit]("o", Seq.empty)
       .withRequiredField(
         "tags",
-        ArraySchema("t", StringSchema("s")).withSizeConstraints(Some(1), Some(3)).withUniqueItems()
+        ArraySchema("t", StringSchema("s")).withMinItems(1).withMaxItems(3).withUniqueItems()
       )
       .toJsonSchema(true)
     check(tags, obj("tags" -> ujson.Arr())) shouldBe Vector("$.tags: 0 items is below minItems 1")
@@ -145,7 +145,7 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
   it should "report every violation in a deterministic order" in {
     val schema = ObjectSchema[Unit]("o", Seq.empty)
       .withRequiredField("a", IntegerSchema("a", maximum = Some(1)))
-      .withRequiredField("b", StringSchema("b").withLengthConstraints(Some(2)))
+      .withRequiredField("b", StringSchema("b").withMinLength(2))
       .withRequiredField("c", BooleanSchema("c"))
       .toJsonSchema(true)
     check(schema, obj("a" -> 5, "b" -> "x", "z" -> 1)) shouldBe Vector(
@@ -240,7 +240,7 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
 
   it should "return empty for every SchemaDefinition constructor in core, strict and non-strict" in {
     val inner = ObjectSchema[Unit]("i", Seq.empty)
-      .withRequiredField("s", StringSchema("s").withEnum(Seq("a")).withLengthConstraints(Some(1), Some(5)))
+      .withRequiredField("s", StringSchema("s").withEnum(Seq("a")).withMinLength(1).withMaxLength(5))
       .withOptionalField("n", NumberSchema("n", minimum = Some(0), maximum = Some(9), multipleOf = Some(0.5)))
       .withOptionalField(
         "nx",
@@ -250,7 +250,7 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
       .withRequiredField("b", BooleanSchema("b"))
       .withRequiredField(
         "arr",
-        ArraySchema("a", StringSchema("s")).withSizeConstraints(Some(1), Some(2)).withUniqueItems()
+        ArraySchema("a", StringSchema("s")).withMinItems(1).withMaxItems(2).withUniqueItems()
       )
       .withOptionalField("nul", NullableSchema(StringSchema("s")))
       .withOptionalField("nulObj", NullableSchema(ObjectSchema[Unit]("x", Seq.empty)))
@@ -430,5 +430,71 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
     v.unsupported(obj("type" -> ujson.Arr("string", "null"), "enum" -> ujson.Arr(ujson.Null))) shouldBe Vector.empty
     v.unsupported(obj("type" -> "string", "enum" -> ujson.Arr(ujson.Null))) shouldBe
       Vector("$: no enum entry matches the type")
+  }
+
+  // anyOf, and null for an optional property (#2814)
+
+  private def nameOrPoint = Schema
+    .anyOf[Any](
+      "A name or a point",
+      Schema.string("A name").withMinLength(2),
+      Schema.`object`[Any]("A point").withRequiredField("x", Schema.number("x"))
+    )
+    .toJsonSchema(strict = false)
+
+  "validate" should "accept a value that satisfies one anyOf alternative" in {
+    check(nameOrPoint, ujson.Str("Ada")) shouldBe Vector.empty
+    check(nameOrPoint, obj("x" -> 1.5)) shouldBe Vector.empty
+  }
+
+  it should "report a value that satisfies no anyOf alternative, with the closest alternative's violations" in {
+    val violations = check(nameOrPoint, ujson.Num(3))
+    violations should have size 1
+    violations.head should startWith("$: 3 matches none of the 2 alternatives")
+    check(nameOrPoint, ujson.Str("A")).head should include("length 1 is below minLength 2")
+  }
+
+  it should "check an anyOf nested in an object property and in array items" in {
+    val schema = Schema
+      .`object`[Any]("o")
+      .withRequiredField("who", Schema.anyOf[Any]("u", Schema.string("s"), Schema.integer("i")))
+      .withRequiredField("all", Schema.array("a", Schema.anyOf[Any]("u", Schema.string("s"), Schema.integer("i"))))
+      .toJsonSchema(strict = false)
+    check(schema, obj("who" -> 1, "all" -> ujson.Arr("a", 2))) shouldBe Vector.empty
+    check(schema, obj("who" -> true, "all" -> ujson.Arr("a", 2.5))).map(_.takeWhile(_ != ':')) shouldBe
+      Vector("$.who", "$.all[1]")
+  }
+
+  it should "read null for a property that is not required as the property left out" in {
+    val schema = Schema
+      .`object`[Any]("Search")
+      .withRequiredField("query", Schema.string("q"))
+      .withOptionalField("limit", Schema.integer("How many").withMinimum(1))
+    // what a model sent the strict definition answers with, checked against the non-strict schema
+    val asStrictClientsSend = obj("query" -> "scala", "limit" -> ujson.Null)
+
+    check(schema.toJsonSchema(strict = false), asStrictClientsSend) shouldBe Vector.empty
+    check(schema.toJsonSchema(strict = true), asStrictClientsSend) shouldBe Vector.empty
+    check(schema.toJsonSchema(strict = false), obj("query" -> "scala", "limit" -> 0)) shouldBe
+      Vector("$.limit: 0 is below minimum 1")
+  }
+
+  it should "still refuse null for a required property that is not nullable" in {
+    val schema = Schema.`object`[Any]("o").withRequiredField("query", Schema.string("q")).toJsonSchema(strict = false)
+    check(schema, obj("query" -> ujson.Null)) shouldBe Vector("$.query: expected string, got null")
+  }
+
+  "unsupported" should "accept anyOf, look inside its alternatives, and refuse one that is not a non-empty array" in {
+    v.unsupported(nameOrPoint) shouldBe Vector.empty
+    v.unsupported(obj("anyOf" -> ujson.Arr(obj("type" -> "string", "pattern" -> "a")))) shouldBe
+      Vector("$.anyOf[0].pattern")
+    v.unsupported(obj("anyOf" -> ujson.Arr())) shouldBe Vector("$.anyOf")
+    v.unsupported(obj("anyOf" -> "string")) shouldBe Vector("$.anyOf")
+  }
+
+  it should "report the keywords of a RawJsonSchema it cannot check" in {
+    v.unsupported(Schema.raw(ujson.Obj("type" -> "string", "format" -> "uri")).toJsonSchema(false)) shouldBe
+      Vector("$.format")
+    v.unsupported(Schema.raw(ujson.Obj("type" -> "object")).toJsonSchema(false)) shouldBe Vector.empty
   }
 }

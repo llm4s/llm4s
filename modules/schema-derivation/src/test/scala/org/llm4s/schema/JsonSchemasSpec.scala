@@ -18,11 +18,13 @@ class JsonSchemasSpec extends AnyFlatSpec with Matchers {
       JsonSchemas.nullable(schema.toJsonSchema(true)) shouldBe NullableSchema(schema).toJsonSchema(true)
   }
 
-  it should "add null to a type array once, and give a schema without a type the type null" in {
+  it should "add null to a type array once, and make a schema without a type an anyOf of itself and null" in {
     JsonSchemas.nullable(ujson.Obj("type" -> ujson.Arr("string", "integer")))("type") shouldBe
       ujson.Arr("string", "integer", "null")
     JsonSchemas.nullable(ujson.Obj("type" -> ujson.Arr("string", "null")))("type") shouldBe ujson.Arr("string", "null")
-    JsonSchemas.nullable(ujson.Obj("description" -> "any"))("type") shouldBe ujson.Arr("null")
+    JsonSchemas.nullable(ujson.Obj("$ref" -> "#/x"))("anyOf") shouldBe
+      ujson.Arr(ujson.Obj("$ref" -> "#/x"), ujson.Obj("type" -> "null"))
+    JsonSchemas.nullable(ujson.Obj()) shouldBe ujson.Obj()
     JsonSchemas.nullable(ujson.Obj("type" -> "string", "enum" -> ujson.Arr("a", ujson.Null)))("enum") shouldBe
       ujson.Arr("a", ujson.Null)
   }

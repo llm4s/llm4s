@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.ConfigurationError
-import org.llm4s.http.{ HttpRawResponse, HttpResponse, Llm4sHttpClient, MultipartPart, StreamingHttpResponse }
+import org.llm4s.http.{ HttpBody, HttpRequest, HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
 import org.llm4s.llmconnect.config.PerplexityConfig
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
@@ -10,7 +10,6 @@ import org.llm4s.types.Result
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentLinkedQueue
-import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 
 /** A request the stub saw. */
@@ -23,66 +22,22 @@ final class StubHttp(
 ) extends Llm4sHttpClient {
   private val log = new ConcurrentLinkedQueue[Seen]()
 
-  def requests: Seq[Seen]          = log.asScala.toSeq
-  def lastBody: ujson.Value        = ujson.read(requests.last.body)
-  @volatile var closed: Boolean    = false
-  override def close(): Unit       = closed = true
-  private def unsupported: Nothing = throw new UnsupportedOperationException("not used by perplexity")
+  def requests: Seq[Seen]       = log.asScala.toSeq
+  def lastBody: ujson.Value     = ujson.read(requests.last.body)
+  @volatile var closed: Boolean = false
+  override def close(): Unit    = closed = true
 
-  override def post(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = {
-    val seen = Seen(url, headers, body, streaming = false)
+  /** A request that asks for `text/event-stream` is answered from the stream script, any other from the reply script. */
+  override def send(request: HttpRequest): Result[StreamingHttpResponse] = {
+    val streaming = request.headers.get("Accept").contains("text/event-stream")
+    val body = request.body match {
+      case HttpBody.Text(text) => text
+      case _                   => ""
+    }
+    val seen = Seen(request.url, request.headers, body, streaming)
     log.add(seen)
-    respond(seen)
+    if streaming then stream(seen) else respond(seen).map(_.toStreaming)
   }
-
-  override def postStream(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[StreamingHttpResponse] = {
-    val seen = Seen(url, headers, body, streaming = true)
-    log.add(seen)
-    stream(seen)
-  }
-
-  override def get(
-    url: String,
-    headers: Map[String, String],
-    params: Map[String, String],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = unsupported
-  override def postBytes(
-    url: String,
-    headers: Map[String, String],
-    data: Array[Byte],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = unsupported
-  override def postMultipart(
-    url: String,
-    headers: Map[String, String],
-    parts: Seq[MultipartPart],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = unsupported
-  override def put(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = unsupported
-  override def delete(url: String, headers: Map[String, String], timeout: FiniteDuration): Result[HttpResponse] =
-    unsupported
-  override def postRaw(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[HttpRawResponse] = unsupported
 }
 
 object PerplexityFixtures {

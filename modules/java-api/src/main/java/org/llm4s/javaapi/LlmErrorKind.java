@@ -31,8 +31,7 @@ public enum LlmErrorKind {
   NETWORK,
 
   /**
-   * The provider answered with an error ({@code ServiceError}, {@code APIError}, or an {@code EmbeddingError} with a
-   * status); see {@code getStatusCode()}.
+   * The provider answered with an error ({@code ServiceError}, or an {@code EmbeddingError} with a status); see {@code getStatusCode()}.
    */
   SERVICE,
 

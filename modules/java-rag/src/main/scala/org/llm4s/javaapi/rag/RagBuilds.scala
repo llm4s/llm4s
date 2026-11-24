@@ -1,7 +1,7 @@
 package org.llm4s.javaapi.rag
 
 import org.llm4s.chunking.ChunkerFactory
-import org.llm4s.core.safety.Safety
+import org.llm4s.error.Safety
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.javaapi.{ FacadeInternals, JCompletionOptions, JEmbeddingClient, JLlmClient, JMessage, LlmResult }

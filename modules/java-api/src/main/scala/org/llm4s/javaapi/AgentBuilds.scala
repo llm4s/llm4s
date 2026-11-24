@@ -59,7 +59,8 @@ private[javaapi] object AgentBuilds {
         Option.when(input.nonEmpty || output.nonEmpty)(new GuardrailMiddleware(input, output)),
         window.map(new ContextWindowMiddleware(_))
       ).flatten
-      base     = Agent.builder(id, client.underlying).withTools(new ToolRegistry(tools.map(_.function)))
+      registry <- ToolRegistry.of(tools.map(_.function))
+      base     = Agent.builder(id, client.underlying).withTools(registry)
       prompted = prompt.fold(base)(base.withSystemPrompt)
       streamed = if (spec.streaming) prompted.withStreaming() else prompted
       stepped  = spec.maxSteps.fold(streamed)(streamed.withMaxSteps)

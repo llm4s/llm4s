@@ -134,7 +134,9 @@ class ZioChatRoutesSpec extends AnyFlatSpec with Matchers {
       .fold(e => fail(s"could not build the tool: $e"), identity)
     val client = ScriptedLLMClient.sequence(Reply.toolCall("clock", "{}", Some("call-1")), Reply.text("It is noon."))
     val agent = unsafeRun(
-      LLMClientZ(client).agent("chat")(builder => ChatAgent.configure(builder).withTools(new ToolRegistry(Seq(clock))))
+      LLMClientZ(client).agent("chat")(builder =>
+        ChatAgent.configure(builder).withTools(ToolRegistry.of(Seq(clock)).toOption.get)
+      )
     )
     val received = events(post(agent, "/chat/stream", """{"message": "time?"}""")._2)
     received.head shouldBe ("tool_call" -> ujson.Obj("id" -> "call-1", "tool" -> "clock"))

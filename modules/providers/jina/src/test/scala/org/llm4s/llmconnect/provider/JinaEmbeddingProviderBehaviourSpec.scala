@@ -2,18 +2,17 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.security.Secret
 import org.llm4s.error.NetworkError
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient, MultipartPart }
+import org.llm4s.http.{ HttpRequest, HttpResponse, Llm4sHttpClient, MockHttpClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.EmbeddingRequest
 import org.llm4s.testkit.LocalProviderTestServer
-import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import ujson.read
 
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.duration.{ DurationInt, FiniteDuration }
+import scala.concurrent.duration.DurationInt
 
 /**
  * Behaviour the happy-path spec does not pin: exact request JSON per task, URL joining, the full
@@ -184,15 +183,7 @@ class JinaEmbeddingProviderBehaviourSpec extends AnyFlatSpec with Matchers {
   "secrets" should "stay out of the config's toString and of transport errors" in {
     (cfg().toString should not).include(secretKey)
     val failing = new Llm4sHttpClient {
-      private def fail[A]: Result[A] = Left(NetworkError("connect timed out", None, "http://jina-test/embeddings"))
-      def get(u: String, h: Map[String, String], p: Map[String, String], t: FiniteDuration)          = fail
-      def post(u: String, h: Map[String, String], b: String, t: FiniteDuration)                      = fail
-      def postBytes(u: String, h: Map[String, String], d: Array[Byte], t: FiniteDuration)            = fail
-      def postMultipart(u: String, h: Map[String, String], p: Seq[MultipartPart], t: FiniteDuration) = fail
-      def put(u: String, h: Map[String, String], b: String, t: FiniteDuration)                       = fail
-      def delete(u: String, h: Map[String, String], t: FiniteDuration)                               = fail
-      def postRaw(u: String, h: Map[String, String], b: String, t: FiniteDuration)                   = fail
-      def postStream(u: String, h: Map[String, String], b: String, t: FiniteDuration)                = fail
+      def send(request: HttpRequest) = Left(NetworkError("connect timed out", None, "http://jina-test/embeddings"))
     }
     val err = embed(failing, Seq("a")).left.toOption.get
     (err.toString should not).include(secretKey)
@@ -250,15 +241,7 @@ class JinaEmbeddingProviderBehaviourSpec extends AnyFlatSpec with Matchers {
 
   it should "pass a timeout through, and report any other transport failure as an EmbeddingError" in {
     def failingWith(error: org.llm4s.error.LLMError): Llm4sHttpClient = new Llm4sHttpClient {
-      private def fail[A]: Result[A]                                                                 = Left(error)
-      def get(u: String, h: Map[String, String], p: Map[String, String], t: FiniteDuration)          = fail
-      def post(u: String, h: Map[String, String], b: String, t: FiniteDuration)                      = fail
-      def postBytes(u: String, h: Map[String, String], d: Array[Byte], t: FiniteDuration)            = fail
-      def postMultipart(u: String, h: Map[String, String], p: Seq[MultipartPart], t: FiniteDuration) = fail
-      def put(u: String, h: Map[String, String], b: String, t: FiniteDuration)                       = fail
-      def delete(u: String, h: Map[String, String], t: FiniteDuration)                               = fail
-      def postRaw(u: String, h: Map[String, String], b: String, t: FiniteDuration)                   = fail
-      def postStream(u: String, h: Map[String, String], b: String, t: FiniteDuration)                = fail
+      def send(request: HttpRequest) = Left(error)
     }
     val late = org.llm4s.error.TimeoutError("POST jina: request timed out", 1.second, "http.POST")
     embed(failingWith(late), Seq("a")).left.toOption.get shouldBe late

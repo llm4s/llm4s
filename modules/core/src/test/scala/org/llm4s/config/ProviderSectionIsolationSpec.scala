@@ -99,11 +99,10 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
         }
 
         "report the bad section, and only it, as an error from providerConfigs" in {
-          val (errors, configs) =
-            Llm4sConfig.providerConfigs(config(badSection)).fold(err => fail(err.toString), identity)
-          errors.keySet shouldBe Set(ProviderName("bad-one"))
-          errors(ProviderName("bad-one")).message should include("bad-one")
-          configs.keySet shouldBe Set(ProviderName("good-one"))
+          val sections = Llm4sConfig.providerConfigs(config(badSection)).fold(err => fail(err.toString), identity)
+          sections.keySet shouldBe Set(ProviderName("bad-one"), ProviderName("good-one"))
+          sections(ProviderName("bad-one")).left.toOption.map(_.message).getOrElse("") should include("bad-one")
+          sections(ProviderName("good-one")).isRight shouldBe true
         }
 
         "still fail the full providers() load, which validates every section" in {

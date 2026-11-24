@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.security.Secret
-import org.llm4s.http.{ HttpRawResponse, HttpResponse, Llm4sHttpClient, MultipartPart, StreamingHttpResponse }
+import org.llm4s.http.{ HttpBody, HttpRequest, HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
 import org.llm4s.llmconnect.config.WatsonXConfig
 import org.llm4s.types.Result
 
@@ -32,68 +32,24 @@ final class StubHttp(
 ) extends Llm4sHttpClient {
   private val log = new ConcurrentLinkedQueue[Seen]()
 
-  def requests: Seq[Seen]          = log.asScala.toSeq
-  def iamRequests: Seq[Seen]       = requests.filter(_.url.contains("/identity/token"))
-  def modelRequests: Seq[Seen]     = requests.filterNot(_.url.contains("/identity/token"))
-  private val closedFlag           = new AtomicBoolean(false)
-  def closed: Boolean              = closedFlag.get()
-  override def close(): Unit       = closedFlag.set(true)
-  private def unsupported: Nothing = throw new UnsupportedOperationException("not used by watsonx")
+  def requests: Seq[Seen]      = log.asScala.toSeq
+  def iamRequests: Seq[Seen]   = requests.filter(_.url.contains("/identity/token"))
+  def modelRequests: Seq[Seen] = requests.filterNot(_.url.contains("/identity/token"))
+  private val closedFlag       = new AtomicBoolean(false)
+  def closed: Boolean          = closedFlag.get()
+  override def close(): Unit   = closedFlag.set(true)
 
-  override def post(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = {
-    val seen = Seen(url, headers, body, streaming = false, timeout)
+  /** A request that asks for `text/event-stream` is answered from the stream script, any other from the reply script. */
+  override def send(request: HttpRequest): Result[StreamingHttpResponse] = {
+    val streaming = request.headers.get("Accept").contains("text/event-stream")
+    val body = request.body match {
+      case HttpBody.Text(text) => text
+      case _                   => ""
+    }
+    val seen = Seen(request.url, request.headers, body, streaming, request.responseTimeout)
     log.add(seen)
-    respond(seen)
+    if streaming then streamBody(seen) else respond(seen).map(_.toStreaming)
   }
-
-  override def postStream(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[StreamingHttpResponse] = {
-    val seen = Seen(url, headers, body, streaming = true, timeout)
-    log.add(seen)
-    streamBody(seen)
-  }
-
-  override def get(
-    url: String,
-    headers: Map[String, String],
-    params: Map[String, String],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = unsupported
-  override def postBytes(
-    url: String,
-    headers: Map[String, String],
-    data: Array[Byte],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = unsupported
-  override def postMultipart(
-    url: String,
-    headers: Map[String, String],
-    parts: Seq[MultipartPart],
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = unsupported
-  override def put(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[HttpResponse] = unsupported
-  override def delete(url: String, headers: Map[String, String], timeout: FiniteDuration): Result[HttpResponse] =
-    unsupported
-  override def postRaw(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: FiniteDuration
-  ): Result[HttpRawResponse] = unsupported
 }
 
 object StubHttp {

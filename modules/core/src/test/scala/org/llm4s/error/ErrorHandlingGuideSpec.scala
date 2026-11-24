@@ -5,8 +5,8 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.{ Completion, Conversation, EmbeddingError }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testutil.MockLLMClients.{ FailingMock, SimpleMock }
-import org.llm4s.Result
-import org.llm4s.types.{ OptionOps, Result, TryOps }
+import org.llm4s.types.Result
+import org.llm4s.syntax.toResult
 import org.scalatest.{ EitherValues, Suite }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -180,9 +180,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
         RateLimitError("p"),
         TimeoutError("m", 1.second, "op"),
         ServiceError(503, "p", "d"),
-        APIError("p", "m", None, None),
         ExecutionError("m", "op", None, None),
-        SystemError("m", None),
         OptimisticLockFailure("m", "id", 1L)
       )
       val permanent: List[LLMError] = List(
@@ -241,7 +239,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
       Try("123".toInt).toResult shouldBe Right(123)
       Try("abc".toInt).toResult.left.value shouldBe a[LLMError]
 
-      import org.llm4s.error.ThrowableOps._
+      import org.llm4s.syntax.toLLMError
       new IllegalStateException("boom").toLLMError shouldBe a[LLMError]
       new InterruptedException("stop").toLLMError shouldBe a[CancelledError]
       intercept[InterruptedException](Try(throw new InterruptedException("stop")).toResult)
@@ -270,11 +268,6 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
       )
       checked.left.value should have size 2
       Result.validateAll(List("a", "b"))(Right(_)) shouldBe Right(List("a", "b"))
-    }
-
-    "combine independent Results into a tuple" in {
-      Result.combine(Right(1), Right("a")) shouldBe Right((1, "a"))
-      Result.combine(Right(1), Left(SimpleError("no")): Result[String]).isLeft shouldBe true
     }
   }
 
@@ -309,8 +302,6 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
         calls
       }
       callsFor(NetworkError("down", None, "https://x")) shouldBe 3
-      callsFor(APIError("p", "m", None, None)) shouldBe 3
-      callsFor(APIError("p", "m", Some(400), None)) shouldBe 1
       callsFor(ServiceError(404, "p", "d")) shouldBe 1
       callsFor(OptimisticLockFailure("m", "id", 1L)) shouldBe 1
     }

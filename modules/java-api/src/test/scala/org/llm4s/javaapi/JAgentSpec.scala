@@ -4,7 +4,7 @@ import org.llm4s.testutil.TestTimeLimit
 
 import java.util.Optional
 import org.llm4s.agent.graph.GraphError
-import org.llm4s.error.{ APIError, LLMError }
+import org.llm4s.error.{ ServiceError, LLMError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
@@ -70,7 +70,7 @@ class JAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "return a failure result when the underlying LLM call fails" in {
-    val error  = APIError("test-provider", "timeout")
+    val error  = ServiceError(503, "test-provider", "timeout")
     val agent  = Llm4s.createAgent(Llm4s.wrapClient(failingClient(error)))
     val result = agent.run("hello")
     result.isFailure shouldBe true
@@ -83,7 +83,7 @@ class JAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "return failure when the LLM fails, even with tools provided" in {
-    val error  = APIError("test-provider", "server error")
+    val error  = ServiceError(503, "test-provider", "server error")
     val agent  = Llm4s.createAgent(Llm4s.wrapClient(failingClient(error)), ToolRegistry.empty)
     val result = agent.run("query")
     result.isFailure shouldBe true

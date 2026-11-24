@@ -56,7 +56,7 @@ object JudgeRecipe extends RecipeApp {
 
   val verdictSchema = Schema
     .`object`[Verdict]("A grade for one answer")
-    .withRequiredField("score", Schema.integer("The grade from the rubric, 1 to 5").withRange(Some(1), Some(5)))
+    .withRequiredField("score", Schema.integer("The grade from the rubric, 1 to 5").withMinimum(1).withMaximum(5))
     .withRequiredField("reason", Schema.string("One sentence explaining the grade"))
 
   def judge(judgeModel: LLMClient, question: String, reference: String, answer: String): Result[Verdict] = {

@@ -2,23 +2,24 @@ package org.llm4s.error
 
 import org.llm4s.annotation.Stable
 
-import org.slf4j.MDC
-
 /**
- * Enhanced comprehensive error hierarchy for LLM operations using ADTs.
+ * The base of every error llm4s returns in a `Left`.
  *
- * This replaces the simple org.llm4s.llmconnect.model.LLMError with a
- * much more comprehensive error system.
+ * Each of the library's errors is a final case class with a private constructor, built through its companion, and
+ * follows these conventions:
  *
- * Key improvements over legacy version:
- * - Structured context information
- * - Recovery guidance built-in - Trait-based recoverability
- * - Provider-agnostic design
- * - Rich error formatting
- * - Type-safe error handling
- * - Private case class constructors with smart constructors
+ *  - '''`apply`.''' An error that generates its message takes its structured fields, then the free text as
+ *    `details` or `reason`: `ServiceError(httpStatus, provider, details)`, `ProcessingError(operation, details)`,
+ *    `ValidationError(field, reason)`. An error with nothing to generate a message from takes `message` first:
+ *    `ConfigurationError(message)`, `NetworkError(message, cause, endpoint)`.
+ *  - '''Extractor.''' Every error has an explicit `unapply`: `message`, then its fields in constructor order. Its
+ *    arity is fixed, so a field added after the extractor was written is read by name, not bound by position:
+ *    `RateLimitError.origin`, `ContentFilteredError.usage`.
+ *  - '''Cause.''' An exception behind an error is `cause: Option[Throwable]`. [[UnknownError]] alone holds a
+ *    `Throwable`: it exists only to carry an exception nothing else classified.
+ *  - '''Context.''' `context` is derived from the error's fields. [[ExecutionError]] and [[TimeoutError]], raised
+ *    from many unrelated call sites, also take the caller's entries (`withContext`).
  */
-
 @Stable
 trait LLMError extends Product with Serializable {
 
@@ -31,16 +32,12 @@ trait LLMError extends Product with Serializable {
   /** Additional context information */
   def context: Map[String, String] = Map.empty
 
-  /** Error correlation IDs for debugging */
-  def correlationId: Option[String] = Option(MDC.get("correlationId"))
-
   /** Formatted error message with context */
   def formatted: String = {
     val contextStr = context.toList.map { case (k, v) => s"$k=$v" }.mkString("[", ",", "]")
-    val corrStr    = correlationId.map(id => s" [correlationId=$id]").getOrElse("")
     val codeStr    = code.map(c => s" [$c]").getOrElse("")
 
-    s"${getClass.getSimpleName}: $message$codeStr$contextStr$corrStr"
+    s"${getClass.getSimpleName}: $message$codeStr$contextStr"
   }
 }
 
@@ -83,26 +80,4 @@ object LLMError {
    */
   private[llm4s] def describeCause(cause: Throwable): String =
     Option(cause.getMessage).filter(_.nonEmpty).getOrElse(cause.getClass.getName)
-
-  /**
-   * Cats integration
-   */
-
-  /** Static show method - always works */
-  def show(error: LLMError): String = error.formatted
-
-  // Smart constructors for backward compatibility
-  def processingFailed(operation: String, message: String, cause: Option[Throwable] = None): ProcessingError =
-    ProcessingError(operation, message, cause)
-
-  def invalidImageInput(field: String, value: String, reason: String): InvalidInputError =
-    InvalidInputError(field, value, reason)
-
-  def apiCallFailed(
-    provider: String,
-    message: String,
-    statusCode: Option[Int] = None,
-    responseBody: Option[String] = None
-  ): APIError =
-    APIError(provider, message, statusCode, responseBody)
 }

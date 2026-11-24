@@ -14,9 +14,9 @@ class TypedCalculatorExampleSpec extends AnyFlatSpec with Matchers {
   private val scoped    = TypedCalculator.scopedTool.fold(e => sys.error(e.formatted), identity)
 
   "The typed calculator" should "send the built-in schema, with the optional operand allowed to be null" in {
-    val expected = handBuilt.toOpenAITool()
+    val expected = handBuilt.toolDefinition(strict = true)
     expected("function")("parameters")("properties")("b")("type") = ujson.Arr("number", "null")
-    typed.toOpenAITool() shouldBe expected
+    typed.toolDefinition(strict = true) shouldBe expected
     typed.name shouldBe handBuilt.name
     typed.description shouldBe handBuilt.description
   }
@@ -55,21 +55,22 @@ class TypedCalculatorExampleSpec extends AnyFlatSpec with Matchers {
 
   it should "refuse an operation the built-in one rejects in its handler, before the handler runs" in {
     typed.execute(ujson.Obj("operation" -> "mul", "a" -> 1, "b" -> 2)) match {
-      case Left(ToolCallError.HandlerError("calculator", message)) => message should include("one of add, subtract")
-      case other                                                   => fail(s"unexpected $other")
+      case Left(error @ ToolCallError.InvalidArguments("calculator", List(_))) =>
+        error.message should include("one of add, subtract")
+      case other => fail(s"unexpected $other")
     }
   }
 
   "The named tuple calculator" should "send the typed schema, each parameter described by its name" in {
-    val expected   = typed.toOpenAITool()
+    val expected   = typed.toolDefinition(strict = true)
     val parameters = expected("function")("parameters")
     parameters("description") = ujson.Str("(operation: Operation, a: Double, b: Option[Double])")
     List("operation", "a", "b").foreach(name => parameters("properties")(name)("description") = ujson.Str(name))
-    tupled.toOpenAITool() shouldBe expected
+    tupled.toolDefinition(strict = true) shouldBe expected
   }
 
   "The scoped calculator" should "send the typed schema" in {
-    scoped.toOpenAITool() shouldBe typed.toOpenAITool()
+    scoped.toolDefinition(strict = true) shouldBe typed.toolDefinition(strict = true)
   }
 
   "The sample" should "run without a model" in {

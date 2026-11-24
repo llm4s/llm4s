@@ -10,7 +10,8 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.media.MediaSource
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, UnmappedOptions }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
 import org.slf4j.LoggerFactory
 
@@ -437,7 +438,7 @@ class OllamaClient(
       "options"  -> opts
     )
     if (options.tools.nonEmpty)
-      body("tools") = ujson.Arr.from(options.tools.map(t => OllamaClient.encodeTool(t.toOpenAITool(strict = false))))
+      body("tools") = ujson.Arr.from(options.tools.map(t => OllamaClient.encodeTool(t.toolDefinition(strict = false))))
     options.responseFormat.foreach(rf => body("format") = OllamaClient.encodeFormat(rf))
     think.think.foreach(value => body("think") = value)
     body
@@ -552,7 +553,7 @@ object OllamaClient {
   /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
   val DefaultStreamTimeout: FiniteDuration = 10.minutes
 
-  import org.llm4s.types.TryOps
+  import org.llm4s.syntax.toResult
 
   private val logger = LoggerFactory.getLogger(getClass)
 

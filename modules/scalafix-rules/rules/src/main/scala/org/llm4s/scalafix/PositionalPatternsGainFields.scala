@@ -85,7 +85,7 @@ object PositionalPatternsGainFields {
     "org/llm4s/model/TransformationResult"                          -> (3  -> 4),
     "org/llm4s/reranker/RerankProviderConfig"                       -> (3  -> 4),
     "org/llm4s/toolapi/SafeParameterExtractor"                      -> (1  -> 2),
-    "org/llm4s/toolapi/ToolRetryPolicy"                             -> (3  -> 4),
+    "org/llm4s/toolapi/ToolRetryPolicy"                             -> (3  -> 5),
     "org/llm4s/trace/TraceEvent.AgentRunEnded"                      -> (7  -> 12),
     "org/llm4s/trace/TraceEvent.CompletionReceived"                 -> (5  -> 15),
     "org/llm4s/trace/TraceEvent.CustomEvent"                        -> (3  -> 4),

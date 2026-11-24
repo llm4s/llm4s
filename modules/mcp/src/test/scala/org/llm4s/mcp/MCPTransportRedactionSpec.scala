@@ -3,7 +3,7 @@ package org.llm4s.mcp
 import ch.qos.logback.classic.{ Logger => LogbackLogger }
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.http.{ HttpResponse, StubbedHttpCalls }
 import org.llm4s.types.Result
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.matchers.should.Matchers
@@ -65,13 +65,13 @@ class MCPTransportRedactionSpec extends AnyWordSpec with Matchers with MockFacto
     lines.foreach(assertNoSecret)
   }
 
-  private def answering(status: Int, body: String): Llm4sHttpClient = {
-    val http = stub[Llm4sHttpClient]
-    (http.post _).when(*, *, *, *).returns(Right(HttpResponse(status, body)))
+  private def answering(status: Int, body: String): StubbedHttpCalls = {
+    val http = stub[StubbedHttpCalls]
+    (http.onPost _).when(*, *, *, *).returns(Right(HttpResponse(status, body)))
     http
   }
 
-  private val transports: Seq[(String, Llm4sHttpClient => MCPTransportImpl)] = Seq(
+  private val transports: Seq[(String, StubbedHttpCalls => MCPTransportImpl)] = Seq(
     "streamable-http" -> (http =>
       new StreamableHTTPTransportImpl("http://localhost:8080/mcp", "t", 5.seconds, WholeBodyReplies(http))
     ),
@@ -103,8 +103,8 @@ class MCPTransportRedactionSpec extends AnyWordSpec with Matchers with MockFacto
     "redact credentials in an unrecognized SSE line it logs at DEBUG" in {
       val ok   = write(JsonRpcResponse(jsonrpc = "2.0", id = "1", result = Some(ujson.Obj()), error = None))
       val body = EchoedText + "\n" + s"data: $ok\n\n"
-      val http = stub[Llm4sHttpClient]
-      (http.post _)
+      val http = stub[StubbedHttpCalls]
+      (http.onPost _)
         .when(*, *, *, *)
         .returns(Right(HttpResponse(200, body, Map("content-type" -> Seq("text/event-stream")))))
       val mcpLogger = LoggerFactory.getLogger("org.llm4s.mcp").asInstanceOf[LogbackLogger]

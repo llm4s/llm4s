@@ -3,7 +3,7 @@ package org.llm4s.knowledgegraph.storage
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
-import org.llm4s.types.TryOps
+import org.llm4s.syntax.toResult
 
 import java.nio.file.{ Files, Path }
 import java.nio.charset.StandardCharsets

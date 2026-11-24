@@ -1183,7 +1183,7 @@ lazy val memoryPostgres = (project in file("modules/memory-postgres"))
 
 lazy val mcp = (project in file("modules/mcp"))
   // `providerTestkit % Test` is for the interruption checks, run against a server that never answers.
-  .dependsOn(core, providerTestkit % Test)
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
   .settings(
     name := "llm4s-mcp",
     commonSettings,
@@ -1252,7 +1252,7 @@ lazy val image = (project in file("modules/image"))
   // `observabilityPrometheus % Test` is for `ImageGenerationCostTrackingSpec`, which reads the
   // image metrics back out of a real `PrometheusMetrics` registry. Test scope only: the
   // published `llm4s-image` depends on the `MetricsCollector` contract, not on Prometheus.
-  .dependsOn(media, core, observabilityPrometheus % Test, providerTestkit % Test)
+  .dependsOn(media, core % "compile->compile;test->test", observabilityPrometheus % Test, providerTestkit % Test)
   .settings(
     name := "llm4s-image",
     commonSettings,

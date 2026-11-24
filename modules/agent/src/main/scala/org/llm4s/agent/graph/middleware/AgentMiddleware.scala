@@ -13,7 +13,8 @@ import org.llm4s.agent.graph.tool.{
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ LLMError, NonRecoverableError }
 import org.llm4s.llmconnect.model.{ Completion, Message, ToolCall }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
 import scala.annotation.unused

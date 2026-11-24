@@ -23,9 +23,10 @@ object SingleStepAgentExample {
       given org.llm4s.model.ModelRegistryService = registryService
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
+      registry    <- ToolRegistry.of(Seq(weatherTool))
       agent <- Agent
         .builder("single-step-agent", client)
-        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withTools(registry)
         .withMaxSteps(5)
         .build()
 

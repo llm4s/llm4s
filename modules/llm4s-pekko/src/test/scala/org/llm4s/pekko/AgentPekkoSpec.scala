@@ -238,7 +238,7 @@ class AgentPekkoSpec extends AnyFlatSpec with TestTimeLimit with Matchers with B
     case Left(e)  => fail(s"could not build tool: $e")
   }
 
-  private def tools: ToolRegistry = new ToolRegistry(Seq(echoTool))
+  private def tools: ToolRegistry = ToolRegistry.of(Seq(echoTool)).toOption.get
 
   private def toolCall(i: Int): Completion = {
     val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = ujson.Obj("v" -> "x")))

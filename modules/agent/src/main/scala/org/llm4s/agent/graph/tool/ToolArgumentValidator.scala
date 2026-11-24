@@ -8,8 +8,10 @@ import org.llm4s.annotation.Stable
  * The default implementation supports exactly the subset core's `SchemaDefinition` emits:
  * `type` (a string or an array of strings), `description` (ignored), `properties`, `required`,
  * `additionalProperties` (boolean), `enum`, `minLength`, `maxLength`, `minimum`, `maximum`,
- * `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `items`, `minItems`, `maxItems` and
- * `uniqueItems`. Any other keyword, and a supported one with a malformed value (a bound that is not
+ * `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `items`, `minItems`, `maxItems`,
+ * `uniqueItems` and `anyOf` (a value must satisfy at least one alternative). A property that is not
+ * required may be `null`, which is how a client that sends tools strict has the model leave it out.
+ * Any other keyword, which only a `RawJsonSchema` writes, and a supported one with a malformed value (a bound that is not
  * a number, a length or count that is not a non-negative whole number, a non-boolean `uniqueItems`,
  * a `required` that is not an array of strings, an `enum` that is not an array, `properties` that
  * is not an object), is reported by [[unsupported]] so a tool set can refuse it when it is built,
@@ -54,7 +56,8 @@ object ToolArgumentValidator {
     "items",
     "minItems",
     "maxItems",
-    "uniqueItems"
+    "uniqueItems",
+    "anyOf"
   )
 
   private val JsonTypes: Set[String] =
@@ -120,6 +123,14 @@ object ToolArgumentValidator {
                     case ujson.Arr(entries) if entries.nonEmpty && entries.distinct.size == entries.size =>
                       Vector.empty
                     case _ => Vector(s"$path.enum")
+                  }
+                case "anyOf" =>
+                  value match {
+                    case ujson.Arr(alternatives) if alternatives.nonEmpty =>
+                      alternatives.toVector.zipWithIndex.flatMap { case (alternative, i) =>
+                        unsupportedAt(alternative, s"$path.anyOf[$i]")
+                      }
+                    case _ => Vector(s"$path.anyOf")
                   }
                 case _ => Vector.empty
               }
@@ -188,13 +199,31 @@ object ToolArgumentValidator {
           if (types.nonEmpty && !types.exists(matchesType(_, value)))
             Vector(s"$path: expected ${types.mkString(" or ")}, got ${actualType(value)}")
           else
-            enumViolations(fields, value, path) ++ (value match {
+            anyOfViolations(fields, value, path) ++ enumViolations(fields, value, path) ++ (value match {
               case ujson.Str(s) => stringViolations(fields, s, path)
               case ujson.Num(n) => numberViolations(fields, n, path)
               case ujson.Obj(o) => objectViolations(fields, o, path)
               case ujson.Arr(a) => arrayViolations(fields, a.toVector, path)
               case _            => Vector.empty
             })
+        case _ => Vector.empty
+      }
+
+    /** No violation when at least one alternative accepts the value; otherwise the closest alternative's. */
+    private def anyOfViolations(
+      fields: scala.collection.Map[String, ujson.Value],
+      value: ujson.Value,
+      path: String
+    ): Vector[String] =
+      fields.get("anyOf") match {
+        case Some(ujson.Arr(alternatives)) if alternatives.nonEmpty =>
+          val attempts = alternatives.toVector.map(validateAt(_, value, path))
+          if (attempts.exists(_.isEmpty)) Vector.empty
+          else
+            Vector(
+              s"$path: ${ujson.write(value)} matches none of the ${attempts.size} alternatives (closest: " +
+                attempts.minBy(_.size).mkString("; ") + ")"
+            )
         case _ => Vector.empty
       }
 
@@ -303,8 +332,18 @@ object ToolArgumentValidator {
         if (fields.get("additionalProperties").contains(ujson.Bool(false)))
           obj.keys.toVector.filterNot(declared.contains).map(k => s"$path.$k: property not allowed")
         else Vector.empty
+      val required = fields
+        .get("required")
+        .collect { case ujson.Arr(r) => r.toVector.collect { case ujson.Str(name) => name } }
+        .getOrElse(Vector.empty)
+        .toSet
       val nested = props.flatMap { case (name, sub) =>
-        obj.get(name).toVector.flatMap(validateAt(sub, _, s"$path.$name"))
+        obj.get(name).toVector.flatMap {
+          // null for a property that is not required is the property left out: a strict client lists every
+          // property as required and nullable, so that is how its model omits one
+          case ujson.Null if !required(name) => Vector.empty
+          case present                       => validateAt(sub, present, s"$path.$name")
+        }
       }
       missing ++ extra ++ nested
     }

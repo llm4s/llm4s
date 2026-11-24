@@ -3,7 +3,7 @@ package org.llm4s.llmconnect
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
-import org.llm4s.types.TryOps
+import org.llm4s.syntax.toResult
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.FileAlreadyExistsException

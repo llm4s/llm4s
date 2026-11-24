@@ -24,14 +24,16 @@ import org.llm4s.types.Result
  * // Safe tools for production use
  * for {
  *   tools <- BuiltinTools.withHttpSafe()
- * } yield new ToolRegistry(tools)
+ *   registry <- ToolRegistry.of(tools)
+ * } yield registry
  *
  * // Development tools with file and shell access
  * for {
  *   tools <- BuiltinTools.developmentSafe(
  *     workingDirectory = Some("/home/user/project")
  *   )
- * } yield new ToolRegistry(tools)
+ *   registry <- ToolRegistry.of(tools)
+ * } yield registry
  * }}}
  */
 object BuiltinTools {

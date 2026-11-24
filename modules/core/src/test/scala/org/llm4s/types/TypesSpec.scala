@@ -3,7 +3,7 @@ package org.llm4s.types
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.error.ValidationError
-import org.llm4s.Result
+import org.llm4s.syntax.toResult
 
 import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration._
@@ -16,24 +16,9 @@ import scala.util.{ Failure, Success, Try }
  * - Newtype wrappers (ModelName, ApiKey, ConversationId, etc.)
  * - Validation and smart constructors
  * - Result companion object methods
- * - TryOps, OptionOps, FutureOps conversions
+ * - the Try and Option conversions of org.llm4s.syntax
  */
 class TypesSpec extends AnyFlatSpec with Matchers {
-
-  // ==========================================================================
-  // FilePath Tests
-  // ==========================================================================
-
-  "FilePath" should "extract extension" in {
-    FilePath("/path/to/file.txt").extension shouldBe Some("txt")
-    FilePath("/path/to/file.scala").extension shouldBe Some("scala")
-    FilePath("/path/to/file").extension shouldBe None
-    FilePath("/path/to/.hidden").extension shouldBe Some("hidden")
-  }
-
-  it should "convert to string via toString" in {
-    FilePath("/path/to/file.txt").toString shouldBe "/path/to/file.txt"
-  }
 
   // ==========================================================================
   // HeadroomPercent Tests
@@ -208,22 +193,6 @@ class TypesSpec extends AnyFlatSpec with Matchers {
     Result.traverse((1 to 100000).toList)(n => Right(n)).map(_.size) shouldBe Right(100000)
   }
 
-  "Result.combine" should "combine two results into tuple" in {
-    val result = Result.combine(Right(1), Right("a"))
-    result shouldBe Right((1, "a"))
-  }
-
-  it should "fail if first fails" in {
-    val error  = ValidationError("test", "error")
-    val result = Result.combine(Left(error), Right("a"))
-    result shouldBe Left(error)
-  }
-
-  it should "combine three results" in {
-    val result = Result.combine(Right(1), Right("a"), Right(true))
-    result shouldBe Right((1, "a", true))
-  }
-
   "Result.safely" should "wrap successful computation" in {
     val result = Result.safely(42)
     result.getOrElse(fail("Expected success")) shouldBe 42
@@ -232,24 +201,6 @@ class TypesSpec extends AnyFlatSpec with Matchers {
   it should "wrap failed computation" in {
     val result = Result.safely(throw new RuntimeException("boom"))
     result.isLeft shouldBe true
-  }
-
-  "Result.fromBoolean" should "return success for true" in {
-    val error  = ValidationError("test", "error")
-    val result = Result.fromBoolean(condition = true, error)
-    result shouldBe Right(())
-  }
-
-  it should "return failure for false" in {
-    val error  = ValidationError("test", "error")
-    val result = Result.fromBoolean(condition = false, error)
-    result shouldBe Left(error)
-  }
-
-  "Result.fromBooleanWithValue" should "return value for true" in {
-    val error  = ValidationError("test", "error")
-    val result = Result.fromBooleanWithValue(condition = true, 42, error)
-    result shouldBe Right(42)
   }
 
   "Result.validateAll" should "collect all successes" in {
@@ -289,10 +240,10 @@ class TypesSpec extends AnyFlatSpec with Matchers {
   }
 
   // ==========================================================================
-  // TryOps Tests
+  // Try.toResult
   // ==========================================================================
 
-  "TryOps" should "convert Success to Right" in {
+  "Try.toResult" should "convert Success to Right" in {
     val t: Try[Int] = Success(42)
     val result      = t.toResult
     result shouldBe Right(42)
@@ -305,10 +256,10 @@ class TypesSpec extends AnyFlatSpec with Matchers {
   }
 
   // ==========================================================================
-  // OptionOps Tests
+  // Option.toResult
   // ==========================================================================
 
-  "OptionOps" should "convert Some to Right" in {
+  "Option.toResult" should "convert Some to Right" in {
     val error  = ValidationError("test", "missing")
     val opt    = Some(42)
     val result = opt.toResult(error)

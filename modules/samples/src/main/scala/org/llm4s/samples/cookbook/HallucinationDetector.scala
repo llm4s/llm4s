@@ -9,7 +9,7 @@ import org.llm4s.toolapi.builtin.search.{ ExaSearchTool, ExaSearchConfig }
 import org.llm4s.agent.Agent
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.samples.util.AgentResults
-import org.llm4s.types.TryOps
+import org.llm4s.syntax.toResult
 import org.slf4j.LoggerFactory
 import pureconfig.ConfigSource
 import scala.util.Try
@@ -66,13 +66,11 @@ object HallucinationDetector {
           )
         )
 
-        exaToolResult match {
+        exaToolResult.flatMap(tool => ToolRegistry.of(List(tool))) match {
           case Left(error) =>
             logger.error("Failed to create Exa search tool: {}", error.formatted)
 
-          case Right(exaSearchTool) =>
-            val registry = new ToolRegistry(List(exaSearchTool))
-
+          case Right(registry) =>
             // Use the typed config loaded at the edge
             val text = detectorConfig.text
 

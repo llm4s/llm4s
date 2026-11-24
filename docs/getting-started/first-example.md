@@ -229,8 +229,9 @@ class ToolExample(client: LLMClient) {
                        "Get current weather for a location",
                        weatherSchema
                      ).withHandler(extractor => extractor.getString("location").map(getWeather)).buildSafe()
+      toolRegistry <- ToolRegistry.of(Seq(weatherTool))
       agent <- Agent.builder("weather-agent", client)
-        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withTools(toolRegistry)
         .build()
       result <- agent.run("What's the weather in Paris?")
     } yield result
@@ -381,8 +382,9 @@ class ComprehensiveAgent(client: LLMClient) {
                     "Evaluate a mathematical expression",
                     calcSchema
                   ).withHandler(extractor => extractor.getString("expression").map(calculate)).buildSafe()
+      toolRegistry <- ToolRegistry.of(Seq(calcTool))
       agent <- Agent.builder("calc-agent", client)
-        .withTools(new ToolRegistry(Seq(calcTool)))
+        .withTools(toolRegistry)
         .build()
       result <- agent.run("What is 6 times 7? Please use the calculator.")
     } yield result
@@ -443,7 +445,8 @@ val response = client.complete(
 ```scala
 // Assuming client is injected
 val result = for {
-  agent  <- Agent.builder("assistant", client).withTools(new ToolRegistry(myTools)).build()
+  toolRegistry <- ToolRegistry.of(myTools)
+  agent  <- Agent.builder("assistant", client).withTools(toolRegistry).build()
   result <- agent.run("User query")
 } yield result
 ```

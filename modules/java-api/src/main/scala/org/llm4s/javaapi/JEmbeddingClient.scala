@@ -1,6 +1,6 @@
 package org.llm4s.javaapi
 
-import org.llm4s.core.safety.Safety
+import org.llm4s.error.Safety
 import org.llm4s.error.{ CancelledError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig

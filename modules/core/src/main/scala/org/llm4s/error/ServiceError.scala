@@ -75,4 +75,11 @@ object ServiceError {
       error.requestId,
       error.retryAfter
     )
+
+  /**
+   * Extracts the message, HTTP status, provider, request id and `retryAfter`; the arity is fixed. It always
+   * matches, as the synthesized extractor it replaces did.
+   */
+  def unapply(error: ServiceError): Some[(String, Int, String, Option[String], Option[FiniteDuration])] =
+    Some((error.message, error.httpStatus, error.provider, error.requestId, error.retryAfter))
 }

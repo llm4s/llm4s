@@ -30,6 +30,10 @@ object CancelledError {
   def apply(operation: String, cause: Option[Throwable] = None): CancelledError =
     new CancelledError(s"$operation was cancelled", operation, cause)
 
+  /** Extracts the message, the operation and the cause. It always matches, as the synthesized extractor did. */
+  def unapply(error: CancelledError): Some[(String, String, Option[Throwable])] =
+    Some((error.message, error.operation, error.cause))
+
   /**
    * Whether `t` is a cancellation: the current thread is interrupted, or `t` or one of its causes
    * is an `InterruptedException` or a `ClosedByInterruptException`.

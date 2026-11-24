@@ -74,7 +74,10 @@ object ContentFilteredError {
         usage = None
       )
 
-  /** Extracts the message, provider, reason and whether the prompt was blocked. */
+  /**
+   * Extracts the message, provider, reason and whether the prompt was blocked. The arity is fixed: `usage`, added
+   * later, is read by name.
+   */
   def unapply(error: ContentFilteredError): Option[(String, String, String, Boolean)] =
     Some((error.message, error.provider, error.reason, error.promptBlocked))
 }

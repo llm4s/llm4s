@@ -4,7 +4,7 @@ import org.llm4s.shared.ReplaceOperation
 import org.llm4s.workspace.ContainerisedWorkspace
 import org.slf4j.LoggerFactory
 import scala.util.{ Try, Using }
-import org.llm4s.types.TryOps
+import org.llm4s.syntax.toResult
 
 /**
  * Demonstrates the basic usage of the Workspace class

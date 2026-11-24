@@ -17,8 +17,9 @@ import upickle.default._
  * @param name        Unique tool identifier used by the LLM when calling the tool
  * @param description Natural-language description of what the tool does and when to use it
  * @param schema      Parameter schema describing the expected JSON arguments
- * @param handler     Business logic; receives a [[SafeParameterExtractor]] and
- *                    returns `Right(result)` or `Left(errorMessage)`
+ * @param handler     Business logic; receives a [[SafeParameterExtractor]] and returns `Right(result)`, or
+ *                    `Left` of a [[ToolHandlerError]]: a `ToolParameterError` from a getter when an argument is
+ *                    at fault, or a message when the tool itself fails
  * @tparam T Phantom type for the parameter schema (unused at runtime)
  * @tparam R Return type, must have a uPickle `ReadWriter`
  */
@@ -27,7 +28,7 @@ final case class ToolFunction[T, R: ReadWriter] private (
   name: String,
   description: String,
   schema: SchemaDefinition[T],
-  handler: SafeParameterExtractor => Either[String, R]
+  handler: SafeParameterExtractor => Either[ToolHandlerError, R]
 ) {
 
   /** Replace the tool's name. */
@@ -41,12 +42,18 @@ final case class ToolFunction[T, R: ReadWriter] private (
     new ToolFunction[U, R](name, description, schema, handler)
 
   /** Replace the handler. */
-  def withHandler(handler: SafeParameterExtractor => Either[String, R]): ToolFunction[T, R] = copy(handler = handler)
+  def withHandler(handler: SafeParameterExtractor => Either[ToolHandlerError, R]): ToolFunction[T, R] =
+    copy(handler = handler)
 
   /**
-   * Converts the tool definition to the format expected by OpenAI's API
+   * The definition of this tool as a model is told about it: the chat-completions function-tool JSON
+   * (`{"type": "function", "function": {name, description, parameters, strict}}`), which is the format every
+   * provider client in llm4s starts from, whatever its own wire format.
+   *
+   * @param strict `true` renders the schema for OpenAI's strict mode, where every property is listed as
+   *               required; `false` keeps `required` as the schema declares it
    */
-  def toOpenAITool(strict: Boolean = true): ujson.Value =
+  def toolDefinition(strict: Boolean): ujson.Value =
     ujson.Obj(
       "type" -> ujson.Str("function"),
       "function" -> ujson.Obj(
@@ -80,68 +87,39 @@ final case class ToolFunction[T, R: ReadWriter] private (
   def execute(args: ujson.Value, call: ToolCallInfo): Either[ToolCallError, ujson.Value] = run(args, Some(call))
 
   private def run(args: ujson.Value, call: Option[ToolCallInfo]): Either[ToolCallError, ujson.Value] =
-    // Check for null arguments first
     args match {
-      case ujson.Null =>
-        // For zero-parameter tools, treat null as empty object
-        if (!hasRequiredParameters) {
-          val extractor = SafeParameterExtractor(ujson.Obj(), call)
-          handler(extractor) match {
-            case Right(result) => Right(writeJs(result))
-            case Left(error)   => Left(ToolCallError.HandlerError(name, error))
-          }
-        } else {
-          Left(ToolCallError.NullArguments(name))
-        }
-      case _ =>
-        val extractor = SafeParameterExtractor(args, call)
-        handler(extractor) match {
-          case Right(result) => Right(writeJs(result))
-          case Left(error)   => Left(ToolCallError.HandlerError(name, error))
-        }
+      // a tool with no required parameter takes null as no arguments
+      case ujson.Null if hasRequiredParameters => Left(ToolCallError.NullArguments(name))
+      case ujson.Null                          => handle(SafeParameterExtractor(ujson.Obj(), call))
+      case _                                   => handle(SafeParameterExtractor(args, call))
     }
 
-  /**
-   * Executes the tool with enhanced error reporting.
-   * Uses SafeParameterExtractor in enhanced mode for better error messages.
-   *
-   * @param args The arguments to pass to the tool
-   * @param enhancedHandler Handler that uses enhanced extraction methods
-   * @return Either an error or the result as JSON
-   */
-  def executeEnhanced(
-    args: ujson.Value,
-    enhancedHandler: SafeParameterExtractor => Either[List[ToolParameterError], R]
-  ): Either[ToolCallError, ujson.Value] =
-    args match {
-      case ujson.Null =>
-        // For zero-parameter tools, treat null as empty object
-        if (!hasRequiredParameters) {
-          val extractor = SafeParameterExtractor(ujson.Obj())
-          enhancedHandler(extractor) match {
-            case Right(result) => Right(writeJs(result))
-            case Left(errors)  => Left(ToolCallError.InvalidArguments(name, errors))
-          }
-        } else {
-          Left(ToolCallError.NullArguments(name))
-        }
-      case _ =>
-        val extractor = SafeParameterExtractor(args)
-        enhancedHandler(extractor) match {
-          case Right(result) => Right(writeJs(result))
-          case Left(errors)  => Left(ToolCallError.InvalidArguments(name, errors))
-        }
+  // An argument at fault is InvalidArguments, with each parameter error listed; the tool's own message HandlerError.
+  private def handle(extractor: SafeParameterExtractor): Either[ToolCallError, ujson.Value] =
+    handler(extractor) match {
+      case Right(result)         => Right(writeJs(result))
+      case Left(message: String) => Left(ToolCallError.HandlerError(name, message))
+      case Left(error: ToolParameterError) =>
+        Left(ToolCallError.InvalidArguments(name, ToolCallErrorJson.flattenErrors(List(error))))
     }
 }
 
 object ToolFunction {
+
+  /**
+   * The [[ToolFunction.toolDefinition definitions]] of `tools`, in order, as the JSON array a request carries.
+   *
+   * @param strict as for [[ToolFunction.toolDefinition]]
+   */
+  def toolDefinitions(tools: Seq[ToolFunction[_, _]], strict: Boolean): ujson.Arr =
+    ujson.Arr.from(tools.map(_.toolDefinition(strict)))
 
   /** Creates a [[ToolFunction]]; [[ToolBuilder]] is the usual way in. */
   def apply[T, R: ReadWriter](
     name: String,
     description: String,
     schema: SchemaDefinition[T],
-    handler: SafeParameterExtractor => Either[String, R]
+    handler: SafeParameterExtractor => Either[ToolHandlerError, R]
   ): ToolFunction[T, R] =
     new ToolFunction[T, R](name, description, schema, handler)
 }
@@ -165,7 +143,7 @@ class ToolBuilder[T, R: ReadWriter] private (
   name: String,
   description: String,
   schema: SchemaDefinition[T],
-  handler: Option[SafeParameterExtractor => Either[String, R]] = None
+  handler: Option[SafeParameterExtractor => Either[ToolHandlerError, R]] = None
 ) {
 
   /**
@@ -174,7 +152,7 @@ class ToolBuilder[T, R: ReadWriter] private (
    * @param handler Function that extracts parameters and executes the tool's logic
    * @return A new builder with the handler registered
    */
-  def withHandler(handler: SafeParameterExtractor => Either[String, R]): ToolBuilder[T, R] =
+  def withHandler(handler: SafeParameterExtractor => Either[ToolHandlerError, R]): ToolBuilder[T, R] =
     new ToolBuilder(name, description, schema, Some(handler))
 
   /**

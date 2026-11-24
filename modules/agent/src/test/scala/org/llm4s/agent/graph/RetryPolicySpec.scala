@@ -1,7 +1,6 @@
 package org.llm4s.agent.graph
 
 import org.llm4s.error.{
-  APIError,
   CancelledError,
   ExecutionError,
   LLMError,
@@ -9,7 +8,6 @@ import org.llm4s.error.{
   OptimisticLockFailure,
   RateLimitError,
   ServiceError,
-  SystemError,
   ValidationError
 }
 import org.llm4s.reliability.RetryPolicy as LlmRetryPolicy
@@ -101,16 +99,12 @@ class RetryPolicySpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "retry exactly what the LLM retry policy retries, so a node and an LLM call agree" in {
     val errors: Seq[LLMError] = Seq(
-      APIError("p", "failed"),
-      APIError("p", "bad request", Some(400)),
-      APIError("p", "unavailable", Some(503)),
       ExecutionError("failed", "run"),
       NetworkError("down", None, "https://example.test"),
       OptimisticLockFailure("conflict", "m", 1L),
       RateLimitError("p", 5.seconds),
       ServiceError(400, "p", "bad request"),
       ServiceError(503, "p", "unavailable"),
-      SystemError("system"),
       ValidationError("field", "bad"),
       CancelledError("op", None)
     )
@@ -126,7 +120,6 @@ class RetryPolicySpec extends AnyFlatSpec with Matchers with EitherValues {
     val policy = RetryPolicy(maxAttempts = 3)
 
     policy.retries(ServiceError(400, "p", "bad request"), failedAttempts = 1) shouldBe false
-    policy.retries(APIError("p", "no such model", Some(404)), failedAttempts = 1) shouldBe false
     policy.retries(OptimisticLockFailure("conflict", "m", 1L), failedAttempts = 1) shouldBe false
     policy.retries(ServiceError(503, "p", "unavailable"), failedAttempts = 1) shouldBe true
   }

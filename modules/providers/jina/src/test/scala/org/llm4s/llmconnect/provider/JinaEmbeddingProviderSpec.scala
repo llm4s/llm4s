@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient }
+import org.llm4s.http.{ HttpResponse, MockHttpClient, StubbedHttpCalls }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, Image, MultimediaEmbeddingRequest }
 import org.scalamock.scalatest.MockFactory
@@ -170,8 +170,8 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFacto
 
   it should "be a returned error, not an exception, on a transport failure: the HTTP client's own (#1781)" in {
     val refused = org.llm4s.error.NetworkError("connection refused", None, "http://jina-test/embeddings")
-    val http    = stub[Llm4sHttpClient]
-    (http.post _).when(*, *, *, *).returns(Left(refused))
+    val http    = stub[StubbedHttpCalls]
+    (http.onPost _).when(*, *, *, *).returns(Left(refused))
 
     JinaEmbeddingProvider.forTest(cfg, http).embed(req) shouldBe Left(refused)
   }

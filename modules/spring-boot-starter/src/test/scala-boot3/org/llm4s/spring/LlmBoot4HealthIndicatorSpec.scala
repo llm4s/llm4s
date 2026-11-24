@@ -1,6 +1,6 @@
 package org.llm4s.spring
 
-import org.llm4s.error.APIError
+import org.llm4s.error.ServiceError
 import org.llm4s.javaapi.{ JLlmClient, JLlmClientTestFactory }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -29,7 +29,7 @@ class LlmBoot4HealthIndicatorSpec extends AnyFlatSpec with Matchers {
   })
 
   private val ok     = Right(Completion("id", Instant.EPOCH, "ok", "m", AssistantMessage("ok")))
-  private val failed = Left(APIError("openai", "rejected key sk-abcdefghijklmnop"))
+  private val failed = Left(ServiceError(503, "openai", "rejected key sk-abcdefghijklmnop"))
 
   private def boot3(c: JLlmClient, probe: Boolean): (String, Map[String, AnyRef]) = {
     val h = new LlmHealthIndicator(c, StarterTestSupport.settings(probe), StarterTestSupport.pool).health()

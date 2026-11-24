@@ -32,7 +32,7 @@ class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
   private def tool = DateTimeTool.toolSafe.fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
 
   private def call(params: (String, ujson.Value)*): Either[String, DateTimeResult] =
-    tool.handler(SafeParameterExtractor(ujson.Obj.from(params)))
+    tool.handler(SafeParameterExtractor(ujson.Obj.from(params))).left.map(org.llm4s.toolapi.ToolHandlerError.message)
 
   private def callOk(params: (String, ujson.Value)*): DateTimeResult =
     call(params: _*).fold(err => fail(s"Expected Right but got Left: $err"), identity)
@@ -354,14 +354,14 @@ class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
   // ---- parameters are optional
 
   "The DateTimeTool schema" should "declare no parameter as required, because every one has a default" in {
-    val parameters = tool.toOpenAITool(strict = false)("function")("parameters")
+    val parameters = tool.toolDefinition(strict = false)("function")("parameters")
     parameters("required").arr shouldBe empty
     parameters("properties").obj.keySet shouldBe Set("timezone", "format")
     parameters("properties")("format")("enum").arr.toSeq shouldBe Seq(ujson.Str("iso"), ujson.Str("human"), ujson.Null)
   }
 
   it should "allow null defaults when strict schemas require both properties" in {
-    val parameters = tool.toOpenAITool(strict = true)("function")("parameters")
+    val parameters = tool.toolDefinition(strict = true)("function")("parameters")
     parameters("required").arr.map(_.str).toSet shouldBe Set("timezone", "format")
     Seq("timezone", "format").foreach { name =>
       parameters("properties")(name)("type").arr.map(_.str).toSet shouldBe Set("string", "null")
@@ -380,6 +380,8 @@ class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
       .toolSafe(Clock.fixed(Instant.parse(instant), ZoneOffset.UTC))
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
       .handler(SafeParameterExtractor(ujson.Obj.from(params)))
+      .left
+      .map(org.llm4s.toolapi.ToolHandlerError.message)
       .fold(err => fail(s"Expected Right but got Left: $err"), identity)
 
   "DateTimeTool with a fixed clock" should "report exactly that instant, in UTC by default" in {
@@ -395,6 +397,8 @@ class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
       .toolSafe(Clock.fixed(Instant.parse("2026-07-04T00:05:09Z"), ZoneId.of("Asia/Tokyo")))
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
       .handler(SafeParameterExtractor(ujson.Obj()))
+      .left
+      .map(org.llm4s.toolapi.ToolHandlerError.message)
       .fold(err => fail(s"Expected Right but got Left: $err"), identity)
     result.iso8601 shouldBe "2026-07-04T00:05:09Z[UTC]"
   }

@@ -51,6 +51,6 @@ object BenchmarkFixtures {
         .toOption
     }
 
-    new ToolRegistry(tools)
+    ToolRegistry.of(tools).getOrElse(ToolRegistry.empty)
   }
 }

@@ -1,9 +1,8 @@
 package org.llm4s.error
 
 import org.llm4s.annotation.Stable
-import org.llm4s.Result
+import org.llm4s.types.Result
 import org.llm4s.reliability.RetryPolicy
-import org.llm4s.types._
 
 import scala.annotation.tailrec
 import java.time.Instant
@@ -31,7 +30,7 @@ object ErrorRecovery {
    *
    * What is retried is the library's one rule for automatic retry,
    * [[org.llm4s.reliability.RetryPolicy.isRetryable]], which `ReliableClient`, `LLMClientRetry` and the
-   * agent graph's node retries use too: a [[RecoverableError]], except a [[ServiceError]] or an [[APIError]]
+   * agent graph's node retries use too: a [[RecoverableError]], except a [[ServiceError]]
    * with a client-error status (any 4xx but 408 and 429) and an [[OptimisticLockFailure]]. Each retried
    * error waits on its own schedule:
    *  - [[RateLimitError]]: waits its [[RateLimitError.retryDelay]], which is the provider's
@@ -40,9 +39,8 @@ object ErrorRecovery {
    *    `baseDelay * n` after the n-th attempt (linear: `baseDelay`, `2 * baseDelay`, ...). Its
    *    [[ServiceError.retryDelay]] default is not used.
    *  - [[TimeoutError]]: waits `baseDelay` before every retry.
-   *  - Any other retried error ([[NetworkError]], [[ExecutionError]], [[SystemError]], an [[APIError]] with
-   *    no status or a 5xx, 429 or 408 one, or another module's [[RecoverableError]], such as `llm4s-agent`'s
-   *    `GraphError.ThreadBusy`): waits `baseDelay * n` after the n-th attempt, as an unhinted
+   *  - Any other retried error ([[NetworkError]], [[ExecutionError]], or another module's [[RecoverableError]],
+   *    such as `llm4s-agent`'s `GraphError.ThreadBusy`): waits `baseDelay * n` after the n-th attempt, as an unhinted
    *    `ServiceError` does.
    *
    * Every other error, including a [[CancelledError]], is returned unchanged at once, whatever the

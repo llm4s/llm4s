@@ -82,7 +82,7 @@ class PythonDevelopersGuideSpec extends AnyFlatSpec with Matchers with EitherVal
       Reply.toolCall("search_database", """{"query": "Ada", "limit": 2}"""),
       Reply.text("Ada Lovelace and Ada Byron.")
     )
-    val tools = new ToolRegistry(Seq(ATool.searchDatabase.value))
+    val tools = ToolRegistry.of(Seq(ATool.searchDatabase.value)).toOption.get
 
     AgentLoop.twoTurns(client, tools).value shouldBe Seq("Ada Lovelace and nine others.", "Ada Lovelace and Ada Byron.")
     client.callCount shouldBe 4

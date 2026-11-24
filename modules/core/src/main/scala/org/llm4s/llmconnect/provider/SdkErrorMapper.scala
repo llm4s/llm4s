@@ -1,50 +1,37 @@
-package org.llm4s.core.safety
+package org.llm4s.llmconnect.provider
 
-import org.llm4s.annotation.Stable
 import org.llm4s.error._
 import org.llm4s.util.Redaction
 
 import java.util.regex.Pattern
 
-/** Maps arbitrary Throwables into domain-specific LLMError values. */
-@Stable
-trait ErrorMapper {
-  def apply(t: Throwable): LLMError
-}
-
 /**
- * Default mapping.
+ * Maps an exception thrown by a vendor SDK (openai-java, anthropic-java, the AWS SDK, a Spring AI model), which
+ * often reports an HTTP failure only in its message.
  *
- * A cancellation - mapped while the current thread is interrupted, or caused by an
- * `InterruptedException` or `ClosedByInterruptException` (see `CancelledError.isCancellation`) -
- * becomes a [[org.llm4s.error.CancelledError CancelledError]]. Mapping classifies only and never sets the interrupt flag: it may
- * run on a thread other than the interrupted one, such as a `Future` callback's pool thread.
- *
- * An exception whose message names HTTP status 401 becomes an [[org.llm4s.error.AuthenticationError AuthenticationError]] (code `401`,
- * carrying the redacted message), and one naming 429 a [[org.llm4s.error.RateLimitError RateLimitError]]; 401 wins when a message
- * names both. A message names a status only in an HTTP context, at a word boundary: after `HTTP`,
+ * It is [[org.llm4s.error.Safety.fromThrowable Safety.fromThrowable]] - a cancellation, a timeout, a refused
+ * connection - plus one step for what that leaves an [[org.llm4s.error.UnknownError UnknownError]]: an exception
+ * whose message names HTTP status 401 becomes an [[org.llm4s.error.AuthenticationError AuthenticationError]] (code
+ * `401`, carrying the redacted message), and one naming 429 a [[org.llm4s.error.RateLimitError RateLimitError]]
+ * whose message ends with the redacted message; 401 wins when a message names both. A message names a status only
+ * in an HTTP context, at a word boundary: after `HTTP`,
  * `status`, `status code`, `http status`, `error code` or `response code`, optionally quoted as a
  * JSON key (`HTTP 401`, `Status Code: 429`, `"status": 401`, `http_status=429`), before its reason
  * phrase (`401 Unauthorized`, `429 Too Many Requests`), or leading the message as `openai-java` and
  * `anthropic-java` write it (`401: <body>`, also behind up to eight wrapping exceptions'
  * `ClassName: `). A message that merely contains the digits - an index, an id, a port or a count -
- * is an [[org.llm4s.error.UnknownError UnknownError]] carrying the exception as its cause, as is anything else not matched above.
+ * stays an `UnknownError`.
  *
  * Known false positive: that last, SDK shape carries no other HTTP marker, so any message that
  * starts with `401: ` or `429: ` (optionally behind `SomeException: ` prefixes) is classified, even
- * when the number means something else, such as a line number in `429: unexpected token`.
+ * when the number means something else, such as a line number in `429: unexpected token`. That is why this
+ * reading is applied only where the exception is known to come from an SDK's HTTP call, and not by
+ * `Safety.fromThrowable`, `toResult` or `toLLMError`.
  *
  * Only the first 4 KiB and the last 1 KiB of a message are scanned (see `ScanHead`), and every
  * pattern runs in linear time, so mapping an exception that carries a large response body is cheap.
- *
- * The message of every error built here is redacted and capped (`Redaction.safeBody`), since an
- * exception's message often echoes a provider's response body and with it a request header or a key.
- * The cause is not: an [[org.llm4s.error.UnknownError UnknownError]] keeps the original exception, whose own `getMessage` and stack
- * trace are unredacted. A logger or handler that prints the cause (`logger.error(msg, err.cause)`,
- * `printStackTrace`) writes that text in the clear.
  */
-@Stable
-object DefaultErrorMapper extends ErrorMapper {
+private[llm4s] object SdkErrorMapper {
 
   private val Unauthorized    = 401
   private val TooManyRequests = 429
@@ -58,7 +45,7 @@ object DefaultErrorMapper extends ErrorMapper {
    * and took seconds), and the wrapper-prefix group of the last pattern is bounded, because an unbounded
    * group repetition recurses once per repetition in `java.util.regex` and overflowed the stack.
    */
-  private[safety] val StatusPatterns: List[Pattern] = List(
+  private[provider] val StatusPatterns: List[Pattern] = List(
     // "HTTP 401", "HTTP/1.1 429", "HTTP error 401", "http_status=401", "status 429", "Status Code: 401",
     // "statusCode=429", "\"status\": 401", "\"status_code\":\"429\"", "Error code: 429", "response code 401"
     """(?i)\b(?:http(?:/\d(?:\.\d)?)?(?:[\s_-]++(?:error|status)(?:[\s_-]*+code)?)?|status(?:[\s_-]*+code)?|error[\s_-]*+code|response[\s_-]*+code)"?\s*+(?:[:=]\s*+)?"?(401|429)\b""",
@@ -105,24 +92,20 @@ object DefaultErrorMapper extends ErrorMapper {
       .toList
   }
 
-  def apply(t: Throwable): LLMError = t match {
-    case ex if CancelledError.isCancellation(ex) =>
-      CancelledError("unknown", Some(ex))
-    // A SocketTimeoutException, and OkHttp's call timeout (`InterruptedIOException("timeout")`, which the
-    // openai-java and Anthropic SDKs surface): a real interruption was classified as a cancellation above.
-    case _: java.io.InterruptedIOException =>
-      NetworkError("Request timeout", Some(t), "unknown")
-    case _: java.net.ConnectException =>
-      NetworkError("Connection failed", Some(t), "unknown")
-    case ex =>
-      val message  = Option(ex.getMessage)
+  /**
+   * The error for `t`, an exception from `provider`'s SDK.
+   *
+   * @param provider the provider name the `AuthenticationError` or `RateLimitError` carries
+   */
+  def apply(t: Throwable, provider: String): LLMError = Safety.fromThrowable(t) match {
+    case unknown: UnknownError =>
+      val message  = Option(t.getMessage)
       val statuses = message.map(statusesIn).getOrElse(Set.empty)
       if (statuses.contains(Unauthorized))
-        AuthenticationError("unknown", Redaction.safeBody(message.getOrElse("")), Unauthorized.toString)
+        AuthenticationError(provider, Redaction.safeBody(message.getOrElse("")), Unauthorized.toString)
       else if (statuses.contains(TooManyRequests))
-        // RateLimitError has no field for a cause or a detail message; the exception cannot be kept.
-        RateLimitError("unknown")
-      else
-        UnknownError(message.fold("Unknown error")(Redaction.safeBody(_)), ex)
+        RateLimitError(provider).withDetail(Redaction.safeBody(message.getOrElse("")))
+      else unknown
+    case classified => classified
   }
 }

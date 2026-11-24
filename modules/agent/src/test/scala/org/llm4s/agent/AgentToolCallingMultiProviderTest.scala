@@ -33,7 +33,7 @@ class AgentToolCallingMultiProviderTest extends AnyFlatSpec with Matchers {
 
   private def agentWith(client: ScriptedLLMClient): Agent = {
     val tool = createInventoryTool().fold(e => fail(s"Setup failed: ${e.formatted}"), identity)
-    built(Agent.builder("assistant", client).withTools(new ToolRegistry(Seq(tool))))
+    built(Agent.builder("assistant", client).withTools(ToolRegistry.of(Seq(tool)).toOption.get))
   }
 
   private def add(id: String, item: String) = ToolCall(id, "add_inventory_item", ujson.Obj("item" -> item))

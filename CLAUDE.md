@@ -23,7 +23,7 @@ The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/iss
 
 ## Architecture rules
 
-**Core is the spine** (`types`, `error`, `config`, `model`, `toolapi`, `context`, `llmconnect`, the `trace`/`metrics` contracts, `util`, `http`, `reliability`, `core/safety`, `security`, `resource`, `syntax`, `identity`) on cats, upickle, slf4j-api, Typesafe Config, pureconfig and jtokkit only.
+**Core is the spine** (`types`, `error`, `config`, `model`, `toolapi`, `context`, `llmconnect`, the `trace`/`metrics` contracts, `util`, `http`, `reliability`, `security`, `resource`, `syntax`, `identity`) on cats, upickle, slf4j-api, Typesafe Config, pureconfig and jtokkit only.
 - No vendor SDK (`com.anthropic`, `com.azure`, `com.openai`), observability, JDBC, parsing or speech dependency in core. `commonSettings` carries no JDBC driver: declare one per module. The build has no third-party resolvers; think hard before adding one.
 - Nothing in core imports `org.llm4s.agent` or `org.llm4s.assistant`. Core's trace specs build `TraceEvent.AgentRunEnded` directly.
 - A utility with one consuming module lives in that module, not core. A helper only llm4s modules use is `private[llm4s]`.
@@ -249,8 +249,8 @@ llm4s {
   config-policy `prod` preset flags sections that do not (`ownApiKey`).
 - **Only the section being loaded is validated** (`ProviderSections.validated`): a section with
   no key available, or whose provider module is absent, fails only a load of that section.
-  `Llm4sConfig.providers()` is the exception - it returns every section, so validates them all;
-  `providerConfigs()` reports each section's error separately.
+  `Llm4sConfig.providerConfigs()` loads every section and reports each one's error separately, as a
+  `Left` under its name; `providers()`, which fails if any section is invalid, is `private[llm4s]`.
 - Samples: `modules/samples/src/main/resources/application.conf` defaults to `ollama-local`
   (model `llama3:latest` - `ollama pull llama3` first, or set `OLLAMA_MODEL`) and
   binds `LLM4S_PROVIDER`, `OLLAMA_MODEL` and `OLLAMA_BASE_URL` - the samples' bindings, not the
@@ -309,7 +309,7 @@ def loadProviderConfig(): Result[ProviderConfig] = Llm4sConfig.defaultProvider()
 def parseConfig(): Config = throw new RuntimeException()
 
 // Convert Try to Result
-import org.llm4s.types.TryOps
+import org.llm4s.syntax.toResult
 Try("123".toInt).toResult
 ```
 
@@ -335,7 +335,7 @@ val apiKey = sys.env.get("OPENAI_API_KEY")
 
 **Banned patterns** (enforced via `.scalafix.conf`):
 - `ConfigFactory.load()`, `sys.env()`, `System.getenv()` - use `Llm4sConfig` in app/test code
-- `try/catch/finally` outside safety packages - use `Result`
+- `try/catch/finally` outside a `// scalafix:off` region - use `Result`
 - Infix operators - use `list.map(f)` not `list map f`
 
 ## Agent Framework

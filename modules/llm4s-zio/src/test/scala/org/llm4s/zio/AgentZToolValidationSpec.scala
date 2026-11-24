@@ -44,7 +44,7 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
     case Left(e)  => throw new IllegalStateException(s"could not build tool: $e")
   }
 
-  private def tools: ToolRegistry = new ToolRegistry(Seq(echoTool))
+  private def tools: ToolRegistry = ToolRegistry.of(Seq(echoTool)).toOption.get
 
   final private class Recording(reply: Int => Completion) extends LLMClient {
     val conversations = new CopyOnWriteArrayList[Conversation]()

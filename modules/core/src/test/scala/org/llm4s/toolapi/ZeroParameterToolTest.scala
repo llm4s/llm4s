@@ -52,7 +52,7 @@ class ZeroParameterToolTest extends AnyFlatSpec with Matchers {
       tool => {
         val result = tool.execute(ujson.Obj())
         (result should be).a(Symbol("right"))
-        val jsonResult = result.fold(e => fail(s"Expected Right but got Left: ${e.getMessage}"), identity)
+        val jsonResult = result.fold(e => fail(s"Expected Right but got Left: ${e.message}"), identity)
         val inventory  = read[InventoryResult](jsonResult)
         inventory.items should contain theSameElementsAs List("sword", "shield", "potion")
         inventory.count shouldBe 3
@@ -67,7 +67,7 @@ class ZeroParameterToolTest extends AnyFlatSpec with Matchers {
         val result = tool.execute(ujson.Null)
         // For zero-parameter tools, null should be treated as {}
         (result should be).a(Symbol("right"))
-        val jsonResult = result.fold(e => fail(s"Expected Right but got Left: ${e.getMessage}"), identity)
+        val jsonResult = result.fold(e => fail(s"Expected Right but got Left: ${e.message}"), identity)
         val inventory  = read[InventoryResult](jsonResult)
         inventory.items should contain theSameElementsAs List("sword", "shield", "potion")
         inventory.count shouldBe 3
@@ -79,7 +79,7 @@ class ZeroParameterToolTest extends AnyFlatSpec with Matchers {
     createZeroParameterTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val openAITool  = tool.toOpenAITool(strict = true)
+        val openAITool  = tool.toolDefinition(strict = true)
         val functionObj = openAITool("function").obj
         functionObj("name").str shouldBe "list_inventory"
         functionObj("description").str shouldBe "Returns the current inventory items"
@@ -130,7 +130,7 @@ class ZeroParameterToolTest extends AnyFlatSpec with Matchers {
           val result = tool.execute(ujson.Obj())
           (result should be).a(Symbol("right"))
           val output =
-            read[SimpleResult](result.fold(e => fail(s"Expected Right but got Left: ${e.getMessage}"), identity))
+            read[SimpleResult](result.fold(e => fail(s"Expected Right but got Left: ${e.message}"), identity))
           output.message shouldBe "Success"
         }
       )
@@ -152,7 +152,7 @@ class ZeroParameterToolTest extends AnyFlatSpec with Matchers {
           // Should fail with null arguments error since this tool has required parameters
           (result should be).a(Symbol("left"))
           val error   = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
-          val message = error.getFormattedMessage
+          val message = error.formatted
           message should include("tool_with_params")
           message should include("null arguments")
         }

@@ -34,7 +34,7 @@ object CalculatorResult {
  * {{{
  * import org.llm4s.toolapi.builtin.core.CalculatorTool
  *
- * val tools = new ToolRegistry(Seq(CalculatorTool.tool))
+ * val tools = ToolRegistry.of(Seq(CalculatorTool.tool))
  * agent.run("What is 15% of 250?", tools)
  * }}}
  */

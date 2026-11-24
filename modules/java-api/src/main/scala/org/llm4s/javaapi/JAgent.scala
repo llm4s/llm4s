@@ -2,7 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.agent.{ Agent, AgentEventBuffer, AgentResult, AgentRun }
 import org.llm4s.agent.graph.{ InterruptId, RunConfig, StreamEvent, ThreadId }
-import org.llm4s.core.safety.Safety
+import org.llm4s.error.Safety
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.types.Result
 

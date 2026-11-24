@@ -59,11 +59,13 @@ class RagGuardrailsGuideSpec extends AnyFlatSpec with Matchers with EitherValues
       Some(RAGContext.fromToolResults(turn, Set("search_docs")))
     }
 
-    val agent = Agent
-      .builder("support", client)
-      .withTools(new ToolRegistry(Seq(searchDocs)))
-      .withMiddleware(new GuardrailMiddleware(input = Seq.empty, output = Seq(grounded)))
-      .build()
+    val agent = ToolRegistry.of(Seq(searchDocs)).flatMap { tools =>
+      Agent
+        .builder("support", client)
+        .withTools(tools)
+        .withMiddleware(new GuardrailMiddleware(input = Seq.empty, output = Seq(grounded)))
+        .build()
+    }
 
     val result = agent.flatMap(_.run("What is the refund window?"))
 
@@ -79,11 +81,13 @@ class RagGuardrailsGuideSpec extends AnyFlatSpec with Matchers with EitherValues
     val grounded = RAGGuardrail.withTurnContext(GroundingGuardrail.balanced(judge)) { turn =>
       Some(RAGContext.fromToolResults(turn, Set("search_docs")))
     }
-    val agent = Agent
-      .builder("support", client)
-      .withTools(new ToolRegistry(Seq(searchDocs)))
-      .withMiddleware(new GuardrailMiddleware(input = Seq.empty, output = Seq(grounded)))
-      .build()
+    val agent = ToolRegistry.of(Seq(searchDocs)).flatMap { tools =>
+      Agent
+        .builder("support", client)
+        .withTools(tools)
+        .withMiddleware(new GuardrailMiddleware(input = Seq.empty, output = Seq(grounded)))
+        .build()
+    }
 
     agent.flatMap(_.run("What is the refund window?")).value.status match {
       case AgentStatus.Blocked(guardrail, _) => guardrail shouldBe "GroundingGuardrail"
@@ -111,11 +115,13 @@ class RagGuardrailsGuideSpec extends AnyFlatSpec with Matchers with EitherValues
     strict.inputGuardrails.map(_.name) should contain("TopicBoundaryGuardrail")
     monitoring.ragGuardrails should have size 3
 
-    val agent = Agent
-      .builder("support", client)
-      .withTools(new ToolRegistry(Seq(searchDocs)))
-      .withMiddleware(guardrails)
-      .build()
+    val agent = ToolRegistry.of(Seq(searchDocs)).flatMap { tools =>
+      Agent
+        .builder("support", client)
+        .withTools(tools)
+        .withMiddleware(guardrails)
+        .build()
+    }
     agent.flatMap(_.run("What is the refund window?")).value.status shouldBe
       AgentStatus.Completed("You can get a refund within 30 days.")
     judge.callCount shouldBe 2

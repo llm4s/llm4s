@@ -34,9 +34,8 @@ sealed trait RetryPolicy {
    * perhaps after the caller does something first; this rule keeps the part where repeating the same request is
    * enough. A recoverable error is therefore retried unless one of three documented exceptions applies:
    *
-   *  - '''A client-error HTTP status.''' A [[org.llm4s.error.ServiceError]] or an [[org.llm4s.error.APIError]] that
-   *    carries a status is retried only for 5xx, 429 or 408. Any other 4xx means the request itself is wrong, so
-   *    sending it unchanged cannot succeed. An `APIError` with no status is retried: nothing says it cannot be.
+   *  - '''A client-error HTTP status.''' A [[org.llm4s.error.ServiceError]] is retried only for 5xx, 429 or 408.
+   *    Any other 4xx means the request itself is wrong, so sending it unchanged cannot succeed.
    *  - '''An [[org.llm4s.error.OptimisticLockFailure]].''' The caller must re-read the record first; the same update
    *    fails again until it does.
    *  - '''A [[org.llm4s.error.CircuitOpenError]].''' A circuit breaker refused the call without making it; sending
@@ -44,9 +43,8 @@ sealed trait RetryPolicy {
    *    `retryAfter`.
    *
    * So the retried errors are [[org.llm4s.error.RateLimitError]], [[org.llm4s.error.TimeoutError]],
-   * [[org.llm4s.error.NetworkError]], [[org.llm4s.error.ExecutionError]], [[org.llm4s.error.SystemError]], an
-   * `APIError` or `ServiceError` with a retryable status, an `APIError` without one, and any other
-   * `RecoverableError` a module defines - such as `llm4s-agent`'s `GraphError.DeadlineExceeded` and
+   * [[org.llm4s.error.NetworkError]], [[org.llm4s.error.ExecutionError]], a `ServiceError` with a retryable
+   * status, and any other `RecoverableError` a module defines - such as `llm4s-agent`'s `GraphError.DeadlineExceeded` and
    * `GraphError.ThreadBusy`. Every
    * [[org.llm4s.error.NonRecoverableError]] is not, including [[org.llm4s.error.CancelledError]].
    */
@@ -66,7 +64,6 @@ object RetryPolicy {
    */
   private[llm4s] def isTransient(error: LLMError): Boolean = error match {
     case s: ServiceError          => isRetryableStatus(s.httpStatus)
-    case a: APIError              => a.statusCode.forall(isRetryableStatus)
     case _: OptimisticLockFailure => false
     case _: CircuitOpenError      => false
     case _: RecoverableError      => true

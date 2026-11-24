@@ -1,6 +1,5 @@
 package org.llm4s.error
 
-import org.llm4s.core.safety.DefaultErrorMapper
 import org.llm4s.metrics.ErrorKind
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -95,14 +94,14 @@ class CancelledErrorSpec extends AnyFlatSpec with Matchers {
     an[IllegalStateException] should be thrownBy CancelledError.catchInterrupt(throw new IllegalStateException)
   }
 
-  "DefaultErrorMapper" should "map an interruption to CancelledError without setting the flag" in {
-    val (error, flag) = withFlag(interrupted = false)(DefaultErrorMapper(new InterruptedException("i")))
+  "Safety.fromThrowable" should "map an interruption to CancelledError without setting the flag" in {
+    val (error, flag) = withFlag(interrupted = false)(Safety.fromThrowable(new InterruptedException("i")))
     error shouldBe a[CancelledError]
     flag shouldBe false
   }
 
   it should "keep the flag it found set" in {
-    val (error, flag) = withFlag(interrupted = true)(DefaultErrorMapper(new java.net.SocketException("closed")))
+    val (error, flag) = withFlag(interrupted = true)(Safety.fromThrowable(new java.net.SocketException("closed")))
     error shouldBe a[CancelledError]
     flag shouldBe true
   }
@@ -110,7 +109,7 @@ class CancelledErrorSpec extends AnyFlatSpec with Matchers {
   it should "not report OkHttp's call timeout as a cancellation" in {
     val (error, flag) =
       withFlag(interrupted = false)(
-        DefaultErrorMapper(new RuntimeException(new java.io.InterruptedIOException("timeout")))
+        Safety.fromThrowable(new RuntimeException(new java.io.InterruptedIOException("timeout")))
       )
     error should not be a[CancelledError]
     flag shouldBe false
@@ -125,7 +124,7 @@ class CancelledErrorSpec extends AnyFlatSpec with Matchers {
     given ExecutionContext = ExecutionContext.fromExecutorService(pool)
     // Scala boxes a failed Future's InterruptedException as ExecutionException(cause = IE)
     val failed: Future[Int] = Future.failed(new InterruptedException("cancelled"))
-    val mapped              = org.llm4s.core.safety.Safety.future.fromFuture(failed)
+    val mapped              = org.llm4s.syntax.toResult(failed)
     val flagAfter           = mapped.map(_ => Thread.currentThread().isInterrupted)
     val result              = Await.result(mapped, 5.seconds)
     val flag                = Await.result(flagAfter, 5.seconds)

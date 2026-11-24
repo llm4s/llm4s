@@ -25,7 +25,7 @@ val invoice = client.completeStructuredOf[Invoice](conversation)   // Result[Inv
 |---|---|
 | `SchemaOf[A]` | the schema of `A`; `derives SchemaOf` for case classes, enums and sealed traits, with or without fields |
 | `SchemaOf[A].toJsonSchema(strict)` | the JSON Schema document `completeStructured` sends |
-| `SchemaOf[A].definition` | the same schema as core's `SchemaDefinition`, which `ToolBuilder` takes as a tool's parameters (not for a sum type with fields, which core cannot express) |
+| `SchemaOf[A].definition` | the same schema as core's `SchemaDefinition`, which `ToolBuilder` takes as a tool's parameters (a sum type with fields is an `AnyOfSchema`) |
 | `@description("...")` | the description the model sees, on a field or a type |
 | `client.completeStructuredOf[A](conversation, options)` | `completeStructured` with the derived schema; for a sum type, its `anyOf` wrapped in a `value` property and unwrapped from the reply |
 | `client.streamStructuredOf[A](conversation, options)(onPartial)` | `completeStructuredOf` streamed: `onPartial` sees `PartialOf[A]`'s typed partial value (a named tuple of `Option`s with `A`'s field names) as the reply arrives; see the [guide](../../docs/guide/structured-output.md#10-streaming-structured-output) |

@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import ch.qos.logback.classic.Level
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.http.{ HttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ GeminiConfig, VertexAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
@@ -50,15 +50,15 @@ final class GeminiDebugLoggingSpec extends AnyFlatSpec with Matchers with Either
   }
 
   private def vertex(level: Level): Vector[String] = {
-    val http = stub[Llm4sHttpClient]
-    (http.post _).when(*, *, *, *).onCall { (url: String, _: Map[String, String], _: String, _: FiniteDuration) =>
+    val http = stub[StubbedHttpCalls]
+    (http.onPost _).when(*, *, *, *).onCall { (url: String, _: Map[String, String], _: String, _: FiniteDuration) =>
       Right {
         if (url.contains("oauth2.googleapis.com"))
           HttpResponse(200, """{"access_token":"ya29.test","expires_in":3600}""", Map.empty)
         else HttpResponse(200, reply, Map.empty)
       }
     }
-    (http.get _).when(*, *, *, *).returns(Right(HttpResponse(200, """{"access_token":"ya29.test"}""", Map.empty)))
+    (http.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, """{"access_token":"ya29.test"}""", Map.empty)))
     val config = VertexAIConfig(
       projectId = "my-gcp-project",
       location = "us-central1",

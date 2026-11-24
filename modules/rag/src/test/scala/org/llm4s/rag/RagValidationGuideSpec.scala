@@ -3,7 +3,8 @@ package org.llm4s.rag
 import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.utils.ChunkingUtils
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.vectorstore._
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers

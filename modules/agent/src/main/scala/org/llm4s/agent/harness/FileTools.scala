@@ -234,11 +234,11 @@ object FileTools:
           .withRequiredField("path", Schema.string("The absolute path of the file"))
           .withOptionalField(
             "offset",
-            nullable(Schema.integer("The 1-based line to start at; 1 when null").withRange(min = Some(1)))
+            nullable(Schema.integer("The 1-based line to start at; 1 when null").withMinimum(1))
           )
           .withOptionalField(
             "limit",
-            nullable(Schema.integer(s"The most lines to read; $readLimit when null").withRange(min = Some(1)))
+            nullable(Schema.integer(s"The most lines to read; $readLimit when null").withMinimum(1))
           )
       ).withHints(readOnly)
         .withValidation(a =>

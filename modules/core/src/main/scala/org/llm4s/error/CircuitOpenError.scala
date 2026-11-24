@@ -61,4 +61,8 @@ object CircuitOpenError {
       Duration.Zero,
       probing = true
     )
+
+  /** Extracts the message, provider, `retryAfter` and `probing`; the arity is fixed, and it always matches. */
+  def unapply(error: CircuitOpenError): Some[(String, String, FiniteDuration, Boolean)] =
+    Some((error.message, error.provider, error.retryAfter, error.probing))
 }

@@ -8,7 +8,8 @@ import org.llm4s.samples.util.AgentResults
 import org.llm4s.llmconnect.model.{ Message, MessageRole }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.tools.WeatherTool
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 import upickle.default.{ read, write }
 
@@ -38,9 +39,10 @@ object ConversationPersistenceExample {
       given org.llm4s.model.ModelRegistryService = registryService
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
+      registry    <- ToolRegistry.of(Seq(weatherTool))
       agent <- Agent
         .builder("persistence-agent", client)
-        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withTools(registry)
         .build()
 
       _ = logger.info("Part 1: Starting conversation and saving messages")
@@ -64,9 +66,10 @@ object ConversationPersistenceExample {
       given org.llm4s.model.ModelRegistryService = registryService
       client       <- LLMConnect.getClient(providerCfg)
       weatherTool2 <- WeatherTool.toolSafe
+      registry     <- ToolRegistry.of(Seq(weatherTool2))
       agent <- Agent
         .builder("persistence-agent", client)
-        .withTools(new ToolRegistry(Seq(weatherTool2)))
+        .withTools(registry)
         .build()
 
       _ = logger.info("--- Simulating New Session ---")

@@ -6,7 +6,7 @@ import org.llm4s.error.AuthenticationError
 import org.llm4s.error.LLMError
 import org.llm4s.error.TroubleshootingLinks
 import org.llm4s.error.ValidationError
-import org.llm4s.error.ThrowableOps._
+import org.llm4s.syntax.toLLMError
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
@@ -694,7 +694,7 @@ object GeminiClient {
 
   /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
   val DefaultStreamTimeout: FiniteDuration = 10.minutes
-  import org.llm4s.types.TryOps
+  import org.llm4s.syntax.toResult
 
   def apply(config: GeminiConfig)(using ModelRegistryService): Result[GeminiClient] =
     Try(new GeminiClient(config)).toResult

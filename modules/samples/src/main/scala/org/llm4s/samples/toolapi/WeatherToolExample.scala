@@ -12,10 +12,9 @@ object WeatherToolExample {
 
   def main(args: Array[String]): Unit = {
     val result = for {
-      weatherTool <- WeatherTool.toolSafe
+      weatherTool  <- WeatherTool.toolSafe
+      toolRegistry <- ToolRegistry.of(Seq(weatherTool))
     } yield {
-      // Create a tool registry with the weather tool
-      val toolRegistry = new ToolRegistry(Seq(weatherTool))
 
       // Example execution
       val weatherRequest = ToolCallRequest(
@@ -34,7 +33,7 @@ object WeatherToolExample {
 
       // Generate tool definitions for OpenAI
       logger.info("OpenAI tool definition:")
-      logger.info("{}", toolRegistry.getOpenAITools().render(indent = 2))
+      logger.info("{}", ToolFunction.toolDefinitions(toolRegistry.tools, strict = true).render(indent = 2))
     }
 
     result.left.foreach(err => logger.error("Failed to load weather tool: {}", err.formatted))

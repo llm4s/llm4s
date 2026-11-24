@@ -69,7 +69,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     )
   }
 
-  private def tools: ToolRegistry = new ToolRegistry(Seq(echoTool))
+  private def tools: ToolRegistry = ToolRegistry.of(Seq(echoTool)).toOption.get
 
   private def io(client: LLMClient)(configure: AgentBuilder => AgentBuilder = identity) =
     AgentIO[IO](Fixtures.agentOf(client)(configure))

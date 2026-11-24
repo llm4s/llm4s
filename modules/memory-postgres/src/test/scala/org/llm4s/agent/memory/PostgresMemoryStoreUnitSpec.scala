@@ -477,7 +477,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     result.isLeft shouldBe true
     result.left.foreach { error =>
       error shouldBe an[OptimisticLockFailure]
-      error.asInstanceOf[OptimisticLockFailure].memoryId shouldBe "mem-cas-2"
+      error.asInstanceOf[OptimisticLockFailure].recordId shouldBe "mem-cas-2"
       error.asInstanceOf[OptimisticLockFailure].attemptedVersion shouldBe 5L
     }
   }

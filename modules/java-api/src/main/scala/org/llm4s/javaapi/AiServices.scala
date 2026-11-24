@@ -2,7 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.agent.Agent
 import org.llm4s.agent.graph.{ RunConfig, ThreadId }
-import org.llm4s.core.safety.Safety
+import org.llm4s.error.Safety
 import org.llm4s.error.{ CancelledError, ProcessingError, ValidationError }
 import org.llm4s.javaapi.services.{ ChatMemoryStore, ChatTurn, MemoryId, SystemMessage, UserMessage, V }
 import org.llm4s.llmconnect.model.{
@@ -329,8 +329,9 @@ private[javaapi] object AiServices {
         case _                   => None
       }
       val system = (p.system.toList ++ structured.map(s => jsonInstruction(s.schema))).mkString("\n\n")
-      val base   = Agent.builder(AgentId, client.underlying).withTools(new ToolRegistry(tools.map(_.function)))
       for {
+        registry <- ToolRegistry.of(tools.map(_.function))
+        base = Agent.builder(AgentId, client.underlying).withTools(registry)
         agent  <- (if (system.isEmpty) base else base.withSystemPrompt(system)).build()
         result <- agent.run(ThreadId(UUID.randomUUID().toString), p.user, RunConfig(), history)
         text <- result.answer.toRight(

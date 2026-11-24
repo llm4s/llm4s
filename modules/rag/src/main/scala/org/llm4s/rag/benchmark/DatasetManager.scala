@@ -1,7 +1,8 @@
 package org.llm4s.rag.benchmark
 
 import org.llm4s.rag.evaluation.{ EvalSample, EvaluationError, TestDataset }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 
 import java.nio.file.{ Files, Path, Paths }
 import scala.util.Try

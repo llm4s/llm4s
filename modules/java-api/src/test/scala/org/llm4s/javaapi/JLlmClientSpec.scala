@@ -2,7 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.testutil.TestTimeLimit
 
-import org.llm4s.error.{ APIError, LLMError }
+import org.llm4s.error.{ ServiceError, LLMError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -36,7 +36,7 @@ class JLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     override def getReserveCompletion(): Int = 512
   }
 
-  private val apiError: LLMError = APIError("test-provider", "service unavailable")
+  private val apiError: LLMError = ServiceError(503, "test-provider", "service unavailable")
 
   "complete(String)" should "return the assistant text on success" in {
     val client = Llm4s.wrapClient(successClient("4"))

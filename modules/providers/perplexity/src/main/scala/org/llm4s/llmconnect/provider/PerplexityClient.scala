@@ -9,7 +9,8 @@ import org.llm4s.llmconnect.config.PerplexityConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.{ AdjustmentLog, EffortMapping, ModelRegistryService, UnmappedOptions }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.io.{ BufferedReader, InputStreamReader }
@@ -302,7 +303,7 @@ class PerplexityClient(
       format.foreach(f => body("response_format") = f)
       val tools =
         (if (config.webSearch) Seq(ujson.Obj("type" -> "web_search")) else Seq.empty) ++
-          options.tools.map(tool => functionTool(tool.toOpenAITool(strict = false)))
+          options.tools.map(tool => functionTool(tool.toolDefinition(strict = false)))
       if (tools.nonEmpty) body("tools") = ujson.Arr.from(tools)
       if (stream) body("stream") = true
       body

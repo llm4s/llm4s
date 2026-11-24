@@ -6,7 +6,8 @@ package org.llm4s.scalafix
  * After 0.5.1 another set of types became growth-prone (private `new` and `copy`, `with*` setters): the
  * OpenAI-compatible, Gemini, Vertex AI and Azure configs, core's config and data types, the `TraceEvent` and
  * `AssistantError` cases, the provider SPI reports, the tool schemas, the context types and `RerankProviderConfig`.
- * `config.copy(maxRetries = 5)` on a `ToolRetryPolicy` becomes `config.withMaxRetries(5)`. An `apiKey` that was a
+ * `config.copy(timeout = None)` on a `ToolExecutionConfig` becomes `config.withTimeout(None)`. `ToolRetryPolicy` is
+ * not rewritten: its setters check the value and return a `Result` (#2816). An `apiKey` that was a
  * `String` is wrapped in `Secret(...)`, which is now its type, and `org.llm4s.security.Secret` is imported. A
  * positional `copy` and a `new X(...)` are reported, with a link to the type's migration note.
  */
@@ -42,9 +43,6 @@ object CopyToWithSetters_1_0 {
           "llmconnect/config/DeepSeekConfig",
           "llmconnect/config/MistralConfig",
           "llmconnect/config/ZaiConfig"
-        ),
-        "toolretrypolicy-is-growth-safe-1708" -> List(
-          "toolapi/ToolRetryPolicy"
         ),
         "geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263" -> List(
           "llmconnect/config/AzureConfig",

@@ -160,11 +160,17 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
       Left(classOf[ValidationError])
   }
 
-  "A sum type's core schema" should "be refused with a message, since core's model has no union" in {
+  "A sum type's core schema" should "be an AnyOfSchema that writes the JSON toJsonSchema writes (#2814)" in {
     import SumFixtures.*
-    val error = intercept[UnsupportedOperationException](SchemaOf[Action].definition)
-    error.getMessage should include("Action is a sum type with fields")
-    error.getMessage should include("anyOf")
-    intercept[UnsupportedOperationException](SchemaOf[Drawing].definition).getMessage should include("Shape")
+    SchemaOf[Action].definition shouldBe a[org.llm4s.toolapi.AnyOfSchema[?]]
+    SchemaOf[Drawing].definition shouldBe a[org.llm4s.toolapi.ObjectSchema[?]]
+    for (strict <- List(true, false)) {
+      SchemaOf[Action].definition.toJsonSchema(strict) shouldBe SchemaOf[Action].toJsonSchema(strict)
+      SchemaOf[Shape].definition.toJsonSchema(strict) shouldBe SchemaOf[Shape].toJsonSchema(strict)
+      SchemaOf[Event].definition.toJsonSchema(strict) shouldBe SchemaOf[Event].toJsonSchema(strict)
+      SchemaOf[Payment].definition.toJsonSchema(strict) shouldBe SchemaOf[Payment].toJsonSchema(strict)
+      SchemaOf[Drawing].definition.toJsonSchema(strict) shouldBe SchemaOf[Drawing].toJsonSchema(strict)
+      SchemaOf[Option[Action]].definition.toJsonSchema(strict) shouldBe SchemaOf[Option[Action]].toJsonSchema(strict)
+    }
   }
 }

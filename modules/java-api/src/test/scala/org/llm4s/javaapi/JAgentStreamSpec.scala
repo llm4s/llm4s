@@ -517,7 +517,7 @@ class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
       () => if (calls.getAndIncrement() == 0) Right(calling) else Right(completion("fine"))
     )
     val agent = jAgentOf(client)(
-      _.withTools(new ToolRegistry(Seq(echoTool))).withMiddleware(ApprovalMiddleware.unlessReadOnly)
+      _.withTools(ToolRegistry.of(Seq(echoTool)).toOption.get).withMiddleware(ApprovalMiddleware.unlessReadOnly)
     )
     val first = agent.stream(threadId, "go", Recorder()).get().await().get()
     first.status.kind shouldBe AgentStatusKind.SUSPENDED

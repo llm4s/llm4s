@@ -158,7 +158,9 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
     val f = new Fixture(Session.offline(client))
     import f.given
 
-    ask("Weather in Paris?", tools = new ToolRegistry(Seq(weather))) shouldBe Outcome.Done("It is 21 degrees in Paris.")
+    ask("Weather in Paris?", tools = ToolRegistry.of(Seq(weather)).toOption.get) shouldBe Outcome.Done(
+      "It is 21 degrees in Paris."
+    )
 
     f.printed shouldBe
       """-> get_weather({"city":"Paris"})
@@ -178,7 +180,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
     val f      = new Fixture(Session.offline(client))
     import f.given
 
-    ask("Do it", tools = new ToolRegistry(Seq(weather))) shouldBe Outcome.Done("Sorry.")
+    ask("Do it", tools = ToolRegistry.of(Seq(weather)).toOption.get) shouldBe Outcome.Done("Sorry.")
 
     f.printed.linesIterator.toList(1) should startWith("<- error: Tool call 'no_such_tool'")
     client.calls(1).conversation.messages.last.content should include("\"error\"")
@@ -192,7 +194,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
     )
     import f.given
 
-    val answer = ask("Weather?", tools = new ToolRegistry(Seq(weather)))
+    val answer = ask("Weather?", tools = ToolRegistry.of(Seq(weather)).toOption.get)
 
     answer.isFailure shouldBe true
     f.printed should include("still calling tools after 1 model calls")

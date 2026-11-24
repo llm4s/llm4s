@@ -139,7 +139,7 @@ object ModelMetadata {
    * error, as is one whose fields have the wrong JSON type.
    */
   def fromJson(modelId: String, data: ujson.Value): Result[ModelMetadata] = {
-    import org.llm4s.types.TryOps
+    import org.llm4s.syntax.toResult
     scala.util
       .Try {
         val obj      = data.obj

@@ -4,7 +4,8 @@ import org.llm4s.annotation.Stable
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.model.UsageSummary
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
 import java.time.{ Clock, Instant }

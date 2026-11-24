@@ -69,7 +69,7 @@ object EmailExtractionRecipe extends RecipeApp {
         Schema
           .`object`[LineItem]("One product and how many")
           .withRequiredField("product", Schema.string("The product name"))
-          .withRequiredField("quantity", Schema.integer("How many").withRange(Some(1), None))
+          .withRequiredField("quantity", Schema.integer("How many").withMinimum(1))
       )
     )
     .withRequiredField("deliverBy", Schema.string("The latest delivery date as YYYY-MM-DD, or \"\" if none is given"))

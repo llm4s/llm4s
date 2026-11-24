@@ -28,8 +28,9 @@ import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, UnmappedOptions }
-import org.llm4s.toolapi.ToolRegistry
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.toolapi.ToolFunction
+import org.llm4s.syntax.toResult
+import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.io.{ BufferedReader, InputStream, InputStreamReader }
@@ -563,7 +564,7 @@ class OpenAICompatibleClient(
     options.maxTokens.foreach(mt => body("max_tokens") = mt)
     if (options.presencePenalty != 0) body("presence_penalty") = options.presencePenalty
     if (options.frequencyPenalty != 0) body("frequency_penalty") = options.frequencyPenalty
-    if (options.tools.nonEmpty) body("tools") = new ToolRegistry(options.tools).getOpenAITools()
+    if (options.tools.nonEmpty) body("tools") = ToolFunction.toolDefinitions(options.tools, strict = true)
     options.responseFormat.foreach { fmt =>
       dialect.encodeResponseFormat(fmt).foreach(rf => body("response_format") = rf)
     }

@@ -56,7 +56,7 @@ package org.llm4s.toolapi.builtin
  *   exaTool   <- ExaSearchTool.create(exaConfig)
  *
  *   // Register all tools
- *   tools = new ToolRegistry(Seq(duckDuckGoTool, braveTool, exaTool))
+ *   tools <- ToolRegistry.of(Seq(duckDuckGoTool, braveTool, exaTool))
  * } yield tools
  *
  * // Handle the result

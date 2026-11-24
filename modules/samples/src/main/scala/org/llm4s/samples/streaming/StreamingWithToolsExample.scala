@@ -23,11 +23,12 @@ object StreamingWithToolsExample:
       providerCfg     <- Llm4sConfig.defaultProvider()
       registryService <- Llm4sConfig.modelRegistryService()
       given org.llm4s.model.ModelRegistryService = registryService
-      client <- LLMConnect.getClient(providerCfg)
-      tools  <- BuiltinTools.coreSafe
+      client   <- LLMConnect.getClient(providerCfg)
+      tools    <- BuiltinTools.coreSafe
+      registry <- ToolRegistry.of(tools)
       agent <- Agent
         .builder("assistant", client)
-        .withTools(new ToolRegistry(tools))
+        .withTools(registry)
         .withSystemPrompt("Use the tools to answer.")
         .withStreaming()
         .build()

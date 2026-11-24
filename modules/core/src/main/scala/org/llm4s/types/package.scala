@@ -1,16 +1,10 @@
 package org.llm4s
 
-import org.llm4s.annotation.Stable
-import org.llm4s.core.safety.{ DefaultErrorMapper, ErrorMapper, Safety }
-import org.llm4s.types.TryOps
-import org.llm4s.types.{ AsyncResult, Result }
-import upickle.default.{ readwriter, ReadWriter => RW }
-
-import scala.concurrent.{ ExecutionContext, Future }
-import scala.util.Try
+import scala.concurrent.Future
 
 /**
- * The `Result` type, its syntax, and the newtypes the library's own APIs use.
+ * The `Result` type, its helpers (the `Result` object), and the newtypes the library's own APIs use. The
+ * conversions to a `Result` (`Try(...).toResult`) are extensions in [[org.llm4s.syntax]].
  */
 package object types {
 
@@ -21,46 +15,10 @@ package object types {
   type AsyncResult[+A] = Future[Result[A]]
 
   /**
-   * Type-safe wrapper for session IDs
-   */
-  final case class SessionId(value: String) extends AnyVal {
-    override def toString: String = value
-  }
-
-  object SessionId {
-    implicit val rw: RW[SessionId] =
-      readwriter[String].bimap[SessionId](_.value, SessionId.apply)
-  }
-
-  /**
    * Type-safe wrapper for trace IDs for distributed tracing
    */
   final case class TraceId(value: String) extends AnyVal {
     override def toString: String = value
-  }
-
-  /** Type-safe wrapper for file paths */
-  final case class FilePath(value: String) extends AnyVal {
-    override def toString: String = value
-    def extension: Option[String] = {
-      val lastDot = value.lastIndexOf('.')
-      if (lastDot >= 0) Some(value.substring(lastDot + 1)) else None
-    }
-  }
-
-  object FilePath {
-    implicit val rw: RW[FilePath] =
-      readwriter[String].bimap[FilePath](_.value, FilePath.apply)
-  }
-
-  /** Type-safe wrapper for directory paths */
-  final case class DirectoryPath(value: String) extends AnyVal {
-    override def toString: String = value
-  }
-
-  object DirectoryPath {
-    implicit val rw: RW[DirectoryPath] =
-      readwriter[String].bimap[DirectoryPath](_.value, DirectoryPath.apply)
   }
 
   // Context Management Types (for conversation context handling)
@@ -145,158 +103,72 @@ package object types {
     val Conservative: HeadroomPercent = HeadroomPercent(0.15) // 15%
   }
 
-  /** Syntax: Try/Option/Future to Result conversions */
-  implicit final class TryOps[A](val t: Try[A]) extends AnyVal {
-    def toResult(implicit em: ErrorMapper = DefaultErrorMapper): Result[A] =
-      t.fold(e => Left(em(e)), v => Right(v))
-  }
-
-  implicit final class OptionOps[A](val oa: Option[A]) extends AnyVal {
-    def toResult(ifEmpty: => error.LLMError): Result[A] = oa.toRight(ifEmpty)
-  }
-
-  implicit final class FutureOps[A](val fa: Future[A]) extends AnyVal {
-    def toResult(implicit ec: ExecutionContext, em: ErrorMapper = DefaultErrorMapper): Future[Result[A]] =
-      Safety.future.fromFuture(fa)
-  }
-
-}
-
-/**
- * Helpers for building and combining `Result` values (`Either[LLMError, A]`).
- *
- * {{{
- * val both: Result[(Int, String)] = Result.combine(parseCount(raw), parseName(raw))
- * val all: Result[List[Int]]      = Result.traverse(lines)(parseLine)
- * }}}
- */
-@Stable
-object Result {
-
-  /** Wraps `value` as a successful result (`Right(value)`). */
-  def success[A](value: A): Result[A] = Right(value)
-
-  /** Wraps `error` as a failed result (`Left(error)`). */
-  def failure[A](error: org.llm4s.error.LLMError): Result[A] = Left(error)
-
   /**
-   * `Right` with the option's value, or `Left(error)` for `None`.
+   * Helpers for building and combining `Result` values (`Either[LLMError, A]`).
    *
-   * @param error by-name: evaluated only when `opt` is `None`
+   * {{{
+   * val all: Result[List[Int]] = Result.traverse(lines)(parseLine)
+   * }}}
    */
-  def fromOption[A](opt: Option[A], error: => org.llm4s.error.LLMError): Result[A] =
-    opt.toRight(error)
+  object Result {
 
-  /**
-   * Collects a list of results into a result of a list: the values in order, or the first
-   * `Left` in the list.
-   */
-  def sequence[A](results: List[Result[A]]): Result[List[A]] =
-    traverse(results)(result => result)
+    /** Wraps `value` as a successful result (`Right(value)`). */
+    def success[A](value: A): Result[A] = Right(value)
 
-  /**
-   * Applies `f` to each element in order and collects the values, stopping at the first `Left`:
-   * `f` is not called on any element after the first failure, so side effects and expensive work
-   * in `f` stop there too.
-   */
-  def traverse[A, B](list: List[A])(f: A => Result[B]): Result[List[B]] = {
-    @scala.annotation.tailrec
-    def loop(remaining: List[A], acc: List[B]): Result[List[B]] =
-      remaining match {
-        case Nil => Right(acc.reverse)
-        case head :: tail =>
-          f(head) match {
-            case Right(value) => loop(tail, value :: acc)
-            case Left(error)  => Left(error)
-          }
-      }
-    loop(list, Nil)
+    /** Wraps `error` as a failed result (`Left(error)`). */
+    def failure[A](error: org.llm4s.error.LLMError): Result[A] = Left(error)
+
+    /**
+     * `Right` with the option's value, or `Left(error)` for `None`.
+     *
+     * @param error by-name: evaluated only when `opt` is `None`
+     */
+    def fromOption[A](opt: Option[A], error: => org.llm4s.error.LLMError): Result[A] =
+      opt.toRight(error)
+
+    /**
+     * Collects a list of results into a result of a list: the values in order, or the first
+     * `Left` in the list.
+     */
+    def sequence[A](results: List[Result[A]]): Result[List[A]] =
+      traverse(results)(result => result)
+
+    /**
+     * Applies `f` to each element in order and collects the values, stopping at the first `Left`:
+     * `f` is not called on any element after the first failure, so side effects and expensive work
+     * in `f` stop there too.
+     */
+    def traverse[A, B](list: List[A])(f: A => Result[B]): Result[List[B]] = {
+      @scala.annotation.tailrec
+      def loop(remaining: List[A], acc: List[B]): Result[List[B]] =
+        remaining match {
+          case Nil => Right(acc.reverse)
+          case head :: tail =>
+            f(head) match {
+              case Right(value) => loop(tail, value :: acc)
+              case Left(error)  => Left(error)
+            }
+        }
+      loop(list, Nil)
+    }
+
+    /**
+     * Runs `operation` and returns its value as a `Right`. A non-fatal exception it throws becomes a `Left`,
+     * mapped by [[org.llm4s.error.Safety.fromThrowable Safety.fromThrowable]]: a `CancelledError`, a `NetworkError`
+     * (a connection failure or timeout) or, for anything else, an `UnknownError`.
+     */
+    def safely[A](operation: => A): Result[A] = org.llm4s.error.Safety.safely(operation)
+
+    /**
+     * Runs `validator` on every item and collects every error, unlike `traverse`, which stops at the
+     * first: `Left` with all the errors in item order when any item fails, otherwise `Right` with the
+     * validated values in order.
+     */
+    def validateAll[A](items: List[A])(validator: A => Result[A]): Either[List[error.LLMError], List[A]] = {
+      val results   = items.map(validator)
+      val errors    = results.collect { case Left(error) => error }
+      val successes = results.collect { case Right(value) => value }
+      if (errors.nonEmpty) Left(errors) else Right(successes)
+    }
   }
-
-  /**
-   * Pairs the values of two results, or returns the first `Left` in argument order: if `ra` failed,
-   * its error is returned even when `rb` failed too.
-   */
-  def combine[A, B](ra: Result[A], rb: Result[B]): Result[(A, B)] =
-    for {
-      a <- ra
-      b <- rb
-    } yield (a, b)
-
-  /**
-   * Like the two-argument `combine`, for three results: the values as a triple, or the first `Left`
-   * in argument order.
-   */
-  def combine[A, B, C](ra: Result[A], rb: Result[B], rc: Result[C]): Result[(A, B, C)] =
-    for {
-      a <- ra
-      b <- rb
-      c <- rc
-    } yield (a, b, c)
-
-  /**
-   * Runs `operation` and returns its value as a `Right`. A non-fatal exception it throws becomes a `Left`,
-   * mapped by [[org.llm4s.core.safety.DefaultErrorMapper DefaultErrorMapper]] to a typed error such as
-   * `CancelledError`, `NetworkError` (a connection failure or timeout), `AuthenticationError`,
-   * `RateLimitError` or, for anything else, `UnknownError`.
-   */
-  def safely[A](operation: => A): Result[A] = Try(operation).toResult
-
-  /**
-   * Turns a `Future[A]` into a future of a `Result`: its value as a `Right`, or its failure mapped by
-   * [[org.llm4s.core.safety.DefaultErrorMapper DefaultErrorMapper]] to a `Left`. The returned future
-   * therefore never fails because the original did. Same as `AsyncResult.fromFuture`.
-   */
-  def fromFuture[A](future: Future[A])(implicit ec: ExecutionContext): Future[Result[A]] =
-    future.map(success).recover { case ex => failure(org.llm4s.error.ThrowableOps.RichThrowable(ex).toLLMError) }
-
-  /**
-   * Create Result from boolean condition
-   */
-  def fromBoolean(condition: Boolean, error: org.llm4s.error.LLMError): Result[Unit] =
-    if (condition) success(()) else failure(error)
-
-  /**
-   * Create Result from boolean with custom success value
-   */
-  def fromBooleanWithValue[A](condition: Boolean, successValue: A, error: org.llm4s.error.LLMError): Result[A] =
-    if (condition) success(successValue) else failure(error)
-
-  /**
-   * Runs `validator` on every item and collects every error, unlike `traverse`, which stops at the
-   * first: `Left` with all the errors in item order when any item fails, otherwise `Right` with the
-   * validated values in order.
-   */
-  def validateAll[A](items: List[A])(validator: A => Result[A]): Either[List[error.LLMError], List[A]] = {
-    val results   = items.map(validator)
-    val errors    = results.collect { case Left(error) => error }
-    val successes = results.collect { case Right(value) => value }
-    if (errors.nonEmpty) Left(errors) else Right(successes)
-  }
-
-  // Resource management: use scala.util.Using + types.TryOps#toResult
-}
-
-/** Helpers for building `AsyncResult` values (`Future[Result[A]]`). */
-@Stable
-object AsyncResult {
-  import scala.concurrent.ExecutionContext
-
-  /** An already-completed future holding `Right(value)`. */
-  def success[A](value: A): AsyncResult[A] = Future.successful(Right(value))
-
-  /** An already-completed future holding `Left(error)`. */
-  def failure[A](error: org.llm4s.error.LLMError): AsyncResult[A] = Future.successful(Left(error))
-
-  /**
-   * The future's value as a `Right`, or its failure mapped by
-   * [[org.llm4s.core.safety.DefaultErrorMapper DefaultErrorMapper]] to a `Left`; the returned future
-   * never fails because the original did.
-   */
-  def fromFuture[A](future: Future[A])(implicit ec: ExecutionContext): AsyncResult[A] =
-    future.map(Right(_)).recover { case ex => Left(org.llm4s.error.ThrowableOps.RichThrowable(ex).toLLMError) }
-
-  /** An already-completed future holding `result`. */
-  def fromResult[A](result: Result[A]): AsyncResult[A] =
-    Future.successful(result)
 }

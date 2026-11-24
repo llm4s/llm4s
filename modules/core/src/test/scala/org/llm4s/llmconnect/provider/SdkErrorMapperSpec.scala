@@ -1,20 +1,23 @@
-package org.llm4s.core.safety
+package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ AuthenticationError, LLMError, NetworkError, RateLimitError, UnknownError }
+import org.llm4s.error.{ AuthenticationError, LLMError, NetworkError, RateLimitError, Safety, UnknownError }
 import org.llm4s.testutil.{ EchoedCredentials, LinearTime, PerformanceTest, SmallStack }
 import org.llm4s.util.Redaction
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /**
- * [[DefaultErrorMapper]] classifies a 401 or a 429 only when the exception's message names an HTTP
- * status, never on a bare substring (#1668).
+ * [[SdkErrorMapper]] classifies a 401 or a 429 only when the exception's message names an HTTP
+ * status, never on a bare substring (#1668). `Safety.fromThrowable`, the mapping every other caller gets, never
+ * reads the message (#2821).
  */
-class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
-  import DefaultErrorMapperSpec.{ Adversarial, Megabyte, ScalingSize }
+class SdkErrorMapperSpec extends AnyFlatSpec with Matchers {
+  import SdkErrorMapperSpec.{ Adversarial, Megabyte, ScalingSize }
+
+  private def mapSdk(t: Throwable): LLMError = SdkErrorMapper(t, "unknown")
 
   private def unknownWithCause(t: Throwable): Unit =
-    DefaultErrorMapper(t) match {
+    mapSdk(t) match {
       case e: UnknownError =>
         (e.cause should be).theSameInstanceAs(t)
         // none of these messages holds a credential: a short one is kept as it is, a long one capped (#1674)
@@ -38,7 +41,7 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
     new RuntimeException("timeout after 429ms")
   )
 
-  "DefaultErrorMapper" should "map a message that only contains 401 or 429 to UnknownError, keeping the cause" in {
+  "SdkErrorMapper" should "map a message that only contains 401 or 429 to UnknownError, keeping the cause" in {
     notAStatus.foreach(unknownWithCause)
   }
 
@@ -53,7 +56,7 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
 
   it should "map OkHttp's call timeout, InterruptedIOException(\"timeout\"), to a retryable NetworkError (#380)" in {
     val timeout = new java.io.InterruptedIOException("timeout")
-    DefaultErrorMapper(timeout) match {
+    mapSdk(timeout) match {
       case e: NetworkError =>
         e.message shouldBe "Request timeout"
         e.cause shouldBe Some(timeout)
@@ -64,7 +67,7 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
 
   it should "map an exception without a message to UnknownError" in {
     val t = new RuntimeException()
-    DefaultErrorMapper(t) match {
+    mapSdk(t) match {
       case e: UnknownError =>
         e.message shouldBe "Unknown error"
         (e.cause should be).theSameInstanceAs(t)
@@ -128,7 +131,7 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
 
   it should "map a message naming HTTP status 401 to AuthenticationError, keeping the message and code" in {
     unauthorized.foreach { message =>
-      DefaultErrorMapper(new RuntimeException(message)) match {
+      mapSdk(new RuntimeException(message)) match {
         case e: AuthenticationError =>
           e.provider shouldBe "unknown"
           e.code shouldBe Some("401")
@@ -140,10 +143,10 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "keep the original message, redacted, in the AuthenticationError" in {
-    DefaultErrorMapper(new RuntimeException("HTTP 401 Unauthorized")).message shouldBe
+    mapSdk(new RuntimeException("HTTP 401 Unauthorized")).message shouldBe
       "Authentication failed for unknown: HTTP 401 Unauthorized"
 
-    val leaked = DefaultErrorMapper(
+    val leaked = mapSdk(
       new RuntimeException("HTTP 401 Unauthorized: Authorization: Bearer sk-abcdefghijklmnopqrstuvwxyz123456")
     ).message
     leaked should include("HTTP 401 Unauthorized")
@@ -152,19 +155,19 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
 
   it should "redact and cap the message of an UnknownError and an AuthenticationError, keeping the cause as it is (#1674)" in {
     val unknown = new IllegalStateException("upstream said: " + EchoedCredentials.Text + " " + "x" * 5000)
-    DefaultErrorMapper(unknown) match {
+    mapSdk(unknown) match {
       case e: UnknownError =>
         e.message should include("[REDACTED]")
         EchoedCredentials.leaked(e.message) shouldBe empty
         e.message should include("(truncated, original length: ")
         e.message.length should be < 2200
-        // the cause is the original exception, unredacted (documented on DefaultErrorMapper)
+        // the cause is the original exception, unredacted (documented on Safety.fromThrowable)
         (e.cause should be).theSameInstanceAs(unknown)
       case other => fail(s"expected an UnknownError, got $other")
     }
 
     // anthropic-java and openai-java write the body after the status: "401: <body>"
-    val auth = DefaultErrorMapper(new RuntimeException("401: " + EchoedCredentials.JsonError))
+    val auth = mapSdk(new RuntimeException("401: " + EchoedCredentials.JsonError))
     auth shouldBe an[AuthenticationError]
     auth.message should include("[REDACTED]")
     EchoedCredentials.leaked(auth.message) shouldBe empty
@@ -172,9 +175,10 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
 
   it should "map a message naming HTTP status 429 to RateLimitError" in {
     rateLimited.foreach { message =>
-      DefaultErrorMapper(new RuntimeException(message)) match {
+      mapSdk(new RuntimeException(message)) match {
         case e: RateLimitError =>
           e.provider shouldBe "unknown"
+          e.message shouldBe s"Rate limited by unknown: $message"
           LLMError.isRecoverable(e) shouldBe true
         case other => fail(s"expected a RateLimitError for '$message', got $other")
       }
@@ -182,15 +186,32 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "prefer authentication when a message names both statuses" in {
-    DefaultErrorMapper(new RuntimeException("HTTP 429 Too Many Requests, then HTTP 401 Unauthorized")) shouldBe
+    mapSdk(new RuntimeException("HTTP 429 Too Many Requests, then HTTP 401 Unauthorized")) shouldBe
       a[AuthenticationError]
   }
 
-  it should "reach the same classification through Safety.safely" in {
+  it should "name the provider it was given, and redact the message a RateLimitError keeps" in {
+    SdkErrorMapper(new RuntimeException("HTTP 401 Unauthorized"), "openai").message shouldBe
+      "Authentication failed for openai: HTTP 401 Unauthorized"
+    val limited = SdkErrorMapper(new RuntimeException("429: " + EchoedCredentials.JsonError), "anthropic")
+    limited shouldBe a[RateLimitError]
+    limited.message should startWith("Rate limited by anthropic: 429: ")
+    EchoedCredentials.leaked(limited.message) shouldBe empty
+  }
+
+  it should "leave what Safety.fromThrowable classifies by type as it is" in {
+    val refused = new java.net.ConnectException("HTTP 401 Unauthorized")
+    mapSdk(refused) shouldBe Safety.fromThrowable(refused)
+    mapSdk(refused) shouldBe a[NetworkError]
+  }
+
+  "Safety.safely" should "not read a status out of a message: the same exceptions are UnknownErrors" in {
     Safety.safely(throw new IllegalStateException("request 1700401234 timed out")).left.toOption.get shouldBe
       an[UnknownError]
     Safety.safely(throw new IllegalStateException("HTTP 429 Too Many Requests")).left.toOption.get shouldBe
-      a[RateLimitError]
+      an[UnknownError]
+    Safety.safely(throw new IllegalStateException("HTTP 401 Unauthorized")).left.toOption.get shouldBe
+      an[UnknownError]
   }
 
   // Inputs on which the patterns of d48da248 backtracked quadratically (#1669 review): seconds at 20k-40k.
@@ -211,7 +232,7 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
     // The mapper runs the patterns over a message's head and tail only, which bounds even a quadratic
     // pattern here, but it redacts the whole message, so its cost grows linearly with the message. The
     // patterns' own linearity is checked over the whole input by the next test.
-    def mapped(t: Throwable): Unit = DefaultErrorMapper(t) shouldBe an[UnknownError]
+    def mapped(t: Throwable): Unit = mapSdk(t) shouldBe an[UnknownError]
     adversarial(Adversarial / 8).zip(adversarial(Adversarial / 2)).foreach { case ((name, small), (_, large)) =>
       LinearTime.assertLinear(name, new RuntimeException(small), new RuntimeException(large))(mapped)
     }
@@ -225,7 +246,7 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
     }
     for {
       ((name, small), (_, large)) <- adversarial(ScalingSize).zip(adversarial(4 * ScalingSize))
-      pattern                     <- DefaultErrorMapper.StatusPatterns
+      pattern                     <- SdkErrorMapper.StatusPatterns
     } LinearTime.assertLinear(s"$name, ${pattern.pattern}", small, large)(scan(pattern))
   }
 
@@ -239,9 +260,9 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
     adversarial(Megabyte).foreach { case (name, message) =>
       message.length should be >= 990000
       LinearTime.timed(name, LinearTime.MegabyteHangGuard)(
-        DefaultErrorMapper(new RuntimeException(message)) shouldBe an[UnknownError]
+        mapSdk(new RuntimeException(message)) shouldBe an[UnknownError]
       )
-      DefaultErrorMapper.StatusPatterns.foreach { pattern =>
+      SdkErrorMapper.StatusPatterns.foreach { pattern =>
         LinearTime.timed(s"$name, ${pattern.pattern}", LinearTime.MegabyteHangGuard)(scan(pattern)(message))
       }
     }
@@ -250,14 +271,14 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
   it should "not overflow a small stack on a long run of exception-name prefixes" in {
     Seq(2000, 10000).foreach { n =>
       val message = "Error: " * n + "401: x"
-      val mapped  = SmallStack.run(DefaultErrorMapper(new RuntimeException(message)), stackBytes = 256L * 1024L)
+      val mapped  = SmallStack.run(mapSdk(new RuntimeException(message)), stackBytes = 256L * 1024L)
       withClue(s"$n prefixes: ") {
         mapped.isRight shouldBe true
         mapped.toOption.get shouldBe an[UnknownError]
       }
       // the patterns themselves, over the whole message
       val scanned = SmallStack.run(
-        DefaultErrorMapper.StatusPatterns.map(_.matcher(message).find()),
+        SdkErrorMapper.StatusPatterns.map(_.matcher(message).find()),
         stackBytes = 256L * 1024L
       )
       withClue(s"$n prefixes, whole message: ")(scanned.isRight shouldBe true)
@@ -265,20 +286,20 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "classify the SDK shape behind up to eight wrapping exceptions, and no more" in {
-    DefaultErrorMapper(new RuntimeException("Error: " * 8 + "401: x")) shouldBe an[AuthenticationError]
+    mapSdk(new RuntimeException("Error: " * 8 + "401: x")) shouldBe an[AuthenticationError]
     unknownWithCause(new RuntimeException("Error: " * 9 + "401: x"))
   }
 
   it should "classify the known false positive: a message that starts with the SDK shape" in {
     // `401: ` and `429: ` leading a message is how openai-java and anthropic-java report a status; nothing
     // else tells it from a number that happens to lead the message, so this is classified (documented).
-    DefaultErrorMapper(new RuntimeException("429: unexpected token")) shouldBe a[RateLimitError]
+    mapSdk(new RuntimeException("429: unexpected token")) shouldBe a[RateLimitError]
   }
 
   it should "scan only a long message's head and tail" in {
     val padding = "x " * 3000
-    DefaultErrorMapper(new RuntimeException("HTTP 401 Unauthorized " + padding)) shouldBe an[AuthenticationError]
-    DefaultErrorMapper(
+    mapSdk(new RuntimeException("HTTP 401 Unauthorized " + padding)) shouldBe an[AuthenticationError]
+    mapSdk(
       new RuntimeException(padding + "(Service: BedrockRuntime, Status Code: 429, Request ID: abc)")
     ) shouldBe a[RateLimitError]
     unknownWithCause(new RuntimeException(padding + "HTTP 401 Unauthorized " + padding))
@@ -295,7 +316,7 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
   }
 }
 
-object DefaultErrorMapperSpec {
+object SdkErrorMapperSpec {
 
   /** The length of each adversarial input: ten times the 20,000 characters that took seconds before. */
   val Adversarial = 200000

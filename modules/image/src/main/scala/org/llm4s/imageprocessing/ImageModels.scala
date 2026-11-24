@@ -2,7 +2,7 @@ package org.llm4s.imageprocessing
 
 import java.nio.file.Path
 import java.time.Instant
-import org.llm4s.error.LLMError
+import org.llm4s.error.{ InvalidInputError, LLMError, ProcessingError }
 import org.llm4s.media.ImageMediaType
 import cats.data.Validated
 import cats.syntax.validated._
@@ -78,13 +78,13 @@ case class ProcessedImage(
       Try(Files.write(normalizedPath, data)).toEither.left
         .map {
           case e: java.nio.file.AccessDeniedException =>
-            LLMError.processingFailed("save", s"Access denied: ${e.getMessage}", Some(e))
+            ProcessingError("save", s"Access denied: ${e.getMessage}", Some(e))
           case e: java.nio.file.NoSuchFileException =>
-            LLMError.processingFailed("save", s"Directory does not exist: ${e.getMessage}", Some(e))
+            ProcessingError("save", s"Directory does not exist: ${e.getMessage}", Some(e))
           case e: java.nio.file.FileSystemException =>
-            LLMError.processingFailed("save", s"File system error: ${e.getMessage}", Some(e))
+            ProcessingError("save", s"File system error: ${e.getMessage}", Some(e))
           case e: Exception =>
-            LLMError.processingFailed("save", s"Unexpected error: ${e.getMessage}", Some(e))
+            ProcessingError("save", s"Unexpected error: ${e.getMessage}", Some(e))
         }
         .map(_ => ())
     }
@@ -101,7 +101,7 @@ case class ProcessedImage(
       normalizedPath.startsWith(currentDir.resolve("..")) ||
       normalizedPath.startsWith(currentDir.resolve("../"))
     ) {
-      LLMError.invalidImageInput("path", path.toString, "Path traversal detected").invalid
+      InvalidInputError("path", path.toString, "Path traversal detected").invalid
     } else {
       normalizedPath.valid
     }

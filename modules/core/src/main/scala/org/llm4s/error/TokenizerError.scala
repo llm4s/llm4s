@@ -18,9 +18,6 @@ object TokenizerError {
   def notAvailable(tokenizerId: String): TokenizerError =
     new TokenizerError(s"Tokenizer not available: $tokenizerId", tokenizerId)
 
-  def notFound(tokenizerId: String): TokenizerError =
-    new TokenizerError(s"Tokenizer not found: $tokenizerId", tokenizerId)
-
   /** Unapply extractor for pattern matching */
   def unapply(error: TokenizerError): Option[(String, String)] =
     Some((error.message, error.tokenizerId))

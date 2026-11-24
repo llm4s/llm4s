@@ -102,7 +102,7 @@ object ShellResult {
  *   workingDirectory = Some("/home/user/project")
  * ))
  *
- * val tools = new ToolRegistry(Seq(devShell))
+ * val tools = ToolRegistry.of(Seq(devShell))
  * agent.run("List files in the current directory", tools)
  * }}}}
  */

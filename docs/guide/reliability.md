@@ -307,25 +307,31 @@ import org.llm4s.toolapi._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 
-val config = ToolExecutionConfig(
-  timeout = Some(5.seconds),
-  retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 200.millis, backoffFactor = 2.0))
-)
-
-val registry = new ToolRegistry(myTools) // your ToolFunctions
 val request  = ToolCallRequest("get_weather", ujson.Obj("city" -> "Paris"))
 val requests = Seq(request, ToolCallRequest("get_weather", ujson.Obj("city" -> "Rome")))
 
-registry.execute(request, config)                                       // blocks the calling thread
-registry.executeAsync(request, config)                                  // Future
-registry.executeAll(requests, ToolExecutionStrategy.ParallelWithLimit(4), config)
+for {
+  registry <- ToolRegistry.of(myTools) // your ToolFunctions
+  policy   <- ToolRetryPolicy(maxAttempts = 3, baseDelay = 200.millis, backoffFactor = 2.0)
+  fourAtATime <- ToolExecutionStrategy.parallelWithLimit(4)
+  config = ToolExecutionConfig(timeout = Some(5.seconds), retryPolicy = Some(policy))
+} yield {
+  ToolExecutor.execute(registry, request, config)      // blocks the calling thread
+  ToolExecutor.executeAsync(registry, request, config) // Future
+  ToolExecutor.executeAll(registry, requests, fourAtATime, config)
+}
 ```
+
+`ToolExecutor` (experimental) works on any `ToolRegistry`: every attempt goes through the registry's own
+`execute`, so an `MCPToolRegistry`'s remote tools get the same timeout and retries. `ToolRetryPolicy(...)` and
+`ToolExecutionStrategy.parallelWithLimit(n)` return a `Result`: a value out of range is a `ValidationError`, not
+an exception.
 
 - **What is retried.** A `Timeout`, and an `ExecutionError` whose cause is an `IOException` or a
   `TimeoutException`. Not retried: an unknown tool, invalid or null arguments, a tool's own error result, and a
   cancellation. `maxAttempts` counts the first try.
 - **How long it waits.** Before retry *n* the wait is `baseDelay * backoffFactor^(n-1)`, so the first retry waits
-  `baseDelay`. Each attempt gets its own `timeout`.
+  `baseDelay`, and never more than `maxDelay` (30 seconds unless you set it). Each attempt gets its own `timeout`.
 - **Jitter.** Many callers retrying a failing backend on the same schedule hit it again at the same moment. Set
   `jitter` (or `.withJitter`) to a fraction from 0.0 to 1.0 to randomise each wait: it is drawn uniformly between
   `(1 - jitter) * d` and `d`, where `d` is the wait above, so `0.5` is "equal jitter" and `1.0` is "full jitter". The
@@ -417,16 +423,16 @@ The reliability layer automatically retries these errors:
 
 - ✅ `RateLimitError` - Respects `Retry-After` header
 - ✅ `TimeoutError` - Network timeouts
-- ✅ `ServiceError` and `APIError` with a retryable status - any 5xx, 429 or 408; respects a 503's `Retry-After` header. An `APIError` with no status is retried too
+- ✅ `ServiceError` with a retryable status - any 5xx, 429 or 408; respects a 503's `Retry-After` header
 - ✅ `NetworkError` - Connection failures
-- ✅ `ExecutionError` and `SystemError` - transient execution and system failures
+- ✅ `ExecutionError` - transient execution failures
 
 Non-retryable errors (fail immediately):
 
 - ❌ `AuthenticationError` - Bad API key
 - ❌ `ValidationError` - Invalid input
 - ❌ `ConfigurationError` - Client misconfiguration
-- ❌ `ServiceError` and `APIError` with any other 4xx status - the request itself is wrong, so repeating it cannot succeed
+- ❌ `ServiceError` with any other 4xx status - the request itself is wrong, so repeating it cannot succeed
 - ❌ `OptimisticLockFailure` - recoverable, but the caller must re-read the record first
 - ❌ `CircuitOpenError` - recoverable after its `retryAfter`, but repeating the call at once is what an open circuit prevents
 - ❌ `CancelledError` - the caller stopped the call

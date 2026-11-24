@@ -1,6 +1,6 @@
 package org.llm4s.javaapi
 
-import org.llm4s.core.safety.Safety
+import org.llm4s.error.Safety
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation }

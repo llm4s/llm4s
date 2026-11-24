@@ -131,7 +131,8 @@ class CancellationSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       def getReserveCompletion(): Int = 256
     }
     val (capture, thread) = threadCapture()
-    val agent = AgentIO[IO](agentOf(scripted)(_.withTools(new ToolRegistry(Seq(blocking))).withMiddleware(capture)))
+    val agent =
+      AgentIO[IO](agentOf(scripted)(_.withTools(ToolRegistry.of(Seq(blocking)).toOption.get).withMiddleware(capture)))
     val fiber = agent.run("go").start.unsafeRunSync()
     toolStarted.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
     fiber.cancel.timeout(5.seconds).attempt.unsafeRunSync().isRight shouldBe true

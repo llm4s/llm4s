@@ -99,7 +99,7 @@ class IronDecodingSpec extends AnyFlatSpec with Matchers {
 
   "Tool.of with a refined argument" should "send the bounds in its parameters" in {
     val tool       = book.fold(fail(_), identity)
-    val parameters = tool.toOpenAITool()("function")("parameters")
+    val parameters = tool.toolDefinition(strict = true)("function")("parameters")
     parameters("properties")("nights")("minimum") shouldBe ujson.Num(1)
     parameters("properties")("nights")("maximum") shouldBe ujson.Num(14)
     parameters("properties")("guest")("minLength") shouldBe ujson.Num(1)
@@ -119,22 +119,22 @@ class IronDecodingSpec extends AnyFlatSpec with Matchers {
     decoded match {
       case Left(List(e: ToolParameterError.TypeMismatch)) =>
         e.parameterName shouldBe "nights"
-        e.getMessage should include("Should be included in [1, 14]")
+        e.message should include("Should be included in [1, 14]")
       case other => fail(s"expected one TypeMismatch, got $other")
     }
     tool.execute(ujson.Obj("guest" -> "Ada", "nights" -> 30)) match {
-      case Left(ToolCallError.HandlerError("book", message)) =>
-        message should include("nights")
-        message should include("Should be included in [1, 14]")
-      case other => fail(s"expected the handler's error, got $other")
+      case Left(error @ ToolCallError.InvalidArguments("book", List(_))) =>
+        error.message should include("nights")
+        error.message should include("Should be included in [1, 14]")
+      case other => fail(s"expected the arguments to be refused, got $other")
     }
   }
 
   it should "reject a blank guest name" in {
     val tool = book.fold(fail(_), identity)
     tool.execute(ujson.Obj("guest" -> " ", "nights" -> 3)) match {
-      case Left(ToolCallError.HandlerError(_, message)) => message should include("guest")
-      case other                                        => fail(s"expected the handler's error, got $other")
+      case Left(error: ToolCallError.InvalidArguments) => error.message should include("guest")
+      case other                                       => fail(s"expected the arguments to be refused, got $other")
     }
   }
 }

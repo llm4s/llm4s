@@ -1,5 +1,6 @@
 package org.llm4s.toolapi
 
+import org.llm4s.error.ValidationError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -27,28 +28,32 @@ class ToolExecutionStrategySpec extends AnyFlatSpec with Matchers {
   // ============ ParallelWithLimit Strategy ============
 
   "ToolExecutionStrategy.ParallelWithLimit" should "accept positive concurrency limit" in {
-    val strategy = ToolExecutionStrategy.ParallelWithLimit(5)
+    val strategy = ToolExecutionStrategy.parallelWithLimit(5).toOption.get
 
     strategy.maxConcurrency shouldBe 5
     strategy shouldBe a[ToolExecutionStrategy]
   }
 
   it should "accept concurrency limit of 1" in {
-    val strategy = ToolExecutionStrategy.ParallelWithLimit(1)
+    val strategy = ToolExecutionStrategy.parallelWithLimit(1).toOption.get
 
     strategy.maxConcurrency shouldBe 1
   }
 
-  it should "reject zero concurrency limit" in {
-    an[IllegalArgumentException] should be thrownBy {
-      ToolExecutionStrategy.ParallelWithLimit(0)
-    }
+  it should "reject zero concurrency limit as a ValidationError, not a throw" in {
+    val error = ToolExecutionStrategy.parallelWithLimit(0).left.toOption.get
+    error shouldBe a[ValidationError]
+    error.message should (include("maxConcurrency").and(include("0")))
   }
 
   it should "reject negative concurrency limit" in {
-    an[IllegalArgumentException] should be thrownBy {
-      ToolExecutionStrategy.ParallelWithLimit(-1)
-    }
+    ToolExecutionStrategy.parallelWithLimit(-1).left.toOption.get shouldBe a[ValidationError]
+  }
+
+  it should "have no public constructor that skips the check" in {
+    assertTypeError("ToolExecutionStrategy.ParallelWithLimit(0)")
+    assertTypeError("new ToolExecutionStrategy.ParallelWithLimit(0)")
+    assertTypeError("ToolExecutionStrategy.parallelWithLimit(2).map(_.copy(maxConcurrency = 0))")
   }
 
   // ============ Default Strategy ============
@@ -68,6 +73,6 @@ class ToolExecutionStrategySpec extends AnyFlatSpec with Matchers {
 
     describeStrategy(ToolExecutionStrategy.Sequential) shouldBe "sequential"
     describeStrategy(ToolExecutionStrategy.Parallel) shouldBe "parallel"
-    describeStrategy(ToolExecutionStrategy.ParallelWithLimit(3)) shouldBe "parallel-3"
+    describeStrategy(ToolExecutionStrategy.parallelWithLimit(3).toOption.get) shouldBe "parallel-3"
   }
 }

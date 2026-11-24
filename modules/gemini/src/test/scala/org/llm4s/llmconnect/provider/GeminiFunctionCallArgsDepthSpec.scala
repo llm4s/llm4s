@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.ServiceError
 import org.llm4s.security.Secret
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
+import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.{ LLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.{ GeminiConfig, VertexAIConfig }
 import org.llm4s.llmconnect.model._
@@ -66,15 +66,15 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     new GeminiClient(geminiConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
 
   /** Vertex AI: the OAuth token endpoint answers with a token, every other POST with `reply`. */
-  private def vertex(mockHttp: Llm4sHttpClient, reply: String): LLMClient = {
-    (mockHttp.post _).when(*, *, *, *).onCall {
+  private def vertex(mockHttp: StubbedHttpCalls, reply: String): LLMClient = {
+    (mockHttp.onPost _).when(*, *, *, *).onCall {
       (url: String, _: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
         Right(
           if (url.contains("oauth2.googleapis.com")) HttpResponse(200, tokenBody, Map.empty)
           else HttpResponse(200, reply, Map.empty)
         )
     }
-    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
     new VertexAIClient(
       vertexConfig,
       org.llm4s.metrics.MetricsCollector.noop,
@@ -113,23 +113,23 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     }
 
   "GeminiClient.complete" should "refuse a functionCall whose args are nested too deeply, never overflow" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, callReply(deepArgs), Map.empty)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, callReply(deepArgs), Map.empty)))
     val client = gemini(mockHttp)
     shouldRefuse(roundTrip(client)(client.complete(question, CompletionOptions())))
   }
 
   "GeminiClient.streamComplete" should "fail the stream on a chunk whose functionCall args are nested too deeply, never overflow" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, sse(callReply(deepArgs)))))
-    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, textReply, Map.empty)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, sse(callReply(deepArgs)))))
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, textReply, Map.empty)))
     val client = gemini(mockHttp)
     shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions(), _ => ())))
   }
 
   it should "fail the stream on a chunk that is not JSON at all, as a 502 (RFC 0009, open question 5)" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _)
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, sse("{not json", textReply))))
     gemini(mockHttp).streamComplete(question, CompletionOptions(), _ => ()) match {
@@ -139,21 +139,21 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
   }
 
   "VertexAIClient.complete" should "refuse a functionCall whose args are nested too deeply, never overflow" in {
-    val mockHttp = stub[Llm4sHttpClient]
+    val mockHttp = stub[StubbedHttpCalls]
     val client   = vertex(mockHttp, callReply(deepArgs))
     shouldRefuse(roundTrip(client)(client.complete(question, CompletionOptions())))
   }
 
   "VertexAIClient.streamComplete" should "fail the stream on a chunk whose functionCall args are nested too deeply, never overflow" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, sse(callReply(deepArgs)))))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, sse(callReply(deepArgs)))))
     val client = vertex(mockHttp, textReply)
     shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions(), _ => ())))
   }
 
   it should "fail the stream on a chunk that is not JSON at all, as a 502 (RFC 0009, open question 5)" in {
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _)
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, sse("{not json", textReply))))
     vertex(mockHttp, textReply).streamComplete(question, CompletionOptions(), _ => ()) match {
@@ -165,8 +165,8 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
   "GeminiClient" should "still accept a functionCall whose args are nested to the limit" in {
     // the limit is the reply's: the envelope around `args` is itself seven levels deep
     val atLimit  = "{\"a\":" * 505 + "1" + "}" * 505
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, callReply(atLimit), Map.empty)))
+    val mockHttp = stub[StubbedHttpCalls]
+    (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, callReply(atLimit), Map.empty)))
     val completion = gemini(mockHttp).complete(question, CompletionOptions()).fold(e => fail(e.message), identity)
     completion.toolCalls.map(_.name) shouldBe List("get_weather")
     completion.toolCalls.head.arguments.obj.keySet shouldBe Set("a")

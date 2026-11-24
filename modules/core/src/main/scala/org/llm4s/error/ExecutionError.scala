@@ -18,7 +18,6 @@ import org.llm4s.annotation.Stable
  * @example
  * {{{
  * val error = ExecutionError("Command failed", "bash-script")
- *   .withExitCode(1)
  *   .withContext("command", "npm install")
  * }}}
  */
@@ -39,10 +38,6 @@ final case class ExecutionError private (
   /** Adds multiple key-value pairs to the error context. */
   def withContext(entries: Map[String, String]): ExecutionError =
     copy(context = context ++ entries)
-
-  /** Sets the exit code and adds it to the context. */
-  def withExitCode(code: Int): ExecutionError =
-    copy(exitCode = Some(code), context = context + ("exitCode" -> code.toString))
 }
 
 object ExecutionError {

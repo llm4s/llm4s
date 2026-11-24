@@ -69,7 +69,10 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
     val tool = ShellTool.createSafe(ShellConfig.readOnly()).getOrElse(fail("could not build the tool"))
 
     Seq("env sh -c 'echo ran'", "env", "env echo hi").foreach { command =>
-      val result = tool.handler(SafeParameterExtractor(ujson.Obj("command" -> command)))
+      val result = tool
+        .handler(SafeParameterExtractor(ujson.Obj("command" -> command)))
+        .left
+        .map(org.llm4s.toolapi.ToolHandlerError.message)
 
       withClue(command) {
         result.left.map(_.toLowerCase) shouldBe Left(
@@ -118,6 +121,8 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("command" -> "echo hello world")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               shellResult => {
@@ -141,6 +146,8 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("command" -> "rm -rf /tmp/test")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => err should include("not allowed"),
               result => fail(s"Expected Left but got Right: $result")
@@ -161,6 +168,8 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("command" -> "ls /nonexistent/path/12345")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               shellResult => {
@@ -184,6 +193,8 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("command" -> "sleep 10")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               shellResult => {
@@ -207,6 +218,8 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("command" -> "pwd")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               shellResult => {
@@ -234,6 +247,8 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("command" -> "seq 1 10000")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               shellResult => {
@@ -261,6 +276,8 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("command" -> s"echo hi && rm ${tempFile.getAbsolutePath}")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               shellResult => {
@@ -288,6 +305,8 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("command" -> "echo \"hello world\"")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               shellResult => {
@@ -312,6 +331,8 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("command" -> "echo 'a && b | c'")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => fail(s"Expected Right but got Left: $err"),
               shellResult => {
@@ -334,6 +355,8 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("command" -> "echo \"missing close")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => err.toLowerCase should include("unclosed"),
               result => fail(s"Expected Left but got Right: $result")
@@ -353,6 +376,8 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("command" -> "   ")
           tool
             .handler(SafeParameterExtractor(params))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
             .fold(
               err => err.toLowerCase should include("empty"),
               result => fail(s"Expected Left but got Right: $result")

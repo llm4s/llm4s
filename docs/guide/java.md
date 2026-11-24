@@ -595,7 +595,7 @@ try {
 
 A provider's error response with status `400`, `401`/`403` or `429` has the kind that status means (`VALIDATION`,
 `AUTHENTICATION`, `RATE_LIMIT`) even when a provider client reported it as a generic service error. Such an error keeps
-the recoverability of its class: a `ServiceError` or an `APIError` is recoverable whatever its status, so a `403`
+the recoverability of its class: a `ServiceError` is recoverable whatever its status, so a `403`
 reported as one reads as `AUTHENTICATION` and `isRecoverable()` is `true`. The table's column is what the kind's own
 error classes say; to decide whether to try again, always call `isRecoverable()` rather than infer it from the kind.
 Every error class in `org.llm4s.error` has a kind, and a test fails when a new one is added without one.

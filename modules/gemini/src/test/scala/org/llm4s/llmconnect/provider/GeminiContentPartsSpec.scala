@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.security.Secret
 import org.llm4s.error.UnsupportedContentPartError
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StubbedHttpCalls }
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model.*
@@ -114,8 +114,8 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
 
   "GeminiClient" should "send a user message's parts in order, and a tool result's text" in {
     val sent = new AtomicReference[String]()
-    val http = stub[Llm4sHttpClient]
-    (http.post _).when(*, *, *, *).onCall { (_, _, body, _) =>
+    val http = stub[StubbedHttpCalls]
+    (http.onPost _).when(*, *, *, *).onCall { (_, _, body, _) =>
       sent.set(body); Right(HttpResponse(200, successBody, Map.empty))
     }
     val assistant = AssistantMessage(None, Seq(ToolCall("c1", "fetch", ujson.Obj())))
@@ -137,8 +137,8 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
 
   it should "send no empty text part for a blank text part" in {
     val sent = new AtomicReference[String]()
-    val http = stub[Llm4sHttpClient]
-    (http.post _).when(*, *, *, *).onCall { (_, _, body, _) =>
+    val http = stub[StubbedHttpCalls]
+    (http.onPost _).when(*, *, *, *).onCall { (_, _, body, _) =>
       sent.set(body); Right(HttpResponse(200, successBody, Map.empty))
     }
     client(http).complete(Conversation(Seq(UserMessage(Vector(ContentPart.Text(" "), inline)))), CompletionOptions())
@@ -147,8 +147,8 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
 
   it should "send a one-text user message exactly as before" in {
     val sent = new AtomicReference[String]()
-    val http = stub[Llm4sHttpClient]
-    (http.post _).when(*, *, *, *).onCall { (_, _, body, _) =>
+    val http = stub[StubbedHttpCalls]
+    (http.onPost _).when(*, *, *, *).onCall { (_, _, body, _) =>
       sent.set(body); Right(HttpResponse(200, successBody, Map.empty))
     }
     client(http).complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions()).isRight shouldBe true
@@ -157,11 +157,11 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
   }
 
   it should "fail before sending anything for a part it cannot send" in {
-    val http  = stub[Llm4sHttpClient]
+    val http  = stub[StubbedHttpCalls]
     val other = ContentPart.image(MediaSource.ProviderFile("openai", "file-1"), MediaType.Png).value
     client(http).complete(Conversation(Seq(UserMessage(Vector(other)))), CompletionOptions()).left.value shouldBe
       UnsupportedContentPartError("gemini", other.kind, "user")
-    (http.post _).verify(*, *, *, *).never()
+    (http.onPost _).verify(*, *, *, *).never()
   }
 
 }

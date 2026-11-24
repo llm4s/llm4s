@@ -254,10 +254,10 @@ This is much cleaner than nested pattern matches!
 
 ### Converting from Try to Result
 
-If you have code using `Try`, convert it with the `TryOps` extension:
+If you have code using `Try`, convert it with the `toResult` extension:
 
 ```scala
-import org.llm4s.types.TryOps
+import org.llm4s.syntax.toResult
 import scala.util.Try
 
 val tryValue = Try("123".toInt)

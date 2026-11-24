@@ -1,18 +1,14 @@
-package org.llm4s.syntax
+package org.llm4s
 
 import org.llm4s.error.{ LLMError, NotFoundError, ValidationError }
-import org.llm4s.syntax.syntax._
+import org.llm4s.syntax.*
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /**
- * The `Result` extension methods in [[org.llm4s.syntax.syntax.ResultOps]].
- *
- * `Either` has its own `getOrElse` and `orElse` members, and a member always wins over an extension method of the same
- * name, so `result.getOrElse(...)` and `result.orElse(...)` never reach `ResultOps` even with the import in scope. The
- * tests for those two therefore call `ResultOps(...)` directly, and one test pins that the member is what an ordinary
- * call selects.
+ * The `Result` extension methods of [[org.llm4s.syntax]]. `Either` has its own `getOrElse` and `orElse`, and a member
+ * always wins over an extension of the same name, so the object defines neither.
  */
 class ResultSyntaxSpec extends AnyFlatSpec with Matchers {
 
@@ -21,36 +17,6 @@ class ResultSyntaxSpec extends AnyFlatSpec with Matchers {
 
   private def ok(value: Int): Result[Int]          = Right(value)
   private def failed(error: LLMError): Result[Int] = Left(error)
-
-  "ResultOps.getOrElse" should "return the value of a Right and the default of a Left" in {
-    ResultOps(ok(1)).getOrElse(2) shouldBe 1
-    ResultOps(failed(invalid)).getOrElse(2) shouldBe 2
-  }
-
-  it should "not evaluate the default for a Right" in {
-    var evaluated = 0
-    ResultOps(ok(1)).getOrElse { evaluated += 1; 2 } shouldBe 1
-    evaluated shouldBe 0
-  }
-
-  "result.getOrElse with the syntax import" should "select Either's own member, which behaves the same" in {
-    // Either#getOrElse is a member, so the extension is never chosen; both return the same values.
-    ok(1).getOrElse(2) shouldBe ResultOps(ok(1)).getOrElse(2)
-    failed(invalid).getOrElse(2) shouldBe ResultOps(failed(invalid)).getOrElse(2)
-  }
-
-  "ResultOps.orElse" should "return a Right unchanged without evaluating the alternative" in {
-    var evaluated = 0
-    ResultOps(ok(1)).orElse { evaluated += 1; ok(2) } shouldBe Right(1)
-    evaluated shouldBe 0
-  }
-
-  it should "return the alternative for a Left, whether it is a Right or another Left" in {
-    var evaluated = 0
-    ResultOps(failed(invalid)).orElse { evaluated += 1; ok(2) } shouldBe Right(2)
-    evaluated shouldBe 1
-    ResultOps(failed(invalid)).orElse(failed(notFound)) shouldBe Left(notFound)
-  }
 
   "mapError" should "change the error of a Left" in {
     failed(invalid).mapError(_ => notFound) shouldBe Left(notFound)

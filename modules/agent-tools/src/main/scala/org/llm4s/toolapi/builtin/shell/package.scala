@@ -38,7 +38,7 @@ package org.llm4s.toolapi.builtin
  *   timeout = 60.seconds
  * ))
  *
- * val tools = new ToolRegistry(Seq(devShell))
+ * val tools = ToolRegistry.of(Seq(devShell))
  * }}}
  */
 package object shell

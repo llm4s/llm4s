@@ -255,8 +255,69 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
     val path = java.nio.file.Paths.get("/tmp/test.txt")
     val part = MultipartPart.FilePart("file", path, "test.txt")
     part.name shouldBe "file"
-    part.path shouldBe path
+    part.content shouldBe MultipartPart.Content.File(path)
     part.filename shouldBe "test.txt"
+    part.contentType shouldBe "application/octet-stream"
+  }
+
+  it should "take bytes in memory and a content type (#2802)" in {
+    val part = MultipartPart.FilePart.ofBytes("file", "RIFF".getBytes(StandardCharsets.UTF_8), "a.wav", "audio/wav")
+    val body = client.postMultipart(s"$baseUrl/echo", parts = Seq(part)).ok.body
+    body should include("Content-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\n")
+    body should include("Content-Type: audio/wav\r\n\r\nRIFF\r\n")
+  }
+
+  it should "refuse a content type that holds a line break" in {
+    val part = MultipartPart.FilePart.ofBytes("file", Array.emptyByteArray, "a.wav", "audio/wav\r\nX-Injected: 1")
+    client.postMultipart(s"$baseUrl/echo", parts = Seq(part)).left.toOption.map(_.getClass) shouldBe
+      Some(classOf[ValidationError])
+  }
+
+  "A multipart part's names" should "be escaped, so a quote or a line break cannot end the header (#2802)" in {
+    val parts = Seq(
+      MultipartPart.TextField("na\"me\r\nX-Injected: 1", "v"),
+      MultipartPart.FilePart.ofBytes("file", "x".getBytes(StandardCharsets.UTF_8), "a\".txt\r\nX-Evil: 1")
+    )
+    val body = client.postMultipart(s"$baseUrl/echo", parts = parts).ok.body
+    body should include("name=\"na%22me%0D%0AX-Injected: 1\"\r\n\r\nv\r\n")
+    body should include("filename=\"a%22.txt%0D%0AX-Evil: 1\"\r\n")
+    (body should not).include("\r\nX-Injected")
+    (body should not).include("\r\nX-Evil")
+  }
+
+  "Llm4sHttpClient.send" should "send a method the conveniences do not cover, and leave the body open to read" in {
+    val request  = HttpRequest(HttpMethod.Patch, s"$baseUrl/echo").withTextBody("""{"a":1}""")
+    val response = client.send(request).ok
+    response.statusCode shouldBe 200
+    val text = scala.util.Using.resource(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8))
+    text should include("method=PATCH")
+    text should include("""body={"a":1}""")
+  }
+
+  "Llm4sHttpClient.sendRaw" should "GET a body as its exact bytes" in {
+    val raw = client.sendRaw(HttpRequest(HttpMethod.Get, s"$baseUrl/binary")).ok
+    raw.body.take(3) shouldEqual Array[Byte](0xff.toByte, 0xd8.toByte, 0xff.toByte)
+  }
+
+  "Llm4sHttpClient.sendText" should "append the query parameters" in {
+    val request = HttpRequest(HttpMethod.Get, s"$baseUrl/params").withQueryParams(Map("q" -> "a b"))
+    client.sendText(request).ok.body shouldBe "q=a+b"
+  }
+
+  "HttpRequest.toString" should "leave out headers and the query, which may carry a credential" in {
+    val request = HttpRequest(HttpMethod.Get, "https://api.example.com/v1/models?key=sk-secret")
+      .withHeader("Authorization", "Bearer sk-secret")
+    request.toString shouldBe "HttpRequest(GET https://api.example.com/v1/models)"
+  }
+
+  "A text body" should "be decoded in the charset its Content-Type names, UTF-8 otherwise" in {
+    HttpFailures.charsetOf(Map("content-type" -> Seq("text/plain; charset=ISO-8859-1"))) shouldBe
+      StandardCharsets.ISO_8859_1
+    HttpFailures.charsetOf(Map("content-type" -> Seq("text/plain; charset=\"utf-16\""))) shouldBe
+      StandardCharsets.UTF_16
+    HttpFailures.charsetOf(Map("content-type" -> Seq("application/json"))) shouldBe StandardCharsets.UTF_8
+    HttpFailures.charsetOf(Map("content-type" -> Seq("text/plain; charset=no-such"))) shouldBe StandardCharsets.UTF_8
+    HttpFailures.charsetOf(Map.empty) shouldBe StandardCharsets.UTF_8
   }
 
   // ============================================================
@@ -275,8 +336,8 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
     closing.get(s"$baseUrl/echo").isLeft shouldBe true
   }
 
-  "Llm4sHttpClient.create(connectTimeout)" should "return a working client" in {
-    val withConnectTimeout = Llm4sHttpClient.create(connectTimeout = 5.seconds)
+  "Llm4sHttpClient.create(options)" should "return a working client" in {
+    val withConnectTimeout = Llm4sHttpClient.create(HttpClientOptions(connectTimeout = Some(5.seconds)))
     withConnectTimeout.get(s"$baseUrl/echo").ok.statusCode shouldBe 200
   }
 

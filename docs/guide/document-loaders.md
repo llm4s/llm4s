@@ -420,7 +420,7 @@ whose DNS answer changes after the check (DNS rebinding) cannot reach an address
 followed by the loader, at most five, each checked again: a refused hop fails with "Redirect blocked by SSRF
 protection".
 
-`UrlPolicy.default` is the check of `NetworkSecurity.validateUrl` (in `org.llm4s.core.safety`): only `http` and
+`UrlPolicy.default` is the check of `NetworkSecurity.validateUrl` (in `org.llm4s.security`): only `http` and
 `https`, and a host that resolves to a non-public address is refused: loopback (`localhost`, `127.0.0.0/8`, `::1`),
 private networks (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`), link-local addresses including the cloud metadata
 endpoint `169.254.169.254`, and the other special-purpose ranges. Its setters build other rules:

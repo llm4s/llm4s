@@ -71,7 +71,8 @@ def plainProgram(client: LLMClient, timeout: FiniteDuration): String = {
     for {
       _      <- client.streamComplete(greeting, CompletionOptions(), _.content.foreach(reply.append))
       tool   <- temperature
-      agent  <- Agent.builder("assistant", client).withTools(new ToolRegistry(Seq(tool))).build()
+      tools  <- ToolRegistry.of(Seq(tool))
+      agent  <- Agent.builder("assistant", client).withTools(tools).build()
       result <- agent.run(question)
     } yield s"$reply | ${result.answer.getOrElse("")}"
   }
@@ -92,8 +93,8 @@ def catsProgram(client: LLMClient, timeout: FiniteDuration): IO[String] = {
   val llm = LLMClientIO[IO](client)
   val program = for {
     reply  <- llm.streamComplete(greeting).map(_.content.getOrElse("")).compile.string
-    tool   <- IO.fromEither(temperature.left.map(new LLMException(_)))
-    agent  <- llm.agent("assistant")(_.withTools(new ToolRegistry(Seq(tool))))
+    tools  <- IO.fromEither(temperature.flatMap(tool => ToolRegistry.of(Seq(tool))).left.map(new LLMException(_)))
+    agent  <- llm.agent("assistant")(_.withTools(tools))
     result <- agent.run(question)
   } yield s"$reply | ${result.answer.getOrElse("")}"
   program.timeoutTo(timeout, IO.pure("timed out")).recover { case e: LLMException => s"failed: ${e.error.message}" }
@@ -113,8 +114,8 @@ def zioProgram(client: LLMClient, timeout: FiniteDuration): UIO[String] = {
   val llm = LLMClientZ(client)
   val program = for {
     reply  <- llm.streamComplete(greeting).map(_.content.getOrElse("")).runFold("")(_ + _)
-    tool   <- ZIO.fromEither(temperature)
-    agent  <- llm.agent("assistant")(_.withTools(new ToolRegistry(Seq(tool))))
+    tools  <- ZIO.fromEither(temperature.flatMap(tool => ToolRegistry.of(Seq(tool))))
+    agent  <- llm.agent("assistant")(_.withTools(tools))
     result <- agent.run(question)
   } yield s"$reply | ${result.answer.getOrElse("")}"
   program.timeout(Duration.fromScala(timeout)).fold(e => s"failed: ${e.message}", _.getOrElse("timed out"))
@@ -141,8 +142,9 @@ import scala.concurrent.Future
 
 def pekkoProgram(client: LLMClient, timeout: FiniteDuration)(using system: ActorSystem): Future[String] = {
   import system.dispatcher
-  val llm = LLMClientPekko(client)
-  temperature.flatMap(tool => llm.agent("assistant")(_.withTools(new ToolRegistry(Seq(tool))))) match {
+  val llm   = LLMClientPekko(client)
+  val tools = temperature.flatMap(tool => ToolRegistry.of(Seq(tool)))
+  tools.flatMap(registry => llm.agent("assistant")(_.withTools(registry))) match {
     case Left(error) => Future.successful(s"failed: ${error.message}")
     case Right(agent) =>
       val reply = llm.streamComplete(greeting).map(_.content.getOrElse("")).fold("")(_ + _)

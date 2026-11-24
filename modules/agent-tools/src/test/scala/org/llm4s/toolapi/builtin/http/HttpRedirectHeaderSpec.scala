@@ -96,7 +96,12 @@ class HttpRedirectHeaderSpec extends AnyFlatSpec with Matchers with BeforeAndAft
     val params =
       ujson.Obj("url" -> url, "headers" -> ujson.Obj.from(sensitive.map { case (k, v) => k -> ujson.Str(v) }))
     val result =
-      HTTPTool.createSafe(config).fold(e => fail(e.formatted), identity).handler(SafeParameterExtractor(params))
+      HTTPTool
+        .createSafe(config)
+        .fold(e => fail(e.formatted), identity)
+        .handler(SafeParameterExtractor(params))
+        .left
+        .map(org.llm4s.toolapi.ToolHandlerError.message)
     val body = result.fold(e => fail(e), _.body)
     ujson.read(body).obj.map { case (k, v) => k -> v.str }.toMap
   }

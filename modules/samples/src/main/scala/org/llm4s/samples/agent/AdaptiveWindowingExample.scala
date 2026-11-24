@@ -66,9 +66,10 @@ object AdaptiveWindowingExample {
         minRecentTurns = 3 // The last 3 turns are sent even past the window
       )
 
+      registry <- ToolRegistry.of(Seq(weatherTool))
       agent <- Agent
         .builder("adaptive-windowing", client)
-        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withTools(registry)
         .withMiddleware(ContextWindowMiddleware(config))
         .build()
 
@@ -126,9 +127,10 @@ object AdaptiveWindowingExample {
         minRecentTurns = 2 // The last 2 turns are never pruned
       )
 
+      registry <- ToolRegistry.of(Seq(weatherTool))
       agent <- Agent
         .builder("adaptive-windowing", client)
-        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withTools(registry)
         .withMiddleware(ContextWindowMiddleware(config))
         .build()
 
@@ -181,9 +183,10 @@ object AdaptiveWindowingExample {
         minRecentTurns = 5 // The last 5 turns are never pruned
       )
 
+      registry <- ToolRegistry.of(Seq(weatherTool))
       agent <- Agent
         .builder("adaptive-windowing", client)
-        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withTools(registry)
         .withMiddleware(ContextWindowMiddleware(config))
         .build()
 

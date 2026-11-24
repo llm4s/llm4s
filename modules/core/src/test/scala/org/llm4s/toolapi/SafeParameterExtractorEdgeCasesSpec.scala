@@ -21,34 +21,35 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "name the key when it is missing, and list what is available" in {
-    val message = extractor("""{"other":"x"}""").getString("name").left.getOrElse(fail("expected Left"))
+    val message =
+      extractor("""{"other":"x"}""").getString("name").left.map(_.message).left.getOrElse(fail("expected Left"))
 
     message should include("'name'")
     message should include("other")
   }
 
   it should "reject a number with a type mismatch naming the key and both types" in {
-    extractor("""{"name":42}""").getStringEnhanced("name") shouldBe
+    extractor("""{"name":42}""").getString("name") shouldBe
       Left(TypeMismatch("name", "string", "number"))
   }
 
   it should "reject a boolean with a type mismatch naming the key and both types" in {
-    extractor("""{"name":true}""").getStringEnhanced("name") shouldBe
+    extractor("""{"name":true}""").getString("name") shouldBe
       Left(TypeMismatch("name", "string", "boolean"))
   }
 
   it should "reject an object and an array with a type mismatch" in {
-    extractor("""{"name":{"a":1}}""").getStringEnhanced("name") shouldBe
+    extractor("""{"name":{"a":1}}""").getString("name") shouldBe
       Left(TypeMismatch("name", "string", "object"))
-    extractor("""{"name":["a"]}""").getStringEnhanced("name") shouldBe
+    extractor("""{"name":["a"]}""").getString("name") shouldBe
       Left(TypeMismatch("name", "string", "array"))
   }
 
   it should "reject null as null, which is not the same as missing" in {
     val e = extractor("""{"name":null}""")
 
-    e.getStringEnhanced("name") shouldBe Left(NullParameter("name", "string"))
-    e.getString("name").left.getOrElse(fail("expected Left")) should include("null")
+    e.getString("name") shouldBe Left(NullParameter("name", "string"))
+    e.getString("name").left.map(_.message).left.getOrElse(fail("expected Left")) should include("null")
   }
 
   it should "keep surrounding whitespace and non-ASCII text untouched" in {
@@ -67,11 +68,11 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "not coerce a numeric string" in {
-    extractor("""{"n":"123"}""").getIntEnhanced("n") shouldBe Left(TypeMismatch("n", "integer", "string"))
+    extractor("""{"n":"123"}""").getInt("n") shouldBe Left(TypeMismatch("n", "integer", "string"))
   }
 
   it should "not coerce a boolean" in {
-    extractor("""{"n":true}""").getIntEnhanced("n") shouldBe Left(TypeMismatch("n", "integer", "boolean"))
+    extractor("""{"n":true}""").getInt("n") shouldBe Left(TypeMismatch("n", "integer", "boolean"))
   }
 
   // An integer parameter accepts a JSON number that is a whole value inside the Int range (ujson numbers are
@@ -82,7 +83,7 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
   it should "reject a fractional number or one outside the Int range, in every integer getter" in {
     notIntegers.foreach { n =>
       val json = s"""{"n":$n}"""
-      extractor(json).getIntEnhanced("n") shouldBe Left(TypeMismatch("n", "integer", "number"))
+      extractor(json).getInt("n") shouldBe Left(TypeMismatch("n", "integer", "number"))
       extractor(json).getInt("n").isLeft shouldBe true
       extractor(json).getOptionalInt("n") shouldBe Left(TypeMismatch("n", "integer", "number"))
     }
@@ -92,7 +93,7 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
     Seq("3.0" -> 3, "1e2" -> 100, "-0.0" -> 0, "2147483647" -> Int.MaxValue, "-2147483648" -> Int.MinValue).foreach {
       case (n, expected) =>
         val json = s"""{"n":$n}"""
-        extractor(json).getIntEnhanced("n") shouldBe Right(expected)
+        extractor(json).getInt("n") shouldBe Right(expected)
         extractor(json).getInt("n") shouldBe Right(expected)
         extractor(json).getOptionalInt("n") shouldBe Right(Some(expected))
     }
@@ -107,7 +108,7 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "never reach an integer getter, which refuses it rather than passing on a rounded value" in {
-    extractor(s"""{"id":$Big}""").getIntEnhanced("id") shouldBe Left(TypeMismatch("id", "integer", "number"))
+    extractor(s"""{"id":$Big}""").getInt("id") shouldBe Left(TypeMismatch("id", "integer", "number"))
     extractor(s"""{"id":$Big}""").getOptionalInt("id") shouldBe Left(TypeMismatch("id", "integer", "number"))
   }
 
@@ -122,7 +123,7 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   it should "reject NaN and the infinities, which JSON text cannot carry but a ujson tree can" in {
     Seq(Double.NaN, Double.PositiveInfinity, Double.NegativeInfinity).foreach { d =>
-      SafeParameterExtractor(ujson.Obj("n" -> ujson.Num(d))).getIntEnhanced("n") shouldBe
+      SafeParameterExtractor(ujson.Obj("n" -> ujson.Num(d))).getInt("n") shouldBe
         Left(TypeMismatch("n", "integer", "number"))
     }
   }
@@ -132,12 +133,12 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "report null and a missing key differently" in {
-    extractor("""{"n":null}""").getIntEnhanced("n") shouldBe Left(NullParameter("n", "integer"))
-    extractor("""{}""").getIntEnhanced("n") shouldBe Left(MissingParameter("n", "integer", Nil))
+    extractor("""{"n":null}""").getInt("n") shouldBe Left(NullParameter("n", "integer"))
+    extractor("""{}""").getInt("n") shouldBe Left(MissingParameter("n", "integer", Nil))
   }
 
   it should "not coerce a numeric string in the string-error API either, and say what it got" in {
-    val message = extractor("""{"n":"123"}""").getInt("n").left.getOrElse(fail("expected Left"))
+    val message = extractor("""{"n":"123"}""").getInt("n").left.map(_.message).left.getOrElse(fail("expected Left"))
 
     message should include("'n'")
     message should include("integer")
@@ -153,7 +154,7 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "not coerce a numeric string" in {
-    extractor("""{"x":"3.14"}""").getDoubleEnhanced("x") shouldBe Left(TypeMismatch("x", "number", "string"))
+    extractor("""{"x":"3.14"}""").getDouble("x") shouldBe Left(TypeMismatch("x", "number", "string"))
   }
 
   // ---- booleans
@@ -164,17 +165,18 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "not coerce the strings \"true\" and \"false\"" in {
-    extractor("""{"t":"true"}""").getBooleanEnhanced("t") shouldBe Left(TypeMismatch("t", "boolean", "string"))
-    extractor("""{"f":"false"}""").getBooleanEnhanced("f") shouldBe Left(TypeMismatch("f", "boolean", "string"))
+    extractor("""{"t":"true"}""").getBoolean("t") shouldBe Left(TypeMismatch("t", "boolean", "string"))
+    extractor("""{"f":"false"}""").getBoolean("f") shouldBe Left(TypeMismatch("f", "boolean", "string"))
   }
 
   it should "not coerce 0 and 1" in {
-    extractor("""{"t":1}""").getBooleanEnhanced("t") shouldBe Left(TypeMismatch("t", "boolean", "number"))
-    extractor("""{"f":0}""").getBooleanEnhanced("f") shouldBe Left(TypeMismatch("f", "boolean", "number"))
+    extractor("""{"t":1}""").getBoolean("t") shouldBe Left(TypeMismatch("t", "boolean", "number"))
+    extractor("""{"f":0}""").getBoolean("f") shouldBe Left(TypeMismatch("f", "boolean", "number"))
   }
 
   it should "not coerce the strings \"true\" and \"false\" in the string-error API either" in {
-    val message = extractor("""{"t":"true"}""").getBoolean("t").left.getOrElse(fail("expected Left"))
+    val message =
+      extractor("""{"t":"true"}""").getBoolean("t").left.map(_.message).left.getOrElse(fail("expected Left"))
 
     message should include("boolean")
     message should include("string")
@@ -238,39 +240,44 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   it should "put the full path in the message when a nested key is missing, and list that object's keys" in {
     val message =
-      extractor("""{"config":{"host":"h"}}""").getString("config.port").left.getOrElse(fail("expected Left"))
+      extractor("""{"config":{"host":"h"}}""")
+        .getString("config.port")
+        .left
+        .map(_.message)
+        .left
+        .getOrElse(fail("expected Left"))
 
     message should include("'config.port'")
     message should include("host")
   }
 
   it should "put the path of the missing intermediate object in the error" in {
-    extractor("""{"a":{}}""").getStringEnhanced("a.b.c") shouldBe
+    extractor("""{"a":{}}""").getString("a.b.c") shouldBe
       Left(MissingParameter("a.b", "object", Nil))
   }
 
   it should "report which parent is not an object when the path goes through a scalar" in {
-    val error = extractor("""{"config":"text"}""").getStringEnhanced("config.host")
+    val error = extractor("""{"config":"text"}""").getString("config.host")
 
     error shouldBe Left(InvalidNesting("host", "config", "string"))
-    val message = error.left.map(_.getMessage).left.getOrElse(fail("expected Left"))
+    val message = error.left.map(_.message).left.getOrElse(fail("expected Left"))
     message should include("'host'")
     message should include("'config'")
     message should include("string")
   }
 
   it should "report a null parent on the way down" in {
-    extractor("""{"config":null}""").getStringEnhanced("config.host") shouldBe
+    extractor("""{"config":null}""").getString("config.host") shouldBe
       Left(InvalidNesting("host", "config", "null"))
   }
 
   it should "report an array parent on the way down" in {
-    extractor("""{"items":[1,2]}""").getStringEnhanced("items.first") shouldBe
+    extractor("""{"items":[1,2]}""").getString("items.first") shouldBe
       Left(InvalidNesting("first", "items", "array"))
   }
 
   it should "report a type mismatch when a getObject target is a scalar" in {
-    extractor("""{"config":5}""").getObjectEnhanced("config") shouldBe
+    extractor("""{"config":5}""").getObject("config") shouldBe
       Left(TypeMismatch("config", "object", "number"))
   }
 
@@ -281,12 +288,12 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "treat keys as case-sensitive" in {
-    extractor("""{"Name":"x"}""").getStringEnhanced("name") shouldBe
+    extractor("""{"Name":"x"}""").getString("name") shouldBe
       Left(MissingParameter("name", "string", List("Name")))
   }
 
   it should "list every available key when one is missing" in {
-    val available = extractor("""{"zeta":1,"alpha":2,"mid":3}""").getStringEnhanced("nope") match {
+    val available = extractor("""{"zeta":1,"alpha":2,"mid":3}""").getString("nope") match {
       case Left(MissingParameter("nope", "string", keys)) => keys
       case other                                          => fail(s"expected MissingParameter, got $other")
     }
@@ -298,11 +305,11 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   "validateRequired" should "report a null parameter and a missing one together, in the order asked" in {
     val errors = extractor("""{"a":null,"b":"x"}""")
-      .validateRequired("a" -> "string", "c" -> "integer")
+      .validateRequired("a" -> ToolParameterType.String, "c" -> ToolParameterType.Integer)
       .left
       .getOrElse(fail("expected Left"))
 
-    errors.map {
+    ToolCallErrorJson.flattenErrors(List(errors)).map {
       case NullParameter(path, _)       => s"null:$path"
       case MissingParameter(path, _, _) => s"missing:$path"
       case other                        => fail(s"unexpected error $other")
@@ -310,30 +317,34 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "accept parameters that are present" in {
-    extractor("""{"a":"x","c":3}""").validateRequired("a" -> "string", "c" -> "integer") shouldBe Right(())
+    extractor("""{"a":"x","c":3}""").validateRequired(
+      "a" -> ToolParameterType.String,
+      "c" -> ToolParameterType.Integer
+    ) shouldBe Right(())
   }
 
   it should "report a required parameter of the wrong type, as its Scaladoc promises" in {
-    extractor("""{"age":"x"}""").validateRequired("age" -> "integer") shouldBe
-      Left(List(TypeMismatch("age", "integer", "string")))
+    extractor("""{"age":"x"}""").validateRequired("age" -> ToolParameterType.Integer) shouldBe
+      Left(TypeMismatch("age", "integer", "string"))
   }
 
   it should "check every declared type, and report wrong types beside missing ones in the order asked" in {
     val json = """{"s":1,"i":2.5,"d":"x","b":"true","a":{},"o":[]}"""
     val errors = extractor(json)
       .validateRequired(
-        "s" -> "string",
-        "i" -> "integer",
-        "d" -> "number",
-        "b" -> "boolean",
-        "a" -> "array",
-        "o" -> "object",
-        "m" -> "string"
+        "s" -> ToolParameterType.String,
+        "i" -> ToolParameterType.Integer,
+        "d" -> ToolParameterType.Number,
+        "b" -> ToolParameterType.Boolean,
+        "a" -> ToolParameterType.Array,
+        "o" -> ToolParameterType.Object,
+        "m" -> ToolParameterType.String
       )
       .left
       .getOrElse(fail("expected Left"))
 
-    errors shouldBe List(
+    errors shouldBe a[MultipleErrors]
+    ToolCallErrorJson.flattenErrors(List(errors)) shouldBe List(
       TypeMismatch("s", "string", "number"),
       TypeMismatch("i", "integer", "number"),
       TypeMismatch("d", "number", "string"),
@@ -347,18 +358,26 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
   it should "accept a value of every declared type" in {
     val json = """{"s":"x","i":3.0,"d":2.5,"b":false,"a":[],"o":{}}"""
     extractor(json).validateRequired(
-      "s" -> "string",
-      "i" -> "integer",
-      "d" -> "number",
-      "b" -> "boolean",
-      "a" -> "array",
-      "o" -> "object"
+      "s" -> ToolParameterType.String,
+      "i" -> ToolParameterType.Integer,
+      "d" -> ToolParameterType.Number,
+      "b" -> ToolParameterType.Boolean,
+      "a" -> ToolParameterType.Array,
+      "o" -> ToolParameterType.Object
     ) shouldBe Right(())
   }
 
-  it should "stay presence-only for a type name it does not know" in {
-    extractor("""{"x":"anything"}""").validateRequired("x" -> "uuid") shouldBe Right(())
-    extractor("""{}""").validateRequired("x" -> "uuid").isLeft shouldBe true
+  it should "return a single error as it is, and several as one MultipleErrors a handler can return" in {
+    extractor("""{}""").validateRequired("x" -> ToolParameterType.String) shouldBe
+      Left(MissingParameter("x", "string", Nil))
+    extractor("""{}""")
+      .validateRequired("x" -> ToolParameterType.String, "y" -> ToolParameterType.Number)
+      .left
+      .map(_.message) shouldBe Left(
+      "multiple parameter issues:\n" +
+        "  - required parameter 'x' (type: string) is missing\n" +
+        "  - required parameter 'y' (type: number) is missing"
+    )
   }
 }
 

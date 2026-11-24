@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.security.Secret
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
+import org.llm4s.http.{ HttpResponse, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.{ LLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.{ GeminiConfig, VertexAIConfig }
 import org.llm4s.llmconnect.model.*
@@ -42,12 +42,12 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
   private def geminiClient(model: String = "gemini-2.0-flash"): (LLMClient, Wire) = {
     val wire = new Wire
-    val http = stub[Llm4sHttpClient]
-    (http.post _).when(*, *, *, *).onCall { (_: String, _: Map[String, String], body: String, _: FiniteDuration) =>
+    val http = stub[StubbedHttpCalls]
+    (http.onPost _).when(*, *, *, *).onCall { (_: String, _: Map[String, String], body: String, _: FiniteDuration) =>
       wire.requests += ujson.read(body)
       Right(HttpResponse(200, wire.body, Map.empty))
     }
-    (http.postStream _).when(*, *, *, *).onCall {
+    (http.onPostStream _).when(*, *, *, *).onCall {
       (_: String, _: Map[String, String], body: String, _: FiniteDuration) =>
         wire.requests += ujson.read(body)
         Right(StreamingHttpResponse(200, new ByteArrayInputStream(wire.sse.getBytes(StandardCharsets.UTF_8))))
@@ -64,20 +64,20 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
   private def vertexClient(model: String = "gemini-2.0-flash"): (LLMClient, Wire) = {
     val wire = new Wire
-    val http = stub[Llm4sHttpClient]
-    (http.post _).when(*, *, *, *).onCall { (url: String, _: Map[String, String], body: String, _: FiniteDuration) =>
+    val http = stub[StubbedHttpCalls]
+    (http.onPost _).when(*, *, *, *).onCall { (url: String, _: Map[String, String], body: String, _: FiniteDuration) =>
       if (url.contains("oauth2.googleapis.com")) Right(HttpResponse(200, tokenBody, Map.empty))
       else {
         wire.requests += ujson.read(body)
         Right(HttpResponse(200, wire.body, Map.empty))
       }
     }
-    (http.postStream _).when(*, *, *, *).onCall {
+    (http.onPostStream _).when(*, *, *, *).onCall {
       (_: String, _: Map[String, String], body: String, _: FiniteDuration) =>
         wire.requests += ujson.read(body)
         Right(StreamingHttpResponse(200, new ByteArrayInputStream(wire.sse.getBytes(StandardCharsets.UTF_8))))
     }
-    (http.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (http.onGet _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
     val config = VertexAIConfig(
       projectId = "my-gcp-project",
       location = "us-central1",

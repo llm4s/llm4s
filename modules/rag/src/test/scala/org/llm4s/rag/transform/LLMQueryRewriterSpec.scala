@@ -1,6 +1,6 @@
 package org.llm4s.rag.transform
 
-import org.llm4s.error.{ APIError, ProcessingError }
+import org.llm4s.error.{ ServiceError, ProcessingError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -56,7 +56,7 @@ class LLMQueryRewriterSpec extends AnyFlatSpec with Matchers {
       conversation: Conversation,
       options: CompletionOptions
     ): Result[Completion] =
-      Left(APIError("mock-provider", "LLM service unavailable", statusCode = Some(500)))
+      Left(ServiceError(500, "mock-provider", "LLM service unavailable"))
 
     override def streamComplete(
       conversation: Conversation,

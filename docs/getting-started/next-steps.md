@@ -381,7 +381,8 @@ val result = for {
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
   client <- LLMConnect.getClient(providerConfig)
-  agent <- Agent.builder("time-agent", client).withTools(new ToolRegistry(Seq(timeTool))).build()
+  toolRegistry <- ToolRegistry.of(Seq(timeTool))
+  agent <- Agent.builder("time-agent", client).withTools(toolRegistry).build()
   result <- agent.run("What time is it?")
 } yield result.answer
 ```

@@ -128,14 +128,14 @@ class HttpNetworkConfigSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   it should "carry the settings when every section is loaded" in {
-    val (errors, configs) = Llm4sConfig
+    val sections = Llm4sConfig
       .providerConfigs(ConfigSource.string(s"""$section
         llm4s.http.proxy.url = "http://proxy.corp:3128"
         llm4s.providers.broken { provider = fixturechat, model = m, apiKey = k, http.proxy.url = "nope://x" }
       """))
       .value
-    configs.values.head.network.proxy.map(_.host) shouldBe Some("proxy.corp")
-    errors.keySet.map(_.asName) shouldBe Set("broken")
+    sections.values.flatMap(_.toOption).head.network.proxy.map(_.host) shouldBe Some("proxy.corp")
+    sections.collect { case (name, Left(_)) => name.asName }.toSet shouldBe Set("broken")
   }
 
   "An embedding config" should "carry llm4s.http" in {

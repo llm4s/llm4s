@@ -23,7 +23,7 @@ class Part3Spec extends AnyFlatSpec with Matchers with TutorialSpecSupport {
 
   it should "tell the model when it does not know the order" in {
     val error = orderTool.toOption.get.execute(ujson.Obj("orderId" -> "Z-9"))
-    error.left.map(_.getMessage).left.toOption.get should include("There is no order Z-9")
+    error.left.map(_.message).left.toOption.get should include("There is no order Z-9")
   }
 
   "Part 3's policy tool" should "answer for a topic in any case" in {
@@ -63,7 +63,7 @@ class Part3Spec extends AnyFlatSpec with Matchers with TutorialSpecSupport {
     built.name shouldBe "delivery_estimate"
     built.execute(ujson.Obj("orderId" -> "A-1001")).map(_("workingDays").num) shouldBe Right(2.0)
     built.execute(ujson.Obj("orderId" -> "A-1002")).map(_("workingDays").num) shouldBe Right(4.0)
-    built.execute(ujson.Obj("orderId" -> "Z-9")).left.map(_.getMessage).left.toOption.get should include(
+    built.execute(ujson.Obj("orderId" -> "Z-9")).left.map(_.message).left.toOption.get should include(
       "There is no order Z-9"
     )
   }
