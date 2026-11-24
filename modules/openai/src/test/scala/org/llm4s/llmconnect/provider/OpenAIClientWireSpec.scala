@@ -224,6 +224,62 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
     }
   }
 
+  it should "stream to a router-prefixed gpt-6-luna with tools at reasoning_effort none, and report it (#2886)" in {
+    val seen = new AtomicReference[Seen]()
+    val events = Seq(
+      """{"id":"l1","created":0,"model":"gpt-6-luna","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}""",
+      """{"id":"l1","created":0,"model":"gpt-6-luna","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"""
+    )
+    LocalProviderTestServer.withServer("/") { exchange =>
+      capture(seen, exchange)
+      LocalProviderTestServer.sendSseResponse(
+        exchange,
+        (events.map(e => s"data: $e") :+ "data: [DONE]").mkString("", "\n\n", "\n\n")
+      )
+    } { baseUrl =>
+      // Requesty's form of the id: the same OpenAIClient and rules, behind a router prefix
+      val client = OpenAIClient(
+        OpenAIConfig.fromValues(ModelName("openai/gpt-6-luna"), Secret("sk-test"), BaseUrl(baseUrl)).value
+      ).value
+      val options =
+        CompletionOptions(maxTokens = Some(128)).withTools(Seq(noopTool)).withReasoning(ReasoningEffort.Medium)
+      val completion = client.streamComplete(hello, options)(_ => ()).value
+      client.close()
+
+      val body = seen.get().body
+      body("stream").bool shouldBe true
+      body("reasoning_effort").str shouldBe "none"
+      body("max_completion_tokens").num shouldBe 128
+      body.obj.contains("max_tokens") shouldBe false
+      completion.content shouldBe "hi"
+      completion.adjustments.map(_.option) should contain(org.llm4s.llmconnect.model.RequestOption.Reasoning)
+    }
+  }
+
+  it should "send an Azure deployment named gpt-6-luna a request with tools at reasoning_effort none (#2886)" in {
+    val seen = new AtomicReference[Seen]()
+    LocalProviderTestServer.withServer("/") { exchange =>
+      capture(seen, exchange)
+      LocalProviderTestServer.sendJsonResponse(
+        exchange,
+        200,
+        LocalProviderTestServer.openAICompletion("hi", "gpt-6-luna")
+      )
+    } { baseUrl =>
+      val config = AzureConfig
+        .fromValues(ModelName("gpt-6-luna"), Secret("azure-key"), BaseUrl(baseUrl), AzureConfig.DEFAULT_API_VERSION)
+        .value
+      val client     = OpenAIClient(config).value
+      val completion = client.complete(hello, CompletionOptions().withTools(Seq(noopTool))).value
+      client.close()
+
+      val request = seen.get()
+      request.path shouldBe "/openai/deployments/gpt-6-luna/chat/completions"
+      request.body("reasoning_effort").str shouldBe "none"
+      completion.adjustments.map(_.option) should contain(org.llm4s.llmconnect.model.RequestOption.Reasoning)
+    }
+  }
+
   it should "refuse a request with tools to gpt-6.1-terra before sending it (#2886)" in {
     val requests = new java.util.concurrent.atomic.AtomicInteger()
     LocalProviderTestServer.withServer("/") { exchange =>

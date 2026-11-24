@@ -377,6 +377,11 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
           ("gpt-6-luna", true),
           ("gpt-6.1-terra", true),
           ("openai/gpt-6.2-astra", true),
+          ("gpt-6-luna-2026-10-01", true),
+          ("openai/gpt-6.1-terra-2026-09-08", true),
+          ("ft:gpt-6-luna:my-org::abc123", true),
+          ("ft:gpt-6.1-terra-2026-09-08:my-org:custom:abc123", true),
+          ("gpt-60", false),
           ("gpt-35-turbo", false),
           // Standard models do NOT require max_completion_tokens
           ("gpt-4o", false),
@@ -420,6 +425,11 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
     OpenAIModelRules.toolsOnChatCompletions("gpt-6-luna-2026-10-01") shouldBe ToolCalls.OnlyWithoutReasoning
     OpenAIModelRules.toolsOnChatCompletions("gpt-6.1-terra") shouldBe ToolCalls.ResponsesApiOnly
     OpenAIModelRules.toolsOnChatCompletions("GPT-6.1-TERRA") shouldBe ToolCalls.ResponsesApiOnly
+    OpenAIModelRules.toolsOnChatCompletions("openai/gpt-6.1-terra-2026-09-08") shouldBe ToolCalls.ResponsesApiOnly
+    // a fine-tune is judged by its base model
+    OpenAIModelRules.toolsOnChatCompletions("ft:gpt-6-luna:my-org::abc123") shouldBe ToolCalls.OnlyWithoutReasoning
+    OpenAIModelRules.toolsOnChatCompletions("ft:gpt-6.1-terra-2026-09-08:my-org:custom:abc123") shouldBe
+      ToolCalls.ResponsesApiOnly
     Seq("gpt-5.6-luna", "gpt-5.6-terra", "gpt-6.2-astra", "gpt-6-lunar", "gpt-6.1-terra-mini", "gpt-4o").foreach { m =>
       withClue(m)(OpenAIModelRules.toolsOnChatCompletions(m) shouldBe ToolCalls.Unrestricted)
     }
