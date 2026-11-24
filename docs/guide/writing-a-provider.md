@@ -77,9 +77,13 @@ my-llm4s-acme/
         └── Llm4sAcmeModuleSpec.scala
 ```
 
-Use your own package. The in-repo modules keep `org.llm4s.*` for source compatibility with
-earlier releases; a third-party module has no reason to, and anything `private[llm4s]` stays
-out of reach either way (see [Stability](#stability)).
+Use your own package. The in-repo modules, the template `modules/providers/voyage` included, are
+declared in `org.llm4s.*` because they are llm4s: their class names are part of earlier releases.
+That is not something to copy. Being inside `org.llm4s` lets them reach `private[llm4s]` helpers
+your module cannot, and the template uses one: `org.llm4s.util.Redaction.safeBody`, for the body of
+an error message. Everything else it calls is the public SPI this guide describes; build your error
+from the response with `HttpErrorMapper.toError`, which redacts and truncates the body itself (see
+[Stability](#stability)).
 
 ## Registration
 
@@ -184,7 +188,8 @@ check the config's type rather than cast - `ProviderDescriptor.expectConfig` doe
 `aliases` are other names a section's `provider` may use: `ProviderRegistry.find` and `resolve` accept an
 alias as they accept the id. An id always wins, so an alias equal to another provider's id is ignored, and of
 two providers declaring one alias the later registered keeps it; both cases appear in
-`ProviderRegistry.report.collisions` (kind `chat alias` or `embedding alias`) and in the discovery log.
+`ProviderRegistry.report.collisions` (kind `ProviderCollisionKind.ChatAlias` or `EmbeddingAlias`) and in the
+discovery log. The report is the registry's to build and yours to read: its ids are `ProviderId`s.
 
 ### Workload identity
 

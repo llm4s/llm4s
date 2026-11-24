@@ -106,7 +106,7 @@ private[llm4s] object NamedProviderSectionValidator:
   private def specError(id: String, spec: ProviderConfigSpec): Option[ConfigurationError] =
     val clashing          = spec.extras.map(_.name).filter(ProviderConfigSpec.BuiltinKeys.contains)
     val reservedAuth      = spec.authExtras.map(_.name).filter(AuthConfig.ReservedKeys.contains)
-    val undeclaredKeyless = spec.keylessWhen.map(_._1).filterNot(key => spec.extra(key).isDefined)
+    val undeclaredKeyless = spec.keylessWhen.map(_.key).filterNot(key => spec.extra(key).isDefined)
     val problems =
       undeclaredKeyless.map(key =>
         s"names $key in keylessWhen but does not declare it in its ProviderConfigSpec.extras"
@@ -322,4 +322,4 @@ private[llm4s] object NamedProviderConfigValidator:
 
   /** The provider's keyless setting as a section writes it, e.g. `authentication = "entra-id"`. */
   private def keylessSetting(descriptor: ProviderDescriptor): String =
-    descriptor.configSpec.keylessWhen.fold("a keyless authentication")((key, value) => s"$key = \"$value\"")
+    descriptor.configSpec.keylessWhen.fold("a keyless authentication")(_.describe)

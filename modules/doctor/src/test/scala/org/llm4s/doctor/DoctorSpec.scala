@@ -269,7 +269,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
           |}""".stripMargin
       val key = check(run(hocon), "API key")
       key.status shouldBe CheckStatus.Pass
-      key.detail should include("authenticates with authentication = entra-id and needs no API key")
+      key.detail should include("authenticates with authentication = \"entra-id\" and needs no API key")
     }
 
     "need no key for a provider that takes none" in {

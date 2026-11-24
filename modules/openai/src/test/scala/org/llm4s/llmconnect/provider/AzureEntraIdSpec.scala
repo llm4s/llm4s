@@ -42,7 +42,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
     private val issued          = new AtomicInteger(1)
     val invalidated             = new ConcurrentLinkedQueue[String]()
     def token(): Result[String] = Right(s"token-${issued.get()}")
-    def invalidate(rejected: String): Unit =
+    override def invalidate(rejected: String): Unit =
       invalidated.add(rejected)
       if (rejected == s"token-${issued.get()}") issued.incrementAndGet(): Unit
   }
@@ -139,8 +139,8 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       val token = "opaqueEntraToken00001"
       // A plain provider, not a caching one: the client itself must register what it sends.
       val own = new AccessTokenProvider {
-        def token(): Result[String]            = Right("opaqueEntraToken00001")
-        def invalidate(rejected: String): Unit = ()
+        def token(): Result[String]                     = Right("opaqueEntraToken00001")
+        override def invalidate(rejected: String): Unit = ()
       }
       val authorizations = new ConcurrentLinkedQueue[String]()
       LocalProviderTestServer.withServer("/") { (exchange: HttpExchange) =>
@@ -188,8 +188,8 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi"))
     } { baseUrl =>
       val failing = new AccessTokenProvider {
-        def token(): Result[String]            = Left(AuthenticationError("azure", "no managed identity"))
-        def invalidate(rejected: String): Unit = ()
+        def token(): Result[String]                     = Left(AuthenticationError("azure", "no managed identity"))
+        override def invalidate(rejected: String): Unit = ()
       }
       val client = OpenAIClient(AzureConfig.keyless(baseUrl, "my-deploy", failing)).value
       val error  = client.complete(hello, CompletionOptions()).left.value
@@ -252,8 +252,8 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "mask a token the service's error echoes bare (#1932)" in KnownSecrets.isolated {
     val token = "opaqueEntraEmbed00001"
     val own = new AccessTokenProvider {
-      def token(): Result[String]            = Right("opaqueEntraEmbed00001")
-      def invalidate(rejected: String): Unit = ()
+      def token(): Result[String]                     = Right("opaqueEntraEmbed00001")
+      override def invalidate(rejected: String): Unit = ()
     }
     val authorizations = new ConcurrentLinkedQueue[String]()
     LocalProviderTestServer.withServer("/openai/v1/embeddings") { (exchange: HttpExchange) =>

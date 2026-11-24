@@ -106,17 +106,19 @@ trait ProviderModuleChecks extends Assertions:
   def assertSoleSupplier(module: Llm4sProviderModule)(using pos: Position): Assertion =
     val report    = ProviderRegistry.discover().report
     val className = module.getClass.getName
-    def suppliers(kind: String, ids: Seq[String], of: ProviderModuleReport => Seq[String]): Unit =
+    def suppliers(kind: String, ids: Seq[ProviderId], of: ProviderModuleReport => Seq[ProviderId]): Unit =
       ids.foreach { id =>
         val owners = report.modules.filter(m => of(m).contains(id)).map(_.moduleClass)
         if owners != Seq(className) then
-          failAt(s"$kind id '$id' should be supplied by $className alone, but is supplied by ${owners.mkString(", ")}")
+          failAt(
+            s"$kind id '${id.asString}' should be supplied by $className alone, but is supplied by ${owners.mkString(", ")}"
+          )
       }
-    suppliers("chat", module.chatProviders.map(_.id.asString), _.providerIds)
-    suppliers("embedding", module.embeddingProviders.map(_.id.asString), _.embeddingProviderIds)
+    suppliers("chat", module.chatProviders.map(_.id), _.providerIds)
+    suppliers("embedding", module.embeddingProviders.map(_.id), _.embeddingProviderIds)
     val names = (module.chatProviders.flatMap(d => d.aliases.map(ProviderId(_).asString) + d.id.asString) ++
       module.embeddingProviders.flatMap(d => d.aliases.map(ProviderId(_).asString) + d.id.asString)).toSet
-    report.collisions.find(c => names.contains(c.id)).foreach { c =>
+    report.collisions.find(c => names.contains(c.id.asString)).foreach { c =>
       failAt(s"${c.subject} collides: ${c.droppedModule.getOrElse("an earlier registration")} and ${c.keptModule}")
     }
     succeed

@@ -5,7 +5,7 @@ import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ KeylessSetting, ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -76,7 +76,7 @@ object AzureProvider extends ProviderDescriptor:
   val configSpec: ProviderConfigSpec = ProviderConfigSpec(
     requiresApiKey = true,
     apiKeyEnv = Seq(OpenAIConfigKeys.AZURE_OPENAI_API_KEY),
-    keylessWhen = Some(AuthenticationKey -> EntraIdAuthentication),
+    keylessWhen = Some(KeylessSetting(AuthenticationKey, EntraIdAuthentication)),
     extras = Seq(
       ProviderConfigKey(
         EndpointKey,

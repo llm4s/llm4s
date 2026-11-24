@@ -76,7 +76,7 @@ class CapabilityMatrixSpec extends AnyFlatSpec with Matchers with EitherValues w
   it should "give every provider id the in-repo modules register exactly one row" in {
     val inRepo     = modules.map(_.moduleClass).toSet
     val reports    = registry.report.modules.filter(m => inRepo.contains(m.moduleClass))
-    val registered = reports.flatMap(m => m.providerIds ++ m.embeddingProviderIds).distinct
+    val registered = reports.flatMap(m => m.providerIds ++ m.embeddingProviderIds).map(_.asString).distinct
     val rowIds     = rows.map(_.id)
 
     rowIds.distinct shouldBe rowIds

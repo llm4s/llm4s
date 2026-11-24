@@ -307,7 +307,7 @@ object Doctor {
 
   /** The module that supplied `id` and where it was loaded from, when the registry was discovered. */
   private def moduleFound(id: ProviderId, options: DoctorOptions)(using registry: ProviderRegistry): DoctorCheck = {
-    val supplier = registry.report.modules.reverse.find(_.providerIds.contains(id.asString)).map { module =>
+    val supplier = registry.report.modules.reverse.find(_.providerIds.contains(id)).map { module =>
       val where = module.source.map { location =>
         val trimmed = location.stripSuffix("/")
         if (trimmed.endsWith(".jar")) trimmed.substring(trimmed.lastIndexOf('/') + 1) else location
@@ -350,7 +350,7 @@ object Doctor {
     if (!descriptor.configSpec.requiresApiKey) {
       DoctorCheck.pass(Key, s"'${descriptor.id.asString}' needs no API key")
     } else if (descriptor.configSpec.isKeyless(section.extras)) {
-      val setting = descriptor.configSpec.keylessWhen.fold("")((key, value) => s"$key = $value")
+      val setting = descriptor.configSpec.keylessWhen.fold("")(_.describe)
       DoctorCheck.pass(Key, s"section '$name' authenticates with $setting and needs no API key")
     } else {
       val ownPath = s"llm4s.providers.$name.apiKey"
