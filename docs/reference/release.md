@@ -89,8 +89,9 @@ original). Each tag gets its own feed at `/feed/by_tag/<tag>.xml` once a post us
 
 Everything below goes in the pull request that prepares the release, and is merged before the tag is pushed. Each
 release costs part of the organisation's monthly Sonatype quota ([What is published](#what-is-published-to-maven-central)),
-so there are few of them: 0.6.0, then 0.7.0, which sets the compatibility baseline, then 1.0. Roughly one release a
-month fits; a security patch takes that slot ahead of a planned release, and minor releases come at most about once a
+so there are few of them: 0.6.0, then 0.7.0, which sets the compatibility baseline, then 1.0, with no release in
+between ([After the baseline](../reference/api-stability#after-the-baseline)). Roughly one release a month fits; a
+security patch takes that slot ahead of a planned release, and from 1.0 minor releases come at most about once a
 quarter ([Support Policy](../reference/support-policy#release-cadence)).
 
 **Every release:**
@@ -116,6 +117,21 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
       LiteLLM snapshot, or add an override.
 - [ ] [Refresh the bundled model metadata](../reference/model-metadata#refreshing-the-snapshot) from LiteLLM
       upstream, review the ids it removes, and delete the overrides upstream now carries.
+- [ ] Set the version pins nothing derives from the build: in `README.md` the "current release" line, the sbt snippet
+      and `--llm4s_version`; `-Pllm4sVersion` in `docs/guide/helidon.md` and `docs/guide/micronaut.md`; the
+      `maintained` row of `docs/reference/best-practices.md`; the "road to 1.0" timeline in `docs/index.md`; and the
+      usage examples in `scripts/verify-release.sh`. The `modules/gradle-demo` pins (`build.gradle`,
+      `build.gradle.kts`, `GradleSnippets.scala`) resolve the release from Maven Central, so they move in a follow-up
+      pull request once it is there.
+- [ ] Check that the [llm4s.g8](https://github.com/llm4s/llm4s.g8) template compiles against the release (a release
+      candidate, or the staged artifacts): `sbt new llm4s/llm4s.g8 --llm4s_version=X.Y.Z`, then `sbt compile` in the
+      project it generates. Fix the template before the tag if it does not.
+- [ ] Check that every mechanical rename since the previous release has a Scalafix rule
+      ([Scalafix](../reference/scalafix#migration-rules)) or is listed in the Migration Guide's
+      [changes no rule automates](../reference/migration#changes-since-051-that-no-rule-automates).
+- [ ] Confirm that the month's Sonatype window has room for the release before tagging: the limit is 1,000 files a
+      month and a release uploads nearly all of it, so one already uploaded in the window leaves none
+      ([What is published to Maven Central](#what-is-published-to-maven-central)).
 
 **0.7.0, the baseline release, in addition:**
 
@@ -141,7 +157,10 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
       and every older 0.x line `eol` ([Update the support table](#update-the-support-table)).
 - [ ] Publish the Scalafix migration rules as `org.llm4s::llm4s-scalafix` with the release
       ([#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](../reference/scalafix#migration-rules)), and put the one-line
-      command in the 1.0 upgrade notes.
+      command in the 1.0 upgrade notes. Publishing it adds an artifact's files to the release, which takes it over
+      Sonatype's monthly file limit as counted today
+      ([What is published to Maven Central](#what-is-published-to-maven-central)): have the limit raised, or drop an
+      artifact from the release, before tagging.
 - [ ] Build the site as `pages.yml` does (`bundle exec jekyll build` in `docs/`, Ruby 3.2) and check `_site`: no
       `design/`, `superpowers/`, `events_details/`, `community/launch-1.0` or `people/README` output; the root
       `README.md` excluded but every other `README`-named page still built; `/PRODUCTION_DEPLOYMENT` redirecting to
@@ -153,7 +172,7 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
 - [ ] Release-day wording pass: the pages that call LLM4S pre-1.0 or say the compatibility promise is still to come.
       In `README.md`, "Current Status" ("LLM4S is under active pre-1.0 development", "The path to 1.0 is focused on");
       `docs/why-llm4s.md` ("LLM4S is pre-1.0 and Scala 3 only", "Frozen modules will be binary compatible across 1.x");
-      `docs/index.md` ("Latest release, on the road to 1.0", and "The road to 1.0" timeline with its "Pre-1.0" step);
+      `docs/index.md` ("Latest release, on the road to 1.0", and "The road to 1.0" timeline with its "0.7.0" step);
       `docs/scala-ai/llm-framework.md` ("it is pre-1.0: the API can still change between releases");
       `docs/guide/comparison.md` ("A stable 1.0 API", "You need a stable, frozen API today. LLM4S is pre-1.0");
       `docs/guide/migrating-from-scala-llm-clients.md` ("You need a stable API today. LLM4S is pre-1.0");

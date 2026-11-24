@@ -500,6 +500,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `conversation`) and give the reason as the violation, where field and reason were swapped [#2796](https://github.com/llm4s/llm4s/issues/2796).
 - **Fixed** the credential registry no longer keeps each value it refuses for being under 8 characters: it counts them and
   logs the first refusal only, so many short `Secret`s neither grow memory nor stay held [#2888](https://github.com/llm4s/llm4s/issues/2888).
+- **Fixed** `ContextManager` no longer digests the leading system messages, so the system prompt survives history
+  compression; the digests it made are dropped when the newest turn fits only without them [#2918](https://github.com/llm4s/llm4s/issues/2918).
 
 ### Agent runtime
 
@@ -682,6 +684,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** the docs site groups the User Guide sidebar, and the contributor pages moved from `/reference/` to `/contribute/` (old addresses redirect); the watsonx, Perplexity and Bedrock setup sections, typed tools and the media and store-contract pages are filled in, and `LLMClient`, `AgentStatus`, `ModelRegistryService` and `MCPClient` say how to obtain and use them [#2834](https://github.com/llm4s/llm4s/issues/2834).
 - **Changed** the support table (`docs/_data/support.yml`) has one entry per release line, with `security_until` and `ended_on` dates that the Support Policy page shows; `scripts/check-support-table.sh` checks the fields each status needs, and the release guide says what to change at each release ([Update the support table](docs/reference/release.md#update-the-support-table)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
 - **Changed** the Compatibility and Deprecation Policy no longer says provider modules aim to version independently: every module shares the release version, which `llm4s-bom` pins [#2835](https://github.com/llm4s/llm4s/issues/2835).
+- **Changed** the policy pages state one release plan: 0.7.0 sets the MiMa baseline and 1.0 is the next release, with a break in between recorded as a MiMa filter and a migration note; the artifacts are documented as classpath libraries (no JPMS or OSGi metadata), and pre-1.0 release cadence, the 1.0 Scope `util` and `core` rows and the pre-tag checklist are corrected [#1281](https://github.com/llm4s/llm4s/issues/1281).
 - **Fixed** 23 more guide pages have their Scala blocks compiled (agents, streaming, durable checkpointers, memory, ZIO, cats-effect, RAG, speech, tracing and others), which corrected code that did not compile against the API; guide specs fail when their copy of a page drifts ([#2833](https://github.com/llm4s/llm4s/issues/2833)).
 
 ### Build & tooling

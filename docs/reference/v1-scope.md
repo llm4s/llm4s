@@ -29,7 +29,7 @@ The carves, all published from 0.5.0:
 | [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`; `llm4s-observability-prometheus` (Prometheus). The tracing and metrics contracts stay in `llm4s-core`, which declares no observability dependency | published in 0.5.0 |
 | [7](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (the built-in tools and their config), `llm4s-agent` (`agent`, `assistant`) | published in 0.5.0 |
 
-**0.5.0** is the first release to publish separate module artifacts (0.4.x was a single `llm4s-core`; 0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). It set no MiMa baseline, and neither did 0.5.1 or 0.6.0: the baseline is **0.7.0**, for all seven frozen modules, `llm4s-agent` included, and 1.0 follows it ([#1281](https://github.com/llm4s/llm4s/issues/1281)). Until 1.0 nothing is frozen: "Frozen at 1.0" is the tier a module will hold, not a constraint on changing it now. From the baseline, a break to a frozen module needs a MiMa filter and a migration note, so it is visible and reviewed; the compatibility promise starts at 1.0.
+**0.5.0** is the first release to publish separate module artifacts (0.4.x was a single `llm4s-core`; 0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). It set no MiMa baseline, and neither did 0.5.1 or 0.6.0: the baseline is **0.7.0**, for all seven frozen modules, `llm4s-agent` included, and 1.0 is the next release after it ([#1281](https://github.com/llm4s/llm4s/issues/1281); [After the baseline](api-stability#after-the-baseline)). Until 1.0 nothing is frozen: "Frozen at 1.0" is the tier a module will hold, not a constraint on changing it now. From the baseline, a break to a frozen module needs a MiMa filter and a migration note, so it is visible and reviewed; the compatibility promise starts at 1.0.
 
 ## Maturity Legend
 
@@ -56,9 +56,9 @@ Every top-level package of the published modules, the module that ships it, and 
 | `toolapi/builtin`, `toolapi/tools` — the built-in tools (core utilities, filesystem, HTTP, shell, Brave/DuckDuckGo/Exa search) and `ToolsConfigLoader` — **carved** | `llm4s-agent-tools` | Beta |
 | `context` — token counting: `ConversationTokenCounter`, `context.tokens` | `llm4s-core` | Frozen at 1.0 |
 | `context` — the compression pipeline: `ContextManager`, `TokenWindow`, the compressors, `SemanticBlocks`, `ArtifactStore` ([#2818](https://github.com/llm4s/llm4s/issues/2818)) | `llm4s-core` | Experimental |
-| `util` | `llm4s-core` | Frozen at 1.0 |
+| `util` — internal helpers: every type is `private[llm4s]`, so the package has no public API | `llm4s-core` | Internal: no promise <!-- tier-drift: ignore --> |
 | `syntax` | `llm4s-core` | Frozen at 1.0 |
-| `core` | `llm4s-core` | Frozen at 1.0 |
+| `core/safety` — `UsingOps` — **carved** | `llm4s-agent-tools` | Beta |
 | `http` | `llm4s-core` | Frozen at 1.0 |
 | `security` | `llm4s-core` | Frozen at 1.0 |
 | `llmconnect` (API only — see provider split below) | `llm4s-core` | Frozen at 1.0 |

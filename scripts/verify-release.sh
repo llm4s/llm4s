@@ -21,7 +21,8 @@
 # `-cyclonedx.json` SBOM, which Sonatype's 1,000-files-a-month limit has no room for (project/CentralBundle.scala; the
 # SBOMs are on the GitHub Release). Only the POM's and the jar's extras are probed, not every file's.
 #
-# Those upload rules (the pointer javadoc jar, no checksum of a signature, no SBOM on Central; #2667) apply from 0.6.1.
+# Those upload rules (the pointer javadoc jar, no checksum of a signature, no SBOM on Central; #2667) apply to every
+# release after 0.6.0 (0.7.0 is the next; the script tests for 0.6.1 or later).
 # 0.6.0 and earlier were uploaded before them, with each module's full Scaladoc in its -javadoc.jar and the extras: for
 # those the javadoc jar must only exist, and the extras are not probed.
 #
