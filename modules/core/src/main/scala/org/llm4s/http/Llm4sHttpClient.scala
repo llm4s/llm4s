@@ -987,12 +987,16 @@ final private[llm4s] class IdleTimeoutInputStream(underlying: java.io.InputStrea
     val now = System.nanoTime()
     readStarted = if (now == NotReading) now + 1 else now
     if (watch.isEmpty) watch = Some(startWatching(this, idleNanos))
+    // An InputStream reports failure by throwing, so this is a try: the read's own IOException is rethrown as the
+    // timeout that caused it, and the read is marked over however it ended.
+    // scalafix:off DisableSyntax.NoKeywordFinally
     try
       val n = read
       if (n < 0) stopWatching()
       n
     catch case e: IOException if timedOut => throw timeout(Some(e))
     finally readStarted = NotReading
+    // scalafix:on
   }
 
   override def read(): Int                                   = reading(underlying.read())

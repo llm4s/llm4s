@@ -12,6 +12,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- The `Result` object is `org.llm4s.types.Result`; `toResult` and `toLLMError` are extensions in `org.llm4s.syntax`
+  (`TryOps`, `OptionOps`, `FutureOps`, `ThrowableOps` and `syntax.syntax` are gone); `ErrorMapper` is removed and
+  `Try(...).toResult` no longer reads a 401 or 429 out of an exception's message; `Safety` is in `org.llm4s.error` and
+  `NetworkSecurity` in `org.llm4s.security`; [migration](docs/reference/migration.md#result-helpers-and-conversions-move-and-errormapper-is-removed-2821).
+- `AssistantError`, `SessionId`, `FilePath` and `DirectoryPath` move from `llm4s-core` to `llm4s-agent`, packages
+  unchanged; `AssistantError` is an `LLMError` and formats as one;
+  [migration](docs/reference/migration.md#assistanterror-and-the-assistants-newtypes-live-in-llm4s-agent-2820).
+- `APIError` and `SystemError` are removed (a provider's error response is a `ServiceError`), with the
+  `LLMError.processingFailed` / `invalidImageInput` / `apiCallFailed` shims, `LLMError.correlationId` and `show`,
+  `RecoverableError.maxRetries` and the factories nothing called; `OptimisticLockFailure.memoryId` is `recordId`;
+  `SimpleError`'s extractor binds only the message; [migration](docs/reference/migration.md#error-hierarchy-cleanup-2819).
+- `Llm4sHttpClient` implementations and test doubles implement `send`; its eight request methods are final, `MultipartPart.FilePart.path` is `content`, and `Llm4sHttpClient.create` takes `HttpClientOptions` ([#2802](https://github.com/llm4s/llm4s/issues/2802)); [migration](docs/reference/migration.md#llm4shttpclient-has-one-method-to-implement-send-2802).
+- `NetworkSecurity.validateUrl`/`validateHostname` return `Result[Seq[InetAddress]]` and refuse with a `ValidationError`; `validateIP`, `DefaultBlockedHostnames` and the default arguments are gone ([#2826](https://github.com/llm4s/llm4s/issues/2826)); [migration](docs/reference/migration.md#networksecurity-returns-the-addresses-it-vetted-and-a-refusal-is-not-retryable-2826).
+- `Llm4sConfig.providerConfigs()` returns `Result[Map[ProviderName, Result[ProviderConfig]]]`; `providers()`, `providerConfigs(map)` and `ProvidersConfig` are no longer public ([#2804](https://github.com/llm4s/llm4s/issues/2804)); [migration](docs/reference/migration.md#llm4sconfigproviderconfigs-returns-each-sections-result-providers-and-providersconfig-are-internal-2804).
+- `new ToolRegistry(tools)` is `ToolRegistry.of(tools)`, a `Result` that rejects duplicate names; timeouts, retries,
+  `executeAsync` and `executeAll` move to `ToolExecutor`; `toOpenAITool`/`getOpenAITools` are
+  `toolDefinition(strict)`/`ToolFunction.toolDefinitions(tools, strict)`;
+  [migration](docs/reference/migration.md#toolregistry-is-a-trait-built-with-toolregistryof-2816).
+- `SchemaDefinition` gains `AnyOfSchema` and `RawJsonSchema` (an exhaustive match needs both); `withRange`,
+  `withExclusiveRange`, `withLengthConstraints` and `withSizeConstraints` are removed; a strict schema makes optional
+  properties nullable; [migration](docs/reference/migration.md#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814).
+- A tool handler returns `Either[ToolHandlerError, R]` and `SafeParameterExtractor`'s getters return
+  `Either[ToolParameterError, A]`; `executeEnhanced`, the `getXEnhanced` getters and the `error` field of
+  `ToolCallErrorJson` are removed; [migration](docs/reference/migration.md#a-tool-handler-has-one-error-type-2815).
 - `EmbeddingCache` has no type parameter, returns `Result`s and has an optional `stats`; `InMemoryEmbeddingCache.create` (a `java.time.Clock`, checked arguments) replaces its constructors; `CacheStats` computes `totalRequests` and `hitRatePercent`; `CacheEntry` is internal; `CachedEmbeddingClient`'s `cacheStats` is an `Option` and `clearCache` a `Result` ([#2803](https://github.com/llm4s/llm4s/issues/2803)); [migration](docs/reference/migration.md#the-caching-types-report-failure-and-tool-loops-bypass-the-cache-2803).
 - `ModelRegistryConfig` holds one `ModelRegistrySource` (`Resource | File | Url`); `lookup` is exact and `search` finds ids by substring; `ModelMetadata` loses `inputCostPerToken`/`outputCostPerToken` (use `pricing`), its `deprecationDate` is a `LocalDate` and its `apply` has defaults; `statistics()` is removed and `listProviders()` returns a `List`; `ModelCapabilities.fromJson`/`ModelPricing.fromJson` are internal; `RequestTransformer` is sealed, `transformOptions` has no `dropUnsupported` default, and `disallowedParams` and `withOverrides` are gone ([#2823](https://github.com/llm4s/llm4s/issues/2823)); [migration](docs/reference/migration.md#model-registry-sources-exact-lookup-and-a-sealed-requesttransformer-2823).
 - `GuardrailBlocked.message` no longer holds the guardrail's reason: read `reason`;
@@ -159,6 +183,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
+- **Changed** `Result`'s helper object is in `org.llm4s.types` beside the type; the conversions (`toResult` on `Try`,
+  `Option` and `Future`, `toLLMError`) and the `Result` combinators are Scala 3 extensions in the one object
+  `org.llm4s.syntax`, imported explicitly; `Safety` moves to `org.llm4s.error` and `NetworkSecurity` to
+  `org.llm4s.security`. **Removed** `ErrorMapper`, `org.llm4s.core.safety`, the `AsyncResult` object, `Result.combine`,
+  `fromBoolean`, `fromBooleanWithValue` and `fromFuture`. An exception is now mapped by its type alone; only the
+  SDK-backed clients read an HTTP status from a message
+  ([migration](docs/reference/migration.md#result-helpers-and-conversions-move-and-errormapper-is-removed-2821)) [#2821](https://github.com/llm4s/llm4s/issues/2821).
+- **Changed** `AssistantError` and the newtypes `SessionId`, `FilePath` and `DirectoryPath`, which only the interactive
+  assistant uses, live in `llm4s-agent` (same packages). `AssistantError` is an `LLMError` (non-recoverable) and each
+  case has an explicit fixed-arity `unapply`
+  ([migration](docs/reference/migration.md#assistanterror-and-the-assistants-newtypes-live-in-llm4s-agent-2820)) [#2820](https://github.com/llm4s/llm4s/issues/2820).
+- **Removed** from `org.llm4s.error`: `APIError` (`llm4s-image`'s vision clients return a `ServiceError` with the status, and
+  the HTTP client's own error when the call got no answer), `SystemError`, the `LLMError` shims, `correlationId`, `show`,
+  `maxRetries` and the factories nothing called. **Changed**: every error has an explicit fixed-arity `unapply`, and
+  `OptimisticLockFailure.memoryId` is `recordId`
+  ([migration](docs/reference/migration.md#error-hierarchy-cleanup-2819)) [#2819](https://github.com/llm4s/llm4s/issues/2819).
+- **Changed** `Llm4sHttpClient` has one method to implement, `send(HttpRequest): Result[StreamingHttpResponse]`; `get`, `post` and the rest are final conveniences, with `sendText`/`sendRaw` for PATCH, HEAD and binary GETs. A `timeout` now bounds the wait for the response head and each read of the body (a stalled body used to block for good), `MultipartPart.FilePart` takes a content type and bytes and escapes its names, and `create` takes one `HttpClientOptions` ([migration](docs/reference/migration.md#llm4shttpclient-has-one-method-to-implement-send-2802)) [#2802](https://github.com/llm4s/llm4s/issues/2802).
+- **Fixed** `NetworkSecurity.validateUrl` and `validateHostname` return the addresses they vetted, so a caller can connect to the address that was checked, and a refusal is a non-recoverable `ValidationError` instead of a retryable `NetworkError`. `validateIP` is removed and `DefaultBlockedHostnames` is private ([migration](docs/reference/migration.md#networksecurity-returns-the-addresses-it-vetted-and-a-refusal-is-not-retryable-2826)) [#2826](https://github.com/llm4s/llm4s/issues/2826).
+- **Changed** `Llm4sSettings` is the one implementation behind `Llm4sConfig` and is `@Stable` (`Llm4sConfig.from` stays `@Experimental`). `providerConfigs()` returns each section's `Result` by name, `modelRegistryConfig()` reports a configuration it cannot read, and a provider section's `toString` no longer shows header, extra or auth values or the base URL's userinfo ([migration](docs/reference/migration.md#llm4sconfigproviderconfigs-returns-each-sections-result-providers-and-providersconfig-are-internal-2804)) [#2804](https://github.com/llm4s/llm4s/issues/2804).
+- **Fixed** An Ollama session built by `llm4s-repl` is routed by the `llm4s.http` proxy and TLS settings, which the section-map loader dropped ([#2804](https://github.com/llm4s/llm4s/issues/2804)).
 - **Fixed** `CachingLLMClient` bypasses the cache for a conversation with a tool call or tool result, so a tool loop's next step is no longer served the first step's completion; `CachedEmbeddingClient` is an `EmbeddingProvider`, as `EmbeddingClient` now is, keeps the base response's `usage`, `metadata` and `dim`, and survives a failing `EmbeddingCache`, whose operations return `Result`s ([migration](docs/reference/migration.md#the-caching-types-report-failure-and-tool-loops-bypass-the-cache-2803)) [#2803](https://github.com/llm4s/llm4s/issues/2803).
 - **Fixed** `ModelRegistryConfig.default.withFilePath(...)` (or `withUrl`) loads that source instead of failing with "exactly one of resourcePath, filePath, or url", and `ModelRegistryService.lookup` no longer resolves an unknown id to the one model whose id contains it, so an unknown model never takes another's prices and capabilities [#2823](https://github.com/llm4s/llm4s/issues/2823).
 - **Fixed** `LLMClient.validate()` checks something: one model lookup, model listing or key lookup per provider, with the client's credentials and no completion; a client with no such request returns the new `ValidationUnsupportedError` instead of `Right(())`.
@@ -194,6 +238,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
+- **Changed** `ToolArgumentValidator.default` supports `anyOf` and accepts `null` for a property that is not required,
+  which is how a model sent a strict tool definition leaves one out [#2814](https://github.com/llm4s/llm4s/issues/2814).
 - **Fixed** the JWT secret pattern is linear (60 KB of `eyJ` took 4.7 s in `SecretLeakGuardrail` and in the redaction of every log and error message), a PEM private key is redacted whole, not only its header line, and OpenAI project keys and Anthropic keys holding `-` or `_` are matched whole [#2824](https://github.com/llm4s/llm4s/issues/2824).
 - **Changed** `SecretType` is open, so `SecretLeakGuardrail` takes an application's own credential pattern: `new SecretType(name, pattern, placeholder)`
   ([migration](docs/reference/migration.md#secretpatterns-is-in-llm4s-agent-2824)) [#2824](https://github.com/llm4s/llm4s/issues/2824).
@@ -233,6 +279,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tools
 
+- **Changed** `ToolRegistry` is a trait built with `ToolRegistry.of`, which rejects duplicate tool names; the async,
+  batch, timeout and retry surface is the experimental `ToolExecutor`, and `ToolRetryPolicy` (now with `maxDelay`) and
+  `ToolExecutionStrategy.parallelWithLimit` return a `Result` instead of throwing
+  ([migration](docs/reference/migration.md#toolregistry-is-a-trait-built-with-toolregistryof-2816)) [#2816](https://github.com/llm4s/llm4s/issues/2816).
+- **Added** `AnyOfSchema` (`Schema.anyOf`) and `RawJsonSchema` (`Schema.raw`); `SchemaOf` describes a sum type as an
+  `AnyOfSchema`, so a typed tool's arguments may hold one. **Fixed** a strict schema renders an optional property as
+  nullable instead of dropping `required = false`
+  ([migration](docs/reference/migration.md#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814)) [#2814](https://github.com/llm4s/llm4s/issues/2814).
+- **Changed** a tool handler returns `Either[ToolHandlerError, R]` (`String | ToolParameterError`): a getter's error is
+  reported as `ToolCallError.InvalidArguments` with each parameter listed, a message as `HandlerError`
+  ([migration](docs/reference/migration.md#a-tool-handler-has-one-error-type-2815)) [#2815](https://github.com/llm4s/llm4s/issues/2815).
 - **Fixed** the Windows workspace command policy no longer reads the `C:` in a `findstr /IC:text` switch as a drive
   path; a real drive path in a `/IG:` value is still confined [#1738](https://github.com/llm4s/llm4s/issues/1738), [#2625](https://github.com/llm4s/llm4s/pull/2625).
 - **Fixed** `file_info` describes the filesystem root instead of throwing, and its `sizeHuman` is `1.5 KB` under every
@@ -240,6 +297,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### MCP
 
+- **Fixed** `MCPToolRegistry` returns a local tool's own error instead of `UnknownFunction`, lists a shadowed tool
+  name once, and gets timeouts and retries through `ToolExecutor` for its remote tools too [#2816](https://github.com/llm4s/llm4s/issues/2816).
+- **Fixed** an MCP tool's nested object, `anyOf` and nullable properties are described to the model as they are, not
+  as strings [#2814](https://github.com/llm4s/llm4s/issues/2814).
 - **Fixed** DEBUG logging of an MCP payload over 128 KiB no longer redacts it whole (about a second per megabyte,
   counted against the request's timeout): the preview is redacted from a prefix, or omitted where none is safe [#2774](https://github.com/llm4s/llm4s/pull/2774).
 

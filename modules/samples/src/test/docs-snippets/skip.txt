@@ -212,6 +212,6 @@ tutorials/support-assistant/part-4-help-centre.md | 5dd3497e8c | with | import o
 tutorials/support-assistant/part-5-safety-memory.md | 02ae3a144b | with | import org.llm4s.samples.tutorial.supportassistant.Part3Tools
 tutorials/support-assistant/part-5-safety-memory.md | 0a03fc5f05 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part5SafetyMemory.{ reply, safeAgent }
 guide/agents/guardrails.md | 8ad9467374 | skip | continues the imports block above with `judge`, the reader's own client: RagGuardrailsGuideSpec runs this code
-guide/agents/guardrails.md | d9a4eb6ffe | skip | uses `judge` and the reader's own search_docs tool: RagGuardrailsGuideSpec runs this code
+guide/agents/guardrails.md | 223c61d8cf | skip | uses `judge` and the reader's own search_docs tool: RagGuardrailsGuideSpec runs this code
 guide/agents/guardrails.md | f6ace44ef4 | skip | uses `judge`, the reader's own client: RagGuardrailsGuideSpec runs this code
 guide/agents/guardrails.md | ed67fab4bd | skip | uses `judge`, the reader's own client: RagGuardrailsGuideSpec runs this code

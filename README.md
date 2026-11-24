@@ -381,7 +381,8 @@ val result = for {
   weather <- ToolBuilder[Map[String, Any], String]("get_weather", "Current weather for a city", weatherSchema)
                .withHandler(args => args.getString("location").map(city => s"Sunny in $city"))
                .buildSafe()
-  agent   <- Agent.builder("weather-agent", client).withTools(new ToolRegistry(Seq(weather))).build()
+  tools   <- ToolRegistry.of(Seq(weather))
+  agent   <- Agent.builder("weather-agent", client).withTools(tools).build()
   answer  <- agent.run("What's the weather in Paris?")
 } yield answer
 ```

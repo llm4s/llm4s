@@ -66,7 +66,371 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the caching types report failure, and tool loops bypass the cache](#the-caching-types-report-failure-and-tool-loops-bypass-the-cache-2803),
 [model registry sources, exact lookup and a sealed `RequestTransformer`](#model-registry-sources-exact-lookup-and-a-sealed-requesttransformer-2823),
 [a guardrail block's message names only the guardrail](#a-guardrail-blocks-message-names-only-the-guardrail-2793),
-and [`LLMClient.validate()` checks the provider](#llmclientvalidate-checks-the-provider-2830).
+[`LLMClient.validate()` checks the provider](#llmclientvalidate-checks-the-provider-2830),
+[the error hierarchy cleanup](#error-hierarchy-cleanup-2819),
+[`AssistantError` and the assistant's newtypes live in `llm4s-agent`](#assistanterror-and-the-assistants-newtypes-live-in-llm4s-agent-2820),
+[`Result` helpers and conversions move, and `ErrorMapper` is removed](#result-helpers-and-conversions-move-and-errormapper-is-removed-2821),
+[`Llm4sHttpClient` has one method to implement, `send`](#llm4shttpclient-has-one-method-to-implement-send-2802),
+[`NetworkSecurity` returns the addresses it vetted, and a refusal is not retryable](#networksecurity-returns-the-addresses-it-vetted-and-a-refusal-is-not-retryable-2826),
+[`Llm4sConfig.providerConfigs()` returns each section's `Result`](#llm4sconfigproviderconfigs-returns-each-sections-result-providers-and-providersconfig-are-internal-2804),
+[`ToolRegistry` is a trait built with `ToolRegistry.of`](#toolregistry-is-a-trait-built-with-toolregistryof-2816),
+[`SchemaDefinition` gains a union and a raw JSON Schema case](#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814),
+and [a tool handler has one error type](#a-tool-handler-has-one-error-type-2815).
+
+## A tool handler has one error type (#2815)
+
+A handler returned `Either[String, R]`, so every failure became a `ToolCallError.HandlerError` and the structured
+errors (`InvalidArguments`, `ToolParameterError.MultipleErrors`, the `parameterErrors` of `ToolCallErrorJson`) could
+only be reached through `executeEnhanced`, which ignored the tool's own handler. A handler now returns
+`Either[ToolHandlerError, R]`, where
+
+```scala
+type ToolHandlerError = String | ToolParameterError
+```
+
+A `Left("message")` still compiles and is still a `HandlerError`. A getter's error returned as it is becomes
+`ToolCallError.InvalidArguments(toolName, parameterErrors)`:
+
+```scala
+.withHandler { args =>
+  for {
+    city    <- args.getString("city")                        // Left(ToolParameterError)
+    weather <- lookup(city).toRight(s"no such city: $city")  // Left(String)
+  } yield weather
+}
+```
+
+| Before | After |
+|---|---|
+| `getString`, `getInt`, `getDouble`, `getBoolean`, `getArray`, `getObject`: `Either[String, A]` | the same names return `Either[ToolParameterError, A]` |
+| `getStringEnhanced`, `getIntEnhanced`, ... | `getString`, `getInt`, ... |
+| `args.getOptionalInt("n").left.map(_.getMessage)` | `args.getOptionalInt("n")` |
+| `def handler(args: SafeParameterExtractor): Either[String, R]` that returns a getter's error | `Either[ToolHandlerError, R]` |
+| `args.getString("x")` where an `Either[String, A]` is needed | `args.getString("x").left.map(_.message)` |
+| `tool.handler(args)` read as an `Either[String, R]` | `tool.handler(args).left.map(ToolHandlerError.message)` |
+| `tool.executeEnhanced(args, handler)` | `tool.execute(args)`: the tool's own handler reports structured errors |
+| `SafeParameterExtractor.enhanced(json)` | `SafeParameterExtractor(json)` |
+| `validateRequired("a" -> "string", "n" -> "integer")`: `Either[List[ToolParameterError], Unit]` | `validateRequired("a" -> ToolParameterType.String, "n" -> ToolParameterType.Integer)`: `Either[ToolParameterError, Unit]`, a `MultipleErrors` when several |
+| `ToolCallErrorJson.toJson(error)("error")` | `("message")`, or `error.formatted` for the old text |
+
+What changes without a compile error:
+
+- **A missing or mistyped argument is `InvalidArguments`, not `HandlerError`**, for every tool whose handler returns
+  the getter's error, the built-in tools included. `error.message` loses the `failed with error: ` prefix, and
+  `ToolCallErrorJson.toJson` reports `errorType: "invalid_arguments"` with a `parameterErrors` array. Code that
+  matched on `HandlerError` to find an argument problem matches `InvalidArguments`.
+- **`validateRequired` takes types, not names.** A name it did not know (`"uuid"`) was checked for presence only;
+  that no longer compiles.
+- **A property whose own name has a dot** is read by that name: `getString("a.b")` returns the top-level property
+  `a.b` when there is one, and otherwise `b` inside `a` as before.
+- A handler written as a `def` or a `val` without a declared type that returns both a getter's error and a message
+  needs its type written, `Either[ToolHandlerError, R]`: Scala does not infer a union for it.
+
+`ToolCallError` is not an `LLMError`: a tool call's failure is sent back to the model as a result. Where a program
+must stop on one, map it there: `result.left.map(e => ProcessingError("tool", e.formatted))`.
+
+No Scalafix rule rewrites the getters: their names are unchanged and only the error type differs.
+
+## `SchemaDefinition` gains a union and a raw JSON Schema case (#2814)
+
+`SchemaDefinition` is sealed, so its cases had to be complete before the baseline. Two are new:
+
+- `AnyOfSchema` (`Schema.anyOf(description, first, rest*)`): a value that matches at least one alternative.
+- `RawJsonSchema` (`Schema.raw(ujson.Obj(...))`): a JSON Schema written as JSON, sent as written whatever `strict` is.
+
+**An exhaustive match on `SchemaDefinition` needs a case for each.**
+
+| Before | After |
+|---|---|
+| `schema.withRange(Some(1), Some(5))` | `schema.withMinimum(1).withMaximum(5)` |
+| `schema.withExclusiveRange(Some(0.0), None)` | `schema.withExclusiveMinimum(0.0)` |
+| `schema.withLengthConstraints(Some(1), Some(80))` | `schema.withMinLength(1).withMaxLength(80)` |
+| `schema.withSizeConstraints(max = Some(10))` | `schema.withMaxItems(10)` |
+| `SchemaOf[SumType].definition` threw `UnsupportedOperationException` | it is an `AnyOfSchema` |
+
+The removed setters replaced both bounds at once, so `withRange(max = Some(5))` cleared a minimum set before. To
+clear a bound now, pass `None` to its own setter: `withMinimum(None)`.
+
+Behaviour that changes without a compile error:
+
+- **A strict schema makes optional properties nullable.** `toJsonSchema(strict = true)` (and so
+  `toolDefinition(strict = true)`, which the OpenAI-compatible clients send) lists every property as required, as
+  before, and now adds `null` to the type of each property that is not required. Before, `required = false` was
+  dropped and the model had to invent a value. A handler reads such a property with `getOptional*`, which returns
+  `None` for `null`; `getString` on it returns a `NullParameter` error.
+- **The agent's default argument validator** accepts `null` for a property that is not required, and supports
+  `anyOf`. A `ToolSet` still refuses a schema keyword the validator cannot check, which now can only come from a
+  `RawJsonSchema` (`pattern`, `format`, `$ref`): pass a `ToolArgumentValidator` of your own for such a tool.
+- **MCP tools** describe a nested object, an `anyOf` and a nullable property as they are. They were all described
+  as strings, so a model that was sending a JSON string for an object argument now sends the object.
+- **A typed tool** (`Tool.of`, `Tool.fromMethod`) accepts an argument type that holds a sum type; it returned a
+  `Left` before. A sum type as the arguments themselves is still refused.
+- A `NullableSchema` over a schema with neither `type` nor `anyOf` (only a `RawJsonSchema`) renders as an `anyOf` of
+  that schema and `{"type": "null"}`, not as `"type": ["null"]`.
+
+`NumberSchema.isInteger` and `NullableSchema` are unchanged.
+
+## `ToolRegistry` is a trait built with `ToolRegistry.of` (#2816)
+
+`ToolRegistry` was an open class that accepted two tools with the same name (the first won on execution, both were
+sent to the provider) and carried `Future`-based execution that no llm4s module used. It is now a trait with three
+members, `tools`, `tool(name)` and `execute(request)`.
+
+| Before | After |
+|---|---|
+| `new ToolRegistry(tools)` | `ToolRegistry.of(tools)`: a `Result[ToolRegistry]`, a `ValidationError` naming any name used twice |
+| `registry.getTool(name)` | `registry.tool(name)` |
+| `registry.execute(request, config)` (took an unused `ExecutionContext`) | `ToolExecutor.execute(registry, request, config)`, no `ExecutionContext` |
+| `registry.executeAsync(request, config)` | `ToolExecutor.executeAsync(registry, request, config)` |
+| `registry.executeAll(requests, strategy, config)` | `ToolExecutor.executeAll(registry, requests, strategy, config)` |
+| `tool.toOpenAITool()` / `toOpenAITool(strict)` | `tool.toolDefinition(strict = true)` / `toolDefinition(strict)`: no default, say which |
+| `registry.getOpenAITools()` | `ToolFunction.toolDefinitions(registry.tools, strict = true)` |
+| `ToolRetryPolicy(...)` and its `with*` setters, which threw | the same calls return a `Result[ToolRetryPolicy]` |
+| `ToolExecutionStrategy.ParallelWithLimit(n)`, which threw | `ToolExecutionStrategy.parallelWithLimit(n)`: a `Result` |
+| `error.getMessage` / `error.getFormattedMessage` on a `ToolCallError` or `ToolParameterError` | `error.message` / `error.formatted` |
+
+```scala
+for {
+  tool     <- weatherTool
+  registry <- ToolRegistry.of(Seq(tool))
+  agent    <- Agent.builder("assistant", client).withTools(registry).build()
+} yield agent
+```
+
+- `ToolExecutor`, `ToolExecutionConfig`, `ToolRetryPolicy` and `ToolExecutionStrategy` are `@Experimental`. The
+  agent runtime never used them: it runs tools itself.
+- `ToolExecutor` runs every attempt through the registry's own `execute`, so a registry that implements the trait
+  (`MCPToolRegistry`) is honoured with a timeout, a retry and in a batch. Before, those paths skipped the override.
+- `ToolRetryPolicy` has a `maxDelay` (30 seconds by default, `withMaxDelay`): `delayBeforeAttempt` stops growing
+  there instead of overflowing. A policy that waited longer than that between attempts needs `maxDelay` set.
+- A class that extended `ToolRegistry` implements the trait: `tools` and `execute(request)`.
+- `MCPToolRegistry.execute` returns a local tool's own error (it used to go on to the MCP servers and report
+  `UnknownFunction`), and `tools` lists a name once: a local tool shadows an MCP tool, an earlier server a later one.
+- No Scalafix rule rewrites these: `ToolRegistry.of` and `ToolRetryPolicy(...)` change the type of the expression.
+  `CopyToWithSetters_1_0` no longer rewrites `.copy` on a `ToolRetryPolicy`.
+
+## `Llm4sConfig.providerConfigs()` returns each section's `Result`; `providers()` and `ProvidersConfig` are internal (#2804)
+
+`Llm4sConfig` and `Llm4sSettings` (from `Llm4sConfig.from(config)`) are now one implementation: every `Llm4sConfig`
+method calls the `Llm4sSettings` of the process-wide configuration. Both are `@Stable`; `Llm4sConfig.from` itself
+stays `@Experimental`.
+
+**`providerConfigs()`** returned `Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])]`. It
+returns `Result[Map[ProviderName, Result[ProviderConfig]]]`: each section's config, or the error loading it, under
+its name.
+
+```scala
+// before
+Llm4sConfig.providerConfigs().map { case (errors, configs) =>
+  errors.foreach((name, err) => println(s"${name.asName}: ${err.formatted}"))
+  configs.get(ProviderName("openai-main"))
+}
+
+// after
+Llm4sConfig.providerConfigs().map { sections =>
+  sections.foreach {
+    case (name, Left(err)) => println(s"${name.asName}: ${err.formatted}")
+    case _                 => ()
+  }
+  sections.get(ProviderName("openai-main")).flatMap(_.toOption)
+}
+// the two maps, if you still want them:
+//   sections.collect { case (name, Left(err)) => name -> err }
+//   sections.collect { case (name, Right(config)) => name -> config }
+```
+
+**Removed from the public API** (none had a caller outside llm4s-core's own tests):
+
+| Removed | Use |
+|---|---|
+| `Llm4sConfig.providers()`, `Llm4sSettings.providers()` | `providerConfigs()`, which reports each section separately |
+| `ProvidersConfigModel.ProvidersConfig` | internal now; read sections with `provider(name)` or `providerConfigs()` |
+| `Llm4sConfig.providerConfigs(map)` | internal now (it also ignored `llm4s.http`); put the section in configuration and call `provider(name)` |
+
+**`modelRegistryConfig()`** used to answer "the bundled registry" whenever it could not read `llm4s.modelRegistry`.
+A configuration that cannot be read, or a `resourcePath`, `filePath` or `url` that is not a string, is now a
+`Left(ConfigurationError)` naming the key.
+
+**`toString`**: `NamedProviderConfig.toString` shows its base URL without userinfo, query or fragment
+(`https://***@host/v1`). Do not parse it.
+
+## `NetworkSecurity` returns the addresses it vetted, and a refusal is not retryable (#2826)
+
+`NetworkSecurity.validateUrl` and `validateHostname` return `Result[Seq[InetAddress]]`, the addresses the host
+resolved to and that passed the check, in place of `Result[Unit]`. A caller that only asks "is it allowed" is
+unchanged (`.isRight`, a `for` that discards the value); a caller that connects can now connect to one of those
+addresses, which is what closes DNS rebinding. (`NetworkSecurity` is also in `org.llm4s.security` now, not
+`org.llm4s.core.safety`: see [#2821](#result-helpers-and-conversions-move-and-errormapper-is-removed-2821).)
+
+A refusal - a blocked host name or address, a protocol that is not allowed, a URL that cannot be parsed - is now a
+`ValidationError` (field `url` or `hostname`), which is not recoverable, where it was a
+`NetworkError(_, None, "ssrf-protection")`, which retry logic treats as retryable. A host name that does not resolve
+is still a `NetworkError`; its `endpoint` is now the host name.
+
+| Before | After |
+|---|---|
+| `case Left(e: NetworkError) if e.endpoint == "ssrf-protection"` | `case Left(e: ValidationError)` |
+| `validateUrl(url, additionalBlockedHostnames = hosts)` | `validateUrl(url, hosts, Set("http", "https"))` |
+| `validateUrl(url, allowedProtocols = protocols)` | `validateUrl(url, Set.empty, protocols)` |
+| `NetworkSecurity.validateIP(ip)` | `NetworkSecurity.isBlockedIP(InetAddress.getByName(ip))`, or `validateHostname(ip)` |
+| `NetworkSecurity.DefaultBlockedHostnames` | private; ask `NetworkSecurity.isBlockedHostname(host)` |
+
+`validateUrl`, `validateHostname` and `isBlockedHostname` no longer have default arguments: each has a one-argument
+form and a form taking every argument. `validateIP` is removed: it resolved host names, so it was never a check of
+an IP address alone.
+
+`llm4s-rag`'s `UrlPolicy` is unchanged: it still reports a refusal as a `NetworkError`.
+
+## `Llm4sHttpClient` has one method to implement, `send` (#2802)
+
+`Llm4sHttpClient` was eight abstract methods. It is now one, `send(request: HttpRequest): Result[StreamingHttpResponse]`;
+`get`, `post`, `postBytes`, `postMultipart`, `put`, `delete`, `postRaw` and `postStream` keep their signatures but are
+`final` conveniences over it, joined by `sendText` and `sendRaw` for a request they do not cover (a PATCH, a HEAD, a
+GET of bytes). Code that only *calls* a client is unaffected.
+
+**An implementation or test double** implements `send` alone:
+
+```scala
+// before: eight overrides
+final class FakeHttp(reply: HttpResponse) extends Llm4sHttpClient {
+  override def post(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) = Right(reply)
+  // ... get, postBytes, postMultipart, put, delete, postRaw, postStream
+}
+
+// after
+final class FakeHttp(reply: HttpResponse) extends Llm4sHttpClient {
+  def send(request: HttpRequest): Result[StreamingHttpResponse] = Right(reply.toStreaming)
+}
+```
+
+`request.method`, `request.url`, `request.headers`, `request.queryParams` and `request.body` (`HttpBody.Empty`,
+`Text`, `Bytes` or `Multipart`) say what was asked. A real transport sends `request.fullUrl`, calls
+`request.withMultipartEncoded` if it has no multipart support of its own, and wraps the body with
+`StreamingHttpResponse.withIdleTimeout(request.idleTimeout)` if it has no read timeout of its own.
+
+**A ScalaMock stub** of `get`, `post` and the rest no longer compiles, because they are final. Stub `send`, or
+replace the stub with a small class as above.
+
+**Timeouts.** A `timeout` now bounds two waits, neither a deadline for the whole call: the wait for the response's
+status line and headers, and each wait for more of the body. Before, the JDK client stopped timing once the headers
+arrived, so a response whose body stalled blocked its reader for good. A call that relied on that, reading a body
+that pauses for longer than its `timeout`, now fails (a `TimeoutError` for a buffered call, a
+`SocketTimeoutException` from a stream): raise the timeout, or set the two apart with
+`HttpRequest(...).withResponseTimeout(...).withIdleTimeout(...)` and `send`.
+
+**`MultipartPart`.** `TextField` and `FilePart` are built with `apply` and changed with `with*` setters; `copy` and
+`new` are gone. `FilePart` holds a `content` (`MultipartPart.Content.File(path)` or `Content.Bytes(bytes)`) and a
+`contentType` in place of `path`:
+
+| Before | After |
+|---|---|
+| `part.path` | `part.content` (match on `MultipartPart.Content.File(path)`) |
+| `case FilePart(name, path, filename)` | `case FilePart(name, MultipartPart.Content.File(path), filename, contentType)` |
+| `part.copy(filename = f)` | `part.withFilename(f)` |
+| *(bytes had to be written to a temporary file)* | `MultipartPart.FilePart.ofBytes(name, bytes, filename, contentType)` |
+
+Field and file names are now escaped in the `Content-Disposition` header (`"`, CR and LF percent-encoded).
+
+**`Llm4sHttpClient.create`** takes one `HttpClientOptions`:
+
+| Before | After |
+|---|---|
+| `Llm4sHttpClient.create()` | unchanged |
+| `Llm4sHttpClient.create(network)` | `Llm4sHttpClient.create(HttpClientOptions(network))` |
+| `Llm4sHttpClient.create(connectTimeout)` | `Llm4sHttpClient.create(HttpClientOptions(connectTimeout = Some(connectTimeout)))` |
+| `Llm4sHttpClient.create(network, connectTimeout)` | `Llm4sHttpClient.create(HttpClientOptions(network, Some(connectTimeout)))` |
+
+## `Result` helpers and conversions move, and `ErrorMapper` is removed (#2821)
+
+`Result`'s type and helper object are now one import, the conversions are extensions you import by name, and an
+exception is mapped to an error by its type alone. The `ResultSyntaxMoved` Scalafix rule rewrites the imports in the
+first table; `RemovedApis_1_0` reports the uses in the second.
+
+| Before | After |
+|---|---|
+| `import org.llm4s.Result` (the helper object) | `import org.llm4s.types.Result`, which is the type and the object |
+| `import org.llm4s.types.TryOps` (also `OptionOps`, `FutureOps`) | `import org.llm4s.syntax.toResult` |
+| `import org.llm4s.error.ThrowableOps._` | `import org.llm4s.syntax.toLLMError` |
+| `import org.llm4s.syntax.syntax._` | `import org.llm4s.syntax.*` |
+| `import org.llm4s.core.safety.Safety` | `import org.llm4s.error.Safety` |
+| `import org.llm4s.core.safety.NetworkSecurity` | `import org.llm4s.security.NetworkSecurity` |
+
+`org.llm4s.syntax` is now an object, not a package: `import org.llm4s.syntax.*` brings in every extension, and
+`import org.llm4s.types.*` brings in none, where it used to add `toResult` to every `Try`, `Option` and `Future`
+in the file. `ResultOps.getOrElse` and `orElse` are gone without replacement: `Either`'s own members of those
+names were always the ones called.
+
+| Removed | Use instead |
+|---|---|
+| `ErrorMapper`, `DefaultErrorMapper`, and the `(implicit em: ErrorMapper)` parameter of `toResult`, `toLLMError`, `Safety.safely` and `Safety.fromTry` | `Safety.fromThrowable(t)` for the default mapping; for your own, `Try(...).toEither.left.map(yourMapping)` |
+| `Result.combine(a, b)` | `for { x <- a; y <- b } yield (x, y)` |
+| `Result.fromBoolean(cond, error)`, `fromBooleanWithValue(cond, value, error)` | `Either.cond(cond, (), error)`, `Either.cond(cond, value, error)` |
+| `Result.fromFuture(f)`, `AsyncResult.fromFuture(f)`, `Safety.future.fromFuture(f)` | `f.toResult` (`import org.llm4s.syntax.toResult`) |
+| `AsyncResult.success(v)`, `failure(e)`, `fromResult(r)` | `Future.successful(Right(v))`, `Future.successful(Left(e))`, `Future.successful(r)`; the `AsyncResult[A]` type alias stays |
+| `Safety.fromOption(o, e)`, `Safety.mapError(r)(f)` | `o.toRight(e)`, `r.left.map(f)` |
+| `Safety.future.safely(body)` | `Future(body).toResult` |
+
+**Behaviour: no status sniffing by default.** `Try(...).toResult`, `toLLMError`, `Safety.safely`, `Safety.fromTry`
+and `Result.safely` used to turn an exception whose message named HTTP status 401 into an `AuthenticationError`
+and 429 into a `RateLimitError`, both for the provider `"unknown"`, including for code that made no HTTP call
+(`429: unexpected token` from a parser). They now give an `UnknownError` for such an exception; a cancellation, a
+socket timeout and a refused connection are classified as before. The clients built on a vendor SDK (OpenAI and
+Azure OpenAI, Anthropic, Bedrock, Spring AI) still read the status from their SDK's exceptions, and now name
+their provider on the error; the `RateLimitError` also keeps the exception's redacted message.
+
+## `AssistantError` and the assistant's newtypes live in `llm4s-agent` (#2820)
+
+`org.llm4s.error.AssistantError` and `org.llm4s.types.SessionId`, `FilePath` and `DirectoryPath` are used only by the
+interactive assistant (`org.llm4s.assistant`), so they moved with it to `llm4s-agent`. Their packages are unchanged:
+code that depends on `llm4s-agent` compiles as it is, and code that used them with `llm4s-core` alone adds
+`llm4s-agent`. The three newtypes are no longer members of the `org.llm4s.types` package object, so their binary
+names lose `package$` (`org.llm4s.types.SessionId`); recompile.
+
+`AssistantError` is now an `LLMError`, a `NonRecoverableError`, so an `Either[AssistantError, A]` is a `Result[A]`
+and an assistant failure can be returned where an `LLMError` is expected. Two things follow:
+
+| Before | After |
+|---|---|
+| `error.formatted` is `SessionError: msg [component: session-manager, sessionId: s1]` | `LLMError`'s format: `SessionError: msg[component=session-manager,sessionId=s1]` |
+| a match on `LLMError` could not see an `AssistantError` | `case e: AssistantError` matches; `LLMError.isRecoverable(e)` is `false` |
+
+Each case's extractor is now written out, with the arity it had: patterns such as
+`case AssistantError.FileError(message, path, operation, cause)` compile unchanged, and a field added later will be
+read by name.
+
+## Error hierarchy cleanup (#2819)
+
+`org.llm4s.error` loses the types, constructors and members nothing in the library used. The `RemovedApis_1_0`
+Scalafix rule reports each use of `APIError`, `SystemError` and the three `LLMError` constructors.
+
+| Before | After |
+|---|---|
+| `APIError(provider, message, Some(status))` | `ServiceError(status, provider, message)`; read `httpStatus`, an `Int`, where you read `statusCode` |
+| `APIError(provider, message)` | the error that fits: a `ServiceError` with the status, a `NetworkError`, or an error of your own |
+| `SystemError(message, cause)` | an error of your own: `final case class MyError(message: String) extends LLMError with RecoverableError` |
+| `LLMError.processingFailed(operation, message, cause)` | `ProcessingError(operation, message, cause)` |
+| `LLMError.invalidImageInput(field, value, reason)` | `InvalidInputError(field, value, reason)` |
+| `LLMError.apiCallFailed(provider, message, Some(status))` | `ServiceError(status, provider, message)` |
+| `LLMError.show(error)` | `error.formatted` |
+| `error.correlationId` | read your own MDC key; `formatted` no longer appends `[correlationId=...]` |
+| `error.maxRetries` (`RecoverableError`) | your retry policy's own limit: nothing read it |
+| `AuthenticationError.unauthorized(p)`, `invalidApiKey(p)` | `AuthenticationError(p, "Unauthorized access", "401")`, `AuthenticationError(p, "Invalid API key", "INVALID_KEY")` |
+| `TokenizerError.notFound(id)` | `TokenizerError.notAvailable(id)` |
+| `ExecutionError(...).withExitCode(1)` | `ExecutionError(message, operation, exitCode = Some(1))` |
+| `OptimisticLockFailure#memoryId`, context key `memoryId` | `recordId` |
+| `case SimpleError(message, _)` | `case SimpleError(message)` |
+| `ProcessingError(operation, message = "...")` (named argument) | `details = "..."`; also on `audioResample`, `audioConversion`, `audioTrimming` and `audioValidation` |
+| `ContextError.conversationTooLarge`, `emptyResult`, `semanticBlockingFailed`, `summarizationFailed`, `compressionFailed`, `contextPipelineFailed`, `toolCompressionFailed`, `externalizationFailed`, `tokenEstimationFailed` | removed: nothing raised them. Define an error of your own |
+
+`llm4s-image`'s vision clients (`OpenAIVisionClient`, `AnthropicVisionClient`, `GeminiVisionClient`) returned an
+`APIError`. A non-2xx answer, or a 200 with no usable text, is now a `ServiceError` carrying the status, so a 4xx is
+no longer retried by `RetryPolicy`; a call that got no answer is the HTTP client's own `NetworkError` or
+`TimeoutError`, where the OpenAI and Anthropic clients wrapped it; and a request that cannot be serialized is a
+`ProcessingError`.
+
+Every error now has an explicit `unapply` of fixed arity: `message`, then its fields in constructor order. No
+pattern changes but `SimpleError`'s. A field added later is read by name, as `RateLimitError.origin` and
+`ContentFilteredError.usage` already are.
 
 ## `LLMClient.validate()` checks the provider (#2830)
 

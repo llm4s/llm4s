@@ -249,8 +249,8 @@ llm4s {
   config-policy `prod` preset flags sections that do not (`ownApiKey`).
 - **Only the section being loaded is validated** (`ProviderSections.validated`): a section with
   no key available, or whose provider module is absent, fails only a load of that section.
-  `Llm4sConfig.providers()` is the exception - it returns every section, so validates them all;
-  `providerConfigs()` reports each section's error separately.
+  `Llm4sConfig.providerConfigs()` loads every section and reports each one's error separately, as a
+  `Left` under its name; `providers()`, which fails if any section is invalid, is `private[llm4s]`.
 - Samples: `modules/samples/src/main/resources/application.conf` defaults to `ollama-local`
   (model `llama3:latest` - `ollama pull llama3` first, or set `OLLAMA_MODEL`) and
   binds `LLM4S_PROVIDER`, `OLLAMA_MODEL` and `OLLAMA_BASE_URL` - the samples' bindings, not the
