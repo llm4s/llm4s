@@ -49,7 +49,7 @@ object LLMError {
    *
    * It is total. An error that carries neither marker - a library error whose recoverability depends on more than
    * its type, such as `EmbeddingError`, or a custom `LLMError` that does not say - is not recoverable, as
-   * [[org.llm4s.reliability.RetryPolicy.isRetryable]] and [[ErrorRecovery]] already treat it: nothing says it can
+   * [[org.llm4s.reliability.RetryPolicy.isRetryable]] already treats it: nothing says it can
    * succeed on a retry. Mix in [[RecoverableError]] or [[NonRecoverableError]] to say which an error is.
    *
    * This is wider than what the library retries by itself. [[org.llm4s.reliability.RetryPolicy.isRetryable]] is the

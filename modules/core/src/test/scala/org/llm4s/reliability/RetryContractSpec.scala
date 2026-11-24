@@ -1,7 +1,7 @@
 package org.llm4s.reliability
 
 import org.llm4s.error.*
-import org.llm4s.llmconnect.{ LLMClient, LLMClientRetry }
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -19,7 +19,7 @@ import scala.jdk.CollectionConverters.*
  *
  * `LLMError.isRecoverable` says an error may succeed if tried again, possibly after the caller does something
  * first. The retry layers retry the *identical* request, with nobody in the loop, so they retry a subset of what is
- * recoverable. That subset is `RetryPolicy`'s default rule, and `LLMClientRetry` uses the same one. This spec
+ * recoverable. That subset is `RetryPolicy`'s default rule, which `ReliableClient` applies. This spec
  * fails when a new error type is added without a row here, and when a recoverable error is not retried without a
  * documented reason.
  */
@@ -178,18 +178,17 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  "LLMClientRetry" should "retry exactly the errors the default policy retries" in {
+  "ReliableClient" should "retry exactly the errors the default policy retries, and return the last one unchanged" in {
     rows.foreach { row =>
       withClue(row.label) {
         val client = new AlwaysFailing(row.error)
-        val result = LLMClientRetry.completeWithRetry(
+        val reliable = new ReliableClient(
           client,
-          Conversation(Seq(UserMessage("hi"))),
-          CompletionOptions(),
-          maxAttempts = 3,
-          baseDelay = 1.millis,
-          sleepFn = _ => ()
+          "contract",
+          ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis)),
+          sleep = _ => ()
         )
+        val result = reliable.complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())
 
         result shouldBe Left(row.error)
         client.calls.get() shouldBe (if (row.retried) 3 else 1)

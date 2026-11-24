@@ -395,7 +395,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     assert(completion.content.contains("world"))
   }
 
-  test("a stream that fails mid-read is a recoverable NetworkError, so streamCompleteWithRetry retries it") {
+  test("a stream that fails mid-read is a recoverable NetworkError, so a ReliableClient retries it") {
     // The connection resets after the 200 arrives, before the first chunk.
     val resetting = new java.io.InputStream {
       override def read(): Int = throw new java.io.IOException("Connection reset")

@@ -16,8 +16,7 @@ import scala.util.Try
 /**
  * A stream that fails after a chunk reached the caller is not retried: a retry would deliver the
  * reply again from the start, so the caller would see "HelHello", and the provider would bill it
- * twice. `LLMClientRetry.streamCompleteWithRetry` keeps the same rule. A failure before the first
- * chunk is retried as before.
+ * twice. A failure before the first chunk is retried as before.
  */
 class ReliableClientStreamReplaySpec extends AnyFlatSpec with Matchers {
 

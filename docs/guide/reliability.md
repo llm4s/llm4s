@@ -438,8 +438,8 @@ Non-retryable errors (fail immediately):
 - ❌ `CancelledError` - the caller stopped the call
 
 **One rule.** Automatic retry is `LLMError.isRecoverable` minus the three exceptions above (a client-error response,
-an `OptimisticLockFailure` and a `CircuitOpenError`). `RetryPolicy.isRetryable`, `LLMClientRetry` and an agent graph node's default
-retry all use it, so they cannot disagree about an error. `isRecoverable` means the error may succeed if tried
+an `OptimisticLockFailure` and a `CircuitOpenError`). `RetryPolicy.isRetryable`, which `ReliableClient` applies, and an agent graph node's default
+retry both use it, so they cannot disagree about an error. `isRecoverable` means the error may succeed if tried
 again, perhaps after the caller does something; automatic retry is the part where repeating the identical request is
 enough. `RetryPolicy.custom(attempts, delayFn)` uses the same rule unless you pass your own `retryableFn`, and
 `ServiceError.isRecoverableStatus` is the same status check, so a policy that customises only the delay retries
