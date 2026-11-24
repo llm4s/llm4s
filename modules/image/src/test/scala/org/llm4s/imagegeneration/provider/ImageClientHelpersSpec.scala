@@ -81,11 +81,18 @@ class ImageClientHelpersSpec extends AnyFlatSpec with Matchers {
     OpenAIImageClient.urlToImageFormat("https://x/y") shouldBe None
   }
 
-  "OpenAIImageClient.deprecationWarningMessage" should "name the model, removal date, replacements and the deprecations page" in {
-    OpenAIImageClient.deprecationWarningMessage("dall-e-3") shouldBe
-      "dall-e-3 is deprecated and scheduled for removal on 2026-05-12. " +
-      "Migrate to gpt-image-1, gpt-image-1-mini, gpt-image-1.5. " +
-      "See https://platform.openai.com/docs/deprecations."
+  "OpenAIImageClient.retirementWarning" should "name the model, shutdown date, replacements and the deprecations page" in {
+    OpenAIImageClient.retirementWarning("dall-e-3") shouldBe Some(
+      "OpenAI shuts down dall-e-3 on 2026-05-12, after which api.openai.com refuses it. " +
+        "Use gpt-image-2.6-sunburst or gpt-image-2.6-flare. " +
+        "See https://developers.openai.com/api/docs/deprecations."
+    )
+    OpenAIImageClient.retirementWarning("gpt-image-1").get should include("2026-10-23")
+    OpenAIImageClient.retirementWarning("gpt-image-1.5").get should include("2026-12-01")
+  }
+
+  it should "have nothing to say about the default model" in {
+    OpenAIImageClient.retirementWarning(org.llm4s.imagegeneration.OpenAIConfig.DefaultModel) shouldBe None
   }
 
   "HuggingFaceClient.validatePrompt" should "reject an empty or blank prompt" in {

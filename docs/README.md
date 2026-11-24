@@ -16,7 +16,7 @@ Beginner-friendly guides:
 ### 📖 [User Guide](https://llm4s.org/guide/)
 
 Available guides:
-- **[Image Generation](guide/image-generation.md)** - DALL-E and image providers
+- **[Image Generation](guide/image-generation.md)** - OpenAI GPT Image and other image providers
 - **[Speech](guide/speech.md)** - STT and TTS
 
 Other features are documented via examples and design documents.

@@ -155,9 +155,9 @@ case class ImageGenerationOptions(
   negativePrompt: Option[String] = None,
   samplerName: Option[String] = None, // Optional sampler name
   // New options for GPT Image models
-  quality: Option[String] = None,        // "standard" or "hd"
-  style: Option[String] = None,          // "vivid" or "natural"
-  responseFormat: Option[String] = None, // "url" or "b64_json"
+  quality: Option[String] = None,        // GPT Image: "low", "medium", "high", "auto"; DALL·E: "standard", "hd"
+  style: Option[String] = None,          // DALL·E only: "vivid" or "natural"
+  responseFormat: Option[String] = None, // DALL·E only: "url" or "b64_json" (GPT Image always returns base64)
   outputFormat: Option[String] = None,   // "png", "jpeg", "webp"
   background: Option[String] = None,     // "transparent", "opaque", "auto"
   outputCompression: Option[Int] = None, // 0-100
@@ -312,17 +312,18 @@ object HuggingFaceConfig {
 }
 
 /**
- * Configuration for OpenAI DALL-E API.
+ * Configuration for the OpenAI Images API.
  *
  * @param apiKey Your OpenAI API key. This is required for authentication.
- * @param model The DALL-E model version to use (dall-e-2 or dall-e-3).
+ * @param model The image model, for both generation and editing: a GPT Image model (any id starting `gpt-image`);
+ *              defaults to [[OpenAIConfig.DefaultModel]].
  * @param timeout Request timeout.
  */
 case class OpenAIConfig(
   /** OpenAI API key */
   apiKey: Secret,
-  /** Model to use (dall-e-2, dall-e-3, or gpt-image-1) */
-  model: String = "dall-e-2",
+  /** Image model, used for generation and editing */
+  model: String = OpenAIConfig.DefaultModel,
   /** Base URL for OpenAI API */
   baseUrl: String = "https://api.openai.com/v1",
   /** Request timeout */
@@ -330,6 +331,15 @@ case class OpenAIConfig(
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.DALLE
   override def toString: String = s"OpenAIConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
+}
+
+object OpenAIConfig {
+
+  /**
+   * The default image model: the default of OpenAI's image edits endpoint, and the replacement its deprecations page
+   * names for the GPT Image models it is shutting down (checked 2026-11-24).
+   */
+  val DefaultModel: String = "gpt-image-2.6-sunburst"
 }
 
 /**
@@ -540,12 +550,12 @@ object ImageGeneration {
    * OpenAI API for image generation.
    *
    * @param apiKey Your OpenAI API key (required).
-   * @param model The model version to use. Defaults to gpt-image-1.
+   * @param model The image model to use. Defaults to [[OpenAIConfig.DefaultModel]].
    * @return Either an error or an `ImageGenerationClient` instance configured for OpenAI.
    */
   def openAIClient(
     apiKey: String,
-    model: String = "dall-e-2"
+    model: String = OpenAIConfig.DefaultModel
   ): Either[LLMError, ImageGenerationClient] = {
     val config = OpenAIConfig(apiKey = Secret(apiKey), model = model)
     client(config)
@@ -566,7 +576,7 @@ object ImageGeneration {
     prompt: String,
     apiKey: String,
     options: ImageGenerationOptions = ImageGenerationOptions(),
-    model: String = "dall-e-2"
+    model: String = OpenAIConfig.DefaultModel
   ): Either[LLMError, GeneratedImage] = {
     val config = OpenAIConfig(apiKey = Secret(apiKey), model = model)
     generateImage(prompt, config, options)

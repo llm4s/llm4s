@@ -92,6 +92,7 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [tracing backend aliases and the removal of `Tracing.create`](#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799),
 [image metrics as `ImageMetrics` in `llm4s-image`](#image-metrics-are-imagemetrics-in-llm4s-image-2801),
 [the Hugging Face image client on Inference Providers](#the-hugging-face-image-client-calls-inference-providers-2832),
+[the OpenAI image client's default model](#the-openai-image-client-defaults-to-gpt-image-26-sunburst-2884),
 [which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824),
 [`llm4s.providers.provider` is now `llm4s.defaultProvider`](#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806),
 [`Llm4sConfig` takes `ProviderName`, and `embeddings()` returns the config alone](#llm4sconfig-takes-providername-and-embeddings-returns-the-config-alone-2804)
@@ -463,6 +464,19 @@ to; it now posts to Hugging Face's own `hf-inference` provider on the
 |---|---|
 | `Parameters(guidance_scale, inferenceSteps, negative_prompt, seed)` | `Parameters(guidance_scale, num_inference_steps, negative_prompt, width, height, seed)` |
 | `HuggingFaceConfig(apiKey, model, timeout)` | `HuggingFaceConfig(apiKey, model, timeout, baseUrl)` |
+
+## The OpenAI image client defaults to `gpt-image-2.6-sunburst` (#2884)
+
+OpenAI shut down `dall-e-2`, the client's old default, on 2026-05-12, and `editImage` always sent `dall-e-2`.
+
+- **The default model** (`OpenAIConfig.DefaultModel`, also the default of `ImageGeneration.openAIClient` and
+  `generateWithOpenAI`) is `gpt-image-2.6-sunburst`. An explicit `model` is kept.
+- **`editImage` sends the configured model**, with `size = auto` when no size is given (a GPT Image model; a legacy
+  model still keeps the source image's size).
+- **For a GPT Image model** the client never sends `response_format`, and refuses `responseFormat = Some("url")` and
+  `style` with an `ImageValidationError` before any request: those models always return base64 and take no style.
+- **`OpenAIImageClient.deprecationWarningMessage` is removed**; `retirementWarning(model): Option[String]` covers every
+  image model OpenAI has shut down or is shutting down, with OpenAI's replacements.
 
 ## `Secret` or `Secret.token`: which one stays registered (#2824)
 

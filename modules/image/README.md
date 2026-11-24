@@ -15,7 +15,7 @@ the current version and how to add it.
 Image generation (`org.llm4s.imagegeneration`):
 
 - `ImageGeneration`: factory and convenience methods; `ImageGenerationClient`: the client trait
-- `OpenAIImageClient` (GPT Image models and DALL-E), `StabilityAIClient`, `StableDiffusionClient` (a Stable Diffusion
+- `OpenAIImageClient` (GPT Image models), `StabilityAIClient`, `StableDiffusionClient` (a Stable Diffusion
   WebUI server), `HuggingFaceClient` (Hugging Face Inference Providers, `hf-inference`), in `org.llm4s.imagegeneration.provider`
 - `InstrumentedImageGenerationClient` and `ImagePricingRegistry`: metrics and cost tracking around any client
 

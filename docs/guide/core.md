@@ -35,7 +35,7 @@ the options around it.
 - **[Multimodal Content](multimodal)** - Send images and documents in a user message or a tool result, and check before the request whether the provider takes them
 - **[Media Types](media-types)** - `llm4s-media`: the `MediaType`, `MediaCategory` and `MediaSource` vocabulary that multimodal messages, image generation and RAG extraction share
 - **[Capability-Typed Clients](capabilities)** - Check once that a model can see images or call tools, and let the compiler refuse an unchecked client (experimental)
-- **[Image Generation](image-generation)** - Generate images with OpenAI (DALL-E, GPT Image), Stability AI, Hugging Face or a Stable Diffusion server
+- **[Image Generation](image-generation)** - Generate images with OpenAI GPT Image, Stability AI, Hugging Face or a Stable Diffusion server
 - **[Speech](speech)** - Speech-to-text (STT) and text-to-speech (TTS), local and cloud
 - **[STT Domain Model](stt-domain-model)** - `STTOptions`, `WordTimestamp`, `Transcription` and the `STTError` cases
 - **[Jev decision model](jev)** - Ask TypeSafe's Jev typed questions (Noul, Choice, Score) and get typed answers: a decision client, not a chat model
