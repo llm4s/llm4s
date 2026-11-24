@@ -31,6 +31,6 @@ LLM4S from a JVM language other than Scala: `llm4s-java-api` and the modules bui
 
 ## Kotlin
 
-- **[Kotlin](/getting-started/installation#for-kotlin-coroutines-and-flow)** - `llm4s-kotlin-api`: suspend functions and `Flow`s over the Java API (experimental). It has no guide page of its own; the link goes to its section of the installation page.
+- **[Kotlin](kotlin)** - `llm4s-kotlin-api`: suspend functions, `Flow` streaming, agents with tools and the Kotlin DSL (experimental)
 
 Building with Maven, Gradle or JBang? See [Build Tools and Playgrounds](../getting-started/build-tools).

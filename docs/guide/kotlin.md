@@ -2,9 +2,10 @@
 layout: page
 title: Kotlin
 description: "Call an LLM from Kotlin with llm4s-kotlin-api: suspend functions, Flow streaming, agents with tools, the Kotlin DSL, cancellation and LLMException."
-search_title: "Call LLMs from Kotlin with LLM4S: coroutines, Flow and agents"
-parent: User Guide
-nav_order: 21
+search_title: "Call LLMs from Kotlin with LLM4S: coroutines, Flow, agents"
+parent: Java and Kotlin
+nav_order: 412
+grand_parent: User Guide
 ---
 
 # Kotlin
@@ -48,7 +49,7 @@ has the steps.
 ## A first call
 
 `Llm4s.createDefaultClient()` builds a client from the default provider section of `application.conf` (the one
-`llm4s.providers.provider` names; see [Configuration](../getting-started/configuration)). `complete` is a suspend
+`llm4s.defaultProvider` names; see [Configuration](../getting-started/configuration)). `complete` is a suspend
 function, so call it from a coroutine. `LLMClientKt` is `AutoCloseable`, so `use` closes it:
 
 ```kotlin
