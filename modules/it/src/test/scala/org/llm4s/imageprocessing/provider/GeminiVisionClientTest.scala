@@ -3,7 +3,7 @@ package org.llm4s.imageprocessing.provider
 import org.llm4s.security.Secret
 import org.llm4s.imageprocessing.config.GeminiVisionConfig
 import org.llm4s.imageprocessing.provider.geminiclient.GeminiVisionClient
-import org.llm4s.it.Tier
+import org.llm4s.it.{ GeminiSmoke, Tier }
 import org.llm4s.it.tags.Cloud
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -26,18 +26,15 @@ import java.nio.file.{ Path, Paths }
 @Cloud
 class GeminiVisionClientTest extends AnyFlatSpec with Matchers with EitherValues {
 
-  private val apiKey: Option[String] =
-    Option(System.getenv("GOOGLE_API_KEY"))
-      .filter(_.nonEmpty)
-      .orElse(Option(System.getenv("GEMINI_API_KEY")).filter(_.nonEmpty))
+  private val apiKey: Option[String] = GeminiSmoke.apiKey
 
-  private val Model = "gemini-3.6-flash"
+  private val Model = GeminiSmoke.Model
 
   /** The 64x64 PNG fixture in `modules/it/src/test/resources`. */
   private def testImage: Path = Paths.get(getClass.getResource("/test-image.png").toURI)
 
   "GeminiVisionClient" should "analyze an image with the real Gemini API" in {
-    Tier.require(apiKey.isDefined, "GOOGLE_API_KEY (or GEMINI_API_KEY) not set")
+    Tier.require(apiKey.isDefined, s"${GeminiSmoke.KeyEnvVars} not set")
 
     val client = new GeminiVisionClient(GeminiVisionConfig(apiKey = Secret(apiKey.get), model = Model))
 

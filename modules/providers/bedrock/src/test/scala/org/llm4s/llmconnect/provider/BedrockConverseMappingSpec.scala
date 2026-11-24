@@ -98,6 +98,26 @@ class BedrockConverseMappingSpec extends AnyWordSpec with Matchers {
       without.obj.contains("toolConfig") shouldBe false
     }
 
+    "send a Schema.raw tool's schema as written (#2903)" in {
+      val raw = ujson.Obj(
+        "type" -> "object",
+        "properties" -> ujson.Obj(
+          "city" -> ujson.Obj("type" -> "string", "pattern" -> "^[A-Z]"),
+          "unit" -> ujson.Obj("$ref" -> "#/$defs/unit")
+        ),
+        "required" -> ujson.Arr("city"),
+        "$defs"    -> ujson.Obj("unit" -> ujson.Obj("enum" -> ujson.Arr("c", "f")))
+      )
+      val tool = ToolBuilder[String]("get_weather", "Weather", Schema.raw(raw))
+        .withHandler(_ => Right("sunny"))
+        .buildSafe()
+        .toOption
+        .value
+
+      val body = requestBody(Conversation(Seq(UserMessage("hi"))), CompletionOptions(tools = Seq(tool)))
+      body("toolConfig")("tools")(0)("toolSpec")("inputSchema")("json") shouldBe raw
+    }
+
     "send the model id in the path" in {
       val path = new AtomicReference[String]("")
       withServer("/") { ex =>
