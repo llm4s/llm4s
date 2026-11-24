@@ -13,7 +13,7 @@ import org.llm4s.trace.TraceEvent
 
 object PositionalPatternsGainFieldsTest {
   def vision(capabilities: ModelCapabilities): Boolean = capabilities match {
-    case ModelCapabilities(_, _, vision, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => vision.contains(true)
+    case ModelCapabilities(_, _, vision, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => vision.contains(true)
   }
 
   // gained finishReason since 0.6.0 (RFC 0009 PR 6, #2687)

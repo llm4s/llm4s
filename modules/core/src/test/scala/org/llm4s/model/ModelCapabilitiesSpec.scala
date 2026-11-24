@@ -384,6 +384,36 @@ class ModelCapabilitiesSpec extends AnyFlatSpec with Matchers {
     off.supportsBudgetThinking shouldBe Some(false)
   }
 
+  it should "parse supports_sampling_params, and leave it unknown when absent or null" in {
+    ModelCapabilities.fromJson(ujson.Obj("supports_sampling_params" -> false)).supportsSamplingParams shouldBe
+      Some(false)
+    ModelCapabilities.fromJson(ujson.Obj("supports_sampling_params" -> true)).supportsSamplingParams shouldBe Some(true)
+    ModelCapabilities.fromJson(ujson.Obj()).supportsSamplingParams shouldBe None
+    ModelCapabilities.fromJson(ujson.Obj("supports_sampling_params" -> ujson.Null)).supportsSamplingParams shouldBe None
+  }
+
+  it should "reject a sampling parameter by the flag, and any parameter by disallowed_params" in {
+    val none = ModelCapabilities(supportsSamplingParams = Some(false))
+    for (param <- List("temperature", "top_p", "top_k")) none.rejectsParam(param) shouldBe true
+    none.rejectsParam("presence_penalty") shouldBe false
+
+    val listed = ModelCapabilities(disallowedParams = Some(Set("temperature", "logprobs")))
+    listed.rejectsParam("temperature") shouldBe true
+    listed.rejectsParam("logprobs") shouldBe true
+    listed.rejectsParam("top_p") shouldBe false
+
+    for (caps <- List(ModelCapabilities(), ModelCapabilities(supportsSamplingParams = Some(true))))
+      caps.rejectsParam("temperature") shouldBe false
+  }
+
+  it should "read thinking_always_on as a model that cannot turn thinking off, unless the entry says by effort" in {
+    ModelCapabilities.fromJson(ujson.Obj("thinking_always_on" -> true)).supportsThinkingOff shouldBe Some(false)
+    ModelCapabilities.fromJson(ujson.Obj("thinking_always_on" -> false)).supportsThinkingOff shouldBe None
+    ModelCapabilities
+      .fromJson(ujson.Obj("thinking_always_on" -> true, "supports_none_reasoning_effort" -> true))
+      .supportsThinkingOff shouldBe Some(true)
+  }
+
   it should "leave the thinking and effort flags unknown when the keys are absent or null" in {
     val absent = ModelCapabilities.fromJson(ujson.Obj())
     val nulls = ModelCapabilities.fromJson(
