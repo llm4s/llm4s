@@ -65,7 +65,7 @@ object EmbeddingCacheExample {
 
     for {
       cache <- InMemoryEmbeddingCache.create(maxSize = 1000, ttl = Some(1.hour))
-      cached = new CachedEmbeddingClient(EmbeddingClient(counting), cache)
+      cached = CachedEmbeddingClient(EmbeddingClient(counting), cache)
       first  <- step(cached, "1. first call", Seq("hello world"))
       second <- step(cached, "2. same text again", Seq("hello world"))
       third  <- step(cached, "3. one cached, one new", Seq("hello world", "something new"))

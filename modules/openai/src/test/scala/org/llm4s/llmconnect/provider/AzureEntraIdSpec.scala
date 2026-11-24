@@ -110,7 +110,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         .value
       config.apiKey.reveal shouldBe ""
       config.toString should include("auth=entra-id")
-      val client = OpenAIClient(config).value
+      val client = OpenAIClient.azure(config).value
       client.complete(hello, CompletionOptions()).value.content shouldBe "hi"
       client.close()
       seen.asScala.toList shouldBe List(Some("Bearer token-1") -> None)
@@ -129,7 +129,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi"))
     } { baseUrl =>
       val tokens = new CountingTokens
-      val client = OpenAIClient(AzureConfig.keyless(BaseUrl(baseUrl), ModelName("my-deploy"), tokens)).value
+      val client = OpenAIClient.azure(AzureConfig.keyless(BaseUrl(baseUrl), ModelName("my-deploy"), tokens)).value
       client.complete(hello, CompletionOptions()).left.value shouldBe an[AuthenticationError]
       client.complete(hello, CompletionOptions()).value.content shouldBe "hi"
       client.close()
@@ -156,7 +156,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
           s"""{"error":{"message":"request with $token is denied"}}"""
         )
       } { baseUrl =>
-        val client  = OpenAIClient(AzureConfig.keyless(BaseUrl(baseUrl), ModelName("my-deploy"), own)).value
+        val client  = OpenAIClient.azure(AzureConfig.keyless(BaseUrl(baseUrl), ModelName("my-deploy"), own)).value
         val message = client.complete(hello, CompletionOptions()).left.value.message
         client.close()
         authorizations.asScala.toList shouldBe List(s"Bearer $token")
@@ -176,7 +176,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       else LocalProviderTestServer.sendSseResponse(exchange, LocalProviderTestServer.openAISseBody(Seq("he", "llo")))
     } { baseUrl =>
       val tokens = new CountingTokens
-      val client = OpenAIClient(AzureConfig.keyless(BaseUrl(baseUrl), ModelName("my-deploy"), tokens)).value
+      val client = OpenAIClient.azure(AzureConfig.keyless(BaseUrl(baseUrl), ModelName("my-deploy"), tokens)).value
       client.streamComplete(hello, CompletionOptions())(_ => ()).isLeft shouldBe true
       client.streamComplete(hello, CompletionOptions())(_ => ()).value.content shouldBe "hello"
       client.close()
@@ -195,7 +195,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         def current(): Result[Secret]                   = Left(AuthenticationError("azure", "no managed identity"))
         override def invalidate(rejected: Secret): Unit = ()
       }
-      val client = OpenAIClient(AzureConfig.keyless(BaseUrl(baseUrl), ModelName("my-deploy"), failing)).value
+      val client = OpenAIClient.azure(AzureConfig.keyless(BaseUrl(baseUrl), ModelName("my-deploy"), failing)).value
       val error  = client.complete(hello, CompletionOptions()).left.value
       client.close()
       error shouldBe an[AuthenticationError]

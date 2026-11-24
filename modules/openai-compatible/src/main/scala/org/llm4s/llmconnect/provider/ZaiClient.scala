@@ -4,6 +4,7 @@ import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model.{
@@ -16,10 +17,7 @@ import org.llm4s.llmconnect.model.{
 }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.{ EffortMapping, ModelRegistryService }
-import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
-
-import scala.util.Try
 
 /**
  * LLM client for the Z.ai API.
@@ -39,9 +37,12 @@ import scala.util.Try
  * @param metrics records per-call latency and token-usage events;
  *                use [[org.llm4s.metrics.MetricsCollector.noop]] when metrics are not needed
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere
+ *
+ * The class is private to this module: it is an [[OpenAICompatibleClient]] with this vendor's settings and
+ * dialect, and the companion's factory returns it as one. Outside the module, build it with that factory, or
+ * let `LLMConnect.getClient` build it from a named section.
  */
-@Stable
-class ZaiClient(
+final private[provider] class ZaiClient(
   config: ZaiConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -65,33 +66,23 @@ class ZaiClient(
       httpClient
     )
 
+@Stable
 object ZaiClient {
 
-  def apply(
-    config: ZaiConfig,
-    metrics: MetricsCollector = MetricsCollector.noop
-  )(using ModelRegistryService): Result[ZaiClient] =
-    OpenAICompatibleClient
-      .requireKey("Z.ai", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new ZaiClient(config, metrics)).toResult)
-
-  def apply(
-    config: ZaiConfig,
-    metrics: MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService): Result[ZaiClient] =
-    apply(config, metrics, exchangeLogging, Llm4sHttpClient.FromConfig)
-
-  /** As the three-argument `apply`, sending requests through `httpClient`, which the caller keeps owning. */
-  def apply(
-    config: ZaiConfig,
-    metrics: MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging,
-    httpClient: Llm4sHttpClient
-  )(using ModelRegistryService): Result[ZaiClient] =
-    OpenAICompatibleClient
-      .requireKey("Z.ai", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new ZaiClient(config, metrics, exchangeLogging, httpClient)).toResult)
+  /**
+   * The Z.ai client for `config`, an [[OpenAICompatibleClient]], or why one cannot be built: a blank `apiKey` with no `ApiKeyProvider` is a
+   * `Left(ConfigurationError)`, and nothing is thrown.
+   *
+   * @param config  the provider's configuration.
+   * @param options the metrics collector, exchange logging and HTTP client of the client; none of them by default.
+   *                `options.httpClient`, when set, carries every request and stays the caller's to close.
+   */
+  def apply(config: ZaiConfig, options: LlmClientOptions = LlmClientOptions())(using
+    ModelRegistryService
+  ): Result[OpenAICompatibleClient] =
+    OpenAICompatibleClient.keyed("Z.ai", config.apiKey, config.apiKeyProvider)(options)(
+      new ZaiClient(config, _, _, _)
+    )
 }
 
 /**

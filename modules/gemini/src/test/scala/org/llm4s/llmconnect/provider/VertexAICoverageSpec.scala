@@ -595,14 +595,12 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     result.isRight shouldBe true
   }
 
-  it should "construct a client using the two-argument (config + metrics) overload" in {
-    val result = VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop)
-    result.isRight shouldBe true
-  }
-
-  it should "construct a client using the three-argument (config + metrics + logging) overload" in {
-    val result = VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled)
-    result.isRight shouldBe true
+  it should "construct a client with options" in {
+    val options = org.llm4s.llmconnect.LlmClientOptions(
+      metrics = org.llm4s.metrics.MetricsCollector.noop,
+      exchangeLogging = ProviderExchangeLogging.Disabled
+    )
+    VertexAIClient(testConfig, options).isRight shouldBe true
   }
 
   it should "return a recoverable NetworkError when the stream fails mid-read" in {

@@ -5,6 +5,7 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, ProcessingError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.auth.CachingAccessTokenProvider
 import org.llm4s.llmconnect.config.PerplexityConfig
@@ -78,9 +79,12 @@ import scala.util.{ Try, Using }
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging optional provider exchange logging.
  * @param httpClient      the HTTP client; by default one built from the config's network settings.
+ *
+ * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
+ * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
  */
 @Experimental
-class PerplexityClient(
+final class PerplexityClient private[provider] (
   config: PerplexityConfig,
   protected val metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -99,10 +103,10 @@ class PerplexityClient(
   private val replayOrigin = ReplayOrigin(ProviderName, config.model.asString)
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else [[PerplexityClient.DefaultRequestTimeout]]. */
-  protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(DefaultRequestTimeout)
+  private[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(DefaultRequestTimeout)
 
   /** How long a streamed call may take: the section's `timeouts.stream`, else [[PerplexityClient.DefaultStreamTimeout]]. */
-  protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(DefaultStreamTimeout)
+  private[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(DefaultStreamTimeout)
 
   /** The key to send: asked of the config's `ApiKeyProvider` on every request when it has one, else `apiKey`. */
   private def currentApiKey(): Result[String] =
@@ -422,18 +426,17 @@ object PerplexityClient {
   val ValidationTimeout: FiniteDuration = 10.seconds
 
   /**
-   * Builds a [[PerplexityClient]], wrapping any construction-time exception in a `Left`.
+   * A [[PerplexityClient]] for `config`, or why one cannot be built: a config its provider refuses, or anything the
+   * client's construction fails on, is a `Left`, never an exception.
+   * `options.httpClient` is ignored: this client builds its own.
    *
-   * @param config          model, key, endpoint and web-search setting.
-   * @param metrics         receives per-call latency and token-usage events.
-   * @param exchangeLogging optional provider exchange logging.
+   * @param config  the provider's configuration.
+   * @param options the metrics collector, exchange logging and HTTP client of the client; none of them by default.
    */
-  def apply(
-    config: PerplexityConfig,
-    metrics: MetricsCollector = MetricsCollector.noop,
-    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-  )(using ModelRegistryService): Result[PerplexityClient] =
-    Try(new PerplexityClient(config, metrics, exchangeLogging)).toResult
+  def apply(config: PerplexityConfig, options: LlmClientOptions = LlmClientOptions())(using
+    ModelRegistryService
+  ): Result[PerplexityClient] =
+    Try(new PerplexityClient(config, options.metrics, options.exchangeLogging)).toResult
 
   private val JsonModeUnsupported: LLMError = ValidationError(
     "responseFormat",

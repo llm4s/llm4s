@@ -200,6 +200,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([migration](docs/reference/migration.md#an-open-circuit-is-a-circuitopenerror-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
 - `new ReliableClient(...)` no longer compiles: the constructor is private. Use `ReliableClient(client, name, config)` and `.withMetrics(collector)`; the `clock` and `sleep` parameters are no longer public
   ([migration](docs/reference/migration.md#reliableclient-has-a-private-constructor-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- `new AnthropicClient(...)`, and `new` on any other provider client, no longer compiles: the clients are final with a non-public constructor and one factory, `X(config, options: LlmClientOptions)`; the positional `apply(config, metrics, exchangeLogging, httpClient)` overloads are removed, an Azure client is `OpenAIClient.azure(config, options)`, and the vendor client types on `OpenAICompatibleClient` (`DeepSeekClient`, `ZaiClient`, `OpenRouterClient`, `MistralClient`, `CohereClient`, `XaiClient`) are no longer public: their factories return an `OpenAICompatibleClient`
+  ([migration](docs/reference/migration.md#provider-clients-are-final-with-one-factory-2910)) [#2910](https://github.com/llm4s/llm4s/issues/2910).
+- `new CachingLLMClient(...)` and `new CachedEmbeddingClient(...)` no longer compile: both are final with a private constructor. Drop the `new`; `CachingLLMClient`'s `clock` parameter is `.withClock(clock)`
+  ([migration](docs/reference/migration.md#cachingllmclient-and-cachedembeddingclient-have-private-constructors-2910)) [#2910](https://github.com/llm4s/llm4s/issues/2910).
 - `RegexSafetyManager.safeCompile` and `safeFind` return `Result` (a `ValidationError`), not `Either[String, _]`; `safeFind`'s `maxSteps`, `safeMatches`, `compileLiteralCaseInsensitive`, `replaceAllLiteral`, `replaceFirstLiteral` and `RegexComplexityException` are removed
   ([migration](docs/reference/migration.md#regexsafetymanager-returns-result-2825)) [#2825](https://github.com/llm4s/llm4s/issues/2825).
 - `SecretPatterns` (`SecretType`, `SecretMatch`) moved from `org.llm4s.util` in `llm4s-core` to `org.llm4s.agent.guardrails.patterns` in `llm4s-agent`; `redactAllWithPlaceholder` and `SecretMatch`'s setters are removed, and `SecretType.PrivateKeyPem` matches the whole key
@@ -274,6 +278,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Providers
 
 - **Changed** `MistralModelLister` is `@Experimental`, as the Mistral dialect it lists for is [#2916](https://github.com/llm4s/llm4s/issues/2916).
+- **Changed** the provider clients (`AnthropicClient`, `GeminiClient`, `VertexAIClient`, `OllamaClient`, `OpenAIClient`, `OpenAICompatibleClient`, `BedrockClient`, `WatsonXClient`, `PerplexityClient`) are final, or closed to subclasses outside their module, with one factory taking `LlmClientOptions`; a config a client refuses is a `Left`, never an exception. The six vendor clients on `OpenAICompatibleClient` are private classes, built by `DeepSeekClient(config, options)` and its siblings as an `OpenAICompatibleClient`
+  ([migration](docs/reference/migration.md#provider-clients-are-final-with-one-factory-2910)) [#2910](https://github.com/llm4s/llm4s/issues/2910).
 - **Fixed** `HuggingFaceClient` posted to `api-inference.huggingface.co`, which Hugging Face retired: it calls
   `router.huggingface.co/hf-inference` in the documented text-to-image format, defaults to a model `hf-inference` serves
   and checks health through the Hub API ([migration](docs/reference/migration.md#the-hugging-face-image-client-calls-inference-providers-2832)) [#2832](https://github.com/llm4s/llm4s/issues/2832).
@@ -469,6 +475,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `ReliabilityConfig.validate` (and `CircuitBreakerConfig.validate`, `RateLimitConfig.validate`): a `failureThreshold` or `burstCapacity` below 1 or a negative `requestsPerMinute` is a `ValidationError`, which a `ReliableClient` returns from every call [#2797](https://github.com/llm4s/llm4s/issues/2797).
 - **Changed** `ReliableClient`'s constructor is private: build one with `ReliableClient(underlying, providerName, config)` (`config` defaults to `ReliabilityConfig.default`) and add a collector with `.withMetrics(collector)`
   ([migration](docs/reference/migration.md#reliableclient-has-a-private-constructor-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- **Changed** `CachingLLMClient` and `CachedEmbeddingClient` are final with a private constructor: build one with the companion's `apply`, and give a `CachingLLMClient` a clock of your own with `withClock`
+  ([migration](docs/reference/migration.md#cachingllmclient-and-cachedembeddingclient-have-private-constructors-2910)) [#2910](https://github.com/llm4s/llm4s/issues/2910).
 - **Changed** A `TracingBackend` declares its own `aliases`, and `llm4s-observability-otel` declares `otel`, which core's mode parser no longer names; `TRACING_MODE=otel` works as before. Two backends answering to one name are a `ConfigurationError` naming both
   ([migration](docs/reference/migration.md#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799)) [#2799](https://github.com/llm4s/llm4s/issues/2799).
 - **Removed** `Tracing.create`, which logged a missing or failing backend and returned `NoOpTracing`: `Tracing.fromSettings` returns the error
@@ -498,6 +506,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `conversation`) and give the reason as the violation, where field and reason were swapped [#2796](https://github.com/llm4s/llm4s/issues/2796).
 - **Fixed** the credential registry no longer keeps each value it refuses for being under 8 characters: it counts them and
   logs the first refusal only, so many short `Secret`s neither grow memory nor stay held [#2888](https://github.com/llm4s/llm4s/issues/2888).
+- **Fixed** `ContextManager` no longer digests the leading system messages, so the system prompt survives history
+  compression; the digests it made are dropped when the newest turn fits only without them [#2918](https://github.com/llm4s/llm4s/issues/2918).
 
 ### Agent runtime
 
@@ -636,6 +646,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its filters compare exactly instead of with `LIKE` on the JSON text; earlier rows still read
   [#2759](https://github.com/llm4s/llm4s/issues/2759);
   [migration](docs/reference/migration.md#sqlitevectorstore-escapes-metadata-and-filters-exactly-2759).
+- **Fixed** An S3 listing goes on past a page whose every object is filtered out, so `RAG.sync` no longer deletes the
+  documents after it; a truncated page without a next one is an error [#2914](https://github.com/llm4s/llm4s/issues/2914).
 
 ### Observability
 
@@ -678,6 +690,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** the docs site groups the User Guide sidebar, and the contributor pages moved from `/reference/` to `/contribute/` (old addresses redirect); the watsonx, Perplexity and Bedrock setup sections, typed tools and the media and store-contract pages are filled in, and `LLMClient`, `AgentStatus`, `ModelRegistryService` and `MCPClient` say how to obtain and use them [#2834](https://github.com/llm4s/llm4s/issues/2834).
 - **Changed** the support table (`docs/_data/support.yml`) has one entry per release line, with `security_until` and `ended_on` dates that the Support Policy page shows; `scripts/check-support-table.sh` checks the fields each status needs, and the release guide says what to change at each release ([Update the support table](docs/reference/release.md#update-the-support-table)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
 - **Changed** the Compatibility and Deprecation Policy no longer says provider modules aim to version independently: every module shares the release version, which `llm4s-bom` pins [#2835](https://github.com/llm4s/llm4s/issues/2835).
+- **Changed** the policy pages state one release plan: 0.7.0 sets the MiMa baseline and 1.0 is the next release, with a break in between recorded as a MiMa filter and a migration note; the artifacts are documented as classpath libraries (no JPMS or OSGi metadata), and pre-1.0 release cadence, the 1.0 Scope `util` and `core` rows and the pre-tag checklist are corrected [#1281](https://github.com/llm4s/llm4s/issues/1281).
 - **Fixed** 23 more guide pages have their Scala blocks compiled (agents, streaming, durable checkpointers, memory, ZIO, cats-effect, RAG, speech, tracing and others), which corrected code that did not compile against the API; guide specs fail when their copy of a page drifts ([#2833](https://github.com/llm4s/llm4s/issues/2833)).
 
 ### Build & tooling

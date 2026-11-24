@@ -44,6 +44,7 @@ import com.anthropic.models.messages.{
 import org.llm4s.media.{ ImageMediaType, MediaSource, MediaType }
 
 import scala.collection.mutable
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ AnthropicConfig, AnthropicWorkloadIdentity, ProviderConfig }
@@ -145,9 +146,12 @@ import scala.util.{ Failure, Success, Try, Using }
  * @param config  `AnthropicConfig` carrying the API key, model name, and base URL.
  * @param metrics Receives per-call latency and token-usage events.
  *                Defaults to `MetricsCollector.noop`.
+ *
+ * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
+ * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
  */
 @Stable
-class AnthropicClient(
+final class AnthropicClient private[provider] (
   config: AnthropicConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
@@ -1522,33 +1526,20 @@ object AnthropicClient {
   }
 
   /**
-   * Constructs an [[AnthropicClient]], wrapping any construction-time
-   * exception in a `Left`.
+   * A [[AnthropicClient]] for `config`, or why one cannot be built: a config its provider refuses, or anything the
+   * client's construction fails on, is a `Left`, never an exception.
+   * `options.httpClient` is ignored: this client sends its requests through the vendor's SDK.
    *
-   * @param config  `AnthropicConfig` with API key, model, and base URL.
-   * @param metrics Receives per-call latency and token-usage events.
-   *                Defaults to `MetricsCollector.noop`.
-   * @return `Right(client)` on success; `Left(LLMError)` if the underlying
-   *         SDK client cannot be initialised.
+   * @param config  the provider's configuration.
+   * @param options the metrics collector, exchange logging and HTTP client of the client; none of them by default.
    */
-  def apply(
-    config: AnthropicConfig,
-    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-  )(using ModelRegistryService): Result[AnthropicClient] =
+  def apply(config: AnthropicConfig, options: LlmClientOptions = LlmClientOptions())(using
+    ModelRegistryService
+  ): Result[AnthropicClient] =
     AnthropicConfig
       .validate(config)
       .flatMap(checkTokenFile)
-      .flatMap(valid => Try(new AnthropicClient(valid, metrics)).toResult)
-
-  def apply(
-    config: AnthropicConfig,
-    metrics: org.llm4s.metrics.MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService): Result[AnthropicClient] =
-    AnthropicConfig
-      .validate(config)
-      .flatMap(checkTokenFile)
-      .flatMap(valid => Try(new AnthropicClient(valid, metrics, exchangeLogging)).toResult)
+      .flatMap(valid => Try(new AnthropicClient(valid, options.metrics, options.exchangeLogging)).toResult)
 
   /**
    * The identity token file checks of [[org.llm4s.llmconnect.config.AnthropicWorkloadIdentity.checkTokenFile AnthropicWorkloadIdentity.checkTokenFile]], for a config with workload

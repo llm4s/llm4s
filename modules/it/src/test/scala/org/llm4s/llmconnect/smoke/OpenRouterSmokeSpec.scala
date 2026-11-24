@@ -48,7 +48,7 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
   "OpenRouter" should "complete a basic request" in {
     Tier.require(apiKey.isDefined, "OPENROUTER_API_KEY not set")
 
-    val client     = new OpenRouterClient(config(apiKey.get))
+    val client     = OpenRouterClient(config(apiKey.get)).fold(e => fail(e.message), identity)
     val completion = client.complete(conversation, CompletionOptions())
 
     withClue(s"Completion failed: ${completion.swap.toOption}") {
@@ -60,7 +60,7 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
   it should "stream a response" in {
     Tier.require(apiKey.isDefined, "OPENROUTER_API_KEY not set")
 
-    val client = new OpenRouterClient(config(apiKey.get))
+    val client = OpenRouterClient(config(apiKey.get)).fold(e => fail(e.message), identity)
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
     val result = client.streamComplete(conversation, CompletionOptions())(c => chunks += c)
 
@@ -72,7 +72,7 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
   }
 
   it should "return AuthenticationError for invalid key" in {
-    val client = new OpenRouterClient(config("sk-or-invalid-key-for-testing"))
+    val client = OpenRouterClient(config("sk-or-invalid-key-for-testing")).fold(e => fail(e.message), identity)
     val result = client.complete(conversation, CompletionOptions())
 
     result.isLeft shouldBe true
@@ -84,13 +84,13 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
   override protected def providerLabel: String                          = "OpenRouter"
   override protected def apiKeyEnvVar: String                           = "OPENROUTER_API_KEY"
   override protected def contractKey: Option[String]                    = apiKey
-  override protected def contractClient(key: String): Result[LLMClient] = Right(new OpenRouterClient(config(key)))
+  override protected def contractClient(key: String): Result[LLMClient] = OpenRouterClient(config(key))
 
   registerCapabilityContract()
 
   // ---- validate(): GET /key (#2855) ----
   override protected def invalidKeyClient: Option[Result[LLMClient]] =
-    Some(Right(new OpenRouterClient(config("sk-or-invalid-key-for-testing"))))
+    Some(OpenRouterClient(config("sk-or-invalid-key-for-testing")))
 
   registerValidationContract()
 }

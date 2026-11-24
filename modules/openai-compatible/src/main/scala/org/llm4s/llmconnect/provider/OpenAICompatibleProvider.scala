@@ -6,7 +6,6 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ OpenAICompatibleConfigKeys, OpenAICompatibleModelLister, ProviderModelLister }
-import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAICompatibleConfig, ProviderConfig }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, TokenExchangeConfig }
@@ -355,11 +354,4 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
     given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[OpenAICompatibleConfig](id, config)
-      .flatMap(
-        OpenAICompatibleClient(
-          _,
-          context.metrics,
-          context.exchangeLogging,
-          Llm4sHttpClient.suppliedOrFromConfig(context.httpClient)
-        )
-      )
+      .flatMap(OpenAICompatibleClient(_, context.options))

@@ -4,7 +4,6 @@ import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ DeepSeekModelLister, ProviderModelLister }
-import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, DeepSeekConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{
   ProviderBuildContext,
@@ -47,11 +46,4 @@ object DeepSeekProvider extends ProviderDescriptor:
     given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[DeepSeekConfig](id, config)
-      .flatMap(
-        DeepSeekClient(
-          _,
-          context.metrics,
-          context.exchangeLogging,
-          Llm4sHttpClient.suppliedOrFromConfig(context.httpClient)
-        )
-      )
+      .flatMap(DeepSeekClient(_, context.options))

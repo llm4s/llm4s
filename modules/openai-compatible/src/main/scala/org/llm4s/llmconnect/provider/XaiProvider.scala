@@ -4,7 +4,6 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ ProviderModelLister, XaiModelLister }
-import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, XaiConfig }
 import org.llm4s.llmconnect.spi.{
   ProviderBuildContext,
@@ -50,5 +49,5 @@ object XaiProvider extends ProviderDescriptor:
     ProviderDescriptor
       .expectConfig[XaiConfig](id, config)
       .flatMap(
-        XaiClient(_, context.metrics, context.exchangeLogging, Llm4sHttpClient.suppliedOrFromConfig(context.httpClient))
+        XaiClient(_, context.options)
       )

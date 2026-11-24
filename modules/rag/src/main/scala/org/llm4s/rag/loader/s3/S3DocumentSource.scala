@@ -297,8 +297,8 @@ object S3DocumentSource {
  * Iterator over S3 objects with automatic pagination.
  *
  * Returns Result[S3Object] rather than throwing. A failed ListObjectsV2 call - on the first
- * page or a later one - ends the iteration with a single `Left`, after any objects from
- * earlier pages; an empty bucket yields nothing at all. The two must stay distinguishable:
+ * page or a later one - or a truncated page with no new token ends the iteration with a single `Left`,
+ * after any objects already listed; an empty bucket yields nothing at all. The two must stay distinguishable:
  * a sync that took a failed listing for an empty bucket would delete every indexed document.
  */
 private class S3ObjectIterator(
@@ -316,26 +316,18 @@ private class S3ObjectIterator(
   private var pendingError: Option[NetworkError] = None
   private var errorReturned: Boolean             = false
 
-  override def hasNext: Boolean =
-    // If we have a pending error that hasn't been returned yet, we have one more item
-    if (pendingError.isDefined && !errorReturned) {
-      true
-    } else if (currentBatch.hasNext) {
-      true
-    } else if (hasMore && pendingError.isEmpty) {
-      fetchNextBatch()
-      // After fetching, check again - either we have items, or we have an error to return
-      currentBatch.hasNext || (pendingError.isDefined && !errorReturned)
-    } else {
-      false
-    }
+  override def hasNext: Boolean = {
+    // A page whose every object is filtered out is not the end: the pages after it may have objects
+    while (!currentBatch.hasNext && hasMore) fetchNextBatch()
+    currentBatch.hasNext || (pendingError.isDefined && !errorReturned)
+  }
 
   override def next(): Result[S3Object] = {
     if (!hasNext) throw new NoSuchElementException("No more S3 objects")
 
-    // Return pending error if we have one
+    // The error follows the objects already listed
     pendingError match {
-      case Some(err) if !errorReturned =>
+      case Some(err) if !currentBatch.hasNext =>
         errorReturned = true
         Left(err)
       case _ =>
@@ -362,24 +354,29 @@ private class S3ObjectIterator(
           .filter(obj => matchesExtension(obj.key()))
 
         currentBatch = objects
-        continuationToken = Option(response.nextContinuationToken())
         hasMore = response.isTruncated
+        val next = Option(response.nextContinuationToken())
+        // Neither the end (what is left unlisted would be deleted) nor a page to ask for (it would be this one again)
+        if (hasMore && (next.isEmpty || next == continuationToken))
+          fail("the listing is truncated but has no next page", None)
+        continuationToken = next
 
       case Failure(ex) =>
-        // Store the error to return as a Left on the next iteration. The caller receives it
-        // (SourceBackedLoader turns it into a LoadResult.ListingFailure, which fails RAG.sync),
-        // so log it briefly here; the exception travels as the error's cause.
-        logger.warn(s"Failed to list S3 objects from s3://$bucket/$prefix: ${ex.getMessage}")
-        pendingError = Some(
-          NetworkError(
-            s"Failed to list S3 objects from s3://$bucket/$prefix: ${ex.getMessage}",
-            Some(ex),
-            "s3"
-          )
-        )
-        hasMore = false
+        fail(ex.getMessage, Some(ex))
         currentBatch = Iterator.empty
     }
+  }
+
+  /**
+   * Ends the listing with an error, returned as a Left after the objects already listed. The caller receives it
+   * (SourceBackedLoader turns it into a LoadResult.ListingFailure, which fails RAG.sync), so it is logged briefly;
+   * an exception travels as the error's cause.
+   */
+  private def fail(reason: String, cause: Option[Throwable]): Unit = {
+    val message = s"Failed to list S3 objects from s3://$bucket/$prefix: $reason"
+    logger.warn(message)
+    pendingError = Some(NetworkError(message, cause, "s3"))
+    hasMore = false
   }
 
   private def matchesExtension(key: String): Boolean = {

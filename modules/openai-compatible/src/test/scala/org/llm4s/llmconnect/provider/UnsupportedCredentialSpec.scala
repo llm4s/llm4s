@@ -72,12 +72,11 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
       error.message should include("OpenRouter")
     }
 
-    "refuse workloadIdentity from the three-argument apply" in {
+    "refuse workloadIdentity whatever the options" in {
       configurationError(
         OpenRouterClient(
           workloadIdentityConfig,
-          org.llm4s.metrics.MetricsCollector.noop,
-          org.llm4s.llmconnect.ProviderExchangeLogging.Disabled
+          org.llm4s.llmconnect.LlmClientOptions(metrics = org.llm4s.metrics.MetricsCollector.noop)
         )
       ).message should include("workloadIdentity")
     }
@@ -176,6 +175,45 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
         )
       )
       thrown.getMessage should include("apiKey")
+    }
+
+    "return a ConfigurationError, not throw, from the settings-and-dialect factory" in {
+      val options = org.llm4s.llmconnect.LlmClientOptions()
+      // a blank static key
+      configurationError(
+        OpenAICompatibleClient(
+          settings(OpenAICompatibleClient.Credential.Static(Secret(" "))),
+          OpenAICompatibleDialect.Standard,
+          options
+        )
+      ).message should include("apiKey")
+      // a dialect Authorization header over a rotating key
+      val rotating =
+        OpenAICompatibleClient.Credential.Rotating(() => Right(org.llm4s.types.ProviderModelTypes.ApiKey("sk")))
+      configurationError(
+        OpenAICompatibleClient(
+          settings(rotating),
+          OpenAICompatibleDialect.standard(Seq("Authorization" -> "Bearer other"), streamUsage = true),
+          options
+        )
+      ).message should include("Authorization")
+      // a refreshed bearer over plain http
+      val dynamic = OpenAICompatibleClient.Credential.Dynamic(() => Right(Secret("t")))
+      configurationError(
+        OpenAICompatibleClient(
+          settings(dynamic).withBaseUrl(BaseUrl("http://api.example/v1")),
+          OpenAICompatibleDialect.Standard,
+          options
+        )
+      ).message should include("baseUrl")
+    }
+
+    "build a client from settings and a dialect" in {
+      OpenAICompatibleClient(
+        settings(OpenAICompatibleClient.Credential.Anonymous),
+        OpenAICompatibleDialect.Standard,
+        org.llm4s.llmconnect.LlmClientOptions()
+      ).value.providerId.map(_.asString) shouldBe Some("p")
     }
 
     "treat a generic config's blank apiKey as none, sending no Authorization header" in {

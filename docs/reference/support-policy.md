@@ -59,8 +59,9 @@ There is no long-term-support line before a 2.0 exists.
 
 Releases are cut from a tag by CI ([Release Process](../contribute/release)). There is no fixed schedule: releases happen when the
 maintainers have a set of changes ready, and the date of each is in the table above and on the GitHub Releases page.
-Minor releases come at most about once a quarter. Maven Central's upload limits allow roughly one release a month, and
-a security patch takes that slot ahead of a planned release.
+Before 1.0 they are closer together: 0.5.0, 0.5.1 and 0.6.0 came within two months, and 0.7.0 and 1.0 follow as each
+is ready. From 1.0, minor releases come at most about once a quarter. Maven Central's upload limits allow roughly one
+release a month at any time, and a security patch takes that slot ahead of a planned release.
 
 ---
 
@@ -72,6 +73,8 @@ generated into the [Compatibility Matrix](compatibility-matrix). In short:
 - **Scala:** Scala 3 only ({{ site.data["tested-versions"].scala }}). Scala 2.13 support is deferred to after 1.0.
   Calling LLM4S from Scala 2.13 through the TASTy reader is best effort: CI probes it, but it is not a supported configuration and there are no 2.13 artifacts ([the TASTy reader guide](../getting-started/scala-2-13)).
 - **JDK:** the minimum is JDK {{ site.data["tested-versions"].jdk_minimum }} for every artifact, and CI runs JDK {{ site.data["tested-versions"].jdk_ci | join: ", " }}.
+- **Packaging:** classpath libraries. The artifacts are not JPMS modules or OSGi bundles
+  ([why](compatibility-policy#supported-platforms)).
 
 The Scala 3 minor series and the minimum JDK are raised only in a **minor** release, never in a patch release. Each
 raise is announced one minor release ahead, in that release's CHANGELOG and notes, which is the end-of-support notice

@@ -304,6 +304,9 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
   "XaiClient.apply" should "refuse a blank API key, and build a client from a valid config" in {
     XaiClient(config("http://localhost:1").withApiKey(Secret(""))).isLeft shouldBe true
     XaiClient(config("http://localhost:1")).isRight shouldBe true
-    XaiClient(config("http://localhost:1"), org.llm4s.metrics.MetricsCollector.noop).isRight shouldBe true
+    XaiClient(
+      config("http://localhost:1"),
+      org.llm4s.llmconnect.LlmClientOptions(metrics = org.llm4s.metrics.MetricsCollector.noop)
+    ).isRight shouldBe true
   }
 }

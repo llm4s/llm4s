@@ -75,9 +75,9 @@ class SmokeContractOfflineSpec
     ).value
 
   private def openRouter(): LLMClient =
-    new OpenRouterClient(
+    OpenRouterClient(
       OpenAIConfig.fromValues(ModelName("fake-model"), Secret("test-key"), BaseUrl(server.baseUrl)).value
-    )
+    ).value
 
   private def cohere(): LLMClient =
     CohereClient(
