@@ -213,7 +213,7 @@ Broader idea list (agents, RAG, data pipelines, hardware design, demos): [GSoC P
 | Area | Direction |
 |------|-----------|
 | **Pre-1.0 releases** | Regular previews while APIs stabilize. 0.4.x was the artifact rename and fixes; **0.5.0** completes the modularisation and publishes the separate artifacts; **0.6.0** adds subagents and production agent adapters; **0.7.0** sets the MiMa baseline. Releases are few, since each costs part of the Sonatype quota. |
-| **v1.0** | The release after the 0.7.0 baseline: the frozen modules are binary compatible across 1.x, the Scalafix migration rules are published, known limitations are documented. Scala 3 only. |
+| **v1.0** | The release after the 0.7.0 baseline, with none in between ([After the baseline](api-stability#after-the-baseline)): the frozen modules are binary compatible across 1.x, the Scalafix migration rules are published, known limitations are documented. Scala 3 only. |
 | **Post-1.0** | Semantic Versioning with binary compatibility checks for stable modules; deferred Scala 2.13 support for the frozen spine is considered then ([#874](https://github.com/llm4s/llm4s/issues/874)). Experimental modules may retain separate compatibility notes. |
 
 ## Design Documents
