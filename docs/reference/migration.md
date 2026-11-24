@@ -2066,8 +2066,11 @@ message with tool calls goes with its tool results, so the window never starts a
 returns `Left(ContextError)` when the pinned messages exceed the budget, or when not even the newest turn fits beside
 them, where it returned `Right` with an empty or pinned-only conversation. `ContextManager.manageContext` returns that
 `Left` from its last step; raise the budget, or trim the system prompt. To leave room for the turns,
-`ContextManager` now caps the history digests at half the budget left after headroom (and at
-`summaryTokenTarget`, as before).
+`ContextManager` now caps the history digests at half the budget left after headroom and the leading system messages
+(and at `summaryTokenTarget`, as before), and drops the digests it made when the newest turn fits only without them. It
+no longer digests the leading system messages: a system prompt that exceeds the budget after headroom, or leaves no room
+for the newest turn, is now that `Left`, where a digest replaced it. With an LLM client the squeeze runs in cases where
+digesting the prompt used to avoid it; a squeeze that fails is a `Left`, as before.
 
 **Externalization needs a store.** With `artifactStore = None` (the default of `DeterministicCompressor.compressToCap`
 and of `ContextManager`), tool output over 8 KB used to become an `[EXTERNALIZED: key ...]` pointer into a store
