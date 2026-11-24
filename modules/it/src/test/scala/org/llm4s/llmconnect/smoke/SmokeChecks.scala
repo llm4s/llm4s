@@ -311,9 +311,7 @@ object SmokeChecks {
   private def fromChunks(chunks: Seq[StreamedChunk]): Either[String, Completion] = {
     val accumulator = StreamingAccumulator("")
     chunks.foreach(accumulator.addChunk)
-    accumulator.toCompletion
-      .map(c => c.withToolCalls(c.message.toolCalls.toList))
-      .left
+    accumulator.toCompletion.left
       .map(e => s"the streamed chunks did not reassemble: ${e.message}")
   }
 

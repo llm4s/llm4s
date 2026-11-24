@@ -24,10 +24,8 @@ object MemoryTestSupport:
         Completion(
           id = s"memory-${calls.get}",
           created = Instant.EPOCH,
-          content = text,
           model = "memory-model",
           message = AssistantMessage(text, Seq.empty),
-          toolCalls = Nil,
           usage = Some(TokenUsage(promptTokens = 3, completionTokens = 2, totalTokens = 5))
         )
       )

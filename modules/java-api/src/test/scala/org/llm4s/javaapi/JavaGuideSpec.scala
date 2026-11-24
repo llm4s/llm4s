@@ -90,7 +90,7 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
     val sent: ArrayBuffer[Conversation] = ArrayBuffer.empty
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       sent += c
-      Right(Completion("id", Instant.EPOCH, answer, "m", AssistantMessage(answer)))
+      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(answer)))
     }
     override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
@@ -164,10 +164,8 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
             Completion(
               id = "r1",
               created = Instant.EPOCH,
-              content = "Let me look.",
               model = "gpt-4o-mini-2024-07-18",
-              message = AssistantMessage("Let me look."),
-              toolCalls = List(ToolCall("c1", "weather", ujson.Obj("city" -> "Paris"))),
+              message = AssistantMessage("Let me look.", Seq(ToolCall("c1", "weather", ujson.Obj("city" -> "Paris")))),
               usage = Some(TokenUsage(promptTokens = 12, completionTokens = 5, totalTokens = 17)),
               estimatedCost = Some(0.00042)
             )
@@ -415,10 +413,8 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
               Completion(
                 "id",
                 Instant.EPOCH,
-                "",
                 "m",
-                AssistantMessage(contentOpt = None, toolCalls = calls),
-                toolCalls = calls
+                AssistantMessage(contentOpt = None, toolCalls = calls)
               )
             )
           else super.complete(c, o)
@@ -556,7 +552,7 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
       val closes = new java.util.concurrent.atomic.AtomicInteger(0)
       val underlying = new LLMClient {
         override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-          Right(Completion("id", Instant.EPOCH, "ok", "m", AssistantMessage("ok")))
+          Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("ok")))
         override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit) = complete(c, o)
         override def getContextWindow(): Int                                                         = 4096
         override def getReserveCompletion(): Int                                                     = 512

@@ -356,7 +356,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.now(),
-      content = "test content",
       model = "test-model",
       message = org.llm4s.llmconnect.model.AssistantMessage("test content"),
       usage = Some(sampleUsage),
@@ -371,7 +370,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.now(),
-      content = "test content",
       model = "test-model",
       message = org.llm4s.llmconnect.model.AssistantMessage("test content"),
       usage = Some(sampleUsage)
@@ -384,7 +382,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.now(),
-      content = "test content",
       model = "test-model",
       message = org.llm4s.llmconnect.model.AssistantMessage("test content")
     )

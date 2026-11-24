@@ -55,7 +55,7 @@ class AgentPekkoSpec extends AnyFlatSpec with TestTimeLimit with Matchers with B
   private val Patience = 60.seconds
 
   private def completion(text: String): Completion =
-    Completion(id = "id", created = Instant.EPOCH, content = text, model = "m", message = AssistantMessage(Some(text)))
+    Completion(id = "id", created = Instant.EPOCH, model = "m", message = AssistantMessage(Some(text)))
 
   private def answering(text: String): LLMClient =
     new Fixtures.Scripted(_ => Right(completion(text)), () => Right(completion(text)))
@@ -245,11 +245,8 @@ class AgentPekkoSpec extends AnyFlatSpec with TestTimeLimit with Matchers with B
     Completion(
       id = s"t$i",
       created = Instant.EPOCH,
-      content = "",
       model = "m",
-      message = AssistantMessage("", calls),
-      toolCalls = calls.toList
-    )
+      message = AssistantMessage("", calls))
   }
 
   /** Records every request; answers with `reply(callIndex)`. */

@@ -355,7 +355,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
   }
 
   private def completion(text: String): Completion =
-    Completion("c1", Instant.EPOCH, text, "test-model", AssistantMessage(text))
+    Completion("c1", Instant.EPOCH, "test-model", AssistantMessage(text))
 
   private class FixedClient(answer: Completion) extends LLMClient {
     @volatile var closed                                                                              = false

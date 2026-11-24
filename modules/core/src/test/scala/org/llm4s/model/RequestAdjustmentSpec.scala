@@ -147,7 +147,7 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
     TransformationResult(CompletionOptions(), messages).adjustments shouldBe empty
     TransformationResult(CompletionOptions(), messages).withAdjustments(adjustments).adjustments shouldBe adjustments
 
-    val completion = Completion("id", Instant.EPOCH, "hi", "m", AssistantMessage("hi"))
+    val completion = Completion("id", Instant.EPOCH, "m", AssistantMessage("hi"))
     completion.adjustments shouldBe empty
     completion.withAdjustments(adjustments).adjustments shouldBe adjustments
     completion.withAdjustments(adjustments).withAdjustments(Nil) shouldBe completion
@@ -158,14 +158,12 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
     val usage       = TokenUsage(1, 2, 3)
     val message     = AssistantMessage("there")
     val citations   = List(Citation("https://example.invalid"))
-    val set = Completion("id", Instant.EPOCH, "hi", "m", AssistantMessage("hi"))
+    val set = Completion("id", Instant.EPOCH, "m", AssistantMessage("hi"))
       .withAdjustments(adjustments)
       .withId("id2")
       .withCreated(Instant.EPOCH.plusSeconds(1))
-      .withContent("there")
       .withModel("m2")
       .withMessage(message)
-      .withToolCalls(Nil)
       .withUsage(usage)
       .withEstimatedCost(0.5)
       .withCitations(citations)
@@ -184,8 +182,8 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
 
     val created = Instant.EPOCH
     val message = AssistantMessage("hi")
-    Completion("id", created, "hi", "m", message, Nil, None, None, Nil) shouldBe
-      Completion("id", created, "hi", "m", message)
+    Completion("id", created, "m", message, None, None, Nil) shouldBe
+      Completion("id", created, "m", message)
   }
 
   test("a client that sends no reasoning setting reports a requested one as dropped, and nothing otherwise") {

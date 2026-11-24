@@ -45,8 +45,7 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
       if toolRules && broken then Left(ProcessingError("reference-tool-calls", "malformed tool call"))
       else
         Right(
-          Completion("r", Instant.EPOCH, text, "m", AssistantMessage(Option(text).filter(_.nonEmpty), calls))
-            .withToolCalls(calls)
+          Completion("r", Instant.EPOCH, "m", AssistantMessage(Option(text).filter(_.nonEmpty), calls))
             .withFinishReason(finish)
         )
 

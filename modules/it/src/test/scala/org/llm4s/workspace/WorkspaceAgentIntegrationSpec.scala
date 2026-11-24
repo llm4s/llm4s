@@ -79,10 +79,8 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
         Completion(
           id = s"mock-$turn",
           created = Instant.EPOCH,
-          content = message.content,
           model = "mock-model",
           message = message,
-          toolCalls = toolCalls,
           usage = None
         )
       )

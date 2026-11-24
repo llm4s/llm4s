@@ -163,13 +163,11 @@ final class ScriptedLLMClient private (
     Completion(
       id = s"scripted-${index + 1}",
       created = Instant.EPOCH,
-      content = reply.content,
       model = reply.model,
       message = AssistantMessage(
         contentOpt = Some(reply.content).filter(_.nonEmpty),
         toolCalls = calls
       ),
-      toolCalls = calls,
       usage = reply.usage,
       // as a provider would report it, on complete and stream alike
       finishReason = if (calls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop

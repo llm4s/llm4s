@@ -76,10 +76,8 @@ final class ScriptedClient(reply: (Conversation, Int) => Result[AssistantMessage
       Completion(
         id = s"scripted-$callNumber",
         created = Instant.EPOCH,
-        content = message.content,
         model = "scripted",
         message = message,
-        toolCalls = message.toolCalls.toList,
         finishReason = if (message.toolCalls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop
       )
     }

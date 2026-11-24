@@ -50,7 +50,7 @@ class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
 
   private def calling: Completion = {
     val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
-    Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall))
+    Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(toolCall)))
   }
 
   private def echoTool = ToolBuilder[Map[String, Any], EchoResult](

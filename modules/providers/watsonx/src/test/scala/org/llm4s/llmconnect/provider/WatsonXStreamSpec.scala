@@ -365,7 +365,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
           callEvent(piece(0, None, Some("a"), Some("{}")), piece(1, None, Some("b"), Some("{}"))),
           finishEvent("tool_calls")
         )
-      )._1.map(_.toolCalls.map(_.id)).getOrElse(fail("expected success"))
+      )._1.map(_.toolCalls.map(_.id).toList).getOrElse(fail("expected success"))
     val first  = ids()
     val second = ids()
     first.distinct should have size 2

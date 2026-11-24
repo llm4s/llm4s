@@ -30,7 +30,6 @@ class LLMGuardrailThresholdSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test-id",
           created = Instant.EPOCH,
-          content = reply,
           model = "test-model",
           message = AssistantMessage(reply),
           usage = None

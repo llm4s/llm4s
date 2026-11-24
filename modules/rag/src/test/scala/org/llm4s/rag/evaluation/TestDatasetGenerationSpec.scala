@@ -21,7 +21,6 @@ class TestDatasetGenerationSpec extends AnyFlatSpec with Matchers with EitherVal
         Completion(
           id = "test-completion",
           created = Instant.EPOCH,
-          content = response,
           model = "test-model",
           message = AssistantMessage(contentOpt = Some(response))
         )

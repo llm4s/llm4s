@@ -19,7 +19,6 @@ class AgentIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def completion(text: String) = Completion(
     id = "test-id",
     created = Instant.EPOCH,
-    content = text,
     model = "test-model",
     message = AssistantMessage(contentOpt = Some(text))
   )

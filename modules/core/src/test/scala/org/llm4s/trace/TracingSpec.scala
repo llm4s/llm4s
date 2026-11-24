@@ -335,7 +335,6 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "comp-123",
       created = Instant.ofEpochSecond(1234567890L),
-      content = "Hello",
       model = "gpt-4",
       message = AssistantMessage(Some("Hello"), Seq.empty),
       usage = Some(TokenUsage(100, 50, 150))

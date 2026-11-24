@@ -25,7 +25,7 @@ class DerivedAgentOutputSpec extends AnyFlatSpec with Matchers {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       val reply = replies(asked.size)
       asked.add(options)
-      Right(Completion("id", Instant.EPOCH, reply, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage(reply)))
     }
 
     override def streamComplete(

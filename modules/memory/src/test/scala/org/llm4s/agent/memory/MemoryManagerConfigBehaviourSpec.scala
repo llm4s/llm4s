@@ -128,7 +128,6 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
         Completion(
           id = "extract",
           created = Instant.EPOCH,
-          content = response,
           model = "mock-model",
           message = AssistantMessage(response),
           usage = None

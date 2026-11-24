@@ -145,7 +145,7 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
     }
 
     "record the served tier traceCompletion is given" in withTracing() { (tracing, spans) =>
-      val completion = Completion("chatcmpl-1", at, "hi", "gpt-4o", AssistantMessage("hi"))
+      val completion = Completion("chatcmpl-1", at, "gpt-4o", AssistantMessage("hi"))
         .withServedTier(ServiceTier.Auto)
       tracing.traceCompletion(completion, "gpt-4o") shouldBe Right(())
       spans().loneElement.getAttributes.get(AttributeKey.stringKey("llm4s.service_tier")) shouldBe "auto"
@@ -441,7 +441,6 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
       val completion = Completion(
         id = "chatcmpl-1",
         created = at,
-        content = "4",
         model = "gpt-4o",
         message = AssistantMessage("4")
       )

@@ -96,7 +96,7 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     private def reply: Completion = {
       calls.incrementAndGet(): Unit
       val message = AssistantMessage(answer)
-      Completion(id = "script", created = Instant.EPOCH, content = message.content, model = "script", message = message)
+      Completion(id = "script", created = Instant.EPOCH, model = "script", message = message)
     }
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = Right(reply)

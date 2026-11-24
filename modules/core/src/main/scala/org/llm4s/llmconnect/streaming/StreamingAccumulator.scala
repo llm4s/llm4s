@@ -189,7 +189,6 @@ final class StreamingAccumulator private (model: String) {
     Completion(
       id = messageId.getOrElse(""),
       created = created,
-      content = contentBuilder.toString(),
       model = model,
       message = message,
       usage = usage,

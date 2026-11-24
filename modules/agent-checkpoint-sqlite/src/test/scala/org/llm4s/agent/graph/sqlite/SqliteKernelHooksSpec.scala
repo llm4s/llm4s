@@ -60,7 +60,7 @@ class SqliteKernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   private def completion(message: AssistantMessage): Completion =
-    Completion("c", Instant.EPOCH, message.content, "m", message, message.toolCalls.toList, Some(TokenUsage(10, 5, 15)))
+    Completion("c", Instant.EPOCH, "m", message, Some(TokenUsage(10, 5, 15)))
 
   /** Plays `turns`; the call numbered `failOn` fails while `failing` is set. */
   final private class Model(failing: AtomicBoolean, failOn: Int, turns: AssistantMessage*) extends ModelStep {

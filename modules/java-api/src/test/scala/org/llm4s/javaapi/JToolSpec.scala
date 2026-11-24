@@ -25,7 +25,7 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
     def reply(conversation: Conversation): Result[Completion] =
       if (n.getAndIncrement() == 0) {
         val message = AssistantMessage(contentOpt = None, toolCalls = Seq(call))
-        Right(Completion("id", Instant.EPOCH, "", "m", message, toolCalls = List(call)))
+        Right(Completion("id", Instant.EPOCH, "m", message))
       } else {
         val result = conversation.messages.collect { case t: ToolMessage => t.content }.lastOption.getOrElse("none")
         Right(completion(s"tool said: $result"))

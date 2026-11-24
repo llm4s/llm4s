@@ -299,7 +299,6 @@ class OpenAICompatibleClient(
           if (opaqueThinking.isEmpty) c.message else c.message.withThinking(c.message.thinking ++ opaqueThinking)
         c.withMessage(message)
           .withModel(servedModel.getOrElse(settings.model))
-          .withToolCalls(c.message.toolCalls.toList)
           .withUsage(finalUsage)
           .withEstimatedCost(finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u)))
       }
@@ -625,10 +624,8 @@ class OpenAICompatibleClient(
         .flatMap(_.numOpt)
         .flatMap(s => Try(Instant.ofEpochSecond(s.toLong)).toOption)
         .getOrElse(Instant.EPOCH),
-      content = content.getOrElse(""),
       model = json.obj.get("model").flatMap(_.strOpt).getOrElse(settings.model),
       message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList, thinking = thinking),
-      toolCalls = toolCalls.toList,
       usage = usage,
       estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u)),
       citations = parseCitations(message),

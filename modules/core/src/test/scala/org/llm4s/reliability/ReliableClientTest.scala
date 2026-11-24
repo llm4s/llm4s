@@ -79,7 +79,6 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
   val testCompletion = Completion(
     id = "test-id",
     created = Instant.now(),
-    content = "response",
     model = "test-model",
     message = AssistantMessage(content = "response", toolCalls = List.empty)
   )

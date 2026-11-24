@@ -32,7 +32,6 @@ class RAGAnswerOptionsSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "answer",
           created = Instant.EPOCH,
-          content = "42",
           model = "mock",
           message = AssistantMessage("42"),
           usage = Some(TokenUsage(10, 2, 12))

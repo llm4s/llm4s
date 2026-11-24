@@ -94,12 +94,11 @@ class AgentKtHumanReviewTest {
     private fun completion(text: String, calls: List<ToolCall> = emptyList()): Either<LLMError, Completion> =
         Right(
             Completion.apply(
-                "id", Instant.EPOCH, text, "m",
+                "id", Instant.EPOCH, "m",
                 AssistantMessage.apply(if (calls.isEmpty()) Option.apply(text) else Option.empty(), seq(*calls.toTypedArray()), AssistantMessage.`apply$default$3`()),
-                CollectionConverters.asScala(calls).toList(),
                 Option.empty(), Option.empty(),
                 CollectionConverters.asScala(listOf<Citation>()).toList(),
-                Completion.`apply$default$10`(), Completion.`apply$default$11`(), Completion.`apply$default$12`(),
+                Completion.`apply$default$8`(), Completion.`apply$default$9`(), Completion.`apply$default$10`(),
             ),
         )
 

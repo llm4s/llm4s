@@ -34,7 +34,7 @@ class ExternalUseSpec extends AnyFlatSpec with Matchers {
     var sent: Option[CompletionOptions] = None
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       sent = Some(options)
-      Right(Completion("id", Instant.EPOCH, reply, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage(reply)))
     }
     override def streamComplete(
       conversation: Conversation,

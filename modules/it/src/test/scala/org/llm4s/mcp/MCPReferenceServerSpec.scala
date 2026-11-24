@@ -206,10 +206,8 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = s"scripted-$calls",
           created = Instant.EPOCH,
-          content = message.content,
           model = "scripted-model",
           message = message,
-          toolCalls = toolCalls.toList,
           usage = None
         )
       )

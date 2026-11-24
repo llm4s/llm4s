@@ -177,7 +177,6 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
     val withoutThinking = Completion(
       id = "1",
       created = Instant.EPOCH,
-      content = "response",
       model = "test",
       message = AssistantMessage(Some("response"), Seq.empty)
     )
@@ -195,7 +194,6 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "1",
       created = Instant.EPOCH,
-      content = "The answer is 42.",
       model = "test",
       message = AssistantMessage(Some("The answer is 42."), Seq.empty).withThinking("Let me calculate this...")
     )
@@ -210,7 +208,6 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "1",
       created = Instant.EPOCH,
-      content = "The answer is 42.",
       model = "test",
       message = AssistantMessage(Some("The answer is 42."), Seq.empty)
     )

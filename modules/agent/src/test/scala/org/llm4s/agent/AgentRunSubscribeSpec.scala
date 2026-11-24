@@ -67,11 +67,11 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     def all: Vector[StreamEvent] = events.asScala.toVector
 
   private def answer(text: String): Completion =
-    Completion("answer", Instant.EPOCH, text, "test-model", AssistantMessage(text))
+    Completion("answer", Instant.EPOCH, "test-model", AssistantMessage(text))
 
   private val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
   private def calling: Completion =
-    Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall))
+    Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(toolCall)))
 
   private case class EchoResult(echo: String)
   private object EchoResult:

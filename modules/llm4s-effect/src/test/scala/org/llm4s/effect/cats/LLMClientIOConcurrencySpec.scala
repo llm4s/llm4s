@@ -233,7 +233,6 @@ class LLMClientIOConcurrencySpec extends AnyFlatSpec with TestTimeLimit with Mat
           Completion(
             id = "id",
             created = Instant.EPOCH,
-            content = key,
             model = "m",
             message = AssistantMessage(Some(key))
           )

@@ -26,7 +26,6 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
       Completion(
         id = "c",
         created = Instant.EPOCH,
-        content = text,
         model = "mock-model",
         message = AssistantMessage(text),
         usage = Some(TokenUsage(4, 3, 7))

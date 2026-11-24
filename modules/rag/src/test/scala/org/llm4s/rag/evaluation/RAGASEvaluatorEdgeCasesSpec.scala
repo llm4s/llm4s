@@ -29,7 +29,6 @@ class RAGASEvaluatorEdgeCasesSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test",
           created = Instant.EPOCH,
-          content = response,
           model = "test",
           message = AssistantMessage(response)
         )

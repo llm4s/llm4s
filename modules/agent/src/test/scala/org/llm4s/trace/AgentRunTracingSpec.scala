@@ -84,11 +84,11 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
   }
 
   private def answer(text: String): Completion =
-    Completion("answer", Instant.EPOCH, text, "test-model", AssistantMessage(text), usage = usage)
+    Completion("answer", Instant.EPOCH, "test-model", AssistantMessage(text), usage = usage)
 
   private val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
   private def toolCallCompletion: Completion =
-    Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall), usage)
+    Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(toolCall)), usage)
 
   private def usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
 
@@ -241,7 +241,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     val tracing = new Captured(console)
     val call    = ToolCall("call-1", "echo", ujson.Obj("message" -> secret))
     val calling =
-      Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)
+      Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call)), usage)
     ok(traced(new Scripted(Right(calling), Right(answer(s"Echoed $secret"))), tracing).run(s"Echo $secret"))
     eventually(tracing.printed should include("AGENT RUN ENDED"))
     tracing.printed
@@ -329,7 +329,6 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     val handoff = Completion(
       "turn-1",
       Instant.EPOCH,
-      "",
       "test-model",
       AssistantMessage(None, Seq(ToolCall("call-h", "handoff_to_specialist", ujson.Obj("reason" -> "maths")))),
       usage = usage

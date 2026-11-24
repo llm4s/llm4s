@@ -36,7 +36,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
   }
 
   private def ok: Result[Completion] = Right(
-    Completion("id", Instant.EPOCH, "content", "model", AssistantMessage("content"))
+    Completion("id", Instant.EPOCH, "model", AssistantMessage("content"))
   )
 
   private def timingOut: Result[Completion] = Left(TimeoutError("slow", 1.second, "complete"))

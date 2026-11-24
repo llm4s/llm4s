@@ -88,16 +88,13 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
         Completion(
           "turn-1",
           Instant.EPOCH,
-          "",
           "test-model",
           AssistantMessage("", Seq(toolCall)),
-          List(toolCall),
           Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
         ),
         Completion(
           "turn-2",
           Instant.EPOCH,
-          "Echoed.",
           "test-model",
           AssistantMessage("Echoed."),
           usage = Some(TokenUsage(promptTokens = 30, completionTokens = 5, totalTokens = 35))

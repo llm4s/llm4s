@@ -25,7 +25,6 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "c-1",
       created = createdAt,
-      content = "answer",
       model = "model-a",
       message = AssistantMessage("answer")
     )
@@ -39,10 +38,8 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
   private def completion(
     id: String = "c-1",
     created: Instant = createdAt,
-    content: String = "answer",
     model: String = "model-a",
-    message: AssistantMessage = AssistantMessage("answer"),
-    toolCalls: List[ToolCall] = List(sampleToolCall),
+    message: AssistantMessage = AssistantMessage("answer", Seq(sampleToolCall)),
     usage: Option[TokenUsage] = Some(bareUsage),
     estimatedCost: Option[Double] = Some(0.25),
     citations: List[Citation] = List(citation)
@@ -50,34 +47,37 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = id,
       created = created,
-      content = content,
       model = model,
       message = message,
-      toolCalls = toolCalls,
       usage = usage,
       estimatedCost = estimatedCost,
       citations = citations
     )
 
-  "Completion setters" should "set id, created, content, model and message" in {
+  "Completion setters" should "set id, created, model and message" in {
     val later   = Instant.parse("2026-06-30T12:00:00Z")
     val message = AssistantMessage("other")
 
     fullCompletion.withId("c-2") shouldBe completion(id = "c-2")
     fullCompletion.withCreated(later) shouldBe completion(created = later)
-    fullCompletion.withContent("other") shouldBe completion(content = "other")
     fullCompletion.withModel("model-b") shouldBe completion(model = "model-b")
     fullCompletion.withMessage(message) shouldBe completion(message = message)
   }
 
-  it should "set and clear the tool calls and citations" in {
-    val second = ToolCall("call-2", "fetch", ujson.Obj())
-    val other  = Citation("https://example.com/b")
+  it should "read content and toolCalls from the message, so they cannot disagree with it (#2807)" in {
+    val second  = ToolCall("call-2", "fetch", ujson.Obj())
+    val message = AssistantMessage("other", Seq(sampleToolCall, second))
+    val changed = fullCompletion.withMessage(message)
 
-    fullCompletion.withToolCalls(List(sampleToolCall, second)) shouldBe completion(toolCalls =
-      List(sampleToolCall, second)
-    )
-    fullCompletion.withToolCalls(Nil) shouldBe completion(toolCalls = Nil)
+    changed.content shouldBe "other"
+    changed.toolCalls shouldBe Seq(sampleToolCall, second)
+    changed.withMessage(message.withToolCalls(Nil)).toolCalls shouldBe empty
+    changed.withMessage(AssistantMessage(None, Seq(second))).content shouldBe ""
+  }
+
+  it should "set and clear the citations" in {
+    val other = Citation("https://example.com/b")
+
     fullCompletion.withCitations(List(other)) shouldBe completion(citations = List(other))
     fullCompletion.withCitations(Nil) shouldBe completion(citations = Nil)
   }
@@ -104,8 +104,8 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
 
   it should "update hasToolCalls and hasCitations" in {
     bareCompletion.hasToolCalls shouldBe false
-    bareCompletion.withToolCalls(List(sampleToolCall)).hasToolCalls shouldBe true
-    fullCompletion.withToolCalls(Nil).hasToolCalls shouldBe false
+    bareCompletion.withMessage(AssistantMessage(None, Seq(sampleToolCall))).hasToolCalls shouldBe true
+    fullCompletion.withMessage(AssistantMessage("no calls")).hasToolCalls shouldBe false
 
     bareCompletion.hasCitations shouldBe false
     bareCompletion.withCitations(List(citation)).hasCitations shouldBe true

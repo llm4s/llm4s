@@ -22,7 +22,6 @@ object LLMClientZSpec extends ZIOSpecDefault {
   private val testCompletion = Completion(
     id = "test-id",
     created = Instant.EPOCH,
-    content = "hello",
     model = "test-model",
     message = AssistantMessage(Some("hello"))
   )

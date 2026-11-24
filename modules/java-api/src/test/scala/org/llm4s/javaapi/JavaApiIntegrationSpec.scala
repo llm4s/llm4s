@@ -33,10 +33,10 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
         if (callCount == 1) {
           val tc  = ToolCall("call-1", toolName, toolArgs)
           val msg = AssistantMessage(contentOpt = None, toolCalls = Seq(tc))
-          Right(Completion("id", Instant.EPOCH, "", "test-model", msg))
+          Right(Completion("id", Instant.EPOCH, "test-model", msg))
         } else {
           val msg = AssistantMessage(contentOpt = Some(finalResponse))
-          Right(Completion("id", Instant.EPOCH, finalResponse, "test-model", msg))
+          Right(Completion("id", Instant.EPOCH, "test-model", msg))
         }
       }
       override def streamComplete(
@@ -167,7 +167,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     val capturing = new LLMClient {
       override def complete(conv: Conversation, opts: CompletionOptions): Result[Completion] = {
         seen.set(conv)
-        Right(Completion("id", Instant.EPOCH, "ok", "m", AssistantMessage("ok")))
+        Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("ok")))
       }
       override def streamComplete(
         conv: Conversation,

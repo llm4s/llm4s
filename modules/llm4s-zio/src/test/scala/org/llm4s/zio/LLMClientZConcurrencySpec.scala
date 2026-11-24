@@ -192,7 +192,6 @@ object LLMClientZConcurrencySpec extends ZIOSpecDefault {
               Completion(
                 id = "id",
                 created = Instant.EPOCH,
-                content = key,
                 model = "m",
                 message = AssistantMessage(Some(key))
               )

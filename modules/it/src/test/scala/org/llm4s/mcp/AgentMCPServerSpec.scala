@@ -72,10 +72,8 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
         Completion(
           id = s"mock-$calls",
           created = Instant.EPOCH,
-          content = message.content,
           model = "mock-model",
           message = message,
-          toolCalls = toolCalls.toList,
           usage = None
         )
       )

@@ -33,7 +33,7 @@ class RobustnessSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   private def ok(text: String): Result[Completion] =
-    Right(Completion("id", Instant.EPOCH, text, "m", AssistantMessage(text)))
+    Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(text)))
 
   // ---- LlmResult ---------------------------------------------------------------------------
 

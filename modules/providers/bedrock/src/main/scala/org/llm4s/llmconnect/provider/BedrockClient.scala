@@ -444,7 +444,6 @@ class BedrockClient(
                   else c.message.withThinking(reasoning.values.map(_.toBlock).toSeq)
                 c
                   .withMessage(message)
-                  .withToolCalls(c.message.toolCalls.toList)
                   .withEstimatedCost(c.usage.flatMap(u => CostEstimator.estimate(config.model, u)))
                   .withServedTier(servedTier)
               }
@@ -701,10 +700,8 @@ class BedrockClient(
         Completion(
           id = java.util.UUID.randomUUID().toString,
           created = Instant.now(),
-          content = textContent,
           model = config.model,
           message = message,
-          toolCalls = toolCalls,
           usage = usage,
           estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model, u)),
           finishReason = stopReason.fold(FinishReason.Other(""))(BedrockClient.finishReason),

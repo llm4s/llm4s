@@ -29,7 +29,6 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
   private val completion = Completion(
     id = "c-1",
     created = Instant.EPOCH,
-    content = "answer",
     model = "model-2026",
     message = AssistantMessage("answer"),
     usage = Some(TokenUsage(3, 2, 5))

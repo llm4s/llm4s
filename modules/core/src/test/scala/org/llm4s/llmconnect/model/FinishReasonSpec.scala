@@ -29,7 +29,6 @@ class FinishReasonSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "c",
       created = created,
-      content = "a",
       model = "m",
       message = AssistantMessage("a")
     ).finishReason shouldBe
@@ -40,18 +39,17 @@ class FinishReasonSpec extends AnyFlatSpec with Matchers {
     val c = Completion(
       id = "c",
       created = created,
-      content = "a",
       model = "m",
       message = AssistantMessage("a"),
       finishReason = FinishReason.Length
     )
     c.finishReason shouldBe FinishReason.Length
     c.withFinishReason(FinishReason.ToolCalls).finishReason shouldBe FinishReason.ToolCalls
-    c.withFinishReason(FinishReason.ToolCalls).withContent("b").finishReason shouldBe FinishReason.ToolCalls
+    c.withFinishReason(FinishReason.ToolCalls).withModel("b").finishReason shouldBe FinishReason.ToolCalls
   }
 
   it should "be Stop from the previous apply, which takes every argument but the reason" in {
-    Completion("c", created, "a", "m", AssistantMessage("a"), Nil, None, None, Nil, Nil).finishReason shouldBe
+    Completion("c", created, "m", AssistantMessage("a"), None, None, Nil, Nil).finishReason shouldBe
       FinishReason.Stop
   }
 

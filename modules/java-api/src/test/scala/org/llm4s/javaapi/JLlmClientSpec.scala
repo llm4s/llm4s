@@ -14,7 +14,7 @@ class JLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def successClient(content: String): LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      Right(Completion("id", Instant.EPOCH, content, "test-model", AssistantMessage(content)))
+      Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage(content)))
     override def streamComplete(
       conversation: Conversation,
       options: CompletionOptions,
@@ -75,7 +75,7 @@ class JLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         options: CompletionOptions
       ): Result[Completion] = {
         capturedOptions = Some(options)
-        Right(Completion("id", Instant.EPOCH, "ok", "test-model", AssistantMessage("ok")))
+        Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage("ok")))
       }
       override def streamComplete(
         conversation: Conversation,
@@ -98,7 +98,7 @@ class JLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     var closed = false
     val trackingClient = new LLMClient {
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-        Right(Completion("id", Instant.EPOCH, "", "m", AssistantMessage("")))
+        Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("")))
       override def streamComplete(
         conversation: Conversation,
         options: CompletionOptions,

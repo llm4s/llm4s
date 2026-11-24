@@ -28,7 +28,7 @@ class PrometheusReliabilityMetricsSpec extends AnyFlatSpec with Matchers {
   }
 
   private val completion =
-    Completion("id", Instant.EPOCH, "ok", "test-model", AssistantMessage(content = "ok", toolCalls = List.empty))
+    Completion("id", Instant.EPOCH, "test-model", AssistantMessage(content = "ok", toolCalls = List.empty))
 
   /** Fails its first `failures` calls with a retryable timeout, then answers. */
   private def client(failures: Int): LLMClient = new LLMClient {

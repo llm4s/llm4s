@@ -13,9 +13,7 @@ class NativeQueryGeneratorTest extends AnyFunSuite with Matchers with MockFactor
 
   private def makeCompletion(content: String): Completion = Completion(
     id = "test-id",
-    content = content,
     model = "test-model",
-    toolCalls = Nil,
     created = Instant.ofEpochSecond(1234567890L),
     message = AssistantMessage(Some(content), Nil),
     usage = None

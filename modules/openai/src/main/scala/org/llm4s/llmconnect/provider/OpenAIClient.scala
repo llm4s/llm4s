@@ -357,7 +357,6 @@ class OpenAIClient private[provider] (
           accumulator.toCompletion.map { c =>
             val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
             c
-              .withToolCalls(c.message.toolCalls.toList)
               .withEstimatedCost(cost)
               .withAdjustments(adjustments)
               .withServedTier(state.servedTier)
@@ -859,10 +858,8 @@ class OpenAIClient private[provider] (
       created = known(response._created())
         .flatMap(s => Try(Instant.ofEpochSecond(s.longValue)).toOption)
         .getOrElse(Instant.EPOCH),
-      content = content,
       model = known(response._model()).getOrElse(model),
       message = assistantMessage,
-      toolCalls = toolCalls.toList,
       usage = usage,
       estimatedCost = cost,
       citations = message.map(extractCitations).getOrElse(List.empty),

@@ -40,10 +40,8 @@ object TextOnlyThreadFixture:
     Completion(
       id = "fixture",
       created = Instant.EPOCH,
-      content = message.content,
       model = "test-model",
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
     )
 

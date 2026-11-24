@@ -15,10 +15,8 @@ class SpringAiFinishReasonSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "c",
       created = Instant.EPOCH,
-      content = "x",
       model = "m",
       message = AssistantMessage(Some("x"), calls),
-      toolCalls = calls,
       finishReason = reason
     )
 

@@ -475,7 +475,6 @@ class WatsonXClient(
       .map { c =>
         // the accumulator reports streamed calls on the message only
         c
-          .withToolCalls(c.message.toolCalls.toList)
           .withEstimatedCost(c.usage.flatMap(estimateCost))
       }
   }
@@ -627,8 +626,6 @@ class WatsonXClient(
             Completion(
               id = json.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).getOrElse(java.util.UUID.randomUUID().toString),
               created = Instant.ofEpochSecond(nowSeconds()),
-              content = text,
-              toolCalls = toolCalls,
               usage = usage,
               model = config.model,
               message = AssistantMessage(Some(text).filter(_.nonEmpty), toolCalls).withThinking(thinking),

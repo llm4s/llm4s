@@ -26,10 +26,8 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion-id",
           created = Instant.now(),
-          content = compressed,
           model = "mock-model",
           message = AssistantMessage(compressed),
-          toolCalls = Nil,
           usage = Some(TokenUsage(10, 5, 15))
         )
       )
@@ -45,10 +43,8 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion-id",
           created = Instant.now(),
-          content = "Compressed.",
           model = "mock-model",
           message = AssistantMessage("Compressed."),
-          toolCalls = Nil,
           usage = Some(TokenUsage(10, 5, 15))
         )
       )

@@ -30,7 +30,7 @@ object SpringBootGuideSpec {
     val sent: ConcurrentLinkedQueue[Conversation] = new ConcurrentLinkedQueue[Conversation]()
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       sent.add(c)
-      Right(Completion("id", Instant.EPOCH, answer, "m", AssistantMessage(answer)))
+      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(answer)))
     }
     override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)

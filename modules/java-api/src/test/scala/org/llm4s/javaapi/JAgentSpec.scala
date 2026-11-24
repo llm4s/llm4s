@@ -26,11 +26,8 @@ class JAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         Completion(
           id = "test-id",
           created = Instant.EPOCH,
-          content = answer,
           model = "test-model",
-          message = AssistantMessage(answer),
-          toolCalls = List.empty
-        )
+          message = AssistantMessage(answer))
       )
     override def streamComplete(
       conversation: Conversation,

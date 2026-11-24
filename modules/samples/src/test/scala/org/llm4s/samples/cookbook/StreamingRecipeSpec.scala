@@ -47,7 +47,6 @@ class StreamingRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
           Completion(
             id = "s",
             created = Instant.EPOCH,
-            content = "Hello world",
             model = "m",
             message = AssistantMessage("Hello world")
           )

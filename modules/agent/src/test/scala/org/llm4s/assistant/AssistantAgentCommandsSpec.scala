@@ -33,7 +33,6 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAn
         Completion(
           id = "test-id",
           created = Instant.EPOCH,
-          content = response,
           model = "test-model",
           message = AssistantMessage(response, toolCalls = List.empty)
         )

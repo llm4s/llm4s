@@ -26,7 +26,7 @@ class AiServiceSpec extends AnyWordSpec with TestTimeLimit with Matchers {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       val n       = sent.synchronized { sent += conversation; sent.size - 1 }
       val message = script(n)
-      Right(Completion(s"r$n", Instant.EPOCH, message.content, "recording", message))
+      Right(Completion(s"r$n", Instant.EPOCH, "recording", message))
     }
 
     override def streamComplete(

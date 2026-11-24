@@ -1687,7 +1687,7 @@ object ToolLoop:
         def accepted(response: ModelResponse, answer: Option[ujson.Value]): NodeResult =
           val completion = answer.fold(response.completion) { json =>
             val content = ujson.write(json)
-            response.completion.withMessage(response.completion.message.withContent(content)).withContent(content)
+            response.completion.withMessage(response.completion.message.withContent(content))
           }
           NodeResult.fromResult(
             for

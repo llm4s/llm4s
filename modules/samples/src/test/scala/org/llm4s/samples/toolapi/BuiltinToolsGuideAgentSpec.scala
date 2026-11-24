@@ -28,11 +28,8 @@ class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherVa
       Completion(
         id = s"script-$calls",
         created = Instant.EPOCH,
-        content = message.content,
         model = "script",
-        message = message,
-        toolCalls = message.toolCalls.toList
-      )
+        message = message)
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       calls += 1

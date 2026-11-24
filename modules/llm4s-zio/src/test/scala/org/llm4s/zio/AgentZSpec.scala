@@ -16,7 +16,6 @@ object AgentZSpec extends ZIOSpecDefault {
   private def completion(text: String) = Completion(
     id = "test-id",
     created = Instant.EPOCH,
-    content = text,
     model = "test-model",
     message = AssistantMessage(contentOpt = Some(text))
   )

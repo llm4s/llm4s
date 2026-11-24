@@ -57,12 +57,15 @@ internal class RecordingClient(private val reply: Either<LLMError, Completion>) 
 /** A reply with text, a model, usage, a cost and a tool call; Scala types appear only in building it. */
 internal fun reply(text: String = "Let me check.", cost: Option<Any> = Option.apply(0.0015)): Completion =
     Completion.apply(
-        "reply-1", Instant.EPOCH, text, "gpt-4o-2024-08-06", AssistantMessage.apply(text),
-        scala.jdk.javaapi.CollectionConverters.asScala(listOf(ToolCall("c1", "weather", ujson.Str("Paris")))).toList(),
+        "reply-1", Instant.EPOCH, "gpt-4o-2024-08-06",
+        AssistantMessage.apply(
+            text,
+            scala.jdk.javaapi.CollectionConverters.asScala(listOf(ToolCall("c1", "weather", ujson.Str("Paris")))).toList(),
+        ),
         Option.apply(TokenUsage.apply(12, 5, 17, Option.empty(), Option.apply<Any>(8), Option.apply<Any>(3), Option.empty())),
         cost,
         scala.jdk.javaapi.CollectionConverters.asScala(listOf<Citation>()).toList(),
-        Completion.`apply$default$10`(), Completion.`apply$default$11`(), Completion.`apply$default$12`(),
+        Completion.`apply$default$8`(), Completion.`apply$default$9`(), Completion.`apply$default$10`(),
     )
 
 /**

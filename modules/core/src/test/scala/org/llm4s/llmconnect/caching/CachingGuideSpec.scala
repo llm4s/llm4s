@@ -428,7 +428,6 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
           Completion(
             id = s"id-$n",
             created = Instant.EPOCH,
-            content = s"answer $n",
             model = "fake-model",
             message = AssistantMessage(s"answer $n"),
             usage = None

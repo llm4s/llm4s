@@ -115,7 +115,6 @@ class GuardrailWarnLoggingSpec extends AnyFlatSpec with Matchers with BeforeAndA
         Completion(
           id = "test-id",
           created = Instant.EPOCH,
-          content = response,
           model = "test-model",
           message = AssistantMessage(response),
           usage = Some(TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15))

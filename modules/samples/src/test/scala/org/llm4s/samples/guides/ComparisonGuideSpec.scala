@@ -37,11 +37,8 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     Completion(
       id = "script",
       created = Instant.EPOCH,
-      content = message.content,
       model = "script",
-      message = message,
-      toolCalls = message.toolCalls.toList
-    )
+      message = message)
 
   /** Answers every request with `reply(conversation)` and records the requests. */
   private class ScriptedClient(reply: Conversation => AssistantMessage) extends LLMClient {

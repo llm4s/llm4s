@@ -24,7 +24,6 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test",
           created = Instant.EPOCH,
-          content = "[]",
           model = "test",
           message = AssistantMessage("[]")
         )

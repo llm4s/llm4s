@@ -53,18 +53,15 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
   }
 
   private def text(s: String): Completion =
-    Completion(id = "t", created = Instant.EPOCH, content = s, model = "m", message = AssistantMessage(Some(s)))
+    Completion(id = "t", created = Instant.EPOCH, model = "m", message = AssistantMessage(Some(s)))
 
   private def toolCall(i: Int): Completion = {
     val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = ujson.Obj("v" -> "x")))
     Completion(
       id = s"t$i",
       created = Instant.EPOCH,
-      content = "",
       model = "m",
-      message = AssistantMessage("", calls),
-      toolCalls = calls.toList
-    )
+      message = AssistantMessage("", calls))
   }
 
   private def z(client: LLMClient)(configure: AgentBuilder => AgentBuilder = identity) =

@@ -37,7 +37,6 @@ class RAGSyncAndBytesSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock",
           created = Instant.EPOCH,
-          content = responseOverride.getOrElse("Mock answer."),
           model = "mock",
           message = AssistantMessage(responseOverride.getOrElse("Mock answer.")),
           usage = Some(TokenUsage(10, 5, 15))

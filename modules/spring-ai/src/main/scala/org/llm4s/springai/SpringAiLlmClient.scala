@@ -122,10 +122,8 @@ object SpringAiLlmClient {
       Completion(
         id = id.getOrElse(UUID.randomUUID().toString),
         created = Instant.now(),
-        content = content,
         model = model.getOrElse(""),
         message = AssistantMessage(contentOpt = Option(content).filter(_.nonEmpty), toolCalls = calls),
-        toolCalls = calls.toList,
         usage = usage,
         // Spring AI's reason as the model reported it: it has no common vocabulary to map
         finishReason = FinishReason.Other(finish.getOrElse(""))

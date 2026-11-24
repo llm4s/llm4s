@@ -99,7 +99,6 @@ final case class FixtureChatClient(config: FixtureChatConfig) extends LLMClient:
       Completion(
         id = "fixturechat-completion",
         created = Instant.EPOCH,
-        content = FixtureChatClient.Reply,
         model = config.model,
         message = AssistantMessage(FixtureChatClient.Reply)
       )

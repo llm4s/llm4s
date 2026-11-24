@@ -162,10 +162,8 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-${System.nanoTime()}",
       created = Instant.now(),
-      content = text,
       model = "test-model",
       message = message,
-      toolCalls = Nil,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
     )
   }
@@ -183,10 +181,8 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-tc-${System.nanoTime()}",
       created = Instant.now(),
-      content = "",
       model = "test-model",
       message = message,
-      toolCalls = List(tc),
       usage = Some(TokenUsage(promptTokens = 15, completionTokens = 5, totalTokens = 20))
     )
   }
@@ -196,10 +192,8 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-msg-${System.nanoTime()}",
       created = Instant.now(),
-      content = message.content,
       model = "test-model",
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
     )
 
@@ -217,10 +211,8 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-usage-${System.nanoTime()}",
       created = Instant.now(),
-      content = text,
       model = "test-model",
       message = message,
-      toolCalls = Nil,
       usage = Some(TokenUsage(promptTokens = prompt, completionTokens = completion, totalTokens = prompt + completion))
     )
   }

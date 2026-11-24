@@ -258,10 +258,8 @@ class PerplexityClient(
     Completion(
       id = if (reply.id.nonEmpty) reply.id else java.util.UUID.randomUUID().toString,
       created = reply.created.getOrElse(Instant.now()),
-      content = reply.text,
       model = reply.model.getOrElse(config.model),
       message = message,
-      toolCalls = reply.toolCalls,
       usage = reply.usage,
       estimatedCost = reply.cost.orElse(reply.usage.flatMap(CostEstimator.estimate(config.model, _))),
       citations = reply.citations,

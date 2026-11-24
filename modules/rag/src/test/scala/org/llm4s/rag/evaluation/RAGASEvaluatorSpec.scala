@@ -17,7 +17,6 @@ class RAGASEvaluatorSpec extends AnyFlatSpec with Matchers {
   private def mockCompletion(content: String): Completion = Completion(
     id = "test-id",
     created = Instant.now(),
-    content = content,
     model = "test-model",
     message = AssistantMessage(content)
   )

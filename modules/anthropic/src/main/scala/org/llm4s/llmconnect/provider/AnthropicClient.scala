@@ -872,9 +872,7 @@ curl https://api.anthropic.com/v1/messages \
       // Create completion
       Completion(
         id = response.id(),
-        content = message.content,
         model = response.model().asString(),
-        toolCalls = toolCalls.toList,
         created = Instant.now(),
         message = message,
         usage = Some(tokenUsage),

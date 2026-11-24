@@ -51,7 +51,6 @@ object ReliableClientExample {
   private val dummyCompletion = Completion(
     id = "dummy-id",
     created = Instant.now(),
-    content = "Hello! I am a reliable assistant.",
     model = "mock-model",
     message = AssistantMessage(content = "Hello! I am a reliable assistant.", toolCalls = List.empty)
   )

@@ -11,8 +11,7 @@ import java.time.Instant
 class ToolCallRulesSpec extends AnyFlatSpec with Matchers {
 
   private def reply(reason: FinishReason, calls: ToolCall*): Completion =
-    Completion("r", Instant.EPOCH, "", "m", AssistantMessage(None, calls.toList))
-      .withToolCalls(calls.toList)
+    Completion("r", Instant.EPOCH, "m", AssistantMessage(None, calls.toList))
       .withFinishReason(reason)
 
   private val call = ToolCall("c1", "lookup", ujson.Obj("q" -> "x"))

@@ -362,10 +362,8 @@ private[springai] object SpringAiMapping {
             Completion(
               id = meta.flatMap(m => Option(m.getId)).filter(_.nonEmpty).getOrElse(UUID.randomUUID().toString),
               created = Instant.now(),
-              content = text,
               model = meta.flatMap(m => Option(m.getModel)).getOrElse(""),
               message = AssistantMessage(contentOpt = Option(text).filter(_.nonEmpty), toolCalls = calls),
-              toolCalls = calls.toList,
               usage = meta.flatMap(m => Option(m.getUsage)).flatMap(tokenUsage),
               // Spring AI's reason as the model reported it: it has no common vocabulary to map
               finishReason = FinishReason.Other(

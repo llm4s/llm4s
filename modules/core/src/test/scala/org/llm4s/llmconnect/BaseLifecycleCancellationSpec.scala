@@ -56,7 +56,6 @@ class BaseLifecycleCancellationSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "id",
           created = Instant.EPOCH,
-          content = "answer",
           model = "stub-model",
           message = AssistantMessage("answer")
         )

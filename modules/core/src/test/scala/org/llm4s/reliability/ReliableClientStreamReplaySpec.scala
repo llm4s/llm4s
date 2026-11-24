@@ -23,7 +23,7 @@ class ReliableClientStreamReplaySpec extends AnyFlatSpec with Matchers {
   private val conversation = Conversation(Seq(UserMessage("hi")))
 
   private def completion(text: String) =
-    Completion(id = "c", created = Instant.EPOCH, content = text, model = "m", message = AssistantMessage(text))
+    Completion(id = "c", created = Instant.EPOCH, model = "m", message = AssistantMessage(text))
 
   private val timeout = TimeoutError("connection reset", 1.second, "test")
 

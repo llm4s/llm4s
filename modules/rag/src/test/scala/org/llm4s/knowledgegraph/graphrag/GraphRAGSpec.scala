@@ -27,7 +27,6 @@ class GraphRAGSpec extends AnyFunSuite with Matchers {
         Completion(
           id = "test",
           created = Instant.ofEpochSecond(1L),
-          content = content,
           model = "test-model",
           message = AssistantMessage(contentOpt = Some(content)),
           usage = None

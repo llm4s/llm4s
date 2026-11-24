@@ -52,10 +52,10 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   private def usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
 
   private def answer(text: String): Completion =
-    Completion("answer", Instant.EPOCH, text, "test-model", AssistantMessage(text), usage = usage)
+    Completion("answer", Instant.EPOCH, "test-model", AssistantMessage(text), usage = usage)
 
   private def calling(call: ToolCall): Completion =
-    Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)
+    Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call)), usage)
 
   private val toolCall                       = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
   private def toolCallCompletion: Completion = calling(toolCall)
@@ -168,10 +168,8 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val mixed = Completion(
       "turn-1",
       Instant.EPOCH,
-      "",
       "test-model",
       AssistantMessage(None, Seq(handoff, toolCall)),
-      List(handoff, toolCall),
       usage
     )
     val builder = agentWith(Scripted(Right(mixed), Right(answer("one at a time"))), echoTool)
@@ -338,7 +336,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val runtime = GraphRuntime(store)
     val call    = ToolCall("call-1", "echo", ujson.Obj("message" -> marker))
     val client = Scripted(
-      Right(Completion("c1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)),
+      Right(Completion("c1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call)), usage)),
       Right(answer(s"the answer is $marker"))
     )
     val agent = Agent

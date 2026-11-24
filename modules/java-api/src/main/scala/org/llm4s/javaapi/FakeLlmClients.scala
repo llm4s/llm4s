@@ -50,7 +50,7 @@ private[javaapi] object FakeLlmClients {
       val index  = lock.synchronized { recorded = recorded :+ prompt; recorded.size - 1 }
       script.lift(index) match {
         case Some(Right(text)) =>
-          Right(Completion(s"fake-${index + 1}", Instant.EPOCH, text, "fake", AssistantMessage(text)))
+          Right(Completion(s"fake-${index + 1}", Instant.EPOCH, "fake", AssistantMessage(text)))
         case Some(Left(error)) => Left(error)
         case None =>
           Left(

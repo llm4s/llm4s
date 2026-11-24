@@ -23,7 +23,7 @@ class LLM4STemplateSpec extends AnyFlatSpec with Matchers {
 
   private def successTemplate(text: String) = StarterTestSupport.template(
     JLlmClientTestFactory.create(
-      stubClient(Right(Completion("id", Instant.EPOCH, text, "m", AssistantMessage(text))))
+      stubClient(Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(text))))
     )
   )
 

@@ -77,7 +77,6 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
         Completion(
           id = "mock",
           created = Instant.EPOCH,
-          content = "Answer derived from provided context.",
           model = "mock-model",
           message = AssistantMessage(contentOpt = Some("Answer derived from provided context.")),
           usage = Some(TokenUsage(50, 25, 75))

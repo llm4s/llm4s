@@ -31,7 +31,6 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
       Completion(
         id = "answer",
         created = Instant.EPOCH,
-        content = text,
         model = "mock",
         message = AssistantMessage(text),
         usage = Some(TokenUsage(10, 2, 12))

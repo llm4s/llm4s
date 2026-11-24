@@ -205,12 +205,7 @@ object ModelContext:
     // an estimate never fails the call it charges: whatever a field holds (a custom client may leave one null), each
     // part falls back, and the whole to the one-token minimum
     val usage = Try {
-      val answer = Try {
-        // a null list is an empty one, so calls only on `Completion.toolCalls` still count
-        if nonNull(completion.message.toolCalls).isEmpty && nonNull(completion.toolCalls).nonEmpty then
-          completion.message.withToolCalls(nonNull(completion.toolCalls))
-        else completion.message
-      }.getOrElse(completion.message)
+      val answer = completion.message
       val in = math.max(1, nonNull(request).map(tokens).sum + nonNull(definitions).map(d => tokens(UserMessage(d))).sum)
       val out = math.max(1, tokens(answer))
       TokenUsage(in, out, in + out)

@@ -34,7 +34,6 @@ object Llm4sAgentAutoConfigurationSpec {
               Completion(
                 "id",
                 Instant.EPOCH,
-                s"tool said: ${t.content}",
                 "m",
                 AssistantMessage(s"tool said: ${t.content}")
               )
@@ -42,7 +41,7 @@ object Llm4sAgentAutoConfigurationSpec {
           case _ =>
             val call    = ToolCall("c1", "weather", ujson.Obj("city" -> "Paris"))
             val message = AssistantMessage(contentOpt = None, toolCalls = Seq(call))
-            Right(Completion("id", Instant.EPOCH, "", "m", message, toolCalls = List(call)))
+            Right(Completion("id", Instant.EPOCH, "m", message))
         }
       }
       override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =

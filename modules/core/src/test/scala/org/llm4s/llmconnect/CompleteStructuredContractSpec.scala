@@ -33,7 +33,6 @@ class CompleteStructuredContractSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "id",
       created = Instant.EPOCH,
-      content = content,
       model = "m",
       message = AssistantMessage(Some(content))
     )

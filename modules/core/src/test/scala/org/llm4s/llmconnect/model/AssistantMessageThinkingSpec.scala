@@ -110,7 +110,7 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "be what Completion.thinking reports" in {
-    val completion = Completion("id", Instant.EPOCH, "Checking.", "m", signed, signed.toolCalls.toList)
+    val completion = Completion("id", Instant.EPOCH, "m", signed)
     completion.thinking shouldBe signed.thinkingText
     completion.hasThinking shouldBe true
   }

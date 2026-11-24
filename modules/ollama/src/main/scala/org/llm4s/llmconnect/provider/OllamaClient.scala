@@ -359,7 +359,7 @@ class OllamaClient(
           .map { c =>
             // the accumulator reports streamed calls on the message only
             val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            c.withToolCalls(c.message.toolCalls.toList).withEstimatedCost(cost)
+            c.withEstimatedCost(cost)
           }
 
         recordingExchange(startedAt, requestText, rawResponse.result())(result)
@@ -465,8 +465,6 @@ class OllamaClient(
       Completion(
         id = id,
         created = created,
-        content = content,
-        toolCalls = calls.toList,
         usage = usage,
         model = config.model,
         message = (if (calls.isEmpty) AssistantMessage(content)

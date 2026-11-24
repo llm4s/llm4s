@@ -642,13 +642,11 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
     Completion(
       id = json("id").str,
       created = Instant.ofEpochSecond(json("created").num.toLong),
-      content = contentStr,
       model = json("model").str,
       message = AssistantMessage(
         contentOpt = Some(contentStr),
         toolCalls = toolCalls.toList
       ),
-      toolCalls = toolCalls.toList,
       usage = usage
     )
   }

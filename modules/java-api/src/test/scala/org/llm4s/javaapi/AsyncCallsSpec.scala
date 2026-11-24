@@ -66,7 +66,7 @@ class AsyncCallsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         LockSupport.parkNanos(1000000L)
       if (Thread.currentThread().isInterrupted) interrupted.countDown()
       if (release.getCount == 0 && !Thread.currentThread().isInterrupted)
-        Right(Completion("id", Instant.EPOCH, "late", "m", AssistantMessage("late")))
+        Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("late")))
       else Left(CancelledError("Blocking"))
     }
     override def streamComplete(
@@ -293,7 +293,7 @@ class AsyncCallsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         arrived.countDown()
         val text = conversation.messages.collect { case u: UserMessage => u.content }.last
         if (arrived.await(secs, TimeUnit.SECONDS))
-          Right(Completion("id", Instant.EPOCH, text, "m", AssistantMessage(text)))
+          Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(text)))
         else Left(ProcessingError("concurrency", "the calls did not run at once"))
       }
       override def streamComplete(

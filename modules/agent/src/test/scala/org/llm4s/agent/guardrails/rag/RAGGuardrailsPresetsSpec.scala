@@ -29,7 +29,6 @@ class RAGGuardrailsPresetsSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test-id",
           created = Instant.now(),
-          content = response,
           model = "test-model",
           message = AssistantMessage(response),
           usage = Some(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150))

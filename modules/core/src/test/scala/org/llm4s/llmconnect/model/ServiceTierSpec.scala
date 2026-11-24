@@ -24,7 +24,6 @@ class ServiceTierSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "c",
       created = java.time.Instant.EPOCH,
-      content = "",
       model = "m",
       message = AssistantMessage(contentOpt = None)
     )

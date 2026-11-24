@@ -80,7 +80,6 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
       Completion(
         id = "c1",
         created = Instant.EPOCH,
-        content = "ok",
         model = "gpt-4o",
         message = AssistantMessage("ok"),
         usage = usage,

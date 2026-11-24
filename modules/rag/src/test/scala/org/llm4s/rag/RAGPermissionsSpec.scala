@@ -45,7 +45,6 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock",
           created = Instant.EPOCH,
-          content = "Mock answer.",
           model = "mock",
           message = AssistantMessage("Mock answer."),
           usage = Some(TokenUsage(10, 5, 15))
@@ -816,7 +815,6 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
           Completion(
             id = "rerank",
             created = Instant.EPOCH,
-            content = "[0.1, 0.9]",
             model = "mock",
             message = AssistantMessage("[0.1, 0.9]"),
             usage = None

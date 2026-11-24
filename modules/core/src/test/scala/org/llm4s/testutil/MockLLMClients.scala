@@ -19,7 +19,6 @@ object MockLLMClients {
         Completion(
           id = "test-id",
           created = Instant.now(),
-          content = response,
           model = "test-model",
           message = AssistantMessage(response),
           usage = Some(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150))
@@ -51,7 +50,6 @@ object MockLLMClients {
         Completion(
           id = s"test-id-$responseIndex",
           created = Instant.now(),
-          content = response,
           model = "test-model",
           message = AssistantMessage(response),
           usage = Some(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150))

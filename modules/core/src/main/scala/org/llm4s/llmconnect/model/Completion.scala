@@ -12,10 +12,10 @@ import java.time.Instant
  * @param created When the completion was created. Providers that report a creation time (the
  *                OpenAI-format `created` field, epoch seconds) are converted at the wire boundary;
  *                providers that report none stamp the time the response was received.
- * @param content The main content of the response.
  * @param model The model that generated this completion.
- * @param message The assistant's message in response to the user's input.
- * @param toolCalls List of tool calls made by the assistant.
+ * @param message The assistant's message in response to the user's input: its text is [[content]] and its tool
+ *                calls are [[toolCalls]]. They are read from the message, never stored beside it, so they cannot
+ *                disagree with it; change them with `withMessage(message.withContent(...))`.
  * @param usage Optional token usage statistics for the completion.
  * @param estimatedCost Optional estimated cost of this completion in USD.
  *                      Computed from token usage and model pricing when available.
@@ -40,10 +40,8 @@ import java.time.Instant
 final case class Completion private (
   id: String,
   created: Instant,
-  content: String,
   model: String,
   message: AssistantMessage,
-  toolCalls: List[ToolCall],
   usage: Option[TokenUsage],
   estimatedCost: Option[Double],
   citations: List[Citation],
@@ -53,10 +51,8 @@ final case class Completion private (
 ) {
   def withId(id: String): Completion                                    = copy(id = id)
   def withCreated(created: Instant): Completion                         = copy(created = created)
-  def withContent(content: String): Completion                          = copy(content = content)
   def withModel(model: String): Completion                              = copy(model = model)
   def withMessage(message: AssistantMessage): Completion                = copy(message = message)
-  def withToolCalls(toolCalls: List[ToolCall]): Completion              = copy(toolCalls = toolCalls)
   def withUsage(usage: TokenUsage): Completion                          = copy(usage = Some(usage))
   def withUsage(usage: Option[TokenUsage]): Completion                  = copy(usage = usage)
   def withEstimatedCost(estimatedCost: Double): Completion              = copy(estimatedCost = Some(estimatedCost))
@@ -67,10 +63,11 @@ final case class Completion private (
   def withServedTier(servedTier: ServiceTier): Completion               = copy(servedTier = Some(servedTier))
   def withServedTier(servedTier: Option[ServiceTier]): Completion       = copy(servedTier = servedTier)
 
-  /**
-   * Extract content as text (for compatibility)
-   */
-  def asText: String = content
+  /** The text of the reply: [[message]]'s content, `""` when the model produced only tool calls. */
+  def content: String = message.content
+
+  /** The tool calls the model asked for: [[message]]'s tool calls. */
+  def toolCalls: Seq[ToolCall] = message.toolCalls
 
   /**
    * Check if completion contains tool calls
@@ -113,10 +110,8 @@ object Completion {
   def apply(
     id: String,
     created: Instant,
-    content: String,
     model: String,
     message: AssistantMessage,
-    toolCalls: List[ToolCall] = List.empty,
     usage: Option[TokenUsage] = None,
     estimatedCost: Option[Double] = None,
     citations: List[Citation] = List.empty,
@@ -127,10 +122,8 @@ object Completion {
     new Completion(
       id,
       created,
-      content,
       model,
       message,
-      toolCalls,
       usage,
       estimatedCost,
       citations,

@@ -33,7 +33,6 @@ class LLMQueryRewriterSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = s"mock-${System.currentTimeMillis()}",
           created = Instant.now(),
-          content = response,
           model = "mock-model",
           message = AssistantMessage(contentOpt = Some(response)),
           usage = Some(TokenUsage(promptTokens = 50, completionTokens = 20, totalTokens = 70))

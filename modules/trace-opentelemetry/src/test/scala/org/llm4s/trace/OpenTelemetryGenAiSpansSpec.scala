@@ -62,7 +62,6 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
       Completion(
         id = "chatcmpl-1",
         created = Instant.EPOCH,
-        content = Answer,
         model = "gpt-4o-2024-08-06",
         message = AssistantMessage(Answer),
         usage = Some(TokenUsage(12, 7, 19))

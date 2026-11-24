@@ -396,7 +396,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
     "read no tool calls from a missing, null or empty `tool_calls`" in {
       def callsOf(message: ujson.Obj): List[ToolCall] = {
         var calls = List.empty[ToolCall]
-        withOllama(rawReply(message))((client, _) => calls = ask(client).toOption.get.toolCalls)
+        withOllama(rawReply(message))((client, _) => calls = ask(client).toOption.get.toolCalls.toList)
         calls
       }
 

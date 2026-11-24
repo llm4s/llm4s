@@ -32,7 +32,7 @@ private[javaapi] object StreamFixtures {
   val ParkSeconds: Long = 120L
 
   def completion(text: String): Completion =
-    Completion(id = "id", created = Instant.EPOCH, content = text, model = "m", message = AssistantMessage(Some(text)))
+    Completion(id = "id", created = Instant.EPOCH, model = "m", message = AssistantMessage(Some(text)))
 
   def chunk(i: Int): StreamedChunk = StreamedChunk(id = s"c$i", content = Some("x"))
 

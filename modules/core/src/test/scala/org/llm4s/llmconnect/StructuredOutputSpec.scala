@@ -24,7 +24,6 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "test-id",
       created = Instant.EPOCH,
-      content = content,
       model = "test-model",
       message = AssistantMessage(Some(content))
     )

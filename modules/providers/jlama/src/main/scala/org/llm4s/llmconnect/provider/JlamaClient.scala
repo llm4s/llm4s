@@ -137,7 +137,6 @@ final class JlamaClient private[provider] (
           Completion(
             id = UUID.randomUUID().toString,
             created = Instant.now(),
-            content = generation.text,
             model = config.model,
             message = AssistantMessage(generation.text),
             usage = Some(

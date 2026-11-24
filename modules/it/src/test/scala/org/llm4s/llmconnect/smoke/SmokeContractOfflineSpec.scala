@@ -263,10 +263,8 @@ class SmokeContractOfflineSpec
     Completion(
       id = "stub",
       created = Instant.EPOCH,
-      content = content,
       model = "stub",
       message = AssistantMessage(contentOpt = Some(content), toolCalls = toolCalls),
-      toolCalls = toolCalls,
       usage = usage
     )
 

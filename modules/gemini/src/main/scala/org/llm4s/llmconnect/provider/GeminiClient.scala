@@ -304,9 +304,6 @@ class GeminiClient(
                     // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
                     val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
                     c
-                      .withToolCalls(
-                        c.message.toolCalls.toList
-                      ) // the accumulator keeps streamed calls on the message only
                       .withEstimatedCost(cost)
                       .withCitations(citations.distinct.toList)
                       .withMessage(ThinkingReplay.bindOrigin(replayOrigin, message))
@@ -572,9 +569,7 @@ class GeminiClient(
         Right(
           Completion(
             id = UUID.randomUUID().toString,
-            content = textContent,
             model = config.model,
-            toolCalls = toolCalls.toList,
             created = Instant.now(),
             message = message,
             usage = usageOpt,

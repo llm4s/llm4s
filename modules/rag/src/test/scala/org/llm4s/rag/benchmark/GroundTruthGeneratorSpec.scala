@@ -28,7 +28,6 @@ class GroundTruthGeneratorSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-id",
           created = Instant.EPOCH,
-          content = response,
           model = "mock-model",
           message = AssistantMessage(contentOpt = Some(response)),
           usage = Some(TokenUsage(10, 10, 20))
@@ -58,7 +57,6 @@ class GroundTruthGeneratorSpec extends AnyFlatSpec with Matchers {
           Completion(
             id = "mock",
             created = Instant.EPOCH,
-            content = successResponse,
             model = "mock",
             message = AssistantMessage(contentOpt = Some(successResponse)),
             usage = Some(TokenUsage(10, 10, 20))

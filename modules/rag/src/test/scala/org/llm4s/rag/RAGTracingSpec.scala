@@ -39,7 +39,6 @@ class RAGTracingSpec extends AnyFlatSpec with Matchers {
       Completion(
         id = "c",
         created = Instant.EPOCH,
-        content = text,
         model = "mock-model",
         message = AssistantMessage(text),
         usage = Some(usage),

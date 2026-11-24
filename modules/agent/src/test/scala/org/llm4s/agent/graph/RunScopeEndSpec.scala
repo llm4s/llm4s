@@ -28,7 +28,7 @@ class RunScopeEndSpec extends AnyFlatSpec with Matchers with Eventually:
 
   private object Answering extends LLMClient:
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      Right(Completion("answer", Instant.EPOCH, "hi", "test-model", AssistantMessage("hi")))
+      Right(Completion("answer", Instant.EPOCH, "test-model", AssistantMessage("hi")))
     override def streamComplete(
       conversation: Conversation,
       options: CompletionOptions,

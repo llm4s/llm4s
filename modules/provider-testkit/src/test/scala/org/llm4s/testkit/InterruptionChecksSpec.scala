@@ -84,7 +84,7 @@ class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModu
     intercept[TestFailedException](check).getMessage
 
   private def completion =
-    Completion("c", Instant.EPOCH, "late", "m", AssistantMessage("late"))
+    Completion("c", Instant.EPOCH, "m", AssistantMessage("late"))
 
   "assertCancelsWhenInterrupted" should "say so when a client clears the interrupt flag" in {
     failureOf(assertCancelsWhenInterrupted(Misbehaving(() => Left(CancelledError("stub"))))) should include(

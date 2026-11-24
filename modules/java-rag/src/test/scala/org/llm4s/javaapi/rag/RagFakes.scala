@@ -69,7 +69,7 @@ object RagFakes {
         val answer = prompt.linesIterator
           .collectFirst { case l if l.startsWith("[1] ") => l.stripPrefix("[1] ") }
           .getOrElse(NoContext)
-        Completion("id", Instant.EPOCH, answer, "echo", AssistantMessage(answer)).withUsage(TokenUsage(12, 3, 15))
+        Completion("id", Instant.EPOCH, "echo", AssistantMessage(answer)).withUsage(TokenUsage(12, 3, 15))
       }
     }
 

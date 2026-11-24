@@ -75,7 +75,6 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion",
           created = Instant.now(),
-          content = response,
           model = "mock-model",
           message = AssistantMessage(response),
           usage = None
@@ -112,7 +111,6 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion-malformed",
           created = Instant.now(),
-          content = response,
           model = "mock-model",
           message = AssistantMessage(response),
           usage = None
@@ -147,7 +145,6 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion-empty",
           created = Instant.now(),
-          content = response,
           model = "mock-model",
           message = AssistantMessage(response),
           usage = None

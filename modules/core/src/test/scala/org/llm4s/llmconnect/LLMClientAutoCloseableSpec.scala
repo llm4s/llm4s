@@ -17,7 +17,6 @@ class LLMClientAutoCloseableSpec extends AnyFlatSpec with Matchers {
   private val stubCompletion = Completion(
     id = "test-1",
     created = Instant.EPOCH,
-    content = "ok",
     model = "test",
     message = AssistantMessage("ok")
   )

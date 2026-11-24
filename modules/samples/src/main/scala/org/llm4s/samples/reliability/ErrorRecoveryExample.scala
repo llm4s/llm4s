@@ -53,7 +53,6 @@ object ErrorRecoveryExample {
         Completion(
           id = "demo",
           created = Instant.now(),
-          content = text,
           model = "demo-model",
           message = AssistantMessage(text)
         )

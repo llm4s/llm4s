@@ -152,7 +152,7 @@ class StreamStructuredSpec extends AnyFlatSpec with Matchers with ScalaCheckProp
         onChunk(StreamedChunk("s", None, thinkingDelta = Some("""{"vendor": "thinking"}""")))
         onChunk(StreamedChunk("s", Some("")))
         onChunk(StreamedChunk("s", Some(invoiceJson)))
-        Right(Completion("s", Instant.EPOCH, invoiceJson, "m", AssistantMessage(invoiceJson)))
+        Right(Completion("s", Instant.EPOCH, "m", AssistantMessage(invoiceJson)))
       }
       override def getContextWindow(): Int     = 4096
       override def getReserveCompletion(): Int = 1024

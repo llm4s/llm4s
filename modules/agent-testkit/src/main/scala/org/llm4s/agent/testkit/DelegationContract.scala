@@ -187,10 +187,8 @@ object DelegationContract:
     Completion(
       id = "delegation-contract",
       created = Instant.EPOCH,
-      content = message.content,
       model = "contract-model",
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15)),
       finishReason = if (message.toolCalls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop
     )

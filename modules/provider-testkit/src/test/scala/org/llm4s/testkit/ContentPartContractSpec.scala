@@ -43,7 +43,7 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
           .POST(HttpRequest.BodyPublishers.ofString(ujson.Arr.from(messages).render()))
           .build()
         HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString()): Unit
-        Completion(id = "x", created = Instant.EPOCH, content = "ok", model = "m", message = AssistantMessage("ok"))
+        Completion(id = "x", created = Instant.EPOCH, model = "m", message = AssistantMessage("ok"))
     def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 1000

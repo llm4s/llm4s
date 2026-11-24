@@ -31,7 +31,6 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test-id",
           created = Instant.EPOCH,
-          content = response,
           model = "test-model",
           message = AssistantMessage(response, toolCalls = List.empty)
         )
@@ -177,7 +176,7 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
     val looping = new LLMClient {
       private val call = ToolCall("c", "missing_tool", ujson.Obj())
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-        Right(Completion("loop", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call)))
+        Right(Completion("loop", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call))))
       override def streamComplete(
         conversation: Conversation,
         options: CompletionOptions,

@@ -43,7 +43,6 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
         Completion(
           id = "script",
           created = Instant.EPOCH,
-          content = reply,
           model = "script",
           message = AssistantMessage(reply)
         )

@@ -59,7 +59,7 @@ final case class AcmeConfig(apiKey: String, model: String, baseUrl: String) exte
 
 final case class AcmeClient(config: AcmeConfig) extends LLMClient:
   def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-    Right(Completion("acme-1", Instant.EPOCH, "hi", config.model, AssistantMessage("hi")))
+    Right(Completion("acme-1", Instant.EPOCH, config.model, AssistantMessage("hi")))
 
   def streamComplete(
     conversation: Conversation,

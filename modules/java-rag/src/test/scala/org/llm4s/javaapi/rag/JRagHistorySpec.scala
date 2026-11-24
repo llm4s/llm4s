@@ -24,7 +24,7 @@ class JRagHistorySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val conversations: ArrayBuffer[Conversation] = ArrayBuffer.empty
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       conversations += conversation
-      failure.toLeft(Completion("id", Instant.EPOCH, reply, "fixed", AssistantMessage(reply)))
+      failure.toLeft(Completion("id", Instant.EPOCH, "fixed", AssistantMessage(reply)))
     }
     override def streamComplete(
       conversation: Conversation,

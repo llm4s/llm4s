@@ -26,7 +26,7 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     val received: ArrayBuffer[CompletionOptions] = ArrayBuffer.empty
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       received += o
-      Right(Completion("id", Instant.EPOCH, "4", "m", AssistantMessage("4")))
+      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("4")))
     }
     override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
