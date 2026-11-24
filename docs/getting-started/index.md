@@ -38,7 +38,7 @@ This section will guide you through:
 17. **[First Answer, No Key, No Server](local-jlama)** - A small model run inside your JVM by Jlama: no API key, no model server
 18. **[Configuration in Code](configuration-in-code)** - Configure LLM4S from a Typesafe `Config` you already have, ciris, zio-config or plain values
 19. **From Java, Spring Boot or Kotlin** - the [Java guide](/guide/java), the [Spring Boot starter](/guide/spring-boot)
-    and [Kotlin coroutines](installation#for-kotlin-coroutines-and-flow) (`llm4s-kotlin-api`, on Maven Central from 0.6.0)
+    and the [Kotlin guide](/guide/kotlin) (`llm4s-kotlin-api`, on Maven Central from 0.6.0)
 20. **[Coming from Python?](../guide/for-python-developers)** - OpenAI SDK, LangChain, LlamaIndex and Pydantic code next to the same thing in Scala 3, one Scala concept at a time
 
 The current release is **{{ site.data.project.latest_release }}**, for Scala 3.7.x on JDK 21.
