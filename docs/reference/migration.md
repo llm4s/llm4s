@@ -51,6 +51,7 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
+[the middleware SPI is consistent and testable](#the-middleware-spi-is-consistent-and-testable-2795),
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
 [the legacy embedding provider selector is removed](#the-legacy-embedding-provider-selector-is-removed),
 [Vertex AI no longer reads `endpoint` and `organization`](#vertex-ai-no-longer-reads-endpoint-and-organization),
@@ -825,11 +826,99 @@ For provider authors, the alias mechanism goes with them: `ProviderConfigKey` lo
 `withDeprecatedAliases`, and `ProviderConfigSpec.BuiltinAliasKeys` is removed. Before 1.0 a key is renamed outright,
 with a migration note ([compatibility policy](compatibility-policy)).
 
+## The middleware SPI is consistent and testable (#2795)
+
+`AgentMiddleware` and its types (`org.llm4s.agent.graph.middleware`, `@Experimental`) changed shape so that every hook
+returns state and failure the same way. Only code that writes middleware is affected. There is no shim.
+
+**Ordering constraints take a `MiddlewareRef`.** `runsBefore` and `runsAfter` name another middleware by id or by
+type, and a reference can be optional:
+
+```scala
+// before
+override def runsBefore: Set[MiddlewareId] = Set(MiddlewareId("guardrails"))
+// after: by id, as before
+override def runsBefore: Set[MiddlewareRef] = Set(MiddlewareRef(MiddlewareId("guardrails")))
+// or by type, whatever id it was given, and only if there is one
+override def runsBefore: Set[MiddlewareRef] = Set(MiddlewareRef.ofType[GuardrailMiddleware].ifPresent)
+```
+
+A required reference that names nothing in the stack is still refused. `SemanticMemoryMiddleware` no longer takes a
+`runsBefore` argument: it runs outside the guardrail middleware of its stack by itself, wherever it was registered.
+Delete the argument.
+
+**The system prompt is `ModelRequest.systemPrompt`.** `ModelRequest.messages` is the history alone; the assembled
+system prompt is no longer its first message. A `wrapModelCall` that read or kept the `SystemMessage` reads
+`request.systemPrompt` and changes it with `request.withSystemPrompt(...)`; `request.sentMessages` is the list the
+model receives. A wrapper that split the messages by role to protect the prompt no longer needs to.
+
+**A hook adds to an update; nothing replaces one.**
+
+| Was | Now |
+|---|---|
+| `BoundaryResult(text).withUpdate(u)` | `BoundaryResult(text, u)`, or `result.addUpdate(u)` |
+| `success.withUpdate(success.update.combine(u))` | `success.addUpdate(u)` |
+| matching `ToolOutcome.Success` to add a wrapper's update | `outcome.addUpdate(u)` (other outcomes are returned as they are) |
+| `ModelResponse(completion).addUpdate(u)` | unchanged; `ModelResponse(completion, u)` also works |
+
+**`ToolCallRequest` is read-only.** `withSpec`, `withCall` and `withResources` are removed: `wrapToolCall`'s `next`
+takes no request, so a changed one never reached the tool. Build one in a test with `ToolCallRequest(spec, call)`.
+
+**Reserved ids.** A middleware given to `withMiddleware` whose id is `agent-guardrails`, `delegation`,
+`ancestor-permissions` or `response-format` (`MiddlewareId.reserved`) is refused by `build()`, whether or not the
+agent installs its own under that id. Give yours another id; a constraint may still name one.
+
+**Blocking a turn.** A boundary hook that ends a turn on purpose returns `block(reason)`: the turn ends
+`AgentStatus.Blocked(id, reason)` instead of `agent.run` returning a `Left`. A `Left` still blocks the turn and is
+returned as before. What each hook's `Left`, `ToolOutcome.Fatal` and throw do is in
+[Writing Middleware](../guide/agents/middleware#errors); none of it changed.
+
+**New.** `PromptSection.estimatedTokens` and `charsFor` are public. `MiddlewareTestKit` in `llm4s-agent-testkit`
+builds a `ModelContext` and a `ToolContext` for calling a hook directly, and returns the order a stack resolves to
+([Testing a middleware](../guide/agents/middleware#testing-a-middleware)).
+
 ## `llm4s-agent` types are tiered and growth-safe (#2778)
 
 Every public top-level type of `llm4s-agent` now carries `@Stable` or `@Experimental`
-([Tiers in the Code](api-stability#tiers-in-the-code)), and `sbt stabilityTierCheck` covers the module. A `@Stable`
-case class that may gain a field has a private constructor and `copy`, as core's do. There is no shim.
+([Tiers in the Code](api-stability#tiers-in-the-code)), and `sbt stabilityTierCheck` covers the module. Only a small
+core is `@Stable` ([#2785](https://github.com/llm4s/llm4s/issues/2785)): `Agent`, `AgentBuilder`, `AgentResult`,
+`AgentStatus`, `AgentRun`, `Handoff`, `AgentId`; in `agent.graph`, `ThreadId`, `RunId`, `InterruptId`, `NodeId`,
+`TenantId`, `Principal`, `RunConfig`, `RunBudgets`, `RetentionPolicy`, `RunStatus`; `Guardrail`, `InputGuardrail`,
+`OutputGuardrail`, and `LengthCheck`, `ProfanityFilter`, `JSONValidator`, `RegexValidator`. Everything else - the
+graph runtime, checkpointers, events and streaming, middleware, tools and the tool loop, human review, delegation,
+the harness, `agent.service`, encryption, metrics, the other guardrails and `org.llm4s.assistant` - is
+`@Experimental`, and so are the members of the Stable types that name it (`withMiddleware`, `withRuntime`,
+`withStreaming`, `stream`, `resume`, the `AgentStatus.Suspended` case and the others listed in
+[Tiers in the Code](api-stability#tiers-in-the-code)). Nothing changes for code that uses them; they may change in a
+1.x minor release. Case classes that may gain a field have a private constructor and `copy`, as core's do. There is
+no shim.
+
+**Guardrails attach through the builder.** `withInputGuardrails` and `withOutputGuardrails` are the Stable way;
+`withMiddleware(new GuardrailMiddleware(...))` still works and is the Experimental form for choosing the position in
+the stack ([Guardrails](../guide/agents/guardrails)). The builder's guardrails run innermost, closest to the model.
+
+```scala
+// before
+Agent.builder("assistant", client)
+  .withMiddleware(new GuardrailMiddleware(input = Seq(new LengthCheck(1, 10000)), output = Seq(new JSONValidator())))
+// after
+Agent.builder("assistant", client)
+  .withInputGuardrails(LengthCheck(1, 10000))
+  .withOutputGuardrails(JSONValidator())
+```
+
+**The four validators are built through their companions.** `LengthCheck`, `ProfanityFilter`, `JSONValidator` and
+`RegexValidator` are final with private constructors:
+
+| Was | Now |
+|---|---|
+| `new LengthCheck(min, max)` | `LengthCheck(min, max)` (or `LengthCheck.maxOnly`, `minOnly`) |
+| `new ProfanityFilter()`, `new ProfanityFilter(customBadWords = ws)`, `..., caseSensitive = true)` | `ProfanityFilter()`, `ProfanityFilter.withCustomWords(ws)`, `ProfanityFilter.caseSensitive(ws)` |
+| `new JSONValidator()`, `new JSONValidator(Some(schema))` | `JSONValidator()`, `JSONValidator.withSchema(schema)` |
+| `new RegexValidator(regex)`, `new RegexValidator(regex, Some(message))` | `RegexValidator(regex)`, `RegexValidator(regex, message)` |
+
+**`ThreadId.child` is internal.** It named `IdempotencyKey`, an Experimental type; a child thread's id is the one
+`Agent.children` and the delegation events report.
 
 **Growth-safe types.** `X(...)` still builds each one; `new X(...)` and `.copy(...)` no longer compile.
 
@@ -912,16 +1001,10 @@ is unchanged.
 | `guardrails.rag.GroundingResult`, `ContextRelevanceResult`, `SourceAttributionResult`, `TopicBoundaryResult`, `guardrails.builtin.InjectionMatch` | internal: each guardrail's parsed verdict |
 | `org.llm4s.assistant.Command` | internal to `AssistantAgent` |
 
-**Tiers that moved.** Now `@Stable`, because a Stable signature names them: `ModelContext`, `ModelResponse`,
-`BoundaryResult`, `PromptSection`, `Placement` (the `AgentMiddleware` hooks); `ToolResource`, `Operation`, `LockKey`,
-`OutputFormat` and core's `ToolHints` (the tool contract); `EffectKey`, `EffectRecord`, `RunOrigin`, `RunOutcome`,
-`ChildThread`, `ThreadStatus`, `ThreadMetadata`, `ThreadCursor`, `ThreadQuery`, `ThreadSummary`, `ThreadPage`,
-`SweepPolicy`, `SweepGuard`, `SweepPage` (the `Checkpointer` contract); `ChildRef`, `ChildInterrupt`,
-`DelegatedRequest` (`Suspension.delegated`, `StreamEvent.Nested`). `@Experimental` members of Stable
-types: `AgentBuilder.withHarness`, `withSubagents`, `withDelegation`, `Agent.delegation`, and
-`InMemoryCheckpointer.runQueue`. The RAG
-guardrails (`org.llm4s.agent.guardrails.rag`) are `@Experimental`: an agent gives them the turn's `RAGContext` only
-through `RAGGuardrail.withTurnContext`, whose shape may still change.
+**Tiers that moved.** Core's `ToolHints` is now `@Stable` (the tool contract). `Agent.loop` is now an `@Experimental`
+`def` rather than a constructor `val`, so `agent.loop.graph` reads as before. The RAG guardrails
+(`org.llm4s.agent.guardrails.rag`) are `@Experimental`: an agent gives them the turn's `RAGContext` only through
+`RAGGuardrail.withTurnContext`, whose shape may still change.
 
 ## Context pruning enforces both limits and `minRecentTurns` (#2728, #2729)
 
