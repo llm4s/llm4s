@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -16,11 +17,16 @@ import ujson.read
 class CohereEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
 
   private val cfg =
-    EmbeddingProviderConfig(baseUrl = "http://cohere-test", model = "embed-english-v3.0", apiKey = Secret("k"))
+    EmbeddingProviderConfig(
+      providerId = ProviderId("cohere"),
+      baseUrl = BaseUrl("http://cohere-test"),
+      model = ModelName("embed-english-v3.0"),
+      apiKey = Some(Secret("k"))
+    )
   private val ok = HttpResponse(200, """{"embeddings":{"float":[[0.1,0.2]]}}""", Map.empty)
 
   private def request(purpose: InputPurpose) =
-    EmbeddingRequest(Seq("text"), EmbeddingModelConfig("embed-english-v3.0", 1024), purpose)
+    EmbeddingRequest(Seq("text"), EmbeddingModelConfig(ModelName("embed-english-v3.0"), 1024), purpose)
 
   /** The `input_type` of the request the provider sent, and the one it reports in the response metadata. */
   private def sent(provider: MockHttpClient => EmbeddingProvider, req: EmbeddingRequest): (String, String) = {
@@ -42,7 +48,10 @@ class CohereEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "still send search_document when the request does not say, as every request did before" in {
-    sent(followingPurpose, EmbeddingRequest(Seq("text"), EmbeddingModelConfig("embed-english-v3.0", 1024)))._1 shouldBe
+    sent(
+      followingPurpose,
+      EmbeddingRequest(Seq("text"), EmbeddingModelConfig(ModelName("embed-english-v3.0"), 1024))
+    )._1 shouldBe
       "search_document"
   }
 

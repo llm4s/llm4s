@@ -3,8 +3,9 @@ layout: page
 title: Java Reactor
 description: "Stream a model's reply as a Reactor Flux from Java with llm4s-reactor, for Spring WebFlux and other reactive pipelines."
 search_title: "Stream LLM replies to Reactor Flux from Java"
-parent: User Guide
-nav_order: 35
+parent: Java and Kotlin
+nav_order: 404
+grand_parent: User Guide
 ---
 
 # Streaming to Reactor from Java

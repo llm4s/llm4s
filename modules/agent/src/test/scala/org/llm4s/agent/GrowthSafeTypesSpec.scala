@@ -1,12 +1,22 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.agent.events._
 import org.llm4s.agent.graph._
 import org.llm4s.agent.graph.toolloop._
 import org.llm4s.agent.guardrails.builtin.{ InjectionCategory, InjectionPattern }
 import org.llm4s.error.{ LLMError, ProcessingError }
-import org.llm4s.llmconnect.model.{ FinishReason, RequestAdjustment, RequestOption, ServiceTier, ToolCall, UserMessage }
+import org.llm4s.llmconnect.model.{
+  FinishReason,
+  RequestAdjustment,
+  RequestOption,
+  ServiceTier,
+  ToolCall,
+  ToolCallId,
+  UserMessage
+}
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -97,9 +107,10 @@ class GrowthSafeTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   "ModelCallCompleted" should "set each field through its own setter" in {
-    val base = ModelCallCompleted("a", "a", 1, 1, None, None, None, Nil, None, None)
+    val base = ModelCallCompleted("a", ModelName("a"), 1, 1, None, None, None, Nil, None, None)
     base.withAgent("b").agent shouldBe "b"
-    base.withModel("b").model shouldBe "b"
+    base.withModel(ModelName("b")).model shouldBe ModelName("b")
+    base.withDuration(scala.concurrent.duration.Duration(7, "ms")).duration.toMillis shouldBe 7L
     base.withAttempts(7).attempts shouldBe 7
     base.withToolCalls(7).toolCalls shouldBe 7
     base.withUsage(CallUsage(1, 2, 3, None)).usage shouldBe Some(CallUsage(1, 2, 3, None))
@@ -120,16 +131,16 @@ class GrowthSafeTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   "ToolExecuted" should "set each field through its own setter" in {
-    val base = ToolExecuted("a", "a", "a", 1.second, ToolExecutionOutcome.Succeeded, None)
+    val base = ToolExecuted("a", ToolCallId("a"), "a", 1.second, ToolExecutionOutcome.Succeeded, None)
     base.withAgent("b").agent shouldBe "b"
-    base.withToolCallId("b").toolCallId shouldBe "b"
+    base.withToolCallId(ToolCallId("b")).toolCallId shouldBe ToolCallId("b")
     base.withTool("b").tool shouldBe "b"
     base.withDuration(7.seconds).duration shouldBe 7.seconds
     base.withOutcome(ToolExecutionOutcome.Errored).outcome shouldBe ToolExecutionOutcome.Errored
-    base.withIdempotencyKey("b").idempotencyKey shouldBe Some("b")
-    base.withIdempotencyKey(Some("b")).withIdempotencyKey(None).idempotencyKey shouldBe None
+    base.withIdempotencyKey(IdempotencyKey("b")).idempotencyKey shouldBe Some(IdempotencyKey("b"))
+    base.withIdempotencyKey(Some(IdempotencyKey("b"))).withIdempotencyKey(None).idempotencyKey shouldBe None
     base.withAgent("b").idempotencyKey shouldBe base.idempotencyKey
-    base.withIdempotencyKey("b").agent shouldBe base.agent
+    base.withIdempotencyKey(IdempotencyKey("b")).agent shouldBe base.agent
   }
 
   "HandedOff" should "set each field through its own setter" in {
@@ -173,20 +184,20 @@ class GrowthSafeTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   "ToolCallStarted" should "set each field through its own setter" in {
-    val base = ToolCallStarted("a", "a", ujson.Null)
-    base.withToolCallId("b").toolCallId shouldBe "b"
+    val base = ToolCallStarted(ToolCallId("a"), "a", ujson.Null)
+    base.withToolCallId(ToolCallId("b")).toolCallId shouldBe ToolCallId("b")
     base.withTool("b").tool shouldBe "b"
     base.withArguments(ujson.Str("b")).arguments shouldBe ujson.Str("b")
-    base.withToolCallId("b").arguments shouldBe base.arguments
+    base.withToolCallId(ToolCallId("b")).arguments shouldBe base.arguments
     base.withArguments(ujson.Str("b")).toolCallId shouldBe base.toolCallId
   }
 
   "ToolCallResult" should "set each field through its own setter" in {
-    val base = ToolCallResult("a", "a", false)
-    base.withToolCallId("b").toolCallId shouldBe "b"
+    val base = ToolCallResult(ToolCallId("a"), "a", false)
+    base.withToolCallId(ToolCallId("b")).toolCallId shouldBe ToolCallId("b")
     base.withContent("b").content shouldBe "b"
     base.withIsError(true).isError shouldBe true
-    base.withToolCallId("b").isError shouldBe base.isError
+    base.withToolCallId(ToolCallId("b")).isError shouldBe base.isError
     base.withIsError(true).toolCallId shouldBe base.toolCallId
   }
 
@@ -513,9 +524,13 @@ class GrowthSafeTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   "ToolTask" should "set each field through its own setter" in {
-    val base = ToolTask("a", ToolCall("c1", "search", ujson.Obj()), IdempotencyKey("a"))
+    val base = ToolTask("a", ToolCall(ToolCallId("c1"), "search", ujson.Obj()), IdempotencyKey("a"))
     base.withAssistantMessageId("b").assistantMessageId shouldBe "b"
-    base.withCall(ToolCall("c2", "fetch", ujson.Obj())).call shouldBe ToolCall("c2", "fetch", ujson.Obj())
+    base.withCall(ToolCall(ToolCallId("c2"), "fetch", ujson.Obj())).call shouldBe ToolCall(
+      ToolCallId("c2"),
+      "fetch",
+      ujson.Obj()
+    )
     base.withIdempotencyKey(IdempotencyKey("b")).idempotencyKey shouldBe IdempotencyKey("b")
     base.withAssistantMessageId("b").idempotencyKey shouldBe base.idempotencyKey
     base.withIdempotencyKey(IdempotencyKey("b")).assistantMessageId shouldBe base.assistantMessageId

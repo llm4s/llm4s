@@ -43,7 +43,7 @@ pass them through `JAVA_OPTS`:
 
 ```bash
 gradle installDist
-JAVA_OPTS="-Dllm4s.providers.openai-main.model=gpt-4o" build/install/hello-llm4s/bin/hello-llm4s
+JAVA_OPTS="-Dllm4s.providers.openai-main.model=gpt-5.6-terra" build/install/hello-llm4s/bin/hello-llm4s
 ```
 
 A provider's key comes from its own environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...); see the

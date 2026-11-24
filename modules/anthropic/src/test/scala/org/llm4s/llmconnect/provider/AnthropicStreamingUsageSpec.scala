@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.llmconnect.config.AnthropicConfig
@@ -25,8 +27,8 @@ class AnthropicStreamingUsageSpec extends AnyFlatSpec with Matchers with EitherV
 
   private val testConfig = AnthropicConfig(
     apiKey = Secret("test-key"),
-    model = "claude-sonnet-4-5",
-    baseUrl = "https://api.anthropic.com",
+    model = ModelName("claude-sonnet-4-5"),
+    baseUrl = BaseUrl("https://api.anthropic.com"),
     contextWindow = 200000,
     reserveCompletion = 4096
   )
@@ -71,8 +73,8 @@ class AnthropicStreamingUsageSpec extends AnyFlatSpec with Matchers with EitherV
   private val messageStop = "message_stop" -> """{"type":"message_stop"}"""
 
   private def streamedUsage(baseUrl: String): TokenUsage =
-    new AnthropicClient(testConfig.withBaseUrl(baseUrl))
-      .streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions(), _ => ())
+    new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
+      .streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions())(_ => ())
       .value
       .usage
       .value
@@ -164,8 +166,8 @@ class AnthropicStreamingUsageSpec extends AnyFlatSpec with Matchers with EitherV
       )
     ) ++ text ++ Seq(messageDelta("""{"output_tokens":40}"""), messageStop)
     withStream(events*) { baseUrl =>
-      val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
-        .streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions(), _ => ())
+      val completion = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
+        .streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions())(_ => ())
         .value
       val pricing =
         summon[ModelRegistryService].lookup(testConfig.model).toOption.value.pricing
@@ -173,7 +175,7 @@ class AnthropicStreamingUsageSpec extends AnyFlatSpec with Matchers with EitherV
         3000 * pricing.cacheReadInputTokenCost.value +
         250 * pricing.cacheCreationInputTokenCost.value +
         40 * pricing.outputCostPerToken.value
-      completion.estimatedCost.value shouldBe expected +- 1e-12
+      completion.estimatedCost.value.toDouble shouldBe expected +- 1e-12
     }
   }
 }

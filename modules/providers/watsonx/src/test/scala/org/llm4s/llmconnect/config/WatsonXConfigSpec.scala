@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.model.ModelRegistryTestSupport
@@ -13,12 +15,13 @@ class WatsonXConfigSpec extends AnyFunSuite with Matchers:
     apiKey: String = "key",
     project: Option[String] = Some("p-1"),
     space: Option[String] = None,
-    baseUrl: String = WatsonXConfig.DEFAULT_BASE_URL
-  ) = WatsonXConfig.fromValues("ibm/granite-13b-instruct-v2", Secret(apiKey), project, space, baseUrl)
+    baseUrl: String = WatsonXConfig.DEFAULT_BASE_URL.asUrl
+  ) =
+    WatsonXConfig.fromValues(ModelName("ibm/granite-13b-instruct-v2"), Secret(apiKey), project, space, BaseUrl(baseUrl))
 
   test("fromValues applies the Dallas endpoint, API version and IAM endpoint by default") {
     val config = build().getOrElse(fail("expected a config"))
-    config.baseUrl shouldBe "https://us-south.ml.cloud.ibm.com"
+    config.baseUrl shouldBe BaseUrl("https://us-south.ml.cloud.ibm.com")
     config.apiVersion shouldBe "2026-09-25"
     config.iamUrl shouldBe "https://iam.cloud.ibm.com/identity/token"
     config.providerId.asString shouldBe "watsonx"
@@ -46,6 +49,9 @@ class WatsonXConfigSpec extends AnyFunSuite with Matchers:
 
   test("withModel replaces only the model") {
     val config = build().getOrElse(fail("expected a config"))
-    config.withModel("meta-llama/llama-3-8b-instruct").model shouldBe "meta-llama/llama-3-8b-instruct"
-    config.withModel("x").projectId shouldBe config.projectId
+    config
+      .withModel(ModelName("meta-llama/llama-3-8b-instruct"))
+      .model
+      .asString shouldBe "meta-llama/llama-3-8b-instruct"
+    config.withModel(ModelName("x")).projectId shouldBe config.projectId
   }

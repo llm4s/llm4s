@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.model.ModelRegistryService
@@ -98,7 +99,7 @@ class MultiProviderComparisonExampleSpec extends AnyFlatSpec with Matchers {
            |    apiKey   = "test-key"
            |  }""".stripMargin
       val hocon = s"llm4s.providers {\n  provider = \"alpha\"\n${fakes.keys.map(section).mkString("\n")}\n}"
-      val load  = (name: String) => Llm4sConfig.provider(ConfigSource.string(hocon), name)
+      val load  = (name: String) => Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName(name))
       test(load, fakes)
     }
     servers.values.foreach(_.stop(0))

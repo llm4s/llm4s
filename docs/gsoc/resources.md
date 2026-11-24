@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Student Resources
+description: "Resources for students joining LLM4S or applying to Google Summer of Code: how to apply, where to ask, and how to make a first contribution."
 parent: Google Summer of Code
 nav_order: 2
 permalink: /gsoc/resources/
@@ -26,7 +27,7 @@ If you have been selected or want to start contributing now:
 2.  **Dev Environment Setup**:
     - Install JDK 21+ and SBT.
     - Run `sbt test` to ensure the core builds correctly.
-    - Check out the [Contribution Guide](/reference/contributing).
+    - Check out the [Contribution Guide](/contribute/contributing).
 
 ## Useful Links
 - [Official GSoC Website](https://summerofcode.withgoogle.com/)

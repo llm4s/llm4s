@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.streaming
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ToolCallRules
@@ -21,7 +22,7 @@ import scala.collection.mutable
  * whose wire format identifies continuations only by index must map them back to the id first.
  */
 @Stable
-final class StreamingAccumulator private (model: String) {
+final class StreamingAccumulator private (model: ModelName) {
 
   private val contentBuilder                       = new StringBuilder()
   private val thinkingBuilder                      = new StringBuilder()
@@ -38,7 +39,7 @@ final class StreamingAccumulator private (model: String) {
   // For accumulating partial tool calls, keyed by id. Insertion-ordered, so tool calls come
   // back in the order the stream first named them - the provider's index order - rather than
   // in hash order; callers that run tools sequentially depend on it (#1132).
-  private val partialToolCalls = mutable.LinkedHashMap[String, PartialToolCall]()
+  private val partialToolCalls = mutable.LinkedHashMap[ToolCallId, PartialToolCall]()
 
   /**
    * Add a streaming chunk to the accumulator
@@ -57,7 +58,7 @@ final class StreamingAccumulator private (model: String) {
 
     // Handle tool calls
     chunk.toolCall.foreach { toolCall =>
-      if (toolCall.id.nonEmpty) {
+      if (toolCall.id.asString.nonEmpty) {
         // New tool call or update to existing
         val partial = partialToolCalls.getOrElseUpdate(
           toolCall.id,
@@ -107,7 +108,7 @@ final class StreamingAccumulator private (model: String) {
     partialToolCalls.values.map { p =>
       val raw = p.argumentsBuilder.toString
       // the one boundary parser: unparseable or nested too deeply stays the raw Str, never parsed (#1562)
-      ToolCall(id = p.id, name = p.name, arguments = StreamingToolArgumentParser.parse(raw).getOrElse(ujson.Str(raw)))
+      ToolCall(id = p.id, name = p.name, arguments = ToolCallRules.parseArguments(raw).getOrElse(ujson.Str(raw)))
     }.toSeq
 
   /**
@@ -157,8 +158,8 @@ final class StreamingAccumulator private (model: String) {
    * cut the stream (`Length`) while it made tool calls. A broken call is never `{}` and never dropped.
    */
   def toCompletion(created: Instant): Result[Completion] = {
-    // the last reason a chunk carried; none read is Other(""), never a Stop the provider didn't send
-    val reason = finishReason.getOrElse(FinishReason.Other(""))
+    // the last reason a chunk carried; none read is Unknown, never a Stop the provider didn't send
+    val reason = finishReason.getOrElse(FinishReason.Unknown)
     finishedToolCalls(reason).map(completion(created, _, reason)).flatMap(ToolCallRules.checked)
   }
 
@@ -166,7 +167,7 @@ final class StreamingAccumulator private (model: String) {
     // the streamed thinking is unsigned text; a client whose provider signs its thinking blocks
     // replaces it on the message with the blocks it tracked
     val message = AssistantMessage(
-      contentOpt = if (contentBuilder.isEmpty) None else Some(contentBuilder.toString),
+      text = if (contentBuilder.isEmpty) None else Some(contentBuilder.toString),
       toolCalls = finalToolCalls
     ).withThinking(thinkingBuilder.toString)
 
@@ -189,7 +190,6 @@ final class StreamingAccumulator private (model: String) {
     Completion(
       id = messageId.getOrElse(""),
       created = created,
-      content = contentBuilder.toString(),
       model = model,
       message = message,
       usage = usage,
@@ -249,7 +249,7 @@ final class StreamingAccumulator private (model: String) {
    * Helper class for partial tool call accumulation
    */
   private case class PartialToolCall(
-    id: String,
+    id: ToolCallId,
     var name: String,
     argumentsBuilder: StringBuilder
   )
@@ -266,6 +266,6 @@ object StreamingAccumulator {
    * @param model the model the completion reports as `Completion.model`: the model the request named, or
    *              `""` where the caller does not know it
    */
-  def apply(model: String): StreamingAccumulator = new StreamingAccumulator(model)
+  def apply(model: ModelName): StreamingAccumulator = new StreamingAccumulator(model)
 
 }

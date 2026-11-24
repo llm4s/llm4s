@@ -1,10 +1,11 @@
 package org.llm4s.agent
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
-import org.llm4s.agent.graph.{ GraphError, IdempotencyKey, StateKey, StateUpdate, ThreadId }
+import org.llm4s.agent.graph.{ GraphError, StateKey, StateUpdate, ThreadId }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ToolCallRequest }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.llmconnect.model._
@@ -35,7 +36,7 @@ class ToolTimeoutSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   "A tool past its timeout" should "be interrupted, and the model see a tool error, not a failed run" in {
     val interrupted = new CountDownLatch(1)
     val client      = ScriptedLLMClient.of(calling(call("c1", "hang")), CompletionFixture.simple("moved on"))
-    val agent       = built(Agent.builder("assistant", client).withTools(SpecTools.set(hanging(interrupted))))
+    val agent       = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(hanging(interrupted))))
 
     val result = agent.run("go").value
     result.answer shouldBe Some("moved on")
@@ -46,7 +47,7 @@ class ToolTimeoutSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   "Timed-out calls of one batch" should "each get one error result" in {
     val interrupted = new CountDownLatch(2)
     val client = ScriptedLLMClient.of(calling(call("c1", "hang"), call("c2", "hang")), CompletionFixture.simple("ok"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(hanging(interrupted))))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(hanging(interrupted))))
     toolResults(agent.run("go").value) shouldBe Vector.fill(2)("""{"error":"Tool 'hang' timed out after 100 ms"}""")
   }
 
@@ -64,7 +65,7 @@ class ToolTimeoutSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       calling(call("c2", "read")),
       CompletionFixture.simple("done")
     )
-    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(quick, read)))
+    val agent = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(quick, read)))
     toolResults(agent.run("go").value) shouldBe Vector("quick", "7")
   }
 
@@ -81,7 +82,7 @@ class ToolTimeoutSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       ToolOutcome.success(ToolContent.Json(ujson.Str("slow done")))
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "slow")), CompletionFixture.simple("finished"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(slow)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(slow)))
     val thread = ThreadId("timed-cancel")
 
     val run = agent.start(thread, "go").fold(e => fail(e.message), identity)
@@ -115,7 +116,7 @@ class ToolTimeoutSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         }
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "flaky")), CompletionFixture.simple("done"))
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(flaky)).withMiddleware(retry))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(flaky)).withMiddleware(retry))
     toolResults(agent.run("go").value) shouldBe Vector("second time")
     keys.asScala.toVector.distinct should have size 1
     runs.get shouldBe 2

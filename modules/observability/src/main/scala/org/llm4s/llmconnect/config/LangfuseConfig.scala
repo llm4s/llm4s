@@ -18,7 +18,10 @@ import org.llm4s.trace.TracingMode
  *
  * `toString` redacts both keys so that the config can be safely logged.
  *
- * @param url       Langfuse ingestion endpoint; defaults to [[LangfuseConfig.DEFAULT_URL]]
+ * @param url       the Langfuse host, Langfuse Cloud or a self-hosted server's base URL; defaults to
+ *                  [[LangfuseConfig.DEFAULT_URL]]. Each request appends its own path (`/api/public/otel/v1/traces`,
+ *                  `/api/public/scores`); a URL ending in one of Langfuse's API paths, such as the legacy
+ *                  `/api/public/ingestion`, names the host it is on (#2883)
  * @param publicKey Langfuse public API key; the backend refuses to start without it
  * @param secretKey Langfuse secret API key; redacted in `toString`
  * @param env       deployment environment tag attached to every trace; defaults to `"production"`
@@ -46,8 +49,8 @@ object LangfuseConfig {
   /** The mode Langfuse is registered under: `TRACING_MODE=langfuse`. */
   val Mode: TracingMode = TracingMode.Named("langfuse")
 
-  /** Langfuse Cloud's ingestion endpoint. This was `DefaultConfig.DEFAULT_LANGFUSE_URL` in `llm4s-core`. */
-  val DEFAULT_URL = "https://cloud.langfuse.com/api/public/ingestion"
+  /** Langfuse Cloud (EU). This was `DefaultConfig.DEFAULT_LANGFUSE_URL` in `llm4s-core`. */
+  val DEFAULT_URL = "https://cloud.langfuse.com"
 
   /** This was `DefaultConfig.DEFAULT_LANGFUSE_ENV` in `llm4s-core`. */
   val DEFAULT_ENV = "production"

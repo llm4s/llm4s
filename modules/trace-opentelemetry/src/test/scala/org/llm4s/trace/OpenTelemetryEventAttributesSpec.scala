@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import io.opentelemetry.api.common.{ AttributeKey, Attributes }
 import io.opentelemetry.api.trace.SpanKind
 import io.opentelemetry.sdk.common.CompletableResultCode
@@ -13,6 +14,7 @@ import org.llm4s.llmconnect.model.{
   ServiceTier,
   TokenUsage,
   ToolCall,
+  ToolCallId,
   ToolMessage,
   UserMessage
 }
@@ -70,35 +72,12 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
   private val at    = Instant.parse("2026-11-03T10:00:00Z")
   private val limit = TraceAttributes.ContentLimit
 
-  "AgentInitialized" should {
-
-    "be the `LLM4S Agent Run` span with its tools and no input by default" in {
-      val (name, attributes) = mapped(TraceEvent.AgentInitialized("what is 2+2?", Vector("search", "calculator"), at))
-      name shouldBe "LLM4S Agent Run"
-      str(attributes, "event.type") shouldBe "trace-create"
-      str(attributes, "tools") shouldBe "search, calculator"
-      str(attributes, "input") shouldBe null
-    }
-
-    "record its input with captureContent, cut to ContentLimit characters" in {
-      val (_, whole) = mapped(TraceEvent.AgentInitialized("a" * limit, Vector.empty, at), captureContent = true)
-      str(whole, "input") shouldBe "a" * limit
-
-      val (_, cut) = mapped(TraceEvent.AgentInitialized("a" * (limit + 1), Vector.empty, at), captureContent = true)
-      str(cut, "input") shouldBe "a" * limit
-    }
-
-    "be an INTERNAL span" in {
-      kind(TraceEvent.AgentInitialized("q", Vector.empty, at)) shouldBe SpanKind.INTERNAL
-    }
-  }
-
   "CompletionReceived" should {
 
     "cut each message part to ContentLimit characters with captureContent" in {
       val event = TraceEvent.CompletionReceived(
         id = "chatcmpl-1",
-        model = "gpt-4o",
+        model = ModelName("gpt-4o"),
         toolCalls = 0,
         content = "b" * (limit + 1),
         timestamp = at,
@@ -113,13 +92,13 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
       val arguments = ujson.Obj("query" -> "e" * limit)
       val event = TraceEvent.CompletionReceived(
         id = "chatcmpl-1",
-        model = "gpt-4o",
+        model = ModelName("gpt-4o"),
         toolCalls = 0,
         content = "done",
         timestamp = at,
         input = Seq(
-          AssistantMessage(None, Seq(ToolCall("call-1", "search", arguments))),
-          ToolMessage("f" * (limit + 1), "call-1")
+          AssistantMessage(None, Seq(ToolCall(ToolCallId("call-1"), "search", arguments))),
+          ToolMessage("f" * (limit + 1), ToolCallId("call-1"))
         )
       )
       val (_, attributes) = mapped(event, captureContent = true)
@@ -133,13 +112,13 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
     }
 
     "be a CLIENT span" in {
-      kind(TraceEvent.CompletionReceived("chatcmpl-1", "gpt-4o", 0, "hi", at)) shouldBe SpanKind.CLIENT
+      kind(TraceEvent.CompletionReceived("chatcmpl-1", ModelName("gpt-4o"), 0, "hi", at)) shouldBe SpanKind.CLIENT
     }
 
     "report the output tokens as billed: the completion plus the thinking it leaves out" in {
       val event = TraceEvent.CompletionReceived(
         id = "chatcmpl-1",
-        model = "o3",
+        model = ModelName("o3"),
         toolCalls = 0,
         content = "hi",
         timestamp = at,
@@ -154,7 +133,7 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
     "record the served tier, as openai.response.service_tier for OpenAI and Azure OpenAI" in {
       def tiers(provider: Option[String], tier: Option[ServiceTier]) = {
         val event = TraceEvent
-          .CompletionReceived("chatcmpl-1", "gpt-4o", 0, "hi", at)
+          .CompletionReceived("chatcmpl-1", ModelName("gpt-4o"), 0, "hi", at)
           .withProvider(provider.map(ProviderId(_)))
           .withServedTier(tier)
         val (_, attributes) = mapped(event)
@@ -168,9 +147,9 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
     }
 
     "record the served tier traceCompletion is given" in withTracing() { (tracing, spans) =>
-      val completion = Completion("chatcmpl-1", at, "hi", "gpt-4o", AssistantMessage("hi"))
+      val completion = Completion("chatcmpl-1", at, ModelName("gpt-4o"), AssistantMessage("hi"))
         .withServedTier(ServiceTier.Auto)
-      tracing.traceCompletion(completion, "gpt-4o") shouldBe Right(())
+      tracing.traceCompletion(completion, ModelName("gpt-4o")) shouldBe Right(())
       spans().loneElement.getAttributes.get(AttributeKey.stringKey("llm4s.service_tier")) shouldBe "auto"
     }
   }
@@ -179,7 +158,9 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
 
     "carry its event type, operation, input count and total tokens" in {
       val (_, attributes) =
-        mapped(TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(40, 42), "text-embedding-3-small", "index", 3, at))
+        mapped(
+          TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(40, 42), ModelName("text-embedding-3-small"), "index", 3, at)
+        )
       str(attributes, "event.type") shouldBe "embedding-usage"
       str(attributes, "operation") shouldBe "index"
       long(attributes, "input_count") shouldBe 3L
@@ -187,14 +168,17 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
     }
 
     "be a CLIENT span" in {
-      kind(TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(1, 1), "m", "index", 1, at)) shouldBe SpanKind.CLIENT
+      kind(
+        TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(1, 1), ModelName("m"), "index", 1, at)
+      ) shouldBe SpanKind.CLIENT
     }
   }
 
   "ErrorOccurred without an operation" should {
 
     "be the `Error` span with the error's message, simple class name and context" in {
-      val (name, attributes) = mapped(TraceEvent.ErrorOccurred(new IllegalStateException("boom"), "loading config", at))
+      val (name, attributes) =
+        mapped(TraceEvent.ErrorOccurred.of(new IllegalStateException("boom"), "loading config").withTimestamp(at))
       name shouldBe "Error"
       str(attributes, "event.type") shouldBe "event-create"
       str(attributes, "error.message") shouldBe "boom"
@@ -207,12 +191,12 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
 
     "be the call's span with the GenAI usage a content-filtered reply was billed (#2676)" in {
       val filtered = TraceEvent.ErrorOccurred(
-        new RuntimeException("filtered"),
+        "filtered",
+        "ContentFilteredError",
         "chat",
-        at,
+        timestamp = at,
         operation = Some("chat"),
-        model = Some("gemini-2.5-flash"),
-        errorType = Some("ContentFilteredError"),
+        model = Some(ModelName("gemini-2.5-flash")),
         usage = Some(TokenUsage(7, 4, 11, thinkingTokens = Some(2)))
       )
       val (name, attributes) = mapped(filtered)
@@ -224,7 +208,7 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
 
     "carry no usage when the call reported none" in {
       val (_, attributes) =
-        mapped(TraceEvent.ErrorOccurred(new RuntimeException("x"), "chat", at, operation = Some("chat")))
+        mapped(TraceEvent.ErrorOccurred("x", "RateLimitError", "chat", timestamp = at, operation = Some("chat")))
       long(attributes, "gen_ai.usage.input_tokens") shouldBe null
     }
   }
@@ -232,7 +216,8 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
   "TokenUsageRecorded" should {
 
     "be `Token Usage - <operation>` with the model and all three token counts" in {
-      val (name, attributes) = mapped(TraceEvent.TokenUsageRecorded(TokenUsage(12, 7, 19), "gpt-4o", "summarise", at))
+      val (name, attributes) =
+        mapped(TraceEvent.TokenUsageRecorded(TokenUsage(12, 7, 19), ModelName("gpt-4o"), "summarise", at))
       name shouldBe "Token Usage - summarise"
       str(attributes, "event.type") shouldBe "event-create"
       str(attributes, "gen_ai.request.model") shouldBe "gpt-4o"
@@ -243,12 +228,12 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
     }
 
     "be an INTERNAL span" in {
-      kind(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "m", "op", at)) shouldBe SpanKind.INTERNAL
+      kind(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), ModelName("m"), "op", at)) shouldBe SpanKind.INTERNAL
     }
 
     "count thinking tokens in the output tokens, since completionTokens leaves them out" in {
       val usage           = TokenUsage(81, 18, 145, thinkingTokens = Some(46))
-      val (_, attributes) = mapped(TraceEvent.TokenUsageRecorded(usage, "o3", "chat", at))
+      val (_, attributes) = mapped(TraceEvent.TokenUsageRecorded(usage, ModelName("o3"), "chat", at))
       long(attributes, "gen_ai.usage.output_tokens") shouldBe 64L
       long(attributes, "gen_ai.usage.total_tokens") shouldBe 145L
     }
@@ -257,7 +242,8 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
   "CostRecorded" should {
 
     "be `Cost - <operation>` with the model, token count, cost and cost type" in {
-      val (name, attributes) = mapped(TraceEvent.CostRecorded(0.0125, "gpt-4o", "completion", 500, "total", at))
+      val (name, attributes) =
+        mapped(TraceEvent.CostRecorded(0.0125, ModelName("gpt-4o"), "completion", 500, "total", at))
       name shouldBe "Cost - completion"
       str(attributes, "event.type") shouldBe "cost"
       str(attributes, "gen_ai.request.model") shouldBe "gpt-4o"
@@ -330,8 +316,7 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
 
     def image(costUsd: Option[Double] = None, errorMessage: Option[String] = None, success: Boolean = true) =
       TraceEvent.ImageGenerationCompleted(
-        model = "gpt-image-1",
-        provider = "openai",
+        model = ModelName("gpt-image-1"),
         operation = "generate",
         imageCount = 2,
         size = "1024x1024",
@@ -340,7 +325,8 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
         costUsd = costUsd,
         success = success,
         errorMessage = errorMessage,
-        timestamp = at
+        timestamp = at,
+        provider = Some(ProviderId("openai"))
       )
 
     "be `Image Generation - <operation>` with the request's details" in {
@@ -415,7 +401,7 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
       reasons(Some(FinishReason.Length)) shouldBe Some(Seq("length"))
       reasons(Some(FinishReason.ToolCalls)) shouldBe Some(Seq("tool_calls"))
       reasons(Some(FinishReason.Other("SAFETY"))) shouldBe Some(Seq("SAFETY"))
-      reasons(Some(FinishReason.Other(""))) shouldBe None
+      reasons(Some(FinishReason.Unknown)) shouldBe None
       reasons(None) shouldBe None
     }
   }
@@ -425,29 +411,36 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
     val failure = new RuntimeException("rate limited")
 
     "be CLIENT for an event that records a request to a remote service, or its failure" in {
-      kind(TraceEvent.CompletionReceived("chatcmpl-1", "gpt-4o", 0, "hi", at)) shouldBe SpanKind.CLIENT
-      kind(TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(1, 1), "m", "index", 1, at)) shouldBe SpanKind.CLIENT
+      kind(TraceEvent.CompletionReceived("chatcmpl-1", ModelName("gpt-4o"), 0, "hi", at)) shouldBe SpanKind.CLIENT
       kind(
-        TraceEvent.ImageGenerationCompleted("gpt-image-1", "openai", "generate", 1, "1024x1024", "hd", 1.second)
+        TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(1, 1), ModelName("m"), "index", 1, at)
       ) shouldBe SpanKind.CLIENT
-      kind(TraceEvent.ErrorOccurred(failure, "chat", at, operation = Some("chat"))) shouldBe SpanKind.CLIENT
+      kind(
+        TraceEvent.ImageGenerationCompleted(ModelName("gpt-image-1"), "generate", 1, "1024x1024", "hd", 1.second)
+      ) shouldBe SpanKind.CLIENT
+      kind(
+        TraceEvent.ErrorOccurred.of(failure, "chat").withTimestamp(at).withOperation("chat")
+      ) shouldBe SpanKind.CLIENT
       kind(TraceEvent.CustomEvent(TraceAttributes.AgentModelCallCompleted, ujson.Obj(), at)) shouldBe SpanKind.CLIENT
     }
 
     "be INTERNAL for an event that calls no remote service (#2531)" in {
-      kind(TraceEvent.ErrorOccurred(failure, "loading config", at)) shouldBe SpanKind.INTERNAL
-      kind(TraceEvent.CostRecorded(0.01, "gpt-4o", "completion", 500, "total", at)) shouldBe SpanKind.INTERNAL
+      kind(TraceEvent.ErrorOccurred.of(failure, "loading config").withTimestamp(at)) shouldBe SpanKind.INTERNAL
+      kind(
+        TraceEvent.CostRecorded(0.01, ModelName("gpt-4o"), "completion", 500, "total", at)
+      ) shouldBe SpanKind.INTERNAL
       kind(TraceEvent.CacheHit(0.97, 0.9, at)) shouldBe SpanKind.INTERNAL
       kind(TraceEvent.CacheMiss(TraceEvent.CacheMissReason.TtlExpired, at)) shouldBe SpanKind.INTERNAL
       kind(TraceEvent.RAGOperationCompleted("index", 1.second, timestamp = at)) shouldBe SpanKind.INTERNAL
-      kind(TraceEvent.ToolExecuted("search", "in", "out", 100.millis, true, at)) shouldBe SpanKind.INTERNAL
+      kind(
+        TraceEvent.ToolExecuted("search", ToolCallId("in").asString, "out", 100.millis, true, at)
+      ) shouldBe SpanKind.INTERNAL
       kind(TraceEvent.CustomEvent(TraceAttributes.AgentToolExecuted, ujson.Obj(), at)) shouldBe SpanKind.INTERNAL
       kind(TraceEvent.CustomEvent("x", ujson.Obj(), at)) shouldBe SpanKind.INTERNAL
       kind(
         TraceEvent.CustomEvent("x", ujson.Obj(), at, Some(TraceSpan(TraceContext.random(), None, at)))
       ) shouldBe SpanKind.INTERNAL
-      kind(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "m", "op", at)) shouldBe SpanKind.INTERNAL
-      kind(TraceEvent.AgentInitialized("q", Vector.empty, at)) shouldBe SpanKind.INTERNAL
+      kind(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), ModelName("m"), "op", at)) shouldBe SpanKind.INTERNAL
     }
 
     "be exported as INTERNAL for a cache hit" in withTracing() { (tracing, spans) =>
@@ -462,8 +455,7 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
       val completion = Completion(
         id = "chatcmpl-1",
         created = at,
-        content = "4",
-        model = "gpt-4o",
+        model = ModelName("gpt-4o"),
         message = AssistantMessage("4")
       )
       tracing.traceToolCall(
@@ -474,8 +466,8 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
         success = true
       ) shouldBe Right(())
       tracing.traceError(new IllegalStateException("boom"), "loading config") shouldBe Right(())
-      tracing.traceCompletion(completion, "gpt-4o") shouldBe Right(())
-      tracing.traceTokenUsage(TokenUsage(12, 7, 19), "gpt-4o", "summarise") shouldBe Right(())
+      tracing.traceCompletion(completion, ModelName("gpt-4o")) shouldBe Right(())
+      tracing.traceTokenUsage(TokenUsage(12, 7, 19), ModelName("gpt-4o"), "summarise") shouldBe Right(())
 
       spans().map(_.getName) shouldBe Vector("execute_tool search", "Error", "chat gpt-4o", "Token Usage - summarise")
     }
@@ -488,6 +480,18 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
       val exception = events.head.getAttributes
       str(exception, "exception.type") shouldBe "java.lang.IllegalStateException"
       str(exception, "exception.message") shouldBe "boom"
+    }
+
+    "record an LLMError's type and message, and no exception: it is not one (#2800)" in withTracing() {
+      (tracing, spans) =>
+        val error = org.llm4s.error.ProcessingError("store", "store down")
+        tracing.traceError(error, "commit") shouldBe Right(())
+
+        val span = spans().loneElement
+        span.getName shouldBe "Error"
+        str(span.getAttributes, "error.type") shouldBe "ProcessingError"
+        str(span.getAttributes, "error.message") shouldBe error.message
+        span.getEvents.asScala shouldBe empty
     }
   }
 

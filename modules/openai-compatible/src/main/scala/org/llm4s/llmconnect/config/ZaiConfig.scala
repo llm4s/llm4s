@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -31,24 +31,26 @@ import org.llm4s.types.Result
 @Stable
 final case class ZaiConfig private (
   apiKey: Secret,
-  model: String,
-  baseUrl: String,
+  model: ModelName,
+  baseUrl: BaseUrl,
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                  = ProviderId("zai")
-  override def endpointUrl: Option[String]                             = Some(baseUrl)
-  override def withModel(model: String): ZaiConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): ZaiConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): ZaiConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): ZaiConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): ZaiConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                               = ProviderId("zai")
+  override def endpointUrl: Option[BaseUrl]                         = Some(baseUrl)
+  override def withModel(model: ModelName): ZaiConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): ZaiConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): ZaiConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[ZaiConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): ZaiConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): ZaiConfig                    = copy(apiKey = apiKey)
-  def withBaseUrl(baseUrl: String): ZaiConfig                  = copy(baseUrl = baseUrl)
+  def withBaseUrl(baseUrl: BaseUrl): ZaiConfig                 = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): ZaiConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): ZaiConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
@@ -58,7 +60,7 @@ final case class ZaiConfig private (
 object ZaiConfig {
   private val standardReserve = 4096
 
-  val DEFAULT_BASE_URL: String = "https://api.z.ai/api/paas/v4"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://api.z.ai/api/paas/v4")
 
   /** The context window `apply` uses when none is given; [[fromValues]] resolves the model's own. */
   val DEFAULT_CONTEXT_WINDOW: Int = 128000
@@ -72,8 +74,8 @@ object ZaiConfig {
    */
   def apply(
     apiKey: Secret,
-    model: String,
-    baseUrl: String = DEFAULT_BASE_URL,
+    model: ModelName,
+    baseUrl: BaseUrl = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
     timeouts: ProviderTimeouts = ProviderTimeouts.default
@@ -93,14 +95,14 @@ object ZaiConfig {
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,
    * which do not see Scala default arguments. Set the rest with the `with*` setters.
    */
-  def apply(apiKey: Secret, model: String): ZaiConfig =
+  def apply(apiKey: Secret, model: ModelName): ZaiConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
-  private def zaiFallback(modelName: String): (Int, Int) =
-    modelName match {
-      case name if name.contains("GLM-4.7") => (200000, standardReserve)
-      case name if name.contains("GLM-4.5") => (128000, standardReserve)
-      case _                                => (128000, standardReserve)
+  private def zaiFallback(modelName: ModelName): ContextLimits =
+    modelName.asString match {
+      case name if name.contains("GLM-4.7") => ContextLimits(200000, standardReserve)
+      case name if name.contains("GLM-4.5") => ContextLimits(128000, standardReserve)
+      case _                                => ContextLimits(128000, standardReserve)
     }
 
   /**
@@ -114,16 +116,16 @@ object ZaiConfig {
    *                  [[org.llm4s.config.Llm4sConfig]].
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     apiKey: Secret,
-    baseUrl: String
+    baseUrl: BaseUrl
   )(using resolver: ContextWindowResolver): Result[ZaiConfig] =
     for {
       _ <- ProviderConfig.nonEmpty("Zai", "apiKey", apiKey.reveal)
-      _ <- ProviderConfig.nonEmpty("Zai", "baseUrl", baseUrl)
+      _ <- ProviderConfig.nonEmpty("Zai", "baseUrl", baseUrl.asUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
-        lookupProviders = Seq("zai"),
+      val ContextLimits(cw, rc) = resolver.resolve(
+        lookupProviders = Seq(ProviderId("zai")),
         modelName = modelName,
         defaultContextWindow = 128000,
         defaultReserve = standardReserve,

@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.guardrails.LLMGuardrail
 import org.llm4s.llmconnect.LLMClient
 
@@ -47,7 +47,7 @@ import org.llm4s.llmconnect.LLMClient
  *   .build()
  * }}}
  */
-@Stable
+@Experimental
 class LLMSafetyGuardrail(
   val llmClient: LLMClient,
   override val threshold: Double = 0.8,
@@ -82,6 +82,7 @@ class LLMSafetyGuardrail(
   )
 }
 
+@Experimental
 object LLMSafetyGuardrail {
 
   /**

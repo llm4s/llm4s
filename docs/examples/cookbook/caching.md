@@ -61,7 +61,7 @@ object CachingRecipe extends RecipeApp {
       new CachingLLMClient(
         baseClient = client,
         // The stand-in embedding model; see "Use a real provider".
-        embeddingClient = new EmbeddingClient(BagOfWordsEmbeddings.provider),
+        embeddingClient = EmbeddingClient(BagOfWordsEmbeddings.provider),
         embeddingModel = EmbeddingModelConfig(BagOfWordsEmbeddings.Model, BagOfWordsEmbeddings.Dimensions),
         config = config,
         tracing = new NoOpTracing
@@ -96,7 +96,7 @@ sbt "samples/runMain org.llm4s.samples.cookbook.CachingRecipe"          # script
 sbt "samples/runMain org.llm4s.samples.cookbook.CachingRecipe --live"   # the provider your configuration names
 ```
 
-The first command needs nothing but sbt. The second uses the section `llm4s.providers.provider` names; see
+The first command needs nothing but sbt. The second uses the section `llm4s.defaultProvider` names; see
 [running the samples](../../getting-started/configuration#running-the-samples). CI runs every recipe against its scripted client, and checks
 that the program on this page is the source file, so what you read here compiles and works.
 
@@ -107,7 +107,7 @@ client, built from `llm4s.embeddings` (see [Embeddings configuration](../../gett
 with a `ModelRegistryService` and `given ProviderRegistry = ProviderRegistry.default` in scope:
 
 ```scala
-embeddingClient <- Llm4sConfig.embeddings().flatMap((provider, config) => EmbeddingClient.from(provider, config))
+embeddingClient <- Llm4sConfig.embeddings().flatMap(EmbeddingClient.from(_))
 ```
 
 and give `embeddingModel` that model's name and dimensions. See [Caching](../../guide/caching) for the trade-offs.

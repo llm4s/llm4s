@@ -1,12 +1,12 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.llm4s.trace.{ TraceEvent, Tracing }
 
@@ -15,8 +15,6 @@ import scala.concurrent.duration._
 import scala.collection.mutable.ListBuffer
 
 class CachingLLMClientTest extends AnyFunSuite with Matchers {
-
-  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   class MockTracing extends Tracing {
     val events = ListBuffer[TraceEvent]()
@@ -33,12 +31,6 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     override def instant(): Instant            = currentTime
   }
 
-  class MockProvider extends EmbeddingProvider {
-    def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = Left(
-      org.llm4s.error.ProcessingError("mock", "Mock provider not implemented")
-    )
-  }
-
   class MockLLMClient extends LLMClient {
     var callCount = 0
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
@@ -47,17 +39,14 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
         Completion(
           id = "comp-123",
           created = Instant.now(),
-          content = "Response from LLM",
-          model = "gpt-model",
+          model = ModelName("gpt-model"),
           message = AssistantMessage("Response from LLM"),
           usage = None
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       Left(org.llm4s.error.ProcessingError("mock", "streamComplete not implemented in mock"))
@@ -67,8 +56,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     override def close(): Unit               = ()
   }
 
-  class MockEmbeddingClient(responses: Map[String, Seq[Double]])
-      extends EmbeddingClient(new MockProvider(), None, "embedding") {
+  class MockEmbeddingClient(responses: Map[String, Seq[Double]]) extends EmbeddingProvider {
     var lastInput: Option[String] = None
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
       val text = request.input.head
@@ -87,7 +75,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     }
   }
 
-  val embeddingModel = EmbeddingModelConfig("test-embedding", 3)
+  val embeddingModel = EmbeddingModelConfig(ModelName("test-embedding"), 3)
   val config         = CacheConfig.create(similarityThreshold = 0.9, ttl = 1.hour).getOrElse(fail("Invalid config"))
 
   test("Cache miss calls base client, caches result, and logs TraceEvent with correct reason") {
@@ -160,11 +148,11 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val conv = Conversation.userOnly("Hello").getOrElse(fail())
 
     // Request 1: temp 0.7
-    client.complete(conv, CompletionOptions(temperature = 0.7))
+    client.complete(conv, CompletionOptions(temperature = Some(0.7)))
     mockLLM.callCount shouldBe 1
 
     // Request 2: temp 0.0 (Should be miss despite similar embedding)
-    client.complete(conv, CompletionOptions(temperature = 0.0))
+    client.complete(conv, CompletionOptions(temperature = Some(0.0)))
     mockLLM.callCount shouldBe 2
 
     // Verify reason
@@ -266,8 +254,8 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val step2 = Conversation(
       Seq(
         UserMessage("What is the weather?"),
-        AssistantMessage("Checking...", toolCalls = List(ToolCall("1", "weather", "{\"loc\":\"Paris\"}"))),
-        ToolMessage("Paris: 20C", "1")
+        AssistantMessage("Checking...", toolCalls = List(ToolCall(ToolCallId("1"), "weather", "{\"loc\":\"Paris\"}"))),
+        ToolMessage("Paris: 20C", ToolCallId("1"))
       )
     )
 
@@ -286,8 +274,8 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val conversation = Conversation(
       messages = List(
         UserMessage("What is the weather?"),
-        AssistantMessage("Checking...", toolCalls = List(ToolCall("1", "weather", "{\"loc\":\"Paris\"}"))),
-        ToolMessage("Paris: 20C", "1"),
+        AssistantMessage("Checking...", toolCalls = List(ToolCall(ToolCallId("1"), "weather", "{\"loc\":\"Paris\"}"))),
+        ToolMessage("Paris: 20C", ToolCallId("1")),
         AssistantMessage("It is 20C"),
         UserMessage("And in London?")
       )

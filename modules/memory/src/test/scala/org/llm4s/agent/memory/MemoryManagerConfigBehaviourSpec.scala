@@ -1,5 +1,6 @@
 package org.llm4s.agent.memory
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -128,17 +129,14 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
         Completion(
           id = "extract",
           created = Instant.EPOCH,
-          content = response,
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = AssistantMessage(response),
           usage = None
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -181,7 +179,7 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
       SystemMessage("You are a helpful assistant"),
       UserMessage("Who created Scala?"),
       AssistantMessage("Martin Odersky created Scala."),
-      ToolMessage("{\"result\": 42}", "call-1")
+      ToolMessage("{\"result\": 42}", ToolCallId("call-1"))
     )
     val recorded = llmManager(autoExtract = true, client).recordConversation(conversation, "conv-2").value
 
@@ -225,9 +223,7 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
       answer()
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

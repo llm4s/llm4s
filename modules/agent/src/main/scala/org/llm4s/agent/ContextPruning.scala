@@ -90,7 +90,7 @@ private[agent] object ContextPruning {
 
   /** The `cl100k_base` counter from core, made once; `None` only if jtokkit cannot load it. */
   private lazy val tokenizerCounter: Option[org.llm4s.context.ConversationTokenCounter] =
-    tokenizerFrom(org.llm4s.context.ConversationTokenCounter.openAI())
+    tokenizerFrom(org.llm4s.context.ConversationTokenCounter.cl100k())
 
   /** The loaded counter, or `None` with a warning when loading failed, so pruning counts words instead. */
   private[agent] def tokenizerFrom(
@@ -140,7 +140,7 @@ private[agent] object ContextPruning {
     java.util.Collections.synchronizedMap(new java.util.WeakHashMap[Message, Integer]())
 
   private def hasInlineBytes(message: Message): Boolean = {
-    def anyInline(parts: Vector[ContentPart]): Boolean = parts.exists {
+    def anyInline(parts: Seq[ContentPart]): Boolean = parts.exists {
       case i: ContentPart.Image    => i.source.isInstanceOf[org.llm4s.media.MediaSource.Inline]
       case d: ContentPart.Document => d.source.isInstanceOf[org.llm4s.media.MediaSource.Inline]
       case _                       => false

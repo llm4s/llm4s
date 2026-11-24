@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
@@ -7,10 +9,11 @@ import org.llm4s.http.{ HttpClientOptions, Llm4sHttpClient }
 import org.llm4s.llmconnect.auth.AccessTokenProvider
 import org.llm4s.security.{ Secret, TokenGenerations }
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.llmconnect.model._
+import org.llm4s.error.EmbeddingError
 import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
 import ujson.{ Arr, Obj, read }
@@ -53,15 +56,14 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
    */
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some("https://api.openai.com/v1"),
-    apiKeyEnv = Seq(OpenAIConfigKeys.OPENAI_API_KEY),
-    modelEnv = Some(OpenAIConfigKeys.OPENAI_EMBEDDING_MODEL)
+    defaultBaseUrl = Some(BaseUrl("https://api.openai.com/v1")),
+    apiKeyEnv = Seq(OpenAIConfigKeys.OPENAI_API_KEY)
   )
 
-  override val modelDimensions: Map[String, Int] = Map(
-    "text-embedding-3-small" -> 1536,
-    "text-embedding-3-large" -> 3072,
-    "text-embedding-ada-002" -> 1536
+  override val modelDimensions: Map[ModelName, Int] = Map(
+    ModelName("text-embedding-3-small") -> 1536,
+    ModelName("text-embedding-3-large") -> 3072,
+    ModelName("text-embedding-ada-002") -> 1536
   )
 
   /**
@@ -78,12 +80,12 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
   }
 
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
-    requireApiKey(config.apiKey).map(_ => fromConfig(config))
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+    requireApiKey(config.apiKey).map(_ => provider(config, apiKeyOf(config), _ => (), context.httpClient))
 
   /** A blank `apiKey` would be sent as an empty bearer token: a `ConfigurationError` instead. */
-  private def requireApiKey(key: Secret): Result[Unit] =
-    ProviderConfig.nonEmpty("OpenAI embeddings", "apiKey", key.reveal)
+  private def requireApiKey(key: Option[Secret]): Result[Secret] =
+    ProviderConfig.nonEmpty("OpenAI embeddings", "apiKey", key.fold("")(_.reveal)).map(_ => key.getOrElse(Secret("")))
 
   /**
    * Creates an OpenAI embedding provider from configuration.
@@ -92,8 +94,11 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
    * @return configured EmbeddingProvider instance
    */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
-    // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
-    provider(cfg, () => cfg.currentApiKey().flatMap(key => requireApiKey(key).map(_ => key.reveal)), _ => ())
+    provider(cfg, apiKeyOf(cfg), _ => (), None)
+
+  // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
+  private def apiKeyOf(cfg: EmbeddingProviderConfig): () => Result[String] =
+    () => cfg.currentApiKey().flatMap(requireApiKey).map(_.reveal)
 
   /**
    * An embedding provider that authenticates with bearer tokens from `tokenProvider` rather than an API key
@@ -109,34 +114,37 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     provider(
       cfg,
       () =>
-        tokenProvider.token().map { token =>
-          generations.rotate(token)
-          token
+        tokenProvider.current().map { token =>
+          generations.rotate(token.reveal)
+          token.reveal
         },
-      tokenProvider.invalidate
+      rejected => tokenProvider.invalidate(Secret.unregistered(rejected)),
+      None
     )
   }
 
   /**
    * The provider; `bearer` gives the token for each request, and `rejected` hears of one the service refused.
+   * Requests go through `supplied`, the caller's HTTP client, when there is one.
    */
   private def provider(
     cfg: EmbeddingProviderConfig,
     bearer: () => Result[String],
-    rejected: String => Unit
+    rejected: String => Unit,
+    supplied: Option[Llm4sHttpClient]
   ): EmbeddingProvider = new EmbeddingProvider {
-    private val httpClient = Llm4sHttpClient.create(HttpClientOptions(cfg.network))
+    private val httpClient = supplied.getOrElse(Llm4sHttpClient.create(HttpClientOptions(cfg.network)))
     private val logger     = LoggerFactory.getLogger(getClass)
 
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = CancelledError.attempt("openai.embed") {
-      val model = request.model.name
+      val model = request.model.name.asString
       val input = request.input
       val payload = Obj(
         "input" -> Arr.from(input),
         "model" -> model
       )
 
-      val url = embeddingsUrl(cfg.baseUrl)
+      val url = embeddingsUrl(cfg.baseUrl.asUrl)
       logger.debug(s"[OpenAIEmbeddingProvider] POST $url model=$model inputs=${input.size}")
 
       // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.

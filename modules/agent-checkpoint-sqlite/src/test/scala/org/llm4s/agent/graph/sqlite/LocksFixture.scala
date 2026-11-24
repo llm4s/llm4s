@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.sqlite
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
 import org.llm4s.agent.graph.{ GraphRuntime, GraphSnapshot, InterruptId, StateKey, StateUpdate, ThreadId }
 import org.llm4s.agent.graph.toolloop.ApprovalDecision
@@ -34,16 +35,14 @@ object LocksFixture:
 
   final case class Arg(text: String) derives ReadWriter
 
-  def call(id: String): ToolCall = ToolCall(id, "step", ujson.Obj("text" -> id))
+  def call(id: String): ToolCall = ToolCall(ToolCallId(id), "step", ujson.Obj("text" -> id))
 
   def completion(message: AssistantMessage): Completion =
     Completion(
       id = "fixture",
       created = Instant.EPOCH,
-      content = message.content,
-      model = "test-model",
+      model = ModelName("test-model"),
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
     )
 
@@ -55,9 +54,7 @@ object LocksFixture:
     private val index = new AtomicInteger()
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       completions.lift(index.getAndIncrement()).toRight(ValidationError("scripted", "no completion left"))
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     def getContextWindow(): Int     = 128000
@@ -79,8 +76,8 @@ object LocksFixture:
     Agent
       .builder("assistant", client)
       .withSystemPrompt("You are a fixture.")
-      .withTools(ToolSet.of(step).fold(e => throw new IllegalStateException(e.message), identity))
-      .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == "c1")("review")))
+      .withToolSet(ToolSet.of(step).fold(e => throw new IllegalStateException(e.message), identity))
+      .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == ToolCallId("c1"))("review")))
       .withRuntime(GraphRuntime(store))
       .build()
       .fold(e => throw new IllegalStateException(e.message), identity)

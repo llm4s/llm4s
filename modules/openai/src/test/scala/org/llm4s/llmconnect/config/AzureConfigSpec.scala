@@ -1,8 +1,9 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -27,30 +28,37 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   private val apiKey        = "sk-test"
 
   private val azure =
-    AzureConfig("https://x.openai.azure.com", Secret("k"), "gpt-4o", "2025-01-01-preview", 128000, 4096)
+    AzureConfig(
+      BaseUrl("https://x.openai.azure.com"),
+      Secret("k"),
+      ModelName("gpt-4o"),
+      "2025-01-01-preview",
+      128000,
+      4096
+    )
 
   // ---- fromValues (from ProviderConfigSpec and ProviderConfigLoaderTest) ----
 
   test("AzureConfig.fromValues creates config with correct model") {
     val config = AzureConfig
       .fromValues(
-        modelName = "gpt-4o",
-        endpoint = "https://my-resource.openai.azure.com",
+        modelName = ModelName("gpt-4o"),
+        endpoint = BaseUrl("https://my-resource.openai.azure.com"),
         apiKey = Secret("test-key"),
         apiVersion = "2024-02-15-preview"
       )
       .value
 
-    config.model shouldBe "gpt-4o"
-    config.endpoint shouldBe "https://my-resource.openai.azure.com"
+    config.model.asString shouldBe "gpt-4o"
+    config.endpoint shouldBe BaseUrl("https://my-resource.openai.azure.com")
     config.apiVersion shouldBe "2024-02-15-preview"
   }
 
   test("AzureConfig.fromValues fails for empty endpoint") {
     AzureConfig
       .fromValues(
-        modelName = "gpt-4o",
-        endpoint = "",
+        modelName = ModelName("gpt-4o"),
+        endpoint = BaseUrl(""),
         apiKey = Secret("test-key"),
         apiVersion = "2024-02-15-preview"
       )
@@ -61,27 +69,34 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   test("AzureConfig.fromValues accepts the default API version") {
     val cfg = AzureConfig
       .fromValues(
-        modelName = "gpt-4o",
-        endpoint = "https://example.azure.com",
+        modelName = ModelName("gpt-4o"),
+        endpoint = BaseUrl("https://example.azure.com"),
         apiKey = Secret("test-key"),
         apiVersion = AzureConfig.DEFAULT_API_VERSION
       )
       .value
-    cfg.endpoint shouldBe "https://example.azure.com"
+    cfg.endpoint shouldBe BaseUrl("https://example.azure.com")
     cfg.apiKey.reveal shouldBe "test-key"
     cfg.apiVersion shouldBe "V2025_01_01_PREVIEW"
   }
 
   test("AzureConfig.fromValues returns Left when endpoint missing, whatever the API version") {
-    AzureConfig.fromValues("gpt-4o", Secret("test-key"), "", AzureConfig.DEFAULT_API_VERSION).isLeft shouldBe true
+    AzureConfig
+      .fromValues(ModelName("gpt-4o"), Secret("test-key"), BaseUrl(""), AzureConfig.DEFAULT_API_VERSION)
+      .isLeft shouldBe true
   }
 
   // ---- blank fields (from ProviderConfigSpec) ----
 
   test("AzureConfig.fromValues names the blank field") {
     val blanks = Seq(
-      "Azure endpoint" -> AzureConfig.fromValues("gpt-4o", Secret("key"), " ", "2024-02-15"),
-      "Azure apiKey"   -> AzureConfig.fromValues("gpt-4o", Secret(" "), "https://azure.example", "2024-02-15")
+      "Azure endpoint" -> AzureConfig.fromValues(ModelName("gpt-4o"), Secret("key"), BaseUrl(" "), "2024-02-15"),
+      "Azure apiKey" -> AzureConfig.fromValues(
+        ModelName("gpt-4o"),
+        Secret(" "),
+        BaseUrl("https://azure.example"),
+        "2024-02-15"
+      )
     )
 
     blanks.foreach { case (field, result) =>
@@ -94,37 +109,45 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   // ---- fallbacks (from ProviderConfigFallbackSpec; "patch-cov-" names miss the registry) ----
 
   test("AzureConfig fallback returns 128000 for gpt-4o-like model") {
-    val cfg = AzureConfig.fromValues("patch-cov-gpt-4o", Secret(apiKey), azureEndpoint, azureVersion).value
+    val cfg =
+      AzureConfig.fromValues(ModelName("patch-cov-gpt-4o"), Secret(apiKey), BaseUrl(azureEndpoint), azureVersion).value
     cfg.contextWindow shouldBe 128000
     cfg.reserveCompletion shouldBe 4096
   }
 
   test("AzureConfig fallback returns 128000 for gpt-4-turbo-like model") {
-    val cfg = AzureConfig.fromValues("patch-cov-gpt-4-turbo", Secret(apiKey), azureEndpoint, azureVersion).value
+    val cfg = AzureConfig
+      .fromValues(ModelName("patch-cov-gpt-4-turbo"), Secret(apiKey), BaseUrl(azureEndpoint), azureVersion)
+      .value
     cfg.contextWindow shouldBe 128000
     cfg.reserveCompletion shouldBe 4096
   }
 
   test("AzureConfig fallback returns 8192 for gpt-4-like model") {
-    val cfg = AzureConfig.fromValues("patch-cov-gpt-4", Secret(apiKey), azureEndpoint, azureVersion).value
+    val cfg =
+      AzureConfig.fromValues(ModelName("patch-cov-gpt-4"), Secret(apiKey), BaseUrl(azureEndpoint), azureVersion).value
     cfg.contextWindow shouldBe 8192
     cfg.reserveCompletion shouldBe 4096
   }
 
   test("AzureConfig fallback returns 16384 for gpt-3.5-turbo-like model") {
-    val cfg = AzureConfig.fromValues("patch-cov-gpt-3.5-turbo", Secret(apiKey), azureEndpoint, azureVersion).value
+    val cfg = AzureConfig
+      .fromValues(ModelName("patch-cov-gpt-3.5-turbo"), Secret(apiKey), BaseUrl(azureEndpoint), azureVersion)
+      .value
     cfg.contextWindow shouldBe 16384
     cfg.reserveCompletion shouldBe 4096
   }
 
   test("AzureConfig fallback returns 128000 for o1-like model") {
-    val cfg = AzureConfig.fromValues("patch-cov-o1-mini", Secret(apiKey), azureEndpoint, azureVersion).value
+    val cfg =
+      AzureConfig.fromValues(ModelName("patch-cov-o1-mini"), Secret(apiKey), BaseUrl(azureEndpoint), azureVersion).value
     cfg.contextWindow shouldBe 128000
     cfg.reserveCompletion shouldBe 4096
   }
 
   test("AzureConfig fallback returns 8192 for unknown model") {
-    val cfg = AzureConfig.fromValues("patch-cov-unknown", Secret(apiKey), azureEndpoint, azureVersion).value
+    val cfg =
+      AzureConfig.fromValues(ModelName("patch-cov-unknown"), Secret(apiKey), BaseUrl(azureEndpoint), azureVersion).value
     cfg.contextWindow shouldBe 8192
     cfg.reserveCompletion shouldBe 4096
   }
@@ -135,8 +158,8 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     val secret = "SECRET_TEST_VALUE_12345"
     val cfg = AzureConfig
       .fromValues(
-        modelName = "gpt-4",
-        endpoint = "https://example.invalid",
+        modelName = ModelName("gpt-4"),
+        endpoint = BaseUrl("https://example.invalid"),
         apiKey = Secret(secret),
         apiVersion = "2024-02-01"
       )
@@ -154,8 +177,8 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("AzureConfig.withModel changes only the model") {
-    val renamed = azure.withModel("m")
-    renamed.model shouldBe "m"
+    val renamed = azure.withModel(ModelName("m"))
+    renamed.model.asString shouldBe "m"
     renamed.apiVersion shouldBe azure.apiVersion
     renamed.endpointUrl shouldBe azure.endpointUrl
     renamed.contextWindow shouldBe azure.contextWindow
@@ -170,27 +193,38 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   test(
     "AzureConfig(endpoint, apiKey, model) defaults the API version and takes the context window from the model name"
   ) {
-    AzureConfig("https://x.openai.azure.com", Secret("k"), "gpt-4o") shouldBe
-      AzureConfig("https://x.openai.azure.com", Secret("k"), "gpt-4o", AzureConfig.DEFAULT_API_VERSION, 128000, 4096)
-    AzureConfig("https://x.openai.azure.com", Secret("k"), "gpt-4").contextWindow shouldBe 8192
-    AzureConfig("https://x.openai.azure.com", Secret("k"), "my-deployment").contextWindow shouldBe 8192
+    AzureConfig(BaseUrl("https://x.openai.azure.com"), Secret("k"), ModelName("gpt-4o")) shouldBe
+      AzureConfig(
+        BaseUrl("https://x.openai.azure.com"),
+        Secret("k"),
+        ModelName("gpt-4o"),
+        AzureConfig.DEFAULT_API_VERSION,
+        128000,
+        4096
+      )
+    AzureConfig(BaseUrl("https://x.openai.azure.com"), Secret("k"), ModelName("gpt-4")).contextWindow shouldBe 8192
+    AzureConfig(
+      BaseUrl("https://x.openai.azure.com"),
+      Secret("k"),
+      ModelName("my-deployment")
+    ).contextWindow shouldBe 8192
   }
 
   test("AzureConfig's setters each change one field") {
     val timeouts = ProviderTimeouts(request = Some(45.seconds))
     val adjusted = azure
-      .withEndpoint("https://y.openai.azure.com")
+      .withEndpoint(BaseUrl("https://y.openai.azure.com"))
       .withApiKey(Secret("k2"))
-      .withModel("gpt-4o-mini")
+      .withModel(ModelName("gpt-4o-mini"))
       .withApiVersion("2024-10-21")
       .withContextWindow(64000)
       .withReserveCompletion(2048)
       .withTimeouts(timeouts)
 
     adjusted shouldBe AzureConfig(
-      "https://y.openai.azure.com",
+      BaseUrl("https://y.openai.azure.com"),
       Secret("k2"),
-      "gpt-4o-mini",
+      ModelName("gpt-4o-mini"),
       "2024-10-21",
       64000,
       2048,
@@ -200,14 +234,17 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("fromValues and fromTokenProvider default the API version when it is omitted (#2340)") {
-    val keyed = AzureConfig.fromValues("gpt-4o", Secret("test-key"), "https://x.openai.azure.com").value
+    val keyed =
+      AzureConfig.fromValues(ModelName("gpt-4o"), Secret("test-key"), BaseUrl("https://x.openai.azure.com")).value
     keyed.apiVersion shouldBe AzureConfig.DEFAULT_API_VERSION
 
     val tokens = new org.llm4s.llmconnect.auth.AccessTokenProvider {
-      def token(): org.llm4s.types.Result[String] = Right("t")
-      def invalidate(rejected: String): Unit      = ()
+      def current(): org.llm4s.types.Result[org.llm4s.security.Secret] =
+        Right(org.llm4s.security.Secret.unregistered("t"))
+      override def invalidate(rejected: Secret): Unit = ()
     }
-    val keyless = AzureConfig.fromTokenProvider("gpt-4o", tokens, "https://x.openai.azure.com").value
+    val keyless =
+      AzureConfig.fromTokenProvider(ModelName("gpt-4o"), tokens, BaseUrl("https://x.openai.azure.com")).value
     keyless.apiVersion shouldBe AzureConfig.DEFAULT_API_VERSION
     keyless.tokenProvider shouldBe Some(tokens)
   }

@@ -1,9 +1,14 @@
 package org.llm4s.javaapi
 
+import org.llm4s.agent.{ Agent, ContextWindowConfig }
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.graph.{ InMemoryCheckpointer, ThreadId }
+import org.llm4s.agent.graph.middleware.{ ContextWindowMiddleware, GuardrailMiddleware }
+import org.llm4s.agent.guardrails.builtin.{ JSONValidator, LengthCheck }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.testutil.TestTimeLimit
+import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.trace.{ TraceEvent, Tracing }
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -27,10 +32,10 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val calls = new CopyOnWriteArrayList[Call]()
     private def reply(c: Conversation, o: CompletionOptions, streamed: Boolean): Result[Completion] = {
       calls.add(Call(c.messages.toSeq, o.tools.map(_.name), streamed))
-      Right(Completion("id", Instant.EPOCH, answer, "m", AssistantMessage(answer)))
+      Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(answer)))
     }
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = reply(c, o, streamed = false)
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] = {
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] = {
       f(StreamedChunk(id = "c", content = Some(answer)))
       reply(c, o, streamed = true)
     }
@@ -182,6 +187,40 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     JContextWindow.lastMessages(0).toString should startWith("JContextWindow(invalid: ")
   }
 
+  "the facade's guardrails" should "sit where the Scala builder's do: innermost, after the facade's window (#2835)" in {
+    val model  = new Recording("ok")
+    val window = ContextWindowConfig(maxMessages = Some(20))
+    val facade = AgentBuilds
+      .agent(
+        AgentBuilds.Spec(
+          "pinned",
+          client(model),
+          input = Right(Vector(JGuardrails.length(1, 100))),
+          output = Right(Vector(JGuardrails.json())),
+          contextWindow = Right(Some(window))
+        )
+      )
+      .fold(e => fail(e.message), identity)
+    def version(agent: Result[Agent]): String = agent.fold(e => fail(e.message), _.loop.graph.version)
+    val base                                  = Agent.builder("pinned", model).withTools(ToolRegistry.empty)
+    // the graph version covers each middleware's id, in stack order
+    facade.loop.graph.version shouldBe version(
+      base
+        .withInputGuardrails(LengthCheck(1, 100))
+        .withOutputGuardrails(JSONValidator())
+        .withMiddleware(new ContextWindowMiddleware(window))
+        .build()
+    )
+    facade.loop.graph.version should not be version(
+      base
+        .withMiddleware(
+          new GuardrailMiddleware(Seq(LengthCheck(1, 100)), Seq(JSONValidator())),
+          new ContextWindowMiddleware(window)
+        )
+        .build()
+    )
+  }
+
   "the Java guide's agent-builder block" should "complete with a JSON answer and report a blocked one" in {
     val add = AgentBuilderCheck.add()
     GuideSnippets.agentBuilder(client(new Recording("""{"answer": 5}""")), add).status().kind() shouldBe
@@ -205,10 +244,10 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val calls = new java.util.concurrent.atomic.AtomicInteger(0)
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       val n    = calls.incrementAndGet()
-      val call = ToolCall(s"c$n", "add", ujson.Obj("a" -> 1, "b" -> 2))
-      Right(Completion("id", Instant.EPOCH, "", "m", AssistantMessage(None, Seq(call)), toolCalls = List(call)))
+      val call = ToolCall(ToolCallId(s"c$n"), "add", ujson.Obj("a" -> 1, "b" -> 2))
+      Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(None, Seq(call))))
     }
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512

@@ -16,7 +16,7 @@ class ToolSetSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def badlyNamed(name: String): AgentTool[ujson.Value] =
     AgentTool.fromToolFunction(
-      ToolFunction[Map[String, Any], String](name, "d", Schema.`object`("o"), _ => Right("x"))
+      ToolFunction[String](name, "d", Schema.`object`("o"), _ => Right("x"))
     )
 
   private val refusingValidator = new ToolArgumentValidator {
@@ -60,7 +60,7 @@ class ToolSetSpec extends AnyFlatSpec with Matchers with EitherValues {
       .ObjectSchema[Unit]("o", Seq.empty)
       .withRequiredField("n", org.llm4s.toolapi.IntegerSchema("n").withMultipleOf(0))
     val bad = AgentTool.fromToolFunction(
-      ToolFunction[Unit, String]("zero", "d", schema, _ => Right("x"))
+      ToolFunction[String]("zero", "d", schema, _ => Right("x"))
     )
     val error = ToolSet.of(bad).left.value
     error.message should include("multipleOf")
@@ -77,7 +77,7 @@ class ToolSetSpec extends AnyFlatSpec with Matchers with EitherValues {
       ToolOutcome.success(ToolContent.Json(ujson.Null))
     }
     val listing = AgentTool.fromToolFunction(
-      ToolFunction[Seq[String], String]("listing", "d", Schema.array("l", Schema.string("s")), _ => Right("x"))
+      ToolFunction[String]("listing", "d", Schema.array("l", Schema.string("s")), _ => Right("x"))
     )
     val error = ToolSet.of(scalar, listing, tool("a")).left.value
     error shouldBe a[ValidationError]
@@ -109,7 +109,7 @@ class ToolSetSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "return the original function for an adapted tool and a refusing stand-in otherwise" in {
-    val original = ToolFunction[Map[String, Any], String]("echo", "d", Schema.`object`("o"), _ => Right("x"))
+    val original = ToolFunction[String]("echo", "d", Schema.`object`("o"), _ => Right("x"))
     val set      = ToolSet.of(tool("a_tool"), AgentTool.fromToolFunction(original)).value
     (set.toolFunctions(1) should be).theSameInstanceAs(original)
     val standIn = set.toolFunctions.head.execute(ujson.Obj("query" -> "q"))

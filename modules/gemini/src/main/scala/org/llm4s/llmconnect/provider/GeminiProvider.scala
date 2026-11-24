@@ -1,12 +1,18 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ GeminiConfigKeys, GeminiModelLister, ProviderModelLister }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, GeminiConfig, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderFeatures
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -37,26 +43,24 @@ object GeminiProvider extends ProviderDescriptor:
 
   override val modelLister: Option[ProviderModelLister] = Some(GeminiModelLister)
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    given ContextWindowResolver = context.contextWindows
     for
-      apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
-      baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      search  <- GeminiGrounding.googleSearch(providerName, section)
-      config  <- GeminiConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
+      baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
+      search  <- GeminiGrounding.googleSearch(context.providerName, section)
+      config  <- GeminiConfig.fromValues(section.model, apiKey, baseUrl)
     yield config.withGoogleSearch(search)
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[GeminiConfig](id, config)
       .flatMap(
         GeminiClient(
           _,
-          options.metrics,
-          options.exchangeLogging,
-          Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+          context.metrics,
+          context.exchangeLogging,
+          Llm4sHttpClient.suppliedOrFromConfig(context.httpClient)
         )
       )

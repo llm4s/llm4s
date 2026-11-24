@@ -2,7 +2,7 @@
 layout: landing
 title: Foundation
 nav_order: 13
-description: "Support the LLM4S Foundation: what funding pays for, ways for individuals, companies, grant makers and universities to give or partner, and how the money is handled transparently through Open Collective."
+description: "Support the LLM4S Foundation: what funding pays for, how individuals, companies, grant makers and universities can give or partner, and how money is handled."
 permalink: /foundation/
 ---
 
@@ -77,7 +77,7 @@ permalink: /foundation/
         <a href="mailto:kannupriya@llm4s.org?subject=Internship%20partnership">Propose a partnership</a>
       </li>
     </ul>
-    <p class="lp-small">Not in a position to give money? Contributions of code, documentation, reviews, talks and answers on Discord sustain the project too: see <a href="{{ '/learn/' | relative_url }}">Learn</a> and the <a href="{{ '/reference/contributing' | relative_url }}">contributing guide</a>.</p>
+    <p class="lp-small">Not in a position to give money? Contributions of code, documentation, reviews, talks and answers on Discord sustain the project too: see <a href="{{ '/learn/' | relative_url }}">Learn</a> and the <a href="{{ '/contribute/contributing' | relative_url }}">contributing guide</a>.</p>
   </div>
 </section>
 

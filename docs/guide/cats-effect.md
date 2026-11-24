@@ -3,8 +3,9 @@ layout: page
 title: cats-effect Integration
 description: "Use LLM4S with cats-effect: llm4s-effect wraps LLMClient and Agent in IO, streams with fs2 and keeps blocking calls off the compute pool."
 search_title: "LLM4S with cats-effect and fs2: LLM calls in IO"
-parent: User Guide
-nav_order: 14
+parent: Frameworks and Runtimes
+nav_order: 502
+grand_parent: User Guide
 ---
 
 # cats-effect Integration
@@ -28,7 +29,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-effect" % "{{ site.data.project.lat
 ### Acquire from the environment
 
 Use `LLMClientIO.resource[F]` to load the default provider section of your `application.conf` (the one
-`llm4s.providers.provider` names), build the client, and release it on scope exit:
+`llm4s.defaultProvider` names), build the client, and release it on scope exit:
 
 ```scala
 import cats.effect.{IO, IOApp}
@@ -78,7 +79,7 @@ client
 
 ```scala
 for {
-  agentIO <- client.agent("assistant")(_.withTools(myTools).withSystemPrompt("You are concise."))
+  agentIO <- client.agent("assistant")(_.withTools(tools).withSystemPrompt("You are concise."))
   result  <- agentIO.run("Summarise this")
   _       <- IO.println(result.answer)
 } yield ()

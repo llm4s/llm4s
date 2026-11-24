@@ -15,7 +15,7 @@ import upickle.default.{ read, write }
 class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   private val options = CompletionOptions()
-  private val call    = ToolCall("tc-1", "get_weather", ujson.Obj("city" -> "Paris"))
+  private val call    = ToolCall(ToolCallId("tc-1"), "get_weather", ujson.Obj("city" -> "Paris"))
   private val sealedThinking =
     Seq(ThinkingBlock.Text("Weather.", Some("sig-1")), ThinkingBlock.Redacted("opaque-1"))
 
@@ -43,7 +43,8 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
   "replayable" should "keep sealed thinking while messages are only appended after it" in {
     val ask  = UserMessage("Weather?")
     val turn = signedTurn(ask)
-    val conv = Seq(ask, turn, ToolMessage("sunny", "tc-1"), AssistantMessage("Sunny."), UserMessage("Thanks"))
+    val conv =
+      Seq(ask, turn, ToolMessage("sunny", ToolCallId("tc-1")), AssistantMessage("Sunny."), UserMessage("Thanks"))
     ThinkingReplay.replayable(origin, conv, options) shouldBe conv
   }
 
@@ -51,7 +52,11 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
     val history = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather?"))
     val turn    = signedTurn(history*)
     val sent =
-      ThinkingReplay.replayable(origin, Seq(UserMessage("Weather?"), turn, ToolMessage("sunny", "tc-1")), options)
+      ThinkingReplay.replayable(
+        origin,
+        Seq(UserMessage("Weather?"), turn, ToolMessage("sunny", ToolCallId("tc-1"))),
+        options
+      )
     val unsealed = sent(1).asInstanceOf[AssistantMessage]
     unsealed.hasSealedThinking shouldBe false
     unsealed.thinkingBinding shouldBe None
@@ -85,7 +90,7 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
   it should "after a model switch, replay each turn only to the model that produced it" in {
     val ask1  = UserMessage("Weather?")
     val turn1 = signedTurn(ask1)
-    val res1  = ToolMessage("sunny", "tc-1")
+    val res1  = ToolMessage("sunny", ToolCallId("tc-1"))
     val ask2  = UserMessage("Again?")
     val other = ReplayOrigin("anthropic", "claude-opus-4-1")
     // the second turn came from the other model, which was sent the first unsealed
@@ -139,10 +144,10 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
   it should "keep the turns before a change and unseal every turn after it, leaving no gap" in {
     val ask1  = UserMessage("Weather?")
     val turn1 = signedTurn(ask1)
-    val res1  = ToolMessage("sunny", "tc-1")
+    val res1  = ToolMessage("sunny", ToolCallId("tc-1"))
     val ask2  = UserMessage("Again?")
     val turn2 = signedTurn(ask1, turn1, res1, ask2)
-    val res2  = ToolMessage("still sunny", "tc-1")
+    val res2  = ToolMessage("still sunny", ToolCallId("tc-1"))
     val ask3  = UserMessage("Once more?")
     val turn3 = signedTurn(ask1, turn1, res1, ask2, turn2, res2, ask3)
 
@@ -151,7 +156,9 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
     val edited = turn2.withContent("Checking again.")
     sealedStates(Seq(ask1, turn1, res1, ask2, edited, res2, ask3, turn3)) shouldBe Seq(true, false, false)
     // a result between the first and second turns rewritten: the first keeps, the rest go
-    sealedStates(Seq(ask1, turn1, ToolMessage("[compressed]", "tc-1"), ask2, turn2, res2, ask3, turn3)) shouldBe
+    sealedStates(
+      Seq(ask1, turn1, ToolMessage("[compressed]", ToolCallId("tc-1")), ask2, turn2, res2, ask3, turn3)
+    ) shouldBe
       Seq(true, false, false)
   }
 
@@ -159,7 +166,7 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
     // turn1 was bound to a history since pruned; the next request sent it unsealed
     val turn1   = signedTurn(UserMessage("Hello"), UserMessage("Weather?"))
     val ask     = UserMessage("Weather?")
-    val res1    = ToolMessage("sunny", "tc-1")
+    val res1    = ToolMessage("sunny", ToolCallId("tc-1"))
     val ask2    = UserMessage("Again?")
     val request = Seq(ask, turn1, res1, ask2)
     val turn2   = signedTurn(request*)
@@ -170,7 +177,7 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
   "context rewriters" should "unseal a later turn when TokenWindow trims the oldest messages" in {
     val history = Seq(UserMessage("A" * 400), AssistantMessage("B" * 400), UserMessage("Weather?"))
     val turn    = signedTurn(history*)
-    val conv    = Conversation(history ++ Seq(turn, ToolMessage("sunny", "tc-1")))
+    val conv    = Conversation(history ++ Seq(turn, ToolMessage("sunny", ToolCallId("tc-1"))))
     val window  = TokenWindow.trimToBudget(conv, ContextTestFixtures.createSimpleCounter(), 150).toOption.get
     window.wasTrimmed shouldBe true
     window.conversation.messages should contain(turn)
@@ -178,10 +185,11 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "unseal a later turn when ToolOutputCompressor rewrites an earlier tool result" in {
-    val big        = ToolMessage("x" * 20000, "tc-0")
-    val history    = Seq(UserMessage("Fetch"), AssistantMessage(None, Seq(ToolCall("tc-0", "fetch", ujson.Obj()))), big)
+    val big = ToolMessage("x" * 20000, ToolCallId("tc-0"))
+    val history =
+      Seq(UserMessage("Fetch"), AssistantMessage(None, Seq(ToolCall(ToolCallId("tc-0"), "fetch", ujson.Obj()))), big)
     val turn       = signedTurn((history :+ UserMessage("Weather?"))*)
-    val conv       = history ++ Seq(UserMessage("Weather?"), turn, ToolMessage("sunny", "tc-1"))
+    val conv       = history ++ Seq(UserMessage("Weather?"), turn, ToolMessage("sunny", ToolCallId("tc-1")))
     val compressed = ToolOutputCompressor.compressToolOutputs(conv, ArtifactStore.inMemory()).toOption.get
     compressed should not be conv
     compressed should contain(turn)
@@ -233,6 +241,31 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
     turn.withContent("changed").thinkingBinding shouldBe None
     turn.withToolCalls(Seq.empty).thinkingBinding shouldBe None
     turn.withThinking(sealedThinking).thinkingBinding shouldBe None
-    turn.withContent(turn.contentOpt) shouldBe turn
+    turn.withContent(turn.text) shouldBe turn
+  }
+
+  // #2809 flattened the stored JSON of an assistant message. A fingerprint is compared with one made earlier, so
+  // what it is taken over must not move with the stored shape, or every earlier binding would stop matching.
+  "The fingerprint's encoding" should "keep the shape assistant messages were stored in when bindings were first made" in {
+    ThinkingReplay.encoded(AssistantMessage("Checking.", Seq(call))) shouldBe
+      """{"type":"assistant","data":{"contentOpt":"Checking.","toolCalls":[{"id":"tc-1","name":"get_weather",""" +
+      """"arguments":{"city":"Paris"}}]}}"""
+    ThinkingReplay.encoded(AssistantMessage(None, Seq(call)).withThinking("hmm")) shouldBe
+      """{"type":"assistant","data":{"contentOpt":null,"toolCalls":[{"id":"tc-1","name":"get_weather",""" +
+      """"arguments":{"city":"Paris"}}],"thinking":[{"type":"text","text":"hmm"}]}}"""
+    ThinkingReplay.encoded(UserMessage("hi")) shouldBe write[Message](UserMessage("hi"))
+  }
+
+  it should "keep a binding valid across a write and a read of the conversation in its new shape" in {
+    val history =
+      Seq[Message](
+        UserMessage("hi"),
+        AssistantMessage("Checking.", Seq(call)),
+        ToolMessage("sunny", ToolCallId("tc-1"))
+      )
+    val turn   = signedTurn(history*)
+    val stored = read[Conversation](write(Conversation(history :+ turn)))
+
+    ThinkingReplay.replayable(origin, stored.messages, options).last shouldBe turn
   }
 }

@@ -19,7 +19,7 @@ Every recipe is a small Scala program in
 [`modules/samples`](https://github.com/llm4s/llm4s/tree/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook),
 and every one runs with **no API key**: by default a scripted client stands in for the model, so you can see the whole
 flow work in seconds. Add `--live` to run the same code against the provider your configuration names
-(`llm4s.providers.provider`, see [running the samples](../getting-started/configuration#running-the-samples)).
+(`llm4s.defaultProvider`, see [running the samples](../getting-started/configuration#running-the-samples)).
 
 To run the recipes with no local setup at all, open a GitHub Codespace from the
 [playground](../getting-started/playground): it has sbt and a small local model, so `--live` works there too.
@@ -64,7 +64,7 @@ a section to the git-ignored `modules/samples/src/main/resources/application.loc
 llm4s.providers {
   openai-main {
     provider = "openai"
-    model    = "gpt-4o-mini"
+    model    = "gpt-5.6-luna"
   }
 }
 ```

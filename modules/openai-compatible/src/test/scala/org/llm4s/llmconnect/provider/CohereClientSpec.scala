@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
@@ -70,8 +72,8 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
   private def config(baseUrl: String): CohereConfig =
     CohereConfig(
       apiKey = Secret("test-key"),
-      model = "command-r",
-      baseUrl = baseUrl,
+      model = ModelName("command-r"),
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -125,7 +127,7 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
     val result = client.complete(conversation, CompletionOptions())
     result.isRight shouldBe true
     result.toOption.get.content shouldBe ""
-    result.toOption.get.message.contentOpt shouldBe None
+    result.toOption.get.message.text shouldBe None
     result.toOption.get.toolCalls shouldBe empty
   }
 
@@ -179,7 +181,7 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
     val result = client.complete(conversation, CompletionOptions())
     result.isRight shouldBe true
     exchanges should have size 1
-    exchanges.head.provider shouldBe "cohere"
+    exchanges.head.provider.asString shouldBe "cohere"
     exchanges.head.model shouldBe Some("command-r")
     exchanges.head.requestBody should include("hello")
     exchanges.head.responseBody.value should include("Logged response")

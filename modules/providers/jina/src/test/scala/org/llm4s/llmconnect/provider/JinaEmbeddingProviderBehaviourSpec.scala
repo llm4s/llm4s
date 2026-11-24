@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.error.NetworkError
 import org.llm4s.http.{ HttpRequest, HttpResponse, Llm4sHttpClient, MockHttpClient }
@@ -21,11 +22,16 @@ import scala.concurrent.duration.DurationInt
  */
 class JinaEmbeddingProviderBehaviourSpec extends AnyFlatSpec with Matchers {
 
-  private val modelCfg  = EmbeddingModelConfig("jina-embeddings-v3", 1024)
+  private val modelCfg  = EmbeddingModelConfig(ModelName("jina-embeddings-v3"), 1024)
   private val secretKey = "jina-SECRET-key-123"
 
   private def cfg(base: String = "http://jina-test") =
-    EmbeddingProviderConfig(baseUrl = base, model = "jina-embeddings-v3", apiKey = Secret(secretKey))
+    EmbeddingProviderConfig(
+      providerId = ProviderId("jina"),
+      baseUrl = BaseUrl(base),
+      model = ModelName("jina-embeddings-v3"),
+      apiKey = Some(Secret(secretKey))
+    )
 
   private def ok(vectors: Seq[Seq[Double]]): HttpResponse = {
     val items = vectors.zipWithIndex.map { case (v, i) =>
@@ -65,7 +71,7 @@ class JinaEmbeddingProviderBehaviourSpec extends AnyFlatSpec with Matchers {
     val http = new MockHttpClient(ok(Seq(Seq(1.0))))
     val res = JinaEmbeddingProvider
       .forTest(cfg(), http, task)
-      .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig(model, 1024)))
+      .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig(ModelName(model), 1024)))
     (res, http.lastBody.map(read(_)))
   }
 
@@ -86,7 +92,7 @@ class JinaEmbeddingProviderBehaviourSpec extends AnyFlatSpec with Matchers {
       val http = new MockHttpClient(ok(Seq(Seq(1.0))))
       val res = JinaEmbeddingProvider
         .forTest(cfg(), http, t)
-        .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig("jina-embeddings-v4", 2048)))
+        .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig(ModelName("jina-embeddings-v4"), 2048)))
       res.left.toOption.get.message should include(t.wireName)
       http.lastBody shouldBe None
     }
@@ -247,7 +253,7 @@ class JinaEmbeddingProviderBehaviourSpec extends AnyFlatSpec with Matchers {
     embed(failingWith(late), Seq("a")).left.toOption.get shouldBe late
 
     val invalid = embed(failingWith(org.llm4s.error.ValidationError("request", "bad URL")), Seq("a")).left.toOption.get
-    invalid shouldBe a[org.llm4s.llmconnect.model.EmbeddingError]
+    invalid shouldBe a[org.llm4s.error.EmbeddingError]
     invalid.message should startWith("HTTP request failed")
   }
 

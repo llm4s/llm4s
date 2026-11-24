@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ZaiConfig }
 import org.llm4s.llmconnect.model._
@@ -21,11 +23,13 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   private def client(dialect: OpenAICompatibleDialect) =
     new OpenAICompatibleClient(
-      OpenAICompatibleClient.settings(OpenAICompatibleConfig(model = "m", baseUrl = "http://localhost:1/v1")),
+      OpenAICompatibleClient.settings(
+        OpenAICompatibleConfig(model = ModelName("m"), baseUrl = BaseUrl("http://localhost:1/v1"))
+      ),
       dialect
     )
 
-  private val call = ToolCall("abcdefghi", "get_weather", ujson.Obj("city" -> "Paris"))
+  private val call = ToolCall(ToolCallId("abcdefghi"), "get_weather", ujson.Obj("city" -> "Paris"))
 
   private val history = Conversation(
     Seq(
@@ -75,13 +79,13 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
       val zai = new ZaiClient(
         ZaiConfig(
           apiKey = Secret("test-key"),
-          model = "glm-4.7",
-          baseUrl = baseUrl,
+          model = ModelName("glm-4.7"),
+          baseUrl = BaseUrl(baseUrl),
           contextWindow = 128000,
           reserveCompletion = 4096
         )
       )
-      zai.streamComplete(history, CompletionOptions(), _ => ()).isRight shouldBe true
+      zai.streamComplete(history, CompletionOptions())(_ => ()).isRight shouldBe true
     }
     val body = ujson.read(sent.get)
     body("stream").bool shouldBe true
@@ -112,7 +116,7 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
       "messages" -> ujson.Arr(ujson.Obj("role" -> "assistant", "reasoning_content" -> "Check.")),
       "thinking" -> ujson.Obj("type" -> "enabled", "clear_thinking" -> true)
     )
-    ZaiDialect.addReasoning(body, "glm-4.7", CompletionOptions())
+    ZaiDialect.addReasoning(body, ModelName("glm-4.7"), CompletionOptions())
     body("thinking") shouldBe ujson.Obj("type" -> "enabled", "clear_thinking" -> false)
   }
 

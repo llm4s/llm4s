@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
 import org.llm4s.llmconnect.config.AnthropicConfig
@@ -32,8 +34,8 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
   private val client = new AnthropicClient(
     AnthropicConfig(
       apiKey = Secret("test-api-key"),
-      model = "claude-3-haiku-20240307",
-      baseUrl = "https://api.anthropic.com",
+      model = ModelName("claude-3-haiku-20240307"),
+      baseUrl = BaseUrl("https://api.anthropic.com"),
       contextWindow = 32768,
       reserveCompletion = 8192
     )
@@ -47,8 +49,8 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
     name: String,
     description: String,
     schema: org.llm4s.toolapi.ObjectSchema[Map[String, Any]]
-  ): Result[ToolFunction[Map[String, Any], String]] =
-    ToolBuilder[Map[String, Any], String](name, description, schema)
+  ): Result[ToolFunction[String]] =
+    ToolBuilder[String](name, description, schema)
       .withHandler(_ => Right("result"))
       .buildSafe()
 
@@ -56,7 +58,7 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
    * Convert via the real client method and return the input-schema as JSON string
    *  using the same Jackson mapper the client uses internally.
    */
-  private def schemaJsonOf(toolResult: Result[ToolFunction[Map[String, Any], String]]): String =
+  private def schemaJsonOf(toolResult: Result[ToolFunction[String]]): String =
     toolResult match {
       case Right(tool) =>
         val sdkTool = client.convertToolToAnthropicTool(tool)

@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.caching
 
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.caching.guide.CachingGuideSnippets
 import org.llm4s.llmconnect.caching.guide.CachingGuideSnippets.Observing.{ collectingTracing, describe }
@@ -8,6 +9,7 @@ import org.llm4s.llmconnect.caching.guide.CachingGuideSnippets.OwnStorage.MapEmb
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.testutil.GuideMirror
 import org.llm4s.trace.TraceEvent
 import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
@@ -27,13 +29,23 @@ import scala.concurrent.duration._
  * with only the imports the guide shows for it; the assertions here pin what the surrounding prose claims. The stand-ins at the bottom replace the
  * real provider clients, which the guide's snippets receive as `baseClient` and `embeddingClient`.
  */
+@org.llm4s.tags.DocsSpec
 class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with OptionValues {
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
+  "docs/guide/caching.md" should {
+    "show every block this spec runs, as written" in {
+      GuideMirror.missingFromPage(
+        "docs/guide/caching.md",
+        "modules/core/src/test/scala/org/llm4s/llmconnect/caching/guide/CachingGuideSnippets.scala"
+      ) shouldBe empty
+    }
+  }
+
   // ----------------------------------------------------------------------------------------------------
 
-  private val ModelA = EmbeddingModelConfig("test-embedding", 3)
+  private val ModelA = EmbeddingModelConfig(ModelName("test-embedding"), 3)
 
   private def conversation(text: String): Conversation = Conversation.userOnly(text).value
 
@@ -71,7 +83,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
         new FakeEmbeddingClient,
         InMemoryEmbeddingCache.create().value,
         (text, model, purpose) => {
-          seen += ((text, model, purpose)); CacheKeyGenerator.embeddingKey(text, model, purpose)
+          seen += ((text, model.asString, purpose)); CacheKeyGenerator.embeddingKey(text, model, purpose)
         }
       )
       cached.embed(EmbeddingRequest(Seq("x"), ModelA))
@@ -85,14 +97,14 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
     "keep a query for model m apart from a document for a model named m#query" in {
       val base   = new FakeEmbeddingClient
       val cached = new CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
-      cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig("m", 3), InputPurpose.Query))
-      cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig("m#query", 3)))
+      cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig(ModelName("m"), 3), InputPurpose.Query))
+      cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig(ModelName("m#query"), 3)))
       base.calls.get shouldBe 2
     }
 
     "not let a colon in the text or the model name make two keys collide" in {
-      CacheKeyGenerator.embeddingKey("a:b", "c", InputPurpose.Document) should not be
-        CacheKeyGenerator.embeddingKey("a", "b:c", InputPurpose.Document)
+      CacheKeyGenerator.embeddingKey("a:b", ModelName("c"), InputPurpose.Document) should not be
+        CacheKeyGenerator.embeddingKey("a", ModelName("b:c"), InputPurpose.Document)
     }
 
     "key on whatever the custom key function says" in {
@@ -106,11 +118,11 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
       val snippet = new CachingGuideSnippets.TenantKey(new FakeEmbeddingClient)
       import snippet.tenantKey
       val doc = InputPurpose.Document
-      tenantKey("b:c")("a", "m", doc) should not be tenantKey("c")("a:b", "m", doc)
-      tenantKey("t")("a:b", "c", doc) should not be tenantKey("t")("a", "b:c", doc)
-      tenantKey("t")("x", "m", doc) shouldBe tenantKey("t")("x", "m", doc)
-      tenantKey("t")("x", "m", doc) should not be tenantKey("u")("x", "m", doc)
-      tenantKey("t")("x", "m", doc) should not be tenantKey("t")("x", "m", InputPurpose.Query)
+      tenantKey("b:c")("a", ModelName("m"), doc) should not be tenantKey("c")("a:b", ModelName("m"), doc)
+      tenantKey("t")("a:b", ModelName("c"), doc) should not be tenantKey("t")("a", ModelName("b:c"), doc)
+      tenantKey("t")("x", ModelName("m"), doc) shouldBe tenantKey("t")("x", ModelName("m"), doc)
+      tenantKey("t")("x", ModelName("m"), doc) should not be tenantKey("u")("x", ModelName("m"), doc)
+      tenantKey("t")("x", ModelName("m"), doc) should not be tenantKey("t")("x", ModelName("m"), InputPurpose.Query)
     }
 
     "expire an entry strictly after its TTL, counting the expired read as a miss" in {
@@ -281,7 +293,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
     "miss when the options differ, and report why" in {
       val (client, llm, _, seen, _) = fixture()
       client.complete(conversation("hello"))
-      client.complete(conversation("hello"), CompletionOptions(temperature = 0.9))
+      client.complete(conversation("hello"), CompletionOptions(temperature = Some(0.9)))
       llm.calls.get shouldBe 2
       seen().map(describe) shouldBe List("miss: low_similarity", "miss: options_mismatch")
     }
@@ -310,7 +322,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
 
     "bypass the cache for streaming, and not fill it" in {
       val (client, llm, _, seen, _) = fixture()
-      client.streamComplete(conversation("hello"), CompletionOptions(), _ => ()).isRight shouldBe true
+      client.streamComplete(conversation("hello"), CompletionOptions())(_ => ()).isRight shouldBe true
       client.complete(conversation("hello"))
       llm.calls.get shouldBe 2
       seen().map(describe) shouldBe List("miss: low_similarity")
@@ -347,9 +359,13 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
       )
       val (client, llm, _, _, _) = fixture(embedder = embedder)
       val first =
-        Conversation(Seq(UserMessage("what is 2+2"), AssistantMessage("thinking"), ToolMessage("alpha", "call-1")))
+        Conversation(
+          Seq(UserMessage("what is 2+2"), AssistantMessage("thinking"), ToolMessage("alpha", ToolCallId("call-1")))
+        )
       val second =
-        Conversation(Seq(UserMessage("what is 2+2"), AssistantMessage("other"), ToolMessage("beta", "call-1")))
+        Conversation(
+          Seq(UserMessage("what is 2+2"), AssistantMessage("other"), ToolMessage("beta", ToolCallId("call-1")))
+        )
       client.complete(first)
       client.complete(second)
       llm.calls.get shouldBe 2
@@ -388,14 +404,8 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
 
   // ---- stand-ins for the real clients ---------------------------------------------------------------
 
-  private class NoProvider extends EmbeddingProvider {
-    def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
-      Left(org.llm4s.error.ProcessingError("fake", "the stand-in client never reaches its provider"))
-  }
-
   /** Embeds a text as the vector of the first table entry whose key it contains, else a fixed vector. */
-  private class FakeEmbeddingClient(table: Map[String, Seq[Double]] = Map.empty)
-      extends EmbeddingClient(new NoProvider(), None, "embedding") {
+  private class FakeEmbeddingClient(table: Map[String, Seq[Double]] = Map.empty) extends EmbeddingProvider {
     val calls                      = new AtomicInteger(0)
     val requests                   = ListBuffer.empty[EmbeddingRequest]
     @volatile var failing: Boolean = false
@@ -428,8 +438,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
           Completion(
             id = s"id-$n",
             created = Instant.EPOCH,
-            content = s"answer $n",
-            model = "fake-model",
+            model = ModelName("fake-model"),
             message = AssistantMessage(s"answer $n"),
             usage = None
           )
@@ -437,9 +446,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
     }
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = answer()
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = answer()
     override def getContextWindow(): Int     = 4096

@@ -1,6 +1,6 @@
 package org.llm4s.agent
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.agent.delegation.DelegatedRequest
 import org.llm4s.agent.graph.{ Breakpoint, InterruptId, RunId, ThreadId }
 import org.llm4s.agent.graph.toolloop.{
@@ -18,6 +18,24 @@ import upickle.default.ReadWriter
 
 /**
  * How an agent's turn ended, or why it is waiting.
+ *
+ * Every successful `Agent.run`, `resume` and `recover` returns an [[AgentResult]] whose `status` is one of these
+ * cases, so a caller matches on it to decide what to do next: read the answer of a `Completed` turn (also
+ * [[AgentResult.answer]]), continue or retry a `Truncated`, `StepLimitReached` or `TokenLimitReached` one,
+ * report a `Blocked` one, and answer the interrupts of a `Suspended` one with `Agent.resume`. A guardrail block,
+ * a cut-off answer, a spent budget and a pause for a person are outcomes, not errors: provider, tool and
+ * middleware failures are the `Left` of the run's `Result` instead, and never appear here.
+ *
+ * {{{
+ * agent.run("Summarise the release notes").map(_.status match
+ *   case AgentStatus.Completed(answer)     => answer
+ *   case AgentStatus.Truncated(partial)    => partial + " [cut off]"
+ *   case AgentStatus.Blocked(guardrail, _) => s"refused by $guardrail"
+ *   case AgentStatus.StepLimitReached      => "no answer within the step limit"
+ *   case AgentStatus.TokenLimitReached     => "no answer within the token budget"
+ *   case AgentStatus.Suspended(suspension) => s"waiting: $suspension"
+ * )
+ * }}}
  *
  * `Completed`, `Truncated` and `Blocked` are closed: each is exactly the fields it has, and anything more about the
  * turn goes on [[AgentResult]]. `Suspended` holds a [[Suspension]], which can gain a kind of pending interrupt
@@ -40,11 +58,19 @@ enum AgentStatus:
 
   /**
    * A guardrail refused the turn: `guardrail` is the first failing guardrail's name, `reason` every
-   * failure's error. An input block stores nothing of the turn; an output block removes it - the
+   * failure's error. A middleware that blocks a turn itself is named the same way: `guardrail` is then its id, and
+   * `reason` the one it gave. An input block stores nothing of the turn; an output block removes it - the
    * query, any tool calls and the answer - so `messages` is the history from before the turn. Usage
    * keeps the turn's model calls. The thread is usable, and the next turn runs normally.
+   *
+   * `reason` is `Some` on the result of the run that was blocked and `None` everywhere else (#2853): a reason may
+   * quote the text the guardrail refused, so it is never stored, and a status rebuilt from the thread - a delegated
+   * child's, read again by its parent - names the guardrail only. So does a turn whose query was refused at admission
+   * in one call and blocked in another (#2854): a queued entry its submitter admitted (`Agent.admit` returned the
+   * reason there), or a turn held at a breakpoint before its first step and resumed. Keep the reason yourself if you
+   * need it later.
    */
-  case Blocked(guardrail: String, reason: String)
+  case Blocked(guardrail: String, reason: Option[String])
 
   /** The turn used the active agent's `maxSteps` model calls without a final answer. */
   case StepLimitReached
@@ -64,7 +90,7 @@ enum AgentStatus:
    * (approvals), [[AgentResult.reply]] (a tool's or a middleware's question, with its answer type) and
    * [[AgentResult.proceed]] (breakpoints), and continue with [[Agent.resume]]; unanswered ones stay pending.
    */
-  case Suspended(suspension: Suspension)
+  @Experimental case Suspended(suspension: Suspension)
 
 /**
  * What a suspended turn waits on ([[AgentStatus.Suspended]]), each interrupt keyed by its id.
@@ -80,7 +106,7 @@ enum AgentStatus:
  * @param breakpoints static breakpoints holding a task
  * @param delegated interrupts of suspended subagents
  */
-@Stable
+@Experimental
 final case class Suspension private (
   approvals: Vector[(InterruptId, ApprovalRequest)],
   questions: Vector[(InterruptId, ToolQuestionRequest)],
@@ -95,6 +121,7 @@ final case class Suspension private (
   def withBreakpoints(value: Vector[(InterruptId, BreakpointRequest)]): Suspension = copy(breakpoints = value)
   def withDelegated(value: Vector[(InterruptId, DelegatedRequest)]): Suspension    = copy(delegated = value)
 
+@Experimental
 object Suspension:
 
   def apply(
@@ -146,20 +173,25 @@ final case class AgentResult private (
       .flatMap(OutputFormat.decode[O])
 
   /** Approves the pending tool call `id`, for [[Agent.resume]]. */
+  @Experimental
   def approve(id: InterruptId): (InterruptId, ujson.Value) = decide(id, ApprovalDecision.Approve)
 
   /** Rejects the pending tool call `id`: the model sees `Rejected: <reason>` as its result. */
+  @Experimental
   def reject(id: InterruptId, reason: String): (InterruptId, ujson.Value) = decide(id, ApprovalDecision.Reject(reason))
 
   /** Approves the pending tool call `id` with new `arguments`, which replace the call's in the history. */
+  @Experimental
   def edit(id: InterruptId, arguments: ujson.Value): (InterruptId, ujson.Value) =
     decide(id, ApprovalDecision.Edit(arguments))
 
   /** Answers the question `id` - a tool's or a middleware's - with `value`, of the asker's answer type. */
+  @Experimental
   def reply[Ans: ReadWriter](id: InterruptId, value: Ans): (InterruptId, ujson.Value) =
     id -> upickle.default.writeJs(value)
 
   /** Continues the task the breakpoint `id` holds. */
+  @Experimental
   def proceed(id: InterruptId): (InterruptId, ujson.Value) = id -> Breakpoint.proceed
 
   private def decide(id: InterruptId, decision: ApprovalDecision): (InterruptId, ujson.Value) =

@@ -21,7 +21,7 @@ class PerplexityStreamSpec extends AnyWordSpec with Matchers:
   private def streamed(reply: => Result[StreamingHttpResponse]): (StubHttp, Result[Completion], List[StreamedChunk]) = {
     val http   = new StubHttp(stream = _ => reply)
     val chunks = ListBuffer.empty[StreamedChunk]
-    val result = client(http).streamComplete(hello, CompletionOptions(), chunks += _)
+    val result = client(http).streamComplete(hello, CompletionOptions())(chunks += _)
     (http, result, chunks.toList)
   }
 
@@ -62,7 +62,9 @@ class PerplexityStreamSpec extends AnyWordSpec with Matchers:
     "report tool calls whole, after the text, with finish reason tool_calls" in {
       val done                = response(s"[${functionCall("call_1", "get_weather", """{"city":"Oslo"}""")}]")
       val (_, result, chunks) = streamed(sse(created, completedEvent(done)))
-      chunks.flatMap(_.toolCall) shouldBe List(ToolCall("call_1", "get_weather", ujson.Obj("city" -> "Oslo")))
+      chunks.flatMap(_.toolCall) shouldBe List(
+        ToolCall(ToolCallId("call_1"), "get_weather", ujson.Obj("city" -> "Oslo"))
+      )
       chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
       result.map(_.toolCalls.map(_.id)) shouldBe Right(List("call_1"))
       result.map(_.finishReason) shouldBe Right(FinishReason.ToolCalls)

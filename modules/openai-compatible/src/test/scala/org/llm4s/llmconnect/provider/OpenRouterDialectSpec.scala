@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model._
@@ -21,7 +23,7 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def config(model: String, baseUrl: String = "https://openrouter.ai/api/v1") =
-    OpenAIConfig(Secret("or-key"), model, None, baseUrl, 200000, 4096)
+    OpenAIConfig(Secret("or-key"), ModelName(model), None, BaseUrl(baseUrl), 200000, 4096)
 
   private def body(model: String, options: CompletionOptions, messages: Message*) =
     new OpenRouterClient(config(model)).createRequestBody(Conversation(messages.toSeq), options)
@@ -45,7 +47,7 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
       CompletionOptions(),
       AssistantMessage(Some("text")),
       AssistantMessage(Some("")),
-      AssistantMessage(None, List(ToolCall("c", "f", ujson.Obj())))
+      AssistantMessage(None, List(ToolCall(ToolCallId("c"), "f", ujson.Obj())))
     )("messages")
     messages(0)("content") shouldBe ujson.Str("text")
     messages(1)("content") shouldBe ujson.Str("")
@@ -123,7 +125,7 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
     } { baseUrl =>
       val chunks = ListBuffer.empty[StreamedChunk]
       val completion = new OpenRouterClient(config("anthropic/claude-3.5-sonnet", baseUrl))
-        .streamComplete(Conversation(Seq(hi)), CompletionOptions(), chunks += _)
+        .streamComplete(Conversation(Seq(hi)), CompletionOptions())(chunks += _)
         .value
       chunks.flatMap(_.thinkingDelta) shouldBe Seq("hmm ", "ok")
       completion.thinking shouldBe Some("hmm ok")
@@ -151,7 +153,7 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
           |"tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{\"a\":1}"}}]}}]}""".stripMargin
       )
     )
-    completion.toolCalls shouldBe Seq(ToolCall("c1", "f", ujson.Obj("a" -> 1)))
-    completion.message.contentOpt shouldBe None
+    completion.toolCalls shouldBe Seq(ToolCall(ToolCallId("c1"), "f", ujson.Obj("a" -> 1)))
+    completion.message.text shouldBe None
   }
 }

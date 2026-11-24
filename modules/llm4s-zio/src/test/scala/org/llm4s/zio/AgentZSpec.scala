@@ -1,5 +1,6 @@
 package org.llm4s.zio
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.AgentStatus
 import org.llm4s.agent.testkit.Fixtures
 import org.llm4s.error.SimpleError
@@ -16,15 +17,14 @@ object AgentZSpec extends ZIOSpecDefault {
   private def completion(text: String) = Completion(
     id = "test-id",
     created = Instant.EPOCH,
-    content = text,
-    model = "test-model",
-    message = AssistantMessage(contentOpt = Some(text))
+    model = ModelName("test-model"),
+    message = AssistantMessage(text = Some(text))
   )
 
   private def successClient(text: String): LLMClient = new LLMClient {
     def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
       Right(completion(text))
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       Right(completion(text))
     def getContextWindow(): Int     = 4096
     def getReserveCompletion(): Int = 256
@@ -33,7 +33,7 @@ object AgentZSpec extends ZIOSpecDefault {
   private val failingClient: LLMClient = new LLMClient {
     def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
       Left(SimpleError("agent-fail"))
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       Left(SimpleError("agent-fail"))
     def getContextWindow(): Int     = 4096
     def getReserveCompletion(): Int = 256
@@ -80,7 +80,7 @@ object AgentZSpec extends ZIOSpecDefault {
       val client: LLMClient = new LLMClient {
         def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
           if (calls.getAndIncrement() == 0) Right(completion("4")) else Left(SimpleError("agent-fail"))
-        def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+        def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
           complete(c, o)
         def getContextWindow(): Int     = 4096
         def getReserveCompletion(): Int = 256

@@ -31,5 +31,5 @@ import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModu
  */
 @Stable
 final class Llm4sOpenAIModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(OpenAIProvider, AzureProvider, RequestyProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(OpenAIProvider, AzureProvider, RequestyProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(OpenAIEmbeddingProvider)

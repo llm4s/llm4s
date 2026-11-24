@@ -28,7 +28,7 @@ object EnrichReviews {
     client.left.map(_.message).map { underlying =>
       // Retries, a deadline and a local rate limit. The rate limit is per client, so per partition: the job's
       // total is roughly requestsPerMinute times the number of partitions running at once.
-      new ReliableClient(
+      ReliableClient(
         underlying,
         "spark-example",
         ReliabilityConfig(
@@ -59,10 +59,10 @@ object EnrichReviews {
 
   def main(args: Array[String]): Unit = {
     // `--fake` points the default provider at a local fake Ollama; without it, the job uses the provider your
-    // application.conf names (llm4s.providers.provider).
+    // application.conf names (llm4s.defaultProvider).
     val fake = if (args.contains("--fake")) Some(FakeOllama.start()) else None
     fake.foreach { server =>
-      System.setProperty("llm4s.providers.provider", "local")
+      System.setProperty("llm4s.defaultProvider", "local")
       System.setProperty("llm4s.providers.local.provider", "ollama")
       System.setProperty("llm4s.providers.local.model", "llama3")
       System.setProperty("llm4s.providers.local.baseUrl", s"http://localhost:${server.getAddress.getPort}")

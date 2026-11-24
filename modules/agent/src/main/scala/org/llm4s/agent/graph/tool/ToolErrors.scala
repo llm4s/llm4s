@@ -48,7 +48,7 @@ private[agent] object ToolErrors:
     tool match
       case b: BoundedErrors =>
         parts match
-          case Vector(ContentPart.Text(text)) =>
+          case Seq(ContentPart.Text(text)) =>
             val bytes = utf8(text)
             Option.when(bytes > b.maxErrorBytes)(
               s"Tool '${tool.spec.name}' result over ${b.maxErrorBytes} bytes ($bytes)"

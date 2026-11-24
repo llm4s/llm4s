@@ -3,8 +3,10 @@ layout: page
 title: JBang Quick Start
 description: "Run a first LLM call from one Java file with JBang and llm4s-java-api: dependencies declared in the file, no build tool, no project."
 search_title: "Call an LLM from Java with JBang and LLM4S"
-parent: Getting Started
-nav_order: 10
+parent: Build Tools and Playgrounds
+nav_order: 5
+grand_parent: Getting Started
+cites_closed_issues: [1496]
 ---
 
 # JBang Quick Start
@@ -88,9 +90,8 @@ a "no SLF4J providers were found" warning and drops the logs. `//FILES` puts a f
 
 ```hocon
 llm4s {
+  defaultProvider = "ollama-local"
   providers {
-    provider = "ollama-local"
-
     ollama-local {
       provider = "ollama"
       model    = "llama3"
@@ -127,7 +128,7 @@ the model. To compile without running, use `jbang build HelloLlm4s.java`.
 
 For OpenAI instead of Ollama, change the provider module's `//DEPS` line to
 `org.llm4s:llm4s-openai_3:{{ site.data.project.latest_release }}`, change the section in `application.conf` to
-`provider = "openai"` with `model = "gpt-4o-mini"`, and set `OPENAI_API_KEY` in the shell.
+`provider = "openai"` with `model = "gpt-5.6-luna"`, and set `OPENAI_API_KEY` in the shell.
 
 ## If something goes wrong
 

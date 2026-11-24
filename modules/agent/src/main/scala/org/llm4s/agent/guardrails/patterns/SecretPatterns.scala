@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails.patterns
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.util.{ SecretPatterns => CorePatterns }
 
 import scala.util.matching.Regex
@@ -13,7 +13,7 @@ import scala.util.matching.Regex
  * human-readable name, and the placeholder text to use when redacting. The built-in types share their patterns with
  * the redaction llm4s applies to its own logs and error messages, and each takes time linear in the text.
  */
-@Stable
+@Experimental
 object SecretPatterns {
 
   /**

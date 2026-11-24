@@ -25,7 +25,7 @@ import scala.util.Try
  * 4. Performance metrics and comparison
  *
  * To enable Langfuse tracing, set these environment variables:
- * - LANGFUSE_URL: Your Langfuse instance URL (default: https://cloud.langfuse.com/api/public/ingestion)
+ * - LANGFUSE_URL: Your Langfuse instance URL (default: https://cloud.langfuse.com)
  * - LANGFUSE_PUBLIC_KEY: Your Langfuse public key
  * - LANGFUSE_SECRET_KEY: Your Langfuse secret key
  * - LANGFUSE_ENV: Environment name (default: production)
@@ -123,9 +123,6 @@ object AgentLLMCallingExample {
                     "You have access to a calculator tool. Use it to perform mathematical calculations. IMPORTANT: Make only ONE tool call at a time, wait for the result, then make the next tool call if needed."
                   )
                   .build()
-
-                // Trace agent initialization
-                _ = TracingUtil.traceAgentInitialization(tracing, query, tools)
 
                 _ = logger.info("🔄 Running calculator agent...")
                 _ = logger.info("Query: {}", query)

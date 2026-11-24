@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -28,12 +29,17 @@ class CohereEmbeddingsSmokeSpec extends AnyFlatSpec with Matchers {
 
   private def provider(apiKey: String, inputType: CohereInputType = CohereInputType.default): EmbeddingProvider =
     CohereEmbeddingProvider.fromConfig(
-      EmbeddingProviderConfig(baseUrl = "https://api.cohere.com", model = Model, apiKey = Secret(apiKey)),
+      EmbeddingProviderConfig(
+        providerId = ProviderId("cohere"),
+        baseUrl = BaseUrl("https://api.cohere.com"),
+        model = ModelName(Model),
+        apiKey = Some(Secret(apiKey))
+      ),
       inputType
     )
 
   private def request(texts: String*): EmbeddingRequest =
-    EmbeddingRequest(texts, EmbeddingModelConfig(Model, ExpectedDimensions))
+    EmbeddingRequest(texts, EmbeddingModelConfig(ModelName(Model), ExpectedDimensions))
 
   "Cohere embeddings" should "embed 3 sentences with embed-english-v3.0" in {
     Tier.require(cohereApiKey.isDefined, "COHERE_API_KEY not set")

@@ -1,5 +1,6 @@
 package org.llm4s.agent.events
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.{ FinishReason, RequestAdjustment, RequestOption, ServiceTier }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
@@ -39,7 +40,7 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
   "ModelCallCompleted" should "read an event stored before it had a provider" in {
     val stored = write(StoredWithoutProvider("assistant", "gpt-4o", 1, 0, usage, Some(0.01)))
     read[ModelCallCompleted](stored) shouldBe
-      ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, Some(0.01), provider = None)
+      ModelCallCompleted("assistant", ModelName("gpt-4o"), 1, 0, usage, Some(0.01), provider = None)
   }
 
   it should "read an event whose provider was stored as a string" in {
@@ -48,7 +49,7 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
   }
 
   it should "store its provider in the same form as a string" in {
-    val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, None, Some(ProviderId("anthropic")))
+    val event = ModelCallCompleted("assistant", ModelName("gpt-4o"), 1, 0, usage, None, Some(ProviderId("anthropic")))
     write(event) shouldBe write(StoredWithString("assistant", "gpt-4o", 1, 0, usage, None, Some("anthropic")))
     read[ModelCallCompleted](write(event)) shouldBe event
   }
@@ -76,24 +77,34 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
   }
 
   it should "store an event with no adjustments as it was stored before they existed" in {
-    val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, None, Some(ProviderId("openai")))
+    val event = ModelCallCompleted("assistant", ModelName("gpt-4o"), 1, 0, usage, None, Some(ProviderId("openai")))
     write(event) shouldBe write(StoredWithoutAdjustments("assistant", "gpt-4o", 1, 0, usage, None, Some("openai")))
   }
 
   it should "round-trip every kind of adjustment" in {
-    val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, None, Some(ProviderId("openai")), adjustments)
+    val event =
+      ModelCallCompleted("assistant", ModelName("gpt-4o"), 1, 0, usage, None, Some(ProviderId("openai")), adjustments)
     read[ModelCallCompleted](write(event)) shouldBe event
   }
 
   it should "be read by a reader that predates adjustments, which ignores them" in {
     val event =
-      ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, Some(0.01), Some(ProviderId("openai")), adjustments)
+      ModelCallCompleted(
+        "assistant",
+        ModelName("gpt-4o"),
+        1,
+        0,
+        usage,
+        Some(0.01),
+        Some(ProviderId("openai")),
+        adjustments
+      )
     read[StoredWithoutAdjustments](write(event)) shouldBe
       StoredWithoutAdjustments("assistant", "gpt-4o", 1, 0, usage, Some(0.01), Some("openai"))
   }
 
   it should "store each adjustment tagged by its case, with its option by name" in {
-    val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, None, None, adjustments)
+    val event = ModelCallCompleted("assistant", ModelName("gpt-4o"), 1, 0, usage, None, None, adjustments)
     ujson.read(write(event))("adjustments") shouldBe ujson.Arr(
       ujson.Obj(
         "$type"  -> "Dropped",
@@ -113,7 +124,9 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
 
   it should "leave out an adjustment it cannot read, an option or a case added later, and keep the rest" in {
     val stored =
-      ujson.read(write(ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, Some(0.01), None, adjustments)))
+      ujson.read(
+        write(ModelCallCompleted("assistant", ModelName("gpt-4o"), 1, 0, usage, Some(0.01), None, adjustments))
+      )
     stored("adjustments").arr.prepend(ujson.Obj("$type" -> "Dropped", "option" -> "SeedValue", "reason" -> "later"))
     stored("adjustments").arr.append(ujson.Obj("$type" -> "Deferred", "option" -> "TopP", "reason" -> "later"))
     val read = upickle.default.read[ModelCallCompleted](stored)
@@ -140,7 +153,7 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
       FinishReason.ToolCalls,
       FinishReason.Length,
       FinishReason.Other("SAFETY"),
-      FinishReason.Other("")
+      FinishReason.Unknown
     )
 
   it should "read an event stored before it had a finish reason with none" in {
@@ -152,27 +165,38 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
   }
 
   it should "store an event with no finish reason as it was stored before it existed" in {
-    val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, None, Some(ProviderId("openai")), adjustments)
+    val event =
+      ModelCallCompleted("assistant", ModelName("gpt-4o"), 1, 0, usage, None, Some(ProviderId("openai")), adjustments)
     write(event) shouldBe
       write(StoredWithoutFinishReason("assistant", "gpt-4o", 1, 0, usage, None, Some("openai"), adjustments))
   }
 
   it should "round-trip every finish reason" in {
     reasons.foreach { r =>
-      val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, None, None, Nil, Some(r))
+      val event = ModelCallCompleted("assistant", ModelName("gpt-4o"), 1, 0, usage, None, None, Nil, Some(r))
       read[ModelCallCompleted](write(event)) shouldBe event
     }
   }
 
   it should "store a finish reason as FinishReason's own codec writes it" in {
     reasons.foreach { r =>
-      val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, None, None, Nil, Some(r))
+      val event = ModelCallCompleted("assistant", ModelName("gpt-4o"), 1, 0, usage, None, None, Nil, Some(r))
       ujson.read(write(event))("finishReason") shouldBe upickle.default.writeJs(r)
     }
   }
 
   it should "be read by a reader that predates the finish reason, which ignores it" in {
-    val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, Some(0.01), None, Nil, Some(FinishReason.Length))
+    val event = ModelCallCompleted(
+      "assistant",
+      ModelName("gpt-4o"),
+      1,
+      0,
+      usage,
+      Some(0.01),
+      None,
+      Nil,
+      Some(FinishReason.Length)
+    )
     read[StoredWithoutFinishReason](write(event)) shouldBe
       StoredWithoutFinishReason("assistant", "gpt-4o", 1, 0, usage, Some(0.01))
   }
@@ -180,7 +204,17 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
   it should "read a finish reason it cannot read, a case added later, as Other with its raw value, and keep the rest" in {
     val stored = ujson.read(
       write(
-        ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, Some(0.01), None, adjustments, Some(FinishReason.Stop))
+        ModelCallCompleted(
+          "assistant",
+          ModelName("gpt-4o"),
+          1,
+          0,
+          usage,
+          Some(0.01),
+          None,
+          adjustments,
+          Some(FinishReason.Stop)
+        )
       )
     )
     stored("finishReason") = ujson.Str("ContentFiltered")
@@ -202,14 +236,24 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
 
   it should "round-trip a served tier, and read one it cannot read as Other with its raw value (#2746)" in {
     List(ServiceTier.Priority, ServiceTier.Other("batch")).foreach { tier =>
-      val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, None, servedTier = Some(tier))
+      val event = ModelCallCompleted("assistant", ModelName("gpt-4o"), 1, 0, usage, None, servedTier = Some(tier))
       read[ModelCallCompleted](write(event)) shouldBe event
     }
-    val stored = ujson.read(write(ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, Some(0.01))))
+    val stored = ujson.read(write(ModelCallCompleted("assistant", ModelName("gpt-4o"), 1, 0, usage, Some(0.01))))
     stored.obj.contains("servedTier") shouldBe false
     read[ModelCallCompleted](stored).servedTier shouldBe None
     stored("servedTier") = ujson.Str("Scale")
     val event = read[ModelCallCompleted](stored)
     event.servedTier shouldBe Some(ServiceTier.Other("Scale"))
     event.usage shouldBe usage
+  }
+
+  it should "store the call's duration in milliseconds, and read an event stored before the field as zero (#2829)" in {
+    import scala.concurrent.duration.*
+    val event = ModelCallCompleted("assistant", ModelName("gpt-4o"), 1, 0, usage, None).withDuration(1500.millis)
+    ujson.read(write(event))("duration").num shouldBe 1500.0
+    read[ModelCallCompleted](write(event)) shouldBe event
+    val stored = ujson.read(write(ModelCallCompleted("assistant", ModelName("gpt-4o"), 1, 0, usage, Some(0.01))))
+    stored.obj.remove("duration")
+    read[ModelCallCompleted](stored).duration shouldBe Duration.Zero
   }

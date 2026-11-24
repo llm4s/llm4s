@@ -108,11 +108,11 @@ object ModularRAGExample extends App {
 
       for {
         providerTuple <- Llm4sConfig.embeddings()
-        (providerName, embeddingCfg) = providerTuple
+        embeddingCfg = providerTuple
         rag <- {
           val base = RAG
             .builder()
-            .withEmbeddings(providerName, embeddingCfg.model)
+            .withEmbeddings(embeddingCfg.providerId.asString, embeddingCfg.model.asString)
             .withChunking(ChunkerFactory.Strategy.Sentence, 800, 150)
             .withTopK(defaultTopK)
             .inMemory
@@ -133,7 +133,7 @@ object ModularRAGExample extends App {
     }
 
   private def loadOptionalLlmClient()(using ModelRegistryService): Option[LLMClient] =
-    Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient) match {
+    Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient(_)) match {
       case Right(client) =>
         logger.info("LLM provider detected; generation module will run.")
         Some(client)

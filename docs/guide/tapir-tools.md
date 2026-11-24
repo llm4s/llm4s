@@ -3,8 +3,9 @@ layout: page
 title: Tapir Endpoints as Tools
 description: "Turn the tapir endpoints a Scala service already has into LLM4S tools, with each tool's schema derived from its endpoint."
 search_title: "Expose tapir endpoints as LLM agent tools"
-parent: User Guide
-nav_order: 49
+parent: Agents
+nav_order: 214
+grand_parent: User Guide
 ---
 
 # Tapir endpoints as tools

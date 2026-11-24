@@ -174,7 +174,7 @@ failed.
 |---|---|---|
 | JDK | the running JDK is 21 or newer | names the version it found and says to set `JAVA_HOME` |
 | Configuration | the configuration can be read and has at least one section under `llm4s.providers` | shows the parse problem, or an example section to add |
-| Default provider | `llm4s.providers.provider` names a section that exists | lists the sections you have |
+| Default provider | `llm4s.defaultProvider` names a section that exists | lists the sections you have |
 | Provider module | the section's `provider` is registered, which means its module is on the classpath the doctor runs on (or the `--classpath` given); names the module and the jar it came from | names the registered providers and says to add the dependency that supplies it |
 | API key | the provider needs none, or a key is set | gives the exact setting, for example `set OPENAI_API_KEY, or set apiKey under llm4s.providers.main` |
 | Provider config | the section validates and the provider can build its config | shows the validation error for the section |

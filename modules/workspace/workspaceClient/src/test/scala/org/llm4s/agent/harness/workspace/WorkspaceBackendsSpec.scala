@@ -4,7 +4,7 @@ import org.llm4s.agent.Agent
 import org.llm4s.agent.graph.{ GraphError, ThreadId }
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, LockKey, ToolContent, ToolOutcome, ToolSet }
 import org.llm4s.agent.harness.*
-import org.llm4s.llmconnect.model.{ ToolCall, ToolMessage }
+import org.llm4s.llmconnect.model.{ ToolCall, ToolCallId, ToolMessage }
 import org.llm4s.shared.{ ExecuteCommandResponse, WorkspaceAgentException }
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.Schema
@@ -28,10 +28,10 @@ class WorkspaceBackendsSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   private def runs(batch: Seq[(String, ujson.Obj)], tools: ToolSet): Vector[String] = {
     val replies = Seq(
-      Reply.toolCalls(batch.zipWithIndex.map { case ((name, args), i) => ToolCall(s"c$i", name, args) }*),
+      Reply.toolCalls(batch.zipWithIndex.map { case ((name, args), i) => ToolCall(ToolCallId(s"c$i"), name, args) }*),
       Reply.text("done")
     )
-    val agent = Agent.builder("ws", ScriptedLLMClient.sequence(replies*)).withTools(tools).build().value
+    val agent = Agent.builder("ws", ScriptedLLMClient.sequence(replies*)).withToolSet(tools).build().value
     agent
       .run(ThreadId(s"ws-${System.nanoTime()}"), "go")
       .value
@@ -120,8 +120,10 @@ class WorkspaceBackendsSpec extends AnyFlatSpec with Matchers with EitherValues 
     val files   = WorkspaceFixtures.files(workspace)
     val sandbox = WorkspaceSandboxBackend("ws", workspace).value
     val replies = Seq(
-      Reply.toolCalls(ToolCall("w", "write_file", ujson.Obj("path" -> "/notes.txt", "content" -> "from the harness"))),
-      Reply.toolCalls(ToolCall("x", "execute", ujson.Obj("command" -> "cat notes.txt"))),
+      Reply.toolCalls(
+        ToolCall(ToolCallId("w"), "write_file", ujson.Obj("path" -> "/notes.txt", "content" -> "from the harness"))
+      ),
+      Reply.toolCalls(ToolCall(ToolCallId("x"), "execute", ujson.Obj("command" -> "cat notes.txt"))),
       Reply.text("done")
     )
     val agent = Agent

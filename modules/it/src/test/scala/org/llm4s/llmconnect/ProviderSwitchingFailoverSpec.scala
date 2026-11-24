@@ -1,5 +1,8 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ProviderName
+
 // scalafix:off DisableSyntax.NoConfigFactory
 import com.typesafe.config.ConfigFactory
 // scalafix:on DisableSyntax.NoConfigFactory
@@ -74,18 +77,18 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
 
   /** `application.conf` declaring all three providers, each pointing at its own server. */
   private def threeProviders(openAI: String, anthropic: String, ollama: String, extra: String = ""): String =
-    s"""llm4s.providers {
-       |  provider = "openai-it"
+    s"""llm4s.defaultProvider = "openai-it"
+       |llm4s.providers {
        |  openai-it {
        |    provider = "openai"
-       |    model    = "gpt-4o-mini"
+       |    model    = "gpt-5.6-luna"
        |    baseUrl  = "$openAI/v1"
        |    apiKey   = "$OpenAIKey"
        |    $extra
        |  }
        |  claude-it {
        |    provider = "anthropic"
-       |    model    = "claude-3-5-haiku-latest"
+       |    model    = "claude-haiku-5-5"
        |    baseUrl  = "$anthropic"
        |    apiKey   = "$AnthropicKey"
        |    $extra
@@ -139,20 +142,20 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
 
       val openAI = load("openai-it", hocon).value
       openAI shouldBe a[OpenAIConfig]
-      openAI.model shouldBe "gpt-4o-mini"
-      openAI.asInstanceOf[OpenAIConfig].baseUrl shouldBe "http://openai.invalid/v1"
+      openAI.model.asString shouldBe "gpt-5.6-luna"
+      openAI.asInstanceOf[OpenAIConfig].baseUrl shouldBe BaseUrl("http://openai.invalid/v1")
       openAI.asInstanceOf[OpenAIConfig].apiKey.reveal shouldBe OpenAIKey
 
       val anthropic = load("claude-it", hocon).value
       anthropic shouldBe a[AnthropicConfig]
-      anthropic.model shouldBe "claude-3-5-haiku-latest"
-      anthropic.asInstanceOf[AnthropicConfig].baseUrl shouldBe "http://anthropic.invalid"
+      anthropic.model.asString shouldBe "claude-haiku-5-5"
+      anthropic.asInstanceOf[AnthropicConfig].baseUrl shouldBe BaseUrl("http://anthropic.invalid")
       anthropic.asInstanceOf[AnthropicConfig].apiKey.reveal shouldBe AnthropicKey
 
       val ollama = load("ollama-it", hocon).value
       ollama shouldBe a[OllamaConfig]
-      ollama.model shouldBe "llama3"
-      ollama.asInstanceOf[OllamaConfig].baseUrl shouldBe "http://ollama.invalid"
+      ollama.model.asString shouldBe "llama3"
+      ollama.asInstanceOf[OllamaConfig].baseUrl shouldBe BaseUrl("http://ollama.invalid")
     }
 
     "answer in turn from one JVM, OpenAI -> Anthropic -> Ollama -> OpenAI, each request reaching only its own server" in
@@ -175,12 +178,12 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
         val openAI = providers.byId("openai").server.requests.loneElement
         openAI.header("authorization") shouldBe Some(s"Bearer $OpenAIKey")
         openAI.header("x-api-key") shouldBe None
-        openAI.json("model").str shouldBe "gpt-4o-mini"
+        openAI.json("model").str shouldBe "gpt-5.6-luna"
 
         val anthropic = providers.byId("anthropic").server.requests.loneElement
         anthropic.header("x-api-key") shouldBe Some(AnthropicKey)
         anthropic.header("authorization") shouldBe None
-        anthropic.json("model").str shouldBe "claude-3-5-haiku-latest"
+        anthropic.json("model").str shouldBe "claude-haiku-5-5"
 
         val ollama = providers.byId("ollama").server.requests.loneElement
         ollama.header("authorization") shouldBe None
@@ -201,7 +204,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
       withThreeProviders() { providers =>
         (providers.all ++ providers.all).foreach { p =>
           val chunks = new ConcurrentLinkedQueue[StreamedChunk]()
-          val result = p.client.streamComplete(hello, CompletionOptions(), chunk => chunks.add(chunk): Unit).value
+          val result = p.client.streamComplete(hello, CompletionOptions())(chunk => chunks.add(chunk): Unit).value
           result.content shouldBe s"hello from ${p.id}"
           chunks.asScala.flatMap(_.content).mkString shouldBe s"hello from ${p.id}"
         }
@@ -243,7 +246,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
             usageOf(p.client.complete(hello).value) shouldBe Some((10, 5, 15))
           }
           withClue(s"${p.id} stream: ") {
-            usageOf(p.client.streamComplete(hello, CompletionOptions(), _ => ()).value) shouldBe Some((10, 5, 15))
+            usageOf(p.client.streamComplete(hello, CompletionOptions())(_ => ()).value) shouldBe Some((10, 5, 15))
           }
         }
       }
@@ -257,7 +260,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
             val call = completion.toolCalls.loneElement
             call.name shouldBe "get_weather"
             call.arguments shouldBe ujson.Obj("city" -> "Paris")
-            call.id should not be empty
+            call.id.asString should not be empty
           }
         }
       }
@@ -346,7 +349,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
       deadline = None
     )
 
-    def reliable(p: Live): ReliableClient = new ReliableClient(p.client, p.id, reliability, sleep = _ => ())
+    def reliable(p: Live): ReliableClient = ReliableClient(p.client, p.id, reliability).withSleep(_ => ())
 
     "answer from the fallback when the primary still fails after its retries" in
       withThreeProviders() { providers =>
@@ -423,13 +426,13 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
       load(name, s"llm4s.providers.$name { $section }").left.value
 
     "name the section when its API key is missing" in {
-      val error = errorFor("claude-nokey", """provider = "anthropic", model = "claude-3-5-haiku-latest"""")
+      val error = errorFor("claude-nokey", """provider = "anthropic", model = "claude-haiku-5-5"""")
       error shouldBe a[ConfigurationError]
       error.message should include("llm4s.providers.claude-nokey")
     }
 
     "name the section when its API key is empty" in {
-      val error = errorFor("openai-empty", """provider = "openai", model = "gpt-4o-mini", apiKey = """"")
+      val error = errorFor("openai-empty", """provider = "openai", model = "gpt-5.6-luna", apiKey = """"")
       error shouldBe a[ConfigurationError]
       error.message should include("openai-empty")
     }
@@ -469,7 +472,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
     "not stop the other sections from loading" in {
       val hocon =
         threeProviders("http://a.invalid", "http://b.invalid", "http://c.invalid") +
-          """llm4s.providers.broken { provider = "anthropic", model = "claude-3-5-haiku-latest" }"""
+          """llm4s.providers.broken { provider = "anthropic", model = "claude-haiku-5-5" }"""
       load("broken", hocon).left.value.message should include("llm4s.providers.broken")
       Seq("openai-it", "claude-it", "ollama-it").foreach(name => load(name, hocon).isRight shouldBe true)
     }
@@ -490,7 +493,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
           ) {
             def answer(): String =
               Llm4sConfig
-                .provider("it380-sysprop")
+                .provider(ProviderName("it380-sysprop"))
                 .flatMap(LLMConnect.getClient(_))
                 .flatMap(client => Using.resource(client)(_.complete(hello)))
                 .value
@@ -643,8 +646,8 @@ object ProviderSwitchingFailoverSpec {
     }
 
     private def completion: String = format match {
-      case Format.OpenAI    => LocalProviderTestServer.openAICompletion(text, "gpt-4o-mini")
-      case Format.Anthropic => LocalProviderTestServer.anthropicMessage(text, "claude-3-5-haiku-latest")
+      case Format.OpenAI    => LocalProviderTestServer.openAICompletion(text, "gpt-5.6-luna")
+      case Format.Anthropic => LocalProviderTestServer.anthropicMessage(text, "claude-haiku-5-5")
       case Format.Ollama =>
         ujson
           .Obj(
@@ -661,7 +664,7 @@ object ProviderSwitchingFailoverSpec {
     private def halves: Seq[String] = Seq(text.take(text.length / 2), text.drop(text.length / 2))
 
     private def stream: String = format match {
-      case Format.OpenAI => LocalProviderTestServer.openAISseBody(halves, "gpt-4o-mini")
+      case Format.OpenAI => LocalProviderTestServer.openAISseBody(halves, "gpt-5.6-luna")
       case Format.Anthropic =>
         val start = ujson.Obj(
           "type" -> "message_start",
@@ -670,7 +673,7 @@ object ProviderSwitchingFailoverSpec {
             "type"          -> "message",
             "role"          -> "assistant",
             "content"       -> ujson.Arr(),
-            "model"         -> "claude-3-5-haiku-latest",
+            "model"         -> "claude-haiku-5-5",
             "stop_reason"   -> ujson.Null,
             "stop_sequence" -> ujson.Null,
             "usage"         -> ujson.Obj("input_tokens" -> 10, "output_tokens" -> 0)
@@ -727,7 +730,7 @@ object ProviderSwitchingFailoverSpec {
             "id"      -> "chatcmpl-tool",
             "object"  -> "chat.completion",
             "created" -> 1700000000,
-            "model"   -> "gpt-4o-mini",
+            "model"   -> "gpt-5.6-luna",
             "choices" -> ujson.Arr(
               ujson.Obj(
                 "index" -> 0,
@@ -754,7 +757,7 @@ object ProviderSwitchingFailoverSpec {
             "id"    -> "msg_tool",
             "type"  -> "message",
             "role"  -> "assistant",
-            "model" -> "claude-3-5-haiku-latest",
+            "model" -> "claude-haiku-5-5",
             "content" -> ujson.Arr(
               ujson.Obj(
                 "type"  -> "tool_use",

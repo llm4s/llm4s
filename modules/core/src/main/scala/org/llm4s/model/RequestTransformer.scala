@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{
@@ -51,7 +52,7 @@ sealed trait RequestTransformer {
    * @return Transformed options or validation error
    */
   def transformOptions(
-    modelId: String,
+    modelId: ModelName,
     options: CompletionOptions,
     dropUnsupported: Boolean
   ): Result[CompletionOptions]
@@ -63,9 +64,9 @@ sealed trait RequestTransformer {
    * calls it.
    */
   private[llm4s] def adjustOptions(
-    modelId: String,
+    modelId: ModelName,
     options: CompletionOptions
-  ): Result[(CompletionOptions, List[RequestAdjustment])]
+  ): Result[(CompletionOptions, Seq[RequestAdjustment])]
 
   /**
    * Transform messages for model-specific requirements.
@@ -78,7 +79,7 @@ sealed trait RequestTransformer {
    * @return Transformed messages
    */
   def transformMessages(
-    modelId: String,
+    modelId: ModelName,
     messages: Seq[Message]
   ): Seq[Message]
 
@@ -91,7 +92,7 @@ sealed trait RequestTransformer {
    * @param modelId The model identifier
    * @return true if the model requires fake streaming
    */
-  def requiresFakeStreaming(modelId: String): Boolean
+  def requiresFakeStreaming(modelId: ModelName): Boolean
 }
 
 object RequestTransformer {
@@ -104,7 +105,7 @@ object RequestTransformer {
 
   /** A transformer whose capabilities for the ids in `overrides` replace the registry's; llm4s's own tests use it. */
   private[llm4s] def withOverrides(
-    overrides: Map[String, ModelCapabilities],
+    overrides: Map[ModelName, ModelCapabilities],
     service: ModelRegistryService
   ): RequestTransformer =
     new DefaultRequestTransformer(overrides, service, (_, capabilities) => capabilities)
@@ -118,7 +119,7 @@ object RequestTransformer {
    * @param adjust given the model id and the registry's capabilities for it, the capabilities to use
    */
   def adjusted(service: ModelRegistryService)(
-    adjust: (String, ModelCapabilities) => ModelCapabilities
+    adjust: (ModelName, ModelCapabilities) => ModelCapabilities
   ): RequestTransformer =
     new DefaultRequestTransformer(Map.empty, service, adjust)
 }
@@ -130,15 +131,15 @@ object RequestTransformer {
  * @param adjust    applied to the capabilities found, whatever their source
  */
 final private[model] class DefaultRequestTransformer(
-  overrides: Map[String, ModelCapabilities],
+  overrides: Map[ModelName, ModelCapabilities],
   service: ModelRegistryService,
-  adjust: (String, ModelCapabilities) => ModelCapabilities
+  adjust: (ModelName, ModelCapabilities) => ModelCapabilities
 ) extends RequestTransformer {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
   override def transformOptions(
-    modelId: String,
+    modelId: ModelName,
     options: CompletionOptions,
     dropUnsupported: Boolean
   ): Result[CompletionOptions] =
@@ -156,9 +157,9 @@ final private[model] class DefaultRequestTransformer(
 
   // Pure: the client that sends the request logs what was adjusted (AdjustmentLog), once.
   override private[llm4s] def adjustOptions(
-    modelId: String,
+    modelId: ModelName,
     options: CompletionOptions
-  ): Result[(CompletionOptions, List[RequestAdjustment])] = {
+  ): Result[(CompletionOptions, Seq[RequestAdjustment])] = {
     val found = violations(modelId, options, getCapabilities(modelId))
     Right((found.foldLeft(options)((adjusted, violation) => violation.drop(adjusted)), found.map(_.adjustment)))
   }
@@ -179,45 +180,47 @@ final private[model] class DefaultRequestTransformer(
 
   /** The options `capabilities` rule out, in the order their errors are reported. */
   private def violations(
-    modelId: String,
+    modelId: ModelName,
     options: CompletionOptions,
     capabilities: ModelCapabilities
   ): List[Violation] = {
     val disallowed = capabilities.disallowedParams.getOrElse(Set.empty)
 
-    val temperature = capabilities.temperatureConstraint.collect {
-      case (min, max) if options.temperature < min || options.temperature > max =>
-        Violation(
-          _.withTemperature(min),
-          RequestAdjustment.Adjusted(
-            RequestOption.Temperature,
-            options.temperature.toString,
-            min.toString,
-            s"allowed range for $modelId is $min-$max"
-          ),
-          Some(s"Temperature ${options.temperature} not allowed for $modelId (must be between $min and $max)")
-        )
-    }
+    // a sampling option the caller left unset is not sent, so there is nothing to adjust or drop
+    val temperature = for {
+      (min, max) <- capabilities.temperatureConstraint
+      requested  <- options.temperature
+      if requested < min || requested > max
+    } yield Violation(
+      _.withTemperature(min),
+      RequestAdjustment.Adjusted(
+        RequestOption.Temperature,
+        requested.toString,
+        min.toString,
+        s"allowed range for $modelId is $min-$max"
+      ),
+      Some(s"Temperature $requested not allowed for $modelId (must be between $min and $max)")
+    )
 
-    val topP = Option.when(disallowed.contains("top_p") && options.topP != 1.0)(
+    val topP = Option.when(disallowed.contains("top_p") && options.topP.isDefined)(
       Violation(
-        _.withTopP(1.0),
+        _.withTopP(None),
         RequestAdjustment.Dropped(RequestOption.TopP, s"top_p not supported for $modelId"),
         Some(s"top_p parameter not supported for $modelId")
       )
     )
 
-    val presencePenalty = Option.when(disallowed.contains("presence_penalty") && options.presencePenalty != 0.0)(
+    val presencePenalty = Option.when(disallowed.contains("presence_penalty") && options.presencePenalty.isDefined)(
       Violation(
-        _.withPresencePenalty(0.0),
+        _.withPresencePenalty(None),
         RequestAdjustment.Dropped(RequestOption.PresencePenalty, s"presence_penalty not supported for $modelId"),
         Some(s"presence_penalty parameter not supported for $modelId")
       )
     )
 
-    val frequencyPenalty = Option.when(disallowed.contains("frequency_penalty") && options.frequencyPenalty != 0.0)(
+    val frequencyPenalty = Option.when(disallowed.contains("frequency_penalty") && options.frequencyPenalty.isDefined)(
       Violation(
-        _.withFrequencyPenalty(0.0),
+        _.withFrequencyPenalty(None),
         RequestAdjustment.Dropped(RequestOption.FrequencyPenalty, s"frequency_penalty not supported for $modelId"),
         Some(s"frequency_penalty parameter not supported for $modelId")
       )
@@ -254,7 +257,7 @@ final private[model] class DefaultRequestTransformer(
   }
 
   override def transformMessages(
-    modelId: String,
+    modelId: ModelName,
     messages: Seq[Message]
   ): Seq[Message] = {
     val capabilities = getCapabilities(modelId)
@@ -271,13 +274,13 @@ final private[model] class DefaultRequestTransformer(
     }
   }
 
-  override def requiresFakeStreaming(modelId: String): Boolean = {
+  override def requiresFakeStreaming(modelId: ModelName): Boolean = {
     val capabilities = getCapabilities(modelId)
     !capabilities.supportsNativeStreaming.getOrElse(true)
   }
 
   /** Capabilities for a model: overrides first, then the registry, then none; then `adjust`. */
-  private def getCapabilities(modelId: String): ModelCapabilities =
+  private def getCapabilities(modelId: ModelName): ModelCapabilities =
     adjust(
       modelId,
       overrides
@@ -298,7 +301,7 @@ final case class TransformationResult private (
   options: CompletionOptions,
   messages: Seq[Message],
   requiresFakeStreaming: Boolean,
-  adjustments: List[RequestAdjustment]
+  adjustments: Seq[RequestAdjustment]
 ) {
 
   /** Sets the transformed completion options. */
@@ -312,7 +315,7 @@ final case class TransformationResult private (
     copy(requiresFakeStreaming = requiresFakeStreaming)
 
   /** Sets what the transformation dropped or changed. */
-  def withAdjustments(adjustments: List[RequestAdjustment]): TransformationResult = copy(adjustments = adjustments)
+  def withAdjustments(adjustments: Seq[RequestAdjustment]): TransformationResult = copy(adjustments = adjustments)
 }
 
 object TransformationResult {
@@ -325,7 +328,7 @@ object TransformationResult {
     options: CompletionOptions,
     messages: Seq[Message],
     requiresFakeStreaming: Boolean = false,
-    adjustments: List[RequestAdjustment] = List.empty
+    adjustments: Seq[RequestAdjustment] = Seq.empty
   ): TransformationResult =
     new TransformationResult(options, messages, requiresFakeStreaming, adjustments)
 
@@ -334,7 +337,7 @@ object TransformationResult {
    * changed is in [[TransformationResult.adjustments]]; without it, an unsupported option fails.
    */
   def transform(
-    modelId: String,
+    modelId: ModelName,
     options: CompletionOptions,
     messages: Seq[Message],
     transformer: RequestTransformer,
@@ -343,7 +346,7 @@ object TransformationResult {
     val transformedOptions =
       if (dropUnsupported) transformer.adjustOptions(modelId, options)
       else
-        transformer.transformOptions(modelId, options, dropUnsupported = false).map(_ -> List.empty[RequestAdjustment])
+        transformer.transformOptions(modelId, options, dropUnsupported = false).map(_ -> Seq.empty[RequestAdjustment])
     transformedOptions.map { (transformed, adjustments) =>
       TransformationResult(
         options = transformed,

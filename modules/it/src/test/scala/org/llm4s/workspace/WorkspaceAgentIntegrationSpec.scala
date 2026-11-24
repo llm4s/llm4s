@@ -1,5 +1,6 @@
 package org.llm4s.workspace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Workspace
@@ -71,26 +72,22 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       turn += 1
       val toolCalls =
-        script.lift(turn - 1).map { case (name, args) => ToolCall(s"call-$turn", name, args) }.toList
+        script.lift(turn - 1).map { case (name, args) => ToolCall(ToolCallId(s"call-$turn"), name, args) }.toList
       val message =
-        if (toolCalls.nonEmpty) AssistantMessage(contentOpt = None, toolCalls = toolCalls)
+        if (toolCalls.nonEmpty) AssistantMessage(text = None, toolCalls = toolCalls)
         else AssistantMessage("done")
       Right(
         Completion(
           id = s"mock-$turn",
           created = Instant.EPOCH,
-          content = message.content,
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = message,
-          toolCalls = toolCalls,
           usage = None
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -107,7 +104,7 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
       tools   <- ToolSet.of((FileTools(files) :+ ExecuteTool(sandbox))*)
       agent <- Agent
         .builder("workspace", new ScriptedToolCallLLM(script))
-        .withTools(tools)
+        .withToolSet(tools)
         .withMaxSteps(10)
         .build()
       done <- agent.run("go")

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.{ CompletionOptions, SystemMessage, UserMessage }
 import org.llm4s.model.{ ModelCapabilities, ModelRegistryService, RequestTransformer, TransformationResult }
 import org.scalatest.EitherValues
@@ -19,9 +20,9 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 0.7)
+        val options = CompletionOptions(temperature = Some(0.7))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = false)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = false)
 
         result.isLeft shouldBe true
         result.left.value.message should include("Temperature")
@@ -34,12 +35,12 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 0.7)
+        val options = CompletionOptions(temperature = Some(0.7))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = true)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = true)
 
         result.isRight shouldBe true
-        result.toOption.get.temperature shouldBe 1.0
+        result.toOption.get.temperature shouldBe Some(1.0)
   }
 
   test("O-series models should allow temperature=1.0") {
@@ -47,12 +48,12 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0)
+        val options = CompletionOptions(temperature = Some(1.0))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = false)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = false)
 
         result.isRight shouldBe true
-        result.toOption.get.temperature shouldBe 1.0
+        result.toOption.get.temperature shouldBe Some(1.0)
 
   }
 
@@ -65,9 +66,9 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0, topP = 0.9)
+        val options = CompletionOptions(temperature = Some(1.0), topP = Some(0.9))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = false)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = false)
 
         result.isLeft shouldBe true
         result.left.value.message should include("top_p")
@@ -78,12 +79,12 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0, topP = 0.9)
+        val options = CompletionOptions(temperature = Some(1.0), topP = Some(0.9))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = true)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = true)
 
         result.isRight shouldBe true
-        result.toOption.get.topP shouldBe 1.0
+        result.toOption.get.topP shouldBe None
   }
 
   test("O-series models should reject presence_penalty when dropUnsupported=false") {
@@ -91,9 +92,9 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0, presencePenalty = 0.5)
+        val options = CompletionOptions(temperature = Some(1.0), presencePenalty = Some(0.5))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = false)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = false)
 
         result.isLeft shouldBe true
         result.left.value.message should include("presence_penalty")
@@ -104,12 +105,12 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0, presencePenalty = 0.5)
+        val options = CompletionOptions(temperature = Some(1.0), presencePenalty = Some(0.5))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = true)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = true)
 
         result.isRight shouldBe true
-        result.toOption.get.presencePenalty shouldBe 0.0
+        result.toOption.get.presencePenalty shouldBe None
   }
 
   test("O-series models should reject frequency_penalty when dropUnsupported=false") {
@@ -117,9 +118,9 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0, frequencyPenalty = 0.5)
+        val options = CompletionOptions(temperature = Some(1.0), frequencyPenalty = Some(0.5))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = false)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = false)
 
         result.isLeft shouldBe true
         result.left.value.message should include("frequency_penalty")
@@ -130,12 +131,12 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 1.0, frequencyPenalty = 0.5)
+        val options = CompletionOptions(temperature = Some(1.0), frequencyPenalty = Some(0.5))
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = true)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = true)
 
         result.isRight shouldBe true
-        result.toOption.get.frequencyPenalty shouldBe 0.0
+        result.toOption.get.frequencyPenalty shouldBe None
   }
 
   // ============================================
@@ -148,13 +149,13 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
         fail(error.message)
       case Right(service) =>
         val options = CompletionOptions(
-          temperature = 0.7,
-          topP = 0.9,
-          presencePenalty = 0.5,
-          frequencyPenalty = 0.5
+          temperature = Some(0.7),
+          topP = Some(0.9),
+          presencePenalty = Some(0.5),
+          frequencyPenalty = Some(0.5)
         )
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = false)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = false)
 
         result.isLeft shouldBe true
         val message = result.left.value.message
@@ -170,20 +171,20 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
         fail(error.message)
       case Right(service) =>
         val options = CompletionOptions(
-          temperature = 0.7,
-          topP = 0.9,
-          presencePenalty = 0.5,
-          frequencyPenalty = 0.5
+          temperature = Some(0.7),
+          topP = Some(0.9),
+          presencePenalty = Some(0.5),
+          frequencyPenalty = Some(0.5)
         )
 
-        val result = transformer(service).transformOptions("o1", options, dropUnsupported = true)
+        val result = transformer(service).transformOptions(ModelName("o1"), options, dropUnsupported = true)
 
         result.isRight shouldBe true
         val transformed = result.toOption.get
-        transformed.temperature shouldBe 1.0
-        transformed.topP shouldBe 1.0
-        transformed.presencePenalty shouldBe 0.0
-        transformed.frequencyPenalty shouldBe 0.0
+        transformed.temperature shouldBe Some(1.0)
+        transformed.topP shouldBe None
+        transformed.presencePenalty shouldBe None
+        transformed.frequencyPenalty shouldBe None
   }
 
   // ============================================
@@ -200,7 +201,7 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
           UserMessage("Hello!")
         )
 
-        val result = transformer(service).transformMessages("o1", messages)
+        val result = transformer(service).transformMessages(ModelName("o1"), messages)
 
         result.length shouldBe 2
         result.head shouldBe a[UserMessage]
@@ -218,7 +219,7 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
           UserMessage("Hello!")
         )
 
-        val result = transformer(service).transformMessages("gpt-4o", messages)
+        val result = transformer(service).transformMessages(ModelName("gpt-4o"), messages)
 
         result.length shouldBe 2
         result.head shouldBe a[SystemMessage]
@@ -234,9 +235,9 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        transformer(service).requiresFakeStreaming("o1") shouldBe true
-        transformer(service).requiresFakeStreaming("o1-preview") shouldBe true
-        transformer(service).requiresFakeStreaming("o1-mini") shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o1")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o1-preview")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o1-mini")) shouldBe true
   }
 
   test("Standard models should not require fake streaming") {
@@ -244,8 +245,8 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        transformer(service).requiresFakeStreaming("gpt-4o") shouldBe false
-        transformer(service).requiresFakeStreaming("gpt-4-turbo") shouldBe false
+        transformer(service).requiresFakeStreaming(ModelName("gpt-4o")) shouldBe false
+        transformer(service).requiresFakeStreaming(ModelName("gpt-4-turbo")) shouldBe false
   }
 
   // ============================================
@@ -257,12 +258,12 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        transformer(service).requiresFakeStreaming("o1") shouldBe true
-        transformer(service).requiresFakeStreaming("o1-preview") shouldBe true
-        transformer(service).requiresFakeStreaming("o1-mini") shouldBe true
-        transformer(service).requiresFakeStreaming("o3") shouldBe true
-        transformer(service).requiresFakeStreaming("o3-mini") shouldBe true
-        transformer(service).requiresFakeStreaming("openai/o1") shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o1")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o1-preview")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o1-mini")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o3")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("o3-mini")) shouldBe true
+        transformer(service).requiresFakeStreaming(ModelName("openai/o1")) shouldBe true
   }
 
   // ============================================
@@ -275,7 +276,7 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
         fail(error.message)
       case Right(service) =>
         val disallowed = OpenAIModelRules
-          .adjust("o1", service.lookup("o1").map(_.capabilities).getOrElse(ModelCapabilities()))
+          .adjust("o1", service.lookup(ModelName("o1")).map(_.capabilities).getOrElse(ModelCapabilities()))
           .disallowedParams
           .getOrElse(Set.empty)
 
@@ -291,7 +292,7 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
         fail(error.message)
       case Right(service) =>
         val disallowed = OpenAIModelRules
-          .adjust("gpt-4o", service.lookup("gpt-4o").map(_.capabilities).getOrElse(ModelCapabilities()))
+          .adjust("gpt-4o", service.lookup(ModelName("gpt-4o")).map(_.capabilities).getOrElse(ModelCapabilities()))
           .disallowedParams
           .getOrElse(Set.empty)
 
@@ -307,14 +308,14 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options = CompletionOptions(temperature = 0.7, topP = 0.9)
+        val options = CompletionOptions(temperature = Some(0.7), topP = Some(0.9))
         val messages = Seq(
           SystemMessage("Be helpful"),
           UserMessage("Hello")
         )
 
         val result = TransformationResult.transform(
-          "o1",
+          ModelName("o1"),
           options,
           messages,
           transformer(service),
@@ -324,8 +325,8 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
         result.isRight shouldBe true
         val tr = result.toOption.get
 
-        tr.options.temperature shouldBe 1.0
-        tr.options.topP shouldBe 1.0
+        tr.options.temperature shouldBe Some(1.0)
+        tr.options.topP shouldBe None
         tr.messages.head shouldBe a[UserMessage]
         tr.messages.head.content should include("[System]:")
         tr.requiresFakeStreaming shouldBe true
@@ -336,11 +337,11 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val options  = CompletionOptions(temperature = 0.7)
+        val options  = CompletionOptions(temperature = Some(0.7))
         val messages = Seq(UserMessage("Hello"))
 
         val result = TransformationResult.transform(
-          "o1",
+          ModelName("o1"),
           options,
           messages,
           transformer(service),
@@ -371,6 +372,12 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
           ("gpt-5", true),
           ("gpt5", true),
           ("openai/gpt-5", true),
+          // ...and GPT-6 (#2886)
+          ("gpt-5.6-luna", true),
+          ("gpt-6-luna", true),
+          ("gpt-6.1-terra", true),
+          ("openai/gpt-6.2-astra", true),
+          ("gpt-35-turbo", false),
           // Standard models do NOT require max_completion_tokens
           ("gpt-4o", false),
           ("claude-3", false),
@@ -387,5 +394,68 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
             OpenAIModelRules.requiresMaxCompletionTokens(modelId) shouldBe expected
           }
         }
+  }
+
+  // ============================================
+  // Tool calls on Chat Completions (#2886)
+  // ============================================
+
+  private lazy val noopTool =
+    org.llm4s.toolapi
+      .ToolBuilder[String](
+        "noop",
+        "Does nothing",
+        org.llm4s.toolapi.Schema.`object`[Map[String, Any]]("No parameters")
+      )
+      .withHandler(_ => Right("ok"))
+      .buildSafe()
+      .fold(e => fail(e.formatted), identity)
+
+  private lazy val withTool = CompletionOptions().withTools(Seq(noopTool))
+
+  test("toolsOnChatCompletions follows OpenAI's model pages, by family, snapshot and prefix") {
+    import OpenAIModelRules.ToolCalls
+    OpenAIModelRules.toolsOnChatCompletions("gpt-6-luna") shouldBe ToolCalls.OnlyWithoutReasoning
+    OpenAIModelRules.toolsOnChatCompletions("openai/gpt-6-luna") shouldBe ToolCalls.OnlyWithoutReasoning
+    OpenAIModelRules.toolsOnChatCompletions("gpt-6-luna-2026-10-01") shouldBe ToolCalls.OnlyWithoutReasoning
+    OpenAIModelRules.toolsOnChatCompletions("gpt-6.1-terra") shouldBe ToolCalls.ResponsesApiOnly
+    OpenAIModelRules.toolsOnChatCompletions("GPT-6.1-TERRA") shouldBe ToolCalls.ResponsesApiOnly
+    Seq("gpt-5.6-luna", "gpt-5.6-terra", "gpt-6.2-astra", "gpt-6-lunar", "gpt-6.1-terra-mini", "gpt-4o").foreach { m =>
+      withClue(m)(OpenAIModelRules.toolsOnChatCompletions(m) shouldBe ToolCalls.Unrestricted)
+    }
+  }
+
+  test("a request with tools to gpt-6.1-terra is refused, naming the Responses API") {
+    val error = OpenAIModelRules.checkTools("gpt-6.1-terra", withTool).left.value
+    error shouldBe a[org.llm4s.error.ValidationError]
+    error.message should include("Responses API")
+    error.message should include("gpt-6.1-terra")
+    OpenAIModelRules.checkTools("gpt-6.1-terra", CompletionOptions()) shouldBe Right(())
+    OpenAIModelRules.checkTools("gpt-6-luna", withTool) shouldBe Right(())
+  }
+
+  test("a request with tools to gpt-6-luna sends reasoning_effort none and reports what it overrode") {
+    import org.llm4s.llmconnect.model.{ ReasoningEffort, RequestAdjustment, RequestOption, Thinking }
+    val reason = "gpt-6-luna calls tools on Chat Completions only with reasoning_effort none"
+
+    OpenAIModelRules.forcedToolEffort("gpt-6-luna", withTool) shouldBe Some(
+      (
+        com.openai.models.ReasoningEffort.NONE,
+        List(RequestAdjustment.Adjusted(RequestOption.Reasoning, "model default", "none", reason))
+      )
+    )
+    OpenAIModelRules
+      .forcedToolEffort("gpt-6-luna", withTool.withReasoning(ReasoningEffort.High).withThinking(Thinking.Adaptive))
+      .map(_._2) shouldBe Some(
+      List(
+        RequestAdjustment.Adjusted(RequestOption.Reasoning, ReasoningEffort.High.name, "none", reason),
+        RequestAdjustment.Adjusted(RequestOption.Thinking, "Adaptive", "Off", reason)
+      )
+    )
+    // thinking = Off already asks for no reasoning: nothing to report
+    OpenAIModelRules.forcedToolEffort("gpt-6-luna", withTool.withThinking(Thinking.Off)).map(_._2) shouldBe Some(Nil)
+    // no tools, or another model: the usual effort plan applies
+    OpenAIModelRules.forcedToolEffort("gpt-6-luna", CompletionOptions()) shouldBe None
+    OpenAIModelRules.forcedToolEffort("gpt-5.6-luna", withTool) shouldBe None
   }
 }

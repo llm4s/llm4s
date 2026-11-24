@@ -37,7 +37,7 @@ class RAGAsyncWithMocksSpec extends AnyFlatSpec with Matchers with ScalaFutures 
   }
 
   private def createMockRAG(config: RAGConfig = RAGConfig.default): RAG = {
-    val client = new EmbeddingClient(new MockEmbeddingProvider())
+    val client = EmbeddingClient(new MockEmbeddingProvider())
     RAG.buildWithClient(config, client).toOption.get
   }
 

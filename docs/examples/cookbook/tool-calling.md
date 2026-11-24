@@ -32,7 +32,7 @@ package org.llm4s.samples.cookbook
 
 import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model.{ AssistantMessage, MessageRole, ToolCall }
+import org.llm4s.llmconnect.model.{ AssistantMessage, MessageRole, ToolCall, ToolCallId }
 import org.llm4s.samples.util.AgentResults
 import org.llm4s.toolapi.builtin.core.CalculatorTool
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction, ToolRegistry }
@@ -55,8 +55,8 @@ object ToolCallingRecipe extends RecipeApp {
 
   val rates: Map[(String, String), Double] = Map(("USD", "EUR") -> 0.92, ("EUR", "USD") -> 1.09)
 
-  val exchangeRate: Result[ToolFunction[Map[String, Any], ExchangeRate]] =
-    ToolBuilder[Map[String, Any], ExchangeRate](
+  val exchangeRate: Result[ToolFunction[ExchangeRate]] =
+    ToolBuilder[ExchangeRate](
       "exchange_rate",
       "Today's exchange rate from one currency to another",
       Schema
@@ -83,7 +83,8 @@ object ToolCallingRecipe extends RecipeApp {
   /** Asks for the rate, then for the calculator with that rate, then answers with the calculator's result. */
   def script: ScriptedClient = new ScriptedClient((conversation, _) => {
     val outputs = conversation.messages.filter(_.role == MessageRole.Tool).map(m => ujson.read(m.content))
-    def call(name: String, args: ujson.Obj) = AssistantMessage(None, Seq(ToolCall(s"call-$name", name, args)))
+    def call(name: String, args: ujson.Obj) =
+      AssistantMessage(None, Seq(ToolCall(ToolCallId(s"call-$name"), name, args)))
     Right(outputs.size match {
       case 0 => call("exchange_rate", ujson.Obj("from" -> "USD", "to" -> "EUR"))
       case 1 => call("calculator", ujson.Obj("operation" -> "multiply", "a" -> 120, "b" -> outputs(0)("rate").num))
@@ -103,7 +104,7 @@ sbt "samples/runMain org.llm4s.samples.cookbook.ToolCallingRecipe"          # sc
 sbt "samples/runMain org.llm4s.samples.cookbook.ToolCallingRecipe --live"   # the provider your configuration names
 ```
 
-The first command needs nothing but sbt. The second uses the section `llm4s.providers.provider` names; see
+The first command needs nothing but sbt. The second uses the section `llm4s.defaultProvider` names; see
 [running the samples](../../getting-started/configuration#running-the-samples). CI runs every recipe against its scripted client, and checks
 that the program on this page is the source file, so what you read here compiles and works.
 

@@ -1,12 +1,18 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, PerplexityConfig, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigKey,
+  ProviderConfigSpec,
+  ProviderDescriptor
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import java.util.Locale
@@ -67,18 +73,17 @@ object PerplexityProvider extends ProviderDescriptor:
     )
   )
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    resolver: ContextWindowResolver
-  ): Result[ProviderConfig] =
-    val model = section.model.asString
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    given ContextWindowResolver = context.contextWindows
+    val model                   = section.model.asString
     (for
-      apiKey    <- ProviderDescriptor.requireApiKey(providerName, section)
-      baseUrl   <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
+      apiKey    <- ProviderDescriptor.requireApiKey(context.providerName, section)
+      baseUrl   <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
       webSearch <- parseBoolean(section.extra(WebSearchKey))
       window    <- parseCount(section.extra(ContextWindowKey), ContextWindowKey, min = 1)
       reserve   <- parseCount(section.extra(ReserveCompletionKey), ReserveCompletionKey, min = 0)
       config <- PerplexityConfig.fromValues(
-        model = model,
+        model = ModelName(model),
         apiKey = apiKey,
         baseUrl = baseUrl,
         webSearch = webSearch,
@@ -86,14 +91,13 @@ object PerplexityProvider extends ProviderDescriptor:
         reserveCompletion = reserve.getOrElse(PerplexityConfig.DEFAULT_RESERVE_COMPLETION),
         headers = section.headers
       )
-    yield config).left.map(ProviderConfig.inSection(providerName))
+    yield config).left.map(ProviderConfig.inSection(context.providerName))
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[PerplexityConfig](id, config)
-      .flatMap(PerplexityClient(_, options.metrics, options.exchangeLogging))
+      .flatMap(PerplexityClient(_, context.metrics, context.exchangeLogging))
 
   /**
    * The model registry's context window for an Agent API model id, `vendor/model`: the strict entry of that vendor
@@ -102,7 +106,7 @@ object PerplexityProvider extends ProviderDescriptor:
   private[provider] def registryWindow(model: String)(using resolver: ContextWindowResolver): Option[Int] =
     model.split("/", 2) match
       case Array(vendor, name) if vendor.nonEmpty && name.nonEmpty =>
-        resolver.strictContextWindow(vendor.toLowerCase(Locale.ROOT), name)
+        resolver.strictContextWindow(ProviderId(vendor.toLowerCase(Locale.ROOT)), ModelName(name))
       case _ => None
 
   private def parseBoolean(raw: Option[String]): Result[Boolean] =

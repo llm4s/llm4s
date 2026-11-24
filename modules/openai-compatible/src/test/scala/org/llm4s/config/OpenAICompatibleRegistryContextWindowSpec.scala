@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAICompatibleConfig, ProviderConfig }
 import org.llm4s.llmconnect.provider.OpenAICompatibleProvider
 import org.llm4s.model.{ ModelCapabilities, ModelMetadata, ModelMode, ModelPricing, ModelRegistryService }
@@ -8,6 +8,7 @@ import org.llm4s.types.Result
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import pureconfig.ConfigSource
+import org.llm4s.llmconnect.spi.ProviderConfigContext
 
 /**
  * Where the generic `openai-compatible` provider gets its context window (#1217): the section's own
@@ -25,8 +26,8 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
   /** Loads one `openai-compatible` section through the whole named-provider path. */
   private def load(baseUrl: String, model: String, extra: String = ""): Result[ProviderConfig] =
     val hocon =
-      s"""llm4s.providers {
-         |  provider = "t"
+      s"""llm4s.defaultProvider = "t"
+         |llm4s.providers {
          |  t {
          |    provider = "openai-compatible"
          |    baseUrl = "$baseUrl"
@@ -34,7 +35,7 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
          |    $extra
          |  }
          |}""".stripMargin
-    Llm4sConfig.provider(ConfigSource.string(hocon), "t")
+    Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("t"))
 
   private def generic(result: Result[ProviderConfig]): OpenAICompatibleConfig =
     result match
@@ -209,7 +210,7 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
   // ---------------------------------------------------------------------------------------------
 
   private def recipe(name: String, body: String): OpenAICompatibleConfig =
-    generic(Llm4sConfig.provider(ConfigSource.string(s"llm4s.providers {\n$body\n}"), name))
+    generic(Llm4sConfig.provider(ConfigSource.string(s"llm4s.providers {\n$body\n}"), ProviderName(name)))
 
   "the recipes in the providers guide" should {
 
@@ -324,8 +325,8 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
 
   private def entry(modelId: String, provider: String, maxInput: Option[Int]): ModelMetadata =
     ModelMetadata(
-      modelId = modelId,
-      provider = provider,
+      modelId = ModelName(modelId),
+      provider = ProviderId(provider),
       mode = ModelMode.Chat,
       maxInputTokens = maxInput,
       maxOutputTokens = Some(4096),
@@ -346,7 +347,7 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
     )
     for
       named  <- NamedProviderConfigValidator.validate(ProviderName("t"), raw)
-      config <- OpenAICompatibleProvider.buildConfig("t", named)(using resolver)
+      config <- OpenAICompatibleProvider.buildConfig(named, ProviderConfigContext("t", resolver))
     yield generic(Right(config)).contextWindow
 
   "buildConfig, against a registry of two providers that list the same model name" should {

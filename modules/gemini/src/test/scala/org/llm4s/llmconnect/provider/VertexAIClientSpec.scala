@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.funsuite.AnyFunSuite
 import org.llm4s.llmconnect.config.VertexAIConfig
 import org.llm4s.metrics.MockMetricsCollector
@@ -12,7 +13,7 @@ class VertexAIClientSpec extends AnyFunSuite {
   private val testConfig = VertexAIConfig(
     projectId = "my-gcp-project",
     location = "us-central1",
-    model = "gemini-2.0-flash",
+    model = ModelName("gemini-2.0-flash"),
     credentialFilePath = None,
     contextWindow = 1048576,
     reserveCompletion = 8192

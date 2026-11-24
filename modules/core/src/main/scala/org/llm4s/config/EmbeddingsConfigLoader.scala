@@ -4,13 +4,14 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.spi.{
+  EmbeddingConfigContext,
   EmbeddingConfigSpec,
   EmbeddingProviderDescriptor,
   EmbeddingProviderSection,
   ProviderRegistry
 }
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 import pureconfig.error.ConvertFailure
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
@@ -58,9 +59,8 @@ private[config] object EmbeddingsConfigLoader {
       for
         objCursor <- cursor.asObjectCursor
         fields <- PureConfigReader
-          .forProduct3("apiKey", "baseUrl", "model")(
-            (apiKey: Option[Secret], baseUrl: Option[String], model: Option[String]) =>
-              EmbeddingProviderSection(apiKey, baseUrl, model)
+          .forProduct2("apiKey", "baseUrl")((apiKey: Option[Secret], baseUrl: Option[String]) =>
+            EmbeddingProviderSection(apiKey, baseUrl.map(BaseUrl(_)))
           )
           .from(objCursor)
         timeouts <- ProviderTimeoutsReader.read(objCursor)
@@ -70,7 +70,7 @@ private[config] object EmbeddingsConfigLoader {
   // ---- Public API used by Llm4sConfig ----
 
   /** Load active embeddings provider and its config from the given source under llm4s.embeddings.*. */
-  def loadProvider(source: ConfigSource)(using ProviderRegistry): Result[(String, EmbeddingProviderConfig)] = {
+  def loadProvider(source: ConfigSource)(using ProviderRegistry): Result[EmbeddingProviderConfig] = {
     val rootEither = source.at("llm4s").load[EmbeddingsRoot]
 
     rootEither.left
@@ -88,7 +88,7 @@ private[config] object EmbeddingsConfigLoader {
    */
   def loadProviderFor(source: ConfigSource, modelSpec: String)(using
     ProviderRegistry
-  ): Result[(String, EmbeddingProviderConfig)] =
+  ): Result[EmbeddingProviderConfig] =
     unified(Option(modelSpec).getOrElse(""), None).flatMap(configFor(_, source))
 
   // ---- Internal helpers ----
@@ -96,7 +96,7 @@ private[config] object EmbeddingsConfigLoader {
   private def buildEmbeddingsConfig(
     root: EmbeddingsRoot,
     source: ConfigSource
-  )(using registry: ProviderRegistry): Result[(String, EmbeddingProviderConfig)] = {
+  )(using registry: ProviderRegistry): Result[EmbeddingProviderConfig] = {
     val emb = root.embeddings.getOrElse(EmbeddingsSection(None, None))
 
     // `EMBEDDING_MODEL=provider/model` is the only selector. A section still selecting the provider alone
@@ -138,24 +138,29 @@ private[config] object EmbeddingsConfigLoader {
   /** The selected provider's config: its section and key read from `source`. */
   private def configFor(selected: Selection, source: ConfigSource)(using
     registry: ProviderRegistry
-  ): Result[(String, EmbeddingProviderConfig)] =
+  ): Result[EmbeddingProviderConfig] =
     // Bound whole rather than destructured in the generator: `Either` has no
     // `withFilter`, so a pattern-matching generator does not compile.
     for {
       descriptor <- resolve(selected, registry)
-      id = descriptor.id.asString
-      section  <- readSection(source, descriptor)
-      keyFile  <- readApiKeyFile(source, descriptor)
-      resolved <- resolveApiKey(section, keyFile, descriptor, source)
-      config   <- descriptor.buildConfig(section.withApiKey(resolved.map(_.value)), selected.modelOverride)
-      network  <- HttpNetworkReader.load(source)
+      section    <- readSection(source, descriptor)
+      extras     <- readExtras(source, descriptor)
+      keyFile    <- readApiKeyFile(source, descriptor)
+      resolved   <- resolveApiKey(section, keyFile, descriptor, source)
+      config <- descriptor.buildConfig(
+        section.withApiKey(resolved.map(_.value)).withExtras(extras),
+        EmbeddingConfigContext(selected.modelOverride.map(ModelName(_)))
+      )
+      network <- HttpNetworkReader.load(source)
       // The timeouts block is read once, for every provider, as a chat section's is; the proxy and TLS
       // settings are `llm4s.http`'s.
     } yield {
       resolved.foreach(SharedCredentials.logSource(EmbeddingConfigSpec.sectionPath(descriptor.id), _))
       // A key read from a file - the block's own `apiKeyFile` or the vendor's shared one - is read again per
       // request, so a key the secret manager rotates is used without reloading (#2478).
-      id -> config
+      // The id is the descriptor's canonical one whatever its `buildConfig` set, so the config resolves to it.
+      config
+        .withProviderId(descriptor.id)
         .withTimeouts(section.timeouts)
         .withNetwork(network)
         .withApiKeyProvider(resolved.flatMap(_.file).map(ApiKeyProvider.file))
@@ -200,33 +205,54 @@ private[config] object EmbeddingsConfigLoader {
     val at   = source.at(path)
     if (!at.value().isRight) Right(EmbeddingProviderSection())
     else
-      at.load[EmbeddingProviderSection]
-        .left
-        .map { failures =>
-          // The path says which key a failure is about, which its description alone ("Cannot convert
-          // 'soon' to ...FiniteDuration") does not.
-          val msg = failures.toList
-            .map {
-              case failure: ConvertFailure if failure.path.nonEmpty => s"${failure.path}: ${failure.description}"
-              case failure                                          => failure.description
-            }
-            .mkString("; ")
-          ConfigurationError(s"Failed to load $path via PureConfig: $msg")
-        }
-        .flatMap { section =>
-          ProviderTimeouts
-            .validatedAt(s"$path.timeouts", section.timeouts.request, section.timeouts.stream)
-            .map(_ => section)
-        }
-        .flatMap { section =>
-          // A blank baseUrl is unset, so the provider's default applies; any other must be an http(s) URL (#2347).
-          trimmed(section.baseUrl)
-            .fold[Result[EmbeddingProviderSection]](Right(section))(url =>
-              BaseUrlValidation
-                .validate(EmbeddingConfigSpec.fieldPath(descriptor.id, "baseUrl"), url)
-                .map(_ => section)
-            )
-        }
+      removedModel(source, descriptor).flatMap(_ =>
+        at.load[EmbeddingProviderSection]
+          .left
+          .map { failures =>
+            // The path says which key a failure is about, which its description alone ("Cannot convert
+            // 'soon' to ...FiniteDuration") does not.
+            val msg = failures.toList
+              .map {
+                case failure: ConvertFailure if failure.path.nonEmpty => s"${failure.path}: ${failure.description}"
+                case failure                                          => failure.description
+              }
+              .mkString("; ")
+            ConfigurationError(s"Failed to load $path via PureConfig: $msg")
+          }
+          .flatMap { section =>
+            ProviderTimeouts
+              .validatedAt(s"$path.timeouts", section.timeouts.request, section.timeouts.stream)
+              .map(_ => section)
+          }
+          .flatMap { section =>
+            // A blank baseUrl is unset, so the provider's default applies; any other must be an http(s) URL (#2347).
+            trimmed(section.baseUrl.map(_.asUrl))
+              .fold[Result[EmbeddingProviderSection]](Right(section))(url =>
+                BaseUrlValidation
+                  .validate(EmbeddingConfigSpec.fieldPath(descriptor.id, "baseUrl"), url)
+                  .map(_ => section)
+              )
+          }
+      )
+  }
+
+  /**
+   * Refuses a section that still sets `model` (#2835): the model is the `<model>` half of `EMBEDDING_MODEL`, and a
+   * section's own was read only by the removed `EMBEDDING_PROVIDER` form. A `null` or an unset `${?VAR}` is absent.
+   */
+  private def removedModel(source: ConfigSource, descriptor: EmbeddingProviderDescriptor): Result[Unit] = {
+    val path = EmbeddingConfigSpec.fieldPath(descriptor.id, "model")
+    trimmed(source.at(path).load[Option[String]].toOption.flatten) match {
+      case None => Right(())
+      case Some(model) =>
+        val id = descriptor.id.asString
+        Left(
+          ConfigurationError(
+            s"$path ('$model') is no longer read: set EMBEDDING_MODEL ($UnifiedModelPath) to $id/<model>, " +
+              s"e.g. $id/$model, and remove $path"
+          )
+        )
+    }
   }
 
   /**
@@ -250,7 +276,8 @@ private[config] object EmbeddingsConfigLoader {
         section.apiKey.map(_.reveal),
         EmbeddingConfigSpec.fieldPath(descriptor.id, "apiKey"),
         descriptor.id,
-        keyFile
+        keyFile,
+        descriptor.configSpec.apiKeyEnv
       )
 
   /**
@@ -272,6 +299,64 @@ private[config] object EmbeddingsConfigLoader {
           ConfigurationError(s"Failed to read $path: ${failures.toList.map(_.description).mkString("; ")}")
         )
         .flatMap(SharedCredentials.keyFilePath(_, path))
+  }
+
+  /**
+   * The provider-specific keys the provider declares in `EmbeddingConfigSpec.extras`, read from its section:
+   * each one's value, else its default. A blank value, a `null` or an unset `${?VAR}` is absent. A required key
+   * with neither is an error naming every such key, as a chat section's is; a key the provider does not declare
+   * is not read, so the section's other keys are ignored as they always were.
+   */
+  private def readExtras(
+    source: ConfigSource,
+    descriptor: EmbeddingProviderDescriptor
+  ): Result[Map[String, String]] = {
+    val id      = descriptor.id
+    val keys    = descriptor.configSpec.extras
+    val clashes = keys.map(_.name).filter(EmbeddingConfigSpec.BuiltinKeys.contains)
+    if (clashes.nonEmpty)
+      Left(
+        ConfigurationError(
+          s"Embedding provider '${id.asString}' declares ${clashes.mkString(", ")} as provider-specific key(s), " +
+            "but every section has them; rename them in its EmbeddingConfigSpec.extras"
+        )
+      )
+    else {
+      val read = keys.map { key =>
+        val path = EmbeddingConfigSpec.fieldPath(id, key.name)
+        val at   = source.at(path)
+        val value: Result[Option[String]] =
+          if (at.value().isLeft) Right(None)
+          else
+            at.load[Option[String]]
+              .left
+              .map(failures =>
+                ConfigurationError(s"Failed to read $path: ${failures.toList.map(_.description).mkString("; ")}")
+              )
+        value.map(found => key -> trimmed(found).orElse(key.default))
+      }
+      read.collectFirst { case Left(error) => error } match {
+        case Some(error) => Left(error)
+        case None =>
+          val resolved = read.collect { case Right(pair) => pair }
+          val missing  = resolved.collect { case (key, None) if key.required => key }
+          if (missing.isEmpty) Right(resolved.collect { case (key, Some(value)) => key.name -> value }.toMap)
+          else {
+            val lines = missing.map { key =>
+              val env = key.env.fold("")(variable =>
+                s"; to read it from $variable, add ${key.name} = $${?$variable} to the section"
+              )
+              s"  - ${key.name}: ${key.description} (set it in application.conf under " +
+                s"${EmbeddingConfigSpec.fieldPath(id, key.name)}$env)"
+            }
+            Left(
+              ConfigurationError(
+                s"Embedding provider '${id.asString}' is missing required fields:\n${lines.mkString("\n")}"
+              )
+            )
+          }
+      }
+    }
   }
 
   private def trimmed(value: Option[String]): Option[String] =

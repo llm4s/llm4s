@@ -1,6 +1,7 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.{ Experimental, Stable }
+import org.llm4s.toolapi.IdempotencyKey
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
@@ -86,7 +87,7 @@ private[graph] object KeyDigest:
 
 /**
  * One external effect, the identity its replay evidence is kept under (design §4.24): the SHA-256 of
- * the thread that performs it, a base key - the tool call's [[IdempotencyKey]] or the task's
+ * the thread that performs it, a base key - the tool call's [[org.llm4s.toolapi.IdempotencyKey]] or the task's
  * [[RunContext.taskKey]] - the `operation` (the kind of effect, such as `file.edit`) and a
  * discriminator naming what it touches (a path, sorted source ids). Effects of one task differ in
  * operation or discriminator, so they never suppress one another; a fork's re-run of its source's
@@ -97,11 +98,11 @@ private[graph] object KeyDigest:
  * effect, without revealing it (the SHA-256 of its id): a `Transactional` target fences its keys per
  * scope, because a thread's claim tokens only grow ([[AppliedKeys]]).
  */
-@Stable
+@Experimental
 final case class EffectKey private (value: String, operation: String, scope: String):
   override def toString: String = s"EffectKey($operation, $value)"
 
-@Stable
+@Experimental
 object EffectKey:
 
   /** The key of `operation` on `discriminator`, by thread `threadId`, under `base`. */
@@ -112,7 +113,7 @@ object EffectKey:
     discriminator: Seq[String]
   ): EffectKey =
     // the base names the effect's task (its lineage included) or the call (whose key carries it)
-    val parts = Seq("llm4s-effect-v1", threadId.value, base.value, operation, discriminator.size.toString)
+    val parts = Seq("llm4s-effect-v1", threadId.value, base.asString, operation, discriminator.size.toString)
     new EffectKey(KeyDigest.of(parts ++ discriminator), operation, scopeOf(threadId))
 
   /** The scope of every effect key of thread `threadId`. */
@@ -189,7 +190,7 @@ trait AppliedKeys:
  * continuation, the task it stands in for - by its id and a digest of what scheduled it; they decide when a commit releases it ([[Commit.releasesEffect]]). A store persists
  * [[EffectRecord.toJson]] and reads it back with [[EffectRecord.fromJson]]; the body is the guard's.
  */
-@Stable
+@Experimental
 final class EffectRecord private[graph] (
   val key: EffectKey,
   val taskId: TaskId,
@@ -210,7 +211,7 @@ final class EffectRecord private[graph] (
 
   override def toString: String = s"EffectRecord(${ujson.write(EffectRecord.toJson(this))})"
 
-@Stable
+@Experimental
 object EffectRecord:
 
   /** The format this build writes; [[fromJson]] refuses a newer one. */

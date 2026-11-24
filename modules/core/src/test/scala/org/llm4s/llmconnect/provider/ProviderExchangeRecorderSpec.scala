@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.error.{ ProcessingError, ServiceError }
 import org.llm4s.llmconnect.{
   JsonlProviderExchangeSink,
@@ -47,15 +49,17 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
     correlationId: Option[String] = None
   ): Unit =
     ProviderExchangeRecorder.record(
-      ProviderExchangeLogging.enabled(sink),
-      provider,
-      model,
-      startedAt,
-      requestBody,
-      responseBody,
-      result,
-      requestId,
-      correlationId
+      ProviderExchangeLogging.Enabled(sink),
+      ProviderExchangeCall(
+        provider = ProviderId(provider),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = model.map(ModelName(_)),
+        responseBody = responseBody,
+        requestId = requestId,
+        correlationId = correlationId
+      ),
+      result
     )
 
   private def onlyExchange(sink: CollectingSink): ProviderExchange = {
@@ -73,15 +77,25 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
     val now        = Instant.now()
 
     val disabled =
-      Try(ProviderExchangeRecorder.record(ProviderExchangeLogging.Disabled, "p", None, now, "req", None, nullResult))
+      Try(
+        ProviderExchangeRecorder.record(
+          ProviderExchangeLogging.Disabled,
+          ProviderExchangeCall(
+            provider = ProviderId("p"),
+            startedAt = now,
+            requestBody = "req"
+          ),
+          nullResult
+        )
+      )
     val control = Try(
       ProviderExchangeRecorder.record(
-        ProviderExchangeLogging.enabled(new CollectingSink),
-        "p",
-        None,
-        now,
-        "req",
-        None,
+        ProviderExchangeLogging.Enabled(new CollectingSink),
+        ProviderExchangeCall(
+          provider = ProviderId("p"),
+          startedAt = now,
+          requestBody = "req"
+        ),
         nullResult
       )
     )
@@ -112,7 +126,7 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
     )
 
     val exchange = onlyExchange(sink)
-    exchange.provider shouldBe "anthropic"
+    exchange.provider shouldBe ProviderId("anthropic")
     exchange.model shouldBe Some("claude-haiku-4-5")
     exchange.requestBody shouldBe """{"messages":[{"role":"user","content":"ping"}]}"""
     exchange.responseBody shouldBe Some("""{"content":"pong"}""")
@@ -159,15 +173,16 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
     val fixedId   = "fixed-exchange-id"
 
     ProviderExchangeRecorder.record(
-      ProviderExchangeLogging.enabled(sink),
-      "openai",
-      Some("gpt-4o"),
-      fixedTime.minusSeconds(1),
-      "req",
-      None,
+      ProviderExchangeLogging.Enabled(sink),
+      ProviderExchangeCall(
+        provider = ProviderId("openai"),
+        startedAt = fixedTime.minusSeconds(1),
+        requestBody = "req",
+        model = Some(ModelName("gpt-4o"))
+      ),
       success,
-      clock = () => fixedTime,
-      idGenerator = () => fixedId
+      () => fixedTime,
+      () => fixedId
     )
 
     val exchange = onlyExchange(sink)
@@ -268,12 +283,14 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
 
     val outcome = Try(
       ProviderExchangeRecorder.record(
-        ProviderExchangeLogging.enabled(throwing),
-        "openai",
-        Some("gpt-4o"),
-        Instant.now(),
-        "req",
-        Some("resp"),
+        ProviderExchangeLogging.Enabled(throwing),
+        ProviderExchangeCall(
+          provider = ProviderId("openai"),
+          startedAt = Instant.now(),
+          requestBody = "req",
+          model = Some(ModelName("gpt-4o")),
+          responseBody = Some("resp")
+        ),
         success
       )
     )
@@ -293,10 +310,26 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
           ()
         }
     }
-    val logging = ProviderExchangeLogging.enabled(flaky)
+    val logging = ProviderExchangeLogging.Enabled(flaky)
 
-    ProviderExchangeRecorder.record(logging, "p", None, Instant.now(), "one", None, success)
-    ProviderExchangeRecorder.record(logging, "p", None, Instant.now(), "two", None, success)
+    ProviderExchangeRecorder.record(
+      logging,
+      ProviderExchangeCall(
+        provider = ProviderId("p"),
+        startedAt = Instant.now(),
+        requestBody = "one"
+      ),
+      success
+    )
+    ProviderExchangeRecorder.record(
+      logging,
+      ProviderExchangeCall(
+        provider = ProviderId("p"),
+        startedAt = Instant.now(),
+        requestBody = "two"
+      ),
+      success
+    )
 
     kept.asScala.toList.map(_.requestBody) shouldBe List("two")
   }
@@ -307,12 +340,14 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
     try {
       val outcome = Try(
         ProviderExchangeRecorder.record(
-          ProviderExchangeLogging.enabled(JsonlProviderExchangeSink(unwritable)),
-          "openai",
-          Some("gpt-4o"),
-          Instant.now(),
-          "req",
-          Some("resp"),
+          ProviderExchangeLogging.Enabled(JsonlProviderExchangeSink(unwritable)),
+          ProviderExchangeCall(
+            provider = ProviderId("openai"),
+            startedAt = Instant.now(),
+            requestBody = "req",
+            model = Some(ModelName("gpt-4o")),
+            responseBody = Some("resp")
+          ),
           success
         )
       )
@@ -328,12 +363,14 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
     val file = Files.createTempFile("provider-exchange-recorder", ".jsonl")
     try {
       ProviderExchangeRecorder.record(
-        ProviderExchangeLogging.enabled(JsonlProviderExchangeSink(file)),
-        "openai",
-        Some("gpt-4o"),
-        Instant.now(),
-        """{"api_key":"sk-request-secret-123","prompt":"hello"}""",
-        Some("""{"token":"response-secret-456"}"""),
+        ProviderExchangeLogging.Enabled(JsonlProviderExchangeSink(file)),
+        ProviderExchangeCall(
+          provider = ProviderId("openai"),
+          startedAt = Instant.now(),
+          requestBody = """{"api_key":"sk-request-secret-123","prompt":"hello"}""",
+          model = Some(ModelName("gpt-4o")),
+          responseBody = Some("""{"token":"response-secret-456"}""")
+        ),
         Left(ServiceError(401, "openai", "Authorization: Bearer error-secret-789"))
       )
 
@@ -396,7 +433,7 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
     all.map(_.exchangeId).distinct.size shouldBe threads * perThr
     // each exchange still carries the fields of the single call that produced it
     all.foreach { exchange =>
-      val t = exchange.provider.stripPrefix("provider-")
+      val t = exchange.provider.asString.stripPrefix("provider-")
       exchange.requestBody should startWith(s"body-$t-")
       exchange.requestId.map(_.stripPrefix("req-")) shouldBe Some(exchange.requestBody.stripPrefix("body-"))
     }

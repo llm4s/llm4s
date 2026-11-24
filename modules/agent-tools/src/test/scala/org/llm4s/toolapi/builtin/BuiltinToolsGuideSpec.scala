@@ -1,5 +1,7 @@
 package org.llm4s.toolapi.builtin
 
+import org.llm4s.testutil.GuideMirror
+
 import org.llm4s.security.Secret
 import com.typesafe.config.ConfigFactory
 import org.llm4s.config.{ BraveSearchToolConfig, DuckDuckGoSearchToolConfig, ExaSearchToolConfig, ToolsConfigLoader }
@@ -25,16 +27,24 @@ import scala.concurrent.duration._
  * bundles, the parameter table against the real schemas, and the safety section against what the tools
  * return when they refuse. Nothing here touches the network or leaves the temporary directories it makes.
  */
+@org.llm4s.tags.DocsSpec
 class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
+
+  "docs/guide/builtin-tools.md" should "show every block this spec runs, as written" in {
+    GuideMirror.missingFromPage(
+      "docs/guide/builtin-tools.md",
+      "modules/agent-tools/src/test/scala/org/llm4s/toolapi/builtin/BuiltinToolsGuideSpec.scala"
+    ) shouldBe empty
+  }
 
   private def isWindows: Boolean = System.getProperty("os.name").toLowerCase.contains("win")
 
-  private def names(tools: Result[Seq[ToolFunction[_, _]]]): Set[String] = tools.value.map(_.name).toSet
+  private def names(tools: Result[Seq[ToolFunction[_]]]): Set[String] = tools.value.map(_.name).toSet
 
-  private def call(tools: Seq[ToolFunction[_, _]], tool: String, arguments: ujson.Obj) =
+  private def call(tools: Seq[ToolFunction[_]], tool: String, arguments: ujson.Obj) =
     ToolRegistry.of(tools).toOption.get.execute(ToolCallRequest(tool, arguments))
 
-  private def parameterNames(tool: ToolFunction[_, _]): Set[String] =
+  private def parameterNames(tool: ToolFunction[_]): Set[String] =
     tool.toolDefinition(strict = false)("function")("parameters")("properties").obj.keys.toSet
 
   private def tempDir(): Path = Files.createTempDirectory("builtin-tools-guide")
@@ -90,7 +100,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   // ---- the parameter table
 
-  private def searchTools: Seq[ToolFunction[_, _]] = Seq(
+  private def searchTools: Seq[ToolFunction[_]] = Seq(
     DuckDuckGoSearchTool.create(DuckDuckGoSearchToolConfig("https://api.duckduckgo.com/")).value,
     BraveSearchTool
       .create[BraveWebSearchResult](
@@ -524,8 +534,10 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
     )
     val registry = (for {
       config <- ToolsConfigLoader.loadDuckDuckGoSearchTool(source)
+      // guide-block
       search <- DuckDuckGoSearchTool.create(config)
       core   <- BuiltinTools.coreSafe
+      // end-guide-block
     } yield ToolRegistry.of(core :+ search).toOption.get).value
 
     registry.tools.map(_.name).toSet shouldBe coreNames + "duckduckgo_search"
@@ -559,10 +571,12 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
   // ---- the snippets of the guide that no test above already runs
 
   "The customSafe snippet of section 1" should "build the file and HTTP tools it configures" in {
+    // guide-block
     val tools = BuiltinTools.customSafe(
       fileConfig = Some(FileConfig(allowedPaths = Some(Seq("/srv/agent-data")))),
       httpConfig = Some(HttpConfig.restricted(Seq("api.example.com")))
     )
+    // end-guide-block
 
     names(tools) shouldBe coreNames + "http_request" + "read_file" + "list_directory" + "file_info"
   }
@@ -582,10 +596,12 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   "The configuration snippet of section 5" should "build the read and write tools it configures" in {
+    // guide-block
     val tools = BuiltinTools.customSafe(
       fileConfig = Some(FileConfig(allowedPaths = Some(Seq("/srv/agent-data")), maxFileSize = 256 * 1024)),
       writeConfig = Some(WriteConfig(allowedPaths = Seq("/srv/agent-data/out")))
     )
+    // end-guide-block
 
     names(tools) shouldBe coreNames + "read_file" + "list_directory" + "file_info" + "write_file"
   }

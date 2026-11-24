@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.auth.azure
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderName }
 import com.azure.core.credential.{ AccessToken as AzureAccessToken, TokenCredential, TokenRequestContext }
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.config.Llm4sConfig
@@ -66,7 +68,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         val clock      = new TestClock(Instant.parse("2026-10-25T10:00:00Z"))
         val credential = new TestCredential(clock)
         val tokens     = AzureEntraId.tokenProvider(credential, AzureEntraId.CognitiveServicesScope, clock)
-        val client     = OpenAIClient(AzureConfig.keyless(baseUrl, "my-deploy", tokens)).value
+        val client     = OpenAIClient(AzureConfig.keyless(BaseUrl(baseUrl), ModelName("my-deploy"), tokens)).value
 
         client.complete(hello, CompletionOptions()).value.content shouldBe "hi"
         clock.advance(java.time.Duration.ofMinutes(30))
@@ -93,7 +95,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       override def getTokenSync(request: TokenRequestContext): AzureAccessToken =
         throw new IllegalStateException("ManagedIdentityCredential authentication unavailable")
     }
-    val error = AzureEntraId.tokenProvider(unavailable).token().left.value
+    val error = AzureEntraId.tokenProvider(unavailable).current().left.value
     error shouldBe an[AuthenticationError]
     error.message should include("ManagedIdentityCredential authentication unavailable")
     error.message should include(AzureEntraId.CognitiveServicesScope)
@@ -104,7 +106,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       override def getToken(request: TokenRequestContext): Mono[AzureAccessToken] = Mono.empty()
       override def getTokenSync(request: TokenRequestContext): AzureAccessToken   = null
     }
-    AzureEntraId.tokenProvider(empty, "api://custom/.default").token().left.value.message should include(
+    AzureEntraId.tokenProvider(empty, "api://custom/.default").current().left.value.message should include(
       "returned no token for api://custom/.default"
     )
   }
@@ -128,9 +130,10 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         |  clientId       = "00000000-0000-0000-0000-000000000001"
         |}
         |""".stripMargin
-    val config = Llm4sConfig.provider(ConfigSource.string(hocon), "azure-prod").value.asInstanceOf[AzureConfig]
+    val config =
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("azure-prod")).value.asInstanceOf[AzureConfig]
     config.apiKey.reveal shouldBe ""
     config.tokenProvider should not be empty
-    config.endpoint shouldBe "https://my-resource.openai.azure.com"
+    config.endpoint shouldBe BaseUrl("https://my-resource.openai.azure.com")
   }
 }

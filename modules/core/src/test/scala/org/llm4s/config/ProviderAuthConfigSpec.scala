@@ -1,14 +1,21 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName }
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.{ ProviderId, ProviderName }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, IdentitySource }
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderRegistry }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigKey,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderRegistry
+}
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.security.Secret
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.matchers.should.Matchers
@@ -24,7 +31,7 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
     val id: ProviderId = ProviderId("authfixture")
     val configSpec: ProviderConfigSpec =
       ProviderConfigSpec
-        .apiKeyAndDefaultBaseUrl(FixtureChatProvider.DefaultBaseUrl, Seq("AUTHFIXTURE_API_KEY"))
+        .apiKeyAndDefaultBaseUrl(BaseUrl(FixtureChatProvider.DefaultBaseUrl), Seq("AUTHFIXTURE_API_KEY"))
         .withAuthExtras(
           Seq(
             ProviderConfigKey.required("tokenUrl", "the token endpoint"),
@@ -32,12 +39,10 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
             ProviderConfigKey.optional("scope", "the scope", default = Some("all-apis"))
           )
         )
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] =
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
       FixtureChatConfig.fromValues(section.model.asString, "unused", FixtureChatProvider.DefaultBaseUrl)
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
-      FixtureChatProvider.buildClient(config, options)
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+      FixtureChatProvider.build(config, context)
 
   private given ProviderRegistry = ProviderRegistry.of(AuthProvider, FixtureChatProvider)
 
@@ -67,7 +72,7 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
       val config = load(
         section("""auth { identityToken = "eyJ.x.y", tokenUrl = "https://t" }, timeouts { request = 3m }""")
       ).value
-      config.auth.value.identityToken shouldBe IdentitySource.Literal("eyJ.x.y")
+      config.auth.value.identityToken shouldBe IdentitySource.Literal(Secret("eyJ.x.y"))
       config.timeouts.request shouldBe Some(scala.concurrent.duration.DurationInt(3).minutes)
       config.extras shouldBe empty
       config.withTimeouts(config.timeouts).auth shouldBe config.auth
@@ -78,7 +83,7 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
       load(
         section("""auth { identityToken = "eyJ.x.y", tokenUrl = "https://t" }""")
       ).value.auth.value.identityToken shouldBe
-        IdentitySource.Literal("eyJ.x.y")
+        IdentitySource.Literal(Secret("eyJ.x.y"))
     }
 
     "resolves a relative identityTokenFile to an absolute path" in {
@@ -213,12 +218,10 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
         val configSpec: ProviderConfigSpec =
           ProviderConfigSpec(requiresApiKey = true)
             .withAuthExtras(Seq(ProviderConfigKey.optional("identityTokenFile", "oops")))
-        def buildConfig(providerName: String, section: NamedProviderConfig)(using
-          ContextWindowResolver
-        ): Result[ProviderConfig] = FixtureChatProvider.buildConfig(providerName, section)
-        def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-          ModelRegistryService
-        ): Result[LLMClient] = FixtureChatProvider.buildClient(config, options)
+        def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+          FixtureChatProvider.buildConfig(section, context)
+        def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+          FixtureChatProvider.build(config, context)
 
       given ProviderRegistry = ProviderRegistry.of(Shadowing)
       val hocon = """llm4s.providers.s { provider = shadowing, model = m, auth { identityTokenFile = "/s" } }"""
@@ -241,7 +244,7 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
   }
 
   "ProviderDescriptor.requireAuthExtra" should {
-    val auth = AuthConfig(IdentitySource.Literal("t"), Map("tokenUrl" -> "https://t"))
+    val auth = AuthConfig(IdentitySource.Literal(Secret("t")), Map("tokenUrl" -> "https://t"))
     "read a key that is present" in {
       ProviderDescriptor.requireAuthExtra("p", auth, "tokenUrl") shouldBe Right("https://t")
     }
@@ -251,7 +254,7 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
       error.message should (include("auth.clientId").and(include("llm4s.providers.p.auth.clientId")))
     }
     "report a key built blank in code as missing, naming it" in {
-      val blank = AuthConfig(IdentitySource.Literal("t"), Map("tokenUrl" -> "  "))
+      val blank = AuthConfig(IdentitySource.Literal(Secret("t")), Map("tokenUrl" -> "  "))
       ProviderDescriptor.requireAuthExtra("p", blank, "tokenUrl").left.value.message should include(
         "llm4s.providers.p.auth.tokenUrl"
       )
@@ -260,7 +263,7 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
 
   "AuthConfig" should {
     "trim its extras and drop blank ones, through apply and withExtras" in {
-      val auth = AuthConfig(IdentitySource.Literal("t"), Map("tokenUrl" -> " https://t ", "clientId" -> ""))
+      val auth = AuthConfig(IdentitySource.Literal(Secret("t")), Map("tokenUrl" -> " https://t ", "clientId" -> ""))
       auth.extras shouldBe Map("tokenUrl" -> "https://t")
       auth.withExtras(Map("scope" -> " ", "audience" -> "a")).extras shouldBe Map("audience" -> "a")
       auth.extra("clientId") shouldBe None

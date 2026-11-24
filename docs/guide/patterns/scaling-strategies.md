@@ -4,7 +4,7 @@ title: Scaling Strategies
 description: "Scale LLM4S applications: caching, local rate limits, batched embedding, parallel delegation and a run queue with workers on several machines."
 search_title: "Scale LLM applications: caching, rate limits, batching"
 parent: Real-World Application Patterns
-grand_parent: User Guide
+grand_parent: Operations
 nav_order: 4
 ---
 
@@ -46,7 +46,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.reliability.{ RateLimitConfig, ReliabilityConfig, ReliableClient }
 
 def throttled(client: LLMClient): ReliableClient =
-  new ReliableClient(
+  ReliableClient(
     client,
     "openai-main",
     ReliabilityConfig.default.withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 500, burstCapacity = 50))

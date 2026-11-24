@@ -1,17 +1,22 @@
 package org.llm4s.testutil
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ DiscoveredModel, ProviderModelLister }
 import org.llm4s.error.ValidationError
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.http.Llm4sHttpClient
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, ProviderTimeouts }
+import org.llm4s.llmconnect.config.{ ProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
-import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderConfigSpec, ProviderDescriptor }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
+import org.llm4s.llmconnect.spi.{
+  Llm4sProviderModule,
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigSpec,
+  ProviderDescriptor
+}
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 import java.time.Instant
 
@@ -40,23 +45,19 @@ object FixtureChatProvider extends ProviderDescriptor:
 
   val DefaultBaseUrl: String = "https://fixturechat.invalid/v1"
 
-  val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DefaultBaseUrl)
+  val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(BaseUrl(DefaultBaseUrl))
 
   override val modelLister: Option[ProviderModelLister] =
     Some(FixtureModelLister)
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     for
-      apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
-      baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      config  <- FixtureChatConfig.fromValues(section.model.asString, apiKey.reveal, baseUrl)
+      apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
+      baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
+      config  <- FixtureChatConfig.fromValues(section.model.asString, apiKey.reveal, baseUrl.asUrl)
     yield config
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
     ProviderDescriptor.expectConfig[FixtureChatConfig](id, config).map(FixtureChatClient(_))
 
 /**
@@ -66,7 +67,7 @@ object FixtureChatProvider extends ProviderDescriptor:
  */
 final case class FixtureChatConfig(
   apiKey: String,
-  model: String,
+  modelName: String,
   baseUrl: String = FixtureChatProvider.DefaultBaseUrl,
   contextWindow: Int = 8192,
   reserveCompletion: Int = 1024,
@@ -75,12 +76,13 @@ final case class FixtureChatConfig(
   override val apiKeyProvider: Option[ApiKeyProvider] = None
 ) extends ProviderConfig:
   override val providerId: ProviderId                                       = FixtureChatProvider.id
-  override def endpointUrl: Option[String]                                  = Some(baseUrl)
-  override def withModel(model: String): FixtureChatConfig                  = copy(model = model)
+  override def model: ModelName                                             = ModelName(modelName)
+  override def endpointUrl: Option[BaseUrl]                                 = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): FixtureChatConfig               = copy(modelName = model.asString)
   override def withTimeouts(timeouts: ProviderTimeouts): FixtureChatConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): FixtureChatConfig = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): FixtureChatConfig =
-    copy(apiKeyProvider = Some(provider))
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[FixtureChatConfig] =
+    Right(copy(apiKeyProvider = Some(provider)))
 
 object FixtureChatConfig:
 
@@ -99,15 +101,12 @@ final case class FixtureChatClient(config: FixtureChatConfig) extends LLMClient:
       Completion(
         id = "fixturechat-completion",
         created = Instant.EPOCH,
-        content = FixtureChatClient.Reply,
         model = config.model,
         message = AssistantMessage(FixtureChatClient.Reply)
       )
     )
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     complete(conversation, options)
@@ -120,7 +119,7 @@ object FixtureChatClient:
 
 /** The services entry point for [[FixtureChatProvider]]; a `class`, as `ServiceLoader` requires. */
 final class FixtureChatProviderModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(FixtureChatProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(FixtureChatProvider)
 
 /**
  * [[FixtureChatProvider]]'s model lister: `GET <baseUrl>/models` through the HTTP client it is
@@ -134,9 +133,11 @@ final class FixtureChatProviderModule extends Llm4sProviderModule:
 object FixtureModelLister extends ProviderModelLister:
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
     for
-      section  <- config.requireProvider(FixtureChatProvider.id)
-      _        <- section.requireApiKey
-      response <- httpClient.get(s"${section.baseUrlOrDefault(FixtureChatProvider.DefaultBaseUrl).asUrl}/models")
+      section <- config.requireProvider(FixtureChatProvider.id)
+      _       <- section.requireApiKey
+      response <- httpClient.get(
+        s"${section.baseUrlOrDefault(BaseUrl(FixtureChatProvider.DefaultBaseUrl)).asUrl}/models"
+      )
       ids <- scala.util
         .Try(ujson.read(response.body)("data").arr.toList.flatMap(_.obj.get("id").flatMap(_.strOpt)))
         .toOption

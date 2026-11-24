@@ -19,12 +19,12 @@ import org.slf4j.LoggerFactory
  * 1. Configure a default named provider in `application.local.conf`:
  *    {{{
  *    llm4s {
+ *      defaultProvider = "openai-main"
  *      providers {
- *        provider = "openai-main"
  *
  *        openai-main {
  *          provider = "openai"
- *          model = "gpt-4o"
+ *          model = "gpt-5.6-terra"
  *        }
  *      }
  *    }
@@ -122,7 +122,7 @@ object BasicLLMCallingExample {
     result.fold(
       err => {
         logger.error("{}", err.formatted)
-        logger.info("Tip: Make sure llm4s.providers.provider points at a valid named provider configuration.")
+        logger.info("Tip: Make sure llm4s.defaultProvider points at a valid named provider configuration.")
         logger.info("For more help, see: https://github.com/llm4s/llm4s#getting-started")
       },
       identity

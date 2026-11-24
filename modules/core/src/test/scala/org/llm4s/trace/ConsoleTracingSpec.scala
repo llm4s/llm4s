@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -21,7 +22,7 @@ import java.time.Instant
  */
 class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
 
-  private def ended(status: String, messages: Seq[Message]): TraceEvent.AgentRunEnded =
+  private def ended(status: TraceEvent.RunStatus, messages: Seq[Message]): TraceEvent.AgentRunEnded =
     TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", status, messages, UsageSummary())
 
   // ==========================================================================
@@ -57,7 +58,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val out = new ByteArrayOutputStream()
     Console.withOut(out) {
       new ConsoleTracing().traceEvent(
-        TraceEvent.ErrorOccurred(new RuntimeException("filtered"), "chat", usage = Some(TokenUsage(7, 4, 11)))
+        TraceEvent.ErrorOccurred("filtered", "ContentFilteredError", "chat", usage = Some(TokenUsage(7, 4, 11)))
       )
     }
     val printed = out.toString.replaceAll("\u001b\\[[0-9;]*m", "")
@@ -80,7 +81,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
 
   it should "trace agent state with minimal configuration" in {
     val tracing = new ConsoleTracing()
-    val event   = ended("completed", Seq.empty)
+    val event   = ended(TraceEvent.RunStatus.Completed, Seq.empty)
 
     noException should be thrownBy tracing.traceEvent(event)
   }
@@ -92,7 +93,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
       AssistantMessage(Some("I'm doing well, thanks!"), Seq.empty),
       UserMessage("Great to hear!")
     )
-    val event = ended("completed", messages)
+    val event = ended(TraceEvent.RunStatus.Completed, messages)
 
     noException should be thrownBy tracing.traceEvent(event)
   }
@@ -100,27 +101,29 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
   it should "trace agent state with system message" in {
     val tracing  = new ConsoleTracing()
     val messages = Seq(SystemMessage("You are a helpful assistant"), UserMessage("Hello"))
-    val event    = ended("suspended", messages)
+    val event    = ended(TraceEvent.RunStatus.Suspended, messages)
 
     noException should be thrownBy tracing.traceEvent(event)
   }
 
   it should "trace agent state with assistant tool calls" in {
     val tracing  = new ConsoleTracing()
-    val toolCall = ToolCall("call-123", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
+    val toolCall = ToolCall(ToolCallId("call-123"), "calculator", ujson.Obj("a" -> 1, "b" -> 2))
     val messages = Seq(
       UserMessage("Calculate 1+2"),
       AssistantMessage(Some("Let me calculate that."), Seq(toolCall)),
-      ToolMessage("3", "call-123")
+      ToolMessage("3", ToolCallId("call-123"))
     )
-    val event = ended("completed", messages)
+    val event = ended(TraceEvent.RunStatus.Completed, messages)
 
     noException should be thrownBy tracing.traceEvent(event)
   }
 
   it should "trace an agent run that ended with usage" in {
     val tracing = new ConsoleTracing()
-    val event   = ended("failed", Seq.empty).withUsage(UsageSummary().add("m", TokenUsage(1, 2, 3), None))
+    val event =
+      ended(TraceEvent.RunStatus.Failed, Seq.empty)
+        .withUsage(UsageSummary().add(ModelName("m"), TokenUsage(1, 2, 3), None))
 
     noException should be thrownBy tracing.traceEvent(event)
   }
@@ -134,13 +137,12 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "cmpl-123456",
       created = Instant.now(),
-      content = "Hello, I'm an AI assistant.",
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage(Some("Hello, I'm an AI assistant."), Seq.empty),
       usage = Some(TokenUsage(100, 50, 150))
     )
 
-    noException should be thrownBy tracing.traceCompletion(completion, "gpt-4")
+    noException should be thrownBy tracing.traceCompletion(completion, ModelName("gpt-4"))
   }
 
   it should "trace completion without token usage" in {
@@ -148,28 +150,26 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "cmpl-789",
       created = Instant.now(),
-      content = "Response without usage",
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage(Some("Response without usage"), Seq.empty),
       usage = None
     )
 
-    noException should be thrownBy tracing.traceCompletion(completion, "gpt-4")
+    noException should be thrownBy tracing.traceCompletion(completion, ModelName("gpt-4"))
   }
 
   it should "trace completion with tool calls" in {
     val tracing  = new ConsoleTracing()
-    val toolCall = ToolCall("call-456", "web_search", ujson.Obj("query" -> "test"))
+    val toolCall = ToolCall(ToolCallId("call-456"), "web_search", ujson.Obj("query" -> "test"))
     val completion = Completion(
       id = "cmpl-tools",
       created = Instant.now(),
-      content = "I'll search for that.",
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage(Some("I'll search for that."), Seq(toolCall)),
       usage = Some(TokenUsage(50, 25, 75))
     )
 
-    noException should be thrownBy tracing.traceCompletion(completion, "gpt-4")
+    noException should be thrownBy tracing.traceCompletion(completion, ModelName("gpt-4"))
   }
 
   // ==========================================================================
@@ -180,21 +180,21 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val tracing = new ConsoleTracing()
     val usage   = TokenUsage(1000, 500, 1500)
 
-    noException should be thrownBy tracing.traceTokenUsage(usage, "gpt-4", "completion")
+    noException should be thrownBy tracing.traceTokenUsage(usage, ModelName("gpt-4"), "completion")
   }
 
   it should "trace token usage with zero values" in {
     val tracing = new ConsoleTracing()
     val usage   = TokenUsage(0, 0, 0)
 
-    noException should be thrownBy tracing.traceTokenUsage(usage, "gpt-4", "empty_request")
+    noException should be thrownBy tracing.traceTokenUsage(usage, ModelName("gpt-4"), "empty_request")
   }
 
   it should "trace token usage with large values" in {
     val tracing = new ConsoleTracing()
     val usage   = TokenUsage(100000, 50000, 150000)
 
-    noException should be thrownBy tracing.traceTokenUsage(usage, "gpt-4-32k", "large_context")
+    noException should be thrownBy tracing.traceTokenUsage(usage, ModelName("gpt-4-32k"), "large_context")
   }
 
   // ==========================================================================
@@ -221,13 +221,12 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "cmpl-long",
       created = Instant.EPOCH,
-      content = longContent,
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage(Some(longContent), Seq.empty),
       usage = None
     )
 
-    noException should be thrownBy tracing.traceCompletion(completion, "gpt-4")
+    noException should be thrownBy tracing.traceCompletion(completion, ModelName("gpt-4"))
   }
 
   it should "handle very long tool output" in {
@@ -268,23 +267,12 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     out.toString.replaceAll("\u001b\\[[0-9;]*m", "")
   }
 
-  "What ConsoleTracing prints" should "show the query and tools for AgentInitialized, with captureContent" in {
-    val output = printed {
-      new ConsoleTracing(captureContent = true).traceEvent(
-        TraceEvent.AgentInitialized("What is 2 + 3?", Vector("calculator", "echo"))
-      ) shouldBe
-        Right(())
-    }
-
-    output should include("--- AGENT INITIALIZED ---")
-    output should include("Query: What is 2 + 3?")
-    output should include("Tools: calculator, echo")
-  }
-
-  it should "show the tool, its outcome and its duration for ToolExecuted" in {
+  "What ConsoleTracing prints" should "show the tool, its outcome and its duration for ToolExecuted" in {
     val output = printed {
       new ConsoleTracing(captureContent = true)
-        .traceEvent(TraceEvent.ToolExecuted("echo", """{"message":"hi"}""", "hi", 42.millis, false))
+        .traceEvent(
+          TraceEvent.ToolExecuted("echo", ToolCallId("""{"message":"hi"}""").asString, "hi", 42.millis, false)
+        )
     }
 
     output should include("--- TOOL EXECUTED ---")
@@ -309,7 +297,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val output = printed {
       val tracing = new ConsoleTracing(captureContent = true)
       tracing.traceToolCall("tool", "i" * 150, "o" * 150, scala.concurrent.duration.Duration.Zero, success = true)
-      tracing.traceEvent(TraceEvent.CompletionReceived("c-1", "m", 0, "c" * 250))
+      tracing.traceEvent(TraceEvent.CompletionReceived("c-1", ModelName("m"), 0, "c" * 250))
     }
 
     output should include("Input: " + "i" * 100 + "...")
@@ -320,16 +308,16 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "show the model named by the caller and the tool call count for traceCompletion" in {
-    val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hi"))
+    val toolCall = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hi"))
     val completion = Completion(
       id = "completion-7",
       created = Instant.EPOCH,
-      content = "Calling echo",
-      model = "model-in-completion",
-      message = AssistantMessage("Calling echo", Seq(toolCall, toolCall.withId("call-2")))
+      model = ModelName("model-in-completion"),
+      message = AssistantMessage("Calling echo", Seq(toolCall, toolCall.withId(ToolCallId("call-2"))))
     )
 
-    val output = printed(new ConsoleTracing(captureContent = true).traceCompletion(completion, "model-from-caller"))
+    val output =
+      printed(new ConsoleTracing(captureContent = true).traceCompletion(completion, ModelName("model-from-caller")))
 
     output should include("COMPLETION RECEIVED")
     output should include("Model: model-from-caller")
@@ -341,17 +329,20 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "show the served tier when the completion reports one (#2750)" in {
-    val completion = Completion("c-1", Instant.EPOCH, "hi", "m", AssistantMessage("hi"))
-    printed(new ConsoleTracing().traceCompletion(completion.withServedTier(ServiceTier.Flex), "m")) should include(
+    val completion = Completion("c-1", Instant.EPOCH, ModelName("m"), AssistantMessage("hi"))
+    printed(
+      new ConsoleTracing().traceCompletion(completion.withServedTier(ServiceTier.Flex), ModelName("m"))
+    ) should include(
       "Served Tier: flex"
     )
     printed(
-      new ConsoleTracing().traceCompletion(completion.withServedTier(ServiceTier.Other("scale")), "m")
+      new ConsoleTracing().traceCompletion(completion.withServedTier(ServiceTier.Other("scale")), ModelName("m"))
     ) should include("Served Tier: scale")
   }
 
   it should "show every count for TokenUsage" in {
-    val output = printed(new ConsoleTracing().traceTokenUsage(TokenUsage(20, 10, 30), "test-model", "agent_completion"))
+    val output =
+      printed(new ConsoleTracing().traceTokenUsage(TokenUsage(20, 10, 30), ModelName("test-model"), "agent_completion"))
 
     output should include("--- TOKEN USAGE ---")
     output should include("Model: test-model")
@@ -377,17 +368,9 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
 
   private def secret = "SECRET-PII-4111"
 
-  "ConsoleTracing by default" should "withhold the query of AgentInitialized but show its tools" in {
-    val output = printed(new ConsoleTracing().traceEvent(TraceEvent.AgentInitialized(secret, Vector("calculator"))))
-
-    output should include("--- AGENT INITIALIZED ---")
-    output should include(s"Query: [withheld: ${secret.length} chars]")
-    output should include("Tools: calculator")
-    (output should not).include(secret)
-  }
-
-  it should "withhold completion content but show the model, id and tool call count" in {
-    val output = printed(new ConsoleTracing().traceEvent(TraceEvent.CompletionReceived("c-1", "m-1", 2, secret)))
+  "ConsoleTracing by default" should "withhold completion content but show the model, id and tool call count" in {
+    val output =
+      printed(new ConsoleTracing().traceEvent(TraceEvent.CompletionReceived("c-1", ModelName("m-1"), 2, secret)))
 
     output should include("Model: m-1")
     output should include("ID: c-1")
@@ -446,13 +429,12 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
   it should "withhold an error with no message without failing" in {
     val output = printed(new ConsoleTracing().traceError(new IllegalStateException(), ""))
 
-    output should include("Message: [withheld: 4 chars]")
+    output should include("Message: [withheld: 0 chars]")
   }
 
   it should "withhold an image generation error message" in {
     val event = TraceEvent.ImageGenerationCompleted(
-      model = "img-1",
-      provider = "p",
+      model = ModelName("img-1"),
       operation = "generate",
       imageCount = 0,
       size = "1024x1024",

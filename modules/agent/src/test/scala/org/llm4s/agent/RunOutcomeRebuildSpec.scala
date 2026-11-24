@@ -11,7 +11,8 @@ import org.scalatest.matchers.should.Matchers
 
 /**
  * A settled turn's status rebuilt from its thread alone - the outcome its terminal checkpoint records, and that
- * checkpoint's state (design 4.41) - equals the status the turn returned live, for each way a turn settles.
+ * checkpoint's state (design 4.41) - equals the status the turn returned live, for each way a turn settles but one:
+ * a blocked turn's reason is never stored (#2853), so the rebuilt status names the guardrail and has none.
  */
 class RunOutcomeRebuildSpec extends AnyFlatSpec with Matchers with EitherValues {
 
@@ -63,20 +64,22 @@ class RunOutcomeRebuildSpec extends AnyFlatSpec with Matchers with EitherValues 
     val client = ScriptedLLMClient.of(call, CompletionFixture.simple("never sent"))
     val budget = RunConfig().withBudgets(RunBudgets.default.withMaxTokens(30L))
     val (live, rebuilt, outcome) =
-      liveAndRebuilt(Agent.builder("assistant", client).withTools(SpecTools.set(echo)), "go", budget)
+      liveAndRebuilt(Agent.builder("assistant", client).withToolSet(SpecTools.set(echo)), "go", budget)
     outcome shouldBe Some(RunOutcome.TokenLimitReached)
     live.value shouldBe AgentStatus.TokenLimitReached
     rebuilt shouldBe live
   }
 
-  it should "rebuild Blocked with the guardrail's name and reason" in {
+  it should "rebuild Blocked with the guardrail's name and no reason: the reason is only on the live status" in {
     val builder = Agent
       .builder("assistant", ScriptedLLMClient.of(CompletionFixture.simple("never")))
-      .withMiddleware(new GuardrailMiddleware(input = Seq(new LengthCheck(1, 3)), output = Nil))
+      .withMiddleware(new GuardrailMiddleware(input = Seq(LengthCheck(1, 3)), output = Nil))
     val (live, rebuilt, outcome) = liveAndRebuilt(builder, "far too long")
-    outcome.get shouldBe a[RunOutcome.Blocked]
-    live.value shouldBe a[AgentStatus.Blocked]
-    rebuilt shouldBe live
+    outcome shouldBe Some(RunOutcome.Blocked("LengthCheck"))
+    live.value should matchPattern {
+      case AgentStatus.Blocked("LengthCheck", Some(reason: String)) if reason.nonEmpty =>
+    }
+    rebuilt.value shouldBe AgentStatus.Blocked("LengthCheck", None)
   }
 
   it should "rebuild OutputInvalid with every error, as the live Left carries them" in {

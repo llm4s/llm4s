@@ -1,5 +1,6 @@
 package org.llm4s.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
@@ -7,7 +8,8 @@ import org.llm4s.llmconnect.model.{
   CompletionOptions,
   Conversation,
   FinishReason,
-  StreamedChunk
+  StreamedChunk,
+  ToolCallId
 }
 import org.llm4s.types.Result
 import java.time.Instant
@@ -120,9 +122,7 @@ final class ScriptedLLMClient private (
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     answer(conversation, options, streamed = false).map { case (_, completion) => completion }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     answer(conversation, options, streamed = true).map { case (index, completion) =>
@@ -158,18 +158,16 @@ final class ScriptedLLMClient private (
 
   private def completionOf(index: Int, reply: Reply): Completion = {
     val calls = reply.toolCalls.zipWithIndex.map { case (call, position) =>
-      if (call.id.isEmpty) call.withId(s"call-${index + 1}-${position + 1}") else call
+      if (call.id.asString.isEmpty) call.withId(ToolCallId(s"call-${index + 1}-${position + 1}")) else call
     }
     Completion(
       id = s"scripted-${index + 1}",
       created = Instant.EPOCH,
-      content = reply.content,
-      model = reply.model,
+      model = ModelName(reply.model),
       message = AssistantMessage(
-        contentOpt = Some(reply.content).filter(_.nonEmpty),
+        text = Some(reply.content).filter(_.nonEmpty),
         toolCalls = calls
       ),
-      toolCalls = calls,
       usage = reply.usage,
       // as a provider would report it, on complete and stream alike
       finishReason = if (calls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop

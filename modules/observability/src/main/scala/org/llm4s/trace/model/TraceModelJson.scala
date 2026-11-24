@@ -1,7 +1,7 @@
 package org.llm4s.trace.model
 
 import org.llm4s.error.ValidationError
-import org.llm4s.types.{ Result, TraceId }
+import org.llm4s.types.Result
 
 import java.time.Instant
 

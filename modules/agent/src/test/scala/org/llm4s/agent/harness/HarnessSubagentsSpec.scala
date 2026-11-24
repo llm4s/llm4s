@@ -88,7 +88,7 @@ class HarnessSubagentsSpec extends AnyFlatSpec with Matchers with EitherValues w
   "The general-purpose subagent's grant" should "be every parent tool but the file tools and execute, with no sandbox" in {
     val client = RoutingClient(PartialFunction.empty)
     val agent = assistant(client, HarnessProfile.deepAgents)
-      .withTools(ToolSet.of(echo("lookup")).value)
+      .withToolSet(ToolSet.of(echo("lookup")).value)
       .build()
       .value
     val gp = agent.delegation.find(Assistant, General).value
@@ -102,7 +102,7 @@ class HarnessSubagentsSpec extends AnyFlatSpec with Matchers with EitherValues w
   it should "withhold execute too when the parent has a sandbox, so the preset builds either way" in {
     val client = RoutingClient(PartialFunction.empty)
     val agent = assistant(client, HarnessProfile.deepAgents.withSandbox(SandboxBackend(Echo)))
-      .withTools(ToolSet.of(echo("lookup")).value)
+      .withToolSet(ToolSet.of(echo("lookup")).value)
       .build()
       .value
     val gp = agent.delegation.find(Assistant, General).value
@@ -113,7 +113,7 @@ class HarnessSubagentsSpec extends AnyFlatSpec with Matchers with EitherValues w
   it should "be shown by the plan" in {
     val client = RoutingClient(PartialFunction.empty)
     val plan = assistant(client, HarnessProfile.deepAgents)
-      .withTools(ToolSet.of(echo("lookup")).value)
+      .withToolSet(ToolSet.of(echo("lookup")).value)
       .build()
       .value
       .delegation
@@ -277,7 +277,7 @@ class HarnessSubagentsSpec extends AnyFlatSpec with Matchers with EitherValues w
   "An application tool named task" should "clash with the preset's task tool at build()" in {
     val client = RoutingClient(PartialFunction.empty)
     assistant(client, HarnessProfile.deepAgents)
-      .withTools(ToolSet.of(echo("task")).value)
+      .withToolSet(ToolSet.of(echo("task")).value)
       .build()
       .left
       .value

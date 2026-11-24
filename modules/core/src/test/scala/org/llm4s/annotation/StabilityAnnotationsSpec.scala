@@ -46,8 +46,8 @@ class StabilityAnnotationsSpec extends AnyFlatSpec with Matchers {
     Seq[Class[?]](
       classOf[CachingAccessTokenProvider],
       CachingAccessTokenProvider.getClass,
-      classOf[IdentityTokenSource],
-      IdentityTokenSource.getClass,
+      classOf[IdentityTokenProvider],
+      IdentityTokenProvider.getClass,
       TokenExchange.getClass
     ).foreach(cls => withClue(cls.getName + ": ")(cls.isAnnotationPresent(classOf[Experimental]) shouldBe true))
   }

@@ -2,7 +2,8 @@ package org.llm4s.trace
 
 import org.llm4s.trace.model._
 import org.llm4s.trace.store.TraceStore
-import org.llm4s.types.{ Result, TraceId }
+import org.llm4s.trace.model.TraceId
+import org.llm4s.types.Result
 import org.llm4s.util.LiftToResult
 
 import java.util.UUID
@@ -83,27 +84,12 @@ class TraceCollectorTracing[F[_]](
   private[trace] def eventToSpan(event: TraceEvent, spanId: SpanId): Span = {
     val spanName = event.eventType
 
+    // every event is read by field, never by position: a positional pattern stops compiling when an event grows
     event match {
-      case TraceEvent.AgentInitialized(query, tools, ts) =>
-        Span(
-          spanId = spanId,
-          traceId = traceId,
-          parentSpanId = None,
-          name = spanName,
-          kind = SpanKind.AgentCall,
-          startTime = ts,
-          endTime = Some(ts),
-          status = SpanStatus.Ok,
-          attributes = Map(
-            "query" -> SpanValue.StringValue(query),
-            "tools" -> SpanValue.StringListValue(tools.toList)
-          )
-        )
-
       case e: TraceEvent.CompletionReceived =>
         val attributes = Map(
           "completion_id"    -> SpanValue.StringValue(e.id),
-          "model"            -> SpanValue.StringValue(e.model),
+          "model"            -> SpanValue.StringValue(e.model.asString),
           "tool_calls_count" -> SpanValue.LongValue(e.toolCalls.toLong),
           "content"          -> SpanValue.StringValue(e.content)
         ) ++ e.servedTier.map(t => "service_tier" -> SpanValue.StringValue(TraceEvent.serviceTierName(t)))
@@ -119,29 +105,28 @@ class TraceCollectorTracing[F[_]](
           attributes = attributes
         )
 
-      case TraceEvent.ToolExecuted(name, input, output, duration, success, ts) =>
+      case e: TraceEvent.ToolExecuted =>
         Span(
           spanId = spanId,
           traceId = traceId,
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.ToolCall,
-          startTime = ts.minusMillis(duration.toMillis),
-          endTime = Some(ts),
-          status = if (success) SpanStatus.Ok else SpanStatus.Error(s"Tool $name failed"),
+          startTime = e.timestamp.minusMillis(e.duration.toMillis),
+          endTime = Some(e.timestamp),
+          status = if (e.success) SpanStatus.Ok else SpanStatus.Error(s"Tool ${e.name} failed"),
           attributes = Map(
-            "tool_name"   -> SpanValue.StringValue(name),
-            "input"       -> SpanValue.StringValue(input),
-            "output"      -> SpanValue.StringValue(output),
-            "duration_ms" -> SpanValue.LongValue(duration.toMillis),
-            "success"     -> SpanValue.BooleanValue(success)
+            "tool_name"   -> SpanValue.StringValue(e.name),
+            "input"       -> SpanValue.StringValue(e.input),
+            "output"      -> SpanValue.StringValue(e.output),
+            "duration_ms" -> SpanValue.LongValue(e.duration.toMillis),
+            "success"     -> SpanValue.BooleanValue(e.success)
           )
         )
 
-      case TraceEvent.ErrorOccurred(error, context, ts, _, _, _, _, _, _, usage) =>
-        val errorMessage = Option(error.getMessage).getOrElse("")
+      case e: TraceEvent.ErrorOccurred =>
         // a content-filtered reply's billed tokens (#2676)
-        val tokens = usage.toSeq.flatMap(u =>
+        val tokens = e.usage.toSeq.flatMap(u =>
           Seq(
             "prompt_tokens"     -> SpanValue.LongValue(u.promptTokens.toLong),
             "completion_tokens" -> SpanValue.LongValue(u.completionTokens.toLong),
@@ -155,38 +140,37 @@ class TraceCollectorTracing[F[_]](
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.Internal,
-          startTime = ts,
-          endTime = Some(ts),
-          status = SpanStatus.Error(s"${error.getClass.getSimpleName}: $errorMessage"),
+          startTime = e.timestamp,
+          endTime = Some(e.timestamp),
+          status = SpanStatus.Error(s"${e.errorType}: ${e.message}"),
           attributes = Map(
-            "error_type"    -> SpanValue.StringValue(error.getClass.getSimpleName),
-            "error_message" -> SpanValue.StringValue(errorMessage),
-            "context"       -> SpanValue.StringValue(context)
+            "error_type"    -> SpanValue.StringValue(e.errorType),
+            "error_message" -> SpanValue.StringValue(e.message),
+            "context"       -> SpanValue.StringValue(e.context)
           ) ++ tokens
         )
 
-      case TraceEvent.TokenUsageRecorded(usage, model, operation, ts, _) =>
+      case e: TraceEvent.TokenUsageRecorded =>
         Span(
           spanId = spanId,
           traceId = traceId,
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.Internal,
-          startTime = ts,
-          endTime = Some(ts),
+          startTime = e.timestamp,
+          endTime = Some(e.timestamp),
           status = SpanStatus.Ok,
           attributes = Map(
-            "model"             -> SpanValue.StringValue(model),
-            "operation"         -> SpanValue.StringValue(operation),
-            "prompt_tokens"     -> SpanValue.LongValue(usage.promptTokens.toLong),
-            "completion_tokens" -> SpanValue.LongValue(usage.completionTokens.toLong),
-            "thinking_tokens"   -> SpanValue.LongValue(usage.thinkingTokens.getOrElse(0).toLong),
-            "output_tokens"     -> SpanValue.LongValue(usage.totalOutputTokens.toLong),
-            "total_tokens"      -> SpanValue.LongValue(usage.totalTokens.toLong)
+            "model"             -> SpanValue.StringValue(e.model.asString),
+            "operation"         -> SpanValue.StringValue(e.operation),
+            "prompt_tokens"     -> SpanValue.LongValue(e.usage.promptTokens.toLong),
+            "completion_tokens" -> SpanValue.LongValue(e.usage.completionTokens.toLong),
+            "thinking_tokens"   -> SpanValue.LongValue(e.usage.thinkingTokens.getOrElse(0).toLong),
+            "output_tokens"     -> SpanValue.LongValue(e.usage.totalOutputTokens.toLong),
+            "total_tokens"      -> SpanValue.LongValue(e.usage.totalTokens.toLong)
           )
         )
 
-      // by field, never by position: the event grows
       case run: TraceEvent.AgentRunEnded =>
         Span(
           spanId = spanId,
@@ -201,17 +185,19 @@ class TraceCollectorTracing[F[_]](
             "thread_id"     -> SpanValue.StringValue(run.threadId),
             "run_id"        -> SpanValue.StringValue(run.runId),
             "agent"         -> SpanValue.StringValue(run.agent),
-            "status"        -> SpanValue.StringValue(run.status),
+            "status"        -> SpanValue.StringValue(run.status.name),
             "message_count" -> SpanValue.LongValue(run.messages.size.toLong),
             "input_tokens"  -> SpanValue.LongValue(run.usage.inputTokens),
             "output_tokens" -> SpanValue.LongValue(run.usage.outputTokens)
           ) ++ run.parentThreadId.map(id => "parent_thread_id" -> SpanValue.StringValue(id)) ++
             run.parentRunId.map(id => "parent_run_id" -> SpanValue.StringValue(id)) ++
-            run.userId.map(id => "user_id" -> SpanValue.StringValue(id))
+            run.userId.map(id => "user_id" -> SpanValue.StringValue(id)) ++
+            run.blockedBy.map(guardrail => "blocked_by" -> SpanValue.StringValue(guardrail)) ++
+            run.activeAgent.map(agent => "active_agent" -> SpanValue.StringValue(agent))
         )
 
-      case TraceEvent.CustomEvent(name, data, ts, _) =>
-        val attrs = data.obj.map { case (k, v) =>
+      case e: TraceEvent.CustomEvent =>
+        val attrs = e.data.obj.map { case (k, v) =>
           k -> (v match {
             case ujson.Str(s)   => SpanValue.StringValue(s)
             case ujson.Num(n)   => SpanValue.DoubleValue(n)
@@ -224,71 +210,62 @@ class TraceCollectorTracing[F[_]](
           spanId = spanId,
           traceId = traceId,
           parentSpanId = None,
-          name = s"custom:$name",
+          name = s"custom:${e.name}",
           kind = SpanKind.Internal,
-          startTime = ts,
-          endTime = Some(ts),
+          startTime = e.timestamp,
+          endTime = Some(e.timestamp),
           status = SpanStatus.Ok,
           attributes = attrs
         )
 
-      case TraceEvent.EmbeddingUsageRecorded(usage, model, operation, inputCount, ts, _, _) =>
+      case e: TraceEvent.EmbeddingUsageRecorded =>
         Span(
           spanId = spanId,
           traceId = traceId,
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.Embedding,
-          startTime = ts,
-          endTime = Some(ts),
+          startTime = e.timestamp,
+          endTime = Some(e.timestamp),
           status = SpanStatus.Ok,
           attributes = Map(
-            "model"         -> SpanValue.StringValue(model),
-            "operation"     -> SpanValue.StringValue(operation),
-            "input_count"   -> SpanValue.LongValue(inputCount.toLong),
-            "prompt_tokens" -> SpanValue.LongValue(usage.promptTokens.toLong),
-            "total_tokens"  -> SpanValue.LongValue(usage.totalTokens.toLong)
+            "model"         -> SpanValue.StringValue(e.model.asString),
+            "operation"     -> SpanValue.StringValue(e.operation),
+            "input_count"   -> SpanValue.LongValue(e.inputCount.toLong),
+            "prompt_tokens" -> SpanValue.LongValue(e.usage.promptTokens.toLong),
+            "total_tokens"  -> SpanValue.LongValue(e.usage.totalTokens.toLong)
           )
         )
 
-      case TraceEvent.CostRecorded(costUsd, model, operation, tokenCount, costType, ts) =>
+      case e: TraceEvent.CostRecorded =>
         Span(
           spanId = spanId,
           traceId = traceId,
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.Internal,
-          startTime = ts,
-          endTime = Some(ts),
+          startTime = e.timestamp,
+          endTime = Some(e.timestamp),
           status = SpanStatus.Ok,
           attributes = Map(
-            "cost_usd"    -> SpanValue.DoubleValue(costUsd),
-            "model"       -> SpanValue.StringValue(model),
-            "operation"   -> SpanValue.StringValue(operation),
-            "token_count" -> SpanValue.LongValue(tokenCount.toLong),
-            "cost_type"   -> SpanValue.StringValue(costType)
+            "cost_usd"    -> SpanValue.DoubleValue(e.costUsd),
+            "model"       -> SpanValue.StringValue(e.model.asString),
+            "operation"   -> SpanValue.StringValue(e.operation),
+            "token_count" -> SpanValue.LongValue(e.tokenCount.toLong),
+            "cost_type"   -> SpanValue.StringValue(e.costType)
           )
         )
 
-      case TraceEvent.RAGOperationCompleted(
-            operation,
-            duration,
-            embeddingTokens,
-            llmPromptTokens,
-            llmCompletionTokens,
-            totalCostUsd,
-            ts,
-            stageDurations
-          ) =>
+      case e: TraceEvent.RAGOperationCompleted =>
         val baseAttrs: Map[String, SpanValue] = Map(
-          "operation"   -> SpanValue.StringValue(operation),
-          "duration_ms" -> SpanValue.LongValue(duration.toMillis)
+          "operation"   -> SpanValue.StringValue(e.operation),
+          "duration_ms" -> SpanValue.LongValue(e.duration.toMillis)
         )
-        val embeddingAttr  = embeddingTokens.map(v => "embedding_tokens" -> SpanValue.LongValue(v.toLong))
-        val promptAttr     = llmPromptTokens.map(v => "llm_prompt_tokens" -> SpanValue.LongValue(v.toLong))
-        val completionAttr = llmCompletionTokens.map(v => "llm_completion_tokens" -> SpanValue.LongValue(v.toLong))
-        val costAttr       = totalCostUsd.map(v => "total_cost_usd" -> SpanValue.DoubleValue(v))
-        val stageAttrs = stageDurations.map { case (stage, d) =>
+        val embeddingAttr  = e.embeddingTokens.map(v => "embedding_tokens" -> SpanValue.LongValue(v.toLong))
+        val promptAttr     = e.llmPromptTokens.map(v => "llm_prompt_tokens" -> SpanValue.LongValue(v.toLong))
+        val completionAttr = e.llmCompletionTokens.map(v => "llm_completion_tokens" -> SpanValue.LongValue(v.toLong))
+        val costAttr       = e.totalCostUsd.map(v => "total_cost_usd" -> SpanValue.DoubleValue(v))
+        val stageAttrs = e.stageDurations.map { case (stage, d) =>
           s"stage_${stage}_ms" -> SpanValue.LongValue(d.toMillis)
         }
         val attrs = baseAttrs ++ embeddingAttr ++ promptAttr ++ completionAttr ++ costAttr ++ stageAttrs
@@ -298,80 +275,69 @@ class TraceCollectorTracing[F[_]](
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.Rag,
-          startTime = ts.minusMillis(duration.toMillis),
-          endTime = Some(ts),
+          startTime = e.timestamp.minusMillis(e.duration.toMillis),
+          endTime = Some(e.timestamp),
           status = SpanStatus.Ok,
           attributes = attrs
         )
 
-      case TraceEvent.CacheHit(similarity, threshold, ts) =>
+      case e: TraceEvent.CacheHit =>
         Span(
           spanId = spanId,
           traceId = traceId,
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.Cache,
-          startTime = ts,
-          endTime = Some(ts),
+          startTime = e.timestamp,
+          endTime = Some(e.timestamp),
           status = SpanStatus.Ok,
           attributes = Map(
-            "similarity" -> SpanValue.DoubleValue(similarity),
-            "threshold"  -> SpanValue.DoubleValue(threshold),
+            "similarity" -> SpanValue.DoubleValue(e.similarity),
+            "threshold"  -> SpanValue.DoubleValue(e.threshold),
             "hit"        -> SpanValue.BooleanValue(true)
           )
         )
 
-      case TraceEvent.CacheMiss(reason, ts) =>
+      case e: TraceEvent.CacheMiss =>
         Span(
           spanId = spanId,
           traceId = traceId,
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.Cache,
-          startTime = ts,
-          endTime = Some(ts),
+          startTime = e.timestamp,
+          endTime = Some(e.timestamp),
           status = SpanStatus.Ok,
           attributes = Map(
-            "reason" -> SpanValue.StringValue(reason.value),
+            "reason" -> SpanValue.StringValue(e.reason.value),
             "hit"    -> SpanValue.BooleanValue(false)
           )
         )
 
-      case TraceEvent.ImageGenerationCompleted(
-            model,
-            provider,
-            operation,
-            imageCount,
-            size,
-            quality,
-            duration,
-            costUsd,
-            success,
-            errorMessage,
-            ts
-          ) =>
+      case e: TraceEvent.ImageGenerationCompleted =>
         val baseAttrs: Map[String, SpanValue] = Map(
-          "model"       -> SpanValue.StringValue(model),
-          "provider"    -> SpanValue.StringValue(provider),
-          "operation"   -> SpanValue.StringValue(operation),
-          "image_count" -> SpanValue.LongValue(imageCount.toLong),
-          "size"        -> SpanValue.StringValue(size),
-          "quality"     -> SpanValue.StringValue(quality),
-          "duration_ms" -> SpanValue.LongValue(duration.toMillis),
-          "success"     -> SpanValue.BooleanValue(success)
+          "model"       -> SpanValue.StringValue(e.model.asString),
+          "operation"   -> SpanValue.StringValue(e.operation),
+          "image_count" -> SpanValue.LongValue(e.imageCount.toLong),
+          "size"        -> SpanValue.StringValue(e.size),
+          "quality"     -> SpanValue.StringValue(e.quality),
+          "duration_ms" -> SpanValue.LongValue(e.duration.toMillis),
+          "success"     -> SpanValue.BooleanValue(e.success)
         )
-        val costAttr  = costUsd.map(v => "cost_usd" -> SpanValue.DoubleValue(v))
-        val errorAttr = errorMessage.map(v => "error_message" -> SpanValue.StringValue(v))
-        val attrs     = baseAttrs ++ costAttr ++ errorAttr
+        val providerAttr = e.provider.map(p => "provider" -> SpanValue.StringValue(p.asString))
+        val costAttr     = e.costUsd.map(v => "cost_usd" -> SpanValue.DoubleValue(v))
+        val errorAttr    = e.errorMessage.map(v => "error_message" -> SpanValue.StringValue(v))
+        val attrs        = baseAttrs ++ providerAttr ++ costAttr ++ errorAttr
         Span(
           spanId = spanId,
           traceId = traceId,
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.Internal,
-          startTime = ts.minusMillis(duration.toMillis),
-          endTime = Some(ts),
-          status = if (success) SpanStatus.Ok else SpanStatus.Error(errorMessage.getOrElse("Image generation failed")),
+          startTime = e.timestamp.minusMillis(e.duration.toMillis),
+          endTime = Some(e.timestamp),
+          status =
+            if (e.success) SpanStatus.Ok else SpanStatus.Error(e.errorMessage.getOrElse("Image generation failed")),
           attributes = attrs
         )
     }

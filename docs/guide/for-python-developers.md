@@ -3,8 +3,9 @@ layout: page
 title: Coming from Python
 description: "LLM code in Python (OpenAI SDK, LangChain, LlamaIndex, Pydantic) next to the same thing in Scala 3 with LLM4S, one Scala concept per step."
 search_title: "From Python LangChain and OpenAI SDK to Scala 3 with LLM4S"
-parent: User Guide
-nav_order: 53
+parent: Coming from Another Library
+nav_order: 604
+grand_parent: User Guide
 ---
 
 # Coming from Python
@@ -28,7 +29,7 @@ is run against `llm4s-testkit`'s `ScriptedLLMClient`, a scripted model, with no 
 carries its own imports, so you can copy one on its own.
 
 The Python is shown for comparison only and is not run. Each Python block names the library and version it was
-checked against (on 2026-11-11) and links to the documentation it is taken from.
+checked against (on 2026-11-24) and links to the documentation it is taken from.
 
 ## The words side by side
 
@@ -72,7 +73,7 @@ completion = client.chat.completions.create(
 print(completion.choices[0].message.content)
 ```
 
-*(From [openai-python 3.49.0, README](https://github.com/openai/openai-python#usage).)*
+*(From [openai-python 3.58.0, README](https://github.com/openai/openai-python#usage).)*
 
 In Python a failed call raises an `openai.APIError`. In LLM4S a call that can fail returns a `Result[A]`: a
 `Right(value)` when it worked, a `Left(error)` describing what went wrong when it did not. Nothing is thrown.
@@ -115,7 +116,7 @@ class MathResponse(BaseModel):
 
 client = OpenAI()
 completion = client.chat.completions.parse(
-    model="gpt-4o-2024-08-06",
+    model="gpt-5.6-luna",
     messages=[
         {"role": "system", "content": "You are a helpful math tutor."},
         {"role": "user", "content": "solve 8x + 31 = 2"},
@@ -131,7 +132,7 @@ else:
     print(message.refusal)
 ```
 
-*(From [openai-python 3.49.0, helpers.md](https://github.com/openai/openai-python/blob/main/helpers.md#auto-parsing-response-content-with-pydantic-models), with [Pydantic 2.14 models](https://docs.pydantic.dev/latest/concepts/models/).)*
+*(From [openai-python 3.58.0, helpers.md](https://github.com/openai/openai-python/blob/main/helpers.md#auto-parsing-response-content-with-pydantic-models), with [Pydantic 2.14 models](https://pydantic.dev/docs/validation/latest/concepts/models/).)*
 
 The Pydantic model becomes a case class. `llm4s-schema-derivation` derives the JSON schema sent to the model from it
 (`derives SchemaOf`), and upickle derives the parser (`ReadWriter`):
@@ -174,7 +175,7 @@ def search_database(query: str, limit: int = 10) -> str:
     return f"Found {limit} results for '{query}'"
 ```
 
-*(From [LangChain 1.4.9, Tools](https://docs.langchain.com/oss/python/langchain/tools).)*
+*(From [LangChain 1.5.2, Tools](https://docs.langchain.com/oss/python/langchain/tools).)*
 
 LangChain reads the tool's schema from the function's signature and docstring. In LLM4S you declare it with the
 `Schema` DSL and give `ToolBuilder` a handler that reads the arguments:
@@ -183,7 +184,7 @@ LangChain reads the tool's schema from the function's signature and docstring. I
 import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolFunction, ToolHandlerError }
 import org.llm4s.types.Result
 
-def searchDatabase: Result[ToolFunction[Map[String, Any], String]] = {
+def searchDatabase: Result[ToolFunction[String]] = {
   val schema = Schema
     .`object`[Map[String, Any]]("A search of the customer database")
     .withRequiredField("query", Schema.string("What to search for"))
@@ -195,7 +196,7 @@ def searchDatabase: Result[ToolFunction[Map[String, Any], String]] = {
       limit <- params.getOptionalInt("limit")
     } yield s"Found ${limit.getOrElse(10)} results for '$query'"
 
-  ToolBuilder[Map[String, Any], String](
+  ToolBuilder[String](
     "search_database",
     "Search the customer database for records matching the query.",
     schema
@@ -223,7 +224,7 @@ def get_user_info() -> str:
 
 
 agent = create_agent(
-    model="google_genai:gemini-3.6-flash",
+    model="google_genai:gemini-4-hydrogen",
     tools=[get_user_info],
     checkpointer=InMemorySaver(),
 )
@@ -235,7 +236,7 @@ response = agent.invoke(
 )["messages"][-1].content
 ```
 
-*(Abridged from [LangChain 1.4.9 with LangGraph 1.2.20, Short-term memory](https://docs.langchain.com/oss/python/langchain/short-term-memory).)*
+*(Abridged from [LangChain 1.5.2 with LangGraph 1.2.24, Short-term memory](https://docs.langchain.com/oss/python/langchain/short-term-memory).)*
 
 An LLM4S `Agent` runs the same loop: call the model, run the tools it asks for, feed back their results, until it
 answers. `agent.run` starts a conversation (a thread) and `continueConversation` adds a turn to it, as invoking with
@@ -249,9 +250,9 @@ import org.llm4s.types.Result
 
 def describe(result: AgentResult): String =
   result.status match {
-    case AgentStatus.Completed(answer)  => answer
-    case AgentStatus.Blocked(_, reason) => s"Blocked: $reason"
-    case other                          => s"Stopped: $other"
+    case AgentStatus.Completed(answer)     => answer
+    case AgentStatus.Blocked(guardrail, _) => s"Blocked by $guardrail"
+    case other                             => s"Stopped: $other"
   }
 
 def twoTurns(client: LLMClient, tools: ToolRegistry): Result[Seq[String]] =
@@ -281,7 +282,7 @@ query_engine = index.as_query_engine()
 query_engine.query("YOUR_QUESTION")
 ```
 
-*(Abridged from [llama-index-core 0.14.25, README](https://github.com/run-llama/llama_index/blob/main/README.md).)*
+*(Abridged from [llama-index-core 0.14.26, README](https://github.com/run-llama/llama_index/blob/main/README.md).)*
 
 `llm4s-rag` is the index and the query engine in one: it chunks and embeds what you ingest, retrieves the closest
 chunks, and asks the model to answer from them.
@@ -333,7 +334,7 @@ async def main():
 asyncio.run(main())
 ```
 
-*(From [openai-python 3.49.0, README: Streaming responses](https://github.com/openai/openai-python#streaming-responses).)*
+*(From [openai-python 3.58.0, README: Streaming responses](https://github.com/openai/openai-python#streaming-responses).)*
 
 `streamComplete` hands each piece of the answer to a function you pass, as it arrives, and returns the whole
 completion at the end:
@@ -346,7 +347,7 @@ import org.llm4s.types.Result
 def streamAnswer(client: LLMClient, question: String, onText: String => Unit): Result[String] =
   for {
     conversation <- Conversation.fromPrompts("You answer in one sentence.", question)
-    completion   <- client.streamComplete(conversation, CompletionOptions(), chunk => chunk.content.foreach(onText))
+    completion   <- client.streamComplete(conversation, CompletionOptions())(chunk => chunk.content.foreach(onText))
   } yield completion.content
 ```
 
@@ -431,12 +432,11 @@ Where Python reads `OPENAI_API_KEY` in `OpenAI()`, LLM4S reads a named provider 
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
   providers {
-    provider = "openai-main"
-
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }

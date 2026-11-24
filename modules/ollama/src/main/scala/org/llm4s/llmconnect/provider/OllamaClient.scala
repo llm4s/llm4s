@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ LLMError, NetworkError, ServiceError, TroubleshootingLinks, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
@@ -94,7 +96,7 @@ class OllamaClient(
 
   protected def clientDescription: String = s"Ollama client for model ${config.model}"
   protected def providerName: String      = "ollama"
-  protected def modelName: String         = config.model
+  protected def modelName: ModelName      = config.model
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else [[OllamaClient.DefaultRequestTimeout]]. */
   protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(OllamaClient.DefaultRequestTimeout)
@@ -125,9 +127,9 @@ class OllamaClient(
    * service tier, which Ollama has none of.
    */
   private def unsent(options: CompletionOptions, think: OllamaThink.Plan): List[RequestAdjustment] = {
-    val adjustments = think.adjustments ++ UnmappedOptions.promptCache(config.model, options) ++
+    val adjustments = think.adjustments ++ UnmappedOptions.promptCache(config.model.asString, options) ++
       UnmappedOptions.serviceTier("Ollama", options)
-    adjustmentLog.record(config.model, adjustments)
+    adjustmentLog.record(config.model.asString, adjustments)
     adjustments
   }
 
@@ -144,25 +146,25 @@ class OllamaClient(
   private def thinkControls(): OllamaThink.Controls =
     discoveredThink.getOrElse {
       val headers = Map("Content-Type" -> "application/json")
-      val body    = ujson.Obj("model" -> config.model).render()
+      val body    = ujson.Obj("model" -> config.model.asString).render()
       http.post(s"${config.baseUrl}/api/show", headers, body, timeout = requestTimeout) match {
         case Right(response) if response.statusCode >= 200 && response.statusCode < 300 =>
           val controls = Try(ujson.read(response.body)).toOption
-            .flatMap(OllamaThink.fromShow(config.model, _))
-            .getOrElse(OllamaThink.byName(config.model))
+            .flatMap(OllamaThink.fromShow(config.model.asString, _))
+            .getOrElse(OllamaThink.byName(config.model.asString))
           discoveredThink = Some(controls)
           controls
         case other =>
           val why = other.fold(_.message, response => s"HTTP ${response.statusCode}")
           OllamaClient.logger.debug(s"Ollama /api/show for ${config.model} failed ($why); think follows the model name")
-          OllamaThink.byName(config.model)
+          OllamaThink.byName(config.model.asString)
       }
     }
 
   /** The `think` field for `options`, asking for the model's controls only when it sets thinking or reasoning. */
   private def thinkPlan(options: CompletionOptions): OllamaThink.Plan =
     if (!OllamaThink.asked(options)) OllamaThink.Plan(None, Nil)
-    else OllamaThink.plan(config.model, options, thinkControls())
+    else OllamaThink.plan(config.model.asString, options, thinkControls())
 
   private def send(requestBody: ujson.Obj, options: CompletionOptions): Result[Completion] = {
     val requestText = requestBody.render()
@@ -213,11 +215,11 @@ class OllamaClient(
       Left(
         ServiceError(404, providerName, HttpErrorMapper.extractErrorDetails(body, status, providerName))
           .withHint(
-            TroubleshootingLinks.ollamaModelMissingAction(config.model),
+            TroubleshootingLinks.ollamaModelMissingAction(config.model.asString),
             TroubleshootingLinks.Entry.OllamaModelMissing
           )
       )
-    else HttpErrorMapper.mapHttpError(status, body, providerName, headers)
+    else Left(HttpErrorMapper.toError(status, body, providerName, headers))
 
   private def recordExchange(
     startedAt: Instant,
@@ -226,13 +228,15 @@ class OllamaClient(
     result: Result[Completion]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(config.model),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = Option(responseBody).filter(_.nonEmpty),
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(config.model),
+        responseBody = Option(responseBody).filter(_.nonEmpty)
+      ),
+      result
     )
 
   /**
@@ -249,9 +253,7 @@ class OllamaClient(
     result
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val think = thinkPlan(options)
@@ -359,7 +361,7 @@ class OllamaClient(
           .map { c =>
             // the accumulator reports streamed calls on the message only
             val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            c.withToolCalls(c.message.toolCalls.toList).withEstimatedCost(cost)
+            c.withEstimatedCost(cost)
           }
 
         recordingExchange(startedAt, requestText, rawResponse.result())(result)
@@ -409,7 +411,7 @@ class OllamaClient(
         if (am.toolCalls.nonEmpty)
           message("tool_calls") = ujson.Arr.from(am.toolCalls.zipWithIndex.map { case (tc, index) =>
             ujson.Obj(
-              "id" -> tc.id,
+              "id" -> tc.id.asString,
               "function" -> ujson.Obj(
                 "index"     -> index,
                 "name"      -> tc.name,
@@ -420,19 +422,19 @@ class OllamaClient(
         message
       case tm: ToolMessage =>
         val toolCallId = tm.toolCallId
-        val message    = ujson.Obj("role" -> "tool", "content" -> tm.content, "tool_call_id" -> toolCallId)
+        val message    = ujson.Obj("role" -> "tool", "content" -> tm.content, "tool_call_id" -> toolCallId.asString)
         toolNames.get(toolCallId).foreach(name => message("tool_name") = name)
         message
     })
 
-    val opts = ujson.Obj(
-      "temperature" -> options.temperature,
-      "top_p"       -> options.topP
-    )
+    // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
+    val opts = ujson.Obj()
+    options.temperature.foreach(t => opts("temperature") = t)
+    options.topP.foreach(p => opts("top_p") = p)
     options.maxTokens.foreach(t => opts("num_predict") = t)
 
     val body = ujson.Obj(
-      "model"    -> config.model,
+      "model"    -> config.model.asString,
       "messages" -> msgs,
       "stream"   -> stream,
       "options"  -> opts
@@ -465,8 +467,6 @@ class OllamaClient(
       Completion(
         id = id,
         created = created,
-        content = content,
-        toolCalls = calls.toList,
         usage = usage,
         model = config.model,
         message = (if (calls.isEmpty) AssistantMessage(content)
@@ -490,7 +490,7 @@ class OllamaClient(
    */
   override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
     val headers = Map("Content-Type" -> "application/json")
-    val body    = ujson.Obj("model" -> config.model).render()
+    val body    = ujson.Obj("model" -> config.model.asString).render()
     http
       .post(s"${config.baseUrl}/api/show", headers, body, timeout = requestTimeout.min(OllamaClient.ValidationTimeout))
       .left
@@ -667,18 +667,19 @@ object OllamaClient {
           Either.cond(ids.claim(serverId), serverId, malformed(s"tool call id '$serverId' is used more than once"))
         case None => Right(ids.nextId())
       }
-    } yield ToolCall(id, name, args)
+    } yield ToolCall(ToolCallId(id), name, args)
 
   /**
    * The reply's [[FinishReason]] from its last line's `done_reason` (RFC 0009): `stop` is `ToolCalls` when the reply
-   * called a tool and `Stop` otherwise, `length` is `Length`, any other value `Other`, and none `Other("")`.
+   * called a tool and `Stop` otherwise, `length` is `Length`, any other value `Other`, and none `Unknown`.
    */
   private[provider] def finishReason(json: ujson.Value, calledTools: Boolean): FinishReason =
     json.obj.get("done_reason").flatMap(_.strOpt).filter(_.nonEmpty) match {
       case Some("stop")   => if (calledTools) FinishReason.ToolCalls else FinishReason.Stop
       case Some("length") => FinishReason.Length
+      case Some("")       => FinishReason.Unknown
       case Some(other)    => FinishReason.Other(other)
-      case None           => FinishReason.Other("")
+      case None           => FinishReason.Unknown
     }
 
   /** The `thinking` of a reply's `message`, or of one streamed line; none when absent, null or empty. */

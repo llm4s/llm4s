@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
@@ -23,10 +25,10 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
 
     val config = OpenAIConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret("test-api-key"),
         organization = None,
-        baseUrl = "https://example.invalid/v1"
+        baseUrl = BaseUrl("https://example.invalid/v1")
       )
       .value
 
@@ -54,13 +56,13 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
     val conversation = Conversation(Seq(UserMessage("hello")))
     val received     = scala.collection.mutable.ListBuffer.empty[String]
 
-    val result = client.streamComplete(conversation, CompletionOptions(), c => received += c.content.getOrElse(""))
+    val result = client.streamComplete(conversation, CompletionOptions())(c => received += c.content.getOrElse(""))
 
     result.isRight shouldBe true
 
     val completion = result.toOption.get
     completion.id shouldBe "chatcmpl-1"
-    completion.model shouldBe model
+    completion.model.asString shouldBe model
     completion.content shouldBe "Hi"
     completion.usage.map(_.promptTokens) shouldBe Some(10)
     completion.usage.map(_.completionTokens) shouldBe Some(5)
@@ -75,10 +77,10 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
     val model = "gpt-4"
     val config = OpenAIConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret("test-api-key"),
         organization = None,
-        baseUrl = "https://example.invalid/v1"
+        baseUrl = BaseUrl("https://example.invalid/v1")
       )
       .value
     val contentChunk = chunk(
@@ -105,14 +107,14 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
       model,
       transport(streaming = _ => stream(contentChunk, stopChunk)),
       config,
-      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
-    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions(), _ => ())
+    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())(_ => ())
 
     result.isRight shouldBe true
     recorded should have size 1
-    recorded.head.provider shouldBe "openai"
+    recorded.head.provider.asString shouldBe "openai"
     recorded.head.requestBody should include("messages")
     recorded.head.requestBody should include("hello")
     recorded.head.responseBody.value should include("chatcmpl-stream-1")
@@ -124,10 +126,10 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
     val model = "gpt-4"
     val config = OpenAIConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret("test-api-key"),
         organization = None,
-        baseUrl = "https://example.invalid/v1"
+        baseUrl = BaseUrl("https://example.invalid/v1")
       )
       .value
     val recorded = ListBuffer.empty[ProviderExchange]
@@ -139,14 +141,14 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
       model,
       transport(streaming = _ => throw new RuntimeException("stream connection failed")),
       config,
-      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
-    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions(), _ => ())
+    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())(_ => ())
 
     result.isLeft shouldBe true
     recorded should have size 1
-    recorded.head.provider shouldBe "openai"
+    recorded.head.provider.asString shouldBe "openai"
     recorded.head.responseBody shouldBe empty
     recorded.head.errorMessage.value should include("stream connection failed")
   }

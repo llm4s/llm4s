@@ -1,5 +1,6 @@
 package org.llm4s.reranker
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -14,8 +15,7 @@ class LLMRerankerSpec extends AnyFlatSpec with Matchers {
   private def mockCompletion(content: String): Completion = Completion(
     id = "test-id",
     created = Instant.now(),
-    content = content,
-    model = "test-model",
+    model = ModelName("test-model"),
     message = AssistantMessage(content)
   )
 
@@ -31,9 +31,7 @@ class LLMRerankerSpec extends AnyFlatSpec with Matchers {
       Right(mockCompletion(responseContent))
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -50,9 +48,7 @@ class LLMRerankerSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] =
       Left(RerankError(code = Some("500"), message = "Mock error", provider = "mock"))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -322,9 +318,7 @@ class LLMRerankerSpec extends AnyFlatSpec with Matchers {
       if (calls <= ok) Right(mockCompletion("[0.9]")) else Left(failure)
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

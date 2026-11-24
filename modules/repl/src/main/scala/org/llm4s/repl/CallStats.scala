@@ -23,12 +23,12 @@ final class CallStats private[repl] (
   val model: String,
   val usage: Option[TokenUsage],
   val latency: FiniteDuration,
-  val estimatedCost: Option[Double]
+  val estimatedCost: Option[BigDecimal]
 ) {
 
   override def toString: String = {
     val tokens = usage.map(Render.usage).getOrElse("tokens not reported")
-    val cost   = estimatedCost.map(Render.cost).getOrElse("cost unknown")
+    val cost   = estimatedCost.map(c => Render.cost(c.toDouble)).getOrElse("cost unknown")
     s"$model: $tokens, ${Render.latency(latency)}, $cost"
   }
 }

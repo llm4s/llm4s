@@ -2,8 +2,9 @@
 layout: page
 title: Jev decision model
 description: "Use llm4s-jev, a client for TypeSafe's Jev System One model: send a state and typed questions, and get typed answers your code can act on."
-parent: User Guide
-nav_order: 25
+parent: Core
+nav_order: 119
+grand_parent: User Guide
 ---
 
 # Jev, TypeSafe's decision model
@@ -30,6 +31,7 @@ Set your TypeSafe API key in `TYPESAFE_API_KEY`, the variable TypeSafe's own SDK
 
 ```scala
 import org.llm4s.config.JevConfigLoader
+import org.llm4s.jev.JevClient
 
 // Result[JevClient]: Left(ConfigurationError) when no key is set
 val client = JevConfigLoader.default().flatMap(JevClient(_))
@@ -64,7 +66,9 @@ llm4s.jev {
 Or build a config in code:
 
 ```scala
+import org.llm4s.jev.{ JevClient, JevConfig, JevRetryPolicy }
 import org.llm4s.security.Secret
+import scala.concurrent.duration._
 
 val config = JevConfig(apiKey = Secret("tsk-..."))
   .withModel("jev-1.13.0") // pin the answers; the default is the alias jev-latest
@@ -141,6 +145,9 @@ and needs an LLM provider as well, so the sample stops at the decision.
 `evaluate` blocks and returns every failure as a `Result`:
 
 ```scala
+import org.llm4s.error._
+import scala.concurrent.duration._
+
 def describe(error: LLMError): String = error match {
   case _: ValidationError     => "the request is wrong: fix it, retrying will not help"
   case _: AuthenticationError => "the key was rejected"

@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
@@ -13,13 +13,14 @@ import scala.util.matching.Regex
  * Represents the detected or expected tone of text content.
  * Used by [[ToneValidator]] to enforce tone requirements on LLM output.
  */
-@Stable
+@Experimental
 sealed trait Tone {
 
   /** The tone's display name, as it appears in [[ToneValidator]]'s error and description text. */
   def name: String
 }
 
+@Experimental
 object Tone {
 
   /** Business-appropriate language (e.g. "please", "thank you", "regards"). */
@@ -103,7 +104,7 @@ object Tone {
  *
  * @param allowedTones The tones that pass. An empty set rejects everything; `Tone.all` accepts everything.
  */
-@Stable
+@Experimental
 class ToneValidator(allowedTones: Set[Tone]) extends OutputGuardrail {
 
   /**
@@ -178,6 +179,7 @@ class ToneValidator(allowedTones: Set[Tone]) extends OutputGuardrail {
   )
 }
 
+@Experimental
 object ToneValidator {
 
   private def wholeWords(words: String*): Regex = s"\\b(${words.mkString("|")})\\b".r

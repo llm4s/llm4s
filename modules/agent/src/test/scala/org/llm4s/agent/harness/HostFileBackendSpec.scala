@@ -1,10 +1,12 @@
 package org.llm4s.agent.harness
 
+import org.llm4s.llmconnect.model.ToolCallId
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.graph.GraphTestSupport.testRunContext
 import org.llm4s.agent.graph.HarnessTestSupport.stateOf
-import org.llm4s.agent.graph.{ IdempotencyKey, ReplaySupport, StateUpdate, ToolCallId }
+import org.llm4s.agent.graph.{ ReplaySupport, StateUpdate }
 import org.llm4s.agent.graph.tool.{ Glob, ToolContext }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result

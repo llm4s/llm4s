@@ -4,7 +4,7 @@ title: Configuration in Code
 description: "Configure LLM4S from the config your app already has: a Typesafe Config (Play, Pekko, tests), plain values, ciris or zio-config, no application.conf."
 search_title: "Configure LLM4S from ciris, zio-config or plain values"
 parent: Getting Started
-nav_order: 18
+nav_order: 8
 ---
 
 # Configuration in Code
@@ -39,9 +39,9 @@ in any of the five ways below, and they produce the same client.
 The default. The section and the code that loads it:
 
 ```hocon
+llm4s.defaultProvider = "openai-main"
 llm4s.providers {
-  provider = "openai-main"
-  openai-main { provider = "openai", model = "gpt-4o-mini" }   # the key: OPENAI_API_KEY
+  openai-main { provider = "openai", model = "gpt-5.6-luna" }   # the key: OPENAI_API_KEY
 }
 ```
 
@@ -74,9 +74,9 @@ import org.llm4s.types.Result
 
 // Play: configuration.underlying. Pekko: system.settings.config. A test: a string per case.
 val appConfig: Config = ConfigFactory.parseString(
-  """llm4s.providers {
-    |  provider = "openai-main"
-    |  openai-main { provider = "openai", model = "gpt-4o-mini", apiKey = "sk-tenant-a" }
+  """llm4s.defaultProvider = "openai-main"
+    |llm4s.providers {
+    |  openai-main { provider = "openai", model = "gpt-5.6-luna", apiKey = "sk-tenant-a" }
     |}""".stripMargin
 )
 
@@ -105,12 +105,13 @@ import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
 
 def openAiClient(model: String, apiKey: String, baseUrl: String): Result[LLMClient] =
   for {
     registry <- ModelRegistryService.default()
     given ModelRegistryService = registry
-    config <- OpenAIConfig.fromValues(model, Secret(apiKey), baseUrl)
+    config <- OpenAIConfig.fromValues(ModelName(model), Secret(apiKey), BaseUrl(baseUrl))
     client <- LLMConnect.getClient(config)
   } yield client
 ```
@@ -150,21 +151,26 @@ Each config class has a `DEFAULT_BASE_URL` where the vendor has one. Each module
 ### Embeddings
 
 An embedding provider takes one `EmbeddingProviderConfig` for every vendor (`openai`, `voyage`,
-`jina`, `cohere`, `ollama`); name its arguments, since `baseUrl` and `model` are both strings:
+`jina`, `cohere`, `ollama`), named by its `providerId`; a provider that takes no key leaves `apiKey` out:
 
 ```scala
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 val embedder: Result[EmbeddingClient] = for {
   registry <- ModelRegistryService.default()
   given ModelRegistryService = registry
   client <- EmbeddingClient.from(
-    "voyage",
-    EmbeddingProviderConfig(baseUrl = "https://api.voyageai.com", model = "voyage-3", apiKey = Secret("pa-..."))
+    EmbeddingProviderConfig(
+      providerId = ProviderId("voyage"),
+      baseUrl = BaseUrl("https://api.voyageai.com"),
+      model = ModelName("voyage-3"),
+      apiKey = Some(Secret("pa-..."))
+    )
   )
 } yield client
 ```
@@ -182,13 +188,14 @@ import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
 
 final case class LlmSettings(model: String, apiKey: ciris.Secret[String], baseUrl: String)
 
 val settings: ConfigValue[Effect, LlmSettings] = (
-  env("OPENAI_MODEL").default("gpt-4o-mini"),
+  env("OPENAI_MODEL").default("gpt-5.6-luna"),
   env("OPENAI_API_KEY").secret,
-  env("OPENAI_BASE_URL").default(OpenAIConfig.DEFAULT_BASE_URL)
+  env("OPENAI_BASE_URL").default(OpenAIConfig.DEFAULT_BASE_URL.asUrl)
 ).parMapN(LlmSettings.apply)
 
 def llmClient(s: LlmSettings): IO[LLMClient] =
@@ -196,7 +203,7 @@ def llmClient(s: LlmSettings): IO[LLMClient] =
     (for {
       registry <- ModelRegistryService.default()
       given ModelRegistryService = registry
-      config <- OpenAIConfig.fromValues(s.model, Secret(s.apiKey.value), s.baseUrl)
+      config <- OpenAIConfig.fromValues(ModelName(s.model), Secret(s.apiKey.value), BaseUrl(s.baseUrl))
       client <- LLMConnect.getClient(config)
     } yield client).leftMap(error => new IllegalStateException(error.message))
   )
@@ -217,6 +224,7 @@ import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
 import zio.{ Config, ConfigProvider, ZIO }
 import zio.config.*
 
@@ -224,9 +232,9 @@ final case class LlmSettings(model: String, apiKey: Config.Secret, baseUrl: Stri
 
 // From the environment: OPENAI_MODEL, OPENAI_API_KEY, OPENAI_BASE_URL.
 val descriptor: Config[LlmSettings] =
-  (Config.string("model").withDefault("gpt-4o-mini") ++
+  (Config.string("model").withDefault("gpt-5.6-luna") ++
     Config.secret("api_key") ++
-    Config.string("base_url").withDefault(OpenAIConfig.DEFAULT_BASE_URL))
+    Config.string("base_url").withDefault(OpenAIConfig.DEFAULT_BASE_URL.asUrl))
     .nested("openai")
     .map { case (model, apiKey, baseUrl) => LlmSettings(model, apiKey, baseUrl) }
 
@@ -235,7 +243,7 @@ def llmClient(s: LlmSettings): ZIO[Any, Throwable, LLMClient] =
     .fromEither(for {
       registry <- ModelRegistryService.default()
       given ModelRegistryService = registry
-      config <- OpenAIConfig.fromValues(s.model, Secret(s.apiKey.stringValue), s.baseUrl)
+      config <- OpenAIConfig.fromValues(ModelName(s.model), Secret(s.apiKey.stringValue), BaseUrl(s.baseUrl))
       client <- LLMConnect.getClient(config)
     } yield client)
     .mapError(error => new IllegalStateException(error.message))

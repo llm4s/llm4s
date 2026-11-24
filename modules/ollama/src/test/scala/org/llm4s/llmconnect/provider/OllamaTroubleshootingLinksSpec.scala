@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.NetworkError
 import org.llm4s.error.TroubleshootingLinks.Entry
 import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, ServiceError, TroubleshootingLinks }
@@ -43,7 +45,7 @@ final class OllamaTroubleshootingLinksSpec extends AnyWordSpec with Matchers {
   }
 
   private def config(baseUrl: String): OllamaConfig =
-    OllamaConfig(model = "llama3", baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512)
+    OllamaConfig(model = ModelName("llama3"), baseUrl = BaseUrl(baseUrl), contextWindow = 4096, reserveCompletion = 512)
 
   private def call(baseUrl: String): Result[org.llm4s.llmconnect.model.Completion] =
     new OllamaClient(config(baseUrl)).complete(hello, CompletionOptions())
@@ -79,7 +81,7 @@ final class OllamaTroubleshootingLinksSpec extends AnyWordSpec with Matchers {
       val client = new OllamaClient(config(s"http://127.0.0.1:$port"))
       val errors = Seq(
         client.complete(hello, CompletionOptions()),
-        client.streamComplete(hello, CompletionOptions(), _ => ())
+        client.streamComplete(hello, CompletionOptions())(_ => ())
       ).map(_.left.toOption.getOrElse(fail("expected the call to fail")))
       errors.foreach { error =>
         error shouldBe a[NetworkError]

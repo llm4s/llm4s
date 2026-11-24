@@ -5,7 +5,8 @@ org.llm4s.scalafix.IsRecoverableToTotal
 org.llm4s.scalafix.MovedConfigLoaders
 org.llm4s.scalafix.MessageExtractorToTypePattern
 org.llm4s.scalafix.RemovedApis
-org.llm4s.scalafix.Llm4sMigrate_1_0
+org.llm4s.scalafix.Llm4sMigrateFrom_0_5
+org.llm4s.scalafix.Llm4sMigrateFrom_0_6
 org.llm4s.scalafix.CopyToWithSetters_1_0
 org.llm4s.scalafix.CredentialsToSecret
 org.llm4s.scalafix.FromValuesKeyFirst
@@ -19,3 +20,11 @@ org.llm4s.scalafix.AgentStatusGainsTruncated
 org.llm4s.scalafix.CompressionRuleTransform
 org.llm4s.scalafix.AgentCopyToWithSetters
 org.llm4s.scalafix.ResultSyntaxMoved
+org.llm4s.scalafix.ProviderConfigNewtypes
+org.llm4s.scalafix.SamplingOptionsOptional
+org.llm4s.scalafix.CompletionFromMessage
+org.llm4s.scalafix.MessageAndConversationShapes
+org.llm4s.scalafix.ClientEntryPoints
+org.llm4s.scalafix.ToolFunctionOneTypeParameter
+org.llm4s.scalafix.ToolCallIdTyped
+org.llm4s.scalafix.ModelIdNewtypes

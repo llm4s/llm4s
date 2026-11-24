@@ -14,12 +14,12 @@ import org.llm4s.toolapi.ToolFunction
  * `CompletionOptions` gains a field that is in neither list, so each new field is a decision.
  */
 final private[caching] case class CompletionCacheKey(
-  temperature: Double,
-  topP: Double,
+  temperature: Option[Double],
+  topP: Option[Double],
   maxTokens: Option[Int],
-  presencePenalty: Double,
-  frequencyPenalty: Double,
-  tools: Seq[ToolFunction[?, ?]],
+  presencePenalty: Option[Double],
+  frequencyPenalty: Option[Double],
+  tools: Seq[ToolFunction[?]],
   reasoning: Option[ReasoningEffort],
   thinking: Option[Thinking],
   responseFormat: Option[ResponseFormat]

@@ -29,7 +29,7 @@ object MyApp extends ZIOAppDefault {
 
 ## Obtaining the client
 
-`LLMClientZ.layer` loads the default provider with `Llm4sConfig.defaultProvider()`, builds the client and releases it when the scope ends, so `llm4s.providers.provider` must name a section in your `application.conf`. If you already hold an `LLMClient`, wrap it with `LLMClientZ(client)`. `client.agent(id)(configure)` builds an `AgentZ` from `Agent.builder(id, client)` with `configure` applied.
+`LLMClientZ.layer` loads the default provider with `Llm4sConfig.defaultProvider()`, builds the client and releases it when the scope ends, so `llm4s.defaultProvider` must name a section in your `application.conf`. If you already hold an `LLMClient`, wrap it with `LLMClientZ(client)`. `client.agent(id)(configure)` builds an `AgentZ` from `Agent.builder(id, client)` with `configure` applied.
 
 ## Errors
 

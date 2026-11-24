@@ -1,11 +1,18 @@
 package org.llm4s.config
 
 // scalafix:off DisableSyntax.NoConfigFactory
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import com.typesafe.config.ConfigFactory
 // scalafix:on DisableSyntax.NoConfigFactory
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
+  EmbeddingConfigSpec,
+  EmbeddingProviderDescriptor,
+  ProviderRegistry
+}
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
@@ -40,8 +47,7 @@ class Llm4sConfigTextModelSpec extends AnyWordSpec with Matchers with EitherValu
           .textEmbeddingModel()(using ProviderRegistry.default.withEmbeddingProvider(FixtureEmbeddings))
           .value
 
-        settings.provider shouldBe "fixturelocal"
-        settings.modelName shouldBe "fixture-encoder"
+        settings.name shouldBe ModelName("fixture-encoder")
         settings.dimensions shouldBe 512
       }
     }
@@ -64,14 +70,14 @@ class Llm4sConfigTextModelSpec extends AnyWordSpec with Matchers with EitherValu
   private object FixtureEmbeddings extends EmbeddingProviderDescriptor {
     val id: ProviderId = ProviderId("fixturelocal")
 
-    override val modelDimensions: Map[String, Int] = Map("fixture-encoder" -> 512)
+    override val modelDimensions: Map[ModelName, Int] = Map(ModelName("fixture-encoder") -> 512)
 
     override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
       requiresApiKey = false,
-      defaultBaseUrl = Some("http://localhost:9999")
+      defaultBaseUrl = Some(BaseUrl("http://localhost:9999"))
     )
 
-    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
       Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
   }
 }

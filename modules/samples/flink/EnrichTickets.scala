@@ -120,14 +120,14 @@ object EnrichTickets {
     (routed, routed.getSideOutput(DeadLetters))
   }
 
-  /** The client from `application.conf` (llm4s.providers.provider), with retries, a deadline and a rate limit. */
+  /** The client from `application.conf` (llm4s.defaultProvider), with retries, a deadline and a rate limit. */
   def configuredClient(): Result[LLMClient] = {
     val registry = ProviderRegistry.default
     for {
       models <- Llm4sConfig.modelRegistryService()
       config <- Llm4sConfig.defaultProvider()(using registry)
       client <- LLMConnect.getClient(config)(using models, registry)
-    } yield new ReliableClient(
+    } yield ReliableClient(
       client,
       "flink-example",
       ReliabilityConfig(

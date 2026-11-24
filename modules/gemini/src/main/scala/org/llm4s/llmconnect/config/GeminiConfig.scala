@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -33,8 +33,8 @@ import org.llm4s.types.Result
 @Stable
 final case class GeminiConfig private (
   apiKey: Secret,
-  model: String,
-  baseUrl: String,
+  model: ModelName,
+  baseUrl: BaseUrl,
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
@@ -42,16 +42,18 @@ final case class GeminiConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                     = ProviderId("gemini")
-  override def endpointUrl: Option[String]                                = Some(baseUrl)
-  override def withModel(model: String): GeminiConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): GeminiConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): GeminiConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): GeminiConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                  = ProviderId("gemini")
+  override def endpointUrl: Option[BaseUrl]                            = Some(baseUrl)
+  override def withModel(model: ModelName): GeminiConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): GeminiConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[GeminiConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): GeminiConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): GeminiConfig                    = copy(apiKey = apiKey)
-  def withBaseUrl(baseUrl: String): GeminiConfig                  = copy(baseUrl = baseUrl)
+  def withBaseUrl(baseUrl: BaseUrl): GeminiConfig                 = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): GeminiConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): GeminiConfig = copy(reserveCompletion = reserveCompletion)
   def withGoogleSearch(enabled: Boolean): GeminiConfig            = copy(googleSearch = enabled)
@@ -68,7 +70,7 @@ object GeminiConfig {
    * This was `DefaultConfig.DEFAULT_GEMINI_BASE_URL` in `llm4s-core` until the
    * provider moved to `llm4s-gemini` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
    */
-  val DEFAULT_BASE_URL: String = "https://generativelanguage.googleapis.com/v1beta"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://generativelanguage.googleapis.com/v1beta")
 
   private val standardReserve = 8192
   private val DefaultApiPath  = "/v1beta"
@@ -79,8 +81,8 @@ object GeminiConfig {
    */
   def apply(
     apiKey: Secret,
-    model: String,
-    baseUrl: String,
+    model: ModelName,
+    baseUrl: BaseUrl,
     contextWindow: Int,
     reserveCompletion: Int,
     timeouts: ProviderTimeouts = ProviderTimeouts.default,
@@ -105,19 +107,19 @@ object GeminiConfig {
    * (1M tokens for current Gemini models); set them, and the rest, with the `with*` setters, or use
    * [[fromValues]] to consult the bundled model catalogue.
    */
-  def apply(apiKey: Secret, model: String): GeminiConfig = {
-    val (cw, rc) = geminiFallback(model)
+  def apply(apiKey: Secret, model: ModelName): GeminiConfig = {
+    val ContextLimits(cw, rc) = geminiFallback(model)
     apply(apiKey, model, DEFAULT_BASE_URL, cw, rc)
   }
 
-  private def geminiFallback(modelName: String): (Int, Int) =
-    modelName match {
-      case name if name.contains("gemini-2")     => (1048576, standardReserve)
-      case name if name.contains("gemini-1.5")   => (1048576, standardReserve)
-      case name if name.contains("gemini-1.0")   => (32768, standardReserve)
-      case name if name.contains("gemini-pro")   => (1048576, standardReserve)
-      case name if name.contains("gemini-flash") => (1048576, standardReserve)
-      case _                                     => (1048576, standardReserve)
+  private def geminiFallback(modelName: ModelName): ContextLimits =
+    modelName.asString match {
+      case name if name.contains("gemini-2")     => ContextLimits(1048576, standardReserve)
+      case name if name.contains("gemini-1.5")   => ContextLimits(1048576, standardReserve)
+      case name if name.contains("gemini-1.0")   => ContextLimits(32768, standardReserve)
+      case name if name.contains("gemini-pro")   => ContextLimits(1048576, standardReserve)
+      case name if name.contains("gemini-flash") => ContextLimits(1048576, standardReserve)
+      case _                                     => ContextLimits(1048576, standardReserve)
     }
 
   /**
@@ -129,17 +131,17 @@ object GeminiConfig {
    * @param baseUrl   API base URL; must be non-empty.
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     apiKey: Secret,
-    baseUrl: String
+    baseUrl: BaseUrl
   )(using resolver: ContextWindowResolver): Result[GeminiConfig] =
     for {
       _ <- ProviderConfig.nonEmpty("Gemini", "apiKey", apiKey.reveal)
-      _ <- ProviderConfig.nonEmpty("Gemini", "baseUrl", baseUrl)
+      _ <- ProviderConfig.nonEmpty("Gemini", "baseUrl", baseUrl.asUrl)
     } yield {
       val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
-      val (cw, rc) = resolver.resolve(
-        lookupProviders = Seq("gemini", "google"),
+      val ContextLimits(cw, rc) = resolver.resolve(
+        lookupProviders = Seq(ProviderId("gemini"), ProviderId("google")),
         modelName = modelName,
         defaultContextWindow = 1048576,
         defaultReserve = standardReserve,
@@ -154,9 +156,9 @@ object GeminiConfig {
       )
     }
 
-  private def normalizeBaseUrl(baseUrl: String): String = {
-    val trimmed = baseUrl.trim.stripSuffix("/")
-    if trimmed.matches(""".*/v\d+(?:alpha|beta)?$""") then trimmed
-    else s"$trimmed$DefaultApiPath"
+  private def normalizeBaseUrl(baseUrl: BaseUrl): BaseUrl = {
+    val trimmed = baseUrl.asUrl.trim.stripSuffix("/")
+    if trimmed.matches(""".*/v\d+(?:alpha|beta)?$""") then BaseUrl(trimmed)
+    else BaseUrl(s"$trimmed$DefaultApiPath")
   }
 }

@@ -38,7 +38,7 @@ class BedrockServiceTierSpec extends AnyWordSpec with Matchers {
             empty
         }
         client
-          .streamComplete(conversation, CompletionOptions().withServiceTier(ServiceTier.Flex), _ => ())
+          .streamComplete(conversation, CompletionOptions().withServiceTier(ServiceTier.Flex))(_ => ())
           .toOption
           .value
           .adjustments shouldBe empty
@@ -115,7 +115,7 @@ class BedrockServiceTierSpec extends AnyWordSpec with Matchers {
           Some(ServiceTier.Other("reserved")),
           None
         )
-        client.streamComplete(conversation, CompletionOptions(), _ => ()).toOption.value.servedTier shouldBe
+        client.streamComplete(conversation, CompletionOptions())(_ => ()).toOption.value.servedTier shouldBe
           Some(ServiceTier.Priority)
         client.close()
       }

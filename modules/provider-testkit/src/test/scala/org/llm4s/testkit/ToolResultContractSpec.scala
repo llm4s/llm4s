@@ -1,5 +1,6 @@
 package org.llm4s.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.SimpleError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.LLMClient
@@ -22,11 +23,11 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
       case u: UserMessage      => ujson.Obj("role" -> "user", "content" -> u.content)
       case SystemMessage(text) => ujson.Obj("role" -> "system", "content" -> text)
       case t: ToolMessage =>
-        ujson.Obj("role" -> "tool", "tool_call_id" -> t.toolCallId, "content" -> t.content)
+        ujson.Obj("role" -> "tool", "tool_call_id" -> t.toolCallId.asString, "content" -> t.content)
       case a: AssistantMessage =>
         val calls = a.toolCalls.map { c =>
           ujson.Obj(
-            "id"       -> c.id,
+            "id"       -> c.id.asString,
             "type"     -> "function",
             "function" -> ujson.Obj("name" -> c.name, "arguments" -> c.arguments.render())
           )
@@ -44,10 +45,10 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
           acc :+ ujson.Obj("role" -> "user", "content" -> ujson.Arr(ujson.Obj("type" -> "text", "text" -> u.content)))
         case a: AssistantMessage =>
           val text = Option.when(a.content.nonEmpty)(ujson.Obj("type" -> "text", "text" -> a.content)).toSeq
-          val uses = a.toolCalls.map(c => ujson.Obj("type" -> "tool_use", "id" -> c.id, "name" -> c.name))
+          val uses = a.toolCalls.map(c => ujson.Obj("type" -> "tool_use", "id" -> c.id.asString, "name" -> c.name))
           acc :+ ujson.Obj("role" -> "assistant", "content" -> ujson.Arr.from(text ++ uses))
         case t: ToolMessage =>
-          val block = ujson.Obj("type" -> "tool_result", "tool_use_id" -> t.toolCallId, "content" -> t.content)
+          val block = ujson.Obj("type" -> "tool_result", "tool_use_id" -> t.toolCallId.asString, "content" -> t.content)
           acc.lastOption match
             case Some(last)
                 if last("role").str == "user" && last("content").arr.forall(_("type").str == "tool_result") =>
@@ -57,7 +58,7 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
     }
     ujson.Obj("messages" -> ujson.Arr.from(turns))
 
-  private def call(id: String) = ToolCall(id, "lookup", ujson.Obj())
+  private def call(id: String) = ToolCall(ToolCallId(id), "lookup", ujson.Obj())
   private val user             = UserMessage("go")
 
   "every case" should "be a conversation that keeps the contract in both formats" in {
@@ -77,7 +78,7 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
 
   "violations" should "find a call with no result, in either format" in {
     val messages =
-      Seq(user, AssistantMessage(contentOpt = None, toolCalls = Seq(call("a"), call("b"))), ToolMessage("x", "a"))
+      Seq(user, AssistantMessage(text = None, toolCalls = Seq(call("a"), call("b"))), ToolMessage("x", ToolCallId("a")))
     ToolResultContract.violations(OpenAIChat, openAI(messages)) shouldBe
       Vector("message 1: tool call 'b' has no result straight after it")
     ToolResultContract.violations(AnthropicMessages, anthropic(messages)) shouldBe
@@ -87,10 +88,10 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
   it should "find a second result for one call, and a result that answers no call" in {
     val messages = Seq(
       user,
-      AssistantMessage(contentOpt = None, toolCalls = Seq(call("a"))),
-      ToolMessage("x", "a"),
-      ToolMessage("y", "a"),
-      ToolMessage("z", "q")
+      AssistantMessage(text = None, toolCalls = Seq(call("a"))),
+      ToolMessage("x", ToolCallId("a")),
+      ToolMessage("y", ToolCallId("a")),
+      ToolMessage("z", ToolCallId("q"))
     )
     Seq(OpenAIChat -> openAI(messages), AnthropicMessages -> anthropic(messages)).foreach { (format, body) =>
       ToolResultContract.violations(format, body) shouldBe Vector(
@@ -104,9 +105,9 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
     val messages =
       Seq(
         user,
-        AssistantMessage(contentOpt = None, toolCalls = Seq(call("a"))),
+        AssistantMessage(text = None, toolCalls = Seq(call("a"))),
         UserMessage("wait"),
-        ToolMessage("x", "a")
+        ToolMessage("x", ToolCallId("a"))
       )
     ToolResultContract.violations(OpenAIChat, openAI(messages)) shouldBe Vector(
       "message 1: tool call 'a' has no result straight after it",
@@ -121,11 +122,11 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
   it should "pair positionally, so a reused id does not hide a call with no result" in {
     val messages = Seq(
       user,
-      AssistantMessage(contentOpt = None, toolCalls = Seq(call("call_0"))),
-      ToolMessage("first", "call_0"),
+      AssistantMessage(text = None, toolCalls = Seq(call("call_0"))),
+      ToolMessage("first", ToolCallId("call_0")),
       AssistantMessage("done"),
       UserMessage("again"),
-      AssistantMessage(contentOpt = None, toolCalls = Seq(call("call_0")))
+      AssistantMessage(text = None, toolCalls = Seq(call("call_0")))
     )
     // the id-based check is satisfied by the first turn's result
     Message.validateConversation(messages.toList) shouldBe Right(())
@@ -139,8 +140,8 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
     val messages =
       Seq(
         user,
-        AssistantMessage(contentOpt = None, toolCalls = Seq(call("a"), call("a"), call(""))),
-        ToolMessage("x", "a")
+        AssistantMessage(text = None, toolCalls = Seq(call("a"), call("a"), call(""))),
+        ToolMessage("x", ToolCallId("a"))
       )
     ToolResultContract.violations(OpenAIChat, openAI(messages)) shouldBe Vector(
       "message 1: a tool call has a blank id",
@@ -150,7 +151,7 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
 
   it should "count a whitespace-only call id as blank, as the agent does" in {
     val messages =
-      Seq(user, AssistantMessage(contentOpt = None, toolCalls = Seq(call(" "))), ToolMessage("x", " "))
+      Seq(user, AssistantMessage(text = None, toolCalls = Seq(call(" "))), ToolMessage("x", ToolCallId(" ")))
     ToolResultContract.violations(OpenAIChat, openAI(messages)) shouldBe
       Vector("message 1: a tool call has a blank id")
   }
@@ -197,8 +198,8 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
         case None =>
           http
             .post(url, Map("Content-Type" -> "application/json"), encode(rewrite(c.messages)).render(), 10.seconds)
-            .map(_ => Completion("id", Instant.EPOCH, "done", "test", AssistantMessage("done")))
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+            .map(_ => Completion("id", Instant.EPOCH, ModelName("test"), AssistantMessage("done")))
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 1000
     def getReserveCompletion(): Int = 100

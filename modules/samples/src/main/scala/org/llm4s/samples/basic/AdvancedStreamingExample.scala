@@ -87,58 +87,57 @@ object AdvancedStreamingExample {
         println("=" * 60)
         client.streamComplete(
           conversation,
-          CompletionOptions(),
-          onChunk = { chunk =>
-            val chunkTime = System.currentTimeMillis()
-            // Record first chunk timing
-            if (firstChunkTime.isEmpty) {
-              firstChunkTime = Some(chunkTime - startTime)
-              // Print this info to stdout as part of the "story UI" experience
-              println(s"First chunk received in ${firstChunkTime.get}ms\n")
-              println("-" * maxLineLength)
+          CompletionOptions()
+        ) { chunk =>
+          val chunkTime = System.currentTimeMillis()
+          // Record first chunk timing
+          if (firstChunkTime.isEmpty) {
+            firstChunkTime = Some(chunkTime - startTime)
+            // Print this info to stdout as part of the "story UI" experience
+            println(s"First chunk received in ${firstChunkTime.get}ms\n")
+            println("-" * maxLineLength)
+          }
+          chunk.content.foreach { content =>
+            // Track metrics
+            chunkSizes += content.length
+            if (lastChunkTime > 0) {
+              chunkTimes += (chunkTime - lastChunkTime)
             }
-            chunk.content.foreach { content =>
-              // Track metrics
-              chunkSizes += content.length
-              if (lastChunkTime > 0) {
-                chunkTimes += (chunkTime - lastChunkTime)
-              }
-              lastChunkTime = chunkTime
+            lastChunkTime = chunkTime
 
-              // Count words and sentences
-              wordCount += content.split("\\s+").filter(_.nonEmpty).length
-              sentenceCount += content.count(c => c == '.' || c == '!' || c == '?')
-              paragraphCount += content.count(_ == '\n')
+            // Count words and sentences
+            wordCount += content.split("\\s+").filter(_.nonEmpty).length
+            sentenceCount += content.count(c => c == '.' || c == '!' || c == '?')
+            paragraphCount += content.count(_ == '\n')
 
-              // Handle word wrapping for better display
-              val words = (currentLine + content).split(" ")
-              currentLine = ""
+            // Handle word wrapping for better display
+            val words = (currentLine + content).split(" ")
+            currentLine = ""
 
-              words.foreach { word =>
-                if ((currentLine + " " + word).trim.length > maxLineLength) {
-                  println(currentLine)
-                  currentLine = word
-                } else {
-                  currentLine = if (currentLine.isEmpty) word else s"$currentLine $word"
-                }
-              }
-
-              // Handle newlines
-              if (content.contains("\n")) {
+            words.foreach { word =>
+              if ((currentLine + " " + word).trim.length > maxLineLength) {
                 println(currentLine)
-                currentLine = ""
-                content.split("\n").tail.foreach(_ => println())
+                currentLine = word
+              } else {
+                currentLine = if (currentLine.isEmpty) word else s"$currentLine $word"
               }
             }
 
-            // Show spinner for visual feedback during pauses
-            if (chunk.content.isEmpty && chunk.finishReason.isEmpty) {
-              print(s"\r${spinner(spinnerIndex)} Processing...")
-              spinnerIndex = (spinnerIndex + 1) % spinner.length
-              Thread.sleep(50)
+            // Handle newlines
+            if (content.contains("\n")) {
+              println(currentLine)
+              currentLine = ""
+              content.split("\n").tail.foreach(_ => println())
             }
           }
-        )
+
+          // Show spinner for visual feedback during pauses
+          if (chunk.content.isEmpty && chunk.finishReason.isEmpty) {
+            print(s"\r${spinner(spinnerIndex)} Processing...")
+            spinnerIndex = (spinnerIndex + 1) % spinner.length
+            Thread.sleep(50)
+          }
+        }
       }
       _ = {
         if (currentLine.nonEmpty) {

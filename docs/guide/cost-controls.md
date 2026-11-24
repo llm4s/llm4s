@@ -3,8 +3,9 @@ layout: page
 title: Cost controls
 description: "Cut what LLM calls cost in LLM4S: Thinking and ReasoningEffort per provider, provider-side prompt caching, service tiers, and reports of what was not sent."
 search_title: "Control thinking and reasoning effort in Scala"
-parent: User Guide
-nav_order: 60
+parent: Core
+nav_order: 110
+grand_parent: User Guide
 ---
 
 # Cost controls
@@ -30,6 +31,7 @@ does not. llm4s gives you two controls for it, and tells you when a provider cou
 
 ```scala
 import org.llm4s.llmconnect.model._
+import org.llm4s.types.Result
 
 // let the model decide whether to think, at low effort
 val adaptive = CompletionOptions().withThinking(Thinking.Adaptive).withReasoning(ReasoningEffort.Low)

@@ -1,5 +1,6 @@
 package org.llm4s.agent.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.graph.middleware.{ BoundaryResult, ModelContext }
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReference }
@@ -18,6 +19,7 @@ import org.llm4s.llmconnect.model.{
   Conversation,
   StreamedChunk,
   ToolCall,
+  ToolCallId,
   UserMessage
 }
 import org.llm4s.toolapi.Schema
@@ -34,7 +36,7 @@ import java.time.Instant
 object Fixtures {
 
   val completion: Completion =
-    Completion(id = "id", created = Instant.EPOCH, content = "ok", model = "m", message = AssistantMessage(Some("ok")))
+    Completion(id = "id", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage(Some("ok")))
 
   val conversation: Conversation = Conversation(Seq(UserMessage("ping")))
 
@@ -74,7 +76,7 @@ object Fixtures {
   ) extends LLMClient {
     val streamCalls: AtomicInteger                                          = new AtomicInteger(0)
     def complete(c: Conversation, o: CompletionOptions): Result[Completion] = onComplete()
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = {
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] = {
       streamCalls.incrementAndGet()
       onStream(onChunk)
     }
@@ -218,9 +220,10 @@ object Fixtures {
         onComplete = () => {
           val n = calls.getAndIncrement()
           if (n < turns) {
-            val call = ToolCall(s"call-$n", "pinger", ujson.Obj("text" -> "x"))
-            Right(Completion(s"c$n", Instant.EPOCH, "", "m", AssistantMessage(None, Seq(call)), toolCalls = List(call)))
-          } else if (n == turns) Right(Completion(s"c$n", Instant.EPOCH, "done", "m", AssistantMessage(Some("done"))))
+            val call = ToolCall(ToolCallId(s"call-$n"), "pinger", ujson.Obj("text" -> "x"))
+            Right(Completion(s"c$n", Instant.EPOCH, ModelName("m"), AssistantMessage(None, Seq(call))))
+          } else if (n == turns)
+            Right(Completion(s"c$n", Instant.EPOCH, ModelName("m"), AssistantMessage(Some("done"))))
           else boom
         }
       )
@@ -234,7 +237,7 @@ object Fixtures {
         case Right(set) => set
         case Left(e)    => throw new AssertionError(e.message)
       }
-      agentOf(client)(_.withTools(tools))
+      agentOf(client)(_.withToolSet(tools))
     }
 
     /**

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 import org.llm4s.syntax.toLLMError
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
@@ -79,10 +81,10 @@ class VertexAIClient(
 
   protected def clientDescription: String = s"Vertex AI client for model ${config.model}"
   protected def providerName: String      = "vertexai"
-  protected def modelName: String         = config.model
+  protected def modelName: ModelName      = config.model
 
   // thought signatures are replayed only to the provider and model id they were produced by (see ReplayOrigin)
-  private val replayOrigin = ReplayOrigin(providerName, config.model)
+  private val replayOrigin = ReplayOrigin(providerName, config.model.asString)
 
   // the references Vertex AI takes: Cloud Storage objects
   private val fileUri = GeminiParts.vertexFileUri
@@ -119,11 +121,11 @@ class VertexAIClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
-        val thinkingPlan                   = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val thinkingPlan = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
         val (tierHeaders, tierAdjustments) = GeminiServiceTier.vertex(transformed.options)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
           UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options) ++ tierAdjustments
-        adjustmentLog.record(config.model, adjustments)
+        adjustmentLog.record(config.model.asString, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
         val requestText = requestBody.render()
@@ -158,9 +160,7 @@ class VertexAIClient(
       }
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
@@ -179,11 +179,11 @@ class VertexAIClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
-        val thinkingPlan                   = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val thinkingPlan = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
         val (tierHeaders, tierAdjustments) = GeminiServiceTier.vertex(transformed.options)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
           UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options) ++ tierAdjustments
-        adjustmentLog.record(config.model, adjustments)
+        adjustmentLog.record(config.model.asString, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
         val requestText = requestBody.render()
@@ -289,9 +289,6 @@ class VertexAIClient(
                     // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
                     val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
                     val completion = c
-                      .withToolCalls(
-                        c.message.toolCalls.toList
-                      ) // the accumulator keeps streamed calls on the message only
                       .withEstimatedCost(cost)
                       .withCitations(citations.distinct.toList)
                       .withMessage(
@@ -324,6 +321,28 @@ class VertexAIClient(
 
   override def getContextWindow(): Int     = config.contextWindow
   override def getReserveCompletion(): Int = config.reserveCompletion
+
+  /**
+   * Gets the configured publisher model, `GET <base>/publishers/google/models/<model>` (Vertex AI's
+   * `publishers.models.get`), with the OAuth2 token a completion carries. `Right(())` means credentials were found
+   * and exchanged, the regional endpoint answered, took the token and has the model. A refused token is an
+   * `AuthenticationError` and an unknown model a `ServiceError` 404. The project is not checked: the request names
+   * none, so a project the credentials may not call is found only by a completion.
+   */
+  override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
+    authProvider.getAccessToken().flatMap { token =>
+      http
+        .get(
+          s"${config.computedBaseUrl}/publishers/google/models/${config.model}",
+          Map("Authorization" -> s"Bearer $token"),
+          timeout = requestTimeout.min(VertexAIClient.ValidationTimeout)
+        )
+        .flatMap { response =>
+          if (response.statusCode >= 200 && response.statusCode < 300) Right(())
+          else handleErrorResponse(response.statusCode, response.body, response.headers)
+        }
+    }
+  }
 
   private def buildRequestBody(
     conversation: Conversation,
@@ -359,7 +378,7 @@ class VertexAIClient(
 
       case am: AssistantMessage =>
         // Tool call IDs map to function names so the following ToolMessages can be keyed by name
-        am.toolCalls.foreach(tc => toolCallIdToName(tc.id) = tc.name)
+        am.toolCalls.foreach(tc => toolCallIdToName(tc.id.asString) = tc.name)
         // a functionCall part sent with Gemini's own id needs that id echoed on its functionResponse; an empty
         // id is "no id", as GeminiThoughtSignatures.parse and matchesCall read it, even though the signed part
         // goes back verbatim with it
@@ -374,12 +393,12 @@ class VertexAIClient(
             .filter(_.nonEmpty)
             .foreach(callIdsSentWithId += _)
         }
-        if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.contentOpt.isDefined))
+        if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.text.isDefined))
           contents += ujson.Obj("role" -> "model", "parts" -> ujson.Arr(parts: _*))
 
       case tm: ToolMessage =>
         val toolCallId   = tm.toolCallId
-        val functionName = toolCallIdToName.getOrElse(toolCallId, toolCallId)
+        val functionName = toolCallIdToName.getOrElse(toolCallId.asString, toolCallId.asString)
         contents += ujson.Obj(
           "role" -> "user",
           "parts" -> ujson.Arr(
@@ -390,7 +409,7 @@ class VertexAIClient(
                   "response" -> ujson.Obj("result" -> tm.content)
                 )
                 // a populated functionCall.id must come back on the matching functionResponse
-                if (callIdsSentWithId.contains(toolCallId)) response("id") = toolCallId
+                if (callIdsSentWithId.contains(toolCallId.asString)) response("id") = toolCallId.asString
                 response
               }
             )
@@ -398,7 +417,10 @@ class VertexAIClient(
         )
     }
 
-    val generationConfig = ujson.Obj("temperature" -> options.temperature, "topP" -> options.topP)
+    // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
+    val generationConfig = ujson.Obj()
+    options.temperature.foreach(t => generationConfig("temperature") = t)
+    options.topP.foreach(p => generationConfig("topP") = p)
     options.maxTokens.foreach(mt => generationConfig("maxOutputTokens") = mt)
     thinkingConfig.foreach(tc => generationConfig("thinkingConfig") = tc)
 
@@ -427,7 +449,7 @@ class VertexAIClient(
     request
   }
 
-  private[provider] def convertToolToVertexFormat(tool: ToolFunction[_, _]): ujson.Value = {
+  private[provider] def convertToolToVertexFormat(tool: ToolFunction[_]): ujson.Value = {
     val schema = ujson.read(tool.schema.toJsonSchema(false).render())
     schema.obj.remove("strict")
     schema.obj.remove("additionalProperties")
@@ -483,7 +505,7 @@ class VertexAIClient(
         val thinking =
           Option.when(parsed.thought.nonEmpty)(ThinkingBlock.Text(parsed.thought)).toSeq ++ parsed.signatures
         val message = AssistantMessage(
-          contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
+          text = if (textContent.nonEmpty) Some(textContent) else None,
           toolCalls = toolCalls,
           thinking = thinking
         )
@@ -492,9 +514,7 @@ class VertexAIClient(
         Right(
           Completion(
             id = UUID.randomUUID().toString,
-            content = textContent,
             model = config.model,
-            toolCalls = toolCalls.toList,
             created = Instant.now(),
             message = message,
             usage = usageOpt,
@@ -539,7 +559,7 @@ class VertexAIClient(
     headers: Map[String, Seq[String]]
   ): Result[Nothing] = {
     logger.error(s"[VertexAI] Error response: $statusCode")
-    HttpErrorMapper.mapHttpError(statusCode, body, providerName, headers)
+    Left(HttpErrorMapper.toError(statusCode, body, providerName, headers))
   }
 
   private def recordExchange(
@@ -549,13 +569,15 @@ class VertexAIClient(
     result: Result[?]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(config.model),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = responseBody,
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(config.model),
+        responseBody = responseBody
+      ),
+      result
     )
 
   // A client the caller supplied is the caller's to close (#2341).
@@ -569,6 +591,9 @@ object VertexAIClient {
 
   /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
   val DefaultStreamTimeout: FiniteDuration = 10.minutes
+
+  /** The longest `validate()` waits for its one request: ten seconds. */
+  val ValidationTimeout: FiniteDuration = 10.seconds
   import org.llm4s.syntax.toResult
 
   def apply(config: VertexAIConfig)(using ModelRegistryService): Result[VertexAIClient] =

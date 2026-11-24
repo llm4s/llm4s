@@ -1,5 +1,6 @@
 package org.llm4s.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ ContentFilteredError, LLMError, NetworkError, ProcessingError, ServiceError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -38,15 +39,14 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
         .body()
 
     private def callsOf(json: ujson.Value): List[ToolCall] =
-      json.obj.get("calls").toList.flatMap(_.arr).map(c => ToolCall(c("id").str, c("name").str, c("args")))
+      json.obj.get("calls").toList.flatMap(_.arr).map(c => ToolCall(ToolCallId(c("id").str), c("name").str, c("args")))
 
     private def completion(text: String, calls: List[ToolCall], finish: FinishReason): Result[Completion] =
       val broken = calls.exists(_.arguments.objOpt.isEmpty) || (calls.nonEmpty && finish == FinishReason.Length)
       if toolRules && broken then Left(ProcessingError("reference-tool-calls", "malformed tool call"))
       else
         Right(
-          Completion("r", Instant.EPOCH, text, "m", AssistantMessage(Option(text).filter(_.nonEmpty), calls))
-            .withToolCalls(calls)
+          Completion("r", Instant.EPOCH, ModelName("m"), AssistantMessage(Option(text).filter(_.nonEmpty), calls))
             .withFinishReason(finish)
         )
 
@@ -56,7 +56,7 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
         case "filter" => Left(ContentFilteredError.reply("Reference", "filter"))
         case finish   => completion(json("text").str, callsOf(json), mapFinish(finish))
 
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       val events = fetch().linesIterator.filter(_.nonEmpty).map(ujson.read(_)).toList
       val errors = events.flatMap(_.obj.get("error")).flatMap(e => errorEvent(e.str))
       if events.exists(_.obj.get("finish").exists(_.str == "filter")) then
@@ -76,7 +76,7 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
         completion(
           chunks.flatMap(_.content).mkString,
           chunks.flatMap(_.toolCall),
-          chunks.flatMap(_.finishReason).lastOption.getOrElse(FinishReason.Other(""))
+          chunks.flatMap(_.finishReason).lastOption.getOrElse(FinishReason.Unknown)
         )
 
     def getContextWindow(): Int     = 1000

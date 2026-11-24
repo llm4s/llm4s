@@ -1,8 +1,9 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.LLMError
 import org.llm4s.trace.TraceContext
 import upickle.default.ReadWriter
@@ -11,7 +12,7 @@ import java.time.Instant
 
 /**
  * Where a child thread came from (design 4.41): the thread whose run started it (`parent`), the tool call of that run
- * that started it (`call`, the call's [[IdempotencyKey]]), the agent it runs (`agent`), when it was first admitted
+ * that started it (`call`, the call's [[org.llm4s.toolapi.IdempotencyKey]]), the agent it runs (`agent`), when it was first admitted
  * (`startedAt`, by the runtime's clock: [[GraphRuntime.startChild]] stamps it, whatever the caller passed), and how
  * deep it is: `1` for a child of a top-level thread, one more for each level below.
  *
@@ -25,7 +26,7 @@ import java.time.Instant
  * context of the call that drives them. A child thread is driven only through its parent's run: `start`, `recover`, `resume`, `fork`,
  * `updateState` and `deleteThread` on it are refused with [[GraphError.ChildThread]].
  */
-@Stable
+@Experimental
 final case class RunOrigin private (
   parent: ThreadId,
   call: IdempotencyKey,
@@ -42,7 +43,7 @@ final case class RunOrigin private (
   def withTrace(t: TraceContext): RunOrigin         = copy(trace = Some(t))
   def withTrace(t: Option[TraceContext]): RunOrigin = copy(trace = t)
 
-@Stable
+@Experimental
 object RunOrigin:
 
   /** Throws `IllegalArgumentException` for a `depth` below 1: a child is at least one level below its parent. */
@@ -65,7 +66,7 @@ object RunOrigin:
  * One direct child of a thread, as [[Checkpointer.children]] lists it: its id, its [[RunOrigin]], and its latest
  * checkpoint's status, id and creation time.
  */
-@Stable
+@Experimental
 final case class ChildThread private (
   threadId: ThreadId,
   origin: RunOrigin,
@@ -79,7 +80,7 @@ final case class ChildThread private (
   def withLatest(value: String): ChildThread           = copy(latest = value)
   def withUpdatedAt(value: Instant): ChildThread       = copy(updatedAt = value)
 
-@Stable
+@Experimental
 object ChildThread:
 
   def apply(
@@ -109,8 +110,12 @@ object ChildThread:
  * The answer itself is in the thread's state, so `Answered` carries none. A graph that is not an agent turn records
  * `Answered` when it completes and `Failed` when a node blocks it; any graph records `Blocked` for a
  * `GuardrailBlocked` Block and `OutputInvalid` for a `GraphError.OutputInvalid` one.
+ *
+ * An outcome is stored, so it holds no text a guardrail refused (#2853): `Blocked` names the guardrail and never
+ * its reason. `OutputInvalid` and `Failed` do hold error text, which
+ * [[org.llm4s.agent.encryption.EncryptingCheckpointer EncryptingCheckpointer]] seals.
  */
-@Stable
+@Experimental
 enum RunOutcome derives ReadWriter:
 
   /** The run completed with an answer, which is in the thread's state. */
@@ -125,8 +130,12 @@ enum RunOutcome derives ReadWriter:
   /** An agent turn's answer, which is in the thread's state, was cut off at the model's output limit. */
   case Truncated
 
-  /** A guardrail blocked the run: its name and reason. */
-  case Blocked(guardrail: String, reason: String)
+  /**
+   * A guardrail blocked the run: its name. The reason it gave is not stored (#2853) - a reason may quote the text
+   * the guardrail refused - so it is on the result of the run that was blocked and nowhere else: a status rebuilt
+   * from this outcome has none.
+   */
+  case Blocked(guardrail: String)
 
   /**
    * The agent's typed answer failed its output schema twice (`GraphError.OutputInvalid`): every problem it was
@@ -137,12 +146,12 @@ enum RunOutcome derives ReadWriter:
   /** The run settled as a failure: the error's kind (its class's simple name) and message. */
   case Failed(kind: String, message: String)
 
-@Stable
+@Experimental
 object RunOutcome:
 
   /** The outcome of a run a node blocked with `error` ([[NodeResult.Block]]). */
   private[agent] def blocked(error: LLMError): RunOutcome = error match
-    case guardrail: GuardrailBlocked       => Blocked(guardrail.guardrail, guardrail.reason)
+    case guardrail: GuardrailBlocked       => Blocked(guardrail.guardrail)
     case invalid: GraphError.OutputInvalid => OutputInvalid(invalid.errors)
     case other                             => failed(other)
 

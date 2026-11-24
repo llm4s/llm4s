@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
@@ -21,7 +23,7 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
 
   private val plain = Conversation(Seq(UserMessage("Is 91 prime?")))
 
-  private val call = ToolCall("call-1", "get_weather", ujson.Obj("city" -> "Paris"))
+  private val call = ToolCall(ToolCallId("call-1"), "get_weather", ujson.Obj("city" -> "Paris"))
 
   /** A conversation whose assistant turn replays reasoning, so `clear_thinking` is set too. */
   private val replaying = Conversation(
@@ -43,8 +45,8 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
       new ZaiClient(
         ZaiConfig(
           apiKey = Secret("test-key"),
-          model = model,
-          baseUrl = baseUrl,
+          model = ModelName(model),
+          baseUrl = BaseUrl(baseUrl),
           contextWindow = 128000,
           reserveCompletion = 4096
         )
@@ -57,7 +59,7 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
     withServer("/chat/completions") { exchange =>
       sent.set(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8))
       sendSseResponse(exchange, openAISseBody(Seq("No."), model))
-    }(baseUrl => zai(baseUrl).streamComplete(conversation, options, _ => ()).isRight shouldBe true)
+    }(baseUrl => zai(baseUrl).streamComplete(conversation, options)(_ => ()).isRight shouldBe true)
     val streamBody = ujson.read(sent.get)
     completeBody.obj.contains("stream") shouldBe false
     streamBody("stream").bool shouldBe true
@@ -150,7 +152,7 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "report that Thinking.Off still thinks, naming the model, and a level it overrode" in {
-    ZaiDialect.addReasoning(ujson.Obj(), "glm-5.3", off.withReasoning(ReasoningEffort.Medium)) shouldBe List(
+    ZaiDialect.addReasoning(ujson.Obj(), ModelName("glm-5.3"), off.withReasoning(ReasoningEffort.Medium)) shouldBe List(
       RequestAdjustment.Adjusted(RequestOption.Thinking, "Off", "low", "glm-5.3 always thinks"),
       RequestAdjustment.Adjusted(RequestOption.Reasoning, "medium", "low", "thinking = Off takes precedence")
     )
@@ -159,20 +161,36 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
   "Z.ai's reports" should "name only the levels it has no Z.ai level for, not its own scale" in {
     ZaiDialect.addReasoning(
       ujson.Obj(),
-      "glm-5.2",
+      ModelName("glm-5.2"),
       CompletionOptions().withReasoning(ReasoningEffort.High)
     ) shouldBe Nil
-    ZaiDialect.addReasoning(ujson.Obj(), "glm-5.2", CompletionOptions().withReasoning(ReasoningEffort.Minimal)) shouldBe
+    ZaiDialect.addReasoning(
+      ujson.Obj(),
+      ModelName("glm-5.2"),
+      CompletionOptions().withReasoning(ReasoningEffort.Minimal)
+    ) shouldBe
       List(RequestAdjustment.Adjusted(RequestOption.Reasoning, "minimal", "low", "glm-5.2 has no minimal level"))
-    ZaiDialect.addReasoning(ujson.Obj(), "glm-5.3", CompletionOptions().withReasoning(ReasoningEffort.XHigh)) shouldBe
+    ZaiDialect.addReasoning(
+      ujson.Obj(),
+      ModelName("glm-5.3"),
+      CompletionOptions().withReasoning(ReasoningEffort.XHigh)
+    ) shouldBe
       List(RequestAdjustment.Adjusted(RequestOption.Reasoning, "xhigh", "max", "glm-5.3 has no xhigh level"))
   }
 
   it should "call adaptive thinking not needed on a GLM model, and drop a budget" in {
-    ZaiDialect.addReasoning(ujson.Obj(), "glm-4.7", CompletionOptions().withThinking(Thinking.Adaptive)) shouldBe
+    ZaiDialect.addReasoning(
+      ujson.Obj(),
+      ModelName("glm-4.7"),
+      CompletionOptions().withThinking(Thinking.Adaptive)
+    ) shouldBe
       List(RequestAdjustment.NotNeeded(RequestOption.Thinking, "glm-4.7 thinks by default"))
     ZaiDialect
-      .addReasoning(ujson.Obj(), "glm-4.7", CompletionOptions().withThinking(Thinking.budget(4096).toOption.get))
+      .addReasoning(
+        ujson.Obj(),
+        ModelName("glm-4.7"),
+        CompletionOptions().withThinking(Thinking.budget(4096).toOption.get)
+      )
       .map(_.option) shouldBe List(RequestOption.Thinking)
   }
 

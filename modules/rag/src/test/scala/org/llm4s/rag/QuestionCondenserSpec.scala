@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ NetworkError, ValidationError }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
@@ -26,8 +27,7 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
       Completion(
         id = "c",
         created = Instant.EPOCH,
-        content = text,
-        model = "mock-model",
+        model = ModelName("mock-model"),
         message = AssistantMessage(text),
         usage = Some(TokenUsage(4, 3, 7))
       )
@@ -38,9 +38,7 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
         condensed.map(completion)
       else Right(completion("42"))
     }
-    override def streamComplete(
-      conversation: Conversation,
-      opts: CompletionOptions,
+    override def streamComplete(conversation: Conversation, opts: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, opts)
     override def getContextWindow(): Int     = 4096
@@ -67,7 +65,7 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
         |Follow-up question: How much is the second one?
         |
         |Standalone question:""".stripMargin
-    client.options.head.temperature shouldBe 0.0
+    client.options.head.temperature shouldBe Some(0.0)
   }
 
   it should "send only the latest messages with text, leaving out tool messages and tool-call-only replies" in {
@@ -75,8 +73,8 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
     val long = Seq(
       UserMessage("first"),
       AssistantMessage("one"),
-      AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("t1", "lookup", ujson.Obj()))),
-      ToolMessage("{}", "t1"),
+      AssistantMessage(text = None, toolCalls = Seq(ToolCall(ToolCallId("t1"), "lookup", ujson.Obj()))),
+      ToolMessage("{}", ToolCallId("t1")),
       UserMessage("second"),
       AssistantMessage("two")
     )
@@ -89,7 +87,7 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
 
   it should "use a custom prompt and options" in {
     val client = new ScriptedClient
-    val opts   = CompletionOptions(temperature = 0.3)
+    val opts   = CompletionOptions(temperature = Some(0.3))
     QuestionCondenser.llm(client, opts, systemPrompt = "Condense.").condense("Q?", history).isRight shouldBe true
     client.conversations.head.messages.head.content shouldBe "Condense."
     client.options.head shouldBe opts
@@ -137,7 +135,7 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
     val tracer = new Recording
     val config =
       RAGConfig.default.withLLM(client).withQuestionCondenser(QuestionCondenser.llm(client)).withTracing(tracer)
-    val rag = RAG.buildWithClient(config, new EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
+    val rag = RAG.buildWithClient(config, EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
     try {
       rag.ingestText("The blue widget costs 42.", "doc1").fold(e => fail(e.message), identity)
       Embeddings.inputs.clear()

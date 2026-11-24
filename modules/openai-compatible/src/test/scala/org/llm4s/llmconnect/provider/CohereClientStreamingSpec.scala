@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.AuthenticationError
 import org.llm4s.llmconnect.config.CohereConfig
@@ -26,7 +28,8 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVal
 
   private val path = "/compatibility/v1/chat/completions"
 
-  private def config(baseUrl: String) = CohereConfig(Secret("test-key"), "command-a-03-2025", baseUrl, 256000, 4096)
+  private def config(baseUrl: String) =
+    CohereConfig(Secret("test-key"), ModelName("command-a-03-2025"), BaseUrl(baseUrl), 256000, 4096)
 
   private def event(delta: String, finish: String = "null", usage: String = ""): String =
     s"""data: {"id":"c-s","object":"chat.completion.chunk","created":1700000000,"model":"command-a-03-2025",""" +
@@ -50,7 +53,7 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVal
     } { root =>
       val chunks = ListBuffer.empty[StreamedChunk]
       val completion = new CohereClient(config(s"$root/compatibility/v1"))
-        .streamComplete(Conversation(Seq(UserMessage("Write a haiku"))), CompletionOptions(), chunks += _)
+        .streamComplete(Conversation(Seq(UserMessage("Write a haiku"))), CompletionOptions())(chunks += _)
         .value
 
       completion.content shouldBe "Recursive loops"
@@ -76,7 +79,7 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVal
       )
     } { root =>
       val completion = new CohereClient(config(s"$root/compatibility/v1"))
-        .streamComplete(Conversation(Seq(UserMessage("Next flight?"))), CompletionOptions(), _ => ())
+        .streamComplete(Conversation(Seq(UserMessage("Next flight?"))), CompletionOptions())(_ => ())
         .value
 
       completion.toolCalls.map(tc => (tc.id, tc.name, tc.arguments)) shouldBe List(
@@ -87,7 +90,7 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVal
   it should "reach the compatibility endpoint from a configured native API root" in
     withServer(path)(exchange => sendSseResponse(exchange, sse(event("""{"content":"hi"}""", "\"stop\"")))) { root =>
       new CohereClient(config(root))
-        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
         .value
         .content shouldBe "hi"
     }
@@ -101,13 +104,13 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVal
       var chunks = 0
       val result = new CohereClient(
         config(s"$root/compatibility/v1"),
-        exchangeLogging = ProviderExchangeLogging.enabled(sink)
-      ).streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => chunks += 1)
+        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
+      ).streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => chunks += 1)
 
       result.left.value shouldBe an[AuthenticationError]
       chunks shouldBe 0
     }
     recorded should have size 1
-    recorded.head.provider shouldBe "cohere"
+    recorded.head.provider.asString shouldBe "cohere"
   }
 }

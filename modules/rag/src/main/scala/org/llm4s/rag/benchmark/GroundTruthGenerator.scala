@@ -127,7 +127,7 @@ class GroundTruthGenerator(
     )
 
     val completionOptions = CompletionOptions(
-      temperature = options.temperature,
+      temperature = Some(options.temperature),
       maxTokens = Some(options.maxTokens)
     )
 
@@ -212,7 +212,7 @@ class GroundTruthGenerator(
     )
 
     val completionOptions = CompletionOptions(
-      temperature = options.temperature,
+      temperature = Some(options.temperature),
       maxTokens = Some(options.maxTokens)
     )
 

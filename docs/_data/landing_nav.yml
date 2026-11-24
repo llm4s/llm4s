@@ -37,7 +37,7 @@ footer:
       - title: Learning path
         url: /learn/
       - title: Contributing guide
-        url: /reference/contributing
+        url: /contribute/contributing
       - title: Good first issues
         url: https://github.com/llm4s/llm4s/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22
       - title: Google Summer of Code

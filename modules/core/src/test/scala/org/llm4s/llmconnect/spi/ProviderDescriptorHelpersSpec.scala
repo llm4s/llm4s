@@ -1,10 +1,11 @@
 package org.llm4s.llmconnect.spi
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.SharedCredentials
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, IdentitySource }
 import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.security.Secret
 import org.llm4s.testutil.FixtureChatConfig
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
@@ -28,7 +29,7 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
   private val providerName = "my-provider"
   private val providerId   = ProviderId("fixturechat")
 
-  private val specWithDefault = ProviderConfigSpec(defaultBaseUrl = Some("https://default.example.com"))
+  private val specWithDefault = ProviderConfigSpec(defaultBaseUrl = Some(BaseUrl("https://default.example.com")))
   private val specNoDefault   = ProviderConfigSpec()
 
   private def section(
@@ -51,25 +52,25 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
       case Right(other)                    => fail(s"expected a Left, got Right($other)")
 
   /** An incompatible config type used to exercise expectConfig’s type-mismatch error. */
-  private object ForeignConfig extends ProviderConfig:
-    val providerId: ProviderId                   = ProviderId("other")
-    val model: String                            = "foreign-model"
-    val contextWindow: Int                       = 8192
-    val reserveCompletion: Int                   = 1024
-    val endpointUrl: Option[String]              = None
-    def withModel(model: String): ProviderConfig = this
+  private object ForeignConfig extends org.llm4s.testutil.FixedProviderSettings:
+    val providerId: ProviderId                      = ProviderId("other")
+    val model: ModelName                            = ModelName("foreign-model")
+    val contextWindow: Int                          = 8192
+    val reserveCompletion: Int                      = 1024
+    val endpointUrl: Option[BaseUrl]                = None
+    def withModel(model: ModelName): ProviderConfig = this
 
   // ---------------------------------------------------------------------------------------------
   // ProviderDescriptor.expectConfig
   // ---------------------------------------------------------------------------------------------
 
   "expectConfig" should "return the config unchanged when it matches the expected type" in {
-    val config = FixtureChatConfig(apiKey = "k", model = "m")
+    val config = FixtureChatConfig(apiKey = "k", modelName = "m")
     ProviderDescriptor.expectConfig[FixtureChatConfig](providerId, config) shouldBe Right(config)
   }
 
   it should "fail, naming the provider and actual config type, when the expected type differs" in {
-    val config  = FixtureChatConfig(apiKey = "k", model = "m")
+    val config  = FixtureChatConfig(apiKey = "k", modelName = "m")
     val message = expectMessage(ProviderDescriptor.expectConfig[ForeignConfig.type](providerId, config))
     message shouldBe s"Invalid config type FixtureChatConfig for provider ${providerId.asString}"
   }
@@ -96,9 +97,9 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
     result shouldBe Right("eu-west-1")
   }
 
-  it should "fail naming the key and the generic <name> hint when the section omits it" in {
+  it should "fail naming the key and the section it is missing from when the section omits it" in {
     val message = expectMessage(ProviderDescriptor.requireExtra(providerName, section(), "region"))
-    message shouldBe s"Configured provider '$providerName' is missing region (llm4s.providers.<name>.region)"
+    message shouldBe s"Configured provider '$providerName' is missing region (llm4s.providers.$providerName.region)"
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -106,7 +107,7 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
   // ---------------------------------------------------------------------------------------------
 
   private def auth(extras: Map[String, String] = Map.empty): AuthConfig =
-    AuthConfig(IdentitySource.Literal("token"), extras = extras)
+    AuthConfig(IdentitySource.Literal(Secret("token")), extras = extras)
 
   "requireAuthExtra" should "return the declared auth key's value when it is present" in {
     val result =
@@ -151,17 +152,17 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
       section(baseUrl = Some("https://section.example.com")),
       specWithDefault
     )
-    result shouldBe Right("https://section.example.com")
+    result shouldBe Right(BaseUrl("https://section.example.com"))
   }
 
   it should "fall back to the spec's default when the section sets no baseUrl" in {
     ProviderDescriptor.resolveBaseUrl(providerName, section(), specWithDefault) shouldBe
-      Right("https://default.example.com")
+      Right(BaseUrl("https://default.example.com"))
   }
 
-  it should "fail naming the generic <name> hint when neither the section nor the spec has one" in {
+  it should "fail naming the section when neither it nor the spec has a base URL" in {
     val message = expectMessage(ProviderDescriptor.resolveBaseUrl(providerName, section(), specNoDefault))
-    message shouldBe s"Configured provider '$providerName' is missing base URL (llm4s.providers.<name>.baseUrl)"
+    message shouldBe s"Configured provider '$providerName' is missing base URL (llm4s.providers.$providerName.baseUrl)"
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -195,12 +196,12 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
     extras: Seq[ProviderConfigKey] = Seq(ProviderConfigKey.required("region", "the region")),
     apiKeyEnv: Seq[String] = Seq("EXAMPLE_API_KEY"),
     authExtras: Seq[ProviderConfigKey] = Seq(ProviderConfigKey.optional("tokenUrl", "the token URL")),
-    keylessWhen: Option[(String, String)] = Some("authentication" -> "entra-id")
+    keylessWhen: Option[KeylessSetting] = Some(KeylessSetting("authentication", "entra-id"))
   ): ProviderConfigSpec =
     ProviderConfigSpec(
       requiresApiKey,
       requiresBaseUrl,
-      defaultBaseUrl,
+      defaultBaseUrl.map(BaseUrl(_)),
       baseUrlExample,
       baseUrlEnv,
       extras,
@@ -218,12 +219,12 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
   }
 
   "withDefaultBaseUrl" should "set defaultBaseUrl from a String and leave every other field unchanged" in {
-    fullSpec().withDefaultBaseUrl("https://other.example.com") shouldBe
+    fullSpec().withDefaultBaseUrl(BaseUrl("https://other.example.com")) shouldBe
       fullSpec(defaultBaseUrl = Some("https://other.example.com"))
   }
 
   it should "set defaultBaseUrl from an Option, including clearing it with None" in {
-    fullSpec().withDefaultBaseUrl(Some("https://other.example.com")) shouldBe
+    fullSpec().withDefaultBaseUrl(Some(BaseUrl("https://other.example.com"))) shouldBe
       fullSpec(defaultBaseUrl = Some("https://other.example.com"))
     fullSpec().withDefaultBaseUrl(None) shouldBe fullSpec(defaultBaseUrl = None)
   }
@@ -257,12 +258,17 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
     fullSpec().withAuthExtras(newAuthExtras) shouldBe fullSpec(authExtras = newAuthExtras)
   }
 
-  "withKeylessWhen" should "set keylessWhen from a key/value pair and leave every other field unchanged" in {
-    fullSpec().withKeylessWhen("mode", "keyless") shouldBe fullSpec(keylessWhen = Some("mode" -> "keyless"))
+  "withKeylessWhen" should "set keylessWhen from a setting and leave every other field unchanged" in {
+    val keyless = KeylessSetting("mode", "keyless")
+    fullSpec().withKeylessWhen(keyless) shouldBe fullSpec(keylessWhen = Some(keyless))
+    keyless.describe shouldBe "mode = \"keyless\""
+    KeylessSetting("mode", "a", "b", "a").values shouldBe Seq("a", "b")
+    KeylessSetting("mode", "a", "b").describe shouldBe "mode = \"a\" or \"b\""
   }
 
   it should "set keylessWhen from an Option, including clearing it with None" in {
-    fullSpec().withKeylessWhen(Some("mode" -> "keyless")) shouldBe fullSpec(keylessWhen = Some("mode" -> "keyless"))
+    val keyless = KeylessSetting("mode", "keyless")
+    fullSpec().withKeylessWhen(Some(keyless)) shouldBe fullSpec(keylessWhen = Some(keyless))
     fullSpec().withKeylessWhen(None) shouldBe fullSpec(keylessWhen = None)
   }
 
@@ -286,10 +292,11 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
   // ---------------------------------------------------------------------------------------------
 
   "apiKeyAndDefaultBaseUrl" should "require an api key and default the base URL, with the given apiKeyEnv" in {
-    val built = ProviderConfigSpec.apiKeyAndDefaultBaseUrl("https://api.example.com/v1", Seq("EXAMPLE_API_KEY"))
+    val built =
+      ProviderConfigSpec.apiKeyAndDefaultBaseUrl(BaseUrl("https://api.example.com/v1"), Seq("EXAMPLE_API_KEY"))
     built shouldBe ProviderConfigSpec(
       requiresApiKey = true,
-      defaultBaseUrl = Some("https://api.example.com/v1"),
+      defaultBaseUrl = Some(BaseUrl("https://api.example.com/v1")),
       apiKeyEnv = Seq("EXAMPLE_API_KEY")
     )
     built.requiresBaseUrl shouldBe false
@@ -299,6 +306,6 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
   }
 
   it should "default apiKeyEnv to empty when not given" in {
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl("https://api.example.com/v1") shouldBe
-      ProviderConfigSpec(requiresApiKey = true, defaultBaseUrl = Some("https://api.example.com/v1"))
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(BaseUrl("https://api.example.com/v1")) shouldBe
+      ProviderConfigSpec(requiresApiKey = true, defaultBaseUrl = Some(BaseUrl("https://api.example.com/v1")))
   }

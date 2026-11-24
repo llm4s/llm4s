@@ -1,9 +1,16 @@
 package org.llm4s.testutil
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor, Llm4sProviderModule }
+import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
+  EmbeddingConfigSpec,
+  EmbeddingProviderDescriptor,
+  Llm4sProviderModule
+}
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -37,7 +44,6 @@ object FixtureEmbeddingProvider extends EmbeddingProviderDescriptor:
   val DefaultBaseUrl: String = "https://fixtureembedding.invalid/v1"
 
   val ApiKeyEnv: String = "FIXTURE_EMBEDDING_API_KEY"
-  val ModelEnv: String  = "FIXTURE_EMBEDDING_MODEL"
 
   /** The dimensions of every vector the fixture's provider returns. */
   val Dimensions: Int = 4
@@ -46,24 +52,24 @@ object FixtureEmbeddingProvider extends EmbeddingProviderDescriptor:
 
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some(DefaultBaseUrl),
-    apiKeyEnv = Seq(ApiKeyEnv),
-    modelEnv = Some(ModelEnv)
+    defaultBaseUrl = Some(BaseUrl(DefaultBaseUrl)),
+    apiKeyEnv = Seq(ApiKeyEnv)
   )
 
-  override val modelDimensions: Map[String, Int] = Map(
-    "fixture-embed-small" -> 256,
-    "fixture-embed-large" -> 1024
+  override val modelDimensions: Map[ModelName, Int] = Map(
+    ModelName("fixture-embed-small") -> 256,
+    ModelName("fixture-embed-large") -> 1024
   )
 
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
     Right(
       new EmbeddingProvider:
         def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
           Right(
             EmbeddingResponse(
               embeddings = request.input.map(_ => Vector.fill(Dimensions)(0.5)),
-              metadata = Map("provider" -> id.asString, "model" -> config.model, "baseUrl" -> config.baseUrl)
+              metadata =
+                Map("provider" -> id.asString, "model" -> config.model.asString, "baseUrl" -> config.baseUrl.asUrl)
             )
           )
     )

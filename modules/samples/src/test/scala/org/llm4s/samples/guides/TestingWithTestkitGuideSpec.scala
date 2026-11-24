@@ -12,7 +12,8 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
 import upickle.default._
-import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
+import scala.concurrent.duration._
 import scala.collection.mutable.ArrayBuffer
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -70,7 +71,8 @@ class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherV
 
   it should "retry through ReliableClient and then succeed" in {
     val flaky    = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("openai")), Reply.text("recovered"))
-    val reliable = new ReliableClient(flaky, "openai", ReliabilityConfig.default, sleep = _ => ())
+    val quick    = ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))
+    val reliable = ReliableClient(flaky, "openai", quick)
 
     reliable.complete(conversation, options).map(_.content) shouldBe Right("recovered")
     flaky.callCount shouldBe 2
@@ -144,7 +146,7 @@ class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherV
     val client = ScriptedLLMClient.sequence(Reply.text("Hello, world")).withChunkSize(5)
 
     val chunks = ArrayBuffer.empty[StreamedChunk]
-    client.streamComplete(conversation, options, chunks += _)
+    client.streamComplete(conversation, options)(chunks += _)
 
     chunks.flatMap(_.content).mkString shouldBe "Hello, world"
     chunks.last.finishReason shouldBe Some(FinishReason.Stop)
@@ -183,8 +185,8 @@ object TestingWithTestkitGuideSpec {
 
   final case class Temperature(city: String, celsius: Double) derives ReadWriter
 
-  val temperatureTool: Result[ToolFunction[Map[String, Any], Temperature]] =
-    ToolBuilder[Map[String, Any], Temperature](
+  val temperatureTool: Result[ToolFunction[Temperature]] =
+    ToolBuilder[Temperature](
       "get_temperature",
       "Current temperature in a city, in Celsius.",
       Schema

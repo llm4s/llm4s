@@ -3,8 +3,10 @@ layout: page
 title: Spark and Databricks
 description: "Enrich a Spark or Databricks DataFrame with LLM calls from Scala: one client per partition, retries and rate limits, and failed calls kept as data."
 search_title: "Call LLMs from Spark and Databricks with LLM4S"
-parent: User Guide
-nav_order: 32
+parent: RAG and Data
+nav_order: 308
+grand_parent: User Guide
+cites_closed_issues: [1354]
 ---
 
 # Using LLM4S from Spark and Databricks
@@ -152,7 +154,7 @@ once (`spark.executor.cores` x executors, or the `n` of `local[n]`). Bound it wi
 `ReliableClient` wraps each partition's client with retries, a deadline and a local rate limit:
 
 ```scala
-new ReliableClient(
+ReliableClient(
   underlying,
   "spark-example",
   ReliabilityConfig(
@@ -193,4 +195,4 @@ output, on Spark 4.0.1:
 4 rows, 1 with an error
 ```
 
-Without `--fake`, the job calls the provider your `application.conf` names in `llm4s.providers.provider`.
+Without `--fake`, the job calls the provider your `application.conf` names in `llm4s.defaultProvider`.

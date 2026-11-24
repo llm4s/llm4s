@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.core.read.ListAppender
@@ -17,8 +18,8 @@ import java.time.Instant
 
 /**
  * Dedicated coverage for [[NoOpTracing]], the tracer every application gets when tracing is
- * disabled (`TRACING_MODE=none`) and the fallback `Tracing.create` returns when a backend is
- * missing or cannot start (#946).
+ * disabled (`TRACING_MODE=none`), and what a caller falls back to when `Tracing.fromSettings`
+ * reports a backend missing or unable to start (#946).
  *
  * `TracingSpec` already checks that each method returns `Right(())` once, and
  * `TracingEdgeCasesSpec` that `close()` does not throw. This spec covers what those do not:
@@ -33,14 +34,14 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
   private val usage = TokenUsage(promptTokens = 12, completionTokens = 8, totalTokens = 20)
 
-  private val toolCall = ToolCall("call-1", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
+  private val toolCall = ToolCall(ToolCallId("call-1"), "calculator", ujson.Obj("a" -> 1, "b" -> 2))
 
   /** Every kind of message, as an agent run leaves its conversation. */
   private val runMessages = Seq(
     SystemMessage("You are a calculator."),
     UserMessage("What is 1 + 2?"),
     AssistantMessage(None, Seq(toolCall)),
-    ToolMessage("""{"result":3}""", "call-1"),
+    ToolMessage("""{"result":3}""", ToolCallId("call-1")),
     AssistantMessage("3")
   )
 
@@ -49,43 +50,54 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
    * `llm4s-agent`, whose `AgentRunTracingSpec` covers building it.
    */
   private val agentRunEnded =
-    TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", runMessages, UsageSummary())
+    TraceEvent.AgentRunEnded(
+      "thread-1",
+      "run-1",
+      "assistant",
+      TraceEvent.RunStatus.Completed,
+      runMessages,
+      UsageSummary()
+    )
 
   private val completionWithToolCalls = Completion(
     id = "completion-1",
     created = Instant.EPOCH,
-    content = "",
-    model = "test-model",
+    model = ModelName("test-model"),
     message = AssistantMessage(None, Seq(toolCall)).withThinking("add them"),
-    toolCalls = List(toolCall),
     usage = Some(usage.withThinkingTokens(Some(4)).withCachedTokens(Some(2))),
     estimatedCost = Some(0.0001)
   )
 
   /** One of every `TraceEvent` case. */
   private val everyEvent: Seq[TraceEvent] = Seq(
-    TraceEvent.AgentInitialized("What is 1 + 2?", Vector("calculator")),
-    TraceEvent.CompletionReceived("completion-1", "test-model", toolCalls = 1, content = ""),
-    TraceEvent.ToolExecuted("calculator", """{"a":1,"b":2}""", "3", duration = 5.millis, success = true),
-    TraceEvent.ToolExecuted("calculator", "{}", "missing argument 'a'", duration = 1.millis, success = false),
-    TraceEvent.ErrorOccurred(new IllegalStateException("boom", new RuntimeException("cause")), "agent step"),
-    TraceEvent.TokenUsageRecorded(usage, "test-model", "completion"),
+    TraceEvent.CompletionReceived("completion-1", ModelName("test-model"), toolCalls = 1, content = ""),
+    TraceEvent
+      .ToolExecuted("calculator", ToolCallId("""{"a":1,"b":2}""").asString, "3", duration = 5.millis, success = true),
+    TraceEvent.ToolExecuted(
+      "calculator",
+      ToolCallId("{}").asString,
+      "missing argument 'a'",
+      duration = 1.millis,
+      success = false
+    ),
+    TraceEvent.ErrorOccurred.of(new IllegalStateException("boom", new RuntimeException("cause")), "agent step"),
+    TraceEvent.TokenUsageRecorded(usage, ModelName("test-model"), "completion"),
     agentRunEnded,
     TraceEvent.CustomEvent("custom", ujson.Obj("nested" -> ujson.Arr(1, 2, 3))),
-    TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(100, 100), "embed-model", "indexing", inputCount = 4),
-    TraceEvent.CostRecorded(0.002, "test-model", "completion", tokenCount = 20, costType = "total"),
+    TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(100, 100), ModelName("embed-model"), "indexing", inputCount = 4),
+    TraceEvent.CostRecorded(0.002, ModelName("test-model"), "completion", tokenCount = 20, costType = "total"),
     TraceEvent.RAGOperationCompleted("answer", 150.millis, Some(100), Some(12), Some(8), Some(0.003)),
-    TraceEvent.ImageGenerationCompleted("image-model", "provider", "generate", 1, "1024x1024", "hd", 900.millis),
+    TraceEvent.ImageGenerationCompleted(ModelName("image-model"), "generate", 1, "1024x1024", "hd", 900.millis),
     TraceEvent.CacheHit(similarity = 0.97, threshold = 0.9),
     TraceEvent.CacheMiss(TraceEvent.CacheMissReason.TtlExpired)
   )
 
   /**
-   * An exception that fails the test if anything reads it. A tracer that renders the error -
+   * An exception that fails the test if anything reads more than its message, which the event carries. A tracer that renders the error -
    * as `ConsoleTracing` and `LangfuseTracing` do - would call `getMessage` or `getStackTrace`.
    */
   private class UntouchableException extends RuntimeException {
-    override def getMessage: String                      = fail("NoOpTracing read the error's message")
+    override def getMessage: String                      = "untouchable"
     override def getStackTrace: Array[StackTraceElement] = fail("NoOpTracing read the error's stack trace")
     override def getCause: Throwable                     = fail("NoOpTracing read the error's cause")
     override def toString: String                        = fail("NoOpTracing rendered the error")
@@ -100,12 +112,13 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
       tracing.traceToolCall("", "", "", scala.concurrent.duration.Duration.Zero, success = true),
       tracing.traceError(new RuntimeException("no context")),
       tracing.traceError(new IllegalStateException("boom", new RuntimeException("cause")), "agent step"),
-      tracing.traceCompletion(completionWithToolCalls, "test-model"),
-      tracing.traceTokenUsage(usage, "test-model", "completion"),
-      tracing.traceTokenUsage(TokenUsage(0, 0, 0), "test-model", "completion"),
-      tracing.traceTokenUsage(TokenUsage(Int.MaxValue, Int.MaxValue, Int.MaxValue), "test-model", "completion"),
-      tracing.traceEmbeddingUsage(EmbeddingUsage(100, 100), "embed-model", "query", 1),
-      tracing.traceCost(0.002, "test-model", "completion", 20, "total"),
+      tracing.traceCompletion(completionWithToolCalls, ModelName("test-model")),
+      tracing.traceTokenUsage(usage, ModelName("test-model"), "completion"),
+      tracing.traceTokenUsage(TokenUsage(0, 0, 0), ModelName("test-model"), "completion"),
+      tracing
+        .traceTokenUsage(TokenUsage(Int.MaxValue, Int.MaxValue, Int.MaxValue), ModelName("test-model"), "completion"),
+      tracing.traceEmbeddingUsage(EmbeddingUsage(100, 100), ModelName("embed-model"), "query", 1),
+      tracing.traceCost(0.002, ModelName("test-model"), "completion", 20, "total"),
       tracing.traceRAGOperation("search", 12.millis, embeddingTokens = Some(10))
     )
 
@@ -133,13 +146,13 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
     everyEvent.foreach(event => withClue(event.eventType)(tracing.traceEvent(event) shouldBe Right(())))
     // Every case is represented, so a new TraceEvent case shows up here as a missing type.
-    everyEvent.map(_.eventType).distinct should have size 13
+    everyEvent.map(_.eventType).distinct should have size 12
   }
 
   it should "trace agent state as an ordinary event, whatever the state holds" in {
     val tracing = new NoOpTracing()
     val empty   = agentRunEnded.withMessages(Seq.empty)
-    val failed  = agentRunEnded.withStatus("failed")
+    val failed  = agentRunEnded.withStatus(TraceEvent.RunStatus.Failed)
 
     tracing.traceEvent(agentRunEnded) shouldBe Right(())
     tracing.traceEvent(empty) shouldBe Right(())
@@ -149,7 +162,9 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
   it should "succeed for failed tool calls and empty tool call arguments" in {
     val tracing = new NoOpTracing()
 
-    tracing.traceEvent(TraceEvent.ToolExecuted("calculator", "{}", "error", 1.millis, success = false)) shouldBe Right(
+    tracing.traceEvent(
+      TraceEvent.ToolExecuted("calculator", ToolCallId("{}").asString, "error", 1.millis, success = false)
+    ) shouldBe Right(
       ()
     )
     tracing.traceToolCall("", "", "", scala.concurrent.duration.Duration.Zero, success = true) shouldBe Right(())
@@ -161,25 +176,31 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
     tracing.traceError(error) shouldBe Right(())
     tracing.traceError(error, "agent step") shouldBe Right(())
-    tracing.traceEvent(TraceEvent.ErrorOccurred(error, "agent step")) shouldBe Right(())
+    tracing.traceEvent(TraceEvent.ErrorOccurred.of(error, "agent step")) shouldBe Right(())
   }
 
   it should "succeed for completions with tool calls, thinking and no usage" in {
     val tracing = new NoOpTracing()
 
-    tracing.traceCompletion(completionWithToolCalls, "test-model") shouldBe Right(())
+    tracing.traceCompletion(completionWithToolCalls, ModelName("test-model")) shouldBe Right(())
     tracing.traceCompletion(
       completionWithToolCalls.withUsage(None).withMessage(completionWithToolCalls.message.withThinking(Seq.empty)),
-      ""
+      ModelName("")
     ) shouldBe Right(())
   }
 
   it should "succeed for zero and extreme token usage" in {
     val tracing = new NoOpTracing()
 
-    tracing.traceTokenUsage(TokenUsage(0, 0, 0), "test-model", "completion") shouldBe Right(())
-    tracing.traceTokenUsage(TokenUsage(Int.MaxValue, Int.MaxValue, Int.MaxValue), "m", "op") shouldBe Right(())
-    tracing.traceTokenUsage(usage.withThinkingTokens(Some(1)).withCacheCreationTokens(Some(3)), "m", "op") shouldBe
+    tracing.traceTokenUsage(TokenUsage(0, 0, 0), ModelName("test-model"), "completion") shouldBe Right(())
+    tracing.traceTokenUsage(TokenUsage(Int.MaxValue, Int.MaxValue, Int.MaxValue), ModelName("m"), "op") shouldBe Right(
+      ()
+    )
+    tracing.traceTokenUsage(
+      usage.withThinkingTokens(Some(1)).withCacheCreationTokens(Some(3)),
+      ModelName("m"),
+      "op"
+    ) shouldBe
       Right(())
   }
 

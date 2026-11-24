@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.sqlite
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.agent.graph.{ GraphRuntime, ThreadId }
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolOutcome, ToolSet }
@@ -34,16 +35,14 @@ object TextOnlyThreadFixture:
       Schema.`object`[Arg](name).withRequiredField("text", Schema.string("Text"))
     )
 
-  def call(id: String, name: String): ToolCall = ToolCall(id, name, ujson.Obj("text" -> "x"))
+  def call(id: String, name: String): ToolCall = ToolCall(ToolCallId(id), name, ujson.Obj("text" -> "x"))
 
   def completion(message: AssistantMessage): Completion =
     Completion(
       id = "fixture",
       created = Instant.EPOCH,
-      content = message.content,
-      model = "test-model",
+      model = ModelName("test-model"),
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
     )
 
@@ -54,9 +53,7 @@ object TextOnlyThreadFixture:
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       sent = sent :+ conversation.messages.toVector
       completions.lift(index.getAndIncrement()).toRight(ValidationError("scripted", "no completion left"))
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     def getContextWindow(): Int     = 128000
@@ -91,7 +88,7 @@ object TextOnlyThreadFixture:
     Agent
       .builder("assistant", client)
       .withSystemPrompt("You are a fixture.")
-      .withTools(tools)
+      .withToolSet(tools)
       .withRuntime(GraphRuntime(store))
       .build()
       .fold(e => throw new IllegalStateException(e.message), identity)

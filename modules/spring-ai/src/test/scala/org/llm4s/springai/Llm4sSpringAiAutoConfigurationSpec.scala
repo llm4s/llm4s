@@ -22,7 +22,7 @@ class Llm4sSpringAiAutoConfigurationSpec extends AnyFlatSpec with Matchers {
     .withConfiguration(AutoConfigurations.of(classOf[Llm4sAutoConfiguration], classOf[Llm4sSpringAiAutoConfiguration]))
 
   private val fixtureProvider = Seq(
-    "llm4s.providers.provider=fx",
+    "llm4s.default-provider=fx",
     "llm4s.providers.fx.provider=fixturechat",
     "llm4s.providers.fx.model=fixture-model",
     "llm4s.providers.fx.api-key=sk-fixture"

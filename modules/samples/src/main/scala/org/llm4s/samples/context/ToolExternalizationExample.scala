@@ -53,7 +53,7 @@ object ToolExternalizationExample {
   }
 
   private def createTokenCounter(): Result[ConversationTokenCounter] =
-    ConversationTokenCounter.openAI()
+    ConversationTokenCounter.cl100k()
 
   private def runExternalizationTests(tokenCounter: ConversationTokenCounter): Result[ExternalizationResults] = {
     val toolMessages = createSyntheticToolMessages()
@@ -115,7 +115,7 @@ object ToolExternalizationExample {
       "timestamp" -> Str("2024-01-01T00:00:00Z")
     )
 
-    ToolMessage(write(largeJson, indent = 2), "fetch_users_api")
+    ToolMessage(write(largeJson, indent = 2), ToolCallId("fetch_users_api"))
   }
 
   private def createLogOutput(): ToolMessage = {
@@ -128,7 +128,7 @@ object ToolExternalizationExample {
       }
       .mkString("\n")
 
-    ToolMessage(logLines, "system_monitoring")
+    ToolMessage(logLines, ToolCallId("system_monitoring"))
   }
 
   private def createErrorOutput(): ToolMessage = {
@@ -145,7 +145,7 @@ java.sql.SQLException: Connection to database 'production' failed after 30 secon
 	at java.base/java.lang.Thread.run(Thread.java:833)""" +
       (1 to 40).map(i => s"\n	at com.example.deep.nested.Frame$i.method$i(Frame$i.java:${100 + i})").mkString
 
-    ToolMessage(errorContent, "error_diagnostics")
+    ToolMessage(errorContent, ToolCallId("error_diagnostics"))
   }
 
   private def createBinaryOutput(): ToolMessage = {
@@ -154,7 +154,7 @@ java.sql.SQLException: Connection to database 'production' failed after 30 secon
     val base64Data =
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" * 200
 
-    ToolMessage(base64Header + base64Data, "image_generation")
+    ToolMessage(base64Header + base64Data, ToolCallId("image_generation"))
   }
 
   private def createDatabaseOutput(): ToolMessage = {
@@ -164,7 +164,7 @@ java.sql.SQLException: Connection to database 'production' failed after 30 secon
 
     ToolMessage(
       s"Query executed successfully. Results:\nid|name|price|status|category|created\n$queryResult",
-      "database_query"
+      ToolCallId("database_query")
     )
   }
 
@@ -175,14 +175,14 @@ java.sql.SQLException: Connection to database 'production' failed after 30 secon
     tokenCounter: ConversationTokenCounter,
     artifactStore: ArtifactStore
   ): Result[MessageTestResult] = {
-    val originalSize   = ContentSize.fromString(toolMessage.content).bytes
+    val originalSize   = ContentSize.fromString(toolMessage.content).asBytes
     val originalTokens = tokenCounter.countMessage(toolMessage)
 
     logger.debug(s"Testing '$description': $originalSize bytes, $originalTokens tokens")
 
     ToolOutputCompressor.compressToolOutputs(Seq(toolMessage), artifactStore, threshold).map { compressed =>
       val processedMessage = compressed.head
-      val compressedSize   = ContentSize.fromString(processedMessage.content).bytes
+      val compressedSize   = ContentSize.fromString(processedMessage.content).asBytes
       val compressedTokens = tokenCounter.countMessage(processedMessage)
       val wasExternalized  = processedMessage.content.contains("EXTERNALIZED")
 

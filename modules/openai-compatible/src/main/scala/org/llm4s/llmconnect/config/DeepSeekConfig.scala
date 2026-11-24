@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -33,24 +33,26 @@ import org.slf4j.LoggerFactory
 @Stable
 final case class DeepSeekConfig private (
   apiKey: Secret,
-  model: String,
-  baseUrl: String,
+  model: ModelName,
+  baseUrl: BaseUrl,
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                       = ProviderId("deepseek")
-  override def endpointUrl: Option[String]                                  = Some(baseUrl)
-  override def withModel(model: String): DeepSeekConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): DeepSeekConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): DeepSeekConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): DeepSeekConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): DeepSeekConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                    = ProviderId("deepseek")
+  override def endpointUrl: Option[BaseUrl]                              = Some(baseUrl)
+  override def withModel(model: ModelName): DeepSeekConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): DeepSeekConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): DeepSeekConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[DeepSeekConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): DeepSeekConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): DeepSeekConfig                    = copy(apiKey = apiKey)
-  def withBaseUrl(baseUrl: String): DeepSeekConfig                  = copy(baseUrl = baseUrl)
+  def withBaseUrl(baseUrl: BaseUrl): DeepSeekConfig                 = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): DeepSeekConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): DeepSeekConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
@@ -61,7 +63,7 @@ object DeepSeekConfig {
   private val logger          = LoggerFactory.getLogger(getClass)
   private val standardReserve = 8192
 
-  val DEFAULT_BASE_URL: String = "https://api.deepseek.com"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://api.deepseek.com")
 
   /** The context window `apply` uses when none is given; [[fromValues]] resolves the model's own. */
   val DEFAULT_CONTEXT_WINDOW: Int = 128000
@@ -75,8 +77,8 @@ object DeepSeekConfig {
    */
   def apply(
     apiKey: Secret,
-    model: String,
-    baseUrl: String = DEFAULT_BASE_URL,
+    model: ModelName,
+    baseUrl: BaseUrl = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
     timeouts: ProviderTimeouts = ProviderTimeouts.default
@@ -96,22 +98,22 @@ object DeepSeekConfig {
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,
    * which do not see Scala default arguments. Set the rest with the `with*` setters.
    */
-  def apply(apiKey: Secret, model: String): DeepSeekConfig =
+  def apply(apiKey: Secret, model: ModelName): DeepSeekConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
-  private def deepSeekFallback(modelName: String): (Int, Int) =
+  private def deepSeekFallback(modelName: ModelName): ContextLimits =
     // Explicit allowlist based on official DeepSeek API (as of Feb 2026)
     // Source: https://api-docs.deepseek.com/quick_start/pricing
-    modelName.toLowerCase match {
+    modelName.asString.toLowerCase match {
       case "deepseek-chat" | "deepseek/deepseek-chat" | "deepseek-reasoner" | "deepseek/deepseek-reasoner" =>
-        (128000, standardReserve)
+        ContextLimits(128000, standardReserve)
       case "deepseek-chat-r1" | "deepseek/deepseek-chat-r1" | "deepseek-r1-distill" | "deepseek/deepseek-r1-distill" |
           "deepseek-coder" | "deepseek/deepseek-coder" | "deepseek-v3" | "deepseek/deepseek-v3" =>
         logger.warn(s"Legacy/variant model $modelName - may not be available via official API")
-        (128000, standardReserve)
+        ContextLimits(128000, standardReserve)
       case _ =>
         logger.warn(s"Unknown DeepSeek model: $modelName, using conservative 128K fallback")
-        (128000, standardReserve)
+        ContextLimits(128000, standardReserve)
     }
 
   /**
@@ -129,16 +131,16 @@ object DeepSeekConfig {
    *                  [[org.llm4s.config.Llm4sConfig]].
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     apiKey: Secret,
-    baseUrl: String
+    baseUrl: BaseUrl
   )(using resolver: ContextWindowResolver): Result[DeepSeekConfig] =
     for {
       _ <- ProviderConfig.nonEmpty("DeepSeek", "apiKey", apiKey.reveal)
-      _ <- ProviderConfig.nonEmpty("DeepSeek", "baseUrl", baseUrl)
+      _ <- ProviderConfig.nonEmpty("DeepSeek", "baseUrl", baseUrl.asUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
-        lookupProviders = Seq("deepseek"),
+      val ContextLimits(cw, rc) = resolver.resolve(
+        lookupProviders = Seq(ProviderId("deepseek")),
         modelName = modelName,
         defaultContextWindow = 64000,
         defaultReserve = standardReserve,

@@ -1,13 +1,16 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.config.VoyageConfigKeys
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
 import org.llm4s.http.{ HttpClientOptions, HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.llmconnect.model._
+import org.llm4s.error.EmbeddingError
 import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
 import ujson.{ Arr, Obj }
@@ -43,10 +46,9 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some("https://api.voyageai.com/v1"),
+    defaultBaseUrl = Some(BaseUrl("https://api.voyageai.com/v1")),
     // Bound to the shared llm4s.credentials.voyage.apiKey in this module's reference.conf.
-    apiKeyEnv = Seq(VoyageConfigKeys.VOYAGE_API_KEY),
-    modelEnv = Some(VoyageConfigKeys.VOYAGE_EMBEDDING_MODEL)
+    apiKeyEnv = Seq(VoyageConfigKeys.VOYAGE_API_KEY)
   )
 
   /**
@@ -54,18 +56,18 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
    * `output_dimension` request parameter; the client does not send one, so the
    * default is what it gets.
    */
-  override val modelDimensions: Map[String, Int] = Map(
-    "voyage-2"         -> 1024,
-    "voyage-3"         -> 1024,
-    "voyage-3-lite"    -> 512,
-    "voyage-3-large"   -> 1024,
-    "voyage-3.5"       -> 1024,
-    "voyage-3.5-lite"  -> 1024,
-    "voyage-code-2"    -> 1536,
-    "voyage-code-3"    -> 1024,
-    "voyage-finance-2" -> 1024,
-    "voyage-law-2"     -> 1024,
-    "voyage-context-3" -> 1024
+  override val modelDimensions: Map[ModelName, Int] = Map(
+    ModelName("voyage-2")         -> 1024,
+    ModelName("voyage-3")         -> 1024,
+    ModelName("voyage-3-lite")    -> 512,
+    ModelName("voyage-3-large")   -> 1024,
+    ModelName("voyage-3.5")       -> 1024,
+    ModelName("voyage-3.5-lite")  -> 1024,
+    ModelName("voyage-code-2")    -> 1536,
+    ModelName("voyage-code-3")    -> 1024,
+    ModelName("voyage-finance-2") -> 1024,
+    ModelName("voyage-law-2")     -> 1024,
+    ModelName("voyage-context-3") -> 1024
   )
 
   /**
@@ -77,8 +79,13 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     case InputPurpose.Query    => "query"
   }
 
-  /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
+  /**
+   * Builds the provider for the SPI; see [[fromConfig]] for the direct route. Requests go through the caller's
+   * HTTP client when `EmbeddingClientOptions` supplied one, else through one built from the config's proxy and
+   * TLS settings.
+   */
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+    Right(create(config, context.httpClient.getOrElse(Llm4sHttpClient.create(HttpClientOptions(config.network)))))
 
   /** Creates an [[EmbeddingProvider]] backed by Voyage AI using the given configuration. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
@@ -93,7 +100,7 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
       override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
         CancelledError.attempt("voyage.embed") {
-          val model = request.model.name
+          val model = request.model.name.asString
           val input = request.input
           val payload = Obj(
             "input"      -> Arr.from(input),
@@ -101,7 +108,7 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
             "input_type" -> inputTypeFor(request.purpose)
           )
 
-          val url = s"${cfg.baseUrl.stripSuffix("/")}/embeddings"
+          val url = s"${cfg.baseUrl.asUrl.stripSuffix("/")}/embeddings"
           logger.debug(s"[VoyageAIEmbeddingProvider] POST $url model=$model inputs=${input.size}")
 
           // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
@@ -117,7 +124,12 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
               .currentApiKey()
               .flatMap(key =>
                 httpClient
-                  .post(url, headers(key.reveal), payload.render(), timeout = cfg.timeouts.requestOr(120.seconds))
+                  .post(
+                    url,
+                    headers(key.fold("")(_.reveal)),
+                    payload.render(),
+                    timeout = cfg.timeouts.requestOr(120.seconds)
+                  )
                   .left
                   .map {
                     // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)

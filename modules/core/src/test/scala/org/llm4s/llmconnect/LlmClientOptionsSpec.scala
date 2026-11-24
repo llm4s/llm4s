@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import java.time.Instant
 
@@ -19,9 +21,9 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
     LlmClientOptions.default.exchangeLogging shouldBe ProviderExchangeLogging.Disabled
   }
 
-  test("ProviderExchangeLogging.enabled stores the provided sink") {
+  test("ProviderExchangeLogging.Enabled stores the provided sink") {
     val sink    = ProviderExchangeSink.noop
-    val enabled = ProviderExchangeLogging.enabled(sink)
+    val enabled = ProviderExchangeLogging.Enabled(sink)
 
     enabled shouldBe ProviderExchangeLogging.Enabled(sink)
   }
@@ -36,7 +38,7 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
       )
       .value
     val options = LlmClientOptions(
-      exchangeLogging = ProviderExchangeLogging.enabled(ProviderExchangeSink.noop)
+      exchangeLogging = ProviderExchangeLogging.Enabled(ProviderExchangeSink.noop)
     )
 
     val res = LLMConnect.getClient(cfg, options)
@@ -53,7 +55,7 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
       )
       .value
     val options = LlmClientOptions(
-      exchangeLogging = ProviderExchangeLogging.enabled(ProviderExchangeSink.noop)
+      exchangeLogging = ProviderExchangeLogging.Enabled(ProviderExchangeSink.noop)
     )
 
     val res = LLMConnect.getClient(FixtureChatProvider.id, cfg, options)
@@ -67,13 +69,12 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
 
     val exchange = ProviderExchange(
       exchangeId = "ex-1",
-      provider = "ollama",
-      model = Some("gemma3:27b"),
+      provider = ProviderId("ollama"),
+      model = Some(ModelName("gemma3:27b")),
       requestId = Some("req-1"),
       correlationId = Some("corr-1"),
       startedAt = startedAt,
       completedAt = completedAt,
-      duration = 2000.millis,
       outcome = ProviderExchangeOutcome.Success,
       requestBody = """{"prompt":"hello"}""",
       responseBody = Some("""{"response":"hi"}"""),
@@ -94,7 +95,7 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("LlmClientOptions' setters each change one field") {
-    val logging = ProviderExchangeLogging.enabled(ProviderExchangeSink.noop)
+    val logging = ProviderExchangeLogging.Enabled(ProviderExchangeSink.noop)
     val metrics = new org.llm4s.metrics.MetricsCollector {
       override def observeRequest(
         provider: String,

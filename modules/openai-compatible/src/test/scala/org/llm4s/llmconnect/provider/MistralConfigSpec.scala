@@ -1,5 +1,8 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.scalatest.EitherValues
@@ -17,14 +20,18 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers with EitherValues:
 
   "MistralConfig.fromValues" should "reject an empty API key" in {
     MistralConfig
-      .fromValues("mistral-small-latest", apiKey = Secret("   "), baseUrl = "https://api.mistral.ai")
+      .fromValues(
+        ModelName("mistral-small-latest"),
+        apiKey = Secret("   "),
+        baseUrl = BaseUrl("https://api.mistral.ai")
+      )
       .left
       .value shouldBe a[ConfigurationError]
   }
 
   it should "reject an empty base URL" in {
     MistralConfig
-      .fromValues("mistral-small-latest", apiKey = Secret("key"), baseUrl = "  ")
+      .fromValues(ModelName("mistral-small-latest"), apiKey = Secret("key"), baseUrl = BaseUrl("  "))
       .left
       .value shouldBe a[ConfigurationError]
   }
@@ -32,11 +39,15 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers with EitherValues:
   it should "produce a valid config with non-empty inputs" in {
     val cfg =
       MistralConfig
-        .fromValues("mistral-small-latest", apiKey = Secret("sk-test"), baseUrl = "https://api.mistral.ai")
+        .fromValues(
+          ModelName("mistral-small-latest"),
+          apiKey = Secret("sk-test"),
+          baseUrl = BaseUrl("https://api.mistral.ai")
+        )
         .value
     cfg.apiKey.reveal shouldBe "sk-test"
-    cfg.model shouldBe "mistral-small-latest"
-    cfg.baseUrl shouldBe "https://api.mistral.ai"
+    cfg.model.asString shouldBe "mistral-small-latest"
+    cfg.baseUrl shouldBe BaseUrl("https://api.mistral.ai")
     cfg.contextWindow should be > 0
     cfg.reserveCompletion should be > 0
   }
@@ -46,13 +57,13 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers with EitherValues:
   "MistralConfig context window fallback" should "return conservative fallback from registry for mistral-small models" in {
     val canonical = ModelRegistryService
       .default()
-      .flatMap(_.lookup("mistral", "mistral-small-latest"))
+      .flatMap(_.lookup(ProviderId("mistral"), ModelName("mistral-small-latest")))
       .getOrElse(fail("mistral-small-latest not found via service"))
 
     val maxTokens = canonical.contextWindow.getOrElse(fail("contextWindow not defined for mistral-small-latest"))
     val cfg =
       MistralConfig
-        .fromValues("mistral-small-latest", apiKey = Secret("key"), baseUrl = MistralConfig.DEFAULT_BASE_URL)
+        .fromValues(ModelName("mistral-small-latest"), apiKey = Secret("key"), baseUrl = MistralConfig.DEFAULT_BASE_URL)
         .value
     cfg.contextWindow should be <= maxTokens
   }
@@ -60,13 +71,13 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers with EitherValues:
   it should "return conservative fallback from registry for codestral models" in {
     val canonical = ModelRegistryService
       .default()
-      .flatMap(_.lookup("mistral", "codestral-latest"))
+      .flatMap(_.lookup(ProviderId("mistral"), ModelName("codestral-latest")))
       .getOrElse(fail("codestral-latest not found via service"))
 
     val maxTokens = canonical.contextWindow.getOrElse(fail("contextWindow not defined for codestral-latest"))
     val cfg =
       MistralConfig
-        .fromValues("codestral-latest", apiKey = Secret("key"), baseUrl = MistralConfig.DEFAULT_BASE_URL)
+        .fromValues(ModelName("codestral-latest"), apiKey = Secret("key"), baseUrl = MistralConfig.DEFAULT_BASE_URL)
         .value
     cfg.contextWindow should be <= maxTokens
   }
@@ -74,7 +85,11 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers with EitherValues:
   it should "return default 128000 for unknown model names" in {
     val cfg =
       MistralConfig
-        .fromValues("some-unknown-model-xyz", apiKey = Secret("key"), baseUrl = MistralConfig.DEFAULT_BASE_URL)
+        .fromValues(
+          ModelName("some-unknown-model-xyz"),
+          apiKey = Secret("key"),
+          baseUrl = MistralConfig.DEFAULT_BASE_URL
+        )
         .value
     cfg.contextWindow shouldBe 128000
     cfg.reserveCompletion shouldBe 4096
@@ -85,8 +100,8 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers with EitherValues:
   "MistralConfig.toString" should "redact the API key" in {
     val cfg = MistralConfig(
       apiKey = Secret("sk-secret-key-12345"),
-      model = "mistral-small-latest",
-      baseUrl = "https://api.mistral.ai",
+      model = ModelName("mistral-small-latest"),
+      baseUrl = BaseUrl("https://api.mistral.ai"),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -99,5 +114,5 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers with EitherValues:
   // ============ DEFAULT_BASE_URL ============
 
   "MistralConfig.DEFAULT_BASE_URL" should "point to Mistral AI API" in {
-    MistralConfig.DEFAULT_BASE_URL shouldBe "https://api.mistral.ai"
+    MistralConfig.DEFAULT_BASE_URL shouldBe BaseUrl("https://api.mistral.ai")
   }

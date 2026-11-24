@@ -1,14 +1,13 @@
 package org.llm4s.samples.cookbook
 
-import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, EmbeddingProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 import java.util.concurrent.atomic.AtomicReference
@@ -76,19 +75,15 @@ final class ScriptedClient(reply: (Conversation, Int) => Result[AssistantMessage
       Completion(
         id = s"scripted-$callNumber",
         created = Instant.EPOCH,
-        content = message.content,
-        model = "scripted",
+        model = ModelName("scripted"),
         message = message,
-        toolCalls = message.toolCalls.toList,
         finishReason = if (message.toolCalls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop
       )
     }
   }
 
   /** Sends the scripted reply a word at a time, each word with the space after it, as a model streams its tokens. */
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     complete(conversation, options).map { completion =>
@@ -111,10 +106,11 @@ final class ScriptedClient(reply: (Conversation, Int) => Result[AssistantMessage
  * [[org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor EmbeddingProviderDescriptor]], so a recipe registers it exactly as it would a provider module's descriptor.
  */
 object BagOfWordsEmbeddings extends EmbeddingProviderDescriptor {
-  val id: ProviderId                             = ProviderId("bagofwords")
-  val Model: String                              = "words-256"
-  val Dimensions: Int                            = 256
-  override val modelDimensions: Map[String, Int] = Map(Model -> Dimensions)
+  val id: ProviderId                                           = ProviderId("bagofwords")
+  val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
+  val Model: ModelName                                         = ModelName("words-256")
+  val Dimensions: Int                                          = 256
+  override val modelDimensions: Map[ModelName, Int]            = Map(Model -> Dimensions)
 
   /** The vector of `text`: its word counts, hashed into buckets, at length 1 (all zeros for a text with no words). */
   def vector(text: String): Seq[Double] = {
@@ -129,16 +125,18 @@ object BagOfWordsEmbeddings extends EmbeddingProviderDescriptor {
       Right(EmbeddingResponse(embeddings = request.input.map(vector), dim = Some(Dimensions)))
   }
 
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(provider)
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] = Right(
+    provider
+  )
 
   /** The provider config a pipeline built on this provider needs: it has no endpoint and no key. */
-  val config: EmbeddingProviderConfig = EmbeddingProviderConfig(baseUrl = "", model = Model, apiKey = Secret(""))
+  val config: EmbeddingProviderConfig = EmbeddingProviderConfig(id, BaseUrl(""), Model)
 }
 
 /**
  * The shape shared by the recipes: `demo` runs the recipe against any client and returns the text to print, `script`
  * is the scripted client that stands in for a model, and `main` runs `demo` against the script, or, with `--live`,
- * against the provider chosen by the normal configuration (`llm4s.providers.provider` in `application.conf`).
+ * against the provider chosen by the normal configuration (`llm4s.defaultProvider` in `application.conf`).
  */
 abstract class RecipeApp {
   def info: RecipeInfo
@@ -168,7 +166,7 @@ abstract class RecipeApp {
 
 object RecipeApp {
 
-  /** The client for the provider named by `llm4s.providers.provider`. */
+  /** The client for the provider named by `llm4s.defaultProvider`. */
   def liveClient(): Result[LLMClient] =
     for {
       providerConfig  <- Llm4sConfig.defaultProvider()

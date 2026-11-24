@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -11,8 +12,13 @@ import ujson.read
 /** Voyage's `input_type`: a request says whether its texts are documents or queries, and Voyage is told. */
 class VoyageAIInputTypeSpec extends AnyFlatSpec with Matchers {
 
-  private val cfg = EmbeddingProviderConfig(baseUrl = "http://voyage-test", model = "voyage-3", apiKey = Secret("k"))
-  private val modelCfg = EmbeddingModelConfig("voyage-3", 1024)
+  private val cfg = EmbeddingProviderConfig(
+    providerId = ProviderId("voyage"),
+    baseUrl = BaseUrl("http://voyage-test"),
+    model = ModelName("voyage-3"),
+    apiKey = Some(Secret("k"))
+  )
+  private val modelCfg = EmbeddingModelConfig(ModelName("voyage-3"), 1024)
   private val okBody   = """{"data":[{"embedding":[0.1,0.2]},{"embedding":[0.3,0.4]}]}"""
 
   private def sentBody(request: EmbeddingRequest): ujson.Value = {

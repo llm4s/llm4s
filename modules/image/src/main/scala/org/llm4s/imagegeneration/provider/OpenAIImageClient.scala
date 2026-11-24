@@ -16,14 +16,17 @@ import org.llm4s.error.LLMError
 import org.llm4s.util.Redaction
 
 /**
- * OpenAI Images API client for image generation.
+ * OpenAI Images API client for image generation and editing.
  *
- * Supports GPT Image models and legacy DALL-E models.
+ * Built for the GPT Image models (any id starting `gpt-image`; the default is [[OpenAIConfig.DefaultModel]]), which
+ * always return base64 and take `output_format`, `output_compression` and `background` but not `response_format` or
+ * `style`. DALL·E ids are still sent as given, for OpenAI-compatible servers that accept them; OpenAI itself shut
+ * DALL·E down on 2026-05-12, and the client logs a warning for any model OpenAI has shut down or is shutting down.
  */
 class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends ImageGenerationClient {
 
   private val logger = LoggerFactory.getLogger(getClass)
-  warnIfDeprecatedModelConfigured()
+  OpenAIImageClient.retirementWarning(config.model).foreach(logger.warn)
 
   override def generateImage(
     prompt: String,
@@ -68,6 +71,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       _             <- validateCount(options.n)
       openAIOptions <- extractOpenAIEditOptions(options)
       _             <- validateEditResponseFormat(openAIOptions.responseFormat)
+      _             <- validateStyle(openAIOptions.style)
       sourceSize    <- ImageEditValidationUtils.readImageSize(imagePath, "source image")
       _             <- ImageEditValidationUtils.validateMaskDimensions(sourceSize, maskPath)
       requestedSize <- resolveEditOutputSize(options.size, sourceSize)
@@ -80,14 +84,11 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
         MultipartPart.FilePart("image", imagePath, imagePath.getFileName.toString),
         MultipartPart.TextField("prompt", prompt),
         MultipartPart.TextField("n", options.n.toString),
-        openAIOptions.responseFormat
-          .fold(MultipartPart.TextField("response_format", "b64_json"))(rf =>
-            MultipartPart.TextField("response_format", rf)
-          )
+        MultipartPart.TextField("model", config.model)
       )
-
-      // OpenAI edit endpoint currently supports DALL-E 2.
-      parts += MultipartPart.TextField("model", "dall-e-2")
+      // GPT Image models always return base64 and reject response_format; the legacy models default to a URL.
+      if (!isGptImageModel)
+        parts += MultipartPart.TextField("response_format", openAIOptions.responseFormat.getOrElse("b64_json"))
       maskPath.foreach(path => parts += MultipartPart.FilePart("mask", path, path.getFileName.toString))
       parts += MultipartPart.TextField("size", sizeToApiFormat(requestedSize))
       openAIOptions.user.foreach(u => parts += MultipartPart.TextField("user", u))
@@ -130,10 +131,21 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
 
   private def validateEditResponseFormat(responseFormat: Option[String]): Either[LLMError, Unit] =
     responseFormat match {
-      case None                     => Right(())
-      case Some("b64_json" | "url") => Right(())
-      case Some(other)              => Left(ImageValidationError(s"Unsupported response format for edit: $other"))
+      case None                           => Right(())
+      case Some("url") if isGptImageModel => Left(gptImageUrlError)
+      case Some("b64_json" | "url")       => Right(())
+      case Some(other)                    => Left(ImageValidationError(s"Unsupported response format for edit: $other"))
     }
+
+  private def gptImageUrlError: LLMError =
+    ImageValidationError(
+      s"${config.model} always returns base64 image data: response_format 'url' is only for the retired DALL·E models"
+    )
+
+  private def validateStyle(style: Option[String]): Either[LLMError, Unit] =
+    if (style.isDefined && isGptImageModel)
+      Left(ImageValidationError(s"style is not supported by ${config.model}: describe the style in the prompt"))
+    else Right(())
 
   private def extractOpenAIEditOptions(
     options: ImageEditOptions
@@ -145,20 +157,31 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
         Left(ImageValidationError("Unsupported provider-specific edit options for OpenAI image client"))
     }
 
+  /** A GPT Image model picks the output size itself (`auto`) unless asked; a legacy model keeps the source's size. */
   private def resolveEditOutputSize(
     requestedSize: Option[ImageSize],
     sourceSize: ImageSize
   ): Either[LLMError, ImageSize] =
-    Right(requestedSize.getOrElse(sourceSize))
+    Right(requestedSize.getOrElse(if (isGptImageModel) ImageSize.Auto else sourceSize))
 
+  /**
+   * The sizes the edits endpoint accepts: for GPT Image models `auto` and the three standard sizes, plus a custom
+   * `WIDTHxHEIGHT` (which OpenAI accepts from `gpt-image-2` on and validates itself); for DALL·E 2 the three squares.
+   */
   private def validateEditSize(size: ImageSize): Either[LLMError, Unit] = {
-    val allowedSizes = Set("256x256", "512x512", "1024x1024")
-    val requested    = sizeToApiFormat(size)
+    val allowedSizes =
+      if (isGptImageModel) Set("auto", "1024x1024", "1536x1024", "1024x1536")
+      else Set("256x256", "512x512", "1024x1024")
+    val requested = sizeToApiFormat(size)
+    val custom = size match {
+      case _: ImageSize.Custom => isGptImageModel
+      case _                   => false
+    }
     Either.cond(
-      allowedSizes.contains(requested),
+      custom || allowedSizes.contains(requested),
       (),
       ImageValidationError(
-        s"Unsupported edit size '$requested'. Allowed sizes: ${allowedSizes.toSeq.sorted.mkString(", ")}"
+        s"Unsupported edit size '$requested' for ${config.model}. Allowed sizes: ${allowedSizes.toSeq.sorted.mkString(", ")}"
       )
     )
   }
@@ -251,6 +274,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
   private def validateGenerationOptions(options: ImageGenerationOptions): Either[LLMError, Unit] =
     for {
       _ <- validateResponseFormat(options.responseFormat)
+      _ <- validateStyle(options.style)
       _ <- validateOutputFormat(options.outputFormat)
       _ <- validateOutputCompression(options.outputCompression)
       _ <- validateModelOptionCompatibility(options)
@@ -258,8 +282,9 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
 
   private def validateResponseFormat(responseFormat: Option[String]): Either[LLMError, Unit] =
     responseFormat match {
-      case None                     => Right(())
-      case Some("b64_json" | "url") => Right(())
+      case None                           => Right(())
+      case Some("url") if isGptImageModel => Left(gptImageUrlError)
+      case Some("b64_json" | "url")       => Right(())
       case Some(unsupported) => Left(ImageValidationError(s"Unsupported response format for generation: $unsupported"))
     }
 
@@ -335,7 +360,8 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       "size"   -> Str(sizeToApiFormat(options.size))
     )
 
-    options.responseFormat.foreach(v => requestBody("response_format") = Str(v))
+    // GPT Image models always return base64 and reject response_format
+    if (!isGptImageModel) options.responseFormat.foreach(v => requestBody("response_format") = Str(v))
     options.quality.foreach(v => requestBody("quality") = Str(v))
     options.style.foreach(v => requestBody("style") = Str(v))
     options.background.foreach(v => requestBody("background") = Str(v))
@@ -397,6 +423,8 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     Try {
       val json       = read(response.body)
       val imagesData = json("data").arr
+      // GPT Image models report the format they wrote at the top level
+      val outputFormat = requestedOutputFormat.orElse(json.obj.get("output_format").collect { case Str(v) => v })
 
       val images = imagesData.map { imageData =>
         val maybeBase64Data = imageData.obj.get("b64_json").collect { case Str(value) => value }
@@ -404,7 +432,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
         val resolvedFormat = resolveImageFormat(
           maybeBase64Data = maybeBase64Data,
           maybeUrl = maybeUrl,
-          requestedOutputFormat = requestedOutputFormat,
+          requestedOutputFormat = outputFormat,
           fallbackFormat = fallbackFormat
         )
 
@@ -424,11 +452,6 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       images
     }.toEither.left.map(e => ImageErrors.fromThrowable(e, "openai-image.request")(ImageUnknownError.apply))
 
-  private def warnIfDeprecatedModelConfigured(): Unit =
-    if (isDallE2Model || isDallE3Model) {
-      logger.warn(OpenAIImageClient.deprecationWarningMessage(config.model))
-    }
-
   private def resolveImageFormat(
     maybeBase64Data: Option[String],
     maybeUrl: Option[String],
@@ -444,12 +467,33 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
 }
 
 object OpenAIImageClient {
-  private val DeprecationsUrl       = "https://platform.openai.com/docs/deprecations"
-  private val DalleRemovalDate      = "2026-05-12"
-  private val MigrationTargetModels = "gpt-image-1, gpt-image-1-mini, gpt-image-1.5"
+  private val DeprecationsUrl = "https://developers.openai.com/api/docs/deprecations"
 
-  def deprecationWarningMessage(model: String): String =
-    s"$model is deprecated and scheduled for removal on $DalleRemovalDate. Migrate to $MigrationTargetModels. See $DeprecationsUrl."
+  /**
+   * The image models OpenAI has shut down or announced a shutdown for, with the date and the replacements OpenAI
+   * names (its deprecations page, checked 2026-11-24).
+   */
+  private val Retirements: Map[String, (String, String)] = {
+    val gen26 = "gpt-image-2.6-sunburst or gpt-image-2.6-flare"
+    Map(
+      "dall-e-2"                 -> ("2026-05-12", gen26),
+      "dall-e-3"                 -> ("2026-05-12", gen26),
+      "gpt-image-1"              -> ("2026-10-23", "gpt-image-2.5-sunburst or gpt-image-2.5-flare"),
+      "gpt-image-1-mini"         -> ("2026-12-01", gen26),
+      "gpt-image-1.5"            -> ("2026-12-01", gen26),
+      "gpt-image-1.5-2025-12-16" -> ("2026-12-01", gen26),
+      "chatgpt-image-latest"     -> ("2026-12-01", gen26),
+      "gpt-image-2"              -> ("2027-02-10", gen26),
+      "gpt-image-2-2026-04-21"   -> ("2027-02-10", gen26)
+    )
+  }
+
+  /** The warning logged when the client is built for a model OpenAI has shut down or will shut down, if it is one. */
+  def retirementWarning(model: String): Option[String] =
+    Retirements.get(model).map { case (date, replacements) =>
+      s"OpenAI shuts down $model on $date, after which api.openai.com refuses it. Use $replacements. " +
+        s"See $DeprecationsUrl."
+    }
 
   /**
    * The image formats the OpenAI images API can return. The vocabulary in `llm4s-media` knows

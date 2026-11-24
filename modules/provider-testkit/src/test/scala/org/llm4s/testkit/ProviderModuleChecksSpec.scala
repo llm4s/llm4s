@@ -1,7 +1,7 @@
 package org.llm4s.testkit
 
 import org.llm4s.security.Secret
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.EmbeddingRequest
 import org.llm4s.testkit.fixtures.*
@@ -75,7 +75,7 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
 
     "build a client from a section" in {
       assertBuildsClient(AcmeProvider, section) shouldBe AcmeClient(
-        AcmeConfig("test-key", "acme-large", AcmeProvider.DefaultBaseUrl)
+        AcmeConfig("test-key", ModelName("acme-large"), AcmeProvider.DefaultBaseUrl)
       )
     }
 
@@ -100,16 +100,26 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
     "return the provider the descriptor builds" in {
       val provider = assertBuildsEmbeddingProvider(
         AcmeEmbeddings,
-        EmbeddingProviderConfig(AcmeProvider.DefaultBaseUrl, "acme-small", Secret("k"))
+        EmbeddingProviderConfig(
+          ProviderId("acme"),
+          BaseUrl(AcmeProvider.DefaultBaseUrl),
+          ModelName("acme-small"),
+          Some(Secret("k"))
+        )
       )
-      provider.embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig("acme-small", 2))).isRight shouldBe true
+      provider.embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig(ModelName("acme-small"), 2))).isRight shouldBe true
     }
 
     "fail when the descriptor refuses the config" in {
       failureOf(
         assertBuildsEmbeddingProvider(
           AcmeEmbeddings,
-          EmbeddingProviderConfig(AcmeProvider.DefaultBaseUrl, "acme-retired", Secret("k"))
+          EmbeddingProviderConfig(
+            ProviderId("acme"),
+            BaseUrl(AcmeProvider.DefaultBaseUrl),
+            ModelName("acme-retired"),
+            Some(Secret("k"))
+          )
         )
       ) should include("no longer served")
     }
@@ -119,7 +129,7 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
 
     "pass when reference.conf binds what apiKeyEnv declares" in {
       assertCredentialBindings(AcmeProvider)
-      assertEmbeddingCredentialBindings(AcmeEmbeddings, "acme-small")
+      assertEmbeddingCredentialBindings(AcmeEmbeddings, ModelName("acme-small"))
     }
 
     "pass trivially for a descriptor that declares no variable" in {
@@ -131,7 +141,7 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
       chat should include("UNBOUND_API_KEY")
       chat should include("llm4s.credentials.unbound.apiKey = ${?UNBOUND_API_KEY}")
 
-      failureOf(assertEmbeddingCredentialBindings(UnboundEmbeddings, "m")) should include(
+      failureOf(assertEmbeddingCredentialBindings(UnboundEmbeddings, ModelName("m"))) should include(
         "llm4s.credentials.unbound.apiKey = ${?UNBOUND_API_KEY}"
       )
     }
@@ -141,6 +151,6 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
 
     "offer the same checks without mixing the trait in" in {
       ProviderModuleChecks.assertRegistrableWith(new Llm4sAcmeModule)
-      ProviderModuleChecks.defaultModelRegistry.lookup("gpt-4o").isRight shouldBe true
+      ProviderModuleChecks.defaultModelRegistry.lookup(ModelName("gpt-4o")).isRight shouldBe true
     }
   }

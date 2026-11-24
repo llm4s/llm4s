@@ -2,7 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.LangfuseConfig
-import org.llm4s.trace.{ LangfuseTracing, NoOpTracing, Tracing, TracingMode }
+import org.llm4s.trace.{ LangfuseTracing, Tracing, TracingMode }
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -57,9 +57,8 @@ class LangfuseTracingConfigSpec extends AnyWordSpec with Matchers with EitherVal
       val s = settings(ReferenceConfig.withEnv("", Map("TRACING_MODE" -> "langfuse")))
 
       LangfuseConfig.fromExtras(s.extras) shouldBe LangfuseConfig()
-      // ...so the backend refuses to start, and Tracing.create degrades to NoOp.
+      // ...so the backend refuses to start, and Tracing.fromSettings says why.
       Tracing.fromSettings(s).left.value.message should include("LANGFUSE_PUBLIC_KEY")
-      Tracing.create(s) shouldBe a[NoOpTracing]
     }
 
     "let application.conf set the keys directly, over the variables" in {

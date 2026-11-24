@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import com.openai.models.{ ReasoningEffort => SdkReasoningEffort }
 import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, RequestOption, Thinking }
 import org.llm4s.model.{ EffortMapping, ModelCapabilities, ModelRegistryService }
@@ -59,8 +60,8 @@ private[provider] object OpenAIReasoning {
 
   /** The registry's answer for `model`, if it resolves `model` to an OpenAI or Azure entry. */
   private def registrySupport(model: String, registry: ModelRegistryService): Option[Support] =
-    registry.lookup(model).toOption.filter(meta => openAIProviders.contains(meta.provider.toLowerCase)).map { meta =>
-      if (meta.capabilities.supportsReasoning.contains(true)) Support.Reasoning else Support.NonReasoning
+    registry.lookup(ModelName(model)).toOption.filter(meta => openAIProviders.contains(meta.provider.asString)).map {
+      meta => if (meta.capabilities.supportsReasoning.contains(true)) Support.Reasoning else Support.NonReasoning
     }
 
   /**
@@ -128,7 +129,9 @@ private[provider] object OpenAIReasoning {
     val base       = baseModel(model)
     val candidates = if (base == model) Seq(model) else Seq(model, base, undated(base)).distinct
     candidates.iterator
-      .flatMap(m => registry.lookup(m).toOption.filter(meta => openAIProviders.contains(meta.provider.toLowerCase)))
+      .flatMap(m =>
+        registry.lookup(ModelName(m)).toOption.filter(meta => openAIProviders.contains(meta.provider.asString))
+      )
       .map(_.capabilities)
       .nextOption()
   }

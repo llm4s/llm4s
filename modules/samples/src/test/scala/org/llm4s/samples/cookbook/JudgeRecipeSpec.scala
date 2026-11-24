@@ -32,7 +32,7 @@ class JudgeRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
     conversation.messages.find(_.role == MessageRole.System).map(_.content) shouldBe Some(JudgeRecipe.Rubric)
     val toGrade = conversation.messages.filter(_.role == MessageRole.User).map(_.content).mkString
     Seq("How much vacation?", "25 days a year", "Employees get 25 days").foreach(toGrade should include(_))
-    options.temperature shouldBe 0.0
+    options.temperature shouldBe Some(0.0)
     options.responseFormat.map(_.isInstanceOf[ResponseFormat.JsonSchema]) shouldBe Some(true)
   }
 

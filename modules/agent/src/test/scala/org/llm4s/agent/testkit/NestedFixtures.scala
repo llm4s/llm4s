@@ -1,5 +1,6 @@
 package org.llm4s.agent.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.agent.delegation.TypedAgent
 import org.llm4s.llmconnect.LLMClient
@@ -14,7 +15,7 @@ object NestedFixtures {
 
   def completion(text: String, calls: Seq[ToolCall] = Nil): Completion = {
     val message = if (calls.isEmpty) AssistantMessage(text, Seq.empty) else AssistantMessage(None, calls)
-    Completion("n", Instant.EPOCH, message.content, "m", message, calls.toList, Some(TokenUsage(1, 1, 2)))
+    Completion("n", Instant.EPOCH, ModelName("m"), message, Some(TokenUsage(1, 1, 2)))
   }
 
   /**
@@ -34,14 +35,18 @@ object NestedFixtures {
           Right(
             completion(
               "",
-              Seq(ToolCall("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "say hello")))
+              Seq(
+                ToolCall(
+                  ToolCallId("c1"),
+                  "task",
+                  ujson.Obj("subagent_type" -> "general", "description" -> "say hello")
+                )
+              )
             )
           )
         }
       }
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] =
         complete(conversation, options).map { c =>

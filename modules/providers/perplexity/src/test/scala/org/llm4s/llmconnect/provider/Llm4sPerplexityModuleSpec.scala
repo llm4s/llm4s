@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.PerplexityConfig
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
@@ -41,7 +41,7 @@ class Llm4sPerplexityModuleSpec extends AnyWordSpec with Matchers with ProviderM
 
     "contribute the chat provider under the id perplexity and no embeddings" in {
       val module = new Llm4sPerplexityModule
-      module.chatProviders shouldBe Seq(PerplexityProvider)
+      module.providers shouldBe Seq(PerplexityProvider)
       module.embeddingProviders shouldBe empty
       PerplexityProvider.id.asString shouldBe "perplexity"
     }
@@ -71,7 +71,7 @@ class Llm4sPerplexityModuleSpec extends AnyWordSpec with Matchers with ProviderM
       ) match
         case Right(config: PerplexityConfig) =>
           config.apiKey.reveal shouldBe "env-key"
-          config.model shouldBe "perplexity/sonar"
+          config.model.asString shouldBe "perplexity/sonar"
           config.baseUrl shouldBe PerplexityConfig.DEFAULT_BASE_URL
           config.agentUrl shouldBe "https://api.perplexity.ai/v1/agent"
           config.webSearch shouldBe true
@@ -147,7 +147,7 @@ class Llm4sPerplexityModuleSpec extends AnyWordSpec with Matchers with ProviderM
 
     "send the key its ApiKeyProvider holds at each request" in {
       assertHonoursApiKeyProvider(sendJsonResponse(_, 200, response(s"[${textMessage("ok")}]"))) { (baseUrl, keys) =>
-        new PerplexityClient(config(baseUrl = baseUrl).withApiKeyProvider(keys))
+        new PerplexityClient(config(baseUrl = baseUrl).withApiKeyProvider(Some(keys)))
       }
     }
 
@@ -155,8 +155,30 @@ class Llm4sPerplexityModuleSpec extends AnyWordSpec with Matchers with ProviderM
       assertModelCallContract(PerplexityContractFixtures.replies)(clientAt)
     }
 
-    "say that validate() checks nothing: it has no validation request (#2830)" in {
-      assertValidationUnsupported(clientAt("http://localhost:1"))
+    "validate with the Agent API's model listing, carrying the key a completion carries (#2855)" in {
+      val listed = """{"object":"list","data":[{"id":"perplexity/sonar","object":"model"}]}"""
+      // the refusal api.perplexity.ai sends for a wrong key (2026-11-24)
+      def refuse(exchange: com.sun.net.httpserver.HttpExchange, status: Int, message: String): Unit =
+        sendJsonResponse(
+          exchange,
+          status,
+          ujson.Obj("error" -> ujson.Obj("message" -> message, "type" -> "invalid_api_key", "code" -> status)).render()
+        )
+      assertValidates(sendJsonResponse(_, 200, listed), refuse)(clientAt)
+
+      val seen = new java.util.concurrent.ConcurrentLinkedQueue[(String, String)]()
+      withServer("/") { exchange =>
+        seen.add(
+          s"${exchange.getRequestMethod} ${exchange.getRequestURI}" ->
+            Option(exchange.getRequestHeaders.getFirst("Authorization")).getOrElse("")
+        )
+        sendJsonResponse(exchange, 200, listed)
+      } { baseUrl =>
+        val client = clientAt(baseUrl)
+        client.validate() shouldBe Right(())
+        client.close()
+      }
+      seen.toArray.toSeq shouldBe Seq("GET /v1/models" -> "Bearer test-key")
     }
 
     "return CancelledError when a call is interrupted" in {

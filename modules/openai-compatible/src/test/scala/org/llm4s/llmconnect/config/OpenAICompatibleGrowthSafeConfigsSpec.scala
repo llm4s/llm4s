@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -54,100 +56,105 @@ class OpenAICompatibleGrowthSafeConfigsSpec extends AnyFlatSpec with Matchers {
   private object DeepSeek extends Subject {
     type C = DeepSeekConfig
     val name                 = "DeepSeekConfig"
-    val defaultBaseUrl       = DeepSeekConfig.DEFAULT_BASE_URL
+    val defaultBaseUrl       = DeepSeekConfig.DEFAULT_BASE_URL.asUrl
     val defaultContextWindow = DeepSeekConfig.DEFAULT_CONTEXT_WINDOW
     val defaultReserve       = DeepSeekConfig.DEFAULT_RESERVE_COMPLETION
     def full(a: String, m: String, b: String, cw: Int, rc: Int, t: ProviderTimeouts) =
-      DeepSeekConfig(Secret(a), m, b, cw, rc, t)
+      DeepSeekConfig(Secret(a), ModelName(m), BaseUrl(b), cw, rc, t)
     def withDefaults(a: String, m: String) =
-      DeepSeekConfig(apiKey = Secret(a), model = m, timeouts = ProviderTimeouts.default)
-    def short(a: String, m: String) = DeepSeekConfig(Secret(a), m)
-    def fields(c: C) = Fields(c.apiKey.reveal, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+      DeepSeekConfig(apiKey = Secret(a), model = ModelName(m), timeouts = ProviderTimeouts.default)
+    def short(a: String, m: String) = DeepSeekConfig(Secret(a), ModelName(m))
+    def fields(c: C) =
+      Fields(c.apiKey.reveal, c.model.asString, c.baseUrl.asUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
     def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
-    def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
+    def withBaseUrl(c: C, v: String)            = c.withBaseUrl(BaseUrl(v))
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
     def withReserveCompletion(c: C, v: Int)     = c.withReserveCompletion(v)
-    def withModel(c: C, v: String)              = c.withModel(v)
+    def withModel(c: C, v: String)              = c.withModel(ModelName(v))
     def withTimeouts(c: C, v: ProviderTimeouts) = c.withTimeouts(v)
   }
 
   private object Zai extends Subject {
     type C = ZaiConfig
     val name                 = "ZaiConfig"
-    val defaultBaseUrl       = ZaiConfig.DEFAULT_BASE_URL
+    val defaultBaseUrl       = ZaiConfig.DEFAULT_BASE_URL.asUrl
     val defaultContextWindow = ZaiConfig.DEFAULT_CONTEXT_WINDOW
     val defaultReserve       = ZaiConfig.DEFAULT_RESERVE_COMPLETION
     def full(a: String, m: String, b: String, cw: Int, rc: Int, t: ProviderTimeouts) =
-      ZaiConfig(Secret(a), m, b, cw, rc, t)
+      ZaiConfig(Secret(a), ModelName(m), BaseUrl(b), cw, rc, t)
     def withDefaults(a: String, m: String) =
-      ZaiConfig(apiKey = Secret(a), model = m, timeouts = ProviderTimeouts.default)
-    def short(a: String, m: String) = ZaiConfig(Secret(a), m)
-    def fields(c: C) = Fields(c.apiKey.reveal, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+      ZaiConfig(apiKey = Secret(a), model = ModelName(m), timeouts = ProviderTimeouts.default)
+    def short(a: String, m: String) = ZaiConfig(Secret(a), ModelName(m))
+    def fields(c: C) =
+      Fields(c.apiKey.reveal, c.model.asString, c.baseUrl.asUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
     def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
-    def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
+    def withBaseUrl(c: C, v: String)            = c.withBaseUrl(BaseUrl(v))
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
     def withReserveCompletion(c: C, v: Int)     = c.withReserveCompletion(v)
-    def withModel(c: C, v: String)              = c.withModel(v)
+    def withModel(c: C, v: String)              = c.withModel(ModelName(v))
     def withTimeouts(c: C, v: ProviderTimeouts) = c.withTimeouts(v)
   }
 
   private object Xai extends Subject {
     type C = XaiConfig
     val name                 = "XaiConfig"
-    val defaultBaseUrl       = XaiConfig.DEFAULT_BASE_URL
+    val defaultBaseUrl       = XaiConfig.DEFAULT_BASE_URL.asUrl
     val defaultContextWindow = XaiConfig.DEFAULT_CONTEXT_WINDOW
     val defaultReserve       = XaiConfig.DEFAULT_RESERVE_COMPLETION
     def full(a: String, m: String, b: String, cw: Int, rc: Int, t: ProviderTimeouts) =
-      XaiConfig(Secret(a), m, b, cw, rc, t)
+      XaiConfig(Secret(a), ModelName(m), BaseUrl(b), cw, rc, t)
     def withDefaults(a: String, m: String) =
-      XaiConfig(apiKey = Secret(a), model = m, timeouts = ProviderTimeouts.default)
-    def short(a: String, m: String) = XaiConfig(Secret(a), m)
-    def fields(c: C) = Fields(c.apiKey.reveal, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+      XaiConfig(apiKey = Secret(a), model = ModelName(m), timeouts = ProviderTimeouts.default)
+    def short(a: String, m: String) = XaiConfig(Secret(a), ModelName(m))
+    def fields(c: C) =
+      Fields(c.apiKey.reveal, c.model.asString, c.baseUrl.asUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
     def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
-    def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
+    def withBaseUrl(c: C, v: String)            = c.withBaseUrl(BaseUrl(v))
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
     def withReserveCompletion(c: C, v: Int)     = c.withReserveCompletion(v)
-    def withModel(c: C, v: String)              = c.withModel(v)
+    def withModel(c: C, v: String)              = c.withModel(ModelName(v))
     def withTimeouts(c: C, v: ProviderTimeouts) = c.withTimeouts(v)
   }
 
   private object Mistral extends Subject {
     type C = MistralConfig
     val name                 = "MistralConfig"
-    val defaultBaseUrl       = MistralConfig.DEFAULT_BASE_URL
+    val defaultBaseUrl       = MistralConfig.DEFAULT_BASE_URL.asUrl
     val defaultContextWindow = MistralConfig.DEFAULT_CONTEXT_WINDOW
     val defaultReserve       = MistralConfig.DEFAULT_RESERVE_COMPLETION
     def full(a: String, m: String, b: String, cw: Int, rc: Int, t: ProviderTimeouts) =
-      MistralConfig(Secret(a), m, b, cw, rc, t)
+      MistralConfig(Secret(a), ModelName(m), BaseUrl(b), cw, rc, t)
     def withDefaults(a: String, m: String) =
-      MistralConfig(apiKey = Secret(a), model = m, timeouts = ProviderTimeouts.default)
-    def short(a: String, m: String) = MistralConfig(Secret(a), m)
-    def fields(c: C) = Fields(c.apiKey.reveal, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+      MistralConfig(apiKey = Secret(a), model = ModelName(m), timeouts = ProviderTimeouts.default)
+    def short(a: String, m: String) = MistralConfig(Secret(a), ModelName(m))
+    def fields(c: C) =
+      Fields(c.apiKey.reveal, c.model.asString, c.baseUrl.asUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
     def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
-    def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
+    def withBaseUrl(c: C, v: String)            = c.withBaseUrl(BaseUrl(v))
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
     def withReserveCompletion(c: C, v: Int)     = c.withReserveCompletion(v)
-    def withModel(c: C, v: String)              = c.withModel(v)
+    def withModel(c: C, v: String)              = c.withModel(ModelName(v))
     def withTimeouts(c: C, v: ProviderTimeouts) = c.withTimeouts(v)
   }
 
   private object Cohere extends Subject {
     type C = CohereConfig
     val name                 = "CohereConfig"
-    val defaultBaseUrl       = CohereConfig.DEFAULT_BASE_URL
+    val defaultBaseUrl       = CohereConfig.DEFAULT_BASE_URL.asUrl
     val defaultContextWindow = CohereConfig.DEFAULT_CONTEXT_WINDOW
     val defaultReserve       = CohereConfig.DEFAULT_RESERVE_COMPLETION
     def full(a: String, m: String, b: String, cw: Int, rc: Int, t: ProviderTimeouts) =
-      CohereConfig(Secret(a), m, b, cw, rc, t)
+      CohereConfig(Secret(a), ModelName(m), BaseUrl(b), cw, rc, t)
     def withDefaults(a: String, m: String) =
-      CohereConfig(apiKey = Secret(a), model = m, timeouts = ProviderTimeouts.default)
-    def short(a: String, m: String) = CohereConfig(Secret(a), m)
-    def fields(c: C) = Fields(c.apiKey.reveal, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+      CohereConfig(apiKey = Secret(a), model = ModelName(m), timeouts = ProviderTimeouts.default)
+    def short(a: String, m: String) = CohereConfig(Secret(a), ModelName(m))
+    def fields(c: C) =
+      Fields(c.apiKey.reveal, c.model.asString, c.baseUrl.asUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
     def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
-    def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
+    def withBaseUrl(c: C, v: String)            = c.withBaseUrl(BaseUrl(v))
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
     def withReserveCompletion(c: C, v: Int)     = c.withReserveCompletion(v)
-    def withModel(c: C, v: String)              = c.withModel(v)
+    def withModel(c: C, v: String)              = c.withModel(ModelName(v))
     def withTimeouts(c: C, v: ProviderTimeouts) = c.withTimeouts(v)
   }
 

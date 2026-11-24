@@ -4,7 +4,7 @@ title: Testing Guide
 description: "Test LLM-powered Scala code without paying for API calls: fast, deterministic tests with mock clients, plus when to run a live model."
 search_title: "Test LLM applications in Scala without API calls"
 parent: Getting Started
-nav_order: 7
+nav_order: 9
 ---
 
 # Testing LLM4S Applications
@@ -140,9 +140,8 @@ Put a named provider section in your test resources and select it as the default
 ```hocon
 # src/test/resources/application.conf
 llm4s {
+  defaultProvider = "ollama-test"
   providers {
-    provider = "ollama-test"
-
     ollama-test {
       provider = "ollama"
       model    = "llama3.2"
@@ -207,10 +206,7 @@ class LLMIntegrationSpec extends AnyFlatSpec with Matchers {
       registry <- Llm4sConfig.modelRegistryService()
       given ModelRegistryService = registry
       client <- LLMConnect.getClient(config)
-      completion <- client.streamComplete(
-        Conversation(Seq(UserMessage("Count: 1, 2, 3"))),
-        onChunk = chunk => chunks = chunks :+ chunk
-      )
+      completion <- client.streamComplete(Conversation(Seq(UserMessage("Count: 1, 2, 3"))))(chunk => chunks = chunks :+ chunk)
     } yield completion
 
     result match {
@@ -291,7 +287,7 @@ class ToolCallingSpec extends AnyFlatSpec with Matchers {
     var capturedCity: Option[String] = None
 
     // A tool that records the arguments it was called with
-    val weatherTool = ToolBuilder[Map[String, Any], String](
+    val weatherTool = ToolBuilder[String](
       "get_weather",
       "Get weather for a city",
       Schema
@@ -481,7 +477,7 @@ src/test/scala/
 
 - [Configuration Guide](configuration) - Configure test environments
 - [Examples](/examples/) - See tests in action
-- [Tests in CI](/reference/testing-guide#10-tests-in-ci) - How the test suites run in CI
+- [Tests in CI](/contribute/testing-guide#10-tests-in-ci) - How the test suites run in CI
 
 ---
 
@@ -489,4 +485,4 @@ src/test/scala/
 
 - [ScalaTest Documentation](https://www.scalatest.org/)
 - [Ollama Models](https://ollama.com/library) - Available test models
-- [Testing Guide](/reference/testing-guide) - Advanced testing patterns
+- [Testing Guide](/contribute/testing-guide) - Advanced testing patterns

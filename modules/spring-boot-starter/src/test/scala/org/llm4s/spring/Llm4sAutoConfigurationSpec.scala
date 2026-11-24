@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.javaapi.{ JLlmClient, JLlmClientTestFactory }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -15,9 +16,9 @@ object Llm4sAutoConfigurationSpec {
 
   val stubLlmClient: LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-      Right(Completion("id", Instant.EPOCH, "mock", "m", AssistantMessage("mock")))
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
-      Right(Completion("id", Instant.EPOCH, "mock", "m", AssistantMessage("mock")))
+      Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("mock")))
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
+      Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("mock")))
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
   }

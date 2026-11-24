@@ -48,7 +48,7 @@ object RetrySchedule {
    *
    * The wait before a retry is the schedule's delay, or longer when the provider asked for longer: a
    * `RateLimitError` waits at least its `retryDelay` (its retry-after, else `RateLimitError.DefaultRetryDelay`), a
-   * `ServiceError` at least its explicit `retryAfter`, as core's `ErrorRecovery` does. Built on Ox's `retryEither`;
+   * `ServiceError` at least its explicit `retryAfter`, as core's `RetryPolicy` does. Built on Ox's `retryEither`;
    * an interrupt during a wait propagates as `InterruptedException`, so an enclosing scope can end.
    */
   def retry[A](schedule: Schedule = default)(operation: => Result[A]): Result[A] = {

@@ -1,5 +1,6 @@
 package org.llm4s.springai
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ AuthenticationError, LLMError, ValidationError }
 import org.llm4s.javaapi.{ LlmException, Llm4s }
 import org.llm4s.llmconnect.model.{
@@ -11,6 +12,7 @@ import org.llm4s.llmconnect.model.{
   SystemMessage,
   TokenUsage,
   ToolCall,
+  ToolCallId,
   ToolMessage,
   UserMessage
 }
@@ -71,7 +73,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     )
   }
 
-  private val weather = ToolBuilder[Map[String, Any], String](
+  private val weather = ToolBuilder[String](
     "weather",
     "Current weather in a city",
     Schema.`object`[Map[String, Any]]("Weather query").withProperty(Schema.property("city", Schema.string("City name")))
@@ -86,7 +88,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     done.content shouldBe "4"
     done.message shouldBe AssistantMessage("4")
     done.id shouldBe "resp-1"
-    done.model shouldBe "spring-model"
+    done.model shouldBe ModelName("spring-model")
     // cache writes are reported only by models whose prompt count leaves the cache out: added to it (#2765)
     done.usage shouldBe Some(TokenUsage(14, 2, 16, cachedTokens = Some(3), cacheCreationTokens = Some(1)))
     done.finishReason shouldBe FinishReason.Other("STOP") // Spring AI's reason as the model sent it, never a guess
@@ -153,15 +155,16 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   it should "send llm4s tools as Spring AI tool definitions, and return the model's tool calls" in {
-    val call  = new SpringAssistantMessage.ToolCall("call-1", "function", "weather", """{"city":"Paris"}""")
+    val call =
+      new SpringAssistantMessage.ToolCall(ToolCallId("call-1").asString, "function", "weather", """{"city":"Paris"}""")
     val model = new FakeChatModel(_ => reply("", calls = Seq(call), finish = "TOOL_CALLS"))
     val done = new SpringAiLlmClient(model)
       .complete(Conversation(Seq(UserMessage("Weather in Paris?"))), CompletionOptions().withTools(Seq(weather)))
       .value
 
-    done.toolCalls shouldBe List(ToolCall("call-1", "weather", ujson.Obj("city" -> "Paris")))
+    done.toolCalls shouldBe List(ToolCall(ToolCallId("call-1"), "weather", ujson.Obj("city" -> "Paris")))
     done.message.toolCalls shouldBe done.toolCalls
-    done.message.contentOpt shouldBe None
+    done.message.text shouldBe None
     val callback = model.prompts.head.getOptions.asInstanceOf[ToolCallingChatOptions].getToolCallbacks.asScala.head
     callback.getToolDefinition.name shouldBe "weather"
     callback.getToolDefinition.description shouldBe "Current weather in a city"
@@ -176,13 +179,15 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
       Seq(
         UserMessage("Weather?"),
         AssistantMessage(
-          contentOpt = None,
-          toolCalls =
-            Seq(ToolCall("c1", "weather", ujson.Obj("city" -> "Paris")), ToolCall("c2", "weather", ujson.Obj()))
+          text = None,
+          toolCalls = Seq(
+            ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris")),
+            ToolCall(ToolCallId("c2"), "weather", ujson.Obj())
+          )
         ),
-        ToolMessage("sunny in Paris", "c1"),
-        ToolMessage("sunny in Oslo", "c2"),
-        ToolMessage("orphan", "c9")
+        ToolMessage("sunny in Paris", ToolCallId("c1")),
+        ToolMessage("sunny in Oslo", ToolCallId("c2")),
+        ToolMessage("orphan", ToolCallId("c9"))
       )
     )
     new SpringAiLlmClient(model)
@@ -227,7 +232,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
       ValidationError
     ]
     val bad = new FakeChatModel(_ =>
-      reply("", calls = Seq(new SpringAssistantMessage.ToolCall("c", "function", "weather", "{x")))
+      reply("", calls = Seq(new SpringAssistantMessage.ToolCall(ToolCallId("c").asString, "function", "weather", "{x")))
     )
     new SpringAiLlmClient(bad)
       .complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())
@@ -256,7 +261,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val model  = new FakeChatModel(_ => reply("unused"), _ => pieces)
     val chunks = Vector.newBuilder[StreamedChunk]
     val done = new SpringAiLlmClient(model)
-      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), chunk => chunks += chunk)
+      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(chunk => chunks += chunk)
       .value
 
     chunks.result().map(c => (c.content, c.finishReason)) shouldBe Vector(
@@ -265,13 +270,14 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     )
     done.content shouldBe "Hello"
     done.finishReason shouldBe FinishReason.Other("STOP")
-    done.model shouldBe "spring-model"
+    done.model shouldBe ModelName("spring-model")
     done.id shouldBe "resp-1"
     done.usage shouldBe Some(TokenUsage(3, 2, 5))
   }
 
   it should "deliver each tool call once, however many responses repeat it" in {
-    val call = new SpringAssistantMessage.ToolCall("c1", "function", "weather", """{"city":"Paris"}""")
+    val call =
+      new SpringAssistantMessage.ToolCall(ToolCallId("c1").asString, "function", "weather", """{"city":"Paris"}""")
     val pieces =
       Flux.just(
         reply("", calls = Seq(call), id = "", finish = ""),
@@ -280,31 +286,39 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val model  = new FakeChatModel(_ => reply("unused"), _ => pieces)
     val chunks = Vector.newBuilder[StreamedChunk]
     val done = new SpringAiLlmClient(model)
-      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), chunk => chunks += chunk)
+      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(chunk => chunks += chunk)
       .value
 
-    chunks.result().flatMap(_.toolCall) shouldBe Vector(ToolCall("c1", "weather", ujson.Obj("city" -> "Paris")))
-    done.toolCalls shouldBe List(ToolCall("c1", "weather", ujson.Obj("city" -> "Paris")))
+    chunks.result().flatMap(_.toolCall) shouldBe Vector(
+      ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris"))
+    )
+    done.toolCalls shouldBe List(ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris")))
     done.content shouldBe ""
     done.usage shouldBe None
     done.id should not be empty
-    done.model shouldBe "spring-model"
+    done.model shouldBe ModelName("spring-model")
   }
 
   it should "return a streaming error, or a bad tool call in a stream, as a Left" in {
     val failing = new FakeChatModel(_ => reply("unused"))
     new SpringAiLlmClient(failing)
-      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
       .left
       .value
       .message should include("no streaming")
 
     val bad = new FakeChatModel(
       _ => reply("unused"),
-      _ => Flux.just(reply("", calls = Seq(new SpringAssistantMessage.ToolCall("c", "function", "weather", "{x"))))
+      _ =>
+        Flux.just(
+          reply(
+            "",
+            calls = Seq(new SpringAssistantMessage.ToolCall(ToolCallId("c").asString, "function", "weather", "{x"))
+          )
+        )
     )
     new SpringAiLlmClient(bad)
-      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
       .left
       .value shouldBe a[ValidationError]
   }
@@ -322,7 +336,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val done = client.complete(conversation, CompletionOptions().withTemperature(0.1)).value
     (done.content, done.model, done.usage) shouldBe ("Paris", "fixture-model", Some(usage))
     scripted.lastCall.map(_.messages) shouldBe Some(conversation.messages)
-    scripted.lastCall.map(_.options.temperature) shouldBe Some(0.1)
+    scripted.lastCall.flatMap(_.options.temperature) shouldBe Some(0.1)
 
     client.complete(conversation, CompletionOptions()).left.value shouldBe (AuthenticationError(
       "fixture",
@@ -331,7 +345,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
 
     val chunks = Vector.newBuilder[String]
     client
-      .streamComplete(conversation, CompletionOptions(), c => c.content.foreach(chunks += _))
+      .streamComplete(conversation, CompletionOptions())(c => c.content.foreach(chunks += _))
       .value
       .content shouldBe "streamed"
     chunks.result().mkString shouldBe "streamed"

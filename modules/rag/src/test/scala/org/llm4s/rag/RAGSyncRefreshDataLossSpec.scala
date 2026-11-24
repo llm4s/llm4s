@@ -30,7 +30,7 @@ class RAGSyncRefreshDataLossSpec extends AnyFlatSpec with Matchers {
   }
 
   private def withRag[A](config: RAGConfig = RAGConfig.default)(f: RAG => A): A =
-    Using.resource(RAG.buildWithClient(config, new EmbeddingClient(new MockEmbeddingProvider)).toOption.get)(f)
+    Using.resource(RAG.buildWithClient(config, EmbeddingClient(new MockEmbeddingProvider)).toOption.get)(f)
 
   private val failFast = RAGConfig.default.copy(loadingConfig = LoadingConfig(failFast = true))
 

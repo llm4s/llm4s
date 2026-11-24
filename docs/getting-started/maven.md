@@ -3,8 +3,10 @@ layout: page
 title: Maven Quick Start
 description: "A complete Maven pom.xml that compiles and runs a first LLM call from Java with llm4s-java-api, built against the library in CI."
 search_title: "Call an LLM from Java with Maven and LLM4S"
-parent: Getting Started
-nav_order: 9
+parent: Build Tools and Playgrounds
+nav_order: 2
+grand_parent: Getting Started
+cites_closed_issues: [1496]
 ---
 
 # Maven Quick Start
@@ -196,12 +198,11 @@ try (JLlmClient client = created.get()) {
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
   providers {
-    provider = "openai-main"
-
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }

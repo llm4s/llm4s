@@ -1,5 +1,6 @@
 package org.llm4s.rag.evaluation
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
@@ -25,9 +26,9 @@ class AnswerRelevancySpec extends AnyFlatSpec with Matchers {
   }
 
   def createMockEmbeddingClient(embeddings: Map[String, Seq[Double]]): EmbeddingClient =
-    new EmbeddingClient(new MockEmbeddingProvider(embeddings))
+    EmbeddingClient(new MockEmbeddingProvider(embeddings))
 
-  private val testEmbeddingConfig = EmbeddingModelConfig("test-model", 3)
+  private val testEmbeddingConfig = EmbeddingModelConfig(ModelName("test-model"), 3)
 
   "AnswerRelevancy" should "have correct metadata" in {
     val mockLLM       = new MockLLMClients.SimpleMock("[]")

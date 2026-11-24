@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ContentFilteredError
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model._
@@ -10,7 +12,7 @@ import org.scalatest.matchers.should.Matchers
 
 /**
  * RFC 0009 Part 1, the chat-completions row: `stop`, `tool_calls` (and the older `function_call`) and `length` map to
- * their `FinishReason`; any other value is kept as `Other`. A reply that sent no reason is `Other("")`, never a
+ * their `FinishReason`; any other value is kept as `Other`. A reply that sent no reason is `Unknown`, never a
  * made-up `Stop`. `content_filter` is read as `Other("content_filter")`, and the client fails the call with a
  * `ContentFilteredError` on it (PR 2), on `complete` and on a stream alike.
  */
@@ -19,7 +21,7 @@ class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val client = new OpenAICompatibleClient(
-    OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", "http://localhost:1/v1", None)),
+    OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), BaseUrl("http://localhost:1/v1"), None)),
     OpenAICompatibleDialect.Standard
   )
 
@@ -38,7 +40,7 @@ class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
     )
 
   private def clientAt(baseUrl: String) = new OpenAICompatibleClient(
-    OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", baseUrl, None)),
+    OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), BaseUrl(baseUrl), None)),
     OpenAICompatibleDialect.Standard
   )
 
@@ -55,7 +57,7 @@ class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
   it should "give Other(\"\") for a reply with no finish_reason, a null or a blank one" in {
     Seq("", ""","finish_reason":null""", ""","finish_reason":""""").foreach { finish =>
       withClue(finish) {
-        client.parsedCompletion(reply(finish)).finishReason shouldBe FinishReason.Other("")
+        client.parsedCompletion(reply(finish)).finishReason shouldBe FinishReason.Unknown
       }
     }
   }
@@ -95,7 +97,7 @@ class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
     ).mkString("", "\n\n", "\n\n")
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
     withServer("/")(sendSseResponse(_, stream)) { baseUrl =>
-      clientAt(baseUrl).streamComplete(Conversation(Seq(UserMessage("Hi"))), onChunk = chunks += _) match {
+      clientAt(baseUrl).streamComplete(Conversation(Seq(UserMessage("Hi"))))(chunks += _) match {
         case Left(e: ContentFilteredError) =>
           e.message should include("after 4 characters")
           e.usage.map(_.totalTokens) shouldBe Some(13)

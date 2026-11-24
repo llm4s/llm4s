@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 import org.llm4s.util.{ BoundedJson, Redaction }
 import org.llm4s.error.AuthenticationError
@@ -98,13 +100,13 @@ class GeminiClient(
 
   protected def clientDescription: String = s"Gemini client for model ${config.model}"
   protected def providerName: String      = "gemini"
-  protected def modelName: String         = config.model
+  protected def modelName: ModelName      = config.model
 
   // thought signatures are replayed only to the provider and model id they were produced by (see ReplayOrigin)
-  private val replayOrigin = ReplayOrigin(providerName, config.model)
+  private val replayOrigin = ReplayOrigin(providerName, config.model.asString)
 
   // the references Gemini takes: web URLs and this provider's uploaded files
-  private val fileUri = GeminiParts.geminiFileUri(providerName, config.baseUrl)
+  private val fileUri = GeminiParts.geminiFileUri(providerName, config.baseUrl.asUrl)
 
   // what the transformer dropped, and what `reasoning` and `thinking` were sent as (see GeminiThinking), goes
   // on every Completion; this warns once per model and option
@@ -134,11 +136,11 @@ class GeminiClient(
       )
       .flatMap(transformed => requestKey().map(transformed -> _))
       .flatMap { (transformed, key) =>
-        val thinkingPlan = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val thinkingPlan = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
           UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options) ++
           GeminiServiceTier.gemini(transformed.options)._2
-        adjustmentLog.record(config.model, adjustments)
+        adjustmentLog.record(config.model.asString, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
         val requestText = requestBody.render()
@@ -171,9 +173,7 @@ class GeminiClient(
       }
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
@@ -193,11 +193,11 @@ class GeminiClient(
       )
       .flatMap(transformed => requestKey().map(transformed -> _))
       .flatMap { (transformed, key) =>
-        val thinkingPlan = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val thinkingPlan = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
           UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options) ++
           GeminiServiceTier.gemini(transformed.options)._2
-        adjustmentLog.record(config.model, adjustments)
+        adjustmentLog.record(config.model.asString, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
         val requestText = requestBody.render()
@@ -304,9 +304,6 @@ class GeminiClient(
                     // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
                     val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
                     c
-                      .withToolCalls(
-                        c.message.toolCalls.toList
-                      ) // the accumulator keeps streamed calls on the message only
                       .withEstimatedCost(cost)
                       .withCitations(citations.distinct.toList)
                       .withMessage(ThinkingReplay.bindOrigin(replayOrigin, message))
@@ -392,7 +389,7 @@ class GeminiClient(
 
       case am: AssistantMessage =>
         // Tool call IDs map to function names so the following ToolMessages can be keyed by name
-        am.toolCalls.foreach(tc => toolCallIdToName(tc.id) = tc.name)
+        am.toolCalls.foreach(tc => toolCallIdToName(tc.id.asString) = tc.name)
         // a functionCall part sent with Gemini's own id needs that id echoed on its functionResponse; an empty
         // id is "no id", as GeminiThoughtSignatures.parse and matchesCall read it, even though the signed part
         // goes back verbatim with it
@@ -407,7 +404,7 @@ class GeminiClient(
             .filter(_.nonEmpty)
             .foreach(callIdsSentWithId += _)
         }
-        if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.contentOpt.isDefined))
+        if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.text.isDefined))
           contents += ujson.Obj("role" -> "model", "parts" -> ujson.Arr(parts: _*))
 
       case tm: ToolMessage =>
@@ -415,7 +412,7 @@ class GeminiClient(
         // Gemini uses functionResponse for tool results
         // The name field should be the function name, not the tool call ID
         // Look up the function name from our mapping, fallback to toolCallId if not found
-        val functionName = toolCallIdToName.getOrElse(toolCallId, toolCallId)
+        val functionName = toolCallIdToName.getOrElse(toolCallId.asString, toolCallId.asString)
         contents += ujson.Obj(
           "role" -> "user",
           "parts" -> ujson.Arr(
@@ -426,7 +423,7 @@ class GeminiClient(
                   "response" -> ujson.Obj("result" -> tm.content)
                 )
                 // a populated functionCall.id must come back on the matching functionResponse
-                if (callIdsSentWithId.contains(toolCallId)) response("id") = toolCallId
+                if (callIdsSentWithId.contains(toolCallId.asString)) response("id") = toolCallId.asString
                 response
               }
             )
@@ -435,10 +432,10 @@ class GeminiClient(
     }
 
     // Build generation config
-    val generationConfig = ujson.Obj(
-      "temperature" -> options.temperature,
-      "topP"        -> options.topP
-    )
+    // the sampling options are sent only when the caller set them: unset, Gemini's own defaults apply
+    val generationConfig = ujson.Obj()
+    options.temperature.foreach(t => generationConfig("temperature") = t)
+    options.topP.foreach(p => generationConfig("topP") = p)
     options.maxTokens.foreach(mt => generationConfig("maxOutputTokens") = mt)
     thinkingConfig.foreach(tc => generationConfig("thinkingConfig") = tc)
 
@@ -480,7 +477,7 @@ class GeminiClient(
    * Strips OpenAI-specific fields like 'strict' and 'additionalProperties' from the schema
    * to maintain compatibility with the Gemini API.
    */
-  private[provider] def convertToolToGeminiFormat(tool: ToolFunction[_, _]): ujson.Value = {
+  private[provider] def convertToolToGeminiFormat(tool: ToolFunction[_]): ujson.Value = {
     // Generate base JSON schema without strict mode
     val schema = ujson.read(tool.schema.toJsonSchema(false).render())
 
@@ -561,7 +558,7 @@ class GeminiClient(
         val thinking =
           Option.when(parsed.thought.nonEmpty)(ThinkingBlock.Text(parsed.thought)).toSeq ++ parsed.signatures
         val message = AssistantMessage(
-          contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
+          text = if (textContent.nonEmpty) Some(textContent) else None,
           toolCalls = toolCalls,
           thinking = thinking
         )
@@ -572,9 +569,7 @@ class GeminiClient(
         Right(
           Completion(
             id = UUID.randomUUID().toString,
-            content = textContent,
             model = config.model,
-            toolCalls = toolCalls.toList,
             created = Instant.now(),
             message = message,
             usage = usageOpt,
@@ -627,7 +622,7 @@ class GeminiClient(
     val details = HttpErrorMapper.extractErrorDetails(body, statusCode, providerName)
     if statusCode == 400 && isInvalidApiKey(details) then
       Left(TroubleshootingLinks.annotate(AuthenticationError(providerName, details)))
-    else HttpErrorMapper.mapHttpError(statusCode, body, providerName, headers)
+    else Left(HttpErrorMapper.toError(statusCode, body, providerName, headers))
   }
 
   private def isInvalidApiKey(details: String): Boolean = {
@@ -643,13 +638,15 @@ class GeminiClient(
     result: Result[?]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(config.model),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = responseBody,
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(config.model),
+        responseBody = responseBody
+      ),
+      result
     )
 
   /**

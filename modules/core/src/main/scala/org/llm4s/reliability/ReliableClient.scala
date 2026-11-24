@@ -34,23 +34,42 @@ import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference 
  * `burstCapacity` below 1, a negative `requestsPerMinute`) does not throw here: every call, and `validate()`,
  * returns its [[org.llm4s.error.ValidationError ValidationError]].
  *
- * @param underlying The client to wrap
- * @param providerName Explicit provider name for stable metrics labels
- * @param config Reliability configuration
- * @param collector Optional metrics collector for observability
- * @param clock the current time, read for deadlines and circuit-breaker recovery; injectable for tests
- * @param sleep how the client waits between attempts; injectable so a test can record the
- *              delays chosen, or throw `InterruptedException` to simulate an interrupted wait
+ * Build one with the companion's `apply`, and add a collector with [[withMetrics]]:
+ * {{{
+ * val reliable = ReliableClient(client, "openai-main", ReliabilityConfig.default).withMetrics(collector)
+ * }}}
+ * The constructor is private, so that a setting can be added without breaking a caller.
  */
 @Stable
-final class ReliableClient(
+final class ReliableClient private (
   underlying: LLMClient,
   providerName: String,
   config: ReliabilityConfig,
-  collector: Option[MetricsCollector] = None,
-  clock: () => Instant = () => Instant.now(),
-  sleep: FiniteDuration => Unit = delay => Thread.sleep(delay.toMillis)
+  collector: Option[MetricsCollector],
+  clock: () => Instant,
+  sleep: FiniteDuration => Unit
 ) extends LLMClient {
+
+  /**
+   * This client reporting its retries, circuit-breaker transitions and errors to `collector`
+   * ([[ReliabilityMetrics]]), labelled with the `providerName` it was built with.
+   *
+   * It returns a new client with a circuit breaker and rate limit of its own, so call it where the client is
+   * built, before the first request.
+   */
+  def withMetrics(collector: MetricsCollector): ReliableClient =
+    new ReliableClient(underlying, providerName, config, Some(collector), clock, sleep)
+
+  /** Test seam: the current time, read for deadlines and circuit-breaker recovery. */
+  private[llm4s] def withClock(clock: () => Instant): ReliableClient =
+    new ReliableClient(underlying, providerName, config, collector, clock, sleep)
+
+  /**
+   * Test seam: how the client waits between attempts, so a test can record the delays chosen, or throw
+   * `InterruptedException` to simulate an interrupted wait.
+   */
+  private[llm4s] def withSleep(sleep: FiniteDuration => Unit): ReliableClient =
+    new ReliableClient(underlying, providerName, config, collector, clock, sleep)
 
   private val cancelledOperation = "reliable-client.complete"
 
@@ -100,18 +119,16 @@ final class ReliableClient(
         .getOrElse(executeWithReliability(rateLimited(() => underlying.complete(conversation, options))))
     }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     if (!config.enabled) {
-      underlying.streamComplete(conversation, options, onChunk)
+      underlying.streamComplete(conversation, options)(onChunk)
     } else
       configError.map(error => Left(error): Result[Completion]).getOrElse {
         // Once a chunk has reached the caller, a failure is returned rather than retried: a retry would
         // deliver the reply again from the start and run (and bill) the call twice. A failure before the
-        // first chunk is retried as usual. `LLMClientRetry.streamCompleteWithRetry` keeps the same rule.
+        // first chunk is retried as usual.
         val delivered = new java.util.concurrent.atomic.AtomicBoolean(false)
         // The caller's own onChunk threw: the client turns that into a Left, but it says nothing about the
         // provider, so the circuit breaker counts it as neither success nor failure. It is rethrown unchanged.
@@ -126,7 +143,7 @@ final class ReliableClient(
           }
         }
         executeWithReliability(
-          rateLimited(() => underlying.streamComplete(conversation, options, tracking)),
+          rateLimited(() => underlying.streamComplete(conversation, options)(tracking)),
           canRetry = () => !delivered.get(),
           callerFailed = () => callerFailed.get()
         )
@@ -534,6 +551,32 @@ final class ReliableClient(
     lastFailureTime.set(0L)
     probePermit.set(false)
   }
+}
+
+object ReliableClient {
+
+  /**
+   * A client that adds retries, a circuit breaker, a deadline and a local rate limit to `underlying`.
+   *
+   * @param underlying the client to wrap
+   * @param providerName the `provider` label of this client's metrics and the provider its own errors name. It
+   *                     is a label, not a vendor id: often the provider's id, but any stable name the caller
+   *                     chooses (a configuration section, a pipeline)
+   * @param config what to retry, when to open the circuit, the deadline and the rate limit
+   */
+  def apply(
+    underlying: LLMClient,
+    providerName: String,
+    config: ReliabilityConfig = ReliabilityConfig.default
+  ): ReliableClient =
+    new ReliableClient(
+      underlying,
+      providerName,
+      config,
+      collector = None,
+      clock = () => Instant.now(),
+      sleep = delay => Thread.sleep(delay.toMillis)
+    )
 }
 
 /**

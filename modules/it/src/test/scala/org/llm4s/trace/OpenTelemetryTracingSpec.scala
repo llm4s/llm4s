@@ -1,9 +1,10 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.SpanKind
 import org.llm4s.llmconnect.config.{ OpenTelemetryConfig, TracingSettings }
-import org.llm4s.llmconnect.model.TokenUsage
+import org.llm4s.llmconnect.model.{ TokenUsage, ToolCallId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.it.tags.Local
@@ -16,26 +17,38 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
 
   "TracingMode" should "parse opentelemetry strings correctly" in {
     TracingMode.fromString("opentelemetry") shouldBe TracingMode.Named("opentelemetry")
-    TracingMode.fromString("otel") shouldBe TracingMode.Named("opentelemetry")
+    // `otel` is the backend's alias, not core's: it parses as itself and the backend answers to it
+    TracingMode.fromString("otel") shouldBe TracingMode.Named("otel")
+    new OpenTelemetryTracingBackend().aliases shouldBe Set("otel")
     TracingMode.fromString("OpenTelemetry") shouldBe TracingMode.Named("opentelemetry")
   }
 
   "OpenTelemetryTracing" should "assign correct SpanKind for events" in {
-    tracing.getSpanKind(TraceEvent.AgentInitialized("query", Vector.empty)) shouldBe SpanKind.INTERNAL
     tracing.getSpanKind(
-      TraceEvent.AgentRunEnded("t", "r", "a", "completed", Seq.empty, org.llm4s.llmconnect.model.UsageSummary())
+      TraceEvent.AgentRunEnded(
+        "t",
+        "r",
+        "a",
+        TraceEvent.RunStatus.Completed,
+        Seq.empty,
+        org.llm4s.llmconnect.model.UsageSummary()
+      )
     ) shouldBe SpanKind.INTERNAL
-    tracing.getSpanKind(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "model", "op")) shouldBe SpanKind.INTERNAL
+    tracing.getSpanKind(
+      TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), ModelName("model"), "op")
+    ) shouldBe SpanKind.INTERNAL
 
-    tracing.getSpanKind(TraceEvent.CompletionReceived("id", "model", 0, "content")) shouldBe SpanKind.CLIENT
-    tracing.getSpanKind(TraceEvent.ToolExecuted("tool", "in", "out", 100.millis, true)) shouldBe SpanKind.INTERNAL
-    tracing.getSpanKind(TraceEvent.ErrorOccurred(new Exception(""), "")) shouldBe SpanKind.INTERNAL
+    tracing.getSpanKind(TraceEvent.CompletionReceived("id", ModelName("model"), 0, "content")) shouldBe SpanKind.CLIENT
+    tracing.getSpanKind(
+      TraceEvent.ToolExecuted("tool", ToolCallId("in").asString, "out", 100.millis, true)
+    ) shouldBe SpanKind.INTERNAL
+    tracing.getSpanKind(TraceEvent.ErrorOccurred.of(new Exception(""), "")) shouldBe SpanKind.INTERNAL
   }
 
   it should "map CompletionReceived parameters to OpenTelemetry Semantic Conventions" in {
     val event = TraceEvent.CompletionReceived(
       id = "comp-123",
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       toolCalls = 2,
       content = "Hello world"
     )
@@ -54,7 +67,7 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
 
   it should "map TokenUsageRecorded parameters to OpenTelemetry Semantic Conventions" in {
     val usage = TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30)
-    val event = TraceEvent.TokenUsageRecorded(usage, "gpt-4", "chat")
+    val event = TraceEvent.TokenUsageRecorded(usage, ModelName("gpt-4"), "chat")
 
     val (name, attributes) = tracing.mapEventToAttributes(event)
 
@@ -90,7 +103,7 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
   it should "truncate excessive content in attributes" in {
     val capturing = new OpenTelemetryTracing("test-service", "http://localhost:4317", Map.empty, captureContent = true)
     val longContent = "a" * 2000
-    val event       = TraceEvent.CompletionReceived("id", "model", 0, longContent)
+    val event       = TraceEvent.CompletionReceived("id", ModelName("model"), 0, longContent)
 
     val (_, attributes)  = capturing.mapEventToAttributes(event)
     val messages: String = attributes.get(AttributeKey.stringKey("gen_ai.output.messages"))
@@ -116,14 +129,14 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
     otel.close()
   }
 
-  it should "be loaded correctly via Tracing.create when configured" in {
+  it should "be loaded correctly via Tracing.fromSettings when configured" in {
     // The llm4s.tracing.opentelemetry block, as core hands it to the backend (#1133).
     val settings = TracingSettings(
       mode = TracingMode.fromString("opentelemetry"),
       extras = Map("serviceName" -> "integration-test", "endpoint" -> "http://localhost:4317")
     )
 
-    val tracingInstance = Tracing.create(settings)
+    val tracingInstance = Tracing.fromSettings(settings).fold(e => fail(e.message), identity)
     tracingInstance shouldBe a[OpenTelemetryTracing]
 
     // Cleanup

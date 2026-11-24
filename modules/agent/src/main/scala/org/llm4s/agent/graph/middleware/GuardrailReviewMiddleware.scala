@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.events.GuardrailPhase
 import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.types.Result
@@ -10,7 +10,7 @@ import upickle.default.ReadWriter
  * What a reviewer is asked when a guardrail refuses a turn's query (`Input`) or its final answer
  * (`Output`): the first failing guardrail, every failure's error, and the refused text.
  */
-@Stable
+@Experimental
 final case class GuardrailReview private (phase: GuardrailPhase, guardrail: String, reason: String, text: String)
     derives ReadWriter:
   def withPhase(p: GuardrailPhase): GuardrailReview = GuardrailReview(p, guardrail, reason, text)
@@ -18,12 +18,13 @@ final case class GuardrailReview private (phase: GuardrailPhase, guardrail: Stri
   def withReason(r: String): GuardrailReview        = GuardrailReview(phase, guardrail, r, text)
   def withText(t: String): GuardrailReview          = GuardrailReview(phase, guardrail, reason, t)
 
+@Experimental
 object GuardrailReview:
   def apply(phase: GuardrailPhase, guardrail: String, reason: String, text: String): GuardrailReview =
     new GuardrailReview(phase, guardrail, reason, text)
 
 /** A reviewer's verdict on a refused query or answer. */
-@Stable
+@Experimental
 enum GuardrailVerdict derives ReadWriter:
   /** Let the refused text through unchanged. */
   case Allow
@@ -46,7 +47,7 @@ enum GuardrailVerdict derives ReadWriter:
  * so a judge whose reason varies is asked once; if the hook runs again on different text, the guardrails
  * run on it and the reviewer may be asked again.
  */
-@Stable
+@Experimental
 final class GuardrailReviewMiddleware(
   input: Seq[InputGuardrail],
   output: Seq[OutputGuardrail],
@@ -71,8 +72,10 @@ final class GuardrailReviewMiddleware(
         verdict.answer match
           case GuardrailVerdict.Allow      => Right(text)
           case GuardrailVerdict.Edit(next) => Right(next)
-          case GuardrailVerdict.Block => Left(GuardrailBlocked(verdict.question.guardrail, verdict.question.reason))
+          case GuardrailVerdict.Block =>
+            Left(GuardrailBlocked(verdict.question.guardrail, Some(verdict.question.reason)))
       case None =>
         guarded match
-          case Left(blocked: GuardrailBlocked) => ask(GuardrailReview(phase, blocked.guardrail, blocked.reason, text))
-          case other                           => other
+          case Left(blocked: GuardrailBlocked) =>
+            ask(GuardrailReview(phase, blocked.guardrail, blocked.reason.getOrElse(blocked.message), text))
+          case other => other

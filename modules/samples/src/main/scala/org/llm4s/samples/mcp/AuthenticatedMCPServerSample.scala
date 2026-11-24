@@ -71,7 +71,7 @@ object AuthenticatedMCPServerSample {
 
     // ── Define tools ────────────────────────────────────────────────────────
 
-    val echoTool = ToolBuilder[Map[String, Any], String](
+    val echoTool = ToolBuilder[String](
       name = "echo",
       description = "Echo a message back to the caller",
       schema = Schema
@@ -84,7 +84,7 @@ object AuthenticatedMCPServerSample {
         identity
       )
 
-    val reverseTool = ToolBuilder[Map[String, Any], String](
+    val reverseTool = ToolBuilder[String](
       name = "reverse",
       description = "Reverse a string",
       schema = Schema

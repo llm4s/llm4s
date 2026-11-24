@@ -67,7 +67,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   private def builder(client: ScriptedLLMClient): AgentBuilder =
-    Agent.builder("assistant", client).withTools(SpecTools.set(deploy))
+    Agent.builder("assistant", client).withToolSet(SpecTools.set(deploy))
 
   private val spendNode  = NodeId("assistant/asked/spend/wrapModelCall")
   private val toolNode   = NodeId("assistant/call-tool")
@@ -156,7 +156,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     )
     val agent = built(
       builder(client)
-        .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == "c1")("check c1")))
+        .withMiddleware(new ApprovalMiddleware(r => Option.when(r.call.id == ToolCallId("c1"))("check c1")))
         .withInterruptAfter(AgentNode.Tool)
     )
     val parked = agent.run("deploy").value
@@ -244,7 +244,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm")), CompletionFixture.simple("done"))
     val agent =
-      built(Agent.builder("assistant", client).withTools(SpecTools.set(confirm)).withInterruptAfter(AgentNode.Tool))
+      built(Agent.builder("assistant", client).withToolSet(SpecTools.set(confirm)).withInterruptAfter(AgentNode.Tool))
     val parked = agent.run("go").value
     val question = parked.status match {
       case AgentStatus.Suspended(s)
@@ -280,7 +280,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(SpecTools.set(deploy))
+        .withToolSet(SpecTools.set(deploy))
         .withMiddleware(new Review, new EnvGate)
         .withHandoffs(Handoff.to("expert", expert))
     )
@@ -353,7 +353,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy")), CompletionFixture.simple("done"))
     val agent =
-      built(Agent.builder("assistant", client).withTools(SpecTools.set(flaky)).withInterruptBefore(AgentNode.Tool))
+      built(Agent.builder("assistant", client).withToolSet(SpecTools.set(flaky)).withInterruptBefore(AgentNode.Tool))
     val parked = agent.run("go").value
     agent.resume(parked.threadId, Map(parked.proceed(breakpointsOf(parked).head._1))).error shouldBe a[GraphError]
     agent.recover(parked.threadId).value.answer shouldBe Some("done")
@@ -372,7 +372,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     }
     val client = ScriptedLLMClient.of(calling(call("c1", "deploy")), CompletionFixture.simple("done"))
     val agent =
-      built(Agent.builder("assistant", client).withTools(SpecTools.set(slow)).withInterruptBefore(AgentNode.Tool))
+      built(Agent.builder("assistant", client).withToolSet(SpecTools.set(slow)).withInterruptBefore(AgentNode.Tool))
     val parked = agent.run("go").value
 
     val run = agent

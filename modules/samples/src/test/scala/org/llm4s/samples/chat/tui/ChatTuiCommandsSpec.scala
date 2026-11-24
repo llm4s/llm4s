@@ -1,5 +1,7 @@
 package org.llm4s.samples.chat.tui
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.OpenAIConfig
@@ -18,17 +20,17 @@ class ChatTuiCommandsSpec extends AnyFlatSpec with Matchers {
   private val stubConfig = ChatTuiConfig(
     providerConfig = OpenAIConfig(
       apiKey = Secret("test"),
-      model = "gpt-4o-mini",
+      model = ModelName("gpt-5.6-luna"),
       organization = None,
-      baseUrl = "https://api.openai.com/v1",
+      baseUrl = BaseUrl("https://api.openai.com/v1"),
       contextWindow = 4096,
       reserveCompletion = 1024
     ),
     modelRegistry = ModelRegistryService.fromModels(Iterable.empty),
-    modelName = "openai/gpt-4o-mini",
+    modelName = "openai/gpt-5.6-luna",
     systemPrompt = "test",
     workspaceRoot = Paths.get("."),
-    allowedModels = Vector("openai/gpt-4o-mini", "anthropic/claude-3-5-haiku-latest")
+    allowedModels = Vector("openai/gpt-5.6-luna", "anthropic/claude-haiku-5-5")
   )
 
   private val stubModel = ChatTuiModel.Model(
@@ -68,8 +70,8 @@ class ChatTuiCommandsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "accept /model when in the allow-list" in {
-    ChatTuiCommands.toMsg(stubModel)(PromptLine("/model anthropic/claude-3-5-haiku-latest")) shouldBe
-      Right(ChatTuiModel.Msg.SetModel("anthropic/claude-3-5-haiku-latest"))
+    ChatTuiCommands.toMsg(stubModel)(PromptLine("/model anthropic/claude-haiku-5-5")) shouldBe
+      Right(ChatTuiModel.Msg.SetModel("anthropic/claude-haiku-5-5"))
   }
 
   it should "reject /model when not in the allow-list" in {
@@ -115,9 +117,7 @@ class ChatTuiCommandsSpec extends AnyFlatSpec with Matchers {
   private object NoopClient extends LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       throw new UnsupportedOperationException("test stub")
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       throw new UnsupportedOperationException("test stub")

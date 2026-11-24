@@ -2,6 +2,7 @@ package org.llm4s.schema
 
 // The build compiles with -source:3.3, which turns off named tuple values and field access by name; Scala 3.7's
 // default source level has them.
+import org.llm4s.types.ProviderModelTypes.ModelName
 import scala.language.`3.7`
 
 import org.llm4s.agent.Agent
@@ -40,12 +41,10 @@ class NamedTupleUseSpec extends AnyFlatSpec with Matchers {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       val reply = replies(asked.size)
       asked.add(options)
-      Right(Completion("id", Instant.EPOCH, reply, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, ModelName("test-model"), AssistantMessage(reply)))
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -58,7 +57,7 @@ class NamedTupleUseSpec extends AnyFlatSpec with Matchers {
   private def sentSchema(client: Scripted): Option[ujson.Value] =
     client.asked.asScala.headOption.flatMap(_.responseFormat).collect { case ResponseFormat.JsonSchema(s, _, _) => s }
 
-  private def built[A, R](tool: Result[ToolFunction[A, R]]): ToolFunction[A, R] =
+  private def built[R](tool: Result[ToolFunction[R]]): ToolFunction[R] =
     tool.fold(e => fail(e.formatted), identity)
 
   private val forecast = built(

@@ -229,11 +229,11 @@ class SessionManagerSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
 
   "SessionManager" should "round-trip tool calls and their results" in {
     val manager = new SessionManager(DirectoryPath(tempDir.toString))
-    val call    = ToolCall("call-1", "lookup", ujson.Obj("q" -> "weather"))
+    val call    = ToolCall(ToolCallId("call-1"), "lookup", ujson.Obj("q" -> "weather"))
     val messages = Vector(
       UserMessage("What is the weather?"),
       AssistantMessage(None, Seq(call)),
-      ToolMessage("""{"forecast":"sun"}""", "call-1"),
+      ToolMessage("""{"forecast":"sun"}""", ToolCallId("call-1")),
       AssistantMessage("Sunny.")
     )
 
@@ -245,9 +245,13 @@ class SessionManagerSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
 
   it should "write each message, and each tool call, to the markdown companion" in {
     val manager = new SessionManager(DirectoryPath(tempDir.toString))
-    val call    = ToolCall("call-1", "lookup", ujson.Obj("q" -> "weather"))
+    val call    = ToolCall(ToolCallId("call-1"), "lookup", ujson.Obj("q" -> "weather"))
     val state = stateWith(
-      Vector(UserMessage("What is the weather?"), AssistantMessage(None, Seq(call)), ToolMessage("sun", "call-1")),
+      Vector(
+        UserMessage("What is the weather?"),
+        AssistantMessage(None, Seq(call)),
+        ToolMessage("sun", ToolCallId("call-1"))
+      ),
       "markdown-test"
     )
 

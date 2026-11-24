@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -18,7 +19,7 @@ import scala.jdk.CollectionConverters.*
  */
 class OllamaEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
 
-  private val model = EmbeddingModelConfig("nomic-embed-text", 2)
+  private val model = EmbeddingModelConfig(ModelName("nomic-embed-text"), 2)
 
   private def bodiesFor(purpose: InputPurpose): List[ujson.Value] = {
     val seen = new ConcurrentLinkedQueue[ujson.Value]()
@@ -27,7 +28,14 @@ class OllamaEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
       sendJsonResponse(ex, 200, """{"embedding":[1.0, 2.0]}""")
     } { baseUrl =>
       val provider =
-        OllamaEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, model.name, Secret("not-required")))
+        OllamaEmbeddingProvider.fromConfig(
+          EmbeddingProviderConfig(
+            ProviderId("ollama"),
+            BaseUrl(baseUrl),
+            ModelName(model.name.asString),
+            Some(Secret("not-required"))
+          )
+        )
       provider.embed(EmbeddingRequest(Seq("first", "second"), model, purpose)).isRight shouldBe true
     }
     seen.asScala.toList

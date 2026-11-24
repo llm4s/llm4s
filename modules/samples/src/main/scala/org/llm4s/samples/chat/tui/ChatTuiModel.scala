@@ -1,5 +1,6 @@
 package org.llm4s.samples.chat.tui
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Conversation, StreamedChunk, ToolCall }
 import termflow.tui.*
@@ -96,7 +97,7 @@ object ChatTuiModel:
     var generation: Long = 0L
 
     // Keep one accumulator for the whole turn: callback tool arguments may be raw JSON fragments.
-    private var accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator("")
+    private var accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator(ModelName(""))
 
     def addChunks(chunks: Vector[org.llm4s.llmconnect.model.StreamedChunk]): Unit =
       chunks.foreach(accumulator.addChunk)
@@ -107,7 +108,7 @@ object ChatTuiModel:
       pump = null
       if sub != Sub.NoSub then sub.cancel()
       sub = Sub.NoSub
-      accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator("")
+      accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator(ModelName(""))
 
   final case class Model(
     width: Int,

@@ -1,5 +1,8 @@
 package org.llm4s.samples.metrics
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.ProviderConfig
@@ -110,8 +113,8 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
 
     val outcome = Try {
       val hocon =
-        s"""llm4s.providers {
-           |  provider = "stub"
+        s"""llm4s.defaultProvider = "stub"
+           |llm4s.providers {
            |  stub {
            |    provider = "openai-compatible"
            |    baseUrl  = "http://localhost:${server.getAddress.getPort}/v1"
@@ -120,7 +123,9 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
            |  }
            |}""".stripMargin
       val config =
-        Llm4sConfig.provider(ConfigSource.string(hocon), "stub").fold(error => fail(error.formatted), identity)
+        Llm4sConfig
+          .provider(ConfigSource.string(hocon), ProviderName("stub"))
+          .fold(error => fail(error.formatted), identity)
       test(config, provider)
     }
     server.stop(0)
@@ -133,8 +138,8 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
 
   private def metadata(model: String, pricing: ModelPricing): ModelMetadata =
     ModelMetadata(
-      modelId = model,
-      provider = "openai-compatible",
+      modelId = ModelName(model),
+      provider = ProviderId("openai-compatible"),
       mode = ModelMode.Chat,
       maxInputTokens = None,
       maxOutputTokens = None,
@@ -162,7 +167,8 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
       // 1. Per request: the first plain request, 20 in and 10 out.
       report.perRequest.usage.map(u => (u.promptTokens, u.completionTokens)) shouldBe Some(Plain.head)
       report.perRequest.cost
-        .getOrElse(fail("no cost")) shouldBe (cost(Plain.head, RegistryIn, RegistryOut) +- tolerance)
+        .getOrElse(fail("no cost"))
+        .toDouble shouldBe (cost(Plain.head, RegistryIn, RegistryOut) +- tolerance)
 
       // 2. Agent: the tool call and the final answer, two requests.
       report.agent.requestCount shouldBe 2
@@ -200,7 +206,7 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
         CostTrackingExample.ExampleInputPerMillion / 1.0e6,
         CostTrackingExample.ExampleOutputPerMillion / 1.0e6
       )
-      custom.request.cost.getOrElse(fail("no cost")) shouldBe (expected +- tolerance)
+      custom.request.cost.getOrElse(fail("no cost")).toDouble shouldBe (expected +- tolerance)
       custom.request.cost
         .getOrElse(fail("no cost")) should not be (cost(Plain(1), RegistryIn, RegistryOut) +- tolerance)
 
@@ -215,7 +221,9 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
     val report = runFor(config, pricedRegistry("acme-chat-7"))
 
     report.model shouldBe "acme-chat-7"
-    report.perRequest.cost.getOrElse(fail("no cost")) shouldBe (cost(Plain.head, RegistryIn, RegistryOut) +- tolerance)
+    report.perRequest.cost
+      .getOrElse(fail("no cost"))
+      .toDouble shouldBe (cost(Plain.head, RegistryIn, RegistryOut) +- tolerance)
     report.agent.requestCount shouldBe 2
   }
 
@@ -252,18 +260,18 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
     val result =
       CostTrackingExample.withCustomPricing(base, "my-model", "acme", 3.0, 9.0).fold(e => fail(e.formatted), identity)
 
-    val mine = result.lookup("my-model").fold(e => fail(e.formatted), identity)
+    val mine = result.lookup(ModelName("my-model")).fold(e => fail(e.formatted), identity)
     mine.pricing.inputCostPerToken.getOrElse(fail("no price")) shouldBe (3.0e-6 +- tolerance)
     mine.pricing.outputCostPerToken.getOrElse(fail("no price")) shouldBe (9.0e-6 +- tolerance)
-    result.lookup("known-model").isRight shouldBe true
+    result.lookup(ModelName("known-model")).isRight shouldBe true
   }
 
   it should "leave the registry it was given as it was" in {
     val base = pricedRegistry("known-model")
     CostTrackingExample.withCustomPricing(base, "my-model", "acme", 3.0, 9.0).isRight shouldBe true
 
-    base.lookup("my-model").isLeft shouldBe true
-    base.lookup("known-model").isRight shouldBe true
+    base.lookup(ModelName("my-model")).isLeft shouldBe true
+    base.lookup(ModelName("known-model")).isRight shouldBe true
   }
 
   it should "replace the price of a model the base registry already has" in {
@@ -272,8 +280,16 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
       .withCustomPricing(base, "known-model", "acme", 5.0, 7.0)
       .fold(e => fail(e.formatted), identity)
 
-    result.lookup("known-model").fold(e => fail(e.formatted), identity).pricing.inputCostPerToken shouldBe Some(5.0e-6)
-    base.lookup("known-model").fold(e => fail(e.formatted), identity).pricing.inputCostPerToken shouldBe Some(
+    result
+      .lookup(ModelName("known-model"))
+      .fold(e => fail(e.formatted), identity)
+      .pricing
+      .inputCostPerToken shouldBe Some(5.0e-6)
+    base
+      .lookup(ModelName("known-model"))
+      .fold(e => fail(e.formatted), identity)
+      .pricing
+      .inputCostPerToken shouldBe Some(
       RegistryIn
     )
   }

@@ -113,7 +113,7 @@ private[jev] object JevErrors {
     // The mapper handles 400 as a validation error; Jev's 422 is the same thing.
     val status = if (response.statusCode == 422) 400 else response.statusCode
     val mapped: LLMError =
-      HttpErrorMapper.mapHttpError(status, body, Provider, response.headers).fold(identity, identity)
+      Left(HttpErrorMapper.toError(status, body, Provider, response.headers)).fold(identity, identity)
     // `retry-after-ms` is the more precise of the two headers the SDKs honour, so it wins when both are sent.
     (mapped, retryAfterMs(response.headers)) match {
       case (_: RateLimitError, Some(delay))     => RateLimitError(Provider, delay)

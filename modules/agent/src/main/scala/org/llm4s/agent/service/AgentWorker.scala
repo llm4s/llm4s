@@ -554,9 +554,8 @@ final class AgentWorker private (
           case (AttemptPlan.Start, _) =>
             Right(entry.input match
               case QueuedInput.Start(input) =>
-                agent
-                  .query(input)
-                  .flatMap((query, history) => agent.agent.start(entry.threadId, query, config, history))
+                // admitted now, unless its submitter admitted it (#2854): `Agent.admit`, then `QueuedInput.admitted`
+                agent.input(input).flatMap(agent.agent.startQueued(entry.threadId, _, config))
               case QueuedInput.Resume(answers) => agent.agent.startResume(entry.threadId, answers, config)
               case QueuedInput.Recover         => agent.agent.startRecover(entry.threadId, config)
             )

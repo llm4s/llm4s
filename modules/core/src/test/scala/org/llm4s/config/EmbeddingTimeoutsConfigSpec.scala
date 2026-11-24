@@ -1,10 +1,17 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, EmbeddingProviderSection, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
+  EmbeddingConfigContext,
+  EmbeddingProviderDescriptor,
+  EmbeddingProviderSection,
+  ProviderRegistry
+}
 import org.llm4s.testutil.FixtureEmbeddingProvider
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
@@ -34,7 +41,6 @@ class EmbeddingTimeoutsConfigSpec extends AnyWordSpec with Matchers with EitherV
              |""".stripMargin
         )
       )
-      .map(_._2)
 
   private def refused(section: String): String =
     load(section) match
@@ -51,7 +57,7 @@ class EmbeddingTimeoutsConfigSpec extends AnyWordSpec with Matchers with EitherV
     "carry the request timeout onto the provider config" in {
       val config = load("timeouts { request = 3m }").value
       config.timeouts.request shouldBe Some(3.minutes)
-      config.model shouldBe "fixture-embed-large"
+      config.model.asString shouldBe "fixture-embed-large"
     }
 
     "carry a stream timeout too, which an embedding call has no use for" in {
@@ -77,8 +83,8 @@ class EmbeddingTimeoutsConfigSpec extends AnyWordSpec with Matchers with EitherV
     "keep reading its other keys with a timeouts block present" in {
       val config = load("""baseUrl = "https://example.invalid/v1"
                           |timeouts { request = 45s }""".stripMargin).value
-      config.baseUrl shouldBe "https://example.invalid/v1"
-      config.apiKey.reveal shouldBe "vk-test-key"
+      config.baseUrl.asUrl shouldBe "https://example.invalid/v1"
+      config.apiKey.map(_.reveal) shouldBe Some("vk-test-key")
       config.timeouts.request shouldBe Some(45.seconds)
     }
   }
@@ -90,9 +96,17 @@ class EmbeddingTimeoutsConfigSpec extends AnyWordSpec with Matchers with EitherV
       object Overriding extends EmbeddingProviderDescriptor:
         val id                  = FixtureEmbeddingProvider.id
         override val configSpec = FixtureEmbeddingProvider.configSpec
-        override def buildConfig(section: EmbeddingProviderSection, modelOverride: Option[String]) =
-          Right(EmbeddingProviderConfig("http://x", modelOverride.getOrElse("m"), Secret("k")))
-        def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = FixtureEmbeddingProvider.build(config)
+        override def buildConfig(section: EmbeddingProviderSection, context: EmbeddingConfigContext) =
+          Right(
+            EmbeddingProviderConfig(
+              ProviderId("fixtureembedding"),
+              BaseUrl("http://x"),
+              context.modelOverride.getOrElse(ModelName("m")),
+              Some(Secret("k"))
+            )
+          )
+        def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+          FixtureEmbeddingProvider.build(config, context)
 
       given ProviderRegistry = ProviderRegistry.ofEmbeddings(Overriding)
       val result = EmbeddingsConfigLoader.loadProvider(
@@ -104,13 +118,18 @@ class EmbeddingTimeoutsConfigSpec extends AnyWordSpec with Matchers with EitherV
             |""".stripMargin
         )
       )
-      result.value._2.timeouts.request shouldBe Some(3.minutes)
+      result.value.timeouts.request shouldBe Some(3.minutes)
     }
   }
 
   "EmbeddingProviderConfig" should {
     "default to no timeouts, so a config built by hand behaves as before" in {
-      EmbeddingProviderConfig("http://x", "m", Secret("k")).timeouts shouldBe ProviderTimeouts.default
+      EmbeddingProviderConfig(
+        ProviderId("fixtureembedding"),
+        BaseUrl("http://x"),
+        ModelName("m"),
+        Some(Secret("k"))
+      ).timeouts shouldBe ProviderTimeouts.default
     }
   }
 }

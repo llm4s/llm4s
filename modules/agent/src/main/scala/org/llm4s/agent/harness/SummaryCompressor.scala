@@ -272,7 +272,7 @@ object SummaryCompressor:
     case other                                                 => other
 
   /** The text of `parts`, each media part named by its kind in place, never sent as bytes. */
-  private def withMedia(parts: Vector[ContentPart]): String =
+  private def withMedia(parts: Seq[ContentPart]): String =
     parts
       .map {
         case ContentPart.Text(text) => text

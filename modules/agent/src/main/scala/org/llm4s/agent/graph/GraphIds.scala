@@ -1,6 +1,7 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.{ Experimental, Stable }
+import org.llm4s.toolapi.IdempotencyKey
 
 /** Stable identifier of a node in a compiled graph; persisted in snapshots. */
 opaque type NodeId = String
@@ -19,17 +20,17 @@ object NodeId:
   def apply(value: String): NodeId         = value
   extension (id: NodeId) def value: String = id
 
-@Stable
+@Experimental
 object TaskId:
   def apply(value: String): TaskId         = value
   extension (id: TaskId) def value: String = id
 
-@Stable
+@Experimental
 object JoinId:
   def apply(value: String): JoinId         = value
   extension (id: JoinId) def value: String = id
 
-@Stable
+@Experimental
 object StateKeyId:
   def apply(value: String): StateKeyId         = value
   extension (id: StateKeyId) def value: String = id
@@ -55,8 +56,8 @@ object ThreadId:
    * The id's shape decides nothing: a thread is a child thread only when its checkpoint records a [[RunOrigin]], so a
    * caller naming a top-level thread like this gets a top-level thread.
    */
-  def child(parent: ThreadId, agent: org.llm4s.agent.AgentId, call: IdempotencyKey): ThreadId =
-    val digest = KeyDigest.of(Seq("llm4s-child-v1", parent, call.value, agent.value)).take(24)
+  private[llm4s] def child(parent: ThreadId, agent: org.llm4s.agent.AgentId, call: IdempotencyKey): ThreadId =
+    val digest = KeyDigest.of(Seq("llm4s-child-v1", parent, call.asString, agent.value)).take(24)
     s"$parent/~task/${agent.value}/$digest"
 
   /**
@@ -96,33 +97,16 @@ object Principal:
   def apply(value: String): Principal         = value
   extension (id: Principal) def value: String = id
 
-/** The provider's identifier of one tool call; unique within a conversation. */
-opaque type ToolCallId = String
-
-@Stable
-object ToolCallId:
-  def apply(value: String): ToolCallId         = value
-  extension (id: ToolCallId) def value: String = id
-
 /**
- * The key a tool gives an external system so that a second run of the same tool call does not
- * repeat its side effect: one key per model-issued call, the same in every run of that call (a
- * retrying wrapper, an approval, an answered question, `recover` after a failure, a cancellation
- * or a crash), and different for a call from another model request, even one that reuses the
- * provider's call id.
+ * The derivations of a tool call's [[org.llm4s.toolapi.IdempotencyKey]] (design §4.1, §4.24). The key type is in
+ * core, where a tool reads it as `ToolCallInfo.idempotencyKey`; how the agent derives it, from its threads, tasks
+ * and lineages, stays here.
  *
- * The agent loop derives it with `IdempotencyKey.ofCall` from the model task that issued the
- * call (its key, lineage included) and the call's id, name and arguments, and records it with the
- * call, so it reaches the tool as `ToolContext.idempotencyKey`. It de-duplicates only where the external
- * system honours it: the runtime runs a tool at least once, never exactly once (design §4.1).
+ * The agent loop derives a call's key with `ofCall` from the model task that issued the call (its key, lineage
+ * included) and the call's id, name and arguments, and records it with the call, so it reaches the tool as
+ * `ToolContext.idempotencyKey`.
  */
-opaque type IdempotencyKey = String
-
-@Stable
-object IdempotencyKey:
-
-  /** A key with this exact value, such as one read back from an external system's log. */
-  def apply(value: String): IdempotencyKey = value
+private[agent] object IdempotencyKeys:
 
   /**
    * The key of task `taskId` of lineage `lineage` on `threadId` ([[RunContext.taskKey]]): the SHA-256 of the
@@ -130,7 +114,7 @@ object IdempotencyKey:
    * the task keeps its id and lineage.
    */
   private[graph] def ofTask(threadId: ThreadId, taskId: TaskId, lineage: String): IdempotencyKey =
-    KeyDigest.of(Seq("llm4s-task-v2", threadId.value, taskId.value, lineage))
+    IdempotencyKey(KeyDigest.of(Seq("llm4s-task-v2", threadId.value, taskId.value, lineage)))
 
   /**
    * The key of tool call `call` issued by the model task whose key is `modelTask` ([[RunContext.taskKey]]):
@@ -140,20 +124,22 @@ object IdempotencyKey:
    * issues it under the same key, and its effects replay rather than repeat; a request whose answer differs
    * issues other calls, with other keys, whatever ids the provider reuses (design §4.24).
    */
-  private[agent] def ofCall(
+  def ofCall(
     threadId: ThreadId,
     modelTask: IdempotencyKey,
     call: org.llm4s.llmconnect.model.ToolCall
   ): IdempotencyKey =
-    KeyDigest.of(
-      Seq(
-        "llm4s-tool-call-v3",
-        threadId.value,
-        modelTask,
-        // a call built in Java may carry null parts: they hash as empty or JSON null, never as an error
-        Option(call.id).getOrElse(""),
-        Option(call.name).getOrElse(""),
-        KeyDigest.canonical(Option(call.arguments).getOrElse(ujson.Null))
+    IdempotencyKey(
+      KeyDigest.of(
+        Seq(
+          "llm4s-tool-call-v3",
+          threadId.value,
+          modelTask.asString,
+          // a call built in Java may carry null parts: they hash as empty or JSON null, never as an error
+          Option(call.id).map(_.asString).getOrElse(""),
+          Option(call.name).getOrElse(""),
+          KeyDigest.canonical(Option(call.arguments).getOrElse(ujson.Null))
+        )
       )
     )
 
@@ -169,21 +155,14 @@ object IdempotencyKey:
     asking: Option[IdempotencyKey],
     resume: String
   ): IdempotencyKey =
-    KeyDigest.of(Seq("llm4s-tool-resume-v3", call, asking.getOrElse(""), resume))
-
-  extension (key: IdempotencyKey) def value: String = key
-
-  /**
-   * Encodes as a plain JSON string. Built from upickle's string codecs: inside this scope an
-   * `IdempotencyKey` is a `String`, so summoning `ReadWriter[String]` would find this given.
-   */
-  given upickle.default.ReadWriter[IdempotencyKey] =
-    upickle.default.ReadWriter.join(upickle.default.StringReader, upickle.default.StringWriter)
+    IdempotencyKey(
+      KeyDigest.of(Seq("llm4s-tool-resume-v3", call.asString, asking.map(_.asString).getOrElse(""), resume))
+    )
 
 /** The name of a tool, as the model calls it. */
 opaque type ToolName = String
 
-@Stable
+@Experimental
 object ToolName:
   def apply(value: String): ToolName           = value
   extension (name: ToolName) def value: String = name
@@ -196,7 +175,7 @@ object ToolName:
  */
 opaque type FencingToken = Long
 
-@Stable
+@Experimental
 object FencingToken:
   def apply(value: Long): FencingToken            = value
   extension (token: FencingToken) def value: Long = token

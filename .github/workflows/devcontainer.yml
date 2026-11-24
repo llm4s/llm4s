@@ -44,6 +44,10 @@ jobs:
           # Compose's bake builder refuses the devcontainer CLI's generated Dockerfile under /tmp without an
           # --allow=fs.read grant the CLI does not pass; the classic builder needs none.
           COMPOSE_BAKE: "false"
+          # Newer Compose builds through bake whatever COMPOSE_BAKE says, and fails with "additional privileges
+          # requested: pass --allow=fs.read=/tmp/devcontainercli-.../Dockerfile-with-features". This turns off bake's
+          # filesystem entitlement check, which is what that grant would satisfy.
+          BUILDX_BAKE_ENTITLEMENTS_FS: "0"
         with:
           push: never
           runCmd: .devcontainer/playground-check.sh

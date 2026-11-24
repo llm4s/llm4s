@@ -3,8 +3,9 @@ layout: page
 title: Data Protection
 description: "What personal data LLM4S sends where, what it keeps and logs by default, provider data residency, and deletion, for privacy and DPIA reviews."
 search_title: "LLM4S data protection: what data leaves your process"
-parent: User Guide
-nav_order: 38
+parent: Operations
+nav_order: 703
+grand_parent: User Guide
 ---
 
 # Data Protection
@@ -83,7 +84,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.trace.{ ConsoleTracing, NoOpTracing, Tracing }
 
 // What the configuration selects: console, metadata only, unless TRACING_MODE says otherwise
-val configured: Tracing = Llm4sConfig.tracing().map(Tracing.create).getOrElse(new NoOpTracing())
+val configured: Tracing = Llm4sConfig.tracing().flatMap(Tracing.fromSettings).getOrElse(new NoOpTracing())
 
 // Prompts and answers too: for a developer's machine only
 val verbose: Tracing = new ConsoleTracing(captureContent = true)
@@ -115,7 +116,7 @@ Allow only what your configuration uses. The defaults below are what a section g
 | Voyage, Jina, Cohere embeddings and rerank | `api.voyageai.com`, `api.jina.ai`, `api.cohere.com` | The matching embedding provider or `CohereReranker` |
 | Ollama, generic `openai-compatible` | The `baseUrl` you set (Ollama: `localhost:11434`) | The matching provider |
 | Brave, Exa, DuckDuckGo | `api.search.brave.com`, `api.exa.ai`, `api.duckduckgo.com` | The search tools |
-| Stability AI, Hugging Face, ElevenLabs | `api.stability.ai`, `api-inference.huggingface.co`, `api.elevenlabs.io` | Image generation, text-to-speech |
+| Stability AI, Hugging Face, ElevenLabs | `api.stability.ai`, `router.huggingface.co` and `huggingface.co` (the health check), `api.elevenlabs.io` | Image generation, text-to-speech |
 | Langfuse, OTLP | `cloud.langfuse.com`; `localhost:4317` | The tracing mode |
 | Model metadata | None: the registry is bundled | Only when you set `llm4s.modelRegistry.url` |
 
@@ -142,7 +143,7 @@ For example, a section that keeps processing in the EU on Vertex AI:
 ```hocon
 llm4s.providers.gemini-eu {
   provider = "vertexai"
-  model    = "gemini-2.0-flash"
+  model    = "gemini-3.8-flash"
   project  = ${?VERTEXAI_PROJECT}
   location = "europe-west4"
 }
@@ -196,18 +197,13 @@ Both cover `SSN`, `CreditCard`, `Email` and `Phone` by default; `PIIType.all` ad
 
 ```scala
 import org.llm4s.agent.Agent
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin.{ PIIDetector, PIIMasker }
 import org.llm4s.agent.guardrails.patterns.PIIPatterns.PIIType
 
 val guarded = Agent
   .builder("support", client)
-  .withMiddleware(
-    GuardrailMiddleware(
-      input = Seq(PIIMasker(PIIType.all)), // mask before the model sees the query
-      output = Seq(PIIDetector())          // block an answer that still contains PII
-    )
-  )
+  .withInputGuardrails(PIIMasker(PIIType.all)) // mask before the model sees the query
+  .withOutputGuardrails(PIIDetector())         // block an answer that still contains PII
   .build()
 ```
 
@@ -217,8 +213,15 @@ Their limits:
   only with a leading `+`. Names, postal addresses, IBANs in most layouts and free-text health data are not detected.
 - They see the query and the final answer. Tool arguments and tool results, retrieved RAG passages and memories put into
   the prompt are not checked, and neither is what a tool sends to its own API.
-- A masked query is what the thread stores, so the masking also keeps it out of the checkpointer; an unmasked one is
-  stored as written.
+- Input guardrails run before a turn is stored. A masked query is the only form of it the checkpointer holds, in
+  every checkpoint of the turn and across `recover` and `resume`; a query a guardrail blocks is in no checkpoint,
+  durable event or trace, and the blocked turn records the guardrail's name and nothing else. The reason a guardrail
+  gives - which may quote the text - is returned to the caller and never stored.
+- That covers the checkpoint store. A query handed to a run queue is stored there as submitted unless you admit it
+  first (`agent.admit`, then `QueuedInput.admitted`), and a `beforeAgent` middleware hook runs after the turn's first
+  checkpoint: redact in `admit`. See [Admission](agents/middleware#admission).
+- An answer is different: an output guardrail runs on an answer the model has produced, so a blocked answer was in
+  the turn's earlier checkpoints, which the block removes from the thread.
 
 For stronger guarantees, redact or pseudonymise before text reaches llm4s, and choose a provider and region your
 agreements cover.

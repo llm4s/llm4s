@@ -1,6 +1,6 @@
 package org.llm4s.schema
 
-import org.llm4s.context.tokens.TokenizerMapping
+import org.llm4s.testutil.DocumentedFixture
 import org.llm4s.schema.MethodFixtures.*
 import org.llm4s.toolapi.{ ToolCallError, ToolCallRequest, ToolFunction, ToolRegistry }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -12,10 +12,10 @@ class DerivedToolsSpec extends AnyFlatSpec with Matchers {
   private def built[T](tool: org.llm4s.types.Result[T]): T =
     tool.fold(e => sys.error(s"could not build the tool: ${e.formatted}"), identity)
 
-  private lazy val tools: Map[String, ToolFunction[?, ?]] =
+  private lazy val tools: Map[String, ToolFunction[?]] =
     built(Tools.derive[CustomerService](LiveCustomerService)).map(t => t.name -> t).toMap
 
-  private def parameters(tool: ToolFunction[?, ?]): ujson.Value = tool.schema.toJsonSchema(true)
+  private def parameters(tool: ToolFunction[?]): ujson.Value = tool.schema.toJsonSchema(true)
 
   "Tools.derive" should "make one tool per public method, in name order, leaving out @notATool methods" in {
     built(Tools.derive[CustomerService](LiveCustomerService)).map(_.name) shouldBe
@@ -76,7 +76,7 @@ class DerivedToolsSpec extends AnyFlatSpec with Matchers {
   }
 
   "Tool.fromMethod" should "build the tool of one method, typed by its result" in {
-    val cancel: ToolFunction[?, Cancellation] = built(Tool.fromMethod(LiveCustomerService.cancelOrder))
+    val cancel: ToolFunction[Cancellation] = built(Tool.fromMethod(LiveCustomerService.cancelOrder))
     cancel.name shouldBe "cancel"
     cancel.execute(ujson.Obj("orderId" -> "O-2", "reason" -> "late")) shouldBe
       Right(ujson.Obj("orderId" -> "O-2", "refunded" -> true))
@@ -109,11 +109,11 @@ class DerivedToolsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "read Scaladoc from the TASTy of a class compiled in another run" in {
-    val exact = built(Tool.fromMethod(TokenizerMapping.isExactMapping))
-    exact.name shouldBe "is_exact_mapping"
-    exact.description should startWith("Check if the tokenizer mapping is exact or approximate for a model.")
-    parameters(exact)("properties")("modelName")("description").str shouldBe "The model identifier"
-    exact.execute(ujson.Obj("modelName" -> "gpt-4o")) shouldBe Right(ujson.Bool(true))
+    val palindrome = built(Tool.fromMethod(DocumentedFixture.isPalindrome))
+    palindrome.name shouldBe "is_palindrome"
+    palindrome.description should startWith("Check if a word is a palindrome.")
+    parameters(palindrome)("properties")("word")("description").str shouldBe "The word to check"
+    palindrome.execute(ujson.Obj("word" -> "Level")) shouldBe Right(ujson.Bool(true))
   }
 
   "Scaladoc" should "be read as its main text and its @param tags, with links written as their text" in {

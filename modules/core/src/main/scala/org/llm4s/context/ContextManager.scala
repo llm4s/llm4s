@@ -1,9 +1,10 @@
 package org.llm4s.context
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Conversation, Message }
-import org.llm4s.types.{ Result, TokenBudget, HeadroomPercent, ContextWindowSize }
+import org.llm4s.error.ValidationError
+import org.llm4s.types.{ HeadroomPercent, Result }
 import org.slf4j.LoggerFactory
 
 /**
@@ -50,7 +51,7 @@ import org.slf4j.LoggerFactory
  *
  * {{{
  * // Quick setup with defaults:
- * val manager = ContextManager.withDefaults(tokenCounter).getOrElse(???)
+ * val manager = ContextManager.create(tokenCounter).getOrElse(???)
  * val result  = manager.manageContext(conversation, budget = 8000)
  * result.foreach(managed => println(managed.summary))
  *
@@ -73,19 +74,19 @@ import org.slf4j.LoggerFactory
  * @see [[TokenWindow]] for Step 4 implementation
  * @see [[ContextConfig]] for all configuration options
  */
-@Stable
-class ContextManager(
+@Experimental
+final class ContextManager private (
   tokenCounter: ConversationTokenCounter,
   config: ContextConfig,
-  llmClient: Option[LLMClient] = None,
-  artifactStore: Option[ArtifactStore] = None
+  llmClient: Option[LLMClient],
+  artifactStore: Option[ArtifactStore]
 ) {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
    * Apply 4-step context management pipeline to fit conversation within budget
    */
-  def manageContext(conversation: Conversation, budget: TokenBudget): Result[ManagedConversation] = {
+  def manageContext(conversation: Conversation, budget: Int): Result[ManagedConversation] = {
     logger.info(
       s"Starting new context management pipeline for ${conversation.messages.length} messages, budget: $budget tokens"
     )
@@ -111,7 +112,9 @@ class ContextManager(
 
     if (!config.enableDeterministicCompression) {
       logger.debug("Deterministic compression disabled in configuration")
-      Right(PipelineStep("ToolDeterministicCompaction", messages, currentTokens, currentTokens, applied = false))
+      Right(
+        PipelineStep(ContextStage.ToolDeterministicCompaction, messages, currentTokens, currentTokens, applied = false)
+      )
     } else {
       // Cap equals current size: allows compaction but never forces arbitrary reduction.
       val capAtCurrent = currentTokens
@@ -122,13 +125,12 @@ class ContextManager(
           messages,
           tokenCounter,
           capAtCurrent,
-          artifactStore,
-          enableSubjectiveEdits = false // Tool compaction only in Step 1
+          artifactStore
         )
         .map { compressedMessages =>
           val finalTokens = tokenCounter.countConversation(Conversation(compressedMessages))
           PipelineStep(
-            name = "ToolDeterministicCompaction",
+            stage = ContextStage.ToolDeterministicCompaction,
             messages = compressedMessages,
             tokensBefore = currentTokens,
             tokensAfter = finalTokens,
@@ -141,12 +143,12 @@ class ContextManager(
   /**
    * Step 2: History compression (structured digest)
    */
-  private def applyHistoryCompression(messages: Seq[Message], budget: TokenBudget): Result[PipelineStep] = {
+  private def applyHistoryCompression(messages: Seq[Message], budget: Int): Result[PipelineStep] = {
     val currentTokens = tokenCounter.countConversation(Conversation(messages))
 
     if (currentTokens <= budget) {
       logger.debug("Messages fit budget, skipping history compression")
-      Right(PipelineStep("HistoryCompression", messages, currentTokens, currentTokens, applied = false))
+      Right(PipelineStep(ContextStage.HistoryCompression, messages, currentTokens, currentTokens, applied = false))
     } else {
       logger.info("Applying history compression with deterministic digest")
       // Step 4 pins every digest, so they may take at most half the usable budget.
@@ -157,7 +159,7 @@ class ContextManager(
         .map { compressedMessages =>
           val finalTokens = tokenCounter.countConversation(Conversation(compressedMessages))
           PipelineStep(
-            name = "HistoryCompression",
+            stage = ContextStage.HistoryCompression,
             messages = compressedMessages,
             tokensBefore = currentTokens,
             tokensAfter = finalTokens,
@@ -170,9 +172,9 @@ class ContextManager(
   /**
    * Step 3: LLM history squeeze (digest-only compression)
    */
-  private def applyLLMHistorySqueeze(messages: Seq[Message], budget: TokenBudget): Result[PipelineStep] = {
+  private def applyLLMHistorySqueeze(messages: Seq[Message], budget: Int): Result[PipelineStep] = {
     val currentTokens = tokenCounter.countConversation(Conversation(messages))
-    val skipStep      = PipelineStep("LLMHistorySqueeze", messages, currentTokens, currentTokens, applied = false)
+    val skipStep = PipelineStep(ContextStage.LLMHistorySqueeze, messages, currentTokens, currentTokens, applied = false)
 
     if (currentTokens <= budget) {
       logger.debug("Messages fit budget, skipping LLM history squeeze")
@@ -186,7 +188,7 @@ class ContextManager(
         compressedMessages =>
           val finalTokens = tokenCounter.countConversation(Conversation(compressedMessages))
           PipelineStep(
-            name = "LLMHistorySqueeze",
+            stage = ContextStage.LLMHistorySqueeze,
             messages = compressedMessages,
             tokensBefore = currentTokens,
             tokensAfter = finalTokens,
@@ -199,13 +201,13 @@ class ContextManager(
   /**
    * Step 4: Final token trim (leading system and digest messages pinned)
    */
-  private def applyFinalTokenTrim(messages: Seq[Message], budget: TokenBudget): Result[PipelineStep] = {
+  private def applyFinalTokenTrim(messages: Seq[Message], budget: Int): Result[PipelineStep] = {
     val currentTokens = tokenCounter.countConversation(Conversation(messages))
     val conversation  = Conversation(messages)
 
-    TokenWindow.trimToBudget(conversation, tokenCounter, budget, config.headroomPercent.asRatio).map { window =>
+    TokenWindow.trimToBudget(conversation, tokenCounter, budget, config.headroomPercent).map { window =>
       PipelineStep(
-        name = "FinalTokenTrim",
+        stage = ContextStage.FinalTokenTrim,
         messages = window.conversation.messages,
         tokensBefore = currentTokens,
         tokensAfter = window.usage.currentTokens,
@@ -216,35 +218,16 @@ class ContextManager(
 
 }
 
-/**
- * Represents a single step in the new 4-stage context management pipeline
- */
-@Stable
-final case class PipelineStep private (
-  name: String,
+/** One stage's outcome inside [[ContextManager]], before it is reported as a [[ContextStep]]. */
+final private case class PipelineStep(
+  stage: ContextStage,
   messages: Seq[Message],
   tokensBefore: Int,
   tokensAfter: Int,
   applied: Boolean
 ) {
-
-  /** Sets the step name. */
-  def withName(name: String): PipelineStep = copy(name = name)
-
-  /** Sets the messages after the step. */
-  def withMessages(messages: Seq[Message]): PipelineStep = copy(messages = messages)
-
-  /** Sets the token count before the step. */
-  def withTokensBefore(tokensBefore: Int): PipelineStep = copy(tokensBefore = tokensBefore)
-
-  /** Sets the token count after the step. */
-  def withTokensAfter(tokensAfter: Int): PipelineStep = copy(tokensAfter = tokensAfter)
-
-  /** Sets whether the step changed the conversation. */
-  def withApplied(applied: Boolean): PipelineStep = copy(applied = applied)
-
   def toContextStep: ContextStep = ContextStep(
-    name = name,
+    stage = stage,
     conversation = Conversation(messages),
     tokensBefore = tokensBefore,
     tokensAfter = tokensAfter,
@@ -252,28 +235,42 @@ final case class PipelineStep private (
   )
 }
 
-object PipelineStep {
+/**
+ * The stages of the [[ContextManager]] pipeline, in the order they run.
+ */
+@Experimental
+enum ContextStage {
 
-  /** Creates a [[PipelineStep]]. */
-  def apply(
-    name: String,
-    messages: Seq[Message],
-    tokensBefore: Int,
-    tokensAfter: Int,
-    applied: Boolean
-  ): PipelineStep =
-    new PipelineStep(name, messages, tokensBefore, tokensAfter, applied)
+  /** Tool outputs are compacted and capped ([[DeterministicCompressor]]). */
+  case ToolDeterministicCompaction
+
+  /** Older history is replaced by digests ([[HistoryCompressor]]). */
+  case HistoryCompression
+
+  /** The digests are compressed further by a model ([[LLMCompressor]]). */
+  case LLMHistorySqueeze
+
+  /** Older turns are dropped until the conversation fits ([[TokenWindow]]). */
+  case FinalTokenTrim
 }
 
+@Experimental
 object ContextManager {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
-   * Create context manager with configuration and LLM client
+   * Creates a context manager.
+   *
+   * @param tokenCounter  Token counter calibrated to the target model's tokenizer
+   * @param config        Pipeline configuration; [[ContextConfig.default]] when omitted
+   * @param llmClient     Client for the LLM history squeeze; the stage is skipped without one
+   * @param artifactStore Store for externalized tool output; nothing is externalized without one
+   * @return the manager, or a `ValidationError` when `config.maxSemanticBlocks` is negative or
+   *         `config.summaryTokenTarget` is not positive
    */
   def create(
     tokenCounter: ConversationTokenCounter,
-    config: ContextConfig,
+    config: ContextConfig = ContextConfig.default,
     llmClient: Option[LLMClient] = None,
     artifactStore: Option[ArtifactStore] = None
   ): Result[ContextManager] =
@@ -282,69 +279,52 @@ object ContextManager {
       new ContextManager(tokenCounter, config, llmClient, artifactStore)
     }
 
-  /**
-   * Create context manager with default configuration
-   */
-  def withDefaults(
-    tokenCounter: ConversationTokenCounter,
-    llmClient: Option[LLMClient] = None,
-    artifactStore: Option[ArtifactStore] = None
-  ): Result[ContextManager] =
-    create(tokenCounter, ContextConfig.default, llmClient, artifactStore)
-
   private def validateConfig(config: ContextConfig): Result[Unit] =
-    if (config.headroomPercent.isValid) Right(())
-    else
-      Left(
-        org.llm4s.error.ValidationError(
-          s"Invalid headroom percent: ${config.headroomPercent}. Must be between 0.0 and 1.0",
-          "headroomPercent"
-        )
-      )
+    if (config.maxSemanticBlocks < 0)
+      Left(ValidationError(s"maxSemanticBlocks must not be negative: ${config.maxSemanticBlocks}", "maxSemanticBlocks"))
+    else if (config.summaryTokenTarget <= 0)
+      Left(ValidationError(s"summaryTokenTarget must be positive: ${config.summaryTokenTarget}", "summaryTokenTarget"))
+    else Right(())
 }
 
 /**
  * Configuration for context management pipeline
  */
-@Stable
+@Experimental
 final case class ContextConfig private (
   headroomPercent: HeadroomPercent,
-  maxSemanticBlocks: ContextWindowSize,
+  maxSemanticBlocks: Int,
   enableDeterministicCompression: Boolean,
   enableLLMCompression: Boolean,
-  summaryTokenTarget: Int,       // target tokens for digest summaries
-  enableSubjectiveEdits: Boolean // gates filler/repetition/truncate rules
+  summaryTokenTarget: Int // target tokens for digest summaries
 ) {
   def withHeadroomPercent(headroomPercent: HeadroomPercent): ContextConfig = copy(headroomPercent = headroomPercent)
-  def withMaxSemanticBlocks(maxSemanticBlocks: ContextWindowSize): ContextConfig =
+  def withMaxSemanticBlocks(maxSemanticBlocks: Int): ContextConfig =
     copy(maxSemanticBlocks = maxSemanticBlocks)
   def withEnableDeterministicCompression(enableDeterministicCompression: Boolean): ContextConfig =
     copy(enableDeterministicCompression = enableDeterministicCompression)
   def withEnableLLMCompression(enableLLMCompression: Boolean): ContextConfig =
     copy(enableLLMCompression = enableLLMCompression)
   def withSummaryTokenTarget(summaryTokenTarget: Int): ContextConfig = copy(summaryTokenTarget = summaryTokenTarget)
-  def withEnableSubjectiveEdits(enableSubjectiveEdits: Boolean): ContextConfig =
-    copy(enableSubjectiveEdits = enableSubjectiveEdits)
 }
 
+@Experimental
 object ContextConfig {
 
   /** Creates a [[ContextConfig]]. Named arguments are the supported way to construct one. */
   def apply(
     headroomPercent: HeadroomPercent,
-    maxSemanticBlocks: ContextWindowSize,
+    maxSemanticBlocks: Int,
     enableDeterministicCompression: Boolean,
     enableLLMCompression: Boolean,
-    summaryTokenTarget: Int = 400,
-    enableSubjectiveEdits: Boolean = false
+    summaryTokenTarget: Int = 400
   ): ContextConfig =
     new ContextConfig(
       headroomPercent,
       maxSemanticBlocks,
       enableDeterministicCompression,
       enableLLMCompression,
-      summaryTokenTarget,
-      enableSubjectiveEdits
+      summaryTokenTarget
     )
 
   val default: ContextConfig = ContextConfig(
@@ -352,25 +332,24 @@ object ContextConfig {
     maxSemanticBlocks = 5,                      // Keep last 5 semantic blocks for history compression
     enableDeterministicCompression = true,
     enableLLMCompression = true,
-    summaryTokenTarget = 400,
-    enableSubjectiveEdits = false // Conservative default - no subjective text edits
+    summaryTokenTarget = 400
   )
 }
 
 /**
  * Represents a single step in the context management pipeline
  */
-@Stable
+@Experimental
 final case class ContextStep private (
-  name: String,
+  stage: ContextStage,
   conversation: Conversation,
   tokensBefore: Int,
   tokensAfter: Int,
   applied: Boolean
 ) {
 
-  /** Sets the step name. */
-  def withName(name: String): ContextStep = copy(name = name)
+  /** Sets the pipeline stage. */
+  def withStage(stage: ContextStage): ContextStep = copy(stage = stage)
 
   /** Sets the conversation after the step. */
   def withConversation(conversation: Conversation): ContextStep = copy(conversation = conversation)
@@ -385,33 +364,34 @@ final case class ContextStep private (
   def withApplied(applied: Boolean): ContextStep = copy(applied = applied)
 
   def summary: String =
-    if (applied) f"$name: $tokensBefore → $tokensAfter tokens (${tokensSaved} saved)"
-    else f"$name: skipped ($tokensBefore tokens)"
+    if (applied) f"$stage: $tokensBefore → $tokensAfter tokens (${tokensSaved} saved)"
+    else f"$stage: skipped ($tokensBefore tokens)"
 
   def tokensSaved: Int         = tokensBefore - tokensAfter
   def compressionRatio: Double = tokensAfter.toDouble / tokensBefore
 }
 
+@Experimental
 object ContextStep {
 
   /** Creates a [[ContextStep]]. */
   def apply(
-    name: String,
+    stage: ContextStage,
     conversation: Conversation,
     tokensBefore: Int,
     tokensAfter: Int,
     applied: Boolean
   ): ContextStep =
-    new ContextStep(name, conversation, tokensBefore, tokensAfter, applied)
+    new ContextStep(stage, conversation, tokensBefore, tokensAfter, applied)
 
-  def noOperation(name: String, conversation: Conversation, tokens: Int): ContextStep =
-    ContextStep(name, conversation, tokens, tokens, applied = false)
+  def noOperation(stage: ContextStage, conversation: Conversation, tokens: Int): ContextStep =
+    ContextStep(stage, conversation, tokens, tokens, applied = false)
 }
 
 /**
  * Final result of context management pipeline
  */
-@Stable
+@Experimental
 final case class ManagedConversation private (
   conversation: Conversation,
   originalTokens: Int,
@@ -440,6 +420,7 @@ final case class ManagedConversation private (
       f"(${(overallCompressionRatio * 100).toInt}%% remaining, ${stepsApplied.length} steps applied)"
 }
 
+@Experimental
 object ManagedConversation {
 
   /** Creates a [[ManagedConversation]]. */

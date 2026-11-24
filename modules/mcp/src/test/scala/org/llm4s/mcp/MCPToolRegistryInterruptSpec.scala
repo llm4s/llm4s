@@ -16,8 +16,8 @@ import scala.concurrent.duration.*
  */
 class MCPToolRegistryInterruptSpec extends AnyFlatSpec with Matchers {
 
-  private def tool(name: String)(body: => Nothing): ToolFunction[Map[String, Any], String] =
-    ToolFunction[Map[String, Any], String](
+  private def tool(name: String)(body: => Nothing): ToolFunction[String] =
+    ToolFunction[String](
       name,
       "a tool that fails",
       ObjectSchema[Map[String, Any]]("no parameters", Seq.empty),
@@ -25,11 +25,11 @@ class MCPToolRegistryInterruptSpec extends AnyFlatSpec with Matchers {
     )
 
   /** A registry whose one MCP server hands out `tool`, without a network. */
-  private def registryWith(tool: ToolFunction[?, ?]): MCPToolRegistry = {
+  private def registryWith(tool: ToolFunction[?]): MCPToolRegistry = {
     val client = new MCPClient {
-      override def initialize(): Result[Unit]                  = Right(())
-      override def getTools(): Result[Seq[ToolFunction[?, ?]]] = Right(Seq(tool))
-      override def close(): Unit                               = ()
+      override def initialize(): Result[Unit]               = Right(())
+      override def getTools(): Result[Seq[ToolFunction[?]]] = Right(Seq(tool))
+      override def close(): Unit                            = ()
     }
     new MCPToolRegistry(
       Seq(MCPServerConfig.streamableHTTP("stub", "http://127.0.0.1:1/mcp", 5.seconds)),

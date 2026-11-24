@@ -1,6 +1,8 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.toolapi.IdempotencyKey
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
@@ -118,9 +120,11 @@ final case class RunConfig private (
   def withMetadata(m: Map[String, String]): RunConfig = copy(metadata = m)
 
   /** Holds every task of these nodes before it runs, replacing the nodes set before. */
+  @Experimental
   def withInterruptBefore(nodes: Set[NodeId]): RunConfig = copy(interruptBefore = nodes)
 
   /** Holds every task of these nodes after it ran, replacing the nodes set before. */
+  @Experimental
   def withInterruptAfter(nodes: Set[NodeId]): RunConfig = copy(interruptAfter = nodes)
 
   /**
@@ -152,6 +156,7 @@ final case class RunConfig private (
    * `RunOutcome.Failed("abandoned", ...)` and then counts; otherwise one is never deleted, and nothing is at
    * `recover` or `resume`. Throws `IllegalArgumentException` below 0.
    */
+  @Experimental
   def withChildRetention(n: Int): RunConfig =
     require(n >= 0, s"childRetention must not be negative, was $n")
     copy(childRetention = n)
@@ -202,7 +207,7 @@ object RunConfig:
  * `None` outside a runtime: a node that writes to an external system able to fence can pass it on,
  * so that system too refuses a run that has lost its claim.
  */
-@Stable
+@Experimental
 final case class RunPosition private (
   threadId: ThreadId,
   runId: RunId,
@@ -221,6 +226,7 @@ final case class RunPosition private (
   def withFencingToken(t: FencingToken): RunPosition         = copy(fencingToken = Some(t))
   def withFencingToken(t: Option[FencingToken]): RunPosition = copy(fencingToken = t)
 
+@Experimental
 object RunPosition:
   def apply(
     threadId: ThreadId,
@@ -232,6 +238,7 @@ object RunPosition:
     fencingToken: Option[FencingToken] = None
   ): RunPosition = new RunPosition(threadId, runId, checkpointId, taskId, nodeId, superstep, fencingToken)
 
+@Experimental
 object RunContext:
 
   /**
@@ -255,7 +262,7 @@ object RunContext:
  * and similar high-volume progress, and carries a name and version like `emit`: delivered at once to current subscribers, never persisted or
  * replayed. Outside a [[GraphRuntime]] both are no-ops.
  */
-@Stable
+@Experimental
 final class RunContext private[graph] (
   val config: RunConfig,
   val position: RunPosition,
@@ -332,12 +339,12 @@ final class RunContext private[graph] (
    * time: after `deleteThread`, or work after the last durable checkpoint planned again under
    * `Async`/`OnExit`, a task id can name new work.
    */
-  lazy val taskKey: IdempotencyKey = IdempotencyKey.ofTask(position.threadId, effectOwner, effectLineage)
+  lazy val taskKey: IdempotencyKey = IdempotencyKeys.ofTask(position.threadId, effectOwner, effectLineage)
 
   /**
    * The key of one external effect of this task - `operation`, such as `memory.record`, on what
    * `discriminator` names - for [[ReplayGuard]]. A tool uses `ToolContext.effectKey`, whose base is its
-   * call's [[IdempotencyKey]]. Give each effect of a task its own operation or discriminator, and pass
+   * call's [[org.llm4s.toolapi.IdempotencyKey]]. Give each effect of a task its own operation or discriminator, and pass
    * a set (memory ids) sorted.
    */
   def effectKey(operation: String, discriminator: String*): EffectKey =
@@ -392,8 +399,11 @@ final private[agent] class TaskUsage:
   /** Child runs' roll-ups (design 4.42): committed with the task, never lost usage, since each child keeps its own. */
   private val delegated = new AtomicReference(UsageSummary())
 
-  def add(model: String, usage: TokenUsage, cost: Option[Double]): Unit =
+  def add(model: ModelName, usage: TokenUsage, cost: Option[BigDecimal]): Unit =
     recorded.updateAndGet(_.add(model, usage, cost)): Unit
+
+  /** Adds usage counted before this task ran: an admission stage's own model calls (#2854). */
+  def addAll(other: UsageSummary): Unit = recorded.updateAndGet(_.merge(other)): Unit
 
   /** Whether the task made an agent's model step: its own model call, not a hook's (design 4.45). */
   private val stepped = new java.util.concurrent.atomic.AtomicBoolean(false)

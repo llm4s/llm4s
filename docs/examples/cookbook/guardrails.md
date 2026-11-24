@@ -29,7 +29,6 @@ network or a key; `demo` runs the recipe and returns what to print.
 ```scala
 package org.llm4s.samples.cookbook
 
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin.{ LengthCheck, ProfanityFilter }
 import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.llmconnect.LLMClient
@@ -60,12 +59,8 @@ object GuardrailsRecipe extends RecipeApp {
   def guardedAgent(client: LLMClient): Result[Agent] =
     Agent
       .builder("guarded-agent", client)
-      .withMiddleware(
-        new GuardrailMiddleware(
-          input = Seq(LengthCheck(1, 200), ProfanityFilter.withCustomWords(Set("heck"))),
-          output = Seq(LengthCheck(1, 300))
-        )
-      )
+      .withInputGuardrails(LengthCheck(1, 200), ProfanityFilter.withCustomWords(Set("heck")))
+      .withOutputGuardrails(LengthCheck(1, 300))
       .build()
 
   def ask(client: LLMClient, query: String): Result[AgentResult] =
@@ -93,7 +88,7 @@ sbt "samples/runMain org.llm4s.samples.cookbook.GuardrailsRecipe"          # scr
 sbt "samples/runMain org.llm4s.samples.cookbook.GuardrailsRecipe --live"   # the provider your configuration names
 ```
 
-The first command needs nothing but sbt. The second uses the section `llm4s.providers.provider` names; see
+The first command needs nothing but sbt. The second uses the section `llm4s.defaultProvider` names; see
 [running the samples](../../getting-started/configuration#running-the-samples). CI runs every recipe against its scripted client, and checks
 that the program on this page is the source file, so what you read here compiles and works.
 

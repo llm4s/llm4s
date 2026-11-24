@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
@@ -105,8 +107,9 @@ object ZaiClient {
 private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
   override val headers: Seq[(String, String)] = Seq("User-Agent" -> "llm4s-coding-assistant/1.0")
 
-  // Z.ai documents no model listing or other cheap authenticated request on its chat API
-  override val validationPath: Option[String] = None
+  // Z.ai's API reference (https://docs.z.ai/llms.txt, read 2026-11-24) documents no model listing, and its other
+  // requests generate, search or bill: there is no cheap authenticated request to validate with
+  override def validationUrl(baseUrl: BaseUrl, model: ModelName): Option[String] = None
 
   /**
    * Not sent. Z.ai's chat-completion reference has no `stream_options` parameter; it documents
@@ -161,12 +164,13 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
    * endpoint; `false` is correct on both. A request that neither replays reasoning nor disables
    * thinking gets no `thinking` field.
    */
-  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] = {
-    val family = ZaiDialect.family(model)
+  override def addReasoning(body: ujson.Obj, model: ModelName, options: CompletionOptions): Seq[RequestAdjustment] = {
+    val family = ZaiDialect.family(model.asString)
     val off    = options.thinking.contains(Thinking.Off)
     // what llm4s's own level is called on Z.ai's scale, where it has one; Minimal and XHigh have none
     def unscaled(effort: ReasoningEffort, sent: String) =
-      if (effort == ReasoningEffort.Minimal || effort == ReasoningEffort.XHigh) EffortMapping.level(model, effort, sent)
+      if (effort == ReasoningEffort.Minimal || effort == ReasoningEffort.XHigh)
+        EffortMapping.level(model.asString, effort, sent)
       else Nil
     val reasoningReport: List[RequestAdjustment] = family match {
       case ZaiDialect.Family.ForcedThinking =>

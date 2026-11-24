@@ -84,7 +84,7 @@ class NestedStreamSpec
     nested.map(_._1.child).distinct.loneElement shouldBe ref
     ref.threadId shouldBe agent.children(ThreadId("t1")).value.loneElement.threadId
     ref.agent.value shouldBe "general"
-    ref.toolCallId.map(_.value) shouldBe Some("c1")
+    ref.toolCallId.map(_.asString) shouldBe Some("c1")
     ref.depth shouldBe 1
   }
 
@@ -271,7 +271,7 @@ class NestedStreamSpec
       case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
       case Child("researcher", _) =>
         childCalls.incrementAndGet() match
-          case 1 => Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+          case 1 => Right(calling(ToolCall(ToolCallId("k1"), "probe", ujson.Obj("text" -> "x"))))
           case 2 => Left(ProcessingError("provider", "the provider is down"))
           case _ => Right(CompletionFixture.simple("""{"summary":"recovered","sources":1}"""))
     }
@@ -492,7 +492,7 @@ class NestedStreamSpec
           ScriptedLLMClient.of(SpecTools.calling(SpecTools.call("k1", "gate")), CompletionFixture.simple("r"))
         )
         .withRuntime(runtime)
-        .withTools(SpecTools.set(gate))
+        .withToolSet(SpecTools.set(gate))
         .build()
         .value
       val delegate = SpecTools.tool("delegate") { (args, ctx) =>
@@ -515,7 +515,7 @@ class NestedStreamSpec
           ScriptedLLMClient.of(SpecTools.calling(SpecTools.call("c1", "delegate")), CompletionFixture.simple("ok"))
         )
         .withRuntime(runtime)
-        .withTools(SpecTools.set(delegate))
+        .withToolSet(SpecTools.set(delegate))
         .build()
         .value
       (parent, child)
@@ -582,9 +582,7 @@ object NestedStreamSpec {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       inner.complete(conversation, options)
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       inner.complete(conversation, options).map { completion =>

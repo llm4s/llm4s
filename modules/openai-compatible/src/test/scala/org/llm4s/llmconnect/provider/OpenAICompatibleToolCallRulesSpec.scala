@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model._
@@ -18,7 +20,7 @@ class OpenAICompatibleToolCallRulesSpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val client = new OpenAICompatibleClient(
-    OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", "http://localhost:1/v1", None)),
+    OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), BaseUrl("http://localhost:1/v1"), None)),
     OpenAICompatibleDialect.Standard
   )
 
@@ -59,7 +61,7 @@ class OpenAICompatibleToolCallRulesSpec extends AnyFlatSpec with Matchers {
     val cut = ujson.write(reply(""","arguments":"{\"q\":\"x\"}"""", ""","finish_reason":"length""""))
     withServer("/chat/completions")(sendJsonResponse(_, 200, cut)) { baseUrl =>
       val at = new OpenAICompatibleClient(
-        OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", baseUrl, None)),
+        OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), BaseUrl(baseUrl), None)),
         OpenAICompatibleDialect.Standard
       )
       val result = at.complete(Conversation(Seq(UserMessage("Hi"))))
@@ -73,7 +75,7 @@ class OpenAICompatibleToolCallRulesSpec extends AnyFlatSpec with Matchers {
     calls("""[{"function":{"name":"lookup","arguments":"{}"}}]""").left.map(_.message.contains("OpenRouter")) shouldBe
       Left(true)
     calls("""[{"id":"c1","function":{"name":"lookup","arguments":""}}]""") shouldBe
-      Right(Seq(ToolCall("c1", "lookup", ujson.Obj())))
+      Right(Seq(ToolCall(ToolCallId("c1"), "lookup", ujson.Obj())))
     malformed(calls("""[{"id":"c1","function":{"name":"lookup","arguments":"{bad"}}]""")) shouldBe true
   }
 }

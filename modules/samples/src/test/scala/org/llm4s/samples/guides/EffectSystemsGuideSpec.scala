@@ -212,9 +212,7 @@ final private class Parked extends LLMClient {
   }
 
   def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = park()
-  def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = park()
   def getContextWindow(): Int     = 8192
@@ -246,11 +244,9 @@ final private class Sequenced(underlying: LLMClient) extends LLMClient {
 
   def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     call(underlying.complete(conversation, options))
-  def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = call(underlying.streamComplete(conversation, options, onChunk))
+  ): Result[Completion] = call(underlying.streamComplete(conversation, options)(onChunk))
   def getContextWindow(): Int     = underlying.getContextWindow()
   def getReserveCompletion(): Int = underlying.getReserveCompletion()
 }

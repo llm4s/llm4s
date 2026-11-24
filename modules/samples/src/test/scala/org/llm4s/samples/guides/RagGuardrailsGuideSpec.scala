@@ -2,7 +2,6 @@ package org.llm4s.samples.guides
 
 // The page shows these imports as one block: keep them together and in this order.
 import org.llm4s.agent.Agent
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.GuardrailAction
 import org.llm4s.agent.guardrails.rag._
 import org.llm4s.toolapi.ToolRegistry
@@ -63,7 +62,7 @@ class RagGuardrailsGuideSpec extends AnyFlatSpec with Matchers with EitherValues
       Agent
         .builder("support", client)
         .withTools(tools)
-        .withMiddleware(new GuardrailMiddleware(input = Seq.empty, output = Seq(grounded)))
+        .withOutputGuardrails(grounded)
         .build()
     }
 
@@ -85,7 +84,7 @@ class RagGuardrailsGuideSpec extends AnyFlatSpec with Matchers with EitherValues
       Agent
         .builder("support", client)
         .withTools(tools)
-        .withMiddleware(new GuardrailMiddleware(input = Seq.empty, output = Seq(grounded)))
+        .withOutputGuardrails(grounded)
         .build()
     }
 
@@ -95,7 +94,7 @@ class RagGuardrailsGuideSpec extends AnyFlatSpec with Matchers with EitherValues
     }
   }
 
-  "The presets of the guide" should "each be a GuardrailConfig, usable in a GuardrailMiddleware" in {
+  "The presets of the guide" should "each be a GuardrailConfig, usable on the agent builder" in {
     val client = ScriptedLLMClient.sequence(searching, Reply.text("You can get a refund within 30 days."))
     val judge  = ScriptedLLMClient.sequence(Reply.text(Grounded), Reply.text(Relevant))
 
@@ -104,10 +103,9 @@ class RagGuardrailsGuideSpec extends AnyFlatSpec with Matchers with EitherValues
     val strict     = RAGGuardrails.strict(judge, allowedTopics = Seq("refunds", "shipping"))
     val monitoring = RAGGuardrails.monitoring(judge) // warns, never blocks
 
-    val guardrails = new GuardrailMiddleware(
-      input = standard.inputGuardrails,
-      output = standard.outputGuardrailsWithContext(turn => Some(RAGContext.fromToolResults(turn, Set("search_docs"))))
-    )
+    val inputs = standard.inputGuardrails
+    val outputs =
+      standard.outputGuardrailsWithContext(turn => Some(RAGContext.fromToolResults(turn, Set("search_docs"))))
 
     minimal.ragGuardrails shouldBe empty
     standard.ragGuardrails.map(_.name) shouldBe Seq("GroundingGuardrail", "ContextRelevanceGuardrail")
@@ -119,7 +117,8 @@ class RagGuardrailsGuideSpec extends AnyFlatSpec with Matchers with EitherValues
       Agent
         .builder("support", client)
         .withTools(tools)
-        .withMiddleware(guardrails)
+        .withInputGuardrails(inputs*)
+        .withOutputGuardrails(outputs*)
         .build()
     }
     agent.flatMap(_.run("What is the refund window?")).value.status shouldBe
@@ -200,8 +199,8 @@ object RagGuardrailsGuideSpec {
   final case class Passages(passages: Seq[String]) derives ReadWriter
 
   /** The agent's retrieval tool: whatever the query, it finds the refund policy. */
-  val searchDocs: ToolFunction[Map[String, Any], Passages] =
-    ToolBuilder[Map[String, Any], Passages](
+  val searchDocs: ToolFunction[Passages] =
+    ToolBuilder[Passages](
       "search_docs",
       "Searches the product documentation.",
       Schema.`object`[Map[String, Any]]("Parameters").withProperty(Schema.property("query", Schema.string("The query")))

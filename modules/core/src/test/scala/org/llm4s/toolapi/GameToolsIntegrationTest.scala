@@ -68,8 +68,8 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
       Right(result)
     }
 
-    val listInventoryTool: Result[ToolFunction[Map[String, Any], InventoryListResult]] =
-      ToolBuilder[Map[String, Any], InventoryListResult](
+    val listInventoryTool: Result[ToolFunction[InventoryListResult]] =
+      ToolBuilder[InventoryListResult](
         "list_inventory",
         "List all items currently in the player's inventory",
         listInventorySchema
@@ -106,8 +106,8 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
           )
         }
 
-    val addInventoryItemTool: Result[ToolFunction[Map[String, Any], InventoryModifyResult]] =
-      ToolBuilder[Map[String, Any], InventoryModifyResult](
+    val addInventoryItemTool: Result[ToolFunction[InventoryModifyResult]] =
+      ToolBuilder[InventoryModifyResult](
         "add_inventory_item",
         "Add a new item to the player's inventory",
         addInventorySchema
@@ -144,15 +144,15 @@ class GameToolsIntegrationTest extends AnyFlatSpec with Matchers with BeforeAndA
           )
         }
 
-    val removeInventoryItemTool: Result[ToolFunction[Map[String, Any], InventoryModifyResult]] =
-      ToolBuilder[Map[String, Any], InventoryModifyResult](
+    val removeInventoryItemTool: Result[ToolFunction[InventoryModifyResult]] =
+      ToolBuilder[InventoryModifyResult](
         "remove_inventory_item",
         "Remove an item from the player's inventory",
         removeInventorySchema
       ).withHandler(removeInventoryHandler).buildSafe()
 
     /** Get all game tools for the ToolRegistry */
-    def allTools: Result[Seq[ToolFunction[_, _]]] = for {
+    def allTools: Result[Seq[ToolFunction[_]]] = for {
       list   <- listInventoryTool
       add    <- addInventoryItemTool
       remove <- removeInventoryItemTool

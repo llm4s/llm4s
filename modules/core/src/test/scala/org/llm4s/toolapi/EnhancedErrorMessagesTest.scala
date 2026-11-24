@@ -11,7 +11,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
   case class TestResult(message: String)
   implicit val testResultRW: ReadWriter[TestResult] = macroRW[TestResult]
 
-  def createEnhancedTool(name: String = "test_tool"): Result[ToolFunction[Map[String, Any], TestResult]] = {
+  def createEnhancedTool(name: String = "test_tool"): Result[ToolFunction[TestResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Test parameters")
       .withProperty(Schema.property("item", Schema.string("Item name")))
@@ -19,7 +19,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
       .withProperty(Schema.property("location", Schema.string("Storage location")))
 
     // Create a tool that uses SafeParameterExtractor in enhanced mode
-    ToolBuilder[Map[String, Any], TestResult](
+    ToolBuilder[TestResult](
       name,
       "Test tool for enhanced error messages",
       schema
@@ -122,7 +122,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
       .`object`[Map[String, Any]]("Test parameters")
       .withProperty(Schema.property("value", Schema.number("A value")))
 
-    ToolBuilder[Map[String, Any], TestResult](
+    ToolBuilder[TestResult](
       "divide_by_value",
       "Divides 10 by the provided value",
       schema

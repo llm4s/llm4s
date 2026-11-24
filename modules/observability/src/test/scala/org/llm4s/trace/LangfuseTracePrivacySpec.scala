@@ -10,9 +10,9 @@ import org.scalatest.matchers.should.Matchers
 import java.time.Instant
 
 /**
- * Who can read a trace, and whose it is (#2828): `public` on every `trace-create` is false unless
+ * Who can read a trace, and whose it is (#2828): `langfuse.trace.public` on every span that sets a trace is false unless
  * `llm4s.tracing.langfuse.public` says otherwise - Langfuse serves a public trace to anyone holding its URL, signed in
- * or not - and `userId` is the run's own, absent when the run has none.
+ * or not - and `user.id` is the run's own, absent when the run has none.
  */
 class LangfuseTracePrivacySpec extends AnyFlatSpec with Matchers {
 
@@ -23,7 +23,7 @@ class LangfuseTracePrivacySpec extends AnyFlatSpec with Matchers {
       "thread-1",
       "run-1",
       "assistant",
-      "completed",
+      TraceEvent.RunStatus.Completed,
       messages,
       UsageSummary(),
       span = span,
@@ -32,13 +32,12 @@ class LangfuseTracePrivacySpec extends AnyFlatSpec with Matchers {
 
   private val placed = Some(TraceSpan(TraceContext.rootFor("run:run-1"), None, Instant.parse("2026-10-21T10:00:00Z")))
 
-  /** The bodies of the `trace-create` events `config`'s backend sends for `event`. */
-  private def traces(config: LangfuseConfig, event: TraceEvent): Seq[ujson.Value] = {
-    val http    = new MockHttpClient(HttpResponse(200, """{"successes":1}"""))
+  /** The spans that set a trace, of those `config`'s backend sends for `event`. */
+  private def traces(config: LangfuseConfig, event: TraceEvent): Seq[SentSpan] = {
+    val http    = new MockHttpClient(HttpResponse(200, "{}"))
     val tracing = LangfuseTracing.from(config, http)
     tracing.traceEvent(event) shouldBe Right(())
-    val batch = ujson.read(http.lastBody.getOrElse(fail("nothing was sent")))("batch").arr.toSeq
-    batch.filter(_("type").str == "trace-create").map(_("body"))
+    SentSpan.all(http.lastBody.getOrElse(fail("nothing was sent"))).filter(_.setsTrace)
   }
 
   private val keys = LangfuseConfig(publicKey = Some(Secret("pk-lf-test")), secretKey = Some(Secret("sk-lf-test")))
@@ -47,33 +46,32 @@ class LangfuseTracePrivacySpec extends AnyFlatSpec with Matchers {
   )
 
   private val everyTrace: Seq[(String, Option[String] => TraceEvent)] = Seq(
-    "a placed agent run"        -> (user => run(user, placed)),
-    "an unplaced agent run"     -> (user => run(user, None)),
-    "an agent's initialisation" -> (_ => TraceEvent.AgentInitialized("what is my balance?", Vector("lookup")))
+    "a placed agent run"    -> (user => run(user, placed)),
+    "an unplaced agent run" -> (user => run(user, None))
   )
 
   everyTrace.foreach { case (name, event) =>
     s"The trace of $name" should "be private by default" in {
       val bodies = traces(keys, event(None))
       bodies should have size 1
-      bodies.head("public").bool shouldBe false
+      bodies.head.attr("langfuse.trace.public") shouldBe ujson.Bool(false)
     }
 
     it should "be public when llm4s.tracing.langfuse.public is true" in {
       val bodies = traces(sharedByLink, event(None))
       bodies should have size 1
-      bodies.head("public").bool shouldBe true
+      bodies.head.attr("langfuse.trace.public") shouldBe ujson.Bool(true)
     }
 
     it should "name no user when the run has none" in {
-      traces(keys, event(None)).head.obj.contains("userId") shouldBe false
-      traces(sharedByLink, event(None)).head.obj.contains("userId") shouldBe false
+      traces(keys, event(None)).head.has("user.id") shouldBe false
+      traces(sharedByLink, event(None)).head.has("user.id") shouldBe false
     }
   }
 
   "The trace of an agent run" should "carry the run's user id, placed or not" in {
-    traces(keys, run(Some("alice"), placed)).head("userId").str shouldBe "alice"
-    traces(keys, run(Some("alice"), None)).head("userId").str shouldBe "alice"
+    traces(keys, run(Some("alice"), placed)).head.str("user.id") shouldBe "alice"
+    traces(keys, run(Some("alice"), None)).head.str("user.id") shouldBe "alice"
   }
 
   "LangfuseConfig" should "read public only from an explicit true" in {

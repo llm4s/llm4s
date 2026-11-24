@@ -244,7 +244,7 @@ class PIIGuardrailSpec extends AnyFlatSpec with Matchers {
   "PIIDetector" should "work with CompositeGuardrail.all" in {
     val composite = CompositeGuardrail.all(
       Seq(
-        new builtin.LengthCheck(1, 1000),
+        builtin.LengthCheck(1, 1000),
         PIIDetector()
       )
     )

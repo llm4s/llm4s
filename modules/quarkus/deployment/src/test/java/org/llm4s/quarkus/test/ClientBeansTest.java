@@ -36,7 +36,7 @@ class ClientBeansTest {
         .setBeforeAllCustomizer(() -> OllamaStub.start(false))
         .setAfterAllCustomizer(OllamaStub::stop)
         .overrideConfigKey("quarkus.http.test-port", "0")
-        .overrideConfigKey("llm4s.providers.provider", "main")
+        .overrideConfigKey("llm4s.default-provider", "main")
         .overrideConfigKey("llm4s.providers.main.provider", "ollama")
         .overrideConfigKey("llm4s.providers.main.model", "stub-model")
         .overrideConfigKey("llm4s.providers.main.base-url", OllamaStub.URL)

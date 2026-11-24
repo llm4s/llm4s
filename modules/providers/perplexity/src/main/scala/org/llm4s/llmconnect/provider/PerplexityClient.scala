@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, ProcessingError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
@@ -92,9 +94,9 @@ class PerplexityClient(
 
   protected def clientDescription: String = s"Perplexity Agent API client for model ${config.model}"
   protected def providerName: String      = ProviderName
-  protected def modelName: String         = config.model
+  protected def modelName: ModelName      = config.model
 
-  private val replayOrigin = ReplayOrigin(ProviderName, config.model)
+  private val replayOrigin = ReplayOrigin(ProviderName, config.model.asString)
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else [[PerplexityClient.DefaultRequestTimeout]]. */
   protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(DefaultRequestTimeout)
@@ -116,8 +118,11 @@ class PerplexityClient(
 
   private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
     val adjustments =
-      PerplexityClient.unsentOptions(config.model, options) ++ UnmappedOptions.serviceTier("Perplexity", options)
-    adjustmentLog.record(config.model, adjustments)
+      PerplexityClient.unsentOptions(config.model.asString, options) ++ UnmappedOptions.serviceTier(
+        "Perplexity",
+        options
+      )
+    adjustmentLog.record(config.model.asString, adjustments)
     adjustments
   }
 
@@ -136,11 +141,13 @@ class PerplexityClient(
                   // RFC 0009, Part 3: a reply `incomplete` at a limit while it made a call runs no call
                   BoundedJson.read(response.body).flatMap(parseReply).map(completion).flatMap(ToolCallRules.checked)
                 else
-                  HttpErrorMapper.mapHttpError(
-                    response.statusCode,
-                    Redaction.scrubRemote(response.body),
-                    providerName,
-                    response.headers
+                  Left(
+                    HttpErrorMapper.toError(
+                      response.statusCode,
+                      Redaction.scrubRemote(response.body),
+                      providerName,
+                      response.headers
+                    )
                   )
               recordExchange(startedAt, requestText, response.body, result)
               result
@@ -149,9 +156,7 @@ class PerplexityClient(
         .map(_.withAdjustments(unsent(options)))
     }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     createRequestBody(conversation, options, stream = true)
@@ -168,8 +173,10 @@ class PerplexityClient(
             else {
               val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
               raw.append(err)
-              HttpErrorMapper
-                .mapHttpError(response.statusCode, Redaction.scrubRemote(err), providerName, response.headers)
+              Left(
+                HttpErrorMapper
+                  .toError(response.statusCode, Redaction.scrubRemote(err), providerName, response.headers)
+              )
             }
           }
         recordExchange(startedAt, requestText, raw.result(), result)
@@ -254,12 +261,14 @@ class PerplexityClient(
     Completion(
       id = if (reply.id.nonEmpty) reply.id else java.util.UUID.randomUUID().toString,
       created = reply.created.getOrElse(Instant.now()),
-      content = reply.text,
-      model = reply.model.getOrElse(config.model),
+      model = reply.model.map(ModelName(_)).getOrElse(config.model),
       message = message,
-      toolCalls = reply.toolCalls,
       usage = reply.usage,
-      estimatedCost = reply.cost.orElse(reply.usage.flatMap(CostEstimator.estimate(config.model, _))),
+      // a reported cost that is not a number has no decimal value: the estimate stands in for it
+      estimatedCost = reply.cost
+        .filter(_.isFinite)
+        .map(BigDecimal.decimal)
+        .orElse(reply.usage.flatMap(CostEstimator.estimate(config.model, _))),
       citations = reply.citations,
       finishReason = finishReasonOf(reply)
     )
@@ -267,10 +276,10 @@ class PerplexityClient(
 
   /**
    * The reply's [[FinishReason]] (RFC 0009): `incomplete` (a limit) is `Length`, even with a call in it; `completed`
-   * with a call is `ToolCalls`, without one `Stop`; a reply with no `status` is `Other("")`, since none was read.
+   * with a call is `ToolCalls`, without one `Stop`; a reply with no `status` is `Unknown`, since none was read.
    */
   private def finishReasonOf(reply: Reply): FinishReason =
-    if (!reply.statusRead) FinishReason.Other("")
+    if (!reply.statusRead) FinishReason.Unknown
     else if (reply.incomplete) FinishReason.Length
     else if (reply.toolCalls.nonEmpty) FinishReason.ToolCalls
     else FinishReason.Stop
@@ -289,13 +298,14 @@ class PerplexityClient(
       }): Result[Option[ujson.Value]]
     } yield {
       val messages = ThinkingReplay.replayableOrigin(replayOrigin, conversation.messages)
-      val body     = ujson.Obj("model" -> config.model, "input" -> encodeInput(messages))
+      val body     = ujson.Obj("model" -> config.model.asString, "input" -> encodeInput(messages))
       val system   = messages.collect { case SystemMessage(content) => content }.filter(_.nonEmpty)
       if (system.nonEmpty) body("instructions") = system.mkString("\n\n")
-      body("temperature") = options.temperature
-      if (options.topP != 1.0) body("top_p") = options.topP
+      // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
+      options.temperature.foreach(t => body("temperature") = t)
+      options.topP.foreach(p => body("top_p") = p)
       options.maxTokens
-        .orElse(Option.when(isAnthropic(config.model))(anthropicDefaultMaxTokens(config.reserveCompletion)))
+        .orElse(Option.when(isAnthropic(config.model.asString))(anthropicDefaultMaxTokens(config.reserveCompletion)))
         .foreach(max => body("max_output_tokens") = max)
       val effort =
         if (options.thinking.contains(Thinking.Off)) Some("minimal") else options.reasoning.map(reasoningEffortValue)
@@ -320,20 +330,21 @@ class PerplexityClient(
           am.thinking.collect { case ThinkingBlock.Opaque(ProviderName, data) => data }.flatMap(decode).toMap
         val text = Option.when(am.content.nonEmpty)(messageItem("assistant", ujson.Str(am.content)))
         val calls = am.toolCalls.map { call =>
-          callNames(call.id) = call.name
+          callNames(call.id.asString) = call.name
           val item = ujson.Obj(
             "type"      -> "function_call",
-            "call_id"   -> call.id,
+            "call_id"   -> call.id.asString,
             "name"      -> call.name,
             "arguments" -> requestArguments(call.arguments)
           )
-          signatures.get(call.id).foreach(sig => item("thought_signature") = sig)
+          signatures.get(call.id.asString).foreach(sig => item("thought_signature") = sig)
           item
         }
         text.toSeq ++ calls
       case tm: ToolMessage =>
-        val item = ujson.Obj("type" -> "function_call_output", "call_id" -> tm.toolCallId, "output" -> tm.content)
-        callNames.get(tm.toolCallId).foreach(name => item("name") = name)
+        val item =
+          ujson.Obj("type" -> "function_call_output", "call_id" -> tm.toolCallId.asString, "output" -> tm.content)
+        callNames.get(tm.toolCallId.asString).foreach(name => item("name") = name)
         Seq(item)
     })
   }
@@ -345,17 +356,52 @@ class PerplexityClient(
     result: Result[Completion]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(config.model),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = Option(responseBody).filter(_.nonEmpty),
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(config.model),
+        responseBody = Option(responseBody).filter(_.nonEmpty)
+      ),
+      result
     )
 
   override def getContextWindow(): Int     = config.contextWindow
   override def getReserveCompletion(): Int = config.reserveCompletion
+
+  /**
+   * Gets the Agent API's model listing, `GET <baseUrl>/v1/models`
+   * (https://docs.perplexity.ai/api-reference/models-get, read 2026-11-24), with the key a completion carries.
+   * `Right(())` means the endpoint answered and took the key; the model is not looked for in the listing. A refused
+   * key is an `AuthenticationError`.
+   *
+   * The reference's OpenAPI declares no security for the request, but api.perplexity.ai answered it with a 401
+   * without a key and with a wrong one on that date. Should the listing ever answer without a key, this check would
+   * pass a wrong one.
+   */
+  override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
+    currentApiKey().flatMap { key =>
+      http
+        .get(
+          config.modelsUrl,
+          requestHeaders(key, "application/json") - "Content-Type",
+          timeout = requestTimeout.min(ValidationTimeout)
+        )
+        .flatMap { response =>
+          if (response.statusCode >= 200 && response.statusCode < 300) Right(())
+          else
+            Left(
+              HttpErrorMapper.toError(
+                response.statusCode,
+                Redaction.scrubRemote(response.body),
+                providerName,
+                response.headers
+              )
+            )
+        }
+    }
+  }
 
   override protected def releaseResources(): Unit = http.close()
 }
@@ -371,6 +417,9 @@ object PerplexityClient {
 
   /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
   val DefaultStreamTimeout: FiniteDuration = 10.minutes
+
+  /** The longest `validate()` waits for its one request: ten seconds. */
+  val ValidationTimeout: FiniteDuration = 10.seconds
 
   /**
    * Builds a [[PerplexityClient]], wrapping any construction-time exception in a `Left`.
@@ -436,12 +485,12 @@ object PerplexityClient {
     }
     val penalties =
       Option
-        .when(options.presencePenalty != 0.0)(
+        .when(options.presencePenalty.isDefined)(
           RequestAdjustment.Dropped(RequestOption.PresencePenalty, "the Perplexity Agent API takes no penalties")
         )
         .toList ++
         Option
-          .when(options.frequencyPenalty != 0.0)(
+          .when(options.frequencyPenalty.isDefined)(
             RequestAdjustment.Dropped(RequestOption.FrequencyPenalty, "the Perplexity Agent API takes no penalties")
           )
           .toList
@@ -462,8 +511,8 @@ object PerplexityClient {
     ujson.Obj("type" -> "message", "role" -> role, "content" -> content)
 
   /** A user turn's content: its text, or `input_text` parts when it has several. Checked text-only before. */
-  private def textContent(parts: Vector[ContentPart]): ujson.Value = parts match {
-    case Vector(ContentPart.Text(text)) => ujson.Str(text)
+  private def textContent(parts: Seq[ContentPart]): ujson.Value = parts match {
+    case Seq(ContentPart.Text(text)) => ujson.Str(text)
     case _ =>
       ujson.Arr.from(parts.collect { case ContentPart.Text(text) => ujson.Obj("type" -> "input_text", "text" -> text) })
   }
@@ -554,7 +603,7 @@ object PerplexityClient {
         text = text,
         toolCalls = calls.map(_._1),
         signatures = calls.collect { case (call, Some(sig)) =>
-          ThinkingBlock.Opaque(ProviderName, encode(call.id, sig))
+          ThinkingBlock.Opaque(ProviderName, encode(call.id.asString, sig))
         },
         citations = citations,
         usage = usage.flatMap(parseUsage),
@@ -573,7 +622,10 @@ object PerplexityClient {
       callId <- item.get("call_id").flatMap(_.strOpt).filter(_.nonEmpty).toRight(malformed("it has no call_id"))
       name   <- item.get("name").flatMap(_.strOpt).filter(_.nonEmpty).toRight(malformed("it has no name"))
       args   <- arguments(item.get("arguments"))
-    } yield ToolCall(callId, name, args) -> item.get("thought_signature").flatMap(_.strOpt).filter(_.nonEmpty)
+    } yield ToolCall(ToolCallId(callId), name, args) -> item
+      .get("thought_signature")
+      .flatMap(_.strOpt)
+      .filter(_.nonEmpty)
 
   /** A call's `arguments`, a JSON string on the wire, as a JSON object; absent or blank is `{}`. */
   private def arguments(raw: Option[ujson.Value]): Result[ujson.Value] = raw match {

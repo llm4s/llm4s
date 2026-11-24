@@ -52,7 +52,7 @@ import scala.util.chaining.scalaUtilChainingOps
  */
 class MCPToolRegistry(
   mcpServers: Seq[MCPServerConfig],
-  localTools: Seq[ToolFunction[_, _]] = Seq.empty,
+  localTools: Seq[ToolFunction[_]] = Seq.empty,
   cacheTTL: FiniteDuration = 10.minutes,
   initializeOnStartup: Boolean = true
 ) extends ToolRegistry
@@ -69,7 +69,7 @@ class MCPToolRegistry(
   logger.debug(s"Cache TTL set to $cacheTTL")
 
   /** Every tool, local and MCP, each name once; see [[getAllTools]]. */
-  override def tools: Seq[ToolFunction[_, _]] = getAllTools
+  override def tools: Seq[ToolFunction[_]] = getAllTools
 
   /**
    * Runs a local tool when one has the name, otherwise the first configured MCP server's tool of that name.
@@ -130,7 +130,7 @@ class MCPToolRegistry(
    * shadows an MCP tool of the same name, and an earlier server's tool a later server's, which is also the
    * tool [[execute]] runs.
    */
-  def getAllTools: Seq[ToolFunction[_, _]] = {
+  def getAllTools: Seq[ToolFunction[_]] = {
     val mcpTools = getAllMCPTools
     val all      = (localTools ++ mcpTools).distinctBy(_.name)
     logger.debug(
@@ -140,7 +140,7 @@ class MCPToolRegistry(
   }
 
   // Find a specific MCP tool by name
-  private def findMCPTool(name: String): Option[ToolFunction[_, _]] = {
+  private def findMCPTool(name: String): Option[ToolFunction[_]] = {
     logger.debug(s"Searching for MCP tool: $name")
     mcpServers.view
       .flatMap(server => getToolsFromServer(server).find(_.name == name))
@@ -148,11 +148,11 @@ class MCPToolRegistry(
   }
 
   // Get all MCP tools from all servers
-  private def getAllMCPTools: Seq[ToolFunction[_, _]] =
+  private def getAllMCPTools: Seq[ToolFunction[_]] =
     mcpServers.flatMap(getToolsFromServer)
 
   // Get tools from a specific server (with caching)
-  private def getToolsFromServer(server: MCPServerConfig): Seq[ToolFunction[_, _]] = {
+  private def getToolsFromServer(server: MCPServerConfig): Seq[ToolFunction[_]] = {
     val now = System.currentTimeMillis()
     Option(toolCache.get(server.name)) match {
       case Some(cached) if !cached.isExpired(now, cacheTTL) =>
@@ -168,7 +168,7 @@ class MCPToolRegistry(
   }
 
   // Refresh tools from server and update cache
-  private def refreshToolsFromServer(server: MCPServerConfig, timestamp: Long): Seq[ToolFunction[_, _]] = {
+  private def refreshToolsFromServer(server: MCPServerConfig, timestamp: Long): Seq[ToolFunction[_]] = {
     logger.info(s"Refreshing tools from MCP server: ${server.name}")
     val result = for {
       client <- Try(getOrCreateClient(server)).toEither.leftMap { ex =>
@@ -339,7 +339,7 @@ object MCPToolRegistry {
 }
 
 // Helper case class for cleaner caching
-private case class CachedTools(tools: Seq[ToolFunction[_, _]], timestamp: Long) {
+private case class CachedTools(tools: Seq[ToolFunction[_]], timestamp: Long) {
   def isExpired(now: Long, ttl: FiniteDuration): Boolean =
     (now - timestamp) >= ttl.toMillis
 }

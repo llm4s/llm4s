@@ -1,6 +1,7 @@
 package org.llm4s.samples.context
 
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.provider.OpenAITokenizers
 import org.llm4s.context.{ ConversationTokenCounter, HistoryCompressor, SemanticBlocks }
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -41,7 +42,7 @@ object HistoryDigestExample {
 
     val result = for {
       modelName    <- Llm4sConfig.defaultProvider().map(_.model)
-      tokenCounter <- ConversationTokenCounter.forModel(modelName)
+      tokenCounter <- OpenAITokenizers.counterFor(modelName.asString).orElse(ConversationTokenCounter.cl100k())
       demo         <- runHistoryDigestDemo(tokenCounter)
     } yield demo
 

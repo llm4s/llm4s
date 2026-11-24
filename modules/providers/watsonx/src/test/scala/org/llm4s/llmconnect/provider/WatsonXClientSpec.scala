@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.{ KnownSecrets, Secret }
 import org.llm4s.error.{ AuthenticationError, ConfigurationError, NetworkError, RateLimitError, ValidationError }
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
@@ -18,8 +20,8 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
     apiKey = Secret("secret key&="),
     projectId = "project-1",
     spaceId = None,
-    model = "ibm/granite-13b-instruct-v2",
-    baseUrl = "https://wx.example.com",
+    model = ModelName("ibm/granite-13b-instruct-v2"),
+    baseUrl = BaseUrl("https://wx.example.com"),
     apiVersion = "2026-09-25",
     iamUrl = "https://iam.example.com/identity/token",
     contextWindow = 8192,
@@ -135,7 +137,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
         SystemMessage("be brief"),
         UserMessage("Hi"),
         AssistantMessage("Hello"),
-        ToolMessage("42", "call-7"),
+        ToolMessage("42", ToolCallId("call-7")),
         UserMessage("Thanks")
       )
     )
@@ -159,7 +161,8 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
 
   test("a space id replaces the project id, and top_p is sent only when it is not the default") {
     val spaced = config.copy(spaceId = Some("space-9"))
-    val body = client(new MockHttpClient(iam), spaced).createRequestBody(hi, CompletionOptions(topP = 0.5)).toOption.get
+    val body =
+      client(new MockHttpClient(iam), spaced).createRequestBody(hi, CompletionOptions(topP = Some(0.5))).toOption.get
     body("space_id").str shouldBe "space-9"
     body.obj.contains("project_id") shouldBe false
     body("top_p").num shouldBe 0.5
@@ -181,20 +184,20 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
     val chunks = ListBuffer.empty[StreamedChunk]
 
     val completion = client(http)
-      .streamComplete(hi, CompletionOptions(), chunks += _)
+      .streamComplete(hi, CompletionOptions())(chunks += _)
       .getOrElse(fail("expected a completion"))
 
     http.lastUrl shouldBe Some("https://wx.example.com/ml/v1/text/chat_stream?version=2026-09-25")
     chunks.flatMap(_.content).mkString shouldBe "Hello"
     chunks.map(_.finishReason) shouldBe Seq(None, None, Some(FinishReason.Stop))
     completion.content shouldBe "Hello"
-    completion.model shouldBe "ibm/granite-13b-instruct-v2"
+    completion.model shouldBe ModelName("ibm/granite-13b-instruct-v2")
     completion.usage.map(u => (u.promptTokens, u.completionTokens)) shouldBe Some((7, 2))
   }
 
   test("a streaming error status is mapped, not parsed as events") {
     val http   = new MockHttpClient(Seq(iam, HttpResponse(429, """{"errors":[{"message":"slow down"}]}""")))
-    val result = client(http).streamComplete(hi, CompletionOptions(), _ => ())
+    val result = client(http).streamComplete(hi, CompletionOptions())(_ => ())
     result.left.toOption.exists(_.isInstanceOf[RateLimitError]) shouldBe true
   }
 

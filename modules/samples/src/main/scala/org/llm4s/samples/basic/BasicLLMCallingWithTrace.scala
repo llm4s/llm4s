@@ -12,7 +12,7 @@ object BasicLLMCallingWithTrace {
   def main(args: Array[String]): Unit = {
     val result = for {
       tracingSettings <- Llm4sConfig.tracing()
-      tracer = Tracing.create(tracingSettings)
+      tracer          <- Tracing.fromSettings(tracingSettings)
       providerCfg     <- Llm4sConfig.defaultProvider()
       registryService <- Llm4sConfig.modelRegistryService()
       given org.llm4s.model.ModelRegistryService = registryService
@@ -49,7 +49,7 @@ object BasicLLMCallingWithTrace {
                 threadId = "sample-thread",
                 runId = java.util.UUID.randomUUID().toString,
                 agent = "sample-agent",
-                status = "completed",
+                status = TraceEvent.RunStatus.Completed,
                 messages = finalMessages,
                 usage = UsageSummary()
               )
@@ -67,7 +67,7 @@ object BasicLLMCallingWithTrace {
             }
 
           case Left(error) =>
-            tracer.traceError(new RuntimeException(error.formatted))
+            tracer.traceError(error, "completion")
             logger.error("Error: {}", error.formatted)
         }
         tracer.traceEvent("LLM conversation finished")

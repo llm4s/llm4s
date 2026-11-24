@@ -76,7 +76,7 @@ class CodeWorker(
 
     val result = for {
       toolSet <- toolSetResult
-      builder = Agent.builder("codegen", client).withTools(toolSet)
+      builder = Agent.builder("codegen", client).withToolSet(toolSet)
       agent   <- maxSteps.fold(builder)(builder.withMaxSteps).build()
       outcome <- agent.run(task)
     } yield outcome

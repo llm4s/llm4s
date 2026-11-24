@@ -45,7 +45,7 @@ class PgSearchIndexRagConsistencySpec extends AnyFlatSpec with Matchers with Bef
   private val openIndexes   = mutable.ListBuffer.empty[PgSearchIndex]
   private val createdPaths  = mutable.ListBuffer.empty[CollectionPath]
   private val JdbcPattern   = """jdbc:postgresql://([^:/]+):?(\d+)?/(.+)""".r
-  private val embeddings    = new EmbeddingClient(new FixedEmbeddingProvider())
+  private val embeddings    = EmbeddingClient(new FixedEmbeddingProvider())
   private val user1         = PrincipalId.user(1)
   private val user1Auth     = UserAuthorization.forUser(user1, Set.empty)
   private val outsiderAuth  = UserAuthorization.forUser(PrincipalId.user(2), Set.empty)

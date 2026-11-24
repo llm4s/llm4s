@@ -1,13 +1,20 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAICompatibleConfigKeys
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ OpenRouterModelLister, ProviderModelLister }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderFeatures
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -33,7 +40,7 @@ object OpenRouterProvider extends ProviderDescriptor:
    * This was `DefaultConfig.DEFAULT_OPENROUTER_BASE_URL` in `llm4s-core` until the
    * provider moved to `llm4s-openai-compatible` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
    */
-  val DEFAULT_BASE_URL: String = "https://openrouter.ai/api/v1"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://openrouter.ai/api/v1")
 
   /** Accepts `organization`, which it passes on in its `OpenAIConfig` as OpenAI and Requesty do. */
   val configSpec: ProviderConfigSpec =
@@ -43,14 +50,13 @@ object OpenRouterProvider extends ProviderDescriptor:
 
   override val modelLister: Option[ProviderModelLister] = Some(OpenRouterModelLister)
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    given ContextWindowResolver = context.contextWindows
     for
-      apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
-      baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
+      apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
+      baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
       config <- OpenAIConfig.fromValues(
-        section.model.asString,
+        section.model,
         apiKey,
         baseUrl,
         section.extra(OpenAIConfig.OrganizationKey),
@@ -58,16 +64,15 @@ object OpenRouterProvider extends ProviderDescriptor:
       )
     yield config
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[OpenAIConfig](id, config)
       .flatMap(
         OpenRouterClient(
           _,
-          options.metrics,
-          options.exchangeLogging,
-          Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+          context.metrics,
+          context.exchangeLogging,
+          Llm4sHttpClient.suppliedOrFromConfig(context.httpClient)
         )
       )

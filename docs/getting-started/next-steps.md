@@ -188,9 +188,9 @@ val searchSchema = Schema
   .`object`[Map[String, Any]]("Search parameters")
   .withProperty(Schema.property("query", Schema.string("What to search for")))
 
-val tool = ToolBuilder[Map[String, Any], String]("search", "Search the web", searchSchema)
+val tool = ToolBuilder[String]("search", "Search the web", searchSchema)
   .withHandler(params => params.getString("query").map(search))
-  .buildSafe()   // Result[ToolFunction[Map[String, Any], String]]
+  .buildSafe()   // Result[ToolFunction[String]]
 ```
 
 [Learn more →](/guide/builtin-tools)
@@ -237,7 +237,7 @@ Get real-time token-by-token responses.
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
 
 val conversation = Conversation(Seq(UserMessage("Tell me a story")))
-client.streamComplete(conversation, onChunk = chunk => chunk.content.foreach(print))
+client.streamComplete(conversation)(chunk => chunk.content.foreach(print))
 ```
 
 [Learn more →](/guide/agents/streaming)
@@ -372,7 +372,7 @@ def getCurrentTime(): String =
   java.time.LocalDateTime.now().toString
 
 val result = for {
-  timeTool <- ToolBuilder[Map[String, Any], String](
+  timeTool <- ToolBuilder[String](
                 "get_time",
                 "Get current date and time",
                 Schema.`object`[Map[String, Any]]("No parameters")
@@ -401,10 +401,7 @@ def streamChat(message: String): Unit = {
     registry <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
-    _ <- client.streamComplete(
-      Conversation(Seq(UserMessage(message))),
-      onChunk = chunk => chunk.content.foreach(print)
-    )
+    _ <- client.streamComplete(Conversation(Seq(UserMessage(message))))(chunk => chunk.content.foreach(print))
   } yield println()
 
   result.left.foreach(error => println(s"Error: $error"))
@@ -448,14 +445,14 @@ val result = for {
 - Check key starts with correct prefix (`sk-` for OpenAI, `sk-ant-` for Anthropic)
 
 **Problem: Model not found**
-- Verify `model` in the provider section is the provider's own model name (e.g. `gpt-4o-mini`, no `openai/` prefix)
-- Check `llm4s.providers.provider` names the section you meant
+- Verify `model` in the provider section is the provider's own model name (e.g. `gpt-5.6-luna`, no `openai/` prefix)
+- Check `llm4s.defaultProvider` names the section you meant
 - Check provider supports that model
 - Try a different model
 
 **Problem: Slow responses**
 - Use streaming for real-time feedback
-- Consider using a faster model (gpt-4o-mini, a Claude Haiku model)
+- Consider using a faster model (gpt-5.6-luna, a Claude Haiku model)
 - Check your internet connection
 
 **Problem: Token limit errors**
@@ -486,7 +483,7 @@ val result = for {
 
 - **Starter Kit**: Use [llm4s.g8](https://github.com/llm4s/llm4s.g8) to scaffold projects
 - **Share Examples**: Post your projects in Discord
-- **Contribute**: See the [contributing guide](/reference/contributing)
+- **Contribute**: See the [contributing guide](/contribute/contributing)
 
 ---
 

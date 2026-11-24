@@ -90,10 +90,11 @@ object DocumentQAExample extends App {
     val embeddingServiceResult: Result[EmbeddingService] =
       Llm4sConfig
         .embeddings()
-        .flatMap { case (provider, cfg) =>
-          val dims     = ModelDimensionRegistry.getDimension(provider, cfg.model).getOrElse(1536)
+        .flatMap { cfg =>
+          val dims =
+            ModelDimensionRegistry.getDimension(cfg.providerId, cfg.model).getOrElse(1536)
           val modelCfg = EmbeddingModelConfig(cfg.model, dims)
-          EmbeddingClient.from(provider, cfg).map(client => LLMEmbeddingService(client, modelCfg))
+          EmbeddingClient.from(cfg).map(client => LLMEmbeddingService(client, modelCfg))
         } match {
         case Right(realService) =>
           logger.info("Using LLMEmbeddingService (real embeddings)")

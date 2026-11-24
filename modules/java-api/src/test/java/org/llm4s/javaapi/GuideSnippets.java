@@ -56,7 +56,7 @@ final class GuideSnippets {
     static List<LlmResult<JLlmClient>> builders(String apiKey) {
         LlmResult<JLlmClient> openai = Llm4s.openAi()
             .apiKey(apiKey)
-            .model("gpt-4o-mini")
+            .model("gpt-5.6-luna")
             .build();
         LlmResult<JLlmClient> local = Llm4s.ollama()
             .model("llama3.2")
@@ -72,8 +72,8 @@ final class GuideSnippets {
 
     /** The second "Configure in code" block: a client from a provider config, with no application.conf. */
     static List<LlmResult<JLlmClient>> inCode(String apiKey) {
-        LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(Secret.apply(apiKey), "gpt-4o-mini"));
-        LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(Secret.apply(apiKey), "claude-sonnet-4-20250514"));
+        LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(Secret.apply(apiKey), "gpt-5.6-luna"));
+        LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(Secret.apply(apiKey), "claude-sonnet-5-5"));
         LlmResult<JLlmClient> local = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"));
 
         return Arrays.asList(openai, anthropic, local);
@@ -91,7 +91,7 @@ final class GuideSnippets {
             String apiKey, String proxyUser, String proxyPassword, String trustStorePassword) {
         LlmResult<JLlmClient> corporate = Llm4s.openAi()
             .apiKey(apiKey)
-            .model("gpt-4o")
+            .model("gpt-5.6-terra")
             .proxy("http://proxy.corp:3128")
             .proxyCredentials(proxyUser, proxyPassword)
             .nonProxyHosts("localhost", "*.internal")

@@ -1,6 +1,5 @@
 package org.llm4s.llmconnect
 
-import org.llm4s.llmconnect.config.LocalEmbeddingModels
 import org.llm4s.llmconnect.model._
 
 /**
@@ -24,25 +23,25 @@ object LLMConnectTestFixtures {
   // ================================= TOOL CALLS =================================
 
   val sampleToolCall: ToolCall = ToolCall(
-    id = "call_abc123",
+    id = ToolCallId("call_abc123"),
     name = "get_weather",
     arguments = ujson.Obj("location" -> "San Francisco", "unit" -> "celsius")
   )
 
   val sampleToolCall2: ToolCall = ToolCall(
-    id = "call_def456",
+    id = ToolCallId("call_def456"),
     name = "search_web",
     arguments = ujson.Obj("query" -> "Scala programming")
   )
 
   val assistantWithToolCalls: AssistantMessage = AssistantMessage(
-    contentOpt = Some("I'll check the weather for you."),
+    text = Some("I'll check the weather for you."),
     toolCalls = Seq(sampleToolCall)
   )
 
   val toolResponse: ToolMessage = ToolMessage(
     content = """{"temperature": 18, "condition": "sunny"}""",
-    toolCallId = "call_abc123"
+    toolCallId = ToolCallId("call_abc123")
   )
 
   // ================================= CONVERSATIONS =================================
@@ -111,15 +110,6 @@ object LLMConnectTestFixtures {
     toolCall = None,
     finishReason = None,
     thinkingDelta = Some("Let me think about this...")
-  )
-
-  // ================================= LOCAL MODELS =================================
-
-  // Use model names from ModelDimensionRegistry
-  val testLocalModels: LocalEmbeddingModels = LocalEmbeddingModels(
-    imageModel = "openclip-vit-b32",
-    audioModel = "wav2vec2-base",
-    videoModel = "timesformer-base"
   )
 
   // ================================= JSON RESPONSES =================================

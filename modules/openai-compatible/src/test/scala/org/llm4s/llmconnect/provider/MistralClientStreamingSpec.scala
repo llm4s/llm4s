@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.RateLimitError
 import org.llm4s.llmconnect.config.MistralConfig
@@ -26,7 +28,8 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
-  private def config(baseUrl: String) = MistralConfig(Secret("test-key"), "mistral-small-latest", baseUrl, 128000, 4096)
+  private def config(baseUrl: String) =
+    MistralConfig(Secret("test-key"), ModelName("mistral-small-latest"), BaseUrl(baseUrl), 128000, 4096)
 
   private def event(delta: String, finish: String = "null", usage: String = ""): String =
     s"""data: {"id":"cmpl-s","object":"chat.completion.chunk","created":1700000000,"model":"mistral-small-latest",""" +
@@ -53,11 +56,11 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
       val chunks = ListBuffer.empty[StreamedChunk]
       val completion =
         new MistralClient(config(baseUrl))
-          .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), chunks += _)
+          .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(chunks += _)
           .value
 
       completion.content shouldBe "Bonjour le monde"
-      completion.model shouldBe "mistral-small-latest"
+      completion.model shouldBe ModelName("mistral-small-latest")
       completion.usage shouldBe Some(TokenUsage(12, 7, 19))
       chunks.flatMap(_.content).mkString shouldBe "Bonjour le monde"
       chunks.flatMap(_.finishReason) shouldBe Seq(FinishReason.Stop)
@@ -83,7 +86,7 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
     } { baseUrl =>
       val chunks = ListBuffer.empty[StreamedChunk]
       val completion = new MistralClient(config(baseUrl))
-        .streamComplete(Conversation(Seq(UserMessage("Weather in Paris?"))), CompletionOptions(), chunks += _)
+        .streamComplete(Conversation(Seq(UserMessage("Weather in Paris?"))), CompletionOptions())(chunks += _)
         .value
 
       completion.toolCalls.map(tc => (tc.id, tc.name, tc.arguments)) shouldBe
@@ -109,8 +112,8 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
       )
     } { baseUrl =>
       val chunks = ListBuffer.empty[StreamedChunk]
-      val completion = new MistralClient(config(baseUrl).withModel("magistral-small-latest"))
-        .streamComplete(Conversation(Seq(UserMessage("2+2?"))), CompletionOptions(), chunks += _)
+      val completion = new MistralClient(config(baseUrl).withModel(ModelName("magistral-small-latest")))
+        .streamComplete(Conversation(Seq(UserMessage("2+2?"))), CompletionOptions())(chunks += _)
         .value
 
       completion.content shouldBe "It is 4."
@@ -127,14 +130,14 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
       sendJsonResponse(exchange, 429, """{"message":"Requests rate limit exceeded"}""")
     } { baseUrl =>
       var chunks = 0
-      val result = new MistralClient(config(baseUrl), exchangeLogging = ProviderExchangeLogging.enabled(sink))
-        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => chunks += 1)
+      val result = new MistralClient(config(baseUrl), exchangeLogging = ProviderExchangeLogging.Enabled(sink))
+        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => chunks += 1)
 
       result.left.value shouldBe a[RateLimitError]
       chunks shouldBe 0
     }
     recorded should have size 1
-    recorded.head.provider shouldBe "mistral"
+    recorded.head.provider.asString shouldBe "mistral"
     recorded.head.responseBody shouldBe Some("""{"message":"Requests rate limit exceeded"}""")
   }
 
@@ -145,7 +148,7 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
       Seq(baseUrl, s"$baseUrl/", s"$baseUrl/v1", s"$baseUrl/v1/").foreach { url =>
         withClue(url) {
           new MistralClient(config(url))
-            .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+            .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
             .value
             .content shouldBe "ok"
         }

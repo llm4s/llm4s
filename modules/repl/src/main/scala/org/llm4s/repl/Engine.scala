@@ -32,13 +32,13 @@ private[repl] object Engine {
         val printed = new AtomicBoolean(false)
         val reply = client.streamComplete(
           Conversation(prior ++ turn),
-          options,
-          chunk =>
-            chunk.content.filter(_.nonEmpty).foreach { text =>
-              out.print(text)
-              out.flush()
-              printed.set(true)
-            }
+          options
+        )(chunk =>
+          chunk.content.filter(_.nonEmpty).foreach { text =>
+            out.print(text)
+            out.flush()
+            printed.set(true)
+          }
         )
         reply match {
           case Left(error) =>

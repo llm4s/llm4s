@@ -114,8 +114,8 @@ private object ProviderExchangeJson:
   def toJson(exchange: ProviderExchange): ujson.Obj =
     ujson.Obj(
       "exchange_id"    -> exchange.exchangeId,
-      "provider"       -> exchange.provider,
-      "model"          -> exchange.model.getOrElse(""),
+      "provider"       -> exchange.provider.asString,
+      "model"          -> exchange.model.fold("")(_.asString),
       "request_id"     -> exchange.requestId.getOrElse(""),
       "correlation_id" -> exchange.correlationId.getOrElse(""),
       "started_at"     -> exchange.startedAt.toString,

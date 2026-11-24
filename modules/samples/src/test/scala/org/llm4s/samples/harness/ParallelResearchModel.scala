@@ -36,7 +36,7 @@ object ParallelResearchModel {
   private val usage = TokenUsage(promptTokens = 100, completionTokens = 20, totalTokens = 120)
 
   private def call(id: String, name: String, args: (String, ujson.Value)*): ToolCall =
-    ToolCall(id, name, ujson.Obj.from(args))
+    ToolCall(ToolCallId(id), name, ujson.Obj.from(args))
 
   private def calls(cs: ToolCall*): Reply = Reply.toolCalls(cs*).withUsage(usage)
   private def text(s: String): Reply      = Reply.text(s).withUsage(usage)
@@ -50,8 +50,8 @@ object ParallelResearchModel {
   /** Each topic's findings, or `None` for a topic whose call ended in an error, from the lead's tool messages. */
   private def findingsIn(messages: Seq[Message]): Vector[(String, Option[Findings])] =
     messages.collect {
-      case t: ToolMessage if t.toolCallId.startsWith("research-") =>
-        t.toolCallId.stripPrefix("research-") -> Try(upickle.default.read[Findings](t.content)).toOption
+      case t: ToolMessage if t.toolCallId.asString.startsWith("research-") =>
+        t.toolCallId.asString.stripPrefix("research-") -> Try(upickle.default.read[Findings](t.content)).toOption
     }.toVector
 
   /** The draft the lead composes from its researchers' findings, naming every gap. */
@@ -70,13 +70,13 @@ object ParallelResearchModel {
           // one message, every question: the children run in parallel, at most MaxConcurrentChildren at once
           calls(qs.map(q => call(researchCall(q.topic), "task_researcher", "topic" -> q.topic, "url" -> q.url))*)
         }
-      case t: ToolMessage if t.toolCallId.startsWith("research-") =>
+      case t: ToolMessage if t.toolCallId.asString.startsWith("research-") =>
         Some(calls(call("review", "task_critic", "text" -> draft(findingsIn(messages)))))
-      case t: ToolMessage if t.toolCallId == "review" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("review") =>
         val review = Try(upickle.default.read[Review](t.content)).toOption.fold("not reviewed")(_.comments)
         val report = draft(findingsIn(messages)) + s"\nReview: $review\n"
         Some(calls(call("report", "write_file", "path" -> ReportPath, "content" -> report)))
-      case t: ToolMessage if t.toolCallId == "report" =>
+      case t: ToolMessage if t.toolCallId == ToolCallId("report") =>
         val sources = findingsIn(messages).flatMap(_._2).flatMap(_.sources)
         Some(text(upickle.default.write(DeepResearch.Brief("How durable agents work", ReportPath, sources))))
       case _ => None
@@ -94,7 +94,7 @@ object ParallelResearchModel {
         case _: UserMessage if failing.contains(q.topic) =>
           Reply.failure(ServiceError(503, "scripted", s"the provider is down for '${q.topic}'"))
         case _: UserMessage => calls(call("fetch", "fetch_page", "url" -> q.url))
-        case t: ToolMessage if t.toolCallId == "fetch" =>
+        case t: ToolMessage if t.toolCallId == ToolCallId("fetch") =>
           val fetched = pages.get(q.url).exists(page => t.content.contains(page))
           val findings =
             if (fetched) Findings(q.topic, t.content.linesIterator.next(), Vector(q.url))

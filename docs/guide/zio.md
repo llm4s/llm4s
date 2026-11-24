@@ -3,8 +3,9 @@ layout: page
 title: ZIO Integration
 description: "Use LLM4S with ZIO: llm4s-zio wraps LLMClient and Agent in ZIO effects, with ZLayer, ZIO Streams and LLMError in the error channel."
 search_title: "LLM4S with ZIO: LLM calls and agents as effects"
-parent: User Guide
-nav_order: 15
+parent: Frameworks and Runtimes
+nav_order: 503
+grand_parent: User Guide
 ---
 
 # ZIO Integration
@@ -27,7 +28,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-zio" % "{{ site.data.project.latest
 ### Acquire via ZLayer
 
 Use `LLMClientZ.layer` to load the default provider section of your `application.conf` (the one
-`llm4s.providers.provider` names), build the client, and release it on scope exit:
+`llm4s.defaultProvider` names), build the client, and release it on scope exit:
 
 ```scala
 import org.llm4s.llmconnect.model.{Conversation, UserMessage}
@@ -76,7 +77,7 @@ client
 
 ```scala
 for {
-  agentZ <- client.agent("assistant")(_.withTools(myTools).withSystemPrompt("You are concise."))
+  agentZ <- client.agent("assistant")(_.withTools(tools).withSystemPrompt("You are concise."))
   result <- agentZ.run("Summarise this")
   _      <- ZIO.debug(result.answer.toString)
 } yield ()

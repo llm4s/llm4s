@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.toolloop
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.AgentId
@@ -72,13 +73,14 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
 
   /** A model turn calling `write` with `name`. */
   private def callWrite(name: String): Vector[Message] => AssistantMessage =
-    _ => AssistantMessage(None, Seq(ToolCall(s"c-$name", "write", ujson.Obj("text" -> name))))
+    _ => AssistantMessage(None, Seq(ToolCall(ToolCallId(s"c-$name"), "write", ujson.Obj("text" -> name))))
 
   /** An output guardrail blocking any answer that mentions a secret. */
   private def secretGuard: AgentMiddleware = middleware(
     "guard",
     writing = Set.empty,
-    after = (t, _) => if t.contains("secret") then Left(GuardrailBlocked("secrets", "no")) else Right(BoundaryResult(t))
+    after =
+      (t, _) => if t.contains("secret") then Left(GuardrailBlocked("secrets", Some("no"))) else Right(BoundaryResult(t))
   )
 
   private def systemOf(request: Vector[Message]): Option[String] =
@@ -184,8 +186,8 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       after = (t, _) => Right(BoundaryResult(t, undeclared)),
       model = (r, _, next) => next(r).map(_.addUpdate(undeclared))
     )
-    val blockingIn  = middleware("blocking", before = (_, _) => Left(GuardrailBlocked("in", "no")))
-    val blockingOut = middleware("blocking", after = (_, _) => Left(GuardrailBlocked("out", "no")))
+    val blockingIn  = middleware("blocking", before = (_, _) => Left(GuardrailBlocked("in", Some("no"))))
+    val blockingOut = middleware("blocking", after = (_, _) => Left(GuardrailBlocked("out", Some("no"))))
     // outermost: discards the inner response, then fails the call
     val discarding =
       middleware("discarding", model = (r, _, next) => next(r).flatMap(_ => Left(ValidationError("x", "y"))))
@@ -269,9 +271,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     val judge = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Right(completion(AssistantMessage("ok"), prompt = 100, completion = 1))
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       def getContextWindow(): Int     = 1000
@@ -303,9 +303,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     val judge = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Right(completion(AssistantMessage("ok"), prompt = 100, completion = 1))
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       def getContextWindow(): Int     = 1000
@@ -333,9 +331,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     val judge = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Right(completion(AssistantMessage("ok"), prompt = 100, completion = 1))
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       def getContextWindow(): Int     = 1000
@@ -346,7 +342,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       writing = Set.empty,
       before = (t, c) => c.accounted(judge).complete(Conversation(Seq(UserMessage(t)))).map(_ => BoundaryResult(t)),
       after = (t, c) =>
-        c.recordUsage("embedder", TokenUsage(7, 0, 7))
+        c.recordUsage(ModelName("embedder"), TokenUsage(7, 0, 7))
         c.accounted(judge).complete(Conversation(Seq(UserMessage(t)))).map(_ => BoundaryResult(t))
     )
     val (state, _) = runInMemory(loopOf(ScriptedModel(answer("hi")), Seq(judging)).graph, AgentInput("go")).answered
@@ -354,7 +350,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     // the agent's call, the input judge's, the output judge's and the recorded usage
     usage.requestCount shouldBe 4
     usage.inputTokens shouldBe 10 + 100 + 100 + 7
-    usage.byModel.keySet shouldBe Set("scripted", "embedder")
+    usage.byModel.keySet shouldBe Set(ModelName("scripted"), ModelName("embedder"))
   }
 
   "Prompt sections" should "join the system prompt, cacheable ones first, each group in stack order, never stored" in {
@@ -454,7 +450,11 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
   it should "restore a key a handoff source's tool wrote, when the target's answer is blocked" in {
     val agentB = AgentId.unsafe("b")
     val handoff: Vector[Message] => AssistantMessage =
-      _ => AssistantMessage(None, Seq(ToolCall("h1", HandoffTools.toolName(agentB), ujson.Obj("reason" -> "over"))))
+      _ =>
+        AssistantMessage(
+          None,
+          Seq(ToolCall(ToolCallId("h1"), HandoffTools.toolName(agentB), ujson.Obj("reason" -> "over")))
+        )
     val source = LoopAgent(agentA, ScriptedModel(callWrite("draft"), handoff), ToolSet.of(write).value)
       .withMiddleware(Seq(secretGuard))
       .withHandoffs(Vector(LoopHandoff(agentB, None, preserveContext = true)))
@@ -474,7 +474,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
       "m",
       writing = Set(scratch),
       before = (t, _) => Right(BoundaryResult(t, StateUpdate.update(scratch, Some(t)))),
-      after = (_, _) => Left(GuardrailBlocked("all", "no"))
+      after = (_, _) => Left(GuardrailBlocked("all", Some("no")))
     )
     val (state, _) = runInMemory(loopOf(ScriptedModel(answer("hi")), Seq(m)).graph, AgentInput("go")).failed
     state.isSet(scratch) shouldBe false
@@ -552,7 +552,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
         next: ModelRequest => Result[ModelResponse]
       ): Result[ModelResponse] = next(request).map(_.addUpdate(StateUpdate.update(notes, "model")))
       override def afterAgent(answer: String, context: ModelContext): Result[BoundaryResult] =
-        answered(context).fold(ask("block?"))(_ => Left(GuardrailBlocked("review", "rejected")))
+        answered(context).fold(ask("block?"))(_ => Left(GuardrailBlocked("review", Some("rejected"))))
     }
     val loop  = loopOf(ScriptedModel(answer("hi")), Seq(reviewing))
     val store = new InMemoryCheckpointer
@@ -657,9 +657,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     val judge = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Right(completion(AssistantMessage("0.9"), prompt = 50, completion = 1))
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       def getContextWindow(): Int     = 1000
@@ -674,8 +672,11 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
         new org.llm4s.agent.guardrails.OutputGuardrail {
           val name: String                            = "composite"
           def validate(value: String): Result[String] = composite.validate(value)
-          override def validate(value: String, context: ModelContext): Result[String] =
-            composite.validate(value, context)
+          override def validateIn(
+            value: String,
+            context: org.llm4s.agent.graph.middleware.UsageAccounting
+          ): Result[String] =
+            composite.validateIn(value, context)
         }
       )
     )

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.model.{
@@ -30,8 +32,8 @@ class DeepSeekClientReasoningSpec extends AnyFlatSpec with Matchers with EitherV
   private def localConfig(baseUrl: String): DeepSeekConfig =
     DeepSeekConfig(
       apiKey = Secret("test-key"),
-      model = "deepseek-reasoner",
-      baseUrl = baseUrl,
+      model = ModelName("deepseek-reasoner"),
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 128000,
       reserveCompletion = 8192
     )
@@ -85,7 +87,7 @@ class DeepSeekClientReasoningSpec extends AnyFlatSpec with Matchers with EitherV
     } { baseUrl =>
       val chunks = ListBuffer.empty[StreamedChunk]
       val completion =
-        new DeepSeekClient(localConfig(baseUrl)).streamComplete(conversation, CompletionOptions(), chunks += _).value
+        new DeepSeekClient(localConfig(baseUrl)).streamComplete(conversation, CompletionOptions())(chunks += _).value
 
       chunks.flatMap(_.thinkingDelta) shouldBe Seq("Let me ", "think.")
       completion.thinking shouldBe Some("Let me think.")

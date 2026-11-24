@@ -134,7 +134,7 @@ class RAGReingestSpec extends AnyFlatSpec with Matchers {
     searcher: Option[HybridSearcher] = None
   ) =
     RAG
-      .buildWithClient(cfg, new EmbeddingClient(provider), hybridSearcher = searcher)
+      .buildWithClient(cfg, EmbeddingClient(provider), hybridSearcher = searcher)
       .fold(e => fail(e.message), identity)
 
   private def storedChunks(rag: RAG): Long = rag.stats.fold(e => fail(e.message), _.vectorCount)

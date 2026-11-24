@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
@@ -35,15 +37,15 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
    * The cheapest reasoning model in the gpt-5 family. The registry flags it `supports_reasoning`,
    * so it gets `reasoning_effort`, `max_completion_tokens` and no sampling parameters.
    */
-  private val ReasoningModel = "gpt-5-mini"
+  private val ReasoningModel = "gpt-5.6-luna" // gpt-5-mini shuts down on 2026-12-11 (OpenAI deprecations page)
 
   private def config(key: String, model: String = "gpt-4o-mini"): OpenAIConfig =
     OpenAIConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret(key),
         organization = None,
-        baseUrl = "https://api.openai.com/v1"
+        baseUrl = BaseUrl("https://api.openai.com/v1")
       )
       .value
 
@@ -71,7 +73,7 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
 
     val client = OpenAIClient(config(apiKey.get)).toOption.get
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+    val result = client.streamComplete(conversation, CompletionOptions())(c => chunks += c)
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
       result.isRight shouldBe true
@@ -124,7 +126,7 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
     // Streams carry usage only because the client sets stream_options.include_usage; OpenAI
     // then sends it on a final chunk with no choices.
     val client = OpenAIClient(config(apiKey.get)).toOption.get
-    val result = client.streamComplete(conversation, CompletionOptions(maxTokens = Some(16)), _ => ())
+    val result = client.streamComplete(conversation, CompletionOptions(maxTokens = Some(16)))(_ => ())
     client.close()
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
@@ -153,7 +155,7 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   override protected def apiKeyEnvVar: String                           = "OPENAI_API_KEY"
   override protected def contractKey: Option[String]                    = apiKey
   override protected def contractClient(key: String): Result[LLMClient] = OpenAIClient(config(key))
-  // gpt-5-mini reasons. OpenAI reports reasoning tokens, not the reasoning text. max_completion_tokens counts the
+  // gpt-5.6-luna reasons. OpenAI reports reasoning tokens, not the reasoning text. max_completion_tokens counts the
   // reasoning too, so the cap leaves room for the answer after it.
   override protected def reasoningSetup: Option[String => Result[ReasoningSetup]] = Some { key =>
     OpenAIClient(config(key, ReasoningModel)).map { client =>
@@ -166,4 +168,12 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   }
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /models/<model> (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(OpenAIClient(config("sk-invalid-key-for-testing")))
+  override protected def unknownModelClient(key: String): Option[Result[LLMClient]] =
+    Some(OpenAIClient(config(key, "llm4s-no-such-model")))
+
+  registerValidationContract()
 }

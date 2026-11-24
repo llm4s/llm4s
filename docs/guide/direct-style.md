@@ -1,10 +1,11 @@
 ---
 layout: page
 title: Direct Style and Ox
-parent: User Guide
+parent: Frameworks and Runtimes
 description: "Use LLM4S in direct style on JDK 21 virtual threads: plain Result code, and llm4s-ox for streamed completions as an Ox Flow, bounded fan-out, races, timeouts and retries."
 search_title: "LLM4S in direct style: Ox, virtual threads, Flow streaming"
-nav_order: 47
+nav_order: 505
+grand_parent: User Guide
 ---
 
 # Direct Style and Ox
@@ -53,7 +54,7 @@ val answer: Result[String] = for {
 } yield completion.content
 ```
 
-Streaming without Ox is a callback, `client.streamComplete(conversation, options, chunk => ...)`, that runs on the
+Streaming without Ox is a callback, `client.streamComplete(conversation, options)(chunk => ...)`, that runs on the
 calling thread until the reply ends.
 
 ## The llm4s-ox module

@@ -3,8 +3,9 @@ layout: page
 title: Kafka
 description: "Enrich a Kafka topic with an LLM using fs2-kafka and LLM4S: bounded concurrency, retries, a dead-letter topic and offsets committed after the produce."
 search_title: "Enrich a Kafka topic with an LLM in Scala"
-parent: User Guide
-nav_order: 44
+parent: RAG and Data
+nav_order: 310
+grand_parent: User Guide
 ---
 
 # Enrich a Kafka topic with an LLM
@@ -145,7 +146,7 @@ def pipe(
   send: TicketPipeline.Send, // producer.produce
   settings: TicketPipeline.Settings
 ): Pipe[IO, CommittableConsumerRecord[IO, String, String], Unit] = {
-  val reliable = new ReliableClient(client, "kafka-ticket-pipeline", settings.reliability)
+  val reliable = ReliableClient(client, "kafka-ticket-pipeline", settings.reliability)
   records =>
     records
       .parEvalMap(settings.concurrency) { committable =>
@@ -273,7 +274,7 @@ def run(client: LLMClient, settings: TicketPipeline.Settings): IO[Unit] = {
 ```bash
 # A scripted model: no provider, no API key
 sbt "samples/runMain org.llm4s.samples.kafka.KafkaTicketEnrichmentExample --scripted"
-# The default provider of application.conf (llm4s.providers.provider)
+# The default provider of application.conf (llm4s.defaultProvider)
 sbt "samples/runMain org.llm4s.samples.kafka.KafkaTicketEnrichmentExample --bootstrap localhost:9092"
 ```
 
@@ -299,8 +300,9 @@ val clientResource: Resource[IO, LLMClient] =
       registry <- Llm4sConfig.modelRegistryService()
       config   <- Llm4sConfig.defaultProvider()
       tracing  <- Llm4sConfig.tracing()
+      tracer   <- Tracing.fromSettings(tracing)
       client   <- LLMConnect.getClient(config)(using registry)
-    } yield TracingLLMClient(client, Tracing.create(tracing), config)
+    } yield TracingLLMClient(client, tracer, config)
   }.flatMap {
     case Right(client) => IO.pure(client)
     case Left(error)   => IO.raiseError(new LLMException(error))
@@ -348,7 +350,7 @@ producerProps.put(ProducerConfig.ACKS_CONFIG, "all")
 
 val consumer = new KafkaConsumer(consumerProps, new StringDeserializer, new StringDeserializer)
 val producer = new KafkaProducer(producerProps, new StringSerializer, new StringSerializer)
-val reliable = new ReliableClient(client, "kafka-ticket-pipeline", ReliabilityConfig())
+val reliable = ReliableClient(client, "kafka-ticket-pipeline", ReliabilityConfig())
 val pool     = Executors.newFixedThreadPool(8) // at most 8 model calls at once
 
 consumer.subscribe(java.util.List.of("tickets"))

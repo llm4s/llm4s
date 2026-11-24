@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.graph.GraphTestSupport.*
@@ -2447,10 +2448,8 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       val client = new org.llm4s.llmconnect.LLMClient {
         import org.llm4s.llmconnect.model.*
         override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-          Right(Completion("answer", Instant.EPOCH, "done", "test-model", AssistantMessage("done")))
-        override def streamComplete(
-          conversation: Conversation,
-          options: CompletionOptions,
+          Right(Completion("answer", Instant.EPOCH, ModelName("test-model"), AssistantMessage("done")))
+        override def streamComplete(conversation: Conversation, options: CompletionOptions)(
           onChunk: StreamedChunk => Unit
         ): Result[Completion] = complete(conversation, options)
         override def getContextWindow(): Int     = 4096
@@ -2577,12 +2576,10 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       val watching = new CountDownLatch(1)
       val client = new org.llm4s.llmconnect.LLMClient {
         import org.llm4s.llmconnect.model.*
-        private def done = Completion("answer", Instant.EPOCH, "done", "test-model", AssistantMessage("done"))
+        private def done = Completion("answer", Instant.EPOCH, ModelName("test-model"), AssistantMessage("done"))
         override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
           Right(done)
-        override def streamComplete(
-          conversation: Conversation,
-          options: CompletionOptions,
+        override def streamComplete(conversation: Conversation, options: CompletionOptions)(
           onChunk: StreamedChunk => Unit
         ): Result[Completion] = {
           if calls.incrementAndGet() == 1 then {

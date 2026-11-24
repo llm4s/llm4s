@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 
 import upickle.default.{ ReadWriter => RW, macroRW, readwriter }
@@ -8,8 +9,8 @@ import upickle.default.{ ReadWriter => RW, macroRW, readwriter }
  * Accumulates token and cost statistics for a single model across one or more requests.
  *
  * `totalCost` is stored as [[BigDecimal]] to avoid floating-point accumulation drift
- * that would occur when summing many `Double` values; incoming `Option[Double]` costs
- * are converted once via `BigDecimal.decimal` on first contact.
+ * that would occur when summing many `Double` values; a [[Completion]]'s cost is a
+ * `BigDecimal` too, so nothing is converted on the way in.
  *
  * @param requestCount   number of API calls attributed to this model
  * @param inputTokens    cumulative prompt tokens sent to the model
@@ -18,6 +19,10 @@ import upickle.default.{ ReadWriter => RW, macroRW, readwriter }
  * @param thinkingTokens cumulative thinking/reasoning tokens, the part of `outputTokens` that was
  *                       thinking; zero where the provider reports none
  * @param totalCost      cumulative estimated cost in USD; `BigDecimal(0)` when cost data is unavailable
+ * @param cachedTokens   cumulative input tokens served from the provider's prompt cache (cache reads), a part of
+ *                       `inputTokens`; zero where the provider reports none
+ * @param cacheCreationTokens cumulative input tokens written into the provider's prompt cache, a part of
+ *                       `inputTokens`; zero where the provider reports none
  *
  * Build one with [[ModelUsage.apply]] and change it with the `with*` setters; the constructor and `copy` are
  * private, so a new field never breaks callers. The constructor keeps its defaults because the JSON codec fills a
@@ -29,7 +34,9 @@ final case class ModelUsage private (
   inputTokens: Long = 0L,
   outputTokens: Long = 0L,
   thinkingTokens: Long = 0L,
-  totalCost: BigDecimal = BigDecimal(0)
+  totalCost: BigDecimal = BigDecimal(0),
+  cachedTokens: Long = 0L,
+  cacheCreationTokens: Long = 0L
 ) {
 
   /** Sets the number of API calls attributed to this model. */
@@ -47,21 +54,29 @@ final case class ModelUsage private (
   /** Sets the cumulative estimated cost in USD. */
   def withTotalCost(totalCost: BigDecimal): ModelUsage = copy(totalCost = totalCost)
 
+  /** Sets the cumulative input tokens served from the provider's prompt cache. */
+  def withCachedTokens(cachedTokens: Long): ModelUsage = copy(cachedTokens = cachedTokens)
+
+  /** Sets the cumulative input tokens written into the provider's prompt cache. */
+  def withCacheCreationTokens(cacheCreationTokens: Long): ModelUsage = copy(cacheCreationTokens = cacheCreationTokens)
+
   /**
    * Returns a new [[ModelUsage]] with `usage` and `cost` folded in.
    *
    * @param usage token-usage record from a [[org.llm4s.llmconnect.model.Completion]]
    * @param cost  optional estimated cost in USD; treated as zero when absent
    */
-  def add(usage: TokenUsage, cost: Option[Double]): ModelUsage = {
+  def add(usage: TokenUsage, cost: Option[BigDecimal]): ModelUsage = {
     val thinking  = usage.thinkingTokens.getOrElse(0)
-    val costValue = cost.map(BigDecimal.decimal).getOrElse(BigDecimal(0))
+    val costValue = cost.getOrElse(BigDecimal(0))
     copy(
       requestCount = requestCount + 1L,
       inputTokens = inputTokens + usage.promptTokens.toLong,
       outputTokens = outputTokens + usage.totalOutputTokens.toLong, // thinking included
       thinkingTokens = thinkingTokens + thinking.toLong,
-      totalCost = totalCost + costValue
+      totalCost = totalCost + costValue,
+      cachedTokens = cachedTokens + usage.cachedTokens.getOrElse(0).toLong,
+      cacheCreationTokens = cacheCreationTokens + usage.cacheCreationTokens.getOrElse(0).toLong
     )
   }
 
@@ -77,7 +92,9 @@ final case class ModelUsage private (
       inputTokens = inputTokens + other.inputTokens,
       outputTokens = outputTokens + other.outputTokens,
       thinkingTokens = thinkingTokens + other.thinkingTokens,
-      totalCost = totalCost + other.totalCost
+      totalCost = totalCost + other.totalCost,
+      cachedTokens = cachedTokens + other.cachedTokens,
+      cacheCreationTokens = cacheCreationTokens + other.cacheCreationTokens
     )
 
   def averageCostPerRequest: BigDecimal =
@@ -95,15 +112,27 @@ object ModelUsage {
    * @param outputTokens   cumulative output tokens, thinking included
    * @param thinkingTokens cumulative thinking tokens, the part of `outputTokens` that was thinking
    * @param totalCost      cumulative estimated cost in USD
+   * @param cachedTokens   cumulative input tokens served from the provider's prompt cache
+   * @param cacheCreationTokens cumulative input tokens written into the provider's prompt cache
    */
   def apply(
     requestCount: Long = 0L,
     inputTokens: Long = 0L,
     outputTokens: Long = 0L,
     thinkingTokens: Long = 0L,
-    totalCost: BigDecimal = BigDecimal(0)
+    totalCost: BigDecimal = BigDecimal(0),
+    cachedTokens: Long = 0L,
+    cacheCreationTokens: Long = 0L
   ): ModelUsage =
-    new ModelUsage(requestCount, inputTokens, outputTokens, thinkingTokens, totalCost)
+    new ModelUsage(
+      requestCount,
+      inputTokens,
+      outputTokens,
+      thinkingTokens,
+      totalCost,
+      cachedTokens,
+      cacheCreationTokens
+    )
 
   implicit val rw: RW[ModelUsage] = macroRW
 }
@@ -130,7 +159,11 @@ object ModelUsage {
  * @param thinkingTokens total thinking/reasoning tokens, the part of `outputTokens` that was thinking; zero
  *                       where no provider reports any
  * @param totalCost      total estimated cost in USD; `BigDecimal(0)` when unavailable
- * @param byModel        per-model breakdown; keyed by the model identifier string
+ * @param byModel        per-model breakdown; keyed by the model identifier
+ * @param cachedTokens   total input tokens served from a provider's prompt cache (cache reads), a part of
+ *                       `inputTokens`; zero where no provider reports any
+ * @param cacheCreationTokens total input tokens written into a provider's prompt cache, a part of `inputTokens`;
+ *                       zero where no provider reports any
  *
  * Build one with [[UsageSummary.apply]] and change it with the `with*` setters; the constructor and `copy` are
  * private, so a new field never breaks callers. The constructor keeps its defaults because the JSON codec fills a
@@ -145,7 +178,9 @@ final case class UsageSummary private (
   outputTokens: Long = 0L,
   thinkingTokens: Long = 0L,
   totalCost: BigDecimal = BigDecimal(0),
-  byModel: Map[String, ModelUsage] = Map.empty[String, ModelUsage]
+  byModel: Map[ModelName, ModelUsage] = Map.empty[ModelName, ModelUsage],
+  cachedTokens: Long = 0L,
+  cacheCreationTokens: Long = 0L
 ) {
 
   /** Sets the total API calls across all models. */
@@ -164,7 +199,14 @@ final case class UsageSummary private (
   def withTotalCost(totalCost: BigDecimal): UsageSummary = copy(totalCost = totalCost)
 
   /** Sets the per-model breakdown, keyed by model identifier. */
-  def withByModel(byModel: Map[String, ModelUsage]): UsageSummary = copy(byModel = byModel)
+  def withByModel(byModel: Map[ModelName, ModelUsage]): UsageSummary = copy(byModel = byModel)
+
+  /** Sets the total input tokens served from a provider's prompt cache. */
+  def withCachedTokens(cachedTokens: Long): UsageSummary = copy(cachedTokens = cachedTokens)
+
+  /** Sets the total input tokens written into a provider's prompt cache. */
+  def withCacheCreationTokens(cacheCreationTokens: Long): UsageSummary =
+    copy(cacheCreationTokens = cacheCreationTokens)
 
   /**
    * Returns a new [[UsageSummary]] with the given usage record folded in.
@@ -175,15 +217,10 @@ final case class UsageSummary private (
    * @param usage token-usage record from a [[org.llm4s.llmconnect.model.Completion]]
    * @param cost  optional estimated cost in USD; treated as zero when absent
    */
-  def add(model: String, usage: TokenUsage, cost: Option[Double]): UsageSummary = {
+  def add(model: ModelName, usage: TokenUsage, cost: Option[BigDecimal]): UsageSummary = {
     val thinking = usage.thinkingTokens.getOrElse(0)
 
-    // NOTE:
-    // Completion.estimatedCost originates as Option[Double] at provider level.
-    // We convert using BigDecimal.decimal to prevent accumulation drift.
-    // Any upstream floating precision loss cannot be recovered here,
-    // but BigDecimal ensures deterministic aggregation from this point forward.
-    val costValue = cost.map(BigDecimal.decimal).getOrElse(BigDecimal(0))
+    val costValue = cost.getOrElse(BigDecimal(0))
 
     val updatedModelUsage =
       byModel.getOrElse(model, ModelUsage()).add(usage, cost)
@@ -194,7 +231,9 @@ final case class UsageSummary private (
       outputTokens = outputTokens + usage.totalOutputTokens.toLong, // thinking included
       thinkingTokens = thinkingTokens + thinking.toLong,
       totalCost = totalCost + costValue,
-      byModel = byModel.updated(model, updatedModelUsage)
+      byModel = byModel.updated(model, updatedModelUsage),
+      cachedTokens = cachedTokens + usage.cachedTokens.getOrElse(0).toLong,
+      cacheCreationTokens = cacheCreationTokens + usage.cacheCreationTokens.getOrElse(0).toLong
     )
   }
 
@@ -217,7 +256,9 @@ final case class UsageSummary private (
       outputTokens = outputTokens + other.outputTokens,
       thinkingTokens = thinkingTokens + other.thinkingTokens,
       totalCost = totalCost + other.totalCost,
-      byModel = mergedByModel
+      byModel = mergedByModel,
+      cachedTokens = cachedTokens + other.cachedTokens,
+      cacheCreationTokens = cacheCreationTokens + other.cacheCreationTokens
     )
   }
 
@@ -274,6 +315,8 @@ object UsageSummary {
    * @param thinkingTokens total extended-thinking tokens
    * @param totalCost      total estimated cost in USD
    * @param byModel        per-model breakdown, keyed by model identifier
+   * @param cachedTokens   total input tokens served from a provider's prompt cache
+   * @param cacheCreationTokens total input tokens written into a provider's prompt cache
    */
   def apply(
     requestCount: Long = 0L,
@@ -281,9 +324,20 @@ object UsageSummary {
     outputTokens: Long = 0L,
     thinkingTokens: Long = 0L,
     totalCost: BigDecimal = BigDecimal(0),
-    byModel: Map[String, ModelUsage] = Map.empty[String, ModelUsage]
+    byModel: Map[ModelName, ModelUsage] = Map.empty[ModelName, ModelUsage],
+    cachedTokens: Long = 0L,
+    cacheCreationTokens: Long = 0L
   ): UsageSummary =
-    new UsageSummary(requestCount, inputTokens, outputTokens, thinkingTokens, totalCost, byModel)
+    new UsageSummary(
+      requestCount,
+      inputTokens,
+      outputTokens,
+      thinkingTokens,
+      totalCost,
+      byModel,
+      cachedTokens,
+      cacheCreationTokens
+    )
 
   /**
    * `totalCost`'s codec: written as a string, read from a string or a number. Private, so a wildcard import of

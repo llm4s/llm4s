@@ -38,7 +38,7 @@ class AgentConversationSpec extends AnyFlatSpec with TestTimeLimit with Matchers
   }
 
   it should "refuse a Suspended result with the runtime's PendingInterrupts, without a new turn" in {
-    val tool = ToolBuilder[Map[String, Any], ujson.Value](
+    val tool = ToolBuilder[ujson.Value](
       "deploy",
       "Deploys",
       Schema.`object`[Map[String, Any]]("Deploy parameters")
@@ -166,7 +166,7 @@ class AgentConversationSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val thread  = ThreadId("cut-mid-turn")
     val history = Seq(
       UserMessage("look it up"),
-      AssistantMessage(None, Seq(ToolCall("call-1", "lookup", ujson.Obj("q" -> "x"))))
+      AssistantMessage(None, Seq(ToolCall(ToolCallId("call-1"), "lookup", ujson.Obj("q" -> "x"))))
     )
 
     val error = agent.run(thread, "and?", RunConfig(), history).error
@@ -245,7 +245,7 @@ class AgentConversationSpec extends AnyFlatSpec with TestTimeLimit with Matchers
       SpecTools.calling(SpecTools.call("c1", "slow")),
       CompletionFixture.simple("finished")
     )
-    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(slow)))
+    val agent  = built(Agent.builder("assistant", client).withToolSet(SpecTools.set(slow)))
     val thread = ThreadId("busy-forget")
 
     val run = agent.start(thread, "go").fold(e => fail(e.message), identity)

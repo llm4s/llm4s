@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
@@ -9,7 +9,7 @@ import java.time.Instant
 import scala.util.Try
 
 /** Whether a thread's latest checkpoint is mid-execution or finished its run. */
-@Stable
+@Experimental
 enum CheckpointStatus derives ReadWriter:
   /** Work is scheduled, or the run stopped before completing; continue with `recover`. */
   case Running
@@ -40,7 +40,7 @@ enum CheckpointStatus derives ReadWriter:
  * Persist with [[Checkpoint.toJson]] and read with [[Checkpoint.fromJson]], which migrates older
  * `formatVersion`s and refuses newer ones.
  */
-@Stable
+@Experimental
 final case class Checkpoint private (
   formatVersion: Int,
   id: String,
@@ -56,7 +56,10 @@ final case class Checkpoint private (
   fencingToken: Option[FencingToken] = None,
   /** Where a child thread came from; `None` for a top-level thread (format 7 and earlier: always `None`). */
   origin: Option[RunOrigin] = None,
-  /** How the run this terminal checkpoint closed settled; `None` on every other checkpoint, and before format 8. */
+  /**
+   * How the run this terminal checkpoint closed settled; `None` on every other checkpoint, and before format 8. From
+   * format 9 a blocked run's names its guardrail and holds no reason (#2853).
+   */
   outcome: Option[RunOutcome] = None,
   /**
    * Whether a cascade delete of the thread has begun (design 4.41, #2074): written under the thread's claim before its
@@ -93,6 +96,7 @@ final case class Checkpoint private (
   def withTrace(t: org.llm4s.trace.TraceContext): Checkpoint         = copy(trace = Some(t))
   def withTrace(t: Option[org.llm4s.trace.TraceContext]): Checkpoint = copy(trace = t)
 
+@Experimental
 object Checkpoint:
 
   def apply(
@@ -129,7 +133,7 @@ object Checkpoint:
     )
 
   /** The format this build writes. */
-  val CurrentFormat: Int = 8
+  val CurrentFormat: Int = 9
 
   /**
    * Migrations of the checkpoint format itself, keyed by the version they upgrade from.
@@ -148,16 +152,20 @@ object Checkpoint:
    * ([[RunOutcome]]), and a cascade delete marks its root `deleting` (#2074); nothing to rewrite, as all three default
    * to none - every earlier thread is top-level, and none is being deleted - but a build that predates them refuses
    * format 8 rather than drive a child thread as a top-level one, or admit a half-deleted thread.
+   * 8 -> 9: a blocked run's outcome names the guardrail only (#2853): the `reason` a format-8 `Blocked` outcome
+   * holds is dropped as it is read, and a build that predates the change refuses format 9 rather than fail to read
+   * an outcome without one.
    */
   private val formatVersion: SchemaVersion =
-    SchemaVersion(8)(
+    SchemaVersion(9)(
       1 -> addSuspension,
       2 -> addTenant,
       3 -> addFailedStatus,
       4 -> addFencingToken,
       5 -> addBreakpoints,
       6 -> addTaskLineages,
-      7 -> addChildThreads
+      7 -> addChildThreads,
+      8 -> dropBlockedReason
     )
 
   private def addSuspension(json: ujson.Value): Result[ujson.Value] =
@@ -218,6 +226,20 @@ object Checkpoint:
       upgraded
     }.toResult
 
+  /** A format-8 `Blocked` outcome without its `reason`, in either form an `Option` is written in. */
+  private def dropBlockedReason(json: ujson.Value): Result[ujson.Value] =
+    Try {
+      val upgraded = ujson.copy(json)
+      def unreasoned(outcome: ujson.Value): Unit = outcome match
+        case ujson.Arr(items) => items.foreach(unreasoned)
+        case obj: ujson.Obj if obj.value.get("$type").flatMap(_.strOpt).contains("Blocked") =>
+          obj.value.remove("reason"): Unit
+        case _ => ()
+      upgraded.obj.get("outcome").foreach(unreasoned)
+      upgraded("formatVersion") = 9
+      upgraded
+    }.toResult
+
   private given ReadWriter[Instant] = upickle.default.readwriter[String].bimap(_.toString, Instant.parse)
 
   given ReadWriter[Checkpoint] = upickle.default.macroRW
@@ -236,7 +258,7 @@ object Checkpoint:
  * A completed (or suspended) task's result, recorded against the checkpoint whose frontier it ran in, before the
  * superstep commits. On recovery the task is not run again: its command is decoded from here.
  */
-@Stable
+@Experimental
 final case class PendingWrite private (
   checkpointId: String,
   taskId: String,
@@ -263,6 +285,7 @@ final case class PendingWrite private (
   def withResultDigest(value: String): PendingWrite                  = copy(resultDigest = Some(value))
   def withResultDigest(value: Option[String]): PendingWrite          = copy(resultDigest = value)
 
+@Experimental
 object PendingWrite:
   def apply(
     checkpointId: String,
@@ -276,24 +299,24 @@ object PendingWrite:
     new PendingWrite(checkpointId, taskId, nodeId, operations, routes, suspension, resultDigest)
 
 /** A suspended task's parked continuation: where it resumes and the question, as data. */
-@Stable
+@Experimental
 final case class EncodedSuspension(resumeNode: String, question: VersionedJson) derives ReadWriter
 
 /** A state operation as data: updates are encoded with the key's update codec. */
-@Stable
+@Experimental
 enum EncodedOperation derives ReadWriter:
   case Update(keyId: String, update: VersionedJson)
   case Remove(keyId: String)
 
 /** A route as data: payloads are encoded with the target node's input codec. */
-@Stable
+@Experimental
 enum EncodedRoute derives ReadWriter:
   case Goto(nodeId: String)
   case Send(nodeId: String, payload: VersionedJson)
   case FanOut(joinId: String, nodeId: String, payloads: Vector[VersionedJson])
 
 /** A thread's latest checkpoint with the pending writes recorded against it. */
-@Stable
+@Experimental
 final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[PendingWrite])
 
 /**
@@ -301,13 +324,14 @@ final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[
  * (#2642): that checkpoint's [[Checkpoint!.tenantId Checkpoint.tenantId]], and the parent its
  * [[Checkpoint!.origin Checkpoint.origin]] names - `None` for a top-level thread.
  */
-@Stable
+@Experimental
 final case class ThreadOwner private (tenantId: Option[String], parent: Option[ThreadId]):
   def withTenantId(value: String): ThreadOwner         = copy(tenantId = Some(value))
   def withTenantId(value: Option[String]): ThreadOwner = copy(tenantId = value)
   def withParent(value: ThreadId): ThreadOwner         = copy(parent = Some(value))
   def withParent(value: Option[ThreadId]): ThreadOwner = copy(parent = value)
 
+@Experimental
 object ThreadOwner:
 
   def apply(tenantId: Option[String], parent: Option[ThreadId]): ThreadOwner =
@@ -350,7 +374,7 @@ object ThreadOwner:
  *    commit; `None` leaves it as it is. A thread keeps its metadata across commits until another replaces it, and
  *    loses it only with the thread ([[Checkpointer.deleteThread]]).
  */
-@Stable
+@Experimental
 final case class Commit private (
   token: FencingToken,
   checkpoint: Option[Checkpoint],
@@ -407,6 +431,7 @@ final case class Commit private (
   private def settled(c: Checkpoint): Boolean =
     c.status == CheckpointStatus.Completed || c.status == CheckpointStatus.Failed
 
+@Experimental
 object Commit:
   def apply(
     token: FencingToken,

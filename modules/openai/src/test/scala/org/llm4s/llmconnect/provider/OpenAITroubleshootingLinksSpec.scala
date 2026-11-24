@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.TroubleshootingLinks.Entry
 import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, ServiceError, TroubleshootingLinks }
@@ -42,7 +44,7 @@ final class OpenAITroubleshootingLinksSpec extends AnyWordSpec with Matchers {
 
   private def call(baseUrl: String): Result[org.llm4s.llmconnect.model.Completion] = {
     val client = OpenAIClient(
-      OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl).toOption.get
+      OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl(baseUrl)).toOption.get
     ).toOption.get
     val result = client.complete(hello, CompletionOptions())
     client.close()

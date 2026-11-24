@@ -1,5 +1,6 @@
 package org.llm4s.zio
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import java.util.concurrent.TimeUnit
 
 import org.llm4s.agent.testkit.Fixtures
@@ -192,15 +193,12 @@ object LLMClientZConcurrencySpec extends ZIOSpecDefault {
               Completion(
                 id = "id",
                 created = Instant.EPOCH,
-                content = key,
-                model = "m",
+                model = ModelName("m"),
                 message = AssistantMessage(Some(key))
               )
             )
           }
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = {
             val key = c.messages.head.content

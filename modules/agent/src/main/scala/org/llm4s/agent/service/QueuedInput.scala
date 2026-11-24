@@ -1,5 +1,6 @@
 package org.llm4s.agent.service
 
+import org.llm4s.agent.AdmittedQuery
 import org.llm4s.agent.graph.InterruptId
 import org.llm4s.agent.graph.toolloop.AgentInput
 import org.llm4s.annotation.Experimental
@@ -17,7 +18,9 @@ import org.llm4s.llmconnect.model.Message
  *    ran on it before (rule 4 otherwise forbids a worker from adopting a run started outside the queue).
  *
  * The input is the caller's to store: the queue keeps it in its entry until the entry is reclaimed, but no metric,
- * trace attribute or log line carries it (Stage 5 rule 10).
+ * trace attribute or log line carries it (Stage 5 rule 10). So a query submitted with [[QueuedInput.query]] is in the
+ * queue before any guardrail has seen it; to keep what a guardrail would refuse or rewrite out of the queue, admit
+ * the query first and submit [[QueuedInput.admitted]] (#2854).
  */
 @Experimental
 enum QueuedInput:
@@ -37,6 +40,13 @@ object QueuedInput:
   /** A new `Agent` turn: `query`, after `history` (no system messages), as `Agent.run` takes them. */
   def query(query: String, history: Seq[Message] = Nil): QueuedInput =
     Start(upickle.default.writeJs(AgentInput(query, history.toVector)))
+
+  /**
+   * A new `Agent` turn whose query the agent's admission stage has seen (`Agent.admit`, #2854): the entry holds the
+   * query as the stage left it - rewritten, or for a refused query nothing but the refusing guardrail's name - and the
+   * worker that takes it does not run the stage again. A refused one runs a turn that ends `AgentStatus.Blocked`.
+   */
+  def admitted(admitted: AdmittedQuery): QueuedInput = Start(upickle.default.writeJs(admitted.input))
 
   /** A new `TypedAgent[I, O]` turn with `input`, in `I`'s JSON form. */
   def typed[I: upickle.default.Writer](input: I): QueuedInput = Start(upickle.default.writeJs(input))

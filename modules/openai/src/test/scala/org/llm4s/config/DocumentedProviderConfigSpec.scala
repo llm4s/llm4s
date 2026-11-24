@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.provider.OpenAIProvider
@@ -29,9 +30,8 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
   private val gettingStarted =
     """
       |llm4s {
+      |  defaultProvider = "openai-main"          # the default: the name of a section below
       |  providers {
-      |    provider = "openai-main"          # the default: the name of a section below
-      |
       |    openai-main {
       |      provider = "openai"
       |      model    = "gpt-4o-mini"
@@ -44,10 +44,9 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
   private val twoSections =
     """
       |llm4s {
+      |  defaultProvider = "openai-main"
+      |  defaultProvider = ${?LLM4S_PROVIDER}
       |  providers {
-      |    provider = "openai-main"
-      |    provider = ${?LLM4S_PROVIDER}
-      |
       |    openai-main {
       |      provider = "openai"
       |      model    = "gpt-4o-mini"
@@ -65,9 +64,8 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
   private val secondAccount =
     """
       |llm4s {
+      |  defaultProvider = "openai-main"
       |  providers {
-      |    provider = "openai-main"
-      |
       |    openai-main {
       |      provider = "openai"
       |      model    = "gpt-4o-mini"
@@ -94,7 +92,7 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
     "resolve the default provider, taking the API key from OPENAI_API_KEY with no apiKey line" in {
       Llm4sConfig.defaultProvider(withEnv(gettingStarted, Map("OPENAI_API_KEY" -> "sk-from-env"))) match
         case Right(openai: OpenAIConfig) =>
-          openai.model shouldBe "gpt-4o-mini"
+          openai.model.asString shouldBe "gpt-4o-mini"
           openai.apiKey.reveal shouldBe "sk-from-env"
           openai.baseUrl shouldBe OpenAIProvider.DEFAULT_BASE_URL
         case other =>
@@ -126,7 +124,7 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
 
     "ignore LLM_MODEL, which nothing reads" in {
       val env = Map("OPENAI_API_KEY" -> "sk-from-env", "LLM_MODEL" -> "openai/gpt-4o")
-      Llm4sConfig.defaultProvider(withEnv(gettingStarted, env)).map(_.model) shouldBe Right("gpt-4o-mini")
+      Llm4sConfig.defaultProvider(withEnv(gettingStarted, env)).map(_.model.asString) shouldBe Right("gpt-4o-mini")
     }
   }
 
@@ -135,18 +133,18 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
     "use the section named by `provider` when LLM4S_PROVIDER is unset" in {
       Llm4sConfig
         .defaultProvider(withEnv(twoSections, Map("OPENAI_API_KEY" -> "sk-from-env")))
-        .map(_.model) shouldBe Right("gpt-4o-mini")
+        .map(_.model.asString) shouldBe Right("gpt-4o-mini")
     }
 
     "switch the default to the section LLM4S_PROVIDER names" in {
       val env = Map("OPENAI_API_KEY" -> "sk-from-env", "LLM4S_PROVIDER" -> "openai-large")
-      Llm4sConfig.defaultProvider(withEnv(twoSections, env)).map(_.model) shouldBe Right("gpt-4o")
+      Llm4sConfig.defaultProvider(withEnv(twoSections, env)).map(_.model.asString) shouldBe Right("gpt-4o")
     }
 
     "load a section by name regardless of the default" in {
       Llm4sConfig
-        .provider(withEnv(twoSections, Map("OPENAI_API_KEY" -> "sk-from-env")), "openai-large")
-        .map(_.model) shouldBe Right("gpt-4o")
+        .provider(withEnv(twoSections, Map("OPENAI_API_KEY" -> "sk-from-env")), ProviderName("openai-large"))
+        .map(_.model.asString) shouldBe Right("gpt-4o")
     }
   }
 
@@ -155,11 +153,15 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
     val env = Map("OPENAI_API_KEY" -> "sk-default-account", "OPENAI_BATCH_API_KEY" -> "sk-batch-account")
 
     "give the section without a key the shared OPENAI_API_KEY" in {
-      apiKey(Llm4sConfig.provider(withEnv(secondAccount, env), "openai-main")) shouldBe "sk-default-account"
+      apiKey(
+        Llm4sConfig.provider(withEnv(secondAccount, env), ProviderName("openai-main"))
+      ) shouldBe "sk-default-account"
     }
 
     "give the section with its own key that key, not the shared one" in {
-      apiKey(Llm4sConfig.provider(withEnv(secondAccount, env), "openai-batch")) shouldBe "sk-batch-account"
+      apiKey(
+        Llm4sConfig.provider(withEnv(secondAccount, env), ProviderName("openai-batch"))
+      ) shouldBe "sk-batch-account"
     }
 
     "be flagged as inheriting by apiKeySources, for the prod policy" in {
@@ -180,10 +182,10 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
 
     "take the API key from OPENAI_API_KEY with no apiKey line" in {
       EmbeddingsConfigLoader.loadProvider(withEnv(embeddings, Map("OPENAI_API_KEY" -> "sk-from-env"))) match
-        case Right((provider, cfg)) =>
-          provider shouldBe "openai"
-          cfg.model shouldBe "text-embedding-3-small"
-          cfg.apiKey.reveal shouldBe "sk-from-env"
+        case Right(cfg) =>
+          cfg.providerId.asString shouldBe "openai"
+          cfg.model.asString shouldBe "text-embedding-3-small"
+          cfg.apiKey.map(_.reveal) shouldBe Some("sk-from-env")
         case other =>
           fail(s"Expected an openai embedding config, got $other")
     }
@@ -191,6 +193,8 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
     "take an embeddings-only key over OPENAI_API_KEY when the block sets one" in {
       val hocon = embeddings + "\nllm4s.embeddings.openai.apiKey = ${?OPENAI_EMBEDDINGS_API_KEY}"
       val env   = Map("OPENAI_API_KEY" -> "sk-chat", "OPENAI_EMBEDDINGS_API_KEY" -> "sk-embeddings")
-      EmbeddingsConfigLoader.loadProvider(withEnv(hocon, env)).map(_._2.apiKey.reveal) shouldBe Right("sk-embeddings")
+      EmbeddingsConfigLoader.loadProvider(withEnv(hocon, env)).map(_.apiKey.fold("")(_.reveal)) shouldBe Right(
+        "sk-embeddings"
+      )
     }
   }

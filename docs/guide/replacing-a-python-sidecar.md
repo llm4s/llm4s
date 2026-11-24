@@ -3,8 +3,11 @@ layout: page
 title: Replacing a Python Sidecar
 description: "Move a Python sidecar's LLM logic into Scala with LLM4S: vLLM, TGI and llama.cpp models as OpenAI-compatible sections, Python functions as MCP tools."
 search_title: "Replace a Python LLM sidecar with LLM4S in Scala"
-parent: User Guide
-nav_order: 45
+parent: Coming from Another Library
+nav_order: 605
+grand_parent: User Guide
+cites_open_issues: [695, 1442]
+cites_closed_issues: [2284]
 ---
 
 # Replacing a Python Sidecar
@@ -65,9 +68,8 @@ default is the one `provider` names:
 
 ```hocon
 llm4s {
+  defaultProvider = "python-vllm"
   providers {
-    provider = "python-vllm"
-
     # vllm serve Qwen/Qwen2.5-7B-Instruct --max-model-len 32768 --enable-auto-tool-choice --tool-call-parser hermes
     python-vllm {
       provider      = "openai-compatible"
@@ -104,10 +106,11 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val pythonModel: Result[LLMClient] =
   for {
-    config   <- Llm4sConfig.provider("python-vllm")
+    config   <- Llm4sConfig.provider(ProviderName("python-vllm"))
     registry <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(config)

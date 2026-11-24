@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.ConfigurationError
@@ -33,7 +35,7 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val identity = OpenAIWorkloadIdentity(
-    identityToken = IdentitySource.Literal("jwt"),
+    identityToken = IdentitySource.Literal(Secret("jwt")),
     identityProviderId = "idp",
     serviceAccountId = "sa"
   )
@@ -41,9 +43,9 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
   /** An OpenAI workload-identity config `OpenAIConfig.validate` accepts: `openai`, an OpenAI host, no key. */
   private val workloadIdentityConfig = OpenAIConfig(
     apiKey = Secret(""),
-    model = "openai/gpt-4o",
+    model = ModelName("openai/gpt-4o"),
     organization = None,
-    baseUrl = "https://api.openai.com/v1",
+    baseUrl = BaseUrl("https://api.openai.com/v1"),
     contextWindow = 8192,
     reserveCompletion = 4096,
     workloadIdentity = Some(identity)
@@ -51,9 +53,9 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
 
   private def openRouterConfig(apiKey: String) = OpenAIConfig(
     apiKey = Secret(apiKey),
-    model = "openai/gpt-4o",
+    model = ModelName("openai/gpt-4o"),
     organization = None,
-    baseUrl = "https://openrouter.ai/api/v1",
+    baseUrl = BaseUrl("https://openrouter.ai/api/v1"),
     contextWindow = 8192,
     reserveCompletion = 4096
   )
@@ -108,43 +110,63 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
 
     "refuse a blank apiKey from apply with a ConfigurationError" in {
       configurationError(
-        DeepSeekClient(DeepSeekConfig(Secret(""), "deepseek-chat", url, 8192, 1024))
+        DeepSeekClient(DeepSeekConfig(Secret(""), ModelName("deepseek-chat"), BaseUrl(url), 8192, 1024))
       ).message should include(
         "apiKey"
       )
-      configurationError(ZaiClient(ZaiConfig(Secret(" "), "GLM-4.7", url, 8192, 1024))).message should include("apiKey")
       configurationError(
-        MistralClient(MistralConfig(Secret(""), "mistral-small", url, 8192, 1024))
+        ZaiClient(ZaiConfig(Secret(" "), ModelName("GLM-4.7"), BaseUrl(url), 8192, 1024))
+      ).message should include("apiKey")
+      configurationError(
+        MistralClient(MistralConfig(Secret(""), ModelName("mistral-small"), BaseUrl(url), 8192, 1024))
       ).message should include(
         "apiKey"
       )
-      configurationError(CohereClient(CohereConfig(Secret(""), "command-r", url, 8192, 1024))).message should include(
+      configurationError(
+        CohereClient(CohereConfig(Secret(""), ModelName("command-r"), BaseUrl(url), 8192, 1024))
+      ).message should include(
         "apiKey"
       )
     }
 
     "refuse a blank apiKey from the constructor" in {
       intercept[IllegalArgumentException](
-        new DeepSeekClient(DeepSeekConfig(Secret(""), "deepseek-chat", url, 8192, 1024))
+        new DeepSeekClient(DeepSeekConfig(Secret(""), ModelName("deepseek-chat"), BaseUrl(url), 8192, 1024))
       )
-      intercept[IllegalArgumentException](new ZaiClient(ZaiConfig(Secret(""), "GLM-4.7", url, 8192, 1024)))
       intercept[IllegalArgumentException](
-        new MistralClient(MistralConfig(Secret(""), "mistral-small", url, 8192, 1024))
+        new ZaiClient(ZaiConfig(Secret(""), ModelName("GLM-4.7"), BaseUrl(url), 8192, 1024))
       )
-      intercept[IllegalArgumentException](new CohereClient(CohereConfig(Secret(""), "command-r", url, 8192, 1024)))
+      intercept[IllegalArgumentException](
+        new MistralClient(MistralConfig(Secret(""), ModelName("mistral-small"), BaseUrl(url), 8192, 1024))
+      )
+      intercept[IllegalArgumentException](
+        new CohereClient(CohereConfig(Secret(""), ModelName("command-r"), BaseUrl(url), 8192, 1024))
+      )
     }
 
     "accept a key" in {
-      DeepSeekClient(DeepSeekConfig(Secret("sk"), "deepseek-chat", url, 8192, 1024)).isRight shouldBe true
-      ZaiClient(ZaiConfig(Secret("sk"), "GLM-4.7", url, 8192, 1024)).isRight shouldBe true
-      MistralClient(MistralConfig(Secret("sk"), "mistral-small", url, 8192, 1024)).isRight shouldBe true
-      CohereClient(CohereConfig(Secret("sk"), "command-r", url, 8192, 1024)).isRight shouldBe true
+      DeepSeekClient(
+        DeepSeekConfig(Secret("sk"), ModelName("deepseek-chat"), BaseUrl(url), 8192, 1024)
+      ).isRight shouldBe true
+      ZaiClient(ZaiConfig(Secret("sk"), ModelName("GLM-4.7"), BaseUrl(url), 8192, 1024)).isRight shouldBe true
+      MistralClient(
+        MistralConfig(Secret("sk"), ModelName("mistral-small"), BaseUrl(url), 8192, 1024)
+      ).isRight shouldBe true
+      CohereClient(CohereConfig(Secret("sk"), ModelName("command-r"), BaseUrl(url), 8192, 1024)).isRight shouldBe true
     }
   }
 
   "OpenAICompatibleClient" should {
     def settings(credential: OpenAICompatibleClient.Credential) =
-      OpenAICompatibleClient.Settings("p", "P", "m", "https://api.example/v1", credential, 8192, 1024)
+      OpenAICompatibleClient.Settings(
+        "p",
+        "P",
+        ModelName("m"),
+        BaseUrl("https://api.example/v1"),
+        credential,
+        8192,
+        1024
+      )
 
     "refuse a blank Static credential, built by hand" in {
       val thrown = intercept[IllegalArgumentException](
@@ -158,7 +180,13 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
 
     "treat a generic config's blank apiKey as none, sending no Authorization header" in {
       OpenAICompatibleClient
-        .settings(OpenAICompatibleConfig(model = "m", baseUrl = "https://x.example/v1", apiKey = Some(Secret("  "))))
+        .settings(
+          OpenAICompatibleConfig(
+            model = ModelName("m"),
+            baseUrl = BaseUrl("https://x.example/v1"),
+            apiKey = Some(Secret("  "))
+          )
+        )
         .credential shouldBe OpenAICompatibleClient.Credential.Anonymous
 
       var seen = Map.empty[String, String]
@@ -166,7 +194,9 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
         seen = exchange.getRequestHeaders.asScala.map((k, v) => k.toLowerCase -> v.asScala.mkString(",")).toMap
         sendJsonResponse(exchange, 200, openAICompletion("ok", "m"))
       } { baseUrl =>
-        OpenAICompatibleClient(OpenAICompatibleConfig(model = "m", baseUrl = baseUrl, apiKey = Some(Secret("")))).value
+        OpenAICompatibleClient(
+          OpenAICompatibleConfig(model = ModelName("m"), baseUrl = BaseUrl(baseUrl), apiKey = Some(Secret("")))
+        ).value
           .complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())
           .isRight shouldBe true
       }

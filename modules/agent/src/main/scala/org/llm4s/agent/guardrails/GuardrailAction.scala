@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 
 /**
  * Actions to take when a guardrail detects a violation.
@@ -20,9 +20,10 @@ import org.llm4s.annotation.Stable
  * val lengthGuard = LengthCheck(1, 10000, onFail = GuardrailAction.Warn)
  * }}}
  */
-@Stable
+@Experimental
 sealed trait GuardrailAction
 
+@Experimental
 object GuardrailAction {
 
   /**

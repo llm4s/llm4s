@@ -1,5 +1,8 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
 import org.llm4s.error.{
@@ -8,6 +11,7 @@ import org.llm4s.error.{
   LLMError,
   NetworkError,
   ServiceError,
+  TroubleshootingLinks,
   ValidationError,
   ValidationUnsupportedError
 }
@@ -110,15 +114,15 @@ class OpenAICompatibleClient(
   // specs can substitute one
   protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.resolve(suppliedHttpClient, settings.network)
   private val logger                                  = org.slf4j.LoggerFactory.getLogger(getClass)
-  private val endpoint                                = s"${settings.baseUrl}/chat/completions"
+  private val endpoint                                = s"${settings.baseUrl.asUrl}/chat/completions"
 
   protected def clientDescription: String = s"${settings.displayName} client for model ${settings.model}"
   protected def providerName: String      = settings.providerName
-  protected def modelName: String         = settings.model
+  protected def modelName: ModelName      = settings.model
 
   // sealed thinking is replayed only to the provider and model that produced it (see ReplayOrigin);
   // this is the origin a request is about to be sent to
-  private val replayOrigin = ReplayOrigin(settings.providerName, settings.model)
+  private val replayOrigin = ReplayOrigin(settings.providerName, settings.model.asString)
 
   // what the dialect could not send goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(settings.providerName)
@@ -144,13 +148,7 @@ class OpenAICompatibleClient(
                   .flatMap(filteredReply)
                   .flatMap(ToolCallRules.checked)
                   .map(bindThinking(_, conversation, options).withAdjustments(adjustments))
-              else
-                HttpErrorMapper.mapHttpError(
-                  response.statusCode,
-                  Redaction.scrubRemote(body),
-                  providerName,
-                  response.headers
-                )
+              else errorResponse(response.statusCode, body, response.headers)
             recordExchange(startedAt, requestText, Some(body), result)
             result
           }
@@ -158,9 +156,7 @@ class OpenAICompatibleClient(
     }
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
@@ -207,7 +203,7 @@ class OpenAICompatibleClient(
         Try(Using.resource(body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)))
           .getOrElse("<error body unreadable>")
       rawStream.append(errorBody)
-      HttpErrorMapper.mapHttpError(statusCode, Redaction.scrubRemote(errorBody), providerName, headers)
+      errorResponse(statusCode, errorBody, headers)
     } else
       // A failure while reading the open body is classified as a transport failure would be
       Try(Using.resource(body)(readStream(_, rawStream, onChunk))).toEither.left
@@ -303,8 +299,7 @@ class OpenAICompatibleClient(
         val message =
           if (opaqueThinking.isEmpty) c.message else c.message.withThinking(c.message.thinking ++ opaqueThinking)
         c.withMessage(message)
-          .withModel(servedModel.getOrElse(settings.model))
-          .withToolCalls(c.message.toolCalls.toList)
+          .withModel(servedModel.map(ModelName(_)).getOrElse(settings.model))
           .withUsage(finalUsage)
           .withEstimatedCost(finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u)))
       }
@@ -356,7 +351,7 @@ class OpenAICompatibleClient(
     conversation: Conversation,
     options: CompletionOptions,
     stream: Boolean
-  ): Result[(String, List[RequestAdjustment])] =
+  ): Result[(String, Seq[RequestAdjustment])] =
     // An empty `messages` array is rejected by every chat-completions endpoint; saying so here
     // costs no round trip and names the problem. The check is on the messages that will be
     // sent, not the conversation: a dialect that drops empty assistant turns (Mistral) can
@@ -387,7 +382,7 @@ class OpenAICompatibleClient(
         }.toResult
       }
       .tapRight { (requestText, adjustments) =>
-        adjustmentLog.record(settings.model, adjustments)
+        adjustmentLog.record(settings.model.asString, adjustments)
         logger.debug(s"Sending request to ${settings.displayName} API at $endpoint")
         if (logger.isDebugEnabled) logger.debug(s"Request body: ${Redaction.redactForLogging(requestText)}")
       }
@@ -429,9 +424,9 @@ class OpenAICompatibleClient(
     // A Dynamic provider is the caller's code: one that throws fails the request instead of escaping it.
     case _ =>
       tokenProvider.fold[Result[Option[String]]](Right(None))(p =>
-        CachingAccessTokenProvider.guarded(p.token()).map { token =>
-          bearers.rotate(token)
-          Some(token)
+        CachingAccessTokenProvider.guarded(p.current()).map { token =>
+          bearers.rotate(token.reveal)
+          Some(token.reveal)
         }
       )
 
@@ -462,7 +457,7 @@ class OpenAICompatibleClient(
         case _                  => send(requestHeaders(token))
       (result, token) match
         case (Left(e: AuthenticationError), Some(rejected)) if e.code.contains("401") =>
-          tokenProvider.foreach(p => Try(p.invalidate(rejected)))
+          tokenProvider.foreach(p => Try(p.invalidate(Secret.unregistered(rejected))))
         case _ => ()
       result
     }
@@ -491,7 +486,7 @@ class OpenAICompatibleClient(
   private def sendableMessages(conversation: Conversation, options: CompletionOptions): Seq[Message] =
     ThinkingReplay.replayable(replayOrigin, conversation.messages, options).filterNot {
       case am: AssistantMessage =>
-        !dialect.sendEmptyAssistantTurns && am.contentOpt.forall(_.isEmpty) && am.toolCalls.isEmpty &&
+        !dialect.sendEmptyAssistantTurns && am.text.forall(_.isEmpty) && am.toolCalls.isEmpty &&
         !encodesThinking(am)
       case _ => false
     }
@@ -515,7 +510,7 @@ class OpenAICompatibleClient(
   private def buildRequest(
     conversation: Conversation,
     options: CompletionOptions
-  ): (ujson.Obj, List[RequestAdjustment]) = {
+  ): (ujson.Obj, Seq[RequestAdjustment]) = {
     val messages = sendableMessages(conversation, options).map {
       case um: UserMessage if !um.parts.exists(ContentPart.isMedia) =>
         ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(um.content))
@@ -525,7 +520,7 @@ class OpenAICompatibleClient(
       case SystemMessage(content) =>
         ujson.Obj("role" -> dialect.systemRole, "content" -> dialect.encodeContent(content))
       case am: AssistantMessage =>
-        val content   = am.contentOpt
+        val content   = am.text
         val toolCalls = am.toolCalls
         val message   = ujson.Obj("role" -> "assistant")
         content.filter(_.nonEmpty) match {
@@ -537,7 +532,7 @@ class OpenAICompatibleClient(
         if (toolCalls.nonEmpty) {
           message("tool_calls") = ujson.Arr.from(toolCalls.map { tc =>
             ujson.Obj(
-              "id"       -> dialect.encodeToolCallId(tc.id),
+              "id"       -> dialect.encodeToolCallId(tc.id.asString),
               "type"     -> "function",
               "function" -> ujson.Obj("name" -> tc.name, "arguments" -> tc.arguments.render())
             )
@@ -549,27 +544,31 @@ class OpenAICompatibleClient(
         // text only (checked by renderRequest); several text parts are sent as their text, joined
         ujson.Obj(
           "role"         -> "tool",
-          "tool_call_id" -> dialect.encodeToolCallId(tm.toolCallId),
+          "tool_call_id" -> dialect.encodeToolCallId(tm.toolCallId.asString),
           "content"      -> dialect.encodeContent(tm.content)
         )
     }
 
     val body = ujson.Obj(
-      "model"       -> settings.model,
-      "messages"    -> ujson.Arr.from(messages),
-      "temperature" -> options.temperature,
-      "top_p"       -> options.topP
+      "model"    -> settings.model.asString,
+      "messages" -> ujson.Arr.from(messages)
     )
 
+    // the sampling options are sent only when the caller set them: unset, the provider's own defaults apply
+    options.temperature.foreach(t => body("temperature") = t)
+    options.topP.foreach(p => body("top_p") = p)
     options.maxTokens.foreach(mt => body("max_tokens") = mt)
-    if (options.presencePenalty != 0) body("presence_penalty") = options.presencePenalty
-    if (options.frequencyPenalty != 0) body("frequency_penalty") = options.frequencyPenalty
+    options.presencePenalty.foreach(p => body("presence_penalty") = p)
+    options.frequencyPenalty.foreach(p => body("frequency_penalty") = p)
     if (options.tools.nonEmpty) body("tools") = ToolFunction.toolDefinitions(options.tools, strict = true)
     options.responseFormat.foreach { fmt =>
       dialect.encodeResponseFormat(fmt).foreach(rf => body("response_format") = rf)
     }
     val adjustments =
-      dialect.addReasoning(body, settings.model, options) ++ UnmappedOptions.promptCache(settings.model, options) ++
+      dialect.addReasoning(body, settings.model, options) ++ UnmappedOptions.promptCache(
+        settings.model.asString,
+        options
+      ) ++
         UnmappedOptions.serviceTier(settings.displayName, options)
     (body, adjustments)
   }
@@ -591,7 +590,7 @@ class OpenAICompatibleClient(
   protected[provider] def parseCompletion(json: ujson.Value): Result[Completion] = {
     val choice       = json("choices")(0)
     val message      = choice("message")
-    val finishReason = ChatCompletionsFinishReason.of(choice).getOrElse(FinishReason.Other(""))
+    val finishReason = ChatCompletionsFinishReason.of(choice).getOrElse(FinishReason.Unknown)
     // a filtered reply's calls are not read: the filter fails the reply (`filteredReply`)
     val rawCalls =
       message.obj
@@ -629,10 +628,8 @@ class OpenAICompatibleClient(
         .flatMap(_.numOpt)
         .flatMap(s => Try(Instant.ofEpochSecond(s.toLong)).toOption)
         .getOrElse(Instant.EPOCH),
-      content = content.getOrElse(""),
-      model = json.obj.get("model").flatMap(_.strOpt).getOrElse(settings.model),
-      message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList, thinking = thinking),
-      toolCalls = toolCalls.toList,
+      model = json.obj.get("model").flatMap(_.strOpt).map(ModelName(_)).getOrElse(settings.model),
+      message = AssistantMessage(text = content, toolCalls = toolCalls.toList, thinking = thinking),
       usage = usage,
       estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u)),
       citations = parseCitations(message),
@@ -741,7 +738,7 @@ class OpenAICompatibleClient(
               id = call.obj.get("id").flatMap(_.strOpt).filter(_.nonEmpty),
               name = function.obj.get("name").flatMap(_.strOpt).filter(_.nonEmpty)
             )
-            ToolCall(id, name, if (raw.isEmpty) ujson.Obj() else ujson.Str(raw))
+            ToolCall(ToolCallId(id), name, if (raw.isEmpty) ujson.Obj() else ujson.Str(raw))
         }
 
         StreamedChunk(chunkId, content, calls.headOption, finishReason, thinking) +:
@@ -755,13 +752,15 @@ class OpenAICompatibleClient(
     result: Result[?]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(settings.model),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = responseBody,
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(settings.model),
+        responseBody = responseBody
+      ),
+      result
     )
 
   override def getContextWindow(): Int = settings.contextWindow
@@ -769,33 +768,48 @@ class OpenAICompatibleClient(
   override def getReserveCompletion(): Int = settings.reserveCompletion
 
   /**
-   * Sends one `GET` to the dialect's [[OpenAICompatibleDialect.validationPath validationPath]] under the base URL -
-   * the model listing, `<baseUrl>/models`, unless the dialect names another request - with the headers and the
-   * credential of a completion, and returns the error a reply that is not 2xx maps to: an `AuthenticationError`
-   * for a refused key, a `ServiceError` for an endpoint that is not this API. A dynamic credential's 401 is retried
-   * once with a fresh token, as a completion's is.
+   * The error a response that is not 2xx maps to, its body scrubbed of registered credentials first: what
+   * `HttpErrorMapper` makes of the status, except that a response the dialect says
+   * [[OpenAICompatibleDialect.refusesCredential refuses the credential]] is an `AuthenticationError` whatever its
+   * status.
+   */
+  private def errorResponse(statusCode: Int, body: String, headers: Map[String, Seq[String]]): Result[Nothing] = {
+    val scrubbed = Redaction.scrubRemote(body)
+    if (dialect.refusesCredential(statusCode, body))
+      Left(
+        TroubleshootingLinks.annotate(
+          AuthenticationError(
+            providerName,
+            HttpErrorMapper.extractErrorDetails(scrubbed, statusCode, providerName),
+            statusCode.toString
+          )
+        )
+      )
+    else Left(HttpErrorMapper.toError(statusCode, scrubbed, providerName, headers))
+  }
+
+  /**
+   * Sends one `GET` to the dialect's [[OpenAICompatibleDialect.validationUrl validationUrl]] - the model listing,
+   * `<baseUrl>/models`, unless the dialect names another request - with the headers and the credential of a
+   * completion, and returns the error a reply that is not 2xx maps to: an `AuthenticationError` for a refused key,
+   * a `ServiceError` for an endpoint that is not this API. A dynamic credential's 401 is retried once with a fresh
+   * token, as a completion's is.
    *
-   * It shows that the endpoint answers and takes the credential. It does not look for the configured model in the
-   * listing: a gateway may serve a model it does not list, and an alias is often listed under another id. A
-   * dialect with no such request ([[OpenAICompatibleDialect.validationPath]] `None`) is
+   * It shows that the endpoint answers and takes the credential. The standard request does not look for the
+   * configured model in the listing: a gateway may serve a model it does not list, and an alias is often listed
+   * under another id. A dialect with no such request ([[OpenAICompatibleDialect.validationUrl]] `None`) is
    * `Left(ValidationUnsupportedError)`.
    */
   override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
-    dialect.validationPath match
+    dialect.validationUrl(settings.baseUrl, settings.model) match
       case None => Left(ValidationUnsupportedError(clientDescription))
-      case Some(path) =>
+      case Some(url) =>
         withAuthRetry { headers =>
           httpClient
-            .get(s"${settings.baseUrl}$path", headers - "Content-Type", Map.empty, validationTimeout)
+            .get(url, headers - "Content-Type", Map.empty, validationTimeout)
             .flatMap { response =>
               if (response.statusCode >= 200 && response.statusCode < 300) Right(())
-              else
-                HttpErrorMapper.mapHttpError(
-                  response.statusCode,
-                  Redaction.scrubRemote(response.body),
-                  providerName,
-                  response.headers
-                )
+              else errorResponse(response.statusCode, response.body, response.headers)
             }
         }
   }
@@ -873,7 +887,7 @@ object OpenAICompatibleClient {
    * host) and no blank identity token, `tokenUrl`, `clientId`, `scope` or `audience`.
    */
   private[provider] def insecureDynamicCredential(settings: Settings): Option[String] = {
-    val baseUrl = TokenExchange.requireSecureUrl(settings.baseUrl, "baseUrl", "the exchanged token")
+    val baseUrl = TokenExchange.requireSecureUrl(settings.baseUrl.asUrl, "baseUrl", "the exchanged token")
     val checks = settings.credential match {
       case Credential.Dynamic(_)       => List(baseUrl)
       case Credential.Exchange(config) => List(TokenExchangeConfig.validate(config).map(_ => ()), baseUrl)
@@ -997,8 +1011,8 @@ object OpenAICompatibleClient {
   final case class Settings private (
     providerName: String,
     displayName: String,
-    model: String,
-    baseUrl: String,
+    model: ModelName,
+    baseUrl: BaseUrl,
     credential: Credential,
     contextWindow: Int,
     reserveCompletion: Int,
@@ -1007,8 +1021,8 @@ object OpenAICompatibleClient {
   ) {
     def withProviderName(providerName: String): Settings        = copy(providerName = providerName)
     def withDisplayName(displayName: String): Settings          = copy(displayName = displayName)
-    def withModel(model: String): Settings                      = copy(model = model)
-    def withBaseUrl(baseUrl: String): Settings                  = copy(baseUrl = baseUrl)
+    def withModel(model: ModelName): Settings                   = copy(model = model)
+    def withBaseUrl(baseUrl: BaseUrl): Settings                 = copy(baseUrl = baseUrl)
     def withCredential(credential: Credential): Settings        = copy(credential = credential)
     def withContextWindow(contextWindow: Int): Settings         = copy(contextWindow = contextWindow)
     def withReserveCompletion(reserveCompletion: Int): Settings = copy(reserveCompletion = reserveCompletion)
@@ -1026,8 +1040,8 @@ object OpenAICompatibleClient {
     def apply(
       providerName: String,
       displayName: String,
-      model: String,
-      baseUrl: String,
+      model: ModelName,
+      baseUrl: BaseUrl,
       credential: Credential,
       contextWindow: Int,
       reserveCompletion: Int,

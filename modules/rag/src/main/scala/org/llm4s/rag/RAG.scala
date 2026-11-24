@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.chunking.{ ChunkMetadata, ChunkerFactory, DocumentChunk, DocumentChunker }
 import org.llm4s.error.Safety
 import org.llm4s.error.{ ConfigurationError, LLMError, ProcessingError, ValidationError }
@@ -8,7 +9,8 @@ import org.llm4s.knowledgegraph.graphrag.{ GraphRAG, GraphRAGAnswer, GraphRAGMod
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.*
-import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, ProviderRegistry }
+import org.llm4s.error.EmbeddingError
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, EmbeddingProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.extract.TikaDocumentExtractor
 import org.llm4s.rag.loader.*
@@ -16,7 +18,6 @@ import org.llm4s.rag.permissions.*
 import org.llm4s.rag.transform.QueryTransformer
 import org.llm4s.reranker.{ RerankProviderConfig, RerankRequest, Reranker, RerankerFactory }
 import org.llm4s.trace.Tracing
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.*
 
@@ -1759,7 +1760,13 @@ final class RAG private (
       .flatMap { response =>
         response.usage.foreach(u => meter.addEmbeddingTokens(u.totalTokens))
         response.embeddings.headOption
-          .toRight(EmbeddingError(None, "Embedding provider returned empty embeddings list", embeddingModelConfig.name))
+          .toRight(
+            EmbeddingError(
+              None,
+              "Embedding provider returned empty embeddings list",
+              embeddingModelConfig.name.asString
+            )
+          )
           .map(_.map(_.toFloat).toArray)
       }
   }
@@ -1772,7 +1779,7 @@ final class RAG private (
           EmbeddingError(
             None,
             "Embedding provider returned empty embeddings list",
-            embeddingModelConfig.name
+            embeddingModelConfig.name.asString
           )
         )
       } else if (response.embeddings.length != texts.length) {
@@ -1782,7 +1789,7 @@ final class RAG private (
             s"Embedding provider returned ${response.embeddings.length} ${
                 if (response.embeddings.length == 1) "embedding" else "embeddings"
               } for batch of ${texts.length} texts",
-            embeddingModelConfig.name
+            embeddingModelConfig.name.asString
           )
         )
       } else {
@@ -1854,7 +1861,7 @@ final class RAG private (
     for {
       _ <- Safety.safely(onContexts(contexts))
       completion <- meter.answering(
-        client.streamComplete(answerConversation(question, history, contexts), options, onChunk)
+        client.streamComplete(answerConversation(question, history, contexts), options)(onChunk)
       )
     } yield answerResult(question, contexts, meter)(completion)
 
@@ -1992,7 +1999,8 @@ object RAG {
     build(
       config,
       Some(embeddingClient),
-      _ => Right(EmbeddingProviderConfig("", "", Secret(""))),
+      // Never consulted: the client is already built.
+      provider => Right(EmbeddingProviderConfig(ProviderId(provider), BaseUrl(""), ModelName(""))),
       resolveRerankerConfig,
       hybridSearcher
     )
@@ -2135,9 +2143,9 @@ object RAG {
         case None =>
           for {
             providerConfig <- resolveEmbeddingProvider(id.asString)
-            model          <- embeddingModel(config, descriptor, Some(providerConfig.model))
-            provider       <- descriptor.build(providerConfig.withModel(model))
-          } yield (new EmbeddingClient(provider, providerId = Some(id)), model)
+            model          <- embeddingModel(config, descriptor, Some(providerConfig.model.asString))
+            provider       <- descriptor.build(providerConfig.withModel(model), EmbeddingBuildContext())
+          } yield (EmbeddingClient(provider).withProviderId(id), model)
       }
       (client, model) = clientAndModel
     } yield (client, createEmbeddingModelConfig(config, descriptor, model))
@@ -2166,9 +2174,10 @@ object RAG {
     config: RAGConfig,
     descriptor: EmbeddingProviderDescriptor,
     resolvedModel: Option[String]
-  ): Result[String] =
+  ): Result[ModelName] =
     config.embeddingModel
       .orElse(resolvedModel.filter(_.trim.nonEmpty))
+      .map(ModelName(_))
       .orElse(descriptor.configSpec.defaultModel)
       .toRight(
         ConfigurationError(
@@ -2181,7 +2190,7 @@ object RAG {
   private def createEmbeddingModelConfig(
     config: RAGConfig,
     descriptor: EmbeddingProviderDescriptor,
-    model: String
+    model: ModelName
   ): EmbeddingModelConfig = {
     // A model the provider does not declare still embeds; 1536 (OpenAI's small model) is the
     // historical fallback for a dimension nothing states.

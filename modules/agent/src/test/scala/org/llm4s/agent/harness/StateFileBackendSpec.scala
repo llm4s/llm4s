@@ -361,7 +361,7 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
       calling(call("r", "read_file", "/a.txt")),
       CompletionFixture.simple("done")
     )
-    val agent = built(Agent.builder("assistant", client).withTools(tools(backend)))
+    val agent = built(Agent.builder("assistant", client).withToolSet(tools(backend)))
     toolResults(agent.run("go").value).last shouldBe "1 2"
   }
 
@@ -375,7 +375,7 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
       ),
       CompletionFixture.simple("done")
     )
-    val agent   = built(Agent.builder("assistant", client).withTools(tools(backend)))
+    val agent   = built(Agent.builder("assistant", client).withToolSet(tools(backend)))
     val results = toolResults(agent.run("go").value)
     results.take(2).foreach(_ should include("FileWritten(true,10)"))
     results(2) should include("over this thread's limit of 30")
@@ -397,7 +397,7 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
     val backend = StateFileBackend(clock = clock)
     val client =
       ScriptedLLMClient.of(calling(call("w", "write_file", "/a.txt|after")), CompletionFixture.simple("done"))
-    val agent = withStore(store)(Agent.builder("assistant", client).withTools(tools(backend)))
+    val agent = withStore(store)(Agent.builder("assistant", client).withToolSet(tools(backend)))
     agent.run(thread, "write").value.answer shouldBe Some("done")
     val state = agent.loop.graph.restore(store.latest(thread).value.value.checkpoint.snapshot).value.state
     state.get(backend.files).value.keySet shouldBe Set(p("/a.txt"))
@@ -407,7 +407,7 @@ class StateFileBackendSpec extends AnyFlatSpec with Matchers with EitherValues w
     val store   = new org.llm4s.agent.graph.InMemoryCheckpointer
     val backend = StateFileBackend(clock = clock)
     def withFiles(replies: org.llm4s.llmconnect.model.Completion*) =
-      withStore(store)(Agent.builder("assistant", ScriptedLLMClient.of(replies*)).withTools(tools(backend)))
+      withStore(store)(Agent.builder("assistant", ScriptedLLMClient.of(replies*)).withToolSet(tools(backend)))
     def without = withStore(store)(Agent.builder("assistant", ScriptedLLMClient.of(CompletionFixture.simple("plain"))))
 
     val holding = org.llm4s.agent.graph.ThreadId("holding")

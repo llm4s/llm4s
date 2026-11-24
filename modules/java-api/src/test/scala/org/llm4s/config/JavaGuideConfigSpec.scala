@@ -1,5 +1,7 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.javaapi.{ GuideDocs, JLlmClient, LlmResult }
 import org.llm4s.llmconnect.config.{ AnthropicConfig, OllamaConfig, OpenAIConfig }
 import org.scalatest.matchers.should.Matchers
@@ -31,7 +33,7 @@ class JavaGuideConfigSpec extends AnyWordSpec with Matchers {
     "give OpenAI the key from OPENAI_API_KEY with only provider and model in the section" in {
       Llm4sConfig.defaultProvider(ReferenceConfig.withEnv(hocon(0), env)) match {
         case Right(openai: OpenAIConfig) =>
-          openai.model shouldBe "gpt-4o-mini"
+          openai.model.asString shouldBe "gpt-5.6-luna"
           openai.apiKey.reveal shouldBe "sk-openai-env"
         case other => fail(s"Expected OpenAIConfig, got $other")
       }
@@ -53,24 +55,24 @@ class JavaGuideConfigSpec extends AnyWordSpec with Matchers {
 
       Llm4sConfig.defaultProvider(source) match {
         case Right(anthropic: AnthropicConfig) =>
-          anthropic.model shouldBe "claude-sonnet-4-20250514"
+          anthropic.model.asString shouldBe "claude-sonnet-5-5"
           anthropic.apiKey.reveal shouldBe "sk-anthropic-env"
         case other => fail(s"Expected AnthropicConfig, got $other")
       }
-      Llm4sConfig.provider(source, "ollama-local") match {
+      Llm4sConfig.provider(source, ProviderName("ollama-local")) match {
         case Right(ollama: OllamaConfig) =>
-          ollama.model shouldBe "llama3.2"
-          ollama.baseUrl shouldBe "http://localhost:11434"
+          ollama.model.asString shouldBe "llama3.2"
+          ollama.baseUrl shouldBe BaseUrl("http://localhost:11434")
         case other => fail(s"Expected OllamaConfig, got $other")
       }
     }
 
     "select OpenAI's text-embedding-3-small for embeddings, with the key from OPENAI_API_KEY" in {
       Llm4sConfig.embeddings(ReferenceConfig.withEnv(hocon(2), env)) match {
-        case Right((provider, config)) =>
-          provider shouldBe "openai"
-          config.model shouldBe "text-embedding-3-small"
-          config.apiKey.reveal shouldBe "sk-openai-env"
+        case Right(config) =>
+          config.providerId.asString shouldBe "openai"
+          config.model.asString shouldBe "text-embedding-3-small"
+          config.apiKey.map(_.reveal) shouldBe Some("sk-openai-env")
         case Left(error) => fail(s"Expected the OpenAI embedding config, got $error")
       }
     }

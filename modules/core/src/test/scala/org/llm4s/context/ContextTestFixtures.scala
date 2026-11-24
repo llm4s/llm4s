@@ -26,7 +26,7 @@ object ContextTestFixtures {
    * Uses a test-only factory instead of reflection.
    */
   def createSimpleCounter(): ConversationTokenCounter =
-    ConversationTokenCounter.forTest(simpleTokenizer)
+    ConversationTokenCounter.of(simpleTokenizer)
 
   // ============ Sample Messages ============
 
@@ -45,7 +45,7 @@ object ContextTestFixtures {
 
   val toolMessage: ToolMessage = ToolMessage(
     content = """{"result": "success", "data": "test"}""",
-    toolCallId = "call_123"
+    toolCallId = ToolCallId("call_123")
   )
 
   // A real digest is always a SystemMessage: HistoryCompressor never writes one of any other type.
@@ -91,7 +91,8 @@ object ContextTestFixtures {
       userMessage1,
       AssistantMessage(
         content = "Let me check that for you.",
-        toolCalls = Seq(ToolCall(id = "call_123", name = "get_data", arguments = ujson.Obj("query" -> "test")))
+        toolCalls =
+          Seq(ToolCall(id = ToolCallId("call_123"), name = "get_data", arguments = ujson.Obj("query" -> "test")))
       ),
       toolMessage,
       AssistantMessage("Based on the data, here is the answer.")

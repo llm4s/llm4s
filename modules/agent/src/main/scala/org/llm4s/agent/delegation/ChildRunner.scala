@@ -415,7 +415,7 @@ private[agent] object ChildRunner:
             Left(
               ValidationError(
                 "threadId",
-                s"'${childId.value}' exists and is not the child thread of call ${origin.call.value} on '${origin.parent.value}'"
+                s"'${childId.value}' exists and is not the child thread of call ${origin.call.asString} on '${origin.parent.value}'"
               )
             )
           )

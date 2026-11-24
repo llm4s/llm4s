@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.funsuite.AnyFunSuite
@@ -230,7 +230,7 @@ class OpenAICompatibleModelListerSpec extends AnyFunSuite with Matchers:
   test("openAICompatible layers the key, section-derived, provider and section headers in that order") {
     val lister = ProviderModelListers.openAICompatible(
       ProviderId("layered"),
-      "https://layered.invalid/v1",
+      BaseUrl("https://layered.invalid/v1"),
       extraHeaders = Map("X-Provider" -> "provider", "X-Shared" -> "provider"),
       sectionHeaders = section =>
         Map("X-From-Section" -> section.model.asString, "X-Shared" -> "section-derived", "Authorization" -> "derived")
@@ -261,7 +261,7 @@ class OpenAICompatibleModelListerSpec extends AnyFunSuite with Matchers:
         |  "not-an-object",
         |  { "id": "b" }
         |] }""".stripMargin
-    val lister   = ProviderModelListers.openAICompatible(ProviderId("meta"), "https://meta.invalid")
+    val lister   = ProviderModelListers.openAICompatible(ProviderId("meta"), BaseUrl("https://meta.invalid"))
     val mockHttp = MockHttpClient(HttpResponse(200, body, Map.empty))
 
     lister.listModels(namedConfig(ProviderId("meta"), "m", apiKey = Some("k")), mockHttp) shouldBe Right(
@@ -277,7 +277,7 @@ class OpenAICompatibleModelListerSpec extends AnyFunSuite with Matchers:
   }
 
   test("openAICompatible fails clearly on a payload with no data array") {
-    val lister   = ProviderModelListers.openAICompatible(ProviderId("meta"), "https://meta.invalid")
+    val lister   = ProviderModelListers.openAICompatible(ProviderId("meta"), BaseUrl("https://meta.invalid"))
     val mockHttp = MockHttpClient(HttpResponse(200, """{ "models": [] }""", Map.empty))
 
     lister.listModels(namedConfig(ProviderId("meta"), "m", apiKey = Some("k")), mockHttp).left.map(_.message) match
@@ -286,7 +286,7 @@ class OpenAICompatibleModelListerSpec extends AnyFunSuite with Matchers:
   }
 
   test("openAICompatible requires an API key unless told otherwise") {
-    val lister   = ProviderModelListers.openAICompatible(ProviderId("meta"), "https://meta.invalid")
+    val lister   = ProviderModelListers.openAICompatible(ProviderId("meta"), BaseUrl("https://meta.invalid"))
     val mockHttp = MockHttpClient(HttpResponse(200, modelsBody, Map.empty))
 
     lister.listModels(namedConfig(ProviderId("meta"), "m", apiKey = None), mockHttp).isLeft shouldBe true
@@ -294,7 +294,7 @@ class OpenAICompatibleModelListerSpec extends AnyFunSuite with Matchers:
   }
 
   test("openAICompatible reports a non-2xx listing response as an error") {
-    val lister   = ProviderModelListers.openAICompatible(ProviderId("meta"), "https://meta.invalid")
+    val lister   = ProviderModelListers.openAICompatible(ProviderId("meta"), BaseUrl("https://meta.invalid"))
     val mockHttp = MockHttpClient(HttpResponse(401, """{"error":"nope"}""", Map.empty))
 
     lister.listModels(namedConfig(ProviderId("meta"), "m", apiKey = Some("k")), mockHttp).isLeft shouldBe true
@@ -308,7 +308,7 @@ class OpenAICompatibleModelListerSpec extends AnyFunSuite with Matchers:
       Map("x-request-id" -> Seq("req-2266"), "retry-after" -> Seq("12"))
     )
     ProviderModelListers
-      .openAICompatible(ProviderId("meta"), "https://meta.invalid")
+      .openAICompatible(ProviderId("meta"), BaseUrl("https://meta.invalid"))
       .listModels(config, MockHttpClient(response)) match
       case Left(err: org.llm4s.error.ServiceError) =>
         err.httpStatus shouldBe 503

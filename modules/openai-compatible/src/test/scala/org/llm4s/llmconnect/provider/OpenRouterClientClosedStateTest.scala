@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -23,11 +25,11 @@ class OpenRouterClientClosedStateTest extends AnyFlatSpec with Matchers with Eit
 
   private def createTestConfig: OpenAIConfig = OpenAIConfig
     .fromValues(
-      modelName = "openai/gpt-4",
+      modelName = ModelName("openai/gpt-4"),
       apiKey = Secret("test-api-key-for-closed-state-testing"),
       organization = None,
       // Must never be used by unit tests (no network). We keep a clearly fake endpoint.
-      baseUrl = "https://example.invalid/api/v1"
+      baseUrl = BaseUrl("https://example.invalid/api/v1")
     )
     .value
 
@@ -59,9 +61,8 @@ class OpenRouterClientClosedStateTest extends AnyFlatSpec with Matchers with Eit
     // Attempt to call streamComplete()
     val result = client.streamComplete(
       createTestConversation,
-      CompletionOptions(),
-      _ => chunksReceived += 1
-    )
+      CompletionOptions()
+    )(_ => chunksReceived += 1)
 
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[ConfigurationError]
@@ -88,10 +89,10 @@ class OpenRouterClientClosedStateTest extends AnyFlatSpec with Matchers with Eit
   it should "include model name in the closed error message" in {
     val config = OpenAIConfig
       .fromValues(
-        modelName = "anthropic/claude-3-opus",
+        modelName = ModelName("anthropic/claude-3-opus"),
         apiKey = Secret("test-api-key"),
         organization = None,
-        baseUrl = "https://example.invalid/api/v1"
+        baseUrl = BaseUrl("https://example.invalid/api/v1")
       )
       .value
     val client = new OpenRouterClient(config)

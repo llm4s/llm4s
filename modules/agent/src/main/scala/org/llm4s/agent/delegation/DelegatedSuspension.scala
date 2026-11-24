@@ -10,7 +10,7 @@ import org.llm4s.agent.graph.toolloop.{
   MiddlewareQuestionRequest,
   ToolQuestionRequest
 }
-import org.llm4s.annotation.{ Experimental, Stable }
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.ToolCall
 import org.llm4s.types.Result
@@ -23,7 +23,7 @@ import scala.util.Try
  * child's own `AgentStatus.Suspended` gives it. `Delegated` is one of the child's own delegated interrupts - a
  * grandchild's - under the child's composite id (`<child interrupt>~<grandchild interrupt>`).
  */
-@Stable
+@Experimental
 enum ChildInterrupt derives ReadWriter:
 
   /** The child's interrupt id. */
@@ -44,7 +44,7 @@ enum ChildInterrupt derives ReadWriter:
   /** An interrupt of one of the child's own children, under the child's composite id. */
   case Delegated(id: InterruptId, request: DelegatedRequest)
 
-@Stable
+@Experimental
 object ChildInterrupt:
 
   /** Every interrupt `status` waits on, in the order it lists them: approvals, questions, middleware questions, breakpoints, then delegated ones. */
@@ -71,7 +71,7 @@ object ChildInterrupt:
  * (design 4.46): the child run that waits, and its `request`, never itself `Delegated` - a grandchild's interrupt names
  * the grandchild here.
  */
-@Stable
+@Experimental
 final case class DelegatedRequest(child: ChildRef, request: ChildInterrupt) derives ReadWriter
 
 /**

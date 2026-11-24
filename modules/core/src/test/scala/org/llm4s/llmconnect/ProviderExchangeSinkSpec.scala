@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
@@ -33,13 +35,12 @@ class ProviderExchangeSinkSpec extends AnyFunSuite with Matchers:
 
       val exchange = ProviderExchange(
         exchangeId = "ex-2",
-        provider = "openai",
-        model = Some("gpt-4o"),
+        provider = ProviderId("openai"),
+        model = Some(ModelName("gpt-4o")),
         requestId = None,
         correlationId = None,
         startedAt = Instant.parse("2026-03-22T10:10:00Z"),
         completedAt = Instant.parse("2026-03-22T10:10:01Z"),
-        duration = 1000.millis,
         outcome = ProviderExchangeOutcome.Error,
         requestBody = """{"apiKey":"sk-secret","prompt":"hello"}""",
         responseBody = Some("""{"message":"failed"}"""),

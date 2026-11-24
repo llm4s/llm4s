@@ -6,7 +6,7 @@ import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ ApiKeyProvider, TokenExchange }
 import org.llm4s.llmconnect.spi.ProviderConfigKey
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -49,9 +49,9 @@ import org.llm4s.types.Result
 @Stable
 final case class OpenAIConfig private (
   apiKey: Secret,
-  model: String,
+  model: ModelName,
   organization: Option[String],
-  baseUrl: String,
+  baseUrl: BaseUrl,
   contextWindow: Int,
   reserveCompletion: Int,
   explicitProviderId: Option[ProviderId],
@@ -74,20 +74,22 @@ final case class OpenAIConfig private (
    */
   override def providerId: ProviderId =
     explicitProviderId.getOrElse(
-      if baseUrl.contains("openrouter.ai") then ProviderId("openrouter") else ProviderId("openai")
+      if baseUrl.asUrl.contains("openrouter.ai") then ProviderId("openrouter") else ProviderId("openai")
     )
 
-  override def endpointUrl: Option[String]                                = Some(baseUrl)
-  override def withModel(model: String): OpenAIConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): OpenAIConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): OpenAIConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): OpenAIConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): OpenAIConfig  = copy(apiKeyProvider = provider)
+  override def endpointUrl: Option[BaseUrl]                            = Some(baseUrl)
+  override def withModel(model: ModelName): OpenAIConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): OpenAIConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): OpenAIConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[OpenAIConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): OpenAIConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): OpenAIConfig                     = copy(apiKey = apiKey)
   def withOrganization(organization: String): OpenAIConfig         = copy(organization = Some(organization))
   def withOrganization(organization: Option[String]): OpenAIConfig = copy(organization = organization)
-  def withBaseUrl(baseUrl: String): OpenAIConfig                   = copy(baseUrl = baseUrl)
+  def withBaseUrl(baseUrl: BaseUrl): OpenAIConfig                  = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): OpenAIConfig          = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): OpenAIConfig  = copy(reserveCompletion = reserveCompletion)
   def withExplicitProviderId(providerId: ProviderId): OpenAIConfig = copy(explicitProviderId = Some(providerId))
@@ -106,7 +108,7 @@ object OpenAIConfig {
   private val standardReserve = 4096
 
   /** The OpenAI API base URL, used by the short `apply(apiKey, model)`. */
-  val DEFAULT_BASE_URL: String = "https://api.openai.com/v1"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://api.openai.com/v1")
 
   /**
    * Builds a config without validating it; [[fromValues]] validates, and `OpenAIClient` applies
@@ -116,9 +118,9 @@ object OpenAIConfig {
    */
   def apply(
     apiKey: Secret,
-    model: String,
+    model: ModelName,
     organization: Option[String],
-    baseUrl: String,
+    baseUrl: BaseUrl,
     contextWindow: Int,
     reserveCompletion: Int,
     explicitProviderId: Option[ProviderId] = None,
@@ -145,8 +147,8 @@ object OpenAIConfig {
    * (`gpt-4o` is 128k, an unknown model 8192); set them, and the rest, with the `with*` setters,
    * or use [[fromValues]] to consult the bundled model catalogue.
    */
-  def apply(apiKey: Secret, model: String): OpenAIConfig = {
-    val (cw, rc) = openAIFallback(model)
+  def apply(apiKey: Secret, model: ModelName): OpenAIConfig = {
+    val ContextLimits(cw, rc) = openAIFallback(model)
     apply(apiKey, model, None, DEFAULT_BASE_URL, cw, rc)
   }
 
@@ -163,14 +165,14 @@ object OpenAIConfig {
   val OrganizationConfigKey: ProviderConfigKey =
     ProviderConfigKey.optional(OrganizationKey, "the OpenAI organization ID, sent as the OpenAI-Organization header")
 
-  private def openAIFallback(modelName: String): (Int, Int) =
-    modelName match {
-      case name if name.contains("gpt-4o")        => (128000, standardReserve)
-      case name if name.contains("gpt-4-turbo")   => (128000, standardReserve)
-      case name if name.contains("gpt-4")         => (8192, standardReserve)
-      case name if name.contains("gpt-3.5-turbo") => (16384, standardReserve)
-      case name if name.contains("o1-")           => (128000, standardReserve)
-      case _                                      => (8192, standardReserve)
+  private def openAIFallback(modelName: ModelName): ContextLimits =
+    modelName.asString match {
+      case name if name.contains("gpt-4o")        => ContextLimits(128000, standardReserve)
+      case name if name.contains("gpt-4-turbo")   => ContextLimits(128000, standardReserve)
+      case name if name.contains("gpt-4")         => ContextLimits(8192, standardReserve)
+      case name if name.contains("gpt-3.5-turbo") => ContextLimits(16384, standardReserve)
+      case name if name.contains("o1-")           => ContextLimits(128000, standardReserve)
+      case _                                      => ContextLimits(8192, standardReserve)
     }
 
   /**
@@ -228,7 +230,7 @@ object OpenAIConfig {
               List("workloadIdentity")
             )
           )
-          _ <- TokenExchange.requireTrustedHost(config.baseUrl, "baseUrl", "OpenAI", WorkloadIdentityHosts)
+          _ <- TokenExchange.requireTrustedHost(config.baseUrl.asUrl, "baseUrl", "OpenAI", WorkloadIdentityHosts)
         yield config
 
   /**
@@ -256,19 +258,19 @@ object OpenAIConfig {
    * @return `Left(ConfigurationError)` for a blank field or a config [[validate]] refuses.
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     apiKey: Secret,
-    baseUrl: String,
+    baseUrl: BaseUrl,
     organization: Option[String] = None,
     providerId: Option[ProviderId] = None,
     workloadIdentity: Option[OpenAIWorkloadIdentity] = None
   )(using resolver: ContextWindowResolver): Result[OpenAIConfig] =
     (for {
       _ <- if (workloadIdentity.isDefined) Right(()) else ProviderConfig.nonEmpty("OpenAI", "apiKey", apiKey.reveal)
-      _ <- ProviderConfig.nonEmpty("OpenAI", "baseUrl", baseUrl)
+      _ <- ProviderConfig.nonEmpty("OpenAI", "baseUrl", baseUrl.asUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
-        lookupProviders = Seq("openai"),
+      val ContextLimits(cw, rc) = resolver.resolve(
+        lookupProviders = Seq(ProviderId("openai")),
         modelName = modelName,
         defaultContextWindow = 8192,
         defaultReserve = standardReserve,

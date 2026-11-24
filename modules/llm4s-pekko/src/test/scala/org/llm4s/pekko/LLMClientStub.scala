@@ -9,9 +9,7 @@ final private[pekko] class LLMClientStub(
   onStream: (Conversation, CompletionOptions, StreamedChunk => Unit) => Result[Completion]
 ) extends LLMClient {
   def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = Right(Fixtures.completion)
-  def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = onStream(conversation, options, onChunk)
   def getContextWindow(): Int     = 4096

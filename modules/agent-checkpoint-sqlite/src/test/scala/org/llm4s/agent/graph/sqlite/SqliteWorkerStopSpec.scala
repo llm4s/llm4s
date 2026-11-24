@@ -40,9 +40,7 @@ class SqliteWorkerStopSpec extends AnyFlatSpec with Matchers with EitherValues w
           case Right(_) => Left(ValidationError("blocking", "was never interrupted"))
         }
       } else Right(CompletionFixture.simple(s"answer ${count.get}"))
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 8192

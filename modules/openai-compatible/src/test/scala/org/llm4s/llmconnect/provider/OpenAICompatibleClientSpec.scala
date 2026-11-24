@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ AuthenticationError, ServiceError }
@@ -30,7 +32,12 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def config(baseUrl: String, apiKey: Option[String] = None, headers: Map[String, String] = Map.empty) =
-    OpenAICompatibleConfig(model = "local-model", baseUrl = baseUrl, apiKey = apiKey.map(Secret(_)), headers = headers)
+    OpenAICompatibleConfig(
+      model = ModelName("local-model"),
+      baseUrl = BaseUrl(baseUrl),
+      apiKey = apiKey.map(Secret(_)),
+      headers = headers
+    )
 
   private def client(cfg: OpenAICompatibleConfig, logging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled) =
     OpenAICompatibleClient(cfg, exchangeLogging = logging).value
@@ -44,7 +51,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
     val recorded = ListBuffer.empty[ProviderExchange]
     val sink = new ProviderExchangeSink:
       override def record(exchange: ProviderExchange): Unit = recorded += exchange
-    (recorded, ProviderExchangeLogging.enabled(sink))
+    (recorded, ProviderExchangeLogging.Enabled(sink))
   }
 
   /** A port nothing listens on, so a request to it fails in transport. */
@@ -105,14 +112,14 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
       sendSseResponse(exchange, openAISseBody(Seq("Hello", " local"), "local-model"))
     } { baseUrl =>
       val chunks = ListBuffer.empty[StreamedChunk]
-      val result = client(config(baseUrl)).streamComplete(conversation, CompletionOptions(), chunks += _)
+      val result = client(config(baseUrl)).streamComplete(conversation, CompletionOptions())(chunks += _)
       result.value.content shouldBe "Hello local"
-      result.value.model shouldBe "local-model"
+      result.value.model shouldBe ModelName("local-model")
       chunks.flatMap(_.content).mkString shouldBe "Hello local"
     }
 
   it should "report the configured context window and reserve" in {
-    val c = client(OpenAICompatibleConfig("m", "http://localhost:1/v1", None, 32768, 4096))
+    val c = client(OpenAICompatibleConfig(ModelName("m"), BaseUrl("http://localhost:1/v1"), None, 32768, 4096))
     (c.getContextWindow(), c.getReserveCompletion()) shouldBe (32768, 4096)
   }
 
@@ -130,8 +137,8 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
         Seq(
           SystemMessage("sys"),
           UserMessage("hi"),
-          AssistantMessage(None, List(ToolCall("c1", "f", ujson.Obj("a" -> 1)))),
-          ToolMessage("out", "c1")
+          AssistantMessage(None, List(ToolCall(ToolCallId("c1"), "f", ujson.Obj("a" -> 1)))),
+          ToolMessage("out", ToolCallId("c1"))
         )
       ),
       CompletionOptions(maxTokens = Some(10)).withReasoning(ReasoningEffort.High)
@@ -173,9 +180,9 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
     )
     completion.id shouldBe ""
     completion.created shouldBe Instant.EPOCH
-    completion.model shouldBe "local-model"
+    completion.model shouldBe ModelName("local-model")
     completion.content shouldBe ""
-    completion.message.contentOpt shouldBe None
+    completion.message.text shouldBe None
     completion.usage shouldBe Some(TokenUsage(3, 4, 7))
   }
 
@@ -196,9 +203,9 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
       ujson.read("""[{"id":"a","function":{"name":"f","arguments":"{\"x\":1}"}},{"function":{}},{}]""")
     ) shouldBe Right(
       Seq(
-        ToolCall("a", "f", ujson.Obj("x" -> 1)),
-        ToolCall("", "", ujson.Obj()),
-        ToolCall("", "", ujson.Obj())
+        ToolCall(ToolCallId("a"), "f", ujson.Obj("x" -> 1)),
+        ToolCall(ToolCallId(""), "", ujson.Obj()),
+        ToolCall(ToolCallId(""), "", ujson.Obj())
       )
     )
     OpenAICompatibleDialect.lenientToolCalls(ujson.read("""[{"function":{"arguments":"{bad"}}]""")).isLeft shouldBe true
@@ -226,7 +233,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
       ]
     }
     recorded should have size 1
-    recorded.head.provider shouldBe "openai-compatible"
+    recorded.head.provider.asString shouldBe "openai-compatible"
     recorded.head.responseBody shouldBe Some("""{"error":"nope"}""")
   }
 
@@ -244,7 +251,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
     val c                   = client(config(deadBaseUrl), logging)
 
     c.complete(conversation, CompletionOptions()).isLeft shouldBe true
-    c.streamComplete(conversation, CompletionOptions(), _ => ()).isLeft shouldBe true
+    c.streamComplete(conversation, CompletionOptions())(_ => ()).isLeft shouldBe true
 
     recorded should have size 2
     recorded.foreach(_.requestBody should include("hello"))
@@ -254,7 +261,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
   it should "record a streaming error status with its body" in {
     val (recorded, logging) = recordingSink()
     withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 503, """{"error":"busy"}""")) { baseUrl =>
-      val result = client(config(baseUrl), logging).streamComplete(conversation, CompletionOptions(), _ => ())
+      val result = client(config(baseUrl), logging).streamComplete(conversation, CompletionOptions())(_ => ())
       result.left.value shouldBe a[ServiceError]
     }
     recorded should have size 1

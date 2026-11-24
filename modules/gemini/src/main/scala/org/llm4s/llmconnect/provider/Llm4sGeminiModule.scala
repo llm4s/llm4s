@@ -29,4 +29,4 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  */
 @Stable
 final class Llm4sGeminiModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(GeminiProvider, VertexAIProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(GeminiProvider, VertexAIProvider)

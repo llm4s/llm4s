@@ -1,5 +1,6 @@
 package org.llm4s.schema
 
+import org.llm4s.llmconnect.model.ToolCallId
 import org.llm4s.error.{ LLMError, NotFoundError }
 import org.llm4s.schema.TypedToolFixtures.*
 import org.llm4s.toolapi.*
@@ -18,21 +19,21 @@ object ScopedToolFixtures {
   case class Sum(total: Int, key: String, toolCallId: Option[String]) derives ReadWriter
 
   /** `add`, as `Tool.of` builds it in [[TypedToolSpec]], for comparing how the two refuse arguments. */
-  def typedAdd: Result[ToolFunction[AddArgs, Int]]  = Tool.of[AddArgs, Int]("add", "Add numbers")(a => Right(a.a + a.b))
-  def scopedAdd: Result[ToolFunction[AddArgs, Int]] = Tool.scoped[AddArgs, Int]("add", "Add numbers")(a => a.a + a.b)
+  def typedAdd: Result[ToolFunction[Int]]  = Tool.of[AddArgs, Int]("add", "Add numbers")(a => Right(a.a + a.b))
+  def scopedAdd: Result[ToolFunction[Int]] = Tool.scoped[AddArgs, Int]("add", "Add numbers")(a => a.a + a.b)
 
-  def typedOrder: Result[ToolFunction[Order, String]] =
+  def typedOrder: Result[ToolFunction[String]] =
     Tool.of[Order, String]("order", "Order")(o => Right(o.address.city))
-  def scopedOrder: Result[ToolFunction[Order, String]] = Tool.scoped[Order, String]("order", "Order")(_.address.city)
+  def scopedOrder: Result[ToolFunction[String]] = Tool.scoped[Order, String]("order", "Order")(_.address.city)
 
   /** Reports what its scope says about the call. */
-  def describe(name: String): Result[ToolFunction[AddArgs, Sum]] =
+  def describe(name: String): Result[ToolFunction[Sum]] =
     Tool.scoped[AddArgs, Sum](name, "Add numbers, saying which call it served") { a =>
-      Sum(a.a + a.b, ToolScope.idempotencyKey, ToolScope.call.map(_.toolCallId))
+      Sum(a.a + a.b, ToolScope.idempotencyKey, ToolScope.call.map(_.toolCallId.asString))
     }
 
   /** Every way to end a call early, chosen by `a`. */
-  def checked(lookups: Int => Result[Int], parse: Int => Either[String, Int]): Result[ToolFunction[AddArgs, Int]] =
+  def checked(lookups: Int => Result[Int], parse: Int => Either[String, Int]): Result[ToolFunction[Int]] =
     Tool.scoped[AddArgs, Int]("checked", "Add numbers, with checks") { args =>
       ensure(args.a >= 0, s"a must not be negative, was ${args.a}")
       if (args.a == 13) reject("13 is unlucky")
@@ -44,29 +45,29 @@ object ScopedToolFixtures {
   var evaluated: Int = 0
 
   /** An `ensure` whose message is counted when it is built. */
-  def lazyMessage: Result[ToolFunction[AddArgs, Int]] =
+  def lazyMessage: Result[ToolFunction[Int]] =
     Tool.scoped[AddArgs, Int]("lazy", "Lazy message") { args =>
       ensure(args.a > 0, { evaluated += 1; "a must be positive" })
       args.a
     }
 
   /** Ends the call from inside a lambda the handler passes to `map` and `foreach`. */
-  def nested: Result[ToolFunction[Echo, List[Int]]] =
+  def nested: Result[ToolFunction[List[Int]]] =
     Tool.scoped[Echo, List[Int]]("digits", "Digits of a text") { e =>
       e.text.toList.foreach(c => ensure(!c.isWhitespace, "no spaces"))
       e.text.toList.map(c => if (c.isDigit) c.asDigit else reject(s"'$c' is not a digit"))
     }
 
-  def throwing: Result[ToolFunction[Echo, String]] =
+  def throwing: Result[ToolFunction[String]] =
     Tool.scoped[Echo, String]("boom", "Throws")(e => throw new IllegalStateException(s"cannot echo ${e.text}"))
 
-  def noArgs: Result[ToolFunction[NoArgs, String]] = Tool.scoped[NoArgs, String]("ping", "Ping")(_ => "pong")
+  def noArgs: Result[ToolFunction[String]] = Tool.scoped[NoArgs, String]("ping", "Ping")(_ => "pong")
 }
 
 class ScopedToolSpec extends AnyFlatSpec with Matchers with ScalaCheckPropertyChecks {
   import ScopedToolFixtures.*
 
-  private def built[A, R](tool: Result[ToolFunction[A, R]]): ToolFunction[A, R] =
+  private def built[R](tool: Result[ToolFunction[R]]): ToolFunction[R] =
     tool.fold(e => fail(s"the tool was not built: ${e.formatted}"), identity)
 
   private def handlerError(name: String, message: String): Either[ToolCallError, ujson.Value] =
@@ -122,7 +123,7 @@ class ScopedToolSpec extends AnyFlatSpec with Matchers with ScalaCheckPropertyCh
 
   it should "write a successful handler's result with its ReadWriter" in {
     val tool = built(describe("sum"))
-    tool.execute(ujson.Obj("a" -> 2, "b" -> 3), ToolCallInfo("call-1", "key-1")) shouldBe
+    tool.execute(ujson.Obj("a" -> 2, "b" -> 3), ToolCallInfo(ToolCallId("call-1"), IdempotencyKey("key-1"))) shouldBe
       Right(upickle.default.writeJs(Sum(5, "key-1", Some("call-1"))))
     built(noArgs).execute(ujson.Null) shouldBe Right(ujson.Str("pong"))
   }
@@ -191,7 +192,7 @@ class ScopedToolSpec extends AnyFlatSpec with Matchers with ScalaCheckPropertyCh
   "ToolScope" should "give the handler the call's idempotency key and id when the call supplies them" in {
     val tool  = built(describe("sum"))
     val args  = ujson.Obj("a" -> 1, "b" -> 1)
-    val call  = ToolCallInfo("call-9", "agent-key-9")
+    val call  = ToolCallInfo(ToolCallId("call-9"), IdempotencyKey("agent-key-9"))
     val first = tool.execute(args, call)
     first shouldBe Right(upickle.default.writeJs(Sum(2, "agent-key-9", Some("call-9"))))
     tool.execute(args, call) shouldBe first // a replay of the same call

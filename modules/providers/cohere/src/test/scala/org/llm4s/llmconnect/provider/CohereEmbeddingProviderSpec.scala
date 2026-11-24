@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
+import org.llm4s.llmconnect.spi.EmbeddingBuildContext
 import org.llm4s.security.Secret
 import org.llm4s.error.{ CancelledError, NetworkError, RateLimitError }
 import org.llm4s.http.{
@@ -12,9 +14,9 @@ import org.llm4s.http.{
   StreamingHttpResponse
 }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
-import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingUsage }
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingUsage }
+import org.llm4s.error.EmbeddingError
 import org.llm4s.testkit.LocalProviderTestServer
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -34,11 +36,16 @@ import org.llm4s.testutil.EchoedCredentials
  */
 class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
 
-  private val modelCfg  = EmbeddingModelConfig("embed-english-v3.0", 1024)
+  private val modelCfg  = EmbeddingModelConfig(ModelName("embed-english-v3.0"), 1024)
   private val secretKey = "cohere-SECRET-key-123"
 
   private def cfg(base: String = "http://cohere-test") =
-    EmbeddingProviderConfig(baseUrl = base, model = "embed-english-v3.0", apiKey = Secret(secretKey))
+    EmbeddingProviderConfig(
+      providerId = ProviderId("cohere"),
+      baseUrl = BaseUrl(base),
+      model = ModelName("embed-english-v3.0"),
+      apiKey = Some(Secret(secretKey))
+    )
 
   /** A v2 response: `embeddings` keyed by type, with the billed input tokens in `meta` when given. */
   private def body(vectors: Seq[Seq[Double]], billed: Option[Int] = None): String = {
@@ -119,7 +126,7 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
     val named = new MockHttpClient(ok(Seq(Seq(1.0))))
     CohereEmbeddingProvider
       .forTest(cfg(), named)
-      .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig("embed-english-v3.0-search_query", 1024)))
+      .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig(ModelName("embed-english-v3.0-search_query"), 1024)))
     // the model name is passed through untouched, and says nothing about the type
     read(named.lastBody.get)("model").str shouldBe "embed-english-v3.0-search_query"
     read(named.lastBody.get)("input_type").str shouldBe "search_document"
@@ -460,14 +467,14 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
     CohereEmbeddingProvider.id shouldBe ProviderId("cohere")
     CohereEmbeddingProvider.configSpec.defaultBaseUrl shouldBe Some("https://api.cohere.com")
     CohereEmbeddingProvider.configSpec.requiresApiKey shouldBe true
-    CohereEmbeddingProvider.dimensionsOf("embed-v4.0") shouldBe Some(1536)
-    CohereEmbeddingProvider.dimensionsOf("embed-english-light-v3.0") shouldBe Some(384)
-    CohereEmbeddingProvider.dimensionsOf("not-a-model") shouldBe None
+    CohereEmbeddingProvider.dimensionsOf(ModelName("embed-v4.0")) shouldBe Some(1536)
+    CohereEmbeddingProvider.dimensionsOf(ModelName("embed-english-light-v3.0")) shouldBe Some(384)
+    CohereEmbeddingProvider.dimensionsOf(ModelName("not-a-model")) shouldBe None
     CohereEmbeddingProvider.modelDimensions.values.foreach(_ should be > 0)
   }
 
   it should "build a provider for the SPI" in {
-    CohereEmbeddingProvider.build(cfg()).isRight shouldBe true
+    CohereEmbeddingProvider.build(cfg(), EmbeddingBuildContext()).isRight shouldBe true
   }
 
   "an error body" should "be redacted before it reaches the error or the log, whatever the status (#1674)" in {

@@ -615,8 +615,8 @@ sbt "samples/runMain org.llm4s.samples.toolapi.WeatherToolExample"
 
 **Key code:**
 ```scala
-val toolSafe: Result[ToolFunction[Map[String, Any], WeatherResult]] =
-  ToolBuilder[Map[String, Any], WeatherResult]("get_weather", "Get current weather for a location", schema)
+val toolSafe: Result[ToolFunction[WeatherResult]] =
+  ToolBuilder[WeatherResult]("get_weather", "Get current weather for a location", schema)
     .withHandler(weatherHandler)
     .buildSafe()
 ```
@@ -1291,7 +1291,7 @@ sbt "samples/runMain org.llm4s.samples.streaming.StreamingAgentExample"
 
 **File:** [`ReasoningModesExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/reasoning/ReasoningModesExample.scala)
 
-Using extended thinking/reasoning modes with OpenAI o1/o3 and Anthropic Claude.
+Using extended thinking/reasoning modes with OpenAI's reasoning models (the gpt-5 family) and Anthropic Claude.
 
 ```bash
 sbt "samples/runMain org.llm4s.samples.reasoning.ReasoningModesExample"
@@ -1423,13 +1423,13 @@ samples' `application.conf`):
 llm4s.providers {
   openai-main {
     provider = "openai"
-    model    = "gpt-4o"
+    model    = "gpt-5.6-terra"
   }
 }
 ```
 
 and select it with `LLM4S_PROVIDER`, which the samples' `application.conf` binds to
-`llm4s.providers.provider`. The section needs no `apiKey`: `llm4s-openai` binds `OPENAI_API_KEY`
+`llm4s.defaultProvider`. The section needs no `apiKey`: `llm4s-openai` binds `OPENAI_API_KEY`
 to OpenAI's shared key.
 
 ```bash

@@ -1,5 +1,6 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import java.util.concurrent.CopyOnWriteArrayList
@@ -28,7 +29,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   final case class EchoResult(value: String)
   object EchoResult { implicit val rw: ReadWriter[EchoResult] = macroRW }
 
-  private val echoTool = ToolBuilder[Map[String, Any], EchoResult](
+  private val echoTool = ToolBuilder[EchoResult](
     "echo",
     "echoes",
     Schema.`object`[Map[String, Any]]("params").withRequiredField("v", Schema.string("value"))
@@ -48,25 +49,18 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       options.add(o)
       Right(reply(i))
     }
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 8192
     def getReserveCompletion(): Int = 512
   }
 
   private def text(s: String): Completion =
-    Completion(id = "t", created = Instant.EPOCH, content = s, model = "m", message = AssistantMessage(Some(s)))
+    Completion(id = "t", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage(Some(s)))
 
   private def toolCall(i: Int): Completion = {
-    val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = ujson.Obj("v" -> "x")))
-    Completion(
-      id = s"t$i",
-      created = Instant.EPOCH,
-      content = "",
-      model = "m",
-      message = AssistantMessage("", calls),
-      toolCalls = calls.toList
-    )
+    val calls = Seq(ToolCall(id = ToolCallId(s"call-$i"), name = "echo", arguments = ujson.Obj("v" -> "x")))
+    Completion(id = s"t$i", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage("", calls))
   }
 
   private def tools: ToolRegistry = ToolRegistry.of(Seq(echoTool)).toOption.get
@@ -85,7 +79,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val sent = client.conversations.get(0).messages
     sent.collect { case m: SystemMessage => m.content }.exists(_.contains("EXTRA-INSTRUCTIONS")) shouldBe true
     sent.collect { case m: UserMessage => m.content } shouldBe Seq("q")
-    client.options.get(0).temperature shouldBe 0.123
+    client.options.get(0).temperature shouldBe Some(0.123)
     client.options.get(0).maxTokens shouldBe Some(77)
     client.options.get(0).tools.map(_.name) shouldBe Seq("echo")
   }
@@ -109,7 +103,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   it should "apply input guardrails before any model call and report the turn Blocked" in {
     val client = new Recording(_ => text("done"))
-    val result = io(client)(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 5)), Nil)))
+    val result = io(client)(_.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 5)), Nil)))
       .run("this query is far too long")
       .unsafeRunSync()
     result.status shouldBe a[AgentStatus.Blocked]
@@ -118,7 +112,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   it should "apply output guardrails to the answer" in {
     val client = new Recording(_ => text("ok"))
-    val result = io(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(10, 100)))))
+    val result = io(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(LengthCheck(10, 100)))))
       .run("q")
       .unsafeRunSync()
     result.status shouldBe a[AgentStatus.Blocked]
@@ -129,7 +123,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val failure = new IllegalStateException("provider exploded")
     val client = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = throw failure
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         throw failure
       def getContextWindow(): Int     = 1
       def getReserveCompletion(): Int = 1
@@ -154,7 +148,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   it should "apply input guardrails to the new message and not call the model" in {
     val client = new Recording(_ => text("first"))
-    val agent  = io(client)(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 20)), Nil)))
+    val agent  = io(client)(_.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 20)), Nil)))
     val first  = agent.run("q1").unsafeRunSync()
     val result = agent.continueConversation(first, "far too long a follow up for the guardrail").unsafeRunSync()
     result.status shouldBe a[AgentStatus.Blocked]
@@ -163,7 +157,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   it should "apply output guardrails to the new answer" in {
     val client = new Recording(i => if (i == 0) text("a long enough first answer") else text("ok"))
-    val agent  = io(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(10, 100)))))
+    val agent  = io(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(LengthCheck(10, 100)))))
     val first  = agent.run("q1").unsafeRunSync()
     first.status shouldBe AgentStatus.Completed("a long enough first answer")
     val next = agent.continueConversation(first, "q2").unsafeRunSync()
@@ -177,7 +171,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val client = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         if (calls.getAndIncrement() == 0) Right(text("first")) else Left(SimpleError("nope"))
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 1
       def getReserveCompletion(): Int = 1
@@ -240,7 +234,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
           case 1 => Left(SimpleError("provider down"))
           case _ => Right(text("recovered"))
         }
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 8192
       def getReserveCompletion(): Int = 512
@@ -260,7 +254,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
           case 0 => Right(toolCall(0))
           case _ => Left(SimpleError("provider down"))
         }
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 8192
       def getReserveCompletion(): Int = 512

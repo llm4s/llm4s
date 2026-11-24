@@ -3,8 +3,10 @@ layout: page
 title: Reference Architecture
 description: "Deploy LLM4S behind an AI gateway: secret injection, egress policy, failover, quotas and spend, with tested Kubernetes manifests."
 search_title: "LLM4S enterprise reference architecture"
-parent: User Guide
-nav_order: 46
+parent: Operations
+nav_order: 702
+grand_parent: User Guide
+cites_closed_issues: [2115, 2273, 2313]
 ---
 
 # Enterprise Reference Architecture
@@ -72,14 +74,13 @@ This is the app's whole `application.conf` in the enterprise overlay, mounted fr
 ([`application.conf`](https://github.com/llm4s/llm4s/blob/main/deploy/overlays/enterprise/application.conf)):
 
 ```hocon
+llm4s.defaultProvider = "gateway"                     # the section the service loads
 llm4s.providers {
-  provider = "gateway"                     # the section the service loads
-
   gateway {
     provider         = "openai-compatible"
     baseUrl          = "http://litellm:4000/v1"                    # the gateway's Service, not the vendor
-    model            = "gpt-4o-mini"                               # a model_name in the gateway's config
-    registryProvider = "openai"                                    # the context window of openai/gpt-4o-mini
+    model            = "gpt-5.6-luna"                              # a model_name in the gateway's config
+    registryProvider = "openai"                                    # the context window of openai/gpt-5.6-luna
     apiKeyFile       = "/var/run/secrets/llm4s/gateway-api-key"   # this app's gateway key, re-read when rotated
     headers {
       "X-Tenant-Id"   = "acme-retail"     # sent on every request, for the gateway's audit log and routing
@@ -141,7 +142,7 @@ llm4s.providers {
   bedrock-private {
     provider = "bedrock"
     region   = "eu-central-1"
-    model    = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+    model    = "us.anthropic.claude-sonnet-5-5"
     # baseUrl = "https://vpce-0123456789abcdef0-abcdefgh.bedrock-runtime.eu-central-1.vpce.amazonaws.com"
     #   only when the VPC endpoint's private DNS is off
   }
@@ -210,11 +211,12 @@ calls:
 
 ```scala
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
+import org.llm4s.llmconnect.{ LLMClient, LLMConnect, LlmClientOptions }
 import org.llm4s.metrics.CostTracker
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.reliability.{ RateLimitConfig, ReliabilityConfig, ReliableClient, RetryPolicy }
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 import scala.concurrent.duration.*
 
@@ -228,11 +230,11 @@ val reliability = ReliabilityConfig(
 
 def reliableClient(section: String): Result[LLMClient] =
   for
-    config   <- Llm4sConfig.provider(section)
+    config   <- Llm4sConfig.provider(ProviderName(section))
     registry <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
-    client <- LLMConnect.getClient(config, costs)
-  yield new ReliableClient(client, section, reliability, Some(costs))
+    client <- LLMConnect.getClient(config, LlmClientOptions(metrics = costs))
+  yield ReliableClient(client, section, reliability).withMetrics(costs)
 ```
 
 For a second region or provider, add a section beside `gateway` (here a gateway in another region; it could as well
@@ -242,7 +244,7 @@ be a direct provider section):
 llm4s.providers.gateway-dr {
   provider         = "openai-compatible"
   baseUrl          = "https://llm-gateway.eu-west-1.example.internal/v1"
-  model            = "gpt-4o-mini"
+  model            = "gpt-5.6-luna"
   registryProvider = "openai"
   apiKeyFile       = "/var/run/secrets/llm4s/gateway-dr-api-key"
   headers {
@@ -327,9 +329,9 @@ import org.llm4s.types.Result
 val gatewayOnly: ConfigPolicy =
   ConfigPolicy()
     .withAllowedProviders("openai-compatible")
-    .withAllowedModelPatterns("openai-compatible/gpt-4o-mini")
+    .withAllowedModelPatterns("openai-compatible/gpt-5.6-luna")
     .withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "openai-compatible", "http://litellm:4000/v1")
-    .withMaxContextWindow(CatalogEnvironment.Prod, "openai-compatible", 128000)
+    .withMaxContextWindow(CatalogEnvironment.Prod, "openai-compatible", 922000)
     .withOwnApiKeyRequired(CatalogEnvironment.Prod)
 
 // Run at startup, or in a test of the deployment's configuration: empty when the section complies.

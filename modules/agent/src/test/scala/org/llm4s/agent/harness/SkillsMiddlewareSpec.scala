@@ -38,7 +38,8 @@ class SkillsMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues w
     val seen = new CopyOnWriteArrayList[Vector[Message]]()
     def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] = {
       seen.add(messages)
-      if (seen.size == 1) Right(completion(AssistantMessage(None, Seq(ToolCall("c1", "noop", ujson.Obj())))))
+      if (seen.size == 1)
+        Right(completion(AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "noop", ujson.Obj())))))
       else Right(completion(AssistantMessage("done")))
     }
   }
@@ -107,7 +108,11 @@ class SkillsMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues w
           // the path is the one the section shows
           val system = messages.collectFirst { case s: SystemMessage => s.content }.getOrElse("")
           val path   = "\\(([^)]*SKILL\\.md)\\)".r.findFirstMatchIn(system).map(_.group(1)).getOrElse("missing")
-          Right(completion(AssistantMessage(None, Seq(ToolCall("r1", FileTools.ReadFile, ujson.Obj("path" -> path))))))
+          Right(
+            completion(
+              AssistantMessage(None, Seq(ToolCall(ToolCallId("r1"), FileTools.ReadFile, ujson.Obj("path" -> path))))
+            )
+          )
         } else Right(completion(AssistantMessage("done")))
       }
     }

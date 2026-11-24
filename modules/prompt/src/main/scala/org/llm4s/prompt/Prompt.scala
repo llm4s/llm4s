@@ -53,7 +53,7 @@ final class Prompt private (private val parts: Vector[Prompt.Part]) {
   }
 
   /** The prompt as a conversation, validated (no empty message). */
-  def toConversation: Result[Conversation] = Conversation.create(messages.toList)
+  def toConversation: Result[Conversation] = Conversation.create(messages)
 
   /** The text of every message, joined by a blank line; the roles are not shown. */
   def text: String = rendered.map(_._2).mkString("\n\n")

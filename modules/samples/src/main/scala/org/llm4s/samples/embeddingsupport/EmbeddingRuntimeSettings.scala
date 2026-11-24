@@ -16,9 +16,8 @@ object EmbeddingRuntimeSettings {
     for {
       emb      <- Llm4sConfig.embeddings()
       chunking <- EmbeddingSampleConfig.chunking()
-      (prov, _) = emb
     } yield EmbeddingRuntimeSettings(
-      provider = prov,
+      provider = emb.providerId.asString,
       chunkingEnabled = chunking.enabled,
       chunkSize = chunking.size,
       chunkOverlap = chunking.overlap

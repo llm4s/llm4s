@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -21,8 +23,8 @@ class ZaiClientClosedStateTest extends AnyFlatSpec with Matchers {
 
   private def createTestConfig: ZaiConfig = ZaiConfig(
     apiKey = Secret("test-api-key-for-closed-state-testing"),
-    model = "zai-coder-v1",
-    baseUrl = "https://example.invalid/v1",
+    model = ModelName("zai-coder-v1"),
+    baseUrl = BaseUrl("https://example.invalid/v1"),
     contextWindow = 128000,
     reserveCompletion = 8192
   )
@@ -55,9 +57,8 @@ class ZaiClientClosedStateTest extends AnyFlatSpec with Matchers {
     // Attempt to call streamComplete()
     val result = client.streamComplete(
       createTestConversation,
-      CompletionOptions(),
-      _ => chunksReceived += 1
-    )
+      CompletionOptions()
+    )(_ => chunksReceived += 1)
 
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[ConfigurationError]
@@ -82,7 +83,7 @@ class ZaiClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.withModel("zai-custom-model")
+    val config = createTestConfig.withModel(ModelName("zai-custom-model"))
     val client = new ZaiClient(config)
 
     client.close()

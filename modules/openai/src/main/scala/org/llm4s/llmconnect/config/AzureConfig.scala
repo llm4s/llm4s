@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.{ AccessTokenProvider, ApiKeyProvider }
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -44,9 +44,9 @@ import org.llm4s.types.Result
  */
 @Stable
 final case class AzureConfig private (
-  endpoint: String,
+  endpoint: BaseUrl,
   apiKey: Secret,
-  model: String,
+  model: ModelName,
   apiVersion: String,
   contextWindow: Int,
   reserveCompletion: Int,
@@ -56,8 +56,8 @@ final case class AzureConfig private (
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
   override val providerId: ProviderId                                 = ProviderId("azure")
-  override def endpointUrl: Option[String]                            = Some(endpoint)
-  override def withModel(model: String): AzureConfig                  = copy(model = model)
+  override def endpointUrl: Option[BaseUrl]                           = Some(endpoint)
+  override def withModel(model: ModelName): AzureConfig               = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): AzureConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): AzureConfig = copy(network = network)
 
@@ -65,13 +65,14 @@ final case class AzureConfig private (
    * Sends the key `provider` holds at each request in the `api-key` header, instead of `apiKey`, so a rotated key
    * is used without rebuilding the client (#2477). A config authenticates one way: this clears `tokenProvider`.
    */
-  override def withApiKeyProvider(provider: ApiKeyProvider): AzureConfig = withApiKeyProvider(Some(provider))
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[AzureConfig] =
+    Right(withApiKeyProvider(Some(provider)))
 
   /** `Some` as [[withApiKeyProvider(provider:* withApiKeyProvider]]; `None` goes back to `apiKey`. */
   def withApiKeyProvider(provider: Option[ApiKeyProvider]): AzureConfig =
     copy(apiKeyProvider = provider, tokenProvider = if provider.isDefined then None else tokenProvider)
 
-  def withEndpoint(endpoint: String): AzureConfig                = copy(endpoint = endpoint)
+  def withEndpoint(endpoint: BaseUrl): AzureConfig               = copy(endpoint = endpoint)
   def withApiKey(apiKey: Secret): AzureConfig                    = copy(apiKey = apiKey)
   def withApiVersion(apiVersion: String): AzureConfig            = copy(apiVersion = apiVersion)
   def withContextWindow(contextWindow: Int): AzureConfig         = copy(contextWindow = contextWindow)
@@ -111,9 +112,9 @@ object AzureConfig {
    * [[ProviderTimeouts.default]], and `tokenProvider` to none: the API key authenticates.
    */
   def apply(
-    endpoint: String,
+    endpoint: BaseUrl,
     apiKey: Secret,
-    model: String,
+    model: ModelName,
     apiVersion: String,
     contextWindow: Int,
     reserveCompletion: Int,
@@ -140,8 +141,8 @@ object AzureConfig {
    * alone (`gpt-4o` is 128k, an unknown model 8192); set them, and the rest, with the `with*`
    * setters, or use [[fromValues]] to consult the bundled model catalogue.
    */
-  def apply(endpoint: String, apiKey: Secret, model: String): AzureConfig = {
-    val (cw, rc) = azureFallback(model)
+  def apply(endpoint: BaseUrl, apiKey: Secret, model: ModelName): AzureConfig = {
+    val ContextLimits(cw, rc) = azureFallback(model)
     apply(endpoint, apiKey, model, DEFAULT_API_VERSION, cw, rc)
   }
 
@@ -151,7 +152,7 @@ object AzureConfig {
    * every other field at its default, as [[apply(endpoint:String,apiKey:org.llm4s.security.Secret,model:String)* apply]]
    * gives it. Usable from Java and Kotlin.
    */
-  def keyless(endpoint: String, model: String, tokenProvider: AccessTokenProvider): AzureConfig =
+  def keyless(endpoint: BaseUrl, model: ModelName, tokenProvider: AccessTokenProvider): AzureConfig =
     apply(endpoint, Secret(""), model).withTokenProvider(tokenProvider)
 
   /**
@@ -159,21 +160,21 @@ object AzureConfig {
    * resolves the context window from the model catalogue, with `tokenProvider` in place of an API key.
    */
   def fromTokenProvider(
-    modelName: String,
+    modelName: ModelName,
     tokenProvider: AccessTokenProvider,
-    endpoint: String,
+    endpoint: BaseUrl,
     apiVersion: String = DEFAULT_API_VERSION
   )(using ContextWindowResolver): Result[AzureConfig] =
     resolved(modelName, endpoint, None, apiVersion).map(_.withTokenProvider(tokenProvider))
 
-  private def azureFallback(modelName: String): (Int, Int) =
-    modelName match {
-      case name if name.contains("gpt-4o")        => (128000, standardReserve)
-      case name if name.contains("gpt-4-turbo")   => (128000, standardReserve)
-      case name if name.contains("gpt-4")         => (8192, standardReserve)
-      case name if name.contains("gpt-3.5-turbo") => (16384, standardReserve)
-      case name if name.contains("o1-")           => (128000, standardReserve)
-      case _                                      => (8192, standardReserve)
+  private def azureFallback(modelName: ModelName): ContextLimits =
+    modelName.asString match {
+      case name if name.contains("gpt-4o")        => ContextLimits(128000, standardReserve)
+      case name if name.contains("gpt-4-turbo")   => ContextLimits(128000, standardReserve)
+      case name if name.contains("gpt-4")         => ContextLimits(8192, standardReserve)
+      case name if name.contains("gpt-3.5-turbo") => ContextLimits(16384, standardReserve)
+      case name if name.contains("o1-")           => ContextLimits(128000, standardReserve)
+      case _                                      => ContextLimits(8192, standardReserve)
     }
 
   /**
@@ -189,31 +190,30 @@ object AzureConfig {
    * @param apiVersion Azure OpenAI API version string; [[DEFAULT_API_VERSION]] when omitted.
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     apiKey: Secret,
-    endpoint: String,
+    endpoint: BaseUrl,
     apiVersion: String = DEFAULT_API_VERSION
   )(using ContextWindowResolver): Result[AzureConfig] =
     resolved(modelName, endpoint, Some(apiKey), apiVersion)
 
   /** The validated config, with `apiKey` checked when there is one to check (a keyless config has none). */
   private def resolved(
-    modelName: String,
-    endpoint: String,
+    modelName: ModelName,
+    endpoint: BaseUrl,
     apiKey: Option[Secret],
     apiVersion: String
   )(using resolver: ContextWindowResolver): Result[AzureConfig] =
     for {
-      _ <- ProviderConfig.nonEmpty("Azure", "endpoint", endpoint)
+      _ <- ProviderConfig.nonEmpty("Azure", "endpoint", endpoint.asUrl)
       _ <- ProviderConfig.nonEmptyIfSet("Azure", "apiKey", apiKey.map(_.reveal))
     } yield {
-      val (cw, rc) = resolver.resolve(
-        lookupProviders = Seq("azure", "openai"),
+      val ContextLimits(cw, rc) = resolver.resolve(
+        lookupProviders = Seq(ProviderId("azure"), ProviderId("openai")),
         modelName = modelName,
         defaultContextWindow = 8192,
         defaultReserve = standardReserve,
-        fallbackResolver = azureFallback,
-        logPrefix = "Azure "
+        fallbackResolver = azureFallback
       )
       AzureConfig(
         endpoint = endpoint,

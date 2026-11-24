@@ -175,12 +175,12 @@ object ImageGenerationExample {
       case Right(providerCfg: org.llm4s.llmconnect.config.OpenAIConfig) =>
         val config = OpenAIConfig(
           apiKey = providerCfg.apiKey,
-          model = "gpt-image-1.5"
+          model = "gpt-image-2.6-sunburst"
         )
+        // GPT Image models always return base64; output_compression applies to jpeg and webp
         val options = ImageGenerationOptions(
           size = ImageSize.Auto,
-          responseFormat = Some("url"),
-          outputFormat = Some("png"),
+          outputFormat = Some("webp"),
           background = Some("auto"),
           outputCompression = Some(80)
         )
@@ -192,7 +192,7 @@ object ImageGenerationExample {
         ) match {
           case Right(image) =>
             logger.info(
-              s"OpenAI image generated. URL: ${image.url.getOrElse("n/a")}, format: ${image.format.extension}"
+              s"OpenAI image generated: ${image.data.length} base64 characters, format: ${image.format.extension}"
             )
           case Left(error) =>
             logger.info(s"OpenAI generation failed: ${error.message}")

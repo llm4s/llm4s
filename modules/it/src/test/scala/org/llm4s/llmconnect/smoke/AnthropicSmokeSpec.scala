@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
@@ -37,9 +39,9 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wit
   private def config(key: String, model: String = "claude-3-haiku-20240307"): AnthropicConfig =
     AnthropicConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret(key),
-        baseUrl = "https://api.anthropic.com"
+        baseUrl = BaseUrl("https://api.anthropic.com")
       )
       .value
 
@@ -67,7 +69,7 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wit
 
     val client = AnthropicClient(config(apiKey.get)).toOption.get
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+    val result = client.streamComplete(conversation, CompletionOptions())(c => chunks += c)
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
       result.isRight shouldBe true
@@ -96,11 +98,19 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wit
     AnthropicClient(config(key, ThinkingModel)).map { client =>
       ReasoningSetup(
         client,
-        CompletionOptions(temperature = 1.0, maxTokens = Some(4096)).withReasoning(ReasoningEffort.Low),
+        CompletionOptions(temperature = Some(1.0), maxTokens = Some(4096)).withReasoning(ReasoningEffort.Low),
         expectsThinkingText = true
       )
     }
   }
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /v1/models/<model> (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(AnthropicClient(config("sk-ant-invalid-key-for-testing")))
+  override protected def unknownModelClient(key: String): Option[Result[LLMClient]] =
+    Some(AnthropicClient(config(key, "llm4s-no-such-model")))
+
+  registerValidationContract()
 }

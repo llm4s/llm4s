@@ -6,6 +6,7 @@ search_title: "Agent memory in Scala: persistent context across turns"
 nav_order: 3
 parent: Agents
 grand_parent: User Guide
+cites_closed_issues: [1579, 1594]
 ---
 
 # Memory System
@@ -255,7 +256,7 @@ val result = manager.recordMessage(
 )
 
 // Record several messages at once
-val result = manager.recordConversation(
+val batch = manager.recordConversation(
   messages = Seq(UserMessage("And in Rome?"), AssistantMessage("Sunny, 24 degrees.")),
   conversationId = "conv-789"
 )
@@ -327,7 +328,7 @@ Fast but volatile - loses data on restart. Each store is an immutable value: a w
 new store, and `SimpleMemoryManager` keeps track of it for you.
 
 ```scala
-import org.llm4s.agent.memory.InMemoryStore
+import org.llm4s.agent.memory.{ InMemoryStore, SimpleMemoryManager }
 
 val store = InMemoryStore.empty
 val manager = SimpleMemoryManager.withStore(store)
@@ -435,9 +436,10 @@ for {
 - **Failures never cost the answer.** A store that cannot be searched or written is skipped, and
   announced with a durable `MemoryEvents.Skipped` (the operation and the error's type, no content);
   `MemoryEvents.Recorded` and `MemoryEvents.Consolidated` carry counts only.
-- **Register it before your guardrails** (or pass `runsBefore = Set(MiddlewareId("guardrails"))`),
-  so an answer a guardrail blocks is never recorded. A recording that already applied is not undone
-  by a later Block.
+- **It runs outside your guardrails**, so an answer a guardrail blocks is never recorded. In one agent that is
+  arranged for you, wherever you registered the two and whatever ids the guardrail middleware have; `build()` refuses
+  it on a handoff target when the root agent has guardrail middleware, since the root's run last. A recording that
+  already applied is not undone by a later Block.
 - **Adding it to an existing agent** registers the `semantic-memory-recalled` key, which starts
   empty: a thread at rest continues under the agent that added it, and, since the recall is
   cleared at the end of each turn, under an agent that removed it again. A thread in flight
@@ -491,6 +493,7 @@ above, with `recordMessage` or `recordConversation`.
 
 ```scala
 import org.llm4s.agent.memory._
+import org.llm4s.types.Result
 
 import scala.util.Using
 

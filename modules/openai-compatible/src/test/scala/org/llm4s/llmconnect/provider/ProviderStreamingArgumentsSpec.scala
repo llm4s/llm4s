@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpServer
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAIConfig, ZaiConfig }
@@ -73,9 +75,9 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
     withSseServer(payload) { baseUrl =>
       val config = OpenAIConfig(
         apiKey = Secret("test-key"),
-        model = "test-model",
+        model = ModelName("test-model"),
         organization = None,
-        baseUrl = baseUrl,
+        baseUrl = BaseUrl(baseUrl),
         contextWindow = 8192,
         reserveCompletion = 4096
       )
@@ -85,9 +87,8 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
 
       val result = client.streamComplete(
         Conversation(Seq(UserMessage("hello"))),
-        CompletionOptions(),
-        chunk => chunk.toolCall.foreach(tc => captured += tc.arguments)
-      )
+        CompletionOptions()
+      )(chunk => chunk.toolCall.foreach(tc => captured += tc.arguments))
 
       result.left.map(_.message.contains("malformed tool call")) shouldBe Left(true)
       captured.toList shouldBe List(ujson.Obj(), ujson.Str("{not json"))
@@ -105,8 +106,8 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
     withSseServer(payload) { baseUrl =>
       val config = ZaiConfig(
         apiKey = Secret("test-key"),
-        model = "test-model",
-        baseUrl = baseUrl,
+        model = ModelName("test-model"),
+        baseUrl = BaseUrl(baseUrl),
         contextWindow = 8192,
         reserveCompletion = 4096
       )
@@ -116,9 +117,8 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
 
       val result = client.streamComplete(
         Conversation(Seq(UserMessage("hello"))),
-        CompletionOptions(),
-        chunk => chunk.toolCall.foreach(tc => captured += tc.arguments)
-      )
+        CompletionOptions()
+      )(chunk => chunk.toolCall.foreach(tc => captured += tc.arguments))
 
       result.left.map(_.message.contains("malformed tool call")) shouldBe Left(true)
       captured.toList shouldBe List(ujson.Obj(), ujson.Str("{not json"))
@@ -136,8 +136,8 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
     withSseServer(payload) { baseUrl =>
       val config = DeepSeekConfig(
         apiKey = Secret("test-key"),
-        model = "test-model",
-        baseUrl = baseUrl,
+        model = ModelName("test-model"),
+        baseUrl = BaseUrl(baseUrl),
         contextWindow = 8192,
         reserveCompletion = 4096
       )
@@ -147,9 +147,8 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
 
       val result = client.streamComplete(
         Conversation(Seq(UserMessage("hello"))),
-        CompletionOptions(),
-        chunk => chunk.toolCall.foreach(tc => captured += tc.arguments)
-      )
+        CompletionOptions()
+      )(chunk => chunk.toolCall.foreach(tc => captured += tc.arguments))
 
       result.left.map(_.message.contains("malformed tool call")) shouldBe Left(true)
       captured.toList shouldBe List(ujson.Obj(), ujson.Str("{not json"))

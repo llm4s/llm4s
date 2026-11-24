@@ -1,6 +1,6 @@
 package org.llm4s.agent
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.model.Message
 
 /**
@@ -21,7 +21,7 @@ import org.llm4s.llmconnect.model.Message
  *                       conversation coherent, and can send more than the limits allow.
  * @param pruningStrategy Strategy for pruning the history before those turns when a limit is exceeded
  */
-@Stable
+@Experimental
 final case class ContextWindowConfig private (
   maxTokens: Option[Int],
   maxMessages: Option[Int],
@@ -38,6 +38,7 @@ final case class ContextWindowConfig private (
   def withPruningStrategy(value: PruningStrategy): ContextWindowConfig = copy(pruningStrategy = value)
 }
 
+@Experimental
 object ContextWindowConfig {
   def apply(
     maxTokens: Option[Int] = None,
@@ -52,9 +53,10 @@ object ContextWindowConfig {
 /**
  * Strategies for pruning conversation history when context limits are exceeded.
  */
-@Stable
+@Experimental
 sealed trait PruningStrategy
 
+@Experimental
 object PruningStrategy {
 
   /**

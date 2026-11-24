@@ -73,12 +73,11 @@ Name the model in `src/main/resources/application.conf`; with `OPENAI_API_KEY` s
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
   providers {
-    provider = "openai-main"
-
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }

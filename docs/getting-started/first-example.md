@@ -46,12 +46,11 @@ It reads the provider from a named section in `src/main/resources/application.co
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }
@@ -127,7 +126,7 @@ client <- LLMConnect.getClient(providerConfig)
 
 In LLM4S, we follow a strict configuration boundary. The entry point (`Main`) builds the client:
 
-- Loads the typed config of the section `llm4s.providers.provider` names in `application.conf`
+- Loads the typed config of the section `llm4s.defaultProvider` names in `application.conf`
 
 - Selects the appropriate provider (OpenAI, Anthropic, etc.)
 
@@ -224,7 +223,7 @@ class ToolExample(client: LLMClient) {
 
   def run(): Unit = {
     val result = for {
-      weatherTool <- ToolBuilder[Map[String, Any], String](
+      weatherTool <- ToolBuilder[String](
                        "get_weather",
                        "Get current weather for a location",
                        weatherSchema
@@ -261,10 +260,7 @@ import org.llm4s.llmconnect.model._
 
 class StreamingExample(client: LLMClient) {
   def run(): Unit = {
-    val result = client.streamComplete(
-      Conversation(Seq(UserMessage("Write a short poem about Scala"))),
-      onChunk = chunk => chunk.content.foreach(print)  // Print each token as it arrives
-    )
+    val result = client.streamComplete(Conversation(Seq(UserMessage("Write a short poem about Scala"))))(chunk => chunk.content.foreach(print))  // Print each token as it arrives
 
     result.fold(
       error => println(s"Error: $error"),
@@ -327,10 +323,11 @@ val uppercased: Result[String] = content.map(_.toUpperCase)
 
 ```scala
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 // The model belongs to the provider section, so to use another model load the section that names it,
-// for example one with provider = "openai" and model = "gpt-4-turbo"
-val gpt4Turbo = Llm4sConfig.provider("openai-gpt4-turbo")
+// for example one with provider = "openai" and model = "gpt-5.6-terra"
+val gpt4Turbo = Llm4sConfig.provider(ProviderName("openai-gpt4-turbo"))
 ```
 
 ### Provider-Specific Settings
@@ -341,7 +338,7 @@ as temperature and token limits go in {% include api.html t="org.llm4s.llmconnec
 ```hocon
 openai-main {
   provider = "openai"
-  model    = "gpt-4o"
+  model    = "gpt-5.6-terra"
 }
 ```
 
@@ -377,7 +374,7 @@ class ComprehensiveAgent(client: LLMClient) {
 
     // Tools belong to the agent, so give them to the builder
     val result = for {
-      calcTool <- ToolBuilder[Map[String, Any], String](
+      calcTool <- ToolBuilder[String](
                     "calculate",
                     "Evaluate a mathematical expression",
                     calcSchema
@@ -455,10 +452,7 @@ val result = for {
 
 ```scala
 // Assuming client is injected
-val completion = client.streamComplete(
-  Conversation(Seq(UserMessage("Your question here"))),
-  onChunk = chunk => chunk.content.foreach(print)
-)
+val completion = client.streamComplete(Conversation(Seq(UserMessage("Your question here"))))(chunk => chunk.content.foreach(print))
 ```
 
 ---
@@ -499,10 +493,7 @@ Streaming gets you the first token faster and improves perceived latency:
 import org.llm4s.llmconnect.model._
 
 // Assuming client is injected
-val streamResult = client.streamComplete(
-  Conversation(Seq(UserMessage("Write a long essay about Scala"))),
-  onChunk = chunk => chunk.content.foreach(print)  // Prints as tokens arrive
-)
+val streamResult = client.streamComplete(Conversation(Seq(UserMessage("Write a long essay about Scala"))))(chunk => chunk.content.foreach(print))  // Prints as tokens arrive
 
 streamResult match {
   case Right(completion) => println(s"\nCompleted with ${completion.usage.map(_.totalTokens).getOrElse(0)} tokens")
@@ -558,7 +549,7 @@ stream), and a provider section can change them:
 ```hocon
 llm4s.providers.my-openai {
   provider = "openai"
-  model    = "gpt-4o"
+  model    = "gpt-5.6-terra"
   timeouts { request = 3m, stream = 15m }
 }
 ```
@@ -568,13 +559,12 @@ bounds. For long-form generation, prefer streaming (above).
 
 ### 5. Use Cheaper Models for Development
 
-Change the section's `model`, or point `llm4s.providers.provider` at another section (see
+Change the section's `model`, or point `llm4s.defaultProvider` at another section (see
 [Switching providers](configuration#switching-providers)):
 
 ```hocon
+llm4s.defaultProvider = "ollama-local"            # development: free, local
 llm4s.providers {
-  provider = "ollama-local"            # development: free, local
-
   ollama-local {
     provider = "ollama"
     model    = "llama3.2"
@@ -583,7 +573,7 @@ llm4s.providers {
 
   openai-main {                        # production: select with provider = "openai-main"
     provider = "openai"
-    model    = "gpt-4o-mini"           # much cheaper than gpt-4o
+    model    = "gpt-5.6-luna"           # much cheaper than gpt-5.6-terra
   }
 }
 ```

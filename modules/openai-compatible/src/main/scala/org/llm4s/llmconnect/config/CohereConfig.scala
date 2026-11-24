@@ -4,7 +4,7 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -42,24 +42,26 @@ import org.slf4j.LoggerFactory
 @Experimental
 final case class CohereConfig private (
   apiKey: Secret,
-  model: String,
-  baseUrl: String,
+  model: ModelName,
+  baseUrl: BaseUrl,
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                     = ProviderId("cohere")
-  override def endpointUrl: Option[String]                                = Some(baseUrl)
-  override def withModel(model: String): CohereConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): CohereConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): CohereConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): CohereConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): CohereConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                  = ProviderId("cohere")
+  override def endpointUrl: Option[BaseUrl]                            = Some(baseUrl)
+  override def withModel(model: ModelName): CohereConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): CohereConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): CohereConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[CohereConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): CohereConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): CohereConfig                    = copy(apiKey = apiKey)
-  def withBaseUrl(baseUrl: String): CohereConfig                  = copy(baseUrl = baseUrl)
+  def withBaseUrl(baseUrl: BaseUrl): CohereConfig                 = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): CohereConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): CohereConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
@@ -77,7 +79,7 @@ object CohereConfig {
    * Cohere's OpenAI-compatibility endpoint. This was `https://api.cohere.com`, the native API
    * root, until the client moved onto the Compatibility API (#1132).
    */
-  val DEFAULT_BASE_URL: String = s"https://api.cohere.ai$COMPATIBILITY_PATH"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl(s"https://api.cohere.ai$COMPATIBILITY_PATH")
 
   /** The context window `apply` uses when none is given; [[fromValues]] resolves the model's own. */
   val DEFAULT_CONTEXT_WINDOW: Int = 128000
@@ -91,8 +93,8 @@ object CohereConfig {
    */
   def apply(
     apiKey: Secret,
-    model: String,
-    baseUrl: String = DEFAULT_BASE_URL,
+    model: ModelName,
+    baseUrl: BaseUrl = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
     timeouts: ProviderTimeouts = ProviderTimeouts.default
@@ -112,10 +114,11 @@ object CohereConfig {
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,
    * which do not see Scala default arguments. Set the rest with the `with*` setters.
    */
-  def apply(apiKey: Secret, model: String): CohereConfig =
+  def apply(apiKey: Secret, model: ModelName): CohereConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
-  private val cohereFallback: String => (Int, Int) = _ => (DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)
+  private val cohereFallback: ModelName => ContextLimits = _ =>
+    ContextLimits(DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)
 
   /**
    * The Compatibility API base for a configured base URL.
@@ -126,10 +129,10 @@ object CohereConfig {
    * version segment (`/v1` or `/v2`). So `https://api.cohere.com`, `https://api.cohere.com/v2`
    * and a proxy root that forwards to Cohere all keep working. Idempotent.
    */
-  def compatibilityBaseUrl(baseUrl: String): String =
-    val url = baseUrl.trim.stripSuffix("/")
-    if url.endsWith(COMPATIBILITY_PATH) then url
-    else url.stripSuffix("/v2").stripSuffix("/v1") + COMPATIBILITY_PATH
+  def compatibilityBaseUrl(baseUrl: BaseUrl): BaseUrl =
+    val url = baseUrl.asUrl.trim.stripSuffix("/")
+    if url.endsWith(COMPATIBILITY_PATH) then BaseUrl(url)
+    else BaseUrl(url.stripSuffix("/v2").stripSuffix("/v1") + COMPATIBILITY_PATH)
 
   /**
    * Constructs a [[CohereConfig]], resolving `contextWindow` and
@@ -143,23 +146,23 @@ object CohereConfig {
    *                  [[org.llm4s.config.Llm4sConfig]].
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     apiKey: Secret,
-    baseUrl: String
+    baseUrl: BaseUrl
   )(using resolver: ContextWindowResolver): Result[CohereConfig] =
     for {
       _ <- ProviderConfig.nonEmpty("Cohere", "apiKey", apiKey.reveal)
-      _ <- ProviderConfig.nonEmpty("Cohere", "baseUrl", baseUrl)
+      _ <- ProviderConfig.nonEmpty("Cohere", "baseUrl", baseUrl.asUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
-        lookupProviders = Seq("cohere"),
+      val ContextLimits(cw, rc) = resolver.resolve(
+        lookupProviders = Seq(ProviderId("cohere")),
         modelName = modelName,
         defaultContextWindow = DEFAULT_CONTEXT_WINDOW,
         defaultReserve = DEFAULT_RESERVE_COMPLETION,
         fallbackResolver = cohereFallback
       )
       val endpoint = compatibilityBaseUrl(baseUrl)
-      if (endpoint != baseUrl.trim.stripSuffix("/"))
+      if (endpoint.asUrl != baseUrl.asUrl.trim.stripSuffix("/"))
         logger.info(
           s"Cohere baseUrl $baseUrl is not a Compatibility API base; using $endpoint. " +
             s"llm4s calls Cohere through its OpenAI-compatibility API since #1132."

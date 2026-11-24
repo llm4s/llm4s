@@ -1,5 +1,6 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import java.util.concurrent.CopyOnWriteArrayList
@@ -33,7 +34,7 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with TestTimeLimit with Matc
   /** Counts executions that got past argument extraction, i.e. the tool's real body. */
   private val executed = new AtomicInteger(0)
 
-  private val echoTool = ToolBuilder[Map[String, Any], EchoResult](
+  private val echoTool = ToolBuilder[EchoResult](
     "echo",
     "echoes",
     Schema.`object`[Map[String, Any]]("params").withRequiredField("v", Schema.string("value"))
@@ -57,25 +58,18 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with TestTimeLimit with Matc
       conversations.add(c)
       Right(reply(i))
     }
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 8192
     def getReserveCompletion(): Int = 512
   }
 
   private def text(s: String): Completion =
-    Completion(id = "t", created = Instant.EPOCH, content = s, model = "m", message = AssistantMessage(Some(s)))
+    Completion(id = "t", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage(Some(s)))
 
   private def callWith(i: Int, args: ujson.Value): Completion = {
-    val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = args))
-    Completion(
-      id = s"t$i",
-      created = Instant.EPOCH,
-      content = "",
-      model = "m",
-      message = AssistantMessage("", calls),
-      toolCalls = calls.toList
-    )
+    val calls = Seq(ToolCall(id = ToolCallId(s"call-$i"), name = "echo", arguments = args))
+    Completion(id = s"t$i", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage("", calls))
   }
 
   private def toolResults(c: Conversation): Seq[ToolMessage] = c.messages.collect { case m: ToolMessage => m }
@@ -147,7 +141,7 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with TestTimeLimit with Matc
           case 1 => Right(callWith(1, ujson.Obj()))
           case _ => Left(org.llm4s.error.SimpleError("provider down"))
         }
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 1
       def getReserveCompletion(): Int = 1

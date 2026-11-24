@@ -24,7 +24,7 @@ class CompletionCacheKeySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "be equal for equal options" in {
-    val options = CompletionOptions(temperature = 0.2, maxTokens = Some(64))
+    val options = CompletionOptions(temperature = Some(0.2), maxTokens = Some(64))
       .withReasoning(ReasoningEffort.High)
       .withThinking(Thinking.Adaptive)
     CompletionCacheKey.of(options) shouldBe CompletionCacheKey.of(options.withTemperature(0.2))

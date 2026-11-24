@@ -8,14 +8,14 @@ import org.scalatest.matchers.should.Matchers
 class GuardrailSpec extends AnyFlatSpec with Matchers {
 
   "LengthCheck" should "accept input within bounds" in {
-    val guardrail = new LengthCheck(min = 5, max = 20)
+    val guardrail = LengthCheck(min = 5, max = 20)
     val result    = guardrail.validate("Valid input")
 
     result shouldBe Right("Valid input")
   }
 
   it should "reject input that is too short" in {
-    val guardrail = new LengthCheck(min = 10, max = 100)
+    val guardrail = LengthCheck(min = 10, max = 100)
     val result    = guardrail.validate("Short")
 
     result.isLeft shouldBe true
@@ -23,7 +23,7 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "reject input that is too long" in {
-    val guardrail = new LengthCheck(min = 1, max = 10)
+    val guardrail = LengthCheck(min = 1, max = 10)
     val result    = guardrail.validate("This is way too long for the maximum")
 
     result.isLeft shouldBe true
@@ -31,14 +31,14 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "accept input at exact minimum" in {
-    val guardrail = new LengthCheck(min = 5, max = 20)
+    val guardrail = LengthCheck(min = 5, max = 20)
     val result    = guardrail.validate("12345")
 
     result shouldBe Right("12345")
   }
 
   it should "accept input at exact maximum" in {
-    val guardrail = new LengthCheck(min = 5, max = 10)
+    val guardrail = LengthCheck(min = 5, max = 10)
     val result    = guardrail.validate("1234567890")
 
     result shouldBe Right("1234567890")
@@ -61,14 +61,14 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   "ProfanityFilter" should "accept clean content" in {
-    val guardrail = new ProfanityFilter()
+    val guardrail = ProfanityFilter()
     val result    = guardrail.validate("This is clean content")
 
     result shouldBe Right("This is clean content")
   }
 
   it should "reject inappropriate content" in {
-    val guardrail = new ProfanityFilter()
+    val guardrail = ProfanityFilter()
     val result    = guardrail.validate("This contains badword")
 
     result.isLeft shouldBe true
@@ -76,14 +76,14 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "be case-insensitive by default" in {
-    val guardrail = new ProfanityFilter()
+    val guardrail = ProfanityFilter()
     val result    = guardrail.validate("This contains BADWORD")
 
     result.isLeft shouldBe true
   }
 
   it should "support custom bad words" in {
-    val guardrail = new ProfanityFilter(customBadWords = Set("custom"))
+    val guardrail = ProfanityFilter.withCustomWords(Set("custom"))
     val result    = guardrail.validate("This contains custom")
 
     result.isLeft shouldBe true
@@ -97,21 +97,21 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   "JSONValidator" should "accept valid JSON" in {
-    val guardrail = new JSONValidator()
+    val guardrail = JSONValidator()
     val result    = guardrail.validate("""{"key": "value"}""")
 
     result shouldBe Right("""{"key": "value"}""")
   }
 
   it should "accept valid JSON array" in {
-    val guardrail = new JSONValidator()
+    val guardrail = JSONValidator()
     val result    = guardrail.validate("""[1, 2, 3]""")
 
     result shouldBe Right("""[1, 2, 3]""")
   }
 
   it should "reject invalid JSON" in {
-    val guardrail = new JSONValidator()
+    val guardrail = JSONValidator()
     val result    = guardrail.validate("not json")
 
     result.isLeft shouldBe true
@@ -119,21 +119,21 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "reject malformed JSON" in {
-    val guardrail = new JSONValidator()
+    val guardrail = JSONValidator()
     val result    = guardrail.validate("""{"key": "value"  missing brace""")
 
     result.isLeft shouldBe true
   }
 
   "RegexValidator" should "accept matching content" in {
-    val guardrail = new RegexValidator("^[0-9]+$".r)
+    val guardrail = RegexValidator("^[0-9]+$".r)
     val result    = guardrail.validate("12345")
 
     result shouldBe Right("12345")
   }
 
   it should "reject non-matching content" in {
-    val guardrail = new RegexValidator("^[0-9]+$".r)
+    val guardrail = RegexValidator("^[0-9]+$".r)
     val result    = guardrail.validate("abc123")
 
     result.isLeft shouldBe true
@@ -141,7 +141,7 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "support custom error messages" in {
-    val guardrail = new RegexValidator("^[0-9]+$".r, Some("Must be numeric"))
+    val guardrail = RegexValidator("^[0-9]+$".r, "Must be numeric")
     val result    = guardrail.validate("abc")
 
     result.isLeft shouldBe true
@@ -190,8 +190,8 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   "CompositeGuardrail.all" should "pass if all guardrails pass" in {
     val composite = CompositeGuardrail.all(
       Seq(
-        new LengthCheck(1, 100),
-        new ProfanityFilter()
+        LengthCheck(1, 100),
+        ProfanityFilter()
       )
     )
 
@@ -202,8 +202,8 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   it should "fail if any guardrail fails" in {
     val composite = CompositeGuardrail.all(
       Seq(
-        new LengthCheck(1, 10), // Will fail
-        new ProfanityFilter()
+        LengthCheck(1, 10), // Will fail
+        ProfanityFilter()
       )
     )
 
@@ -214,8 +214,8 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   it should "aggregate all errors" in {
     val composite = CompositeGuardrail.all(
       Seq(
-        new LengthCheck(100, 200),                        // Will fail (too short)
-        new ProfanityFilter(customBadWords = Set("test")) // Will also fail
+        LengthCheck(100, 200),                       // Will fail (too short)
+        ProfanityFilter.withCustomWords(Set("test")) // Will also fail
       )
     )
 
@@ -227,8 +227,8 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   "CompositeGuardrail.any" should "pass if any guardrail passes" in {
     val composite = CompositeGuardrail.any(
       Seq(
-        new RegexValidator("^[0-9]+$".r), // Will fail
-        new RegexValidator("^[a-z]+$".r)  // Will pass
+        RegexValidator("^[0-9]+$".r), // Will fail
+        RegexValidator("^[a-z]+$".r)  // Will pass
       )
     )
 
@@ -239,8 +239,8 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   it should "fail if all guardrails fail" in {
     val composite = CompositeGuardrail.any(
       Seq(
-        new RegexValidator("^[0-9]+$".r),
-        new RegexValidator("^[A-Z]+$".r)
+        RegexValidator("^[0-9]+$".r),
+        RegexValidator("^[A-Z]+$".r)
       )
     )
 
@@ -251,8 +251,8 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   "CompositeGuardrail.sequential" should "run guardrails in sequence" in {
     val composite = CompositeGuardrail.sequential(
       Seq(
-        new LengthCheck(1, 100),
-        new ProfanityFilter()
+        LengthCheck(1, 100),
+        ProfanityFilter()
       )
     )
 
@@ -262,8 +262,8 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   it should "short-circuit on first failure" in {
     val composite = CompositeGuardrail.sequential(
       Seq(
-        new LengthCheck(100, 200), // Will fail immediately
-        new ProfanityFilter()      // Should not be evaluated
+        LengthCheck(100, 200), // Will fail immediately
+        ProfanityFilter()      // Should not be evaluated
       )
     )
 
@@ -272,8 +272,8 @@ class GuardrailSpec extends AnyFlatSpec with Matchers {
   }
 
   "Guardrail.andThen" should "compose guardrails" in {
-    val lengthCheck     = new LengthCheck(1, 100)
-    val profanityFilter = new ProfanityFilter()
+    val lengthCheck     = LengthCheck(1, 100)
+    val profanityFilter = ProfanityFilter()
     val composed        = lengthCheck.andThen(profanityFilter)
 
     composed.validate("Clean text") shouldBe Right("Clean text")

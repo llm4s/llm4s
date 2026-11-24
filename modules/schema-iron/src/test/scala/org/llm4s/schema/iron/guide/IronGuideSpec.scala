@@ -44,7 +44,7 @@ class IronGuideSpec extends AnyFlatSpec with Matchers {
     ) derives SchemaOf,
           ReadWriter
 
-    val book: Result[ToolFunction[Booking, String]] =
+    val book: Result[ToolFunction[String]] =
       Tool.of[Booking, String]("book_stay", "Books a stay")(b => Right(s"Booked ${b.nights} nights for ${b.guest}"))
 
     def schema: ujson.Value = SchemaOf[Review].toJsonSchema()

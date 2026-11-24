@@ -12,6 +12,7 @@ import org.llm4s.llmconnect.model.{
   SystemMessage,
   TokenUsage,
   ToolCall,
+  ToolCallId,
   ToolMessage,
   UserMessage
 }
@@ -132,11 +133,11 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
     chat.call(new Prompt("hi", options))
 
     val sent = client.lastCall.map(_.options).get
-    sent.temperature shouldBe 0.2
-    sent.topP shouldBe 0.9
+    sent.temperature shouldBe Some(0.2)
+    sent.topP shouldBe Some(0.9)
     sent.maxTokens shouldBe Some(64)
-    sent.presencePenalty shouldBe 0.5
-    sent.frequencyPenalty shouldBe 0.25
+    sent.presencePenalty shouldBe Some(0.5)
+    sent.frequencyPenalty shouldBe Some(0.25)
     sent.tools shouldBe empty
   }
 
@@ -231,8 +232,13 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
       .content("")
       .toolCalls(
         java.util.List.of(
-          new SpringAssistantMessage.ToolCall("call-1", "function", "weather", """{"city":"Paris"}"""),
-          new SpringAssistantMessage.ToolCall("call-2", "function", "time", "")
+          new SpringAssistantMessage.ToolCall(
+            ToolCallId("call-1").asString,
+            "function",
+            "weather",
+            """{"city":"Paris"}"""
+          ),
+          new SpringAssistantMessage.ToolCall(ToolCallId("call-2").asString, "function", "time", "")
         )
       )
       .build()
@@ -252,12 +258,14 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
       Seq(
         UserMessage("Weather?"),
         AssistantMessage(
-          contentOpt = None,
-          toolCalls =
-            Seq(ToolCall("call-1", "weather", ujson.Obj("city" -> "Paris")), ToolCall("call-2", "time", ujson.Obj()))
+          text = None,
+          toolCalls = Seq(
+            ToolCall(ToolCallId("call-1"), "weather", ujson.Obj("city" -> "Paris")),
+            ToolCall(ToolCallId("call-2"), "time", ujson.Obj())
+          )
         ),
-        ToolMessage("sunny", "call-1"),
-        ToolMessage("", "call-2")
+        ToolMessage("sunny", ToolCallId("call-1")),
+        ToolMessage("", ToolCallId("call-2"))
       )
     )
   }
@@ -267,7 +275,9 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
     val assistant = SpringAssistantMessage
       .builder()
       .content("")
-      .toolCalls(java.util.List.of(new SpringAssistantMessage.ToolCall("c", "function", "weather", "{oops")))
+      .toolCalls(
+        java.util.List.of(new SpringAssistantMessage.ToolCall(ToolCallId("c").asString, "function", "weather", "{oops"))
+      )
       .build()
     intercept[LlmException](chat.call(new Prompt(java.util.List.of(assistant)))).getMessage should include(
       "tool 'weather' are not JSON"
@@ -319,9 +329,7 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
     val throwing = new LLMClient {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         Left(ValidationError("x", "unused"))
-      override def streamComplete(
-        c: Conversation,
-        o: CompletionOptions,
+      override def streamComplete(c: Conversation, o: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = throw new IllegalStateException("client bug")
       override def getContextWindow(): Int     = 1000
@@ -338,9 +346,7 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
     val blocking = new LLMClient {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         Left(ValidationError("x", "unused"))
-      override def streamComplete(
-        c: Conversation,
-        o: CompletionOptions,
+      override def streamComplete(c: Conversation, o: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = {
         onChunk(StreamedChunk("s1", Some("first")))
@@ -388,7 +394,7 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
     client.callCount shouldBe 2
     content shouldBe "Sunny in Paris"
     tool.inputs shouldBe Vector("""{"city":"Paris"}""")
-    client.calls.last.messages.last shouldBe ToolMessage("sunny", "c1")
+    client.calls.last.messages.last shouldBe ToolMessage("sunny", ToolCallId("c1"))
   }
 
   "Llm4sChatModel.of" should "adapt the Java facade's client" in {

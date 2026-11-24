@@ -3,15 +3,7 @@ package org.llm4s.agent.delegation
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.{ Agent, AgentBuilder, CompletionFixture }
-import org.llm4s.agent.graph.{
-  GraphError,
-  GraphRuntime,
-  InMemoryCheckpointer,
-  InterruptId,
-  RunConfig,
-  ThreadId,
-  ToolCallId
-}
+import org.llm4s.agent.graph.{ GraphError, GraphRuntime, InMemoryCheckpointer, InterruptId, RunConfig, ThreadId }
 import org.llm4s.agent.graph.toolloop.ApprovalDecision
 import org.llm4s.agent.graph.middleware.{ PermissionMiddleware, PermissionRule }
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, Operation, ToolContent, ToolOutcome, ToolSet }
@@ -85,7 +77,7 @@ class DelegationSpec
       case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
     }
     val agent = lead(client)
-      .withTools(ToolSet.of(echo("parent_tool")).value)
+      .withToolSet(ToolSet.of(echo("parent_tool")).value)
       .withSubagents(researcher.withTools(ToolSet.of(echo("child_tool")).value))
       .build()
       .value
@@ -132,7 +124,7 @@ class DelegationSpec
         Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "x"))))
       case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
       case Child("researcher", _) =>
-        Right(calling(ToolCall("k1", "child_tool", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "child_tool", ujson.Obj("text" -> "x"))))
     }
     val limited = researcher.withTools(ToolSet.of(echo("child_tool")).value).withMaxSteps(1)
     val result  = lead(client).withSubagents(limited).build().value.run(ThreadId("t1"), "go").value
@@ -236,7 +228,7 @@ class DelegationSpec
         Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
       case Lead(_) => Right(calling(call("h1", "handoff_to_specialist", ujson.Obj())))
       case messages if messages.headOption.exists(_.content.startsWith("SPECIALIST")) =>
-        if messages.exists { case t: ToolMessage => t.toolCallId == "c2"; case _ => false } then
+        if messages.exists { case t: ToolMessage => t.toolCallId == ToolCallId("c2"); case _ => false } then
           Right(CompletionFixture.simple(toolResults(messages).last))
         else Right(calling(call("c2", "task_researcher", ujson.Obj("topic" -> "x"))))
       case Child("general", _)    => Right(CompletionFixture.simple("report"))
@@ -295,7 +287,7 @@ class DelegationSpec
         Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
       case Lead(_) => Right(calling(call("h1", "handoff_to_specialist", ujson.Obj())))
       case messages if messages.headOption.exists(_.content.startsWith("SPECIALIST")) =>
-        if messages.exists { case t: ToolMessage => t.toolCallId == "c2"; case _ => false } then
+        if messages.exists { case t: ToolMessage => t.toolCallId == ToolCallId("c2"); case _ => false } then
           Right(CompletionFixture.simple(toolResults(messages).last))
         else Right(calling(call("c2", "task_researcher", ujson.Obj("topic" -> "x"))))
       case Child("general", _)    => Right(CompletionFixture.simple("report"))
@@ -318,7 +310,7 @@ class DelegationSpec
     val specialist = Agent
       .builder("specialist", client)
       .withSystemPrompt("SPECIALIST")
-      .withTools(ToolSet.of(echo("task_researcher")).value)
+      .withToolSet(ToolSet.of(echo("task_researcher")).value)
     val refused = lead(client)
       .withSubagents(researcher)
       .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
@@ -426,7 +418,7 @@ class DelegationSpec
       case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
       case Child("researcher", _) =>
         childCalls.incrementAndGet() match
-          case 1 => Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+          case 1 => Right(calling(ToolCall(ToolCallId("k1"), "probe", ujson.Obj("text" -> "x"))))
           case 2 => Left(ValidationError("provider", "the provider is down"))
           case _ => Right(CompletionFixture.simple("""{"summary":"recovered","sources":1}"""))
     }
@@ -458,7 +450,7 @@ class DelegationSpec
         Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
       case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
       case Child("researcher", _) =>
-        Right(calling(ToolCall("k1", "child_tool", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "child_tool", ujson.Obj("text" -> "x"))))
     }
     val asking = researcher
       .withTools(ToolSet.of(echo("child_tool")).value)
@@ -530,7 +522,7 @@ class DelegationSpec
     val options = CompletionOptions().withTemperature(0.2).withMaxTokens(321)
     researcher.bind(client, GraphRuntime.inMemory(), options).value.run(Question("x")).value
     val sent = client.optionsSentTo("CHILD:researcher").loneElement
-    sent.temperature shouldBe 0.2
+    sent.temperature shouldBe Some(0.2)
     sent.maxTokens shouldBe Some(321)
 
     val own = RoutingClient { case Child("researcher", _) =>
@@ -704,7 +696,7 @@ class DelegationSpec
     val failures = new AtomicInteger(0)
     val client = RoutingClient {
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
-        Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "probe", ujson.Obj("text" -> "x"))))
       // the process dies after the probe's effect committed, before the answer
       case Child("researcher", _) if failures.getAndIncrement() == 0 => Left(ValidationError("provider", "crashed"))
       case Child("researcher", messages) =>
@@ -851,7 +843,7 @@ class DelegationSpec
     val runs = new AtomicInteger(0)
     val client = RoutingClient {
       case Child("researcher", messages) if toolResults(messages).isEmpty =>
-        Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "probe", ujson.Obj("text" -> "x"))))
       case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":1}"""))
     }
     val bound =
@@ -1101,7 +1093,7 @@ class DelegationSpec
         Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
       case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
       case Child("researcher", _) =>
-        Right(calling(ToolCall("k1", "child_tool", ujson.Obj("text" -> "x"))))
+        Right(calling(ToolCall(ToolCallId("k1"), "child_tool", ujson.Obj("text" -> "x"))))
     }
     val asking = researcher
       .withTools(ToolSet.of(echo("child_tool")).value)
@@ -1147,7 +1139,7 @@ class DelegationSpec
     val client = RoutingClient(PartialFunction.empty)
     lead(client).withSubagents(general, general).build().left.value.message should include("defined twice")
     lead(client)
-      .withTools(ToolSet.of(echo("task")).value)
+      .withToolSet(ToolSet.of(echo("task")).value)
       .withSubagents(general)
       .build()
       .left
@@ -1278,7 +1270,7 @@ object DelegationSpec {
   def echo(name: String): AgentTool[SpecText] =
     AgentTool(SpecText.spec(name))((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
 
-  def call(id: String, name: String, args: ujson.Value): ToolCall = ToolCall(id, name, args)
+  def call(id: String, name: String, args: ujson.Value): ToolCall = ToolCall(ToolCallId(id), name, args)
 
   def calling(calls: ToolCall*): Completion = CompletionFixture.withMessage(AssistantMessage(None, calls))
 
@@ -1318,9 +1310,7 @@ object DelegationSpec {
       route.applyOrElse(messages, (_: Vector[Message]) => Left(ValidationError("routing", "no route for the call")))
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

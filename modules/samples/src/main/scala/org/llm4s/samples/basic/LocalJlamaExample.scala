@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
@@ -22,13 +23,12 @@ object LocalJlamaExample {
 
   def main(args: Array[String]): Unit = {
     val answer = for {
-      providerConfig <- Llm4sConfig.provider("jlama-local")
+      providerConfig <- Llm4sConfig.provider(ProviderName("jlama-local"))
       registry       <- Llm4sConfig.modelRegistryService()
       given ModelRegistryService = registry
       client <- LLMConnect.getClient(providerConfig)
-      completion <- client.streamComplete(
-        Conversation(Seq(UserMessage("In one sentence, what is Scala?"))),
-        onChunk = chunk => chunk.content.foreach(text => print(text))
+      completion <- client.streamComplete(Conversation(Seq(UserMessage("In one sentence, what is Scala?"))))(chunk =>
+        chunk.content.foreach(text => print(text))
       )
       _ = client.close()
     } yield completion.content.trim

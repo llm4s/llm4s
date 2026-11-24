@@ -1,5 +1,6 @@
 package org.llm4s.knowledgegraph.query
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalamock.scalatest.MockFactory
@@ -25,9 +26,7 @@ class GraphQueryTranslatorTest extends AnyFunSuite with Matchers with MockFactor
 
   private def makeCompletion(content: String): Completion = Completion(
     id = "test-id",
-    content = content,
-    model = "test-model",
-    toolCalls = Nil,
+    model = ModelName("test-model"),
     created = Instant.ofEpochSecond(1234567890L),
     message = AssistantMessage(Some(content), Nil),
     usage = None

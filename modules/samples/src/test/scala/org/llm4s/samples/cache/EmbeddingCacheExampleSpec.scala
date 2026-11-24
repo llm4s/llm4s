@@ -1,7 +1,9 @@
 package org.llm4s.samples.cache
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
-import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse }
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
+import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
@@ -12,7 +14,7 @@ class EmbeddingCacheExampleSpec extends AnyFlatSpec with Matchers {
 
   private given ModelRegistryService = ModelRegistryService.default().toOption.get
 
-  private val model = EmbeddingModelConfig("stub-embedding", 2)
+  private val model = EmbeddingModelConfig(ModelName("stub-embedding"), 2)
 
   /** One vector per text, derived from its length, so the same text always gives the same vector. */
   private object StubProvider extends EmbeddingProvider {

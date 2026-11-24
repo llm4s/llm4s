@@ -40,8 +40,8 @@ class ResponseFormatSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "preserve other options when using withResponseFormat" in {
-    val opts = CompletionOptions(temperature = 0.5).withResponseFormat(ResponseFormat.Json)
-    opts.temperature shouldBe 0.5
+    val opts = CompletionOptions(temperature = Some(0.5)).withResponseFormat(ResponseFormat.Json)
+    opts.temperature shouldBe Some(0.5)
     opts.responseFormat shouldBe Some(ResponseFormat.Json)
   }
 }

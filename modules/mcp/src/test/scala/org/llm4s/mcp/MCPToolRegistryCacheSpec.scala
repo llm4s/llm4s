@@ -27,12 +27,12 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
   }
 
   // Create a simple test tool using ToolBuilder
-  private def createTestTool(): Result[ToolFunction[Map[String, Any], TestResult]] = {
+  private def createTestTool(): Result[ToolFunction[TestResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Test parameters")
       .withProperty(Schema.property("input", Schema.string("Input value")))
 
-    ToolBuilder[Map[String, Any], TestResult](
+    ToolBuilder[TestResult](
       "test_tool",
       "A test tool",
       schema
@@ -139,7 +139,7 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "MCPToolRegistry" should "return a local tool's own failure, not go on to the MCP servers (#2816)" in {
-    val failing = ToolBuilder[Map[String, Any], TestResult](
+    val failing = ToolBuilder[TestResult](
       "failing_tool",
       "Always fails",
       Schema.`object`[Map[String, Any]]("No parameters")
@@ -151,7 +151,7 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "list a tool name once when two local tools share it, the first shadowing the second (#2816)" in {
-    def named(reply: String) = ToolBuilder[Map[String, Any], TestResult](
+    def named(reply: String) = ToolBuilder[TestResult](
       "twice",
       s"Replies $reply",
       Schema.`object`[Map[String, Any]]("No parameters")

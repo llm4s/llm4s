@@ -1,5 +1,6 @@
 package org.llm4s.deploy
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentId }
 import org.llm4s.agent.graph.GraphRuntime
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolOutcome, ToolSet }
@@ -32,29 +33,25 @@ final class DemoModel(toolDelay: FiniteDuration) extends LLMClient:
     val lastUser = conversation.messages.reverseIterator.collectFirst { case u: UserMessage => u.content }
     val answered = conversation.messages.lastOption.exists(_.isInstanceOf[ToolMessage])
     if toolDelay > Duration.Zero && !answered then
-      val call = ToolCall(s"pause-${conversation.messages.size}", ExampleAgent.PauseTool, ujson.Obj())
-      Right(completion(AssistantMessage(contentOpt = None, toolCalls = Seq(call)), ""))
+      val call = ToolCall(ToolCallId(s"pause-${conversation.messages.size}"), ExampleAgent.PauseTool, ujson.Obj())
+      Right(completion(AssistantMessage(text = None, toolCalls = Seq(call))))
     else
       val text = s"Echo: ${lastUser.getOrElse("")}"
-      Right(completion(AssistantMessage(text), text))
+      Right(completion(AssistantMessage(text)))
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = complete(conversation, options)
 
   override def getContextWindow(): Int     = 128000
   override def getReserveCompletion(): Int = 4096
 
-  private def completion(message: AssistantMessage, text: String): Completion =
+  private def completion(message: AssistantMessage): Completion =
     Completion(
       id = s"demo-${java.util.UUID.randomUUID()}",
       created = Instant.now(),
-      content = text,
-      model = "demo",
+      model = ModelName("demo"),
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(promptTokens = 0, completionTokens = 0, totalTokens = 0)),
       finishReason = if (message.toolCalls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop
     )
@@ -127,4 +124,4 @@ object ExampleAgent:
     val tools = config.model match
       case AgentModel.Demo     => ToolSet.of(pauseTool(config.toolDelay, metrics))
       case AgentModel.Provider => Right(ToolSet.empty)
-    tools.flatMap(set => builder.withTools(set).build())
+    tools.flatMap(set => builder.withToolSet(set).build())

@@ -27,12 +27,11 @@ section's own `apiKey`, else `llm4s.credentials.anthropic.apiKey`, which this mo
 `reference.conf` binds to `ANTHROPIC_API_KEY`:
 
 ```hocon
+llm4s.defaultProvider = "anthropic-main"      # the default section
 llm4s.providers {
-  provider = "anthropic-main"      # the default section
-
   anthropic-main {
     provider = "anthropic"
-    model    = "claude-sonnet-4-20250514"
+    model    = "claude-sonnet-5-5"
   }
 }
 ```
@@ -42,7 +41,7 @@ A section for a second account sets its own key, which wins over the shared one:
 ```hocon
 llm4s.providers.anthropic-team {
   provider = "anthropic"
-  model    = "claude-sonnet-4-20250514"
+  model    = "claude-sonnet-5-5"
   apiKey   = ${?ANTHROPIC_TEAM_API_KEY}
 }
 ```
@@ -58,9 +57,10 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val reply = for {
-  providerConfig  <- Llm4sConfig.provider("anthropic-main")
+  providerConfig  <- Llm4sConfig.provider(ProviderName("anthropic-main"))
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client     <- LLMConnect.getClient(providerConfig)

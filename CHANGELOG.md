@@ -12,6 +12,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `UserMessage.parts` and `ToolMessage.parts` are `Seq[ContentPart]`, and `Completion.citations`, the `RequestAdjustment` lists (`Completion`, `TransformationResult`, `OpenAICompatibleDialect.addReasoning`, `ModelCallCompleted`) are `Seq`s; stored JSON is unchanged
+  ([migration](docs/reference/migration.md#message-parts-citations-and-adjustments-are-seqs-2809)) [#2809](https://github.com/llm4s/llm4s/issues/2809).
+- The `@Experimental` overloads of Stable methods are renamed, so MiMa checks the Stable ones: `AgentBuilder.withTools(toolSet)` is `withToolSet`, `Guardrail.validate(value, context)` is `validateIn`; the Java facade's guardrails sit innermost, as the Scala builder's do
+  ([migration](docs/reference/migration.md#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
+- `LangfuseBatchSender` has `sendTraces` and `sendScores` in place of `sendBatch`, `LANGFUSE_URL` is the host (`LangfuseConfig.DEFAULT_URL` is `https://cloud.langfuse.com`), and an unplaced run's Langfuse trace id is `TraceContext.rootFor(runId).traceId`
+  ([migration](docs/reference/migration.md#the-langfuse-backend-sends-opentelemetry-spans-2883)) [#2883](https://github.com/llm4s/llm4s/issues/2883).
+- A model id is a `ModelName` wherever it crosses a public API (`Completion.model`, `UsageSummary.byModel`, `ModelMetadata.modelId`, `ModelRegistryService.lookup`, `RequestTransformer`, `EmbeddingModelConfig.name`, trace events, every `fromValues`), and a provider config's base URL is a `BaseUrl`; stored JSON is unchanged
+  ([migration](docs/reference/migration.md#model-ids-are-modelname-provider-ids-providerid-and-provider-configs-base-urls-baseurl-2822)) [#2822](https://github.com/llm4s/llm4s/issues/2822).
+- A provider id is a `ProviderId` in `ModelMetadata.provider`, `ModelRegistryService.lookup(provider, model)`, `listByProvider` and `listProviders`, `ContextWindowResolver`, `ModelDimensionRegistry.getDimension` and `ModelRef`
+  ([migration](docs/reference/migration.md#provider-ids-are-providerid)) [#2822](https://github.com/llm4s/llm4s/issues/2822).
+- `CompletionOptions.temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are `Option[Double]`, `None` unless set, and no client sends an unset one
+  ([migration](docs/reference/migration.md#completionoptions-sampling-parameters-are-optional-and-unset-ones-are-not-sent-2807)) [#2807](https://github.com/llm4s/llm4s/issues/2807).
+- `Completion` reads `content` and `toolCalls` from its `message`: `apply` takes neither, and `withContent`, `withToolCalls` and `asText` are removed
+  ([migration](docs/reference/migration.md#completion-reads-content-and-toolcalls-from-its-message-2807)) [#2807](https://github.com/llm4s/llm4s/issues/2807).
+- A `Completion` built without a finish reason is `FinishReason.Unknown`, not `Stop`; `Unknown` replaces `FinishReason.Other("")`
+  ([migration](docs/reference/migration.md#a-completion-without-a-finish-reason-is-finishreasonunknown-2807)) [#2807](https://github.com/llm4s/llm4s/issues/2807).
+- `Completion.estimatedCost`, `CostEstimator.estimate`, `UsageSummary.add` and the agent's `recordUsage` take a `BigDecimal` cost, not a `Double`
+  ([migration](docs/reference/migration.md#completionestimatedcost-is-a-bigdecimal-usagesummary-counts-cache-tokens-2807)) [#2807](https://github.com/llm4s/llm4s/issues/2807).
+- `AssistantMessage.contentOpt` is `text`, its stored JSON is flat (the old shape still reads), `AssistantMessage()` no longer compiles and `ToolMessage.findToolCallName` returns an `Option`
+  ([migration](docs/reference/migration.md#assistantmessagetext-and-a-flat-stored-assistant-message-2809)) [#2809](https://github.com/llm4s/llm4s/issues/2809).
+- `Conversation.create` takes one `Seq[Message]`, and `Conversation.empty` is a value
+  ([migration](docs/reference/migration.md#one-conversationcreate-conversationempty-is-a-value-2809)) [#2809](https://github.com/llm4s/llm4s/issues/2809).
+- `ProviderExchange.provider` is a `ProviderId` and `duration` is derived; `ProviderExchangeRecorder.record` takes a `ProviderExchangeCall`; `ProviderExchangeLogging.enabled` is removed
+  ([migration](docs/reference/migration.md#providerexchange-and-providerexchangerecorder-2809)) [#2809](https://github.com/llm4s/llm4s/issues/2809).
+- `MessageRole` is a Scala 3 `enum`: code that used a case as a type (`MessageRole.User.type`) or from Java (`User$.MODULE$`) changes [#2809](https://github.com/llm4s/llm4s/issues/2809).
+- `LLMConnect.fromConfig`, `fromProvider` and the `getClient` overloads taking a `MetricsCollector` are removed: `getClient(config, LlmClientOptions(metrics = m))`
+  ([migration](docs/reference/migration.md#llmconnectgetclient-is-the-one-way-to-get-a-client-2810)) [#2810](https://github.com/llm4s/llm4s/issues/2810).
+- `LLMClient.streamComplete(conversation, options)(onChunk)`: the callback is a second parameter list, in every call and every `LLMClient` implementation
+  ([migration](docs/reference/migration.md#llmclientstreamcomplete-takes-its-callback-in-a-second-parameter-list-2810)) [#2810](https://github.com/llm4s/llm4s/issues/2810).
+- `MetricsRecording.withMetrics` has no defaulted parameters: pass `extractUsage` and `extractCost` [#2810](https://github.com/llm4s/llm4s/issues/2810).
+- The context compression pipeline in `org.llm4s.context` (`ContextManager`, `TokenWindow`, the compressors,
+  `SemanticBlocks`, `ArtifactStore`) is `@Experimental`; `ContextManager` is built only with `ContextManager.create`
+  (`withDefaults` and the public constructor are gone), `ContextConfig.enableSubjectiveEdits` is removed,
+  `ContextStep.name` is `stage: ContextStage`, `MessageTokenInfo.role` is a `MessageRole`, `TokenWindow` takes a
+  `HeadroomPercent`, and `StructuredInfo`, `HistoryDigest` and `PipelineStep` are private
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818));
+  [migration](docs/reference/migration.md#the-context-pipeline-is-experimental-and-token-counters-are-built-over-a-tokenizer-2818).
+- `ConversationTokenCounter.forModel`, `TokenizerMapping` and `TokenizerAccuracy` are removed from `llm4s-core`: use
+  `OpenAITokenizers.counterFor(model)` in `llm4s-openai`, or `ConversationTokenCounter.cl100k()` for another vendor's
+  model; `ConversationTokenCounter(tokenizerId)`, `openAI()` and `openAI_o200k()` are `create(tokenizerId)`,
+  `cl100k()` and `o200k()`; `TokenizerId` moves from `org.llm4s.identity` to `org.llm4s.context.tokens`
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818));
+  [migration](docs/reference/migration.md#the-context-pipeline-is-experimental-and-token-counters-are-built-over-a-tokenizer-2818).
+- `Modality`'s cases are nested (`Modality.Text`, `Modality.Image`, `Modality.Audio`, `Modality.Video`);
+  `MultimediaEmbeddingRequest`, `RawMediaInput` and `EmbeddingVector` move to `llm4s-rag` (`EmbeddingVector.values` is
+  a `Seq[Double]`, `dim` is derived), and `TextChunkInput`, `ImageInput`, `AudioInput`, `VideoInput` and `MMInput` are
+  removed; `EmbeddingProvider.embedMultimodal` is removed in favour of `MultimodalEmbeddingProvider` in `llm4s-rag`,
+  which `FileEmbedder.encodeFromPath` takes as an argument ([#2808](https://github.com/llm4s/llm4s/issues/2808));
+  [migration](docs/reference/migration.md#modality-is-an-enum-multimodal-embedding-lives-in-llm4s-rag-and-embeddingclient-is-final-2808).
+- `EmbeddingClient` is final with a private constructor: `EmbeddingClient(provider)` then `withTracing`,
+  `withOperation`, `withProviderId`; `EmbeddingClient.from` reports an unknown provider as a `ConfigurationError`, not
+  an `EmbeddingError` with code `400`; `EmbeddingError` moves from `org.llm4s.llmconnect.model` to `org.llm4s.error`
+  ([#2808](https://github.com/llm4s/llm4s/issues/2808));
+  [migration](docs/reference/migration.md#modality-is-an-enum-multimodal-embedding-lives-in-llm4s-rag-and-embeddingclient-is-final-2808).
+- `org.llm4s.types`: `HeadroomPercent` is built only with `HeadroomPercent.create` or a preset (`None` is renamed
+  `Zero`, `isValid` and `value` are gone, read it with `asRatio`); the aliases `TokenBudget`, `ContextWindowSize`,
+  `ByteCount` and `ExternalizationThreshold` are removed (use `Int` / `Long`); `ExternalizedContent` is private;
+  `SemanticBlockId`, `ArtifactKey` and `ContentSize` are opaque types read with `asString` / `asBytes`; `TraceId`
+  moves to `org.llm4s.trace.model` in `llm4s-observability`
+  ([#2822](https://github.com/llm4s/llm4s/issues/2822));
+  [migration](docs/reference/migration.md#newtypes-in-orgllm4stypes-are-opaque-and-headroompercent-is-always-valid-2822).
+- `ProviderDescriptor.buildConfig(providerName, section)(using ContextWindowResolver)` is
+  `buildConfig(section, context: ProviderConfigContext)` and `buildClient(config, options)(using
+  ModelRegistryService)` is `build(config, context: ProviderBuildContext)`;
+  `EmbeddingProviderDescriptor.buildConfig(section, modelOverride)` takes an `EmbeddingConfigContext` and
+  `build(config)` an `EmbeddingBuildContext` ([#2811](https://github.com/llm4s/llm4s/issues/2811));
+  [migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811).
+- `Llm4sProviderModule.chatProviders` is `providers`; `EmbeddingProviderSection.baseUrl` / `model` are
+  `Option[BaseUrl]` / `Option[ModelName]` ([#2811](https://github.com/llm4s/llm4s/issues/2811));
+  [migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811).
+- `AccessTokenProvider.token()` and `IdentityTokenSource.fetch()` are `current(): Result[Secret]`;
+  `IdentityTokenSource` is `IdentityTokenProvider`; `AccessToken.value`, `AccessTokenProvider.invalidate(rejected)`,
+  `IdentityTokenProvider.static(token)` and `IdentitySource.Literal(token)` take a `Secret`, not a `String`
+  ([#2811](https://github.com/llm4s/llm4s/issues/2811));
+  [migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811).
+- `AgentStatus.Blocked` and `TaskRefusal.Blocked` take `reason: Option[String]`, and `RunOutcome.Blocked` holds the guardrail's name only: a guardrail's reason is on the result of the run that was blocked and is never stored. Checkpoint format 9 ([#2853](https://github.com/llm4s/llm4s/issues/2853)); [migration](docs/reference/migration.md#a-guardrails-reason-is-never-stored-2853).
+- Input guardrails run when a turn is admitted, before it is stored and before any middleware's `beforeAgent`; `GuardrailBlocked.reason` is an `Option`; `Guardrail.validateIn(value, context)` (the stage form of `validate`, renamed by [#2835](https://github.com/llm4s/llm4s/issues/2835)) takes a `UsageAccounting` ([#2854](https://github.com/llm4s/llm4s/issues/2854)); [migration](docs/reference/migration.md#a-turns-query-is-admitted-before-the-turn-is-stored-2854).
+- `llm4s.agent.runs.ended` and `llm4s.agent.run.duration` report the status the run's trace does: a guardrail block is
+  `blocked`, not `failed`, and a turn that hit its step or token limit or was cut off is `step_limit_reached`,
+  `token_limit_reached` or `truncated`, not `completed`; check alerts on `status="failed"` and `status="completed"`;
+  [migration](docs/reference/migration.md#an-agent-runs-trace-and-metrics-report-one-status-2829).
+- `TraceEvent.AgentRunEnded.status` is a `TraceEvent.RunStatus`, not a `String`; a blocked run's status is `blocked`
+  with the guardrail in the new `blockedBy`, where it was `blocked:<guardrail>`, in `toJson` and every backend;
+  [migration](docs/reference/migration.md#an-agent-runs-trace-and-metrics-report-one-status-2829).
+- `TraceEvent.AgentRunEnded.agent` is the run's root agent, not the agent active when it ended (the new `activeAgent`),
+  so the `invoke_agent <agent>` span of a run that handed off is named after the agent it was started on;
+  [migration](docs/reference/migration.md#an-agent-runs-trace-and-metrics-report-one-status-2829).
+- `TraceEvent.ErrorOccurred` holds `message`, `errorType: String` and an optional `cause` instead of a `Throwable`:
+  build one with `ErrorOccurred.of(error, context)`, from an `LLMError` or a `Throwable`; an `LLMError` the library
+  traces is recorded under its own type, not `RuntimeException`, and with no stack trace;
+  [migration](docs/reference/migration.md#traceevent-carries-an-error-as-it-is-and-agentinitialized-is-removed-2800).
+- `TraceEvent.ImageGenerationCompleted.provider` is an `Option[ProviderId]` and the event's last field, not a `String`
+  in second place;
+  [migration](docs/reference/migration.md#traceevent-carries-an-error-as-it-is-and-agentinitialized-is-removed-2800).
+- `TraceEvent.AgentInitialized` is removed (nothing in the library emitted it), and with it the `LLM4S Agent Run`
+  trace and span the Langfuse and OpenTelemetry backends made of it; trace your own with `TraceEvent.CustomEvent`;
+  [migration](docs/reference/migration.md#traceevent-carries-an-error-as-it-is-and-agentinitialized-is-removed-2800).
+- `LLMClientRetry` and `ErrorRecovery` (`recoverWithBackoff`, `CircuitBreaker`, `CircuitState`) are removed:
+  `ReliableClient` with a `RetryPolicy` is the one retry and circuit breaker; exhausted attempts return the last
+  error unchanged, not an `ExecutionError`, and an open circuit is a `CircuitOpenError`, which is not retried
+  ([#2798](https://github.com/llm4s/llm4s/issues/2798));
+  [migration](docs/reference/migration.md#one-retry-mechanism-llmclientretry-and-errorrecovery-are-removed-2798).
+- `HttpErrorMapper.mapHttpError(...): Result[Nothing]` is `HttpErrorMapper.toError(status, body, provider, headers):
+  LLMError`, with no default for `headers`; `StreamingToolArgumentParser` is removed (`ToolCallRules.parseArguments`);
+  `CostEstimator.estimateFromMetadata` is internal ([#2811](https://github.com/llm4s/llm4s/issues/2811));
+  [migration](docs/reference/migration.md#provider-spi-error-mapping-published-helpers-report-types-2811).
+- `ProviderConfigSpec.keylessWhen` is an `Option[KeylessSetting]`, not a tuple; `ProviderRegistryReport`,
+  `ProviderModuleReport`, `ProviderDiscoveryFailure` and `ProviderIdCollision` have no public `apply` or setters, a
+  collision's `kind` is a `ProviderCollisionKind` and ids are `ProviderId`; `EmbeddingProviderDescriptor.configSpec`
+  is abstract; an `AccessTokenProvider.invalidate` implementation needs `override`
+  ([#2811](https://github.com/llm4s/llm4s/issues/2811));
+  [migration](docs/reference/migration.md#provider-spi-error-mapping-published-helpers-report-types-2811).
 - The `Result` object is `org.llm4s.types.Result`; `toResult` and `toLLMError` are extensions in `org.llm4s.syntax`
   (`TryOps`, `OptionOps`, `FutureOps`, `ThrowableOps` and `syntax.syntax` are gone); `ErrorMapper` is removed and
   `Try(...).toResult` no longer reads a 401 or 429 out of an exception's message; `Safety` is in `org.llm4s.error` and
@@ -26,6 +138,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Llm4sHttpClient` implementations and test doubles implement `send`; its eight request methods are final, `MultipartPart.FilePart.path` is `content`, and `Llm4sHttpClient.create` takes `HttpClientOptions` ([#2802](https://github.com/llm4s/llm4s/issues/2802)); [migration](docs/reference/migration.md#llm4shttpclient-has-one-method-to-implement-send-2802).
 - `NetworkSecurity.validateUrl`/`validateHostname` return `Result[Seq[InetAddress]]` and refuse with a `ValidationError`; `validateIP`, `DefaultBlockedHostnames` and the default arguments are gone ([#2826](https://github.com/llm4s/llm4s/issues/2826)); [migration](docs/reference/migration.md#networksecurity-returns-the-addresses-it-vetted-and-a-refusal-is-not-retryable-2826).
 - `Llm4sConfig.providerConfigs()` returns `Result[Map[ProviderName, Result[ProviderConfig]]]`; `providers()`, `providerConfigs(map)` and `ProvidersConfig` are no longer public ([#2804](https://github.com/llm4s/llm4s/issues/2804)); [migration](docs/reference/migration.md#llm4sconfigproviderconfigs-returns-each-sections-result-providers-and-providersconfig-are-internal-2804).
+- `llm4s.providers.provider` is now `llm4s.defaultProvider` (Spring and Quarkus: `llm4s.default-provider`): the default section's name sits beside the providers block ([#2806](https://github.com/llm4s/llm4s/issues/2806)); [migration](docs/reference/migration.md#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806).
+- `Llm4sConfig.provider` and `listModels` take a `ProviderName`; `embeddings()` returns the `EmbeddingProviderConfig` alone and `EmbeddingClient.from` takes it without a provider name; `ProvidersConfigModel`, `Llm4sConfig.TextEmbeddingModelSettings` and `ConfigKeys` are removed ([#2804](https://github.com/llm4s/llm4s/issues/2804), [#2806](https://github.com/llm4s/llm4s/issues/2806)); [migration](docs/reference/migration.md#llm4sconfig-takes-providername-and-embeddings-returns-the-config-alone-2804).
+- `ProviderConfig` has no default members: `model` is a `ModelName`, `endpointUrl` an `Option[BaseUrl]`, and `withApiKeyProvider` returns a `Result`; `EmbeddingProviderConfig` is `(providerId, baseUrl: BaseUrl, model: ModelName, apiKey: Option[Secret], ...)` ([#2805](https://github.com/llm4s/llm4s/issues/2805)); [migration](docs/reference/migration.md#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805).
 - `new ToolRegistry(tools)` is `ToolRegistry.of(tools)`, a `Result` that rejects duplicate names; timeouts, retries,
   `executeAsync` and `executeAll` move to `ToolExecutor`; `toOpenAITool`/`getOpenAITools` are
   `toolDefinition(strict)`/`ToolFunction.toolDefinitions(tools, strict)`;
@@ -34,8 +149,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `withExclusiveRange`, `withLengthConstraints` and `withSizeConstraints` are removed; a strict schema makes optional
   properties nullable; [migration](docs/reference/migration.md#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814).
 - A tool handler returns `Either[ToolHandlerError, R]` and `SafeParameterExtractor`'s getters return
-  `Either[ToolParameterError, A]`; `executeEnhanced`, the `getXEnhanced` getters and the `error` field of
+  `Either[ToolParameterError, A]`; `ToolFunction` and `ToolBuilder` have one type parameter, the result's
+  (`ToolBuilder[String](...)`); `executeEnhanced`, the `getXEnhanced` getters and the `error` field of
   `ToolCallErrorJson` are removed; [migration](docs/reference/migration.md#a-tool-handler-has-one-error-type-2815).
+- `ToolCall.id`, `ToolMessage.toolCallId` and `ToolCallInfo.toolCallId` are a `ToolCallId`, and `ToolCallInfo.idempotencyKey` an `IdempotencyKey`, both in core; the agent's own types are removed; [migration](docs/reference/migration.md#a-tool-calls-id-is-a-toolcallid-and-its-idempotency-key-an-idempotencykey-2815).
 - `EmbeddingCache` has no type parameter, returns `Result`s and has an optional `stats`; `InMemoryEmbeddingCache.create` (a `java.time.Clock`, checked arguments) replaces its constructors; `CacheStats` computes `totalRequests` and `hitRatePercent`; `CacheEntry` is internal; `CachedEmbeddingClient`'s `cacheStats` is an `Option` and `clearCache` a `Result` ([#2803](https://github.com/llm4s/llm4s/issues/2803)); [migration](docs/reference/migration.md#the-caching-types-report-failure-and-tool-loops-bypass-the-cache-2803).
 - `ModelRegistryConfig` holds one `ModelRegistrySource` (`Resource | File | Url`); `lookup` is exact and `search` finds ids by substring; `ModelMetadata` loses `inputCostPerToken`/`outputCostPerToken` (use `pricing`), its `deprecationDate` is a `LocalDate` and its `apply` has defaults; `statistics()` is removed and `listProviders()` returns a `List`; `ModelCapabilities.fromJson`/`ModelPricing.fromJson` are internal; `RequestTransformer` is sealed, `transformOptions` has no `dropUnsupported` default, and `disallowedParams` and `withOverrides` are gone ([#2823](https://github.com/llm4s/llm4s/issues/2823)); [migration](docs/reference/migration.md#model-registry-sources-exact-lookup-and-a-sealed-requesttransformer-2823).
 - `GuardrailBlocked.message` no longer holds the guardrail's reason: read `reason`;
@@ -53,20 +170,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MetricsCollector.recordRetryAttempt`, `recordCircuitBreakerTransition` and `recordError` are removed: `ReliableClient` records
   `ReliabilityMetrics.Retries`, `CircuitBreakerTransitions` and `Errors` through `increment`, so a collector that overrode them overrides `increment`;
   [migration](docs/reference/migration.md#reliableclients-metrics-are-generic-metrics-2801).
+- `HuggingFaceClient` calls Hugging Face Inference Providers (`hf-inference`); `HuggingFaceConfig` gains `baseUrl`, and
+  `Parameters.inferenceSteps` is `num_inference_steps`; [migration](docs/reference/migration.md#the-hugging-face-image-client-calls-inference-providers-2832).
+- `OpenAIConfig` (image) defaults to `gpt-image-2.6-sunburst`, and `OpenAIImageClient.deprecationWarningMessage` is `retirementWarning`;
+  [migration](docs/reference/migration.md#the-openai-image-client-defaults-to-gpt-image-26-sunburst-2884).
+- `MetricsCollector.observeImageGeneration` and `recordImageGenerationCost` are removed, with `MicrometerMetrics.Names`' five image constants: the image metrics are `ImageMetrics` in `llm4s-image`, recorded through `increment`/`observe`; the exported series are unchanged;
+  [migration](docs/reference/migration.md#image-metrics-are-imagemetrics-in-llm4s-image-2801).
 - `Tracing` has one abstract method, `traceEvent(TraceEvent)`: `traceToolCall`, `traceError`, `traceCompletion` and `traceTokenUsage` are `final`
   (delete your overrides), `traceToolCall` takes the call's `duration` and `success`, `shutdown()` is `close()` (`Tracing` is `AutoCloseable`), the `TracingComposer`
   trait is gone (the object stays) and the tracing mode `print` is no longer read; [migration](docs/reference/migration.md#tracing-has-one-abstract-method-2799).
+- `Tracing.create` is removed (`Tracing.fromSettings` is the only factory; write the `NoOpTracing` fallback yourself), `TracingMode.fromString("otel")` is `Named("otel")` (the alias is `llm4s-observability-otel`'s), `TracingBackends.find` returns `Result[Option[TracingBackend]]`, and two discovered backends for one mode are an error, not "the later wins";
+  [migration](docs/reference/migration.md#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799).
 - Langfuse traces are private: `LangfuseTracing` sent every trace `public: true` and as user `llm4s-user`; it now sends
   `public: false` unless `llm4s.tracing.langfuse.public = true`, and the run's own user or none;
   [migration](docs/reference/migration.md#langfuse-traces-are-private-and-name-the-runs-user-2828).
 - `ReliableClient` refuses a call on an open circuit with `CircuitOpenError`, not `ServiceError(503, "circuit-breaker")`; `RateLimitConfig.default` is disabled like `RateLimitConfig()`; `ReliabilityConfig.withoutDeadline` and the instance `disabled` are removed
   ([migration](docs/reference/migration.md#an-open-circuit-is-a-circuitopenerror-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- `new ReliableClient(...)` no longer compiles: the constructor is private. Use `ReliableClient(client, name, config)` and `.withMetrics(collector)`; the `clock` and `sleep` parameters are no longer public
+  ([migration](docs/reference/migration.md#reliableclient-has-a-private-constructor-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
 - `RegexSafetyManager.safeCompile` and `safeFind` return `Result` (a `ValidationError`), not `Either[String, _]`; `safeFind`'s `maxSteps`, `safeMatches`, `compileLiteralCaseInsensitive`, `replaceAllLiteral`, `replaceFirstLiteral` and `RegexComplexityException` are removed
   ([migration](docs/reference/migration.md#regexsafetymanager-returns-result-2825)) [#2825](https://github.com/llm4s/llm4s/issues/2825).
 - `SecretPatterns` (`SecretType`, `SecretMatch`) moved from `org.llm4s.util` in `llm4s-core` to `org.llm4s.agent.guardrails.patterns` in `llm4s-agent`; `redactAllWithPlaceholder` and `SecretMatch`'s setters are removed, and `SecretType.PrivateKeyPem` matches the whole key
   ([migration](docs/reference/migration.md#secretpatterns-is-in-llm4s-agent-2824)) [#2824](https://github.com/llm4s/llm4s/issues/2824).
 - 36 `llm4s-agent` case classes (`ContextWindowConfig`, `Handoff`, the `AgentEvents` payloads, `EventRecord`, `GraphSnapshot`, `Command` and others) have a private constructor and `copy`: use `X(...)` and the `with*` setters. `GuardrailResult` is removed, and `MiddlewareStack`, `ToolLoop.results`/`queue` and nine other internal types are no longer public. `AgentStatus.Suspended`, eight `RunEvent` cases, `StreamEvent.Live` and `ToolOutcome.Success` each hold one growth-safe class (`Suspension`, `RunFailedDetails`, `LiveEvent`, `ToolSuccess`, ...) in place of positional fields, and a tool returns `ToolOutcome.success(content)` ([#2781](https://github.com/llm4s/llm4s/issues/2781));
   [migration](docs/reference/migration.md#llm4s-agent-types-are-tiered-and-growth-safe-2778).
+- `LengthCheck`, `ProfanityFilter`, `JSONValidator` and `RegexValidator` are final with private constructors: build them with their companions (`LengthCheck(1, 100)`, `ProfanityFilter.withCustomWords(...)`, `RegexValidator("...".r, "message")`). `ThreadId.child` is internal;
+  [migration](docs/reference/migration.md#llm4s-agent-types-are-tiered-and-growth-safe-2778).
+- Middleware SPI: `AgentMiddleware.runsBefore`/`runsAfter` are `Set[MiddlewareRef]`; `ModelRequest.messages` no longer holds the system prompt (`systemPrompt`); `BoundaryResult.withUpdate`, `ToolSuccess.withUpdate` and `ToolCallRequest.withSpec`/`withCall`/`withResources` are removed; `SemanticMemoryMiddleware` has no `runsBefore` parameter; a middleware id the agent reserves (`delegation`, `agent-guardrails`, `ancestor-permissions`, `response-format`) is refused;
+  [migration](docs/reference/migration.md#the-middleware-spi-is-consistent-and-testable-2795).
 - `CompletionOptions.budgetTokens` and `withBudgetTokens`, and `ReasoningEffort.None`, are removed: use `thinking`
   (`Thinking.budget(n)`, `Thinking.Off`); Java's `budgetTokens` and `JReasoningEffort.NONE` likewise give way to
   `JThinking`. On OpenAI, `Thinking.Off` asks for the lowest effort where `None` sent none (RFC 0008, PR 4);
@@ -108,6 +239,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `stageDurations`) (#2734); [migration](docs/reference/migration.md#rag-tracing-covers-every-model-call-and-each-querys-stages-2734).
 - `RAG.ingestChunks` takes `Seq[DocumentChunk]` and returns `Seq[IndexedChunk]`, and `SearchIndex.ingest` returns the
   stored ids (#2732); [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
+- `SQLiteVectorStore`'s metadata filters are case-sensitive and read `%` and `_` literally, as `MetadataFilter`
+  describes (#2759);
+  [migration](docs/reference/migration.md#sqlitevectorstore-escapes-metadata-and-filters-exactly-2759).
 - `DirectoryLoader` skips symbolic links that leave its root, and a positional pattern on `UrlLoader`, `CrawlerConfig`
   or `DirectoryLoader` gains a field (#2724); [migration](docs/reference/migration.md#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724).
 - Opening a `PostgresCheckpointer` moves its schema from version 5 to 6, which an older build refuses: upgrade every
@@ -119,15 +253,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its turn count with no other limit set
   ([#2728](https://github.com/llm4s/llm4s/issues/2728), [#2729](https://github.com/llm4s/llm4s/issues/2729));
   [migration](docs/reference/migration.md#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729).
-- `EMBEDDING_PROVIDER` (`llm4s.embeddings.provider`) is removed: select embeddings with `EMBEDDING_MODEL=provider/model`;
+- `EMBEDDING_PROVIDER` (`llm4s.embeddings.provider`) is removed: select embeddings with `EMBEDDING_MODEL=provider/model`; so are the per-provider model settings
+  (`llm4s.embeddings.<id>.model`, the `*_EMBEDDING_MODEL` variables, `EmbeddingConfigSpec.modelEnv`, `EmbeddingProviderSection.model`) ([#2835](https://github.com/llm4s/llm4s/issues/2835));
   [migration](docs/reference/migration.md#the-legacy-embedding-provider-selector-is-removed).
-- Vertex AI no longer reads `endpoint` and `organization` (use `project` and `location`), and `ProviderConfigKey`'s
+- Vertex AI no longer reads `endpoint` and `organization` (use `project` and `location`); a section that sets `organization` and no `location` fails ([#2835](https://github.com/llm4s/llm4s/issues/2835)), and `ProviderConfigKey`'s
   `deprecatedAliases` mechanism is removed; [migration](docs/reference/migration.md#vertex-ai-no-longer-reads-endpoint-and-organization).
 
 ### Providers
 
+- **Fixed** `HuggingFaceClient` posted to `api-inference.huggingface.co`, which Hugging Face retired: it calls
+  `router.huggingface.co/hf-inference` in the documented text-to-image format, defaults to a model `hf-inference` serves
+  and checks health through the Hub API ([migration](docs/reference/migration.md#the-hugging-face-image-client-calls-inference-providers-2832)) [#2832](https://github.com/llm4s/llm4s/issues/2832).
+- **Fixed** `OpenAIImageClient` defaulted to `dall-e-2`, which OpenAI shut down, and `editImage` always sent it: the default is
+  `gpt-image-2.6-sunburst`, `editImage` sends the configured model, and a GPT Image request carries no `response_format` or `style` ([migration](docs/reference/migration.md#the-openai-image-client-defaults-to-gpt-image-26-sunburst-2884)) [#2884](https://github.com/llm4s/llm4s/issues/2884).
+- **Fixed** `llm4s-openai` sends `max_completion_tokens` to the GPT-6 models; a request with tools to `gpt-6-luna` is sent
+  `reasoning_effort: none` (reported as a `RequestAdjustment`), and one to `gpt-6.1-terra`, which calls tools only on the Responses API, is refused with a `ValidationError` [#2886](https://github.com/llm4s/llm4s/issues/2886).
+- **Added** Bundled model metadata for `claude-sonnet-5-5`, `claude-haiku-5-5`, their Bedrock ids, `gpt-5.6-luna`,
+  `gpt-5.6-terra` and `gemini-3.8-flash`, as overrides until the next LiteLLM refresh [#2832](https://github.com/llm4s/llm4s/issues/2832).
+- **Changed** No client sends `temperature`, `top_p` or a penalty the caller did not set (OpenAI, the OpenAI-compatible providers, Anthropic, Gemini, Vertex AI, Bedrock, Ollama, watsonx, Perplexity); Jlama, whose engine needs a temperature, uses `0.7` when none is set. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Changed** A provider module's client reports `FinishReason.Unknown` where it read no finish reason, and Perplexity ignores a reported cost that is not a number in favour of the estimate. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Fixed** A key xAI refuses (HTTP 400) is an `AuthenticationError`, not a `ValidationError` ([#2855](https://github.com/llm4s/llm4s/issues/2855)).
+- **Changed** `HttpErrorMapper.mapHttpError` is `toError`, returning the `LLMError`; `ToolCallRules`, `PartEncoding`
+  and `HttpErrorMapper.mapStreamError` are public; `StreamingToolArgumentParser` is removed
+  ([migration](docs/reference/migration.md#provider-spi-error-mapping-published-helpers-report-types-2811)) [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Changed** `ProviderConfigSpec.keylessWhen` is a `KeylessSetting`; the registry report types are read-only with
+  `ProviderCollisionKind` and `ProviderId`; `EmbeddingProviderDescriptor.configSpec` is abstract;
+  `AccessTokenProvider.invalidate` has a default; `CostEstimator.estimateFromMetadata` is internal
+  ([migration](docs/reference/migration.md#provider-spi-error-mapping-published-helpers-report-types-2811)) [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Changed** Both provider descriptors have the same two methods: `buildConfig(section, context)` and
+  `build(config, context)`. `ProviderDescriptor.buildClient` is `build`, and the loose `using` parameters are
+  fields of `ProviderConfigContext` / `ProviderBuildContext` / `EmbeddingConfigContext` / `EmbeddingBuildContext`
+  ([migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811)) [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Added** `EmbeddingClientOptions.withHttpClient`: `EmbeddingClient.from(provider, config, options)` sends an
+  embedding provider's requests through the caller's own HTTP client. OpenAI, Ollama, Voyage, Jina and Cohere
+  honour it, and `llm4s-provider-testkit` has `assertEmbeddingUsesSuppliedHttpClient`
+  [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Changed** `EmbeddingProviderSection.baseUrl` and `model` are a `BaseUrl` and a `ModelName`. **Added**
+  `EmbeddingConfigSpec.extras`: an embedding provider declares its own `llm4s.embeddings.<id>` keys, which reach it
+  in `EmbeddingProviderSection.extras` and `EmbeddingProviderConfig.extras`
+  ([migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811)) [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Changed** `Llm4sProviderModule.chatProviders` is `providers`: across the SPI an unprefixed name is the chat half
+  and `embedding*` the embedding half
+  ([migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811)) [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Changed** `AccessTokenProvider.token()` and `IdentityTokenSource.fetch()` are `current()` and return a `Secret`;
+  `IdentityTokenSource` is `IdentityTokenProvider`; `AccessToken.value`, `AccessTokenProvider.invalidate` and
+  `IdentitySource.Literal` hold a `Secret`
+  ([migration](docs/reference/migration.md#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811)) [#2811](https://github.com/llm4s/llm4s/issues/2811).
+- **Added** `OpenAITokenizers` in `llm4s-openai`: `tokenizerFor(model)` and `counterFor(model)` map an OpenAI model
+  (or an Azure deployment named after one) to its tokenizer. **Fixed** `gpt-4.1`, `gpt-4.5`, `gpt-5`, `o3` and
+  `o4-mini` count with `o200k_base`; they counted with `cl100k_base`, some after an "Unknown model" warning
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818)).
 - **Removed** Vertex AI's `endpoint` / `organization` aliases for `project` / `location`, and with them
-  `ProviderConfigKey.deprecatedAliases` and `ProviderConfigSpec.BuiltinAliasKeys` ([migration](docs/reference/migration.md#vertex-ai-no-longer-reads-endpoint-and-organization)).
+  `ProviderConfigKey.deprecatedAliases` and `ProviderConfigSpec.BuiltinAliasKeys`; a section that sets `organization` and no `location` is a configuration error naming the fix, not run in `us-central1` ([#2835](https://github.com/llm4s/llm4s/issues/2835), [migration](docs/reference/migration.md#vertex-ai-no-longer-reads-endpoint-and-organization)).
 - **Fixed** `SSEParser`'s streaming parser reads CRLF and CR line endings, where a CRLF stream fed in raw chunks yielded
   no event until `flush()`, and ends an event only at a blank line, where a chunk ending at a line break split it; a streamed `Completion.model` is the model the client was created for, never `"unknown"`,
   and `StreamingAccumulator` reports usage only through `updateUsage`, which keeps cache counts [#2813](https://github.com/llm4s/llm4s/issues/2813).
@@ -172,17 +349,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tracing records it on `TraceEvent.CompletionReceived`, as OpenTelemetry's `llm4s.service_tier` (and
   `openai.response.service_tier` for OpenAI) and in Langfuse's generation metadata
   ([#2750](https://github.com/llm4s/llm4s/issues/2750)).
+- **Changed** Every member of `ProviderConfig` is abstract: `model: ModelName`, `withModel(ModelName)`, `endpointUrl: Option[BaseUrl]`, and `withApiKeyProvider` returns `Result[ProviderConfig]`, a `ConfigurationError` from a config that cannot take one (Ollama, Vertex AI, Bedrock, Jlama) instead of the config unchanged; each provider config's `apply` takes a `ModelName` ([migration](docs/reference/migration.md#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805)) [#2805](https://github.com/llm4s/llm4s/issues/2805).
+- **Fixed** A section's `timeouts`, or its own `http` block, that its provider's config does not take (`jlama`) fails the load of that section instead of being dropped [#2805](https://github.com/llm4s/llm4s/issues/2805).
+- **Changed** `ContextWindowResolver` is final; `resolve` returns `ContextLimits(contextWindow, reserveCompletion)`, takes `fallbackResolver: ModelName => ContextLimits` and has no `logPrefix` [#2805](https://github.com/llm4s/llm4s/issues/2805).
 
 ### Java & Kotlin APIs
 
+- **Changed** the Java facade's `inputGuardrails` and `outputGuardrails` sit innermost in the agent's middleware, where the Scala builder's `withInputGuardrails` and `withOutputGuardrails` put them, not first: an output guardrail checks the answer before any other middleware's `afterAgent` ([migration](docs/reference/migration.md#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
+- **Changed** `JCompletionOptions.temperature()`, `topP()`, `presencePenalty()` and `frequencyPenalty()` return `OptionalDouble`, empty when unset. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Added** `JUsageSummary.cachedTokens()`, `cacheCreationTokens()` and the same on `JModelUsage`. [#2807](https://github.com/llm4s/llm4s/issues/2807)
 - **Added** `JThinking` (`off()`, `adaptive()`, `budget(n)`) and `JCompletionOptions.Builder.thinking`, the Kotlin
   `completionOptions { thinking = ... }` property, and `JReasoningEffort.MINIMAL`, `XHIGH` and `MAX`, replacing
   `budgetTokens` and `NONE` ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Added** `JRag.askStream`, which streams a RAG answer to a `JRagStreamListener` with its sources first and can be
   cancelled or awaited, and Reactor's `RagStreams.toFlux`, a `Flux<RagAnswerEvent>` over it [#2727](https://github.com/llm4s/llm4s/issues/2727).
+- **Changed** The Spring Boot starter and the Quarkus extension name the default section with `llm4s.default-provider` (`llm4s.defaultProvider` is read too), replacing `llm4s.providers.provider` ([migration](docs/reference/migration.md#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806)) [#2806](https://github.com/llm4s/llm4s/issues/2806).
 
 ### Core
 
+- **Changed** the model's public collections are `Seq`s: message parts (were `Vector`), `Completion.citations` and the request adjustments (were `List`); `MessagePartsWireFormatSpec` pins the stored JSON, which is unchanged [#2809](https://github.com/llm4s/llm4s/issues/2809).
+- **Changed** a tool call's id is a `ToolCallId` (`ToolCall.id`, `ToolMessage.toolCallId`, `ToolCallInfo.toolCallId`, the agent's events) and `ToolCallInfo.idempotencyKey` an `IdempotencyKey`, opaque types in core that the agent now shares; stored JSON is unchanged, and Scalafix's `ToolCallIdTyped` migrates call sites ([migration](docs/reference/migration.md#a-tool-calls-id-is-a-toolcallid-and-its-idempotency-key-an-idempotencykey-2815)) [#2815](https://github.com/llm4s/llm4s/issues/2815)
+- **Changed** Model ids are `ModelName` and provider configs' base URLs `BaseUrl` across the public API, from `Completion` and `UsageSummary` to the registry, embeddings, trace events, the provider SPI and every `fromValues`; the scalafix rule `ModelIdNewtypes` wraps the common call sites ([migration](docs/reference/migration.md#model-ids-are-modelname-and-provider-configs-base-urls-are-baseurl-2822)) [#2822](https://github.com/llm4s/llm4s/issues/2822).
+- **Changed** Provider ids are `ProviderId` in `ModelMetadata`, the model registry, `ContextWindowResolver` and `ModelDimensionRegistry`; a `ProviderId` reads and writes as its string ([migration](docs/reference/migration.md#provider-ids-are-providerid)) [#2822](https://github.com/llm4s/llm4s/issues/2822).
+- **Changed** `CompletionOptions.temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are `Option[Double]`, `None` unless set; every client sends a sampling parameter only when the caller set it, and a set one that a model cannot take is reported as a `RequestAdjustment` whatever its value (an explicit value equal to the old default used to go unreported). [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Changed** `Completion.content` and `Completion.toolCalls` are read from `Completion.message` instead of being stored beside it, so they cannot disagree with it. **Removed** `Completion.withContent`, `withToolCalls` and `asText`. **Fixed** a completion assembled from a stream reports its tool calls on `toolCalls`, which each client used to copy over by hand. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Added** `FinishReason.Unknown`, what a `Completion` carries when the client read no reason; `Completion.apply` defaults to it instead of `Stop`, and it replaces `FinishReason.Other("")`. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Changed** `Completion.estimatedCost` and `CostEstimator.estimate` are `BigDecimal`: a cost is exact and sums of costs do not drift. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Added** `UsageSummary.cachedTokens` and `cacheCreationTokens`, and the same on `ModelUsage`: what a prompt cache read and wrote, added up across a run. A summary stored before they existed reads with both at zero. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Changed** `AssistantMessage.contentOpt` is `text`, and an assistant message's stored JSON is flat like the other roles' (`content`, `toolCalls`); JSON of the old nested shape still reads, and thinking bindings made before stay valid. `AssistantMessage`'s text has no default; `ToolMessage.findToolCallName` returns an `Option`. [#2809](https://github.com/llm4s/llm4s/issues/2809)
+- **Changed** `Conversation.create` takes one `Seq[Message]`; `Conversation.empty` is a value. `Message.validateConversation` and `Message.assistant` take a `Seq`. [#2809](https://github.com/llm4s/llm4s/issues/2809)
+- **Changed** `ProviderExchange.provider` is a `ProviderId` and its `duration` is derived from its two instants; `ProviderExchangeRecorder.record` takes one `ProviderExchangeCall` (**Added**) in place of eleven parameters. **Removed** `ProviderExchangeLogging.enabled`. [#2809](https://github.com/llm4s/llm4s/issues/2809)
+- **Changed** `MessageRole` is a Scala 3 `enum`. The derived JSON of `FinishReason`, `ServiceTier`, `RequestOption` and `RequestAdjustment`, which durable agent events store, is pinned by tests. [#2809](https://github.com/llm4s/llm4s/issues/2809)
+- **Changed** `LLMConnect.getClient(config, options = LlmClientOptions.default)` and `getClient(provider, config, options)` are the only entry points. **Removed** `LLMConnect.fromConfig`, `fromProvider` and the `MetricsCollector` overloads. [#2810](https://github.com/llm4s/llm4s/issues/2810)
+- **Changed** `LLMClient.streamComplete(conversation, options)(onChunk)`: the callback has its own parameter list, so the default options are reachable without named arguments. `MetricsRecording.withMetrics` has no defaulted parameters. [#2810](https://github.com/llm4s/llm4s/issues/2810)
+- **Changed** The context compression pipeline (`ContextManager`, `ContextConfig`, `ContextStep`,
+  `ManagedConversation`, `TokenWindow`, `DeterministicCompressor`, `ToolOutputCompressor`, `LLMCompressor`,
+  `HistoryCompressor`, `SemanticBlocks`, `ArtifactStore`) is `@Experimental`; token counting stays `@Stable`.
+  `ContextManager.create` is its one factory and validates the config; `ContextStep.stage` is a `ContextStage`
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818)).
+- **Added** `ConversationTokenCounter.of(tokenizer)` counts with any `StringTokenizer`, and `StringTokenizer.count`
+  lets a tokenizer count without building the token list (the bundled jtokkit ones do)
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818)).
+- **Removed** `TokenizerMapping`, `TokenizerAccuracy`, `ConversationTokenCounter.forModel` and the
+  `org.llm4s.identity` package: core names no vendor's models. `TokenizerId` is in `org.llm4s.context.tokens`
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818)).
+- **Removed** `ContextConfig.enableSubjectiveEdits`, which `ContextManager` never read; call
+  `DeterministicCompressor.compressToCap(..., enableSubjectiveEdits = true)` for the subjective rules
+  ([#2818](https://github.com/llm4s/llm4s/issues/2818)).
+- **Changed** `HeadroomPercent` cannot hold an invalid value: `create` or a preset is the only way to build one.
+  The newtypes of `org.llm4s.types` are opaque types, as `ProviderModelTypes` already were; the bare aliases
+  `TokenBudget`, `ContextWindowSize`, `ByteCount` and `ExternalizationThreshold` are gone
+  ([#2822](https://github.com/llm4s/llm4s/issues/2822)).
+- **Removed** `LLMClientRetry` and `ErrorRecovery` (`recoverWithBackoff`, `CircuitBreaker`, `CircuitState`):
+  `ReliableClient` with a `RetryPolicy` is the one retry and circuit-breaker mechanism
+  ([migration](docs/reference/migration.md#one-retry-mechanism-llmclientretry-and-errorrecovery-are-removed-2798)) [#2798](https://github.com/llm4s/llm4s/issues/2798).
+- **Changed** `TraceEvent.AgentRunEnded.status` is a `TraceEvent.RunStatus` with the guardrail in `blockedBy`, not a
+  `String` encoding `blocked:<guardrail>` [#2800](https://github.com/llm4s/llm4s/issues/2800).
+- **Changed** `TraceEvent.ErrorOccurred` carries `message`, `errorType` and an optional `cause` instead of a `Throwable`,
+  so an `LLMError` is traced with its own type; `ErrorOccurred.of` and `Tracing.traceError` take either
+  [#2800](https://github.com/llm4s/llm4s/issues/2800).
+- **Changed** `TraceEvent.ImageGenerationCompleted.provider` is an `Option[ProviderId]`
+  [#2800](https://github.com/llm4s/llm4s/issues/2800).
+- **Removed** `TraceEvent.AgentInitialized`, which nothing in the library emitted
+  [#2800](https://github.com/llm4s/llm4s/issues/2800).
 - **Changed** `Result`'s helper object is in `org.llm4s.types` beside the type; the conversions (`toResult` on `Try`,
   `Option` and `Future`, `toLLMError`) and the `Result` combinators are Scala 3 extensions in the one object
   `org.llm4s.syntax`, imported explicitly; `Safety` moves to `org.llm4s.error` and `NetworkSecurity` to
@@ -201,11 +430,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([migration](docs/reference/migration.md#error-hierarchy-cleanup-2819)) [#2819](https://github.com/llm4s/llm4s/issues/2819).
 - **Changed** `Llm4sHttpClient` has one method to implement, `send(HttpRequest): Result[StreamingHttpResponse]`; `get`, `post` and the rest are final conveniences, with `sendText`/`sendRaw` for PATCH, HEAD and binary GETs. A `timeout` now bounds the wait for the response head and each read of the body (a stalled body used to block for good), `MultipartPart.FilePart` takes a content type and bytes and escapes its names, and `create` takes one `HttpClientOptions` ([migration](docs/reference/migration.md#llm4shttpclient-has-one-method-to-implement-send-2802)) [#2802](https://github.com/llm4s/llm4s/issues/2802).
 - **Fixed** `NetworkSecurity.validateUrl` and `validateHostname` return the addresses they vetted, so a caller can connect to the address that was checked, and a refusal is a non-recoverable `ValidationError` instead of a retryable `NetworkError`. `validateIP` is removed and `DefaultBlockedHostnames` is private ([migration](docs/reference/migration.md#networksecurity-returns-the-addresses-it-vetted-and-a-refusal-is-not-retryable-2826)) [#2826](https://github.com/llm4s/llm4s/issues/2826).
-- **Changed** `Llm4sSettings` is the one implementation behind `Llm4sConfig` and is `@Stable` (`Llm4sConfig.from` stays `@Experimental`). `providerConfigs()` returns each section's `Result` by name, `modelRegistryConfig()` reports a configuration it cannot read, and a provider section's `toString` no longer shows header, extra or auth values or the base URL's userinfo ([migration](docs/reference/migration.md#llm4sconfigproviderconfigs-returns-each-sections-result-providers-and-providersconfig-are-internal-2804)) [#2804](https://github.com/llm4s/llm4s/issues/2804).
+- **Changed** `Llm4sSettings` is the one implementation behind `Llm4sConfig` and is `@Stable`, and so is `Llm4sConfig.from`, the app-edge entry point, although it takes a Typesafe `Config`. `providerConfigs()` returns each section's `Result` by name, `modelRegistryConfig()` reports a configuration it cannot read, a provider section's `toString` no longer shows header, extra or auth values or the base URL's userinfo, `provider(name)` and `listModels(name)` take a `ProviderName`, `embeddings()` returns `Result[EmbeddingProviderConfig]` and `textEmbeddingModel()` `Result[EmbeddingModelConfig]`, and `NamedProviderConfig` is top-level in `org.llm4s.config` (`ProvidersConfigModel` and `TextEmbeddingModelSettings` are removed; [migration](docs/reference/migration.md#llm4sconfig-takes-providername-and-embeddings-returns-the-config-alone-2804)) ([migration](docs/reference/migration.md#llm4sconfigproviderconfigs-returns-each-sections-result-providers-and-providersconfig-are-internal-2804)) [#2804](https://github.com/llm4s/llm4s/issues/2804).
 - **Fixed** An Ollama session built by `llm4s-repl` is routed by the `llm4s.http` proxy and TLS settings, which the section-map loader dropped ([#2804](https://github.com/llm4s/llm4s/issues/2804)).
+- **Changed** The default provider section is named by `llm4s.defaultProvider`; every key of `llm4s.providers` is a section, so a section may be called `provider`. A configuration still setting `llm4s.providers.provider` gets a no-default error that says where the key went ([migration](docs/reference/migration.md#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806)) [#2806](https://github.com/llm4s/llm4s/issues/2806).
+- **Removed** `org.llm4s.config.ConfigKeys` (one constant, no user), and the `llm4s.workspace` block from core's `reference.conf`: `llm4s-workspace-client`, its only reader, binds `WORKSPACE_DIR`, `WORKSPACE_IMAGE` and `WORKSPACE_PORT` itself [#2806](https://github.com/llm4s/llm4s/issues/2806).
+- **Fixed** The error for a shared `llm4s.credentials.<id>` entry that sets both `apiKey` and `apiKeyFile` names the variables the provider's spec declares (`apiKeyEnv`) instead of two vendors hard-coded in core [#2806](https://github.com/llm4s/llm4s/issues/2806).
 - **Fixed** `CachingLLMClient` bypasses the cache for a conversation with a tool call or tool result, so a tool loop's next step is no longer served the first step's completion; `CachedEmbeddingClient` is an `EmbeddingProvider`, as `EmbeddingClient` now is, keeps the base response's `usage`, `metadata` and `dim`, and survives a failing `EmbeddingCache`, whose operations return `Result`s ([migration](docs/reference/migration.md#the-caching-types-report-failure-and-tool-loops-bypass-the-cache-2803)) [#2803](https://github.com/llm4s/llm4s/issues/2803).
 - **Fixed** `ModelRegistryConfig.default.withFilePath(...)` (or `withUrl`) loads that source instead of failing with "exactly one of resourcePath, filePath, or url", and `ModelRegistryService.lookup` no longer resolves an unknown id to the one model whose id contains it, so an unknown model never takes another's prices and capabilities [#2823](https://github.com/llm4s/llm4s/issues/2823).
-- **Fixed** `LLMClient.validate()` checks something: one model lookup, model listing or key lookup per provider, with the client's credentials and no completion; a client with no such request returns the new `ValidationUnsupportedError` instead of `Right(())`.
+- **Fixed** `LLMClient.validate()` checks something: one model lookup, model listing or key lookup per provider, with the client's credentials and no completion; a client with no such request returns the new `ValidationUnsupportedError` instead of `Right(())`. Azure OpenAI, Vertex AI, Cohere, Perplexity, watsonx and Jlama check too, so only Bedrock and Z.ai return it ([#2855](https://github.com/llm4s/llm4s/issues/2855)).
   `ProviderModuleChecks.assertValidates` and `assertValidationUnsupported` check it ([guide](docs/guide/observability/index.md#startup-validation), [migration](docs/reference/migration.md#llmclientvalidate-checks-the-provider-2830)) [#2830](https://github.com/llm4s/llm4s/issues/2830).
 - **Fixed** context compression loses no content it cannot give back: without an `ArtifactStore` nothing is externalized (it went to a throwaway store); binary tool output is detected by content, not the word "base64", and stored whole or left; `TokenWindow` pins every leading system and digest message and trims whole tool-call turns; the subjective rules no longer rewrite user messages; `SemanticBlock.getBlockSummary` no longer throws on an empty block [#2817](https://github.com/llm4s/llm4s/issues/2817).
 - **Fixed** `TracingComposer.filter` and `transform` now apply to `traceToolCall`, `traceError`, `traceCompletion` and `traceTokenUsage`, which went
@@ -214,9 +446,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `ReliableClient`'s fast-fail on an open circuit was a retryable 503, so an outer retry repeated it, and several callers arriving after the recovery time all probed the service; it is a `CircuitOpenError` carrying `retryAfter` that no retry rule repeats, and exactly one caller probes
   ([migration](docs/reference/migration.md#an-open-circuit-is-a-circuitopenerror-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
 - **Added** `ReliabilityConfig.validate` (and `CircuitBreakerConfig.validate`, `RateLimitConfig.validate`): a `failureThreshold` or `burstCapacity` below 1 or a negative `requestsPerMinute` is a `ValidationError`, which a `ReliableClient` returns from every call [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- **Changed** `ReliableClient`'s constructor is private: build one with `ReliableClient(underlying, providerName, config)` (`config` defaults to `ReliabilityConfig.default`) and add a collector with `.withMetrics(collector)`
+  ([migration](docs/reference/migration.md#reliableclient-has-a-private-constructor-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- **Changed** A `TracingBackend` declares its own `aliases`, and `llm4s-observability-otel` declares `otel`, which core's mode parser no longer names; `TRACING_MODE=otel` works as before. Two backends answering to one name are a `ConfigurationError` naming both
+  ([migration](docs/reference/migration.md#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799)) [#2799](https://github.com/llm4s/llm4s/issues/2799).
+- **Removed** `Tracing.create`, which logged a missing or failing backend and returned `NoOpTracing`: `Tracing.fromSettings` returns the error
+  ([migration](docs/reference/migration.md#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799)) [#2799](https://github.com/llm4s/llm4s/issues/2799).
+- **Changed** `Secret`'s Scaladoc and the security guide state the registry contract (`Secret(value)` is never evicted, `Secret.token(value)` may be past 4096 values, so a per-tenant or per-request key is a `Secret.token`), and the over-cap warning names that cause
+  ([migration](docs/reference/migration.md#secret-or-secrettoken-which-one-stays-registered-2824)) [#2824](https://github.com/llm4s/llm4s/issues/2824).
 - **Fixed** `RegexSafetyManager.safeCompile` refused every quantified alternation, so `RegexValidator("(foo|bar)+")` failed every value and a `FileBackend`'s or the workspace's regex search for `(jpg|png)*` was refused or run as a literal; only overlapping alternatives such as `(a|ab)*` are refused now
   ([migration](docs/reference/migration.md#regexsafetymanager-returns-result-2825)) [#2825](https://github.com/llm4s/llm4s/issues/2825).
-- **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
+- **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`, and `Unknown` where the client read none, which is also what a `Completion` built without one carries), on `complete` and in
   traces too, and on each agent call's `ModelCallCompleted` (an event stored before reads with none, a reason this version cannot read as `Other(raw)`), mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider, in place of `assertStreams`
   ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1, 2, 5 and 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
 - **Changed** with `Completion.finishReason` (#2613): Ollama reads `done_reason` instead of reporting `stop` for every finished reply,
@@ -235,20 +475,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   starting with `[HISTORY_SUMMARY]`, so `TokenWindow` no longer pins a message that merely quotes the marker [#2505](https://github.com/llm4s/llm4s/issues/2505).
 - **Fixed** message and conversation validation name the field they reject (`content`, `toolCallId`, `toolMessage`,
   `conversation`) and give the reason as the violation, where field and reason were swapped [#2796](https://github.com/llm4s/llm4s/issues/2796).
+- **Fixed** the credential registry no longer keeps each value it refuses for being under 8 characters: it counts them and
+  logs the first refusal only, so many short `Secret`s neither grow memory nor stay held [#2888](https://github.com/llm4s/llm4s/issues/2888).
 
 ### Agent runtime
 
+- **Changed** `AgentBuilder.withTools(ToolSet)` is `withToolSet` and `Guardrail.validate(value, context)` is `validateIn`, so no `@Experimental` method shares a name with a `@Stable` one, which MiMa would skip with it ([What MiMa Covers](docs/reference/api-stability.md#what-mima-covers)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
 - **Changed** `ToolArgumentValidator.default` supports `anyOf` and accepts `null` for a property that is not required,
   which is how a model sent a strict tool definition leaves one out [#2814](https://github.com/llm4s/llm4s/issues/2814).
 - **Fixed** the JWT secret pattern is linear (60 KB of `eyJ` took 4.7 s in `SecretLeakGuardrail` and in the redaction of every log and error message), a PEM private key is redacted whole, not only its header line, and OpenAI project keys and Anthropic keys holding `-` or `_` are matched whole [#2824](https://github.com/llm4s/llm4s/issues/2824).
 - **Changed** `SecretType` is open, so `SecretLeakGuardrail` takes an application's own credential pattern: `new SecretType(name, pattern, placeholder)`
   ([migration](docs/reference/migration.md#secretpatterns-is-in-llm4s-agent-2824)) [#2824](https://github.com/llm4s/llm4s/issues/2824).
-- **Fixed** A guardrail's reason, which may quote the text it refused, no longer reaches the durable event log or a trace: `GuardrailBlocked.message`, which `TaskFailed` and `RunFailed` record, names only the guardrail. The guides now say what the checkpoint store still holds
+- **Fixed** A guardrail's reason, which may quote the text it refused, no longer reaches the durable event log or a trace: `GuardrailBlocked.message`, which `TaskFailed` and `RunFailed` record, names only the guardrail
   ([limits](docs/guide/agents/streaming.md#limits), [migration](docs/reference/migration.md#a-guardrail-blocks-message-names-only-the-guardrail-2793)) [#2793](https://github.com/llm4s/llm4s/issues/2793).
+- **Fixed** A guardrail's reason, which may quote the text it refused, is no longer stored: a blocked run's closing checkpoint records the guardrail's name (`RunOutcome.Blocked(guardrail)`), and `EncryptingCheckpointer` seals the error text of a failed run's outcome (`RunOutcome.Failed`'s message, `RunOutcome.OutputInvalid`'s errors) ([guide](docs/guide/agents/guardrails.md), [design](docs/design/typed-agent-runtime/4.62-admission-and-stored-outcomes.md)) [#2853](https://github.com/llm4s/llm4s/issues/2853).
+- **Added** `AgentMiddleware.admit` (experimental): a stage that runs before anything of a turn is stored and may rewrite or refuse its query. Input guardrails run there, so a blocked query is in no checkpoint, durable event, queue entry or trace, and a rewritten one is stored only as rewritten; `Agent.admit` and `QueuedInput.admitted` admit a query before it is queued ([guide](docs/guide/agents/middleware.md#admission), [design](docs/design/typed-agent-runtime/4.62-admission-and-stored-outcomes.md)) [#2854](https://github.com/llm4s/llm4s/issues/2854).
+- **Added** `GuardedContentContract` in `llm4s-agent-testkit`: what a guarded agent may leave in a store, for any `Checkpointer` and its queue ([guide](docs/guide/agents/contract-suites.md)) [#2853](https://github.com/llm4s/llm4s/issues/2853), [#2854](https://github.com/llm4s/llm4s/issues/2854).
 - **Added** RAG guardrails run inside an agent (experimental): `RAGGuardrail.withTurnContext(guardrail)(turn => Some(RAGContext.fromToolResults(turn, Set("search"))))` is an output guardrail for `GuardrailMiddleware` that checks each final answer against the turn's retrieval-tool results,
   its judge calls counted in the run's usage; `GuardrailConfig.outputGuardrailsWithContext` does it for a preset ([guide](docs/guide/agents/guardrails.md#rag-guardrails)) [#2781](https://github.com/llm4s/llm4s/issues/2781).
-- **Changed** `llm4s-agent` is tiered: every public top-level type is `@Stable` (the agent, graph, event, middleware and guardrail APIs) or `@Experimental` (harness, run queue and worker, encryption, subagent definition, permissions, the checkpointer SPI, the RAG guardrails, `assistant`), `sbt stabilityTierCheck` covers the module, and its Stable case classes are growth-safe. So are the enum cases with fields of every frozen module: the check now fails for one that is neither a wrapper over a growth-safe class nor listed as closed with its reason ([#2781](https://github.com/llm4s/llm4s/issues/2781))
-  ([tiers](docs/reference/api-stability.md#tiers-in-the-code), [migration](docs/reference/migration.md#llm4s-agent-types-are-tiered-and-growth-safe-2778)) [#2778](https://github.com/llm4s/llm4s/issues/2778).
+- **Changed** `llm4s-agent` is tiered, with a small `@Stable` core (`Agent`, `AgentBuilder`, `AgentResult`, `AgentStatus`, `AgentRun`, `Handoff`, the run ids, `RunConfig` and its settings, the guardrail traits and four validators); the rest - graph runtime, checkpointers, events and streaming, middleware, tools, human review, delegation, harness, `assistant` - is `@Experimental`, as are the members of the Stable types that name it, and `sbt stabilityTierCheck` covers the module. Its Stable case classes are growth-safe, and so are the enum cases with fields of every frozen module ([#2781](https://github.com/llm4s/llm4s/issues/2781))
+  ([tiers](docs/reference/api-stability.md#tiers-in-the-code), [migration](docs/reference/migration.md#llm4s-agent-types-are-tiered-and-growth-safe-2778)) [#2778](https://github.com/llm4s/llm4s/issues/2778), [#2785](https://github.com/llm4s/llm4s/issues/2785).
+- **Added** `AgentBuilder.withInputGuardrails` and `withOutputGuardrails`, the Stable way to attach guardrails; `withMiddleware(new GuardrailMiddleware(...))` is the Experimental form for choosing the position ([guide](docs/guide/agents/guardrails.md)) [#2785](https://github.com/llm4s/llm4s/issues/2785).
+- **Changed** the middleware SPI (`@Experimental`) is consistent: every hook returns its state update the same way (`addUpdate`), `ModelRequest` carries the system prompt as `systemPrompt` apart from `messages`, `runsBefore`/`runsAfter` name a middleware by id or by type with `MiddlewareRef` and can be optional (`ifPresent`), `ToolCallRequest` is read-only, and a hook's failure follows one documented model ([guide](docs/guide/agents/middleware.md), [migration](docs/reference/migration.md#the-middleware-spi-is-consistent-and-testable-2795)) [#2795](https://github.com/llm4s/llm4s/issues/2795).
+- **Added** `AgentMiddleware.block(reason)` ends a turn `AgentStatus.Blocked` from `beforeAgent` or `afterAgent` without a guardrail; `MiddlewareId.reserved` lists the ids the agent uses itself, which `build()` refuses by name; `PromptSection.estimatedTokens` and `charsFor` are public; and `MiddlewareTestKit` (`llm4s-agent-testkit`) calls a middleware's hooks with no agent or model ([guide](docs/guide/agents/middleware.md#testing-a-middleware)) [#2795](https://github.com/llm4s/llm4s/issues/2795).
 - **Fixed** context pruning (`ContextWindowMiddleware`): `ContextWindowConfig.minRecentTurns`, which nothing read, keeps the last N turns whole under every strategy (default 1, the current turn), and `maxTokens` and `maxMessages` set together are both limits, as are `AdaptiveWindowing`'s window and `RecentTurnsOnly`'s turn count, which did nothing with neither set; `MiddleOut` fits `maxTokens`
   ([guide](docs/guide/context-window-pruning.md)) [#2728](https://github.com/llm4s/llm4s/issues/2728), [#2729](https://github.com/llm4s/llm4s/issues/2729).
 - **Added** checkpoint encryption at rest (`org.llm4s.agent.encryption`, experimental): `EncryptingCheckpointer`, `EncryptingRunQueue` and `EncryptingLongTermStore` wrap any store, its queue and its long-term store, sealing state, pending writes, custom events, effect outcomes, queued inputs and long-term items (`/memories/` files included) with AES-256-GCM under keys from an `EncryptionKeySource` (`StaticKeySource`: per-tenant keys, rotation by key id)
@@ -288,7 +537,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nullable instead of dropping `required = false`
   ([migration](docs/reference/migration.md#schemadefinition-gains-a-union-and-a-raw-json-schema-case-2814)) [#2814](https://github.com/llm4s/llm4s/issues/2814).
 - **Changed** a tool handler returns `Either[ToolHandlerError, R]` (`String | ToolParameterError`): a getter's error is
-  reported as `ToolCallError.InvalidArguments` with each parameter listed, a message as `HandlerError`
+  reported as `ToolCallError.InvalidArguments` with each parameter listed, a message as `HandlerError`; `ToolFunction[R]`
+  and `ToolBuilder[R]` drop the arguments type parameter nothing read (Scalafix rule `ToolFunctionOneTypeParameter`)
   ([migration](docs/reference/migration.md#a-tool-handler-has-one-error-type-2815)) [#2815](https://github.com/llm4s/llm4s/issues/2815).
 - **Fixed** the Windows workspace command policy no longer reads the `C:` in a `findstr /IC:text` switch as a drive
   path; a real drive path in a `/IG:` value is still confined [#1738](https://github.com/llm4s/llm4s/issues/1738), [#2625](https://github.com/llm4s/llm4s/pull/2625).
@@ -306,8 +556,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Embeddings & RAG
 
-- **Removed** the provider-only `EMBEDDING_PROVIDER` / `llm4s.embeddings.provider` selector; a config still setting it
-  fails, naming `EMBEDDING_MODEL` ([migration](docs/reference/migration.md#the-legacy-embedding-provider-selector-is-removed)).
+- **Changed** `Modality` is an `enum`; a wildcard import of `org.llm4s.llmconnect.model` no longer brings a bare
+  `Text` and `Image` into scope ([#2808](https://github.com/llm4s/llm4s/issues/2808)).
+- **Changed** `MultimediaEmbeddingRequest`, `RawMediaInput` and `EmbeddingVector` live in `llm4s-rag` with
+  `FileEmbedder`, their one consumer. `RawMediaInput` copies its bytes and compares by content;
+  `EmbeddingVector.values` is a `Seq[Double]` ([#2808](https://github.com/llm4s/llm4s/issues/2808)).
+- **Changed** Multimodal embedding is the separate `MultimodalEmbeddingProvider` capability in `llm4s-rag`, passed to
+  `FileEmbedder.encodeFromPath`; `EmbeddingProvider.embedMultimodal` and its `501` default are removed
+  ([#2808](https://github.com/llm4s/llm4s/issues/2808)).
+- **Changed** `EmbeddingClient` is final: `EmbeddingClient(provider)` with `withTracing`, `withOperation` and
+  `withProviderId`. **Fixed** `EmbeddingClient.from` returns the registry's `ConfigurationError` for an unknown
+  provider, where it rewrote it to an `EmbeddingError` with an invented HTTP status. `EmbeddingError` is in
+  `org.llm4s.error` ([#2808](https://github.com/llm4s/llm4s/issues/2808)).
+- **Removed** the provider-only `EMBEDDING_PROVIDER` / `llm4s.embeddings.provider` selector, and the per-provider model settings only it read:
+  `llm4s.embeddings.<id>.model`, the `OPENAI_`/`OLLAMA_`/`VOYAGE_`/`JINA_`/`COHERE_EMBEDDING_MODEL` variables and constants, `EmbeddingConfigSpec.modelEnv` and
+  `EmbeddingProviderSection.model` ([#2835](https://github.com/llm4s/llm4s/issues/2835)); a config still setting the selector or a block's `model` fails, naming `EMBEDDING_MODEL` ([migration](docs/reference/migration.md#the-legacy-embedding-provider-selector-is-removed)).
 - **Fixed** `RAGConfig.withTracing` traces the answer, LLM-rerank and `LLMQueryRewriter` calls, tagged `rag.answer`,
   `rag.rerank`, `rag.rewrite`, and each query's `RAGOperationCompleted` with stage durations; **Added**
   `RAGAnswerResult.metrics` (`RAGQueryMetrics`) [#2734](https://github.com/llm4s/llm4s/issues/2734).
@@ -340,18 +603,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ingestChunksWithPermissions` take `DocumentChunk`s and return the stored ids, with `RAG.chunk` and
   `ingestBytesWithPermissions` [#2732](https://github.com/llm4s/llm4s/issues/2732);
   [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
+- **Changed** `EmbeddingProviderConfig` carries `providerId: ProviderId`, `baseUrl: BaseUrl`, `model: ModelName` and `apiKey: Option[Secret]` (a keyless provider has `None`); `EmbeddingClient.from(config, options)` resolves the provider from it, and `RAGASFactory.fromConfigs` / `basicFromConfigs` take the config alone ([migration](docs/reference/migration.md#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805)) [#2805](https://github.com/llm4s/llm4s/issues/2805), [#2804](https://github.com/llm4s/llm4s/issues/2804).
+- **Changed** `LocalEmbeddingModels` and the local encoders' dimension table (`LocalEmbeddingModels.dimension`) moved to `llm4s-rag`; `ModelDimensionRegistry` answers from registered providers only, and `localDimension` / `LocalProvider` are removed [#2805](https://github.com/llm4s/llm4s/issues/2805).
+- **Fixed** `SQLiteVectorStore` metadata with a quote, backslash or control character survives a write and a read, and
+  its filters compare exactly instead of with `LIKE` on the JSON text; earlier rows still read
+  [#2759](https://github.com/llm4s/llm4s/issues/2759);
+  [migration](docs/reference/migration.md#sqlitevectorstore-escapes-metadata-and-filters-exactly-2759).
 
 ### Observability
 
+- **Changed** The OpenTelemetry request attributes `gen_ai.request.temperature`, `top_p` and the penalties are set only when the caller set the option. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Changed** `TraceId` is `org.llm4s.trace.model.TraceId` in `llm4s-observability`, its only user; it was in
+  `org.llm4s.types` in `llm4s-core` ([#2822](https://github.com/llm4s/llm4s/issues/2822)).
+- **Changed** `llm4s.agent.runs.ended` and `llm4s.agent.run.duration` report the status the run's trace does: a guardrail
+  block is `blocked`, not `failed`, and a limited or cut-off turn `step_limit_reached`, `token_limit_reached` or
+  `truncated`, not `completed`
+  ([migration](docs/reference/migration.md#an-agent-runs-trace-and-metrics-report-one-status-2829)) [#2829](https://github.com/llm4s/llm4s/issues/2829).
+- **Changed** A run that hands off keeps its `invoke_agent <agent>` span under the agent it was started on:
+  `TraceEvent.AgentRunEnded.agent` is the root agent, and the new `activeAgent` the one active at the end
+  [#2829](https://github.com/llm4s/llm4s/issues/2829).
+- **Fixed** An agent run's `chat <model>` span has the model call's duration, where it was a point: the durable
+  `ModelCallCompleted` event gains `duration`, measured around the client (zero in an event stored before), and a
+  positional pattern on it gains a field, which `PositionalPatternsGainFields` adds
+  ([guide](docs/guide/observability/agents.md#span-names-and-attributes)) [#2829](https://github.com/llm4s/llm4s/issues/2829).
 - **Fixed** `PrometheusMetrics` dropped `ReliableClient`'s retries, circuit-breaker transitions and errors: they are now generic metrics
   (`org.llm4s.reliability.ReliabilityMetrics`) that every backend exports, as `llm4s_retries_total`, `llm4s_circuit_breaker_transitions_total`
   and `llm4s_reliability_errors_total` [#2801](https://github.com/llm4s/llm4s/issues/2801).
+- **Changed** The image generation metrics are `ImageMetrics` in `llm4s-image`, generic metrics every backend exports; `MetricsCollector` has no image method. Every exported series keeps its name, type, labels and buckets, pinned by `ImageMetricsSeriesSpec`
+  ([migration](docs/reference/migration.md#image-metrics-are-imagemetrics-in-llm4s-image-2801)) [#2801](https://github.com/llm4s/llm4s/issues/2801).
+- **Added** `MetricsCollector.Errors`, the failed-operations counter (`llm4s_errors_total`) as a `Metric`, so a module above core adds its failed operations to it [#2801](https://github.com/llm4s/llm4s/issues/2801).
+- **Fixed** The `langfuse` tracing mode sends OTLP/HTTP JSON to Langfuse's OpenTelemetry endpoint (`/api/public/otel/v1/traces`),
+  as Langfuse removed `/api/public/ingestion` from Langfuse Cloud on 2026-11-16; `RAGASLangfuseObserver` scores go to `/api/public/scores`
+  ([migration](docs/reference/migration.md#the-langfuse-backend-sends-opentelemetry-spans-2883)) [#2883](https://github.com/llm4s/llm4s/issues/2883).
 - **Fixed** Langfuse traces were created public - readable, messages included, by anyone holding a trace's URL - and all as user
   `llm4s-user`: they are private unless `llm4s.tracing.langfuse.public = true`, and `userId` is the run's `RunConfig.principal`
   (new `TraceEvent.AgentRunEnded.userId`), or not sent [#2828](https://github.com/llm4s/llm4s/issues/2828).
 
+### Documentation
+
+- **Changed** Examples use current model ids (OpenAI `gpt-5.6-luna`/`gpt-5.6-terra` for the deprecated `gpt-4o` family,
+  `claude-sonnet-5-5`, `gemini-3.8-flash`, Bedrock `us.anthropic.claude-sonnet-5-5`), as do the enterprise deploy overlay, its LiteLLM gateway config and the Kotlin KDoc; the watsonx pages say it ships unverified, the
+  observability guide that Langfuse Cloud removed the ingestion API the `langfuse` mode uses, and the release checklist gains the checks [#2832](https://github.com/llm4s/llm4s/issues/2832) [#2887](https://github.com/llm4s/llm4s/issues/2887).
+- **Added** The contributing guide states the naming conventions: what `apply`, `of`, `create`, `from` and `forX`
+  mean for a factory, `enum` or `sealed trait` for a sum type, plain accessor names, `PascalCase` constants and
+  opaque-type newtypes ([#2822](https://github.com/llm4s/llm4s/issues/2822)).
+- **Changed** the docs site groups the User Guide sidebar, and the contributor pages moved from `/reference/` to `/contribute/` (old addresses redirect); the watsonx, Perplexity and Bedrock setup sections, typed tools and the media and store-contract pages are filled in, and `LLMClient`, `AgentStatus`, `ModelRegistryService` and `MCPClient` say how to obtain and use them [#2834](https://github.com/llm4s/llm4s/issues/2834).
+- **Changed** the support table (`docs/_data/support.yml`) has one entry per release line, with `security_until` and `ended_on` dates that the Support Policy page shows; `scripts/check-support-table.sh` checks the fields each status needs, and the release guide says what to change at each release ([Update the support table](docs/reference/release.md#update-the-support-table)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
+- **Changed** the Compatibility and Deprecation Policy no longer says provider modules aim to version independently: every module shares the release version, which `llm4s-bom` pins [#2835](https://github.com/llm4s/llm4s/issues/2835).
+- **Fixed** 23 more guide pages have their Scala blocks compiled (agents, streaming, durable checkpointers, memory, ZIO, cats-effect, RAG, speech, tracing and others), which corrected code that did not compile against the API; guide specs fail when their copy of a page drifts ([#2833](https://github.com/llm4s/llm4s/issues/2833)).
+
 ### Build & tooling
 
+- **Fixed** the config-policy `prod` and `staging-balanced` presets allowed only retired models (`gpt-4o`, `claude-3-5-sonnet`, `gemini-2.x`, `gemini-1.5-pro`) and capped windows below current models: they allow each vendor's current model generations (`ConfigPolicy.ModelFamilies`, Bedrock's Claude ids included), and each cap is the largest current window in the bundled model metadata ([migration](docs/reference/migration.md#the-config-policy-prod-preset-allows-model-generations-2885)) [#2885](https://github.com/llm4s/llm4s/issues/2885).
+- **Changed** the Beta parts inside frozen modules, `org.llm4s.assistant` and the Mistral, Cohere and xAI dialects, are left out of the 0.7.0 MiMa baseline: `stabilityTierCheck` keeps each of their types `@Experimental` (`stabilityExperimentalFiles`), which MiMa skips with its nested types ([The Baseline](docs/reference/api-stability.md#the-baseline)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
+- **Added** `scripts/check-docs.sh` runs every documentation check of Quick Checks that needs no sbt; every docs page needs a `description`, and a page that links an llm4s issue must declare how it cites it ([#2833](https://github.com/llm4s/llm4s/issues/2833)).
+- **Added** Scalafix rules `SamplingOptionsOptional`, `CompletionFromMessage`, `MessageAndConversationShapes` and `ClientEntryPoints`, part of `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6` ([#2807](https://github.com/llm4s/llm4s/issues/2807), [#2809](https://github.com/llm4s/llm4s/issues/2809), [#2810](https://github.com/llm4s/llm4s/issues/2810)). `PositionalPatternsGainFields` no longer covers `Completion`, whose extractor also lost two fields.
+- **Changed** The scalafix rule `ResultSyntaxMoved` also rewrites the imports of `TokenizerId`, `EmbeddingError`
+  and `TraceId` to where they moved ([#2818](https://github.com/llm4s/llm4s/issues/2818),
+  [#2808](https://github.com/llm4s/llm4s/issues/2808), [#2822](https://github.com/llm4s/llm4s/issues/2822)).
 - **Fixed** `scripts/mima-dry-run.sh`'s negative control resolves its probe baseline again: only `llm4s-core` takes the probe version, so its POM names `llm4s-media` at a version that was published;
   a control that fails before MiMa compares anything is reported as that, and `scripts/test-mima-dry-run.sh` models dependency resolution [#2794](https://github.com/llm4s/llm4s/issues/2794).
 - **Changed** a growth-prone type that gains a field adds no forwarding `apply` overload before the MiMa baseline (0.7.0), so the baseline freezes one `apply` per type
@@ -366,11 +675,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** CI costs fewer runner minutes: each module's tests run once (its coverage leg, or `Test (other modules)`), drafts run nothing, a pull request skips the test jobs its change cannot affect (a docs-only one runs the suites tagged `DocsSpec`), a push to main leaves Windows, performance, ScalaDoc and the consumer and Spring jobs to a nightly run, the consumer and Spring builds share jobs, the agent coverage leg and the other-modules tests reuse the nightly build's compiled output, and benchmarks run weekly ([testing guide](docs/reference/testing-guide.md)).
   `sbt testPerformance` runs only core and agent; MiMa and the config-policy CLIs moved into Quick Checks and the tests.
 - **Added** `llm4s-kotlin-api` publishes from its own workflow (`publish-kotlin.yml`), which a release calls and which can be run by hand for a tag whose Kotlin publish failed: it builds the tag's code with the current upload rules ([release guide](docs/reference/release.md#re-triggering-a-failed-release)).
-- **Added** `Llm4sMigrate_1_0` covers the breaks since 0.6.0: `ThinkingReplacesBudgetTokens` rewrites `ReasoningEffort.None` to `Thinking.Off` and reports `budgetTokens`,
+- **Added** One umbrella Scalafix rule per starting version, `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6` (`Llm4sMigrateFrom_0_7` at 0.7.0), each running every rule from that version once ([#2835](https://github.com/llm4s/llm4s/issues/2835), [Scalafix](docs/reference/scalafix.md#migration-rules)); both cover the breaks since 0.6.0: `ThinkingReplacesBudgetTokens` rewrites `ReasoningEffort.None` to `Thinking.Off` and reports `budgetTokens`,
   `AgentStatusGainsTruncated` reports a `match` on `AgentStatus` with no catch-all, `FinishReasonTyped` rewrites the string comparisons of `StreamedChunk.finishReason` and reports a literal in the same expression that no rewrite gets right (0.6.0's raw Bedrock and Gemini values, a content filter's, Gemini's `STOP`), and positional `Completion`, `ModelCallCompleted`, `ModelCapabilities`, `TokenUsage`, `ModelPricing`, `CompletionOptions`, `TurnState` and `RAGConfig` patterns gain their fields; tested against 0.6.0 [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#migration-rules).
 - **Fixed** `llm4s-reactor` was never published (it was missing from the root aggregate, so 0.6.0 lacks it); `publishedArtifactsCheck` now fails on a published module outside the aggregate.
 - **Added** `llm4s-testkit` has extractors for `ScriptedLLMClient.respondingTo` rules - `EndsWithUser`, `LastUser`, `AfterToolResult`, `AfterToolResults`, `AfterCorrection()` -
   and `conversation.lastUserText` [#2730](https://github.com/llm4s/llm4s/issues/2730); [Testing with the Testkit](docs/guide/testing-with-the-testkit.md#choose-the-reply-from-the-conversation).
+- **Added** Scalafix rule `ProviderConfigNewtypes`, part of `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6`: a provider config's named `model` argument and `withModel(...)` to `ModelName(...)`, `Llm4sConfig.provider/listModels("x")` to `ProviderName("x")`; `CopyToWithSetters` and `CopyToWithSetters_1_0` wrap a copied `model` the same way [#2805](https://github.com/llm4s/llm4s/issues/2805), [#2804](https://github.com/llm4s/llm4s/issues/2804).
 
 ## [0.6.0] - 2026-11-21
 

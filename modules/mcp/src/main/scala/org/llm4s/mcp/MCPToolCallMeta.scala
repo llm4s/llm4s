@@ -1,6 +1,7 @@
 package org.llm4s.mcp
 
-import org.llm4s.toolapi.ToolCallInfo
+import org.llm4s.llmconnect.model.ToolCallId as CallId
+import org.llm4s.toolapi.{ IdempotencyKey as Key, ToolCallInfo }
 
 /**
  * The tool call an MCP `tools/call` request carries in its `_meta` (#1740): the agent's idempotency key and the
@@ -17,7 +18,7 @@ private[mcp] object MCPToolCallMeta {
 
   /** The `_meta` object for `call`. */
   def toMeta(call: ToolCallInfo): ujson.Obj =
-    ujson.Obj(IdempotencyKey -> call.idempotencyKey, ToolCallId -> call.toolCallId)
+    ujson.Obj(IdempotencyKey -> call.idempotencyKey.asString, ToolCallId -> call.toolCallId.asString)
 
   /**
    * The call a request's `params._meta` describes: `None` without an idempotency key, which is what makes it one. A
@@ -27,5 +28,5 @@ private[mcp] object MCPToolCallMeta {
     for
       meta <- params.flatMap(_.objOpt).flatMap(_.get("_meta")).flatMap(_.objOpt)
       key  <- meta.get(IdempotencyKey).flatMap(_.strOpt).filter(_.nonEmpty)
-    yield ToolCallInfo(meta.get(ToolCallId).flatMap(_.strOpt).filter(_.nonEmpty).getOrElse(requestId), key)
+    yield ToolCallInfo(CallId(meta.get(ToolCallId).flatMap(_.strOpt).filter(_.nonEmpty).getOrElse(requestId)), Key(key))
 }

@@ -3,6 +3,7 @@ package fix
 import org.llm4s.llmconnect.config.{ AnthropicConfig, OllamaConfig }
 import org.llm4s.llmconnect.model.{ AssistantMessage, CompletionOptions, TokenUsage }
 import org.llm4s.reliability.CircuitBreakerConfig
+import org.llm4s.types.ProviderModelTypes.ModelName
 
 object CopyToWithSettersTest {
   val options = CompletionOptions().withMaxTokens(500).withTemperature(0.2)
@@ -12,11 +13,11 @@ object CopyToWithSettersTest {
   def reply(message: AssistantMessage, text: String): AssistantMessage =
     message.withContent(text)
 
-  def local(config: OllamaConfig): OllamaConfig = config.withBaseUrl("http://localhost:11434")
+  def local(config: OllamaConfig): OllamaConfig = config.withContextWindow(8192)
 
   def claude(config: AnthropicConfig): AnthropicConfig =
     config
-      .withModel("claude-sonnet-4-5").withContextWindow(200000)
+      .withModel(ModelName("claude-sonnet-4-5")).withContextWindow(200000)
 
   def breaker(config: CircuitBreakerConfig): CircuitBreakerConfig = config.withFailureThreshold(3)
 }

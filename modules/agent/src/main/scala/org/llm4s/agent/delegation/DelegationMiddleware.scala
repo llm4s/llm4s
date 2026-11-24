@@ -235,7 +235,7 @@ final private class TaskTool[A](base: AgentToolSpec[A], val maxErrorBytes: Int)(
     answer(args, answers, context)
 
 private[agent] object DelegationMiddleware:
-  val Id: MiddlewareId = MiddlewareId("delegation")
+  val Id: MiddlewareId = MiddlewareId.Delegation
 
   /**
    * What the parent model sees for subagent `name`'s `outcome`: its report as JSON, or past `maxReportBytes` a tool
@@ -392,7 +392,7 @@ private[agent] object TaskTools:
       case StoredMessage(_, assistant: AssistantMessage) => assistant.toolCalls.filter(c => names(c.name))
       case _                                             => Vector.empty
     }
-    calls.lastIndexWhere(_.id == ctx.toolCallId.value) match
+    calls.lastIndexWhere(_.id == ctx.toolCallId) match
       case -1 => calls.size + 1
       case at => at + 1
 

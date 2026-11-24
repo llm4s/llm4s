@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ Citation, CompletionOptions, Conversation, UserMessage }
@@ -28,10 +30,10 @@ final class OpenAIClientCitationsSpec extends AnyFlatSpec with Matchers with Eit
 
   private val config = OpenAIConfig
     .fromValues(
-      modelName = model,
+      modelName = ModelName(model),
       apiKey = Secret("test-api-key"),
       organization = None,
-      baseUrl = "https://example.invalid/v1"
+      baseUrl = BaseUrl("https://example.invalid/v1")
     )
     .value
 
@@ -133,7 +135,7 @@ final class OpenAIClientCitationsSpec extends AnyFlatSpec with Matchers with Eit
     )
     val client = OpenAIClient.forTest(model, transport(streaming = _ => stream(content, stop)), config)
 
-    val completion = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ()).value
+    val completion = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ()).value
 
     completion.content shouldBe "Hi"
     completion.citations shouldBe Nil

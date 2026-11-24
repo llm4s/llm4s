@@ -14,7 +14,7 @@ class ConfigReaderPrecedenceSpec extends AnyWordSpec with Matchers {
         .defaultProvider()
         .fold(err => fail(err.toString), identity)
 
-      cfg.model shouldBe "fixture-model"
+      cfg.model.asString shouldBe "fixture-model"
     }
 
     "allow -D system property to override application.conf" in {

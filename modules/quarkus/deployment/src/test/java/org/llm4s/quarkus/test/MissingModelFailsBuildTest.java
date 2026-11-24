@@ -14,12 +14,12 @@ class MissingModelFailsBuildTest {
 
     @RegisterExtension
     static final QuarkusUnitTest app = new QuarkusUnitTest()
-        .overrideConfigKey("llm4s.providers.provider", "mian")
+        .overrideConfigKey("llm4s.defaultProvider", "mian")
         .overrideConfigKey("llm4s.providers.main.provider", "ollama")
         .assertException(failure -> Failures.assertMessageNames(
             failure,
             "llm4s.providers.main.model is not set",
-            "llm4s.providers.provider names section 'mian'"));
+            "llm4s.defaultProvider names section 'mian'"));
 
     @Test
     void theBuildFails() {

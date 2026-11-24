@@ -34,12 +34,11 @@ Therefore, there is no `llm4s.credentials.bedrock` block.
 A minimal section needs only `provider`, `model`, and `region`:
 
 ```hocon
+llm4s.defaultProvider = "claude-bedrock"      # the default section
 llm4s.providers {
-  provider = "claude-bedrock"      # the default section
-
   claude-bedrock {
     provider = "bedrock"
-    model    = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    model    = "us.anthropic.claude-sonnet-5-5"
     region   = ${?AWS_REGION}
   }
 }
@@ -50,7 +49,7 @@ Configured settings:
 - `region`: required, never defaulted (`${?AWS_REGION}`). A model is only available in specific regions;
   an explicit region prevents sending requests to the wrong region.
 - `model`: Bedrock model ID or regional inference profile ID (e.g.
-  `"anthropic.claude-3-5-sonnet-20241022-v2:0"` or `"us.anthropic.claude-3-5-sonnet-20241022-v2:0"`).
+  `"anthropic.claude-sonnet-5-5"` or `"us.anthropic.claude-sonnet-5-5"`; Claude Sonnet 5.5 is served on `bedrock-runtime` only through its geo (`us.`, `eu.`, ...) and `global.` profiles).
 - `profile`: optional named AWS shared-config profile (`${?AWS_PROFILE}`).
 - `accessKeyId`, `secretAccessKey`, `sessionToken`: explicit static credentials (`${?AWS_ACCESS_KEY_ID}`,
   `${?AWS_SECRET_ACCESS_KEY}`, `${?AWS_SESSION_TOKEN}`). `accessKeyId` and `secretAccessKey` must be set
@@ -67,7 +66,7 @@ Example with a shared profile and timeouts:
 ```hocon
 llm4s.providers.bedrock-prod {
   provider = "bedrock"
-  model    = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+  model    = "us.anthropic.claude-sonnet-5-5"
   region   = "us-east-1"
   profile  = "production"
   timeouts {
@@ -97,9 +96,10 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val reply = for {
-  providerConfig  <- Llm4sConfig.provider("claude-bedrock")
+  providerConfig  <- Llm4sConfig.provider(ProviderName("claude-bedrock"))
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client     <- LLMConnect.getClient(providerConfig)

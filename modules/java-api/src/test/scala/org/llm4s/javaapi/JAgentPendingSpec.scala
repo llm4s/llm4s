@@ -1,13 +1,14 @@
 package org.llm4s.javaapi
 
+import org.llm4s.toolapi.IdempotencyKey
 import org.llm4s.testutil.TestTimeLimit
 
 import java.util.Optional
 import org.llm4s.agent.{ AgentStatus, Suspension }
-import org.llm4s.agent.graph.{ GraphError, IdempotencyKey, InterruptId }
+import org.llm4s.agent.graph.{ GraphError, InterruptId }
 import org.llm4s.agent.graph.toolloop.{ ApprovalRequest, ApprovalSource, ToolQuestionRequest }
 import org.llm4s.error.{ CancelledError, NetworkError, ValidationError }
-import org.llm4s.llmconnect.model.Completion
+import org.llm4s.llmconnect.model.{ Completion, ToolCallId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -139,7 +140,7 @@ class JAgentPendingSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   it should "list a subagent's interrupts as their kind in the child, under their composite ids (#2050)" in {
     import org.llm4s.agent.delegation.{ ChildInterrupt, ChildRef, DelegatedRequest }
-    import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, NodeId, RunId, ThreadId, ToolCallId }
+    import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, NodeId, RunId, ThreadId }
     import org.llm4s.agent.graph.middleware.MiddlewareId
     import org.llm4s.agent.graph.toolloop.{ BreakpointRequest, MiddlewareHook, MiddlewareQuestionRequest }
     val c = call("k1", "probe", "x")

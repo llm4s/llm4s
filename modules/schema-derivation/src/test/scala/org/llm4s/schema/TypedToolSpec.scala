@@ -88,12 +88,12 @@ object TypedToolFixtures {
 object TypedTools {
   import TypedToolFixtures.*
 
-  def built[T, R](tool: org.llm4s.types.Result[ToolFunction[T, R]]): ToolFunction[T, R] =
+  def built[R](tool: org.llm4s.types.Result[ToolFunction[R]]): ToolFunction[R] =
     tool.fold(e => sys.error(s"could not build the tool: ${e.formatted}"), identity)
 
   // The `add` tool of `MCPEmbeddedServerRoundTripSpec`, as it builds it by hand.
   val handBuiltAdd = built(
-    ToolBuilder[Map[String, Any], String](
+    ToolBuilder[String](
       "add",
       "Returns the sum of two integers",
       Schema
@@ -206,7 +206,7 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
 
   it should "treat null arguments as no arguments when it has no parameters, and refuse them otherwise" in {
     val handBuiltPing = built(
-      ToolBuilder[Map[String, Any], String]("ping", "Pong", Schema.`object`[Map[String, Any]]("No parameters"))
+      ToolBuilder[String]("ping", "Pong", Schema.`object`[Map[String, Any]]("No parameters"))
         .withHandler(_ => Right("pong"))
         .buildSafe()
     )

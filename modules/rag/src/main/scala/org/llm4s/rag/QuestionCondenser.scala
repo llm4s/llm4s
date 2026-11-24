@@ -52,7 +52,7 @@ object QuestionCondenser {
   val DefaultMaxHistoryMessages: Int = 10
 
   /** The built-in condenser's completion options, by default: temperature 0, for a stable rewrite. */
-  val DefaultOptions: CompletionOptions = CompletionOptions(temperature = 0.0)
+  val DefaultOptions: CompletionOptions = CompletionOptions(temperature = Some(0.0))
 
   /**
    * The built-in condenser: one `client` call that rewrites the question as a standalone one, given the history.

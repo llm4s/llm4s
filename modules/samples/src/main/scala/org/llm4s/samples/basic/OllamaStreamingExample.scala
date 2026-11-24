@@ -33,19 +33,19 @@ object OllamaStreamingExample {
       given org.llm4s.model.ModelRegistryService = registryService
       sink <- ProviderExchangeSink.createRunScopedJsonl(Paths.get(logDir))
       options = LlmClientOptions(
-        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
       _ = logger.info("Provider exchange logs: {}", sink.path.toAbsolutePath.normalize())
       client <- LLMConnect.getClient(providerCfg, options)
       completion <- client.streamComplete(
         conversation,
-        CompletionOptions(),
-        chunk =>
-          chunk.content.foreach { text =>
-            // Print incremental content as it arrives
-            print(text)
-            buffer.append(text)
-          }
+        CompletionOptions()
+      )(chunk =>
+        chunk.content.foreach { text =>
+          // Print incremental content as it arrives
+          print(text)
+          buffer.append(text)
+        }
       )
       _ = {
         // Ensure line break after streaming

@@ -25,9 +25,8 @@ the [installation guide](../../docs/getting-started/installation.md); this READM
 Chat providers are named sections of your `application.conf`. A section needs no credentials:
 
 ```hocon
+llm4s.defaultProvider = "ollama-local"        # the default section
 llm4s.providers {
-  provider = "ollama-local"        # the default section
-
   ollama-local {
     provider = "ollama"
     model    = "llama3.2"
@@ -42,7 +41,6 @@ environment:
 | Key | Environment variable |
 |---|---|
 | `llm4s.embeddings.ollama.baseUrl` | `OLLAMA_EMBEDDING_BASE_URL` |
-| `llm4s.embeddings.ollama.model` | `OLLAMA_EMBEDDING_MODEL` |
 
 Chat sections, and the embeddings block, also accept an optional `timeouts { request = 3m, stream = 15m }`
 block; this module defaults to 2 minutes and 10 minutes for the wait for a response to begin (see
@@ -58,9 +56,10 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val reply = for {
-  providerConfig  <- Llm4sConfig.provider("ollama-local")
+  providerConfig  <- Llm4sConfig.provider(ProviderName("ollama-local"))
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client     <- LLMConnect.getClient(providerConfig)

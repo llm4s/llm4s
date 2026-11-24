@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
@@ -27,11 +29,11 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers with EitherV
 
   private def createTestConfig: OpenAIConfig = OpenAIConfig
     .fromValues(
-      modelName = "gpt-4",
+      modelName = ModelName("gpt-4"),
       apiKey = Secret("test-api-key-for-closed-state-testing"),
       organization = None,
       // Must never be used by unit tests (no network). We keep a clearly fake endpoint.
-      baseUrl = "https://example.invalid/v1"
+      baseUrl = BaseUrl("https://example.invalid/v1")
     )
     .value
 
@@ -95,9 +97,8 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers with EitherV
     // Attempt to call streamComplete()
     val result = client.streamComplete(
       createTestConversation,
-      CompletionOptions(),
-      _ => chunksReceived += 1
-    )
+      CompletionOptions()
+    )(_ => chunksReceived += 1)
 
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[ConfigurationError]
@@ -124,7 +125,7 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers with EitherV
   it should "succeed for operations before close() is called" in {
     val transport = new StubTransport
     val client = new OpenAIClient(
-      createTestConfig.model,
+      createTestConfig.model.asString,
       transport,
       createTestConfig,
       org.llm4s.metrics.MetricsCollector.noop,
@@ -150,7 +151,7 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers with EitherV
 
   it should "close its transport exactly once, however often close() is called" in {
     val transport = new StubTransport
-    val client    = OpenAIClient.forTest(createTestConfig.model, transport, createTestConfig)
+    val client    = OpenAIClient.forTest(createTestConfig.model.asString, transport, createTestConfig)
 
     client.close()
     client.close()
@@ -162,11 +163,11 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers with EitherV
     val modelName = "gpt-4-turbo-preview"
     val config = OpenAIConfig
       .fromValues(
-        modelName = modelName,
+        modelName = ModelName(modelName),
         apiKey = Secret("test-api-key"),
         organization = None,
         // Must never be used by unit tests (no network). We keep a clearly fake endpoint.
-        baseUrl = "https://example.invalid/v1"
+        baseUrl = BaseUrl("https://example.invalid/v1")
       )
       .value
     val client = new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)

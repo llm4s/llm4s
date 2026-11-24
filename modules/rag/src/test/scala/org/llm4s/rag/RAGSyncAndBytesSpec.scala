@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.chunking.{ ChunkMetadata, DocumentChunk }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
@@ -37,16 +38,13 @@ class RAGSyncAndBytesSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock",
           created = Instant.EPOCH,
-          content = responseOverride.getOrElse("Mock answer."),
-          model = "mock",
+          model = ModelName("mock"),
           message = AssistantMessage(responseOverride.getOrElse("Mock answer.")),
           usage = Some(TokenUsage(10, 5, 15))
         )
       )
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -60,7 +58,7 @@ class RAGSyncAndBytesSpec extends AnyFlatSpec with Matchers {
   ): Result[RAG] = {
     val mockLLM = new MockLLMClient()
     val cfg     = if (withLLM) config.copy(llmClient = Some(mockLLM)) else config
-    val client  = new EmbeddingClient(new MockEmbeddingProvider())
+    val client  = EmbeddingClient(new MockEmbeddingProvider())
     RAG.buildWithClient(cfg, client)
   }
 

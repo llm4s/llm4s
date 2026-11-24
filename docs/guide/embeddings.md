@@ -3,8 +3,9 @@ layout: page
 title: Embeddings
 description: "Turn text into vectors with LLM4S: choose a provider and model, create an EmbeddingClient, embed documents and queries, and handle dimensions."
 search_title: "Text embeddings in Scala with LLM4S"
-parent: User Guide
-nav_order: 33
+parent: RAG and Data
+nav_order: 301
+grand_parent: User Guide
 ---
 
 # Embeddings
@@ -36,11 +37,11 @@ one, the vendor's key.
 
 | Provider id | Artifact | What it needs | Block variables (`llm4s.embeddings.<id>`) |
 |---|---|---|---|
-| `openai` | `llm4s-openai` | `OPENAI_API_KEY` | `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` |
-| `ollama` | `llm4s-ollama` | a running Ollama, no key | `OLLAMA_EMBEDDING_BASE_URL`, `OLLAMA_EMBEDDING_MODEL` |
-| `voyage` | `llm4s-voyage` | `VOYAGE_API_KEY` | `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL` |
-| `jina` | `llm4s-jina` | `JINA_API_KEY` | `JINA_EMBEDDING_BASE_URL`, `JINA_EMBEDDING_MODEL` |
-| `cohere` | `llm4s-cohere` | `COHERE_API_KEY` | `COHERE_EMBEDDING_BASE_URL`, `COHERE_EMBEDDING_MODEL` |
+| `openai` | `llm4s-openai` | `OPENAI_API_KEY` | `OPENAI_EMBEDDING_BASE_URL` |
+| `ollama` | `llm4s-ollama` | a running Ollama, no key | `OLLAMA_EMBEDDING_BASE_URL` |
+| `voyage` | `llm4s-voyage` | `VOYAGE_API_KEY` | `VOYAGE_EMBEDDING_BASE_URL` |
+| `jina` | `llm4s-jina` | `JINA_API_KEY` | `JINA_EMBEDDING_BASE_URL` |
+| `cohere` | `llm4s-cohere` | `COHERE_API_KEY` | `COHERE_EMBEDDING_BASE_URL` |
 
 Some starting points: a hosted general-purpose model (`openai/text-embedding-3-small`), a local one with no key
 and no data leaving the machine (`ollama/nomic-embed-text`), or a provider whose models distinguish queries from
@@ -62,8 +63,8 @@ The key, a base URL and a second account's key follow the same rules as for chat
 
 ## 4. Embedding some texts
 
-`Llm4sConfig.embeddings()` reads those settings and returns the provider id with its
-`EmbeddingProviderConfig`; `EmbeddingClient.from` builds the client from them. An `EmbeddingRequest` carries the
+`Llm4sConfig.embeddings()` reads those settings and returns the provider's `EmbeddingProviderConfig`, which
+carries the provider as its `providerId`; `EmbeddingClient.from` builds the client from it. An `EmbeddingRequest` carries the
 texts and an `EmbeddingModelConfig` naming the model and its dimensions, and the `EmbeddingResponse` holds one
 vector per text, in order:
 
@@ -77,13 +78,11 @@ import org.llm4s.types.Result
 
 def embedTexts(texts: Seq[String]): Result[EmbeddingResponse] =
   for {
-    settings  <- Llm4sConfig.embeddings()
-    providerId = settings._1
-    config     = settings._2
+    config    <- Llm4sConfig.embeddings()
     registry  <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
-    dimensions <- ModelDimensionRegistry.getDimension(providerId, config.model)
-    client     <- EmbeddingClient.from(providerId, config)
+    dimensions <- ModelDimensionRegistry.getDimension(config.providerId, config.model)
+    client     <- EmbeddingClient.from(config)
     response   <- client.embed(EmbeddingRequest(texts, EmbeddingModelConfig(config.model, dimensions)))
   } yield response
 ```
@@ -145,8 +144,9 @@ answers which, from the dimensions each provider declares for its models:
 ```scala
 import org.llm4s.llmconnect.config.ModelDimensionRegistry
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 
-def dimensionsOf(provider: String, model: String): Result[Int] =
+def dimensionsOf(provider: ProviderId, model: ModelName): Result[Int] =
   ModelDimensionRegistry.getDimension(provider, model)
 ```
 
@@ -175,12 +175,12 @@ Nothing is thrown: `embed` and `EmbeddingClient.from` return a `Result`, so a fa
 `LLMError` (see [Error Handling](error-handling)). A failure the provider reports, such as a rejected key or a
 refused request, is an `EmbeddingError`, with an optional `code` (typically the HTTP status), a `message` and
 the `provider` that produced it. A configuration problem, such as an unset `EMBEDDING_MODEL` or a provider whose
-module is missing, is a `ConfigurationError` from `Llm4sConfig.embeddings()` instead (and an unregistered
-provider id given to `EmbeddingClient.from` is reported as an `EmbeddingError` whose provider is `config`).
+module is missing, is a `ConfigurationError` from `Llm4sConfig.embeddings()` instead, as is an unregistered
+provider id given to `EmbeddingClient.from`.
 
 ```scala
 import org.llm4s.error.LLMError
-import org.llm4s.llmconnect.model.EmbeddingError
+import org.llm4s.error.EmbeddingError
 
 def explain(error: LLMError): String =
   error match {

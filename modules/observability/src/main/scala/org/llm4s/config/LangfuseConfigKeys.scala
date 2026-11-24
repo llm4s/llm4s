@@ -6,7 +6,7 @@ package org.llm4s.config
  *
  * These were `ConfigKeys.LANGFUSE_*` in `llm4s-core` until Langfuse moved to this
  * module ([[https://github.com/llm4s/llm4s/issues/1133 #1133]]): a key belongs with
- * the code that reads it, so that `ConfigKeys` does not name variables for a
+ * the code that reads it, so that `llm4s-core` does not name variables for a
  * backend that may not be on the classpath.
  */
 object LangfuseConfigKeys {

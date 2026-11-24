@@ -23,7 +23,7 @@ object BenchmarkFixtures {
     val messages = (0 until messageCount).map { i =>
       val text = sampleTexts(i % sampleTexts.length) * ((i / sampleTexts.length) + 1)
       if (i % 2 == 0) UserMessage(text)
-      else AssistantMessage(contentOpt = Some(text))
+      else AssistantMessage(text = Some(text))
     }
     Conversation(messages)
   }
@@ -42,7 +42,7 @@ object BenchmarkFixtures {
         .`object`[Map[String, Any]](s"Parameters for echo tool $i")
         .withProperty(Schema.property("message", Schema.string("Message to echo")))
 
-      ToolBuilder[Map[String, Any], String](
+      ToolBuilder[String](
         s"echo_$i",
         s"Echoes a message (tool $i)",
         schema

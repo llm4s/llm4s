@@ -23,7 +23,7 @@ import upickle.default.ReadWriter
  *   .withProperty(Schema.property("a", Schema.number("First operand (required for all operations)")))
  *   .withProperty(Schema.property("b", Schema.number("Second operand ...")))
  *
- * ToolBuilder[Map[String, Any], CalculatorResult]("calculator", description, schema)
+ * ToolBuilder[CalculatorResult]("calculator", description, schema)
  *   .withHandler { extractor =>
  *     for {
  *       operation <- extractor.getString("operation")
@@ -116,7 +116,7 @@ object TypedCalculator {
         ReadWriter
 
   /** The calculator: the same name, description and result type as the built-in one. */
-  val tool: Result[ToolFunction[CalculatorArgs, CalculatorResult]] =
+  val tool: Result[ToolFunction[CalculatorResult]] =
     CalculatorTool.toolSafe.flatMap { builtin =>
       Tool.of[CalculatorArgs, CalculatorResult]("calculator", builtin.description)(calculate)
     }
@@ -125,7 +125,7 @@ object TypedCalculator {
   type CalculatorTuple = (operation: Operation, a: Double, b: Option[Double])
 
   /** The same calculator, its arguments a named tuple. */
-  val namedTupleTool: Result[ToolFunction[CalculatorTuple, CalculatorResult]] =
+  val namedTupleTool: Result[ToolFunction[CalculatorResult]] =
     CalculatorTool.toolSafe.flatMap { builtin =>
       Tool.of[CalculatorTuple, CalculatorResult]("calculator", builtin.description) { args =>
         calculate(CalculatorArgs(args.operation, args.a, args.b))
@@ -133,7 +133,7 @@ object TypedCalculator {
     }
 
   /** The same calculator as a scoped tool: it returns the result, and ends the call early with `reject` or `?`. */
-  val scopedTool: Result[ToolFunction[CalculatorArgs, CalculatorResult]] =
+  val scopedTool: Result[ToolFunction[CalculatorResult]] =
     CalculatorTool.toolSafe.flatMap { builtin =>
       Tool.scoped[CalculatorArgs, CalculatorResult]("calculator", builtin.description) { args =>
         val a         = args.a

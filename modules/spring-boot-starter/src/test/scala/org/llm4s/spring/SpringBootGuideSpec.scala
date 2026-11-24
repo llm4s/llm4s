@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.NetworkError
 import org.llm4s.javaapi.{ JLlmClient, JLlmClientTestFactory, LlmException }
 import org.llm4s.llmconnect.LLMClient
@@ -30,9 +31,9 @@ object SpringBootGuideSpec {
     val sent: ConcurrentLinkedQueue[Conversation] = new ConcurrentLinkedQueue[Conversation]()
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       sent.add(c)
-      Right(Completion("id", Instant.EPOCH, answer, "m", AssistantMessage(answer)))
+      Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(answer)))
     }
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
@@ -43,7 +44,7 @@ object SpringBootGuideSpec {
   private val failing: LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
       Left(NetworkError("the network is down", None, "mock://test"))
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
@@ -176,7 +177,7 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
     ctx.getStartupFailure shouldBe null
     val props = ctx.getBean(classOf[Llm4sProperties])
     props.provider shouldBe "openai"
-    props.model shouldBe "gpt-4o"
+    props.model shouldBe "gpt-5.6-terra"
     props.apiKey shouldBe "sk-from-env" // the ${OPENAI_API_KEY} placeholder, resolved
     ctx.getBeansOfType(classOf[JLlmClient]).size() shouldBe 1
     ctx.getBeansOfType(classOf[LLM4STemplate]).size() shouldBe 1
@@ -344,7 +345,7 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
       val placeholders = List("GOOGLE_API_KEY=gk-from-env", "AZURE_OPENAI_API_KEY=az-from-env")
       blocks.foreach { block =>
         val pairs   = propertyPairs(block)
-        val section = pairs.collectFirst { case p if p.startsWith("llm4s.providers.provider=") => p.split('=')(1) }.get
+        val section = pairs.collectFirst { case p if p.startsWith("llm4s.default-provider=") => p.split('=')(1) }.get
         def value(key: String): String =
           pairs.collectFirst { case p if p.startsWith(s"llm4s.providers.$section.$key=") => p.split("=", 2)(1) }.get
         withClue(s"section $section: ") {
@@ -561,7 +562,11 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
         val health = ctx.getBean(classOf[LlmIndicator]).health()
 
         health.getStatus shouldBe Status.UP
-        health.getDetails.asScala.toMap shouldBe Map("provider" -> "openai", "model" -> "gpt-4o", "probe" -> "disabled")
+        health.getDetails.asScala.toMap shouldBe Map(
+          "provider" -> "openai",
+          "model"    -> "gpt-5.6-terra",
+          "probe"    -> "disabled"
+        )
         (health.toString should not).include("sk-from-env")
       }
     }

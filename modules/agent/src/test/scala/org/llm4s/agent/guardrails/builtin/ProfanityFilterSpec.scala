@@ -31,29 +31,29 @@ class ProfanityFilterSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private lazy val largeClean: String = Seq.fill(200000)("lorem").mkString(" ")
 
   "ProfanityFilter on a very large input" should "pass clean text through untouched" in {
-    val result = withinBound(new ProfanityFilter().validate(largeClean))
+    val result = withinBound(ProfanityFilter().validate(largeClean))
 
     // The very same string comes back, not a copy that was trimmed or rewritten.
     result.toOption.exists(_ eq largeClean) shouldBe true
   }
 
   it should "still find a bad word at the very end" in {
-    withinBound(new ProfanityFilter().validate(largeClean + " badword")).isLeft shouldBe true
+    withinBound(ProfanityFilter().validate(largeClean + " badword")).isLeft shouldBe true
   }
 
   it should "still find a bad word in the middle" in {
     val half = Seq.fill(100000)("lorem").mkString(" ")
-    withinBound(new ProfanityFilter().validate(half + " badword " + half)).isLeft shouldBe true
+    withinBound(ProfanityFilter().validate(half + " badword " + half)).isLeft shouldBe true
   }
 
   it should "handle a single token of a million characters" in {
     val token = "a" * 1000000
-    withinBound(new ProfanityFilter().validate(token).isRight) shouldBe true
+    withinBound(ProfanityFilter().validate(token).isRight) shouldBe true
   }
 
   it should "find a bad word after a million characters of whitespace" in {
     val padded = " " * 1000000 + "badword"
-    withinBound(new ProfanityFilter().validate(padded)).isLeft shouldBe true
+    withinBound(ProfanityFilter().validate(padded)).isLeft shouldBe true
   }
 
   it should "find a custom word in a large input in case-sensitive mode too" in {
@@ -63,7 +63,7 @@ class ProfanityFilterSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   "ProfanityFilter's error" should "be a ValidationError about the input" in {
-    new ProfanityFilter().validate("this is badword text") match {
+    ProfanityFilter().validate("this is badword text") match {
       case Left(e: ValidationError) => e.field shouldBe "input"
       case other                    => fail(s"expected Left(ValidationError), got $other")
     }
@@ -90,6 +90,6 @@ class ProfanityFilterSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   it should "pass a technical query containing code and punctuation" in {
     val query = "SELECT name, email FROM users WHERE id = 42; -- why does a NullPointerException occur at Foo.scala:17?"
-    new ProfanityFilter().validate(query) shouldBe Right(query)
+    ProfanityFilter().validate(query) shouldBe Right(query)
   }
 }

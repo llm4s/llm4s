@@ -1,8 +1,9 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
-import org.llm4s.agent.{ Agent, AgentResult }
+import org.llm4s.agent.{ Agent, AgentResult, Handoff }
 import org.llm4s.agent.graph.{
   CheckpointStatus,
   Checkpointer,
@@ -24,6 +25,7 @@ import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 import org.llm4s.agent.AgentStatus
 import org.llm4s.agent.graph.middleware.{
+  AdmissionContext,
   AgentMiddleware,
   BoundaryResult,
   GuardrailMiddleware,
@@ -73,9 +75,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       sent.add(conversation)
       responses(index)
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -83,11 +83,11 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
   }
 
   private def answer(text: String): Completion =
-    Completion("answer", Instant.EPOCH, text, "test-model", AssistantMessage(text), usage = usage)
+    Completion("answer", Instant.EPOCH, ModelName("test-model"), AssistantMessage(text), usage = usage)
 
-  private val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
+  private val toolCall = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> "hello"))
   private def toolCallCompletion: Completion =
-    Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall), usage)
+    Completion("turn-1", Instant.EPOCH, ModelName("test-model"), AssistantMessage(None, Seq(toolCall)), usage)
 
   private def usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
 
@@ -96,7 +96,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     implicit val rw: ReadWriter[EchoResult] = macroRW
   }
 
-  private def echoTool = ToolBuilder[Map[String, Any], EchoResult](
+  private def echoTool = ToolBuilder[EchoResult](
     "echo",
     "Echoes the supplied message back",
     Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))
@@ -142,9 +142,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     val client = new LLMClient {
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Right(answer("hello"))
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int        = 4096
@@ -238,9 +236,9 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
   /** A run whose query, tool call and answer all hold `secret`, traced to `console`. */
   private def secretRun(console: ConsoleTracing): String = {
     val tracing = new Captured(console)
-    val call    = ToolCall("call-1", "echo", ujson.Obj("message" -> secret))
+    val call    = ToolCall(ToolCallId("call-1"), "echo", ujson.Obj("message" -> secret))
     val calling =
-      Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)
+      Completion("turn-1", Instant.EPOCH, ModelName("test-model"), AssistantMessage(None, Seq(call)), usage)
     ok(traced(new Scripted(Right(calling), Right(answer(s"Echoed $secret"))), tracing).run(s"Echo $secret"))
     eventually(tracing.printed should include("AGENT RUN ENDED"))
     tracing.printed
@@ -257,11 +255,16 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
   private def endedOf(tracing: Recording): Vector[TraceEvent.AgentRunEnded] =
     tracing.all.collect { case e: TraceEvent.AgentRunEnded => e }
 
-  /** A store that refuses every commit carrying a `RunCompleted`: the run ends without a terminal event. */
-  final private class NoTerminal extends Checkpointer {
+  /**
+   * A store that refuses the first `refusals` commits carrying a `RunCompleted` - every one, by default: the run ends
+   * without a terminal event.
+   */
+  final private class NoTerminal(refusals: Int = Int.MaxValue) extends Checkpointer {
     private val underlying = new InMemoryCheckpointer()
+    private val refused    = new java.util.concurrent.atomic.AtomicInteger(0)
     def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
-      if (!commit.events.exists(_.event == RunEvent.RunCompleted)) underlying.commit(threadId, commit)
+      if (!commit.events.exists(_.event == RunEvent.RunCompleted) || refused.getAndIncrement() >= refusals)
+        underlying.commit(threadId, commit)
       else Left(ProcessingError("store", "store down"))
     def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
     def renew(
@@ -312,10 +315,35 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     ended.head.threadId shouldBe "t1"
     ended.head.runId shouldBe first.runId.value
     ended.head.agent shouldBe "assistant"
-    ended.head.status shouldBe "completed"
+    ended.head.status shouldBe TraceEvent.RunStatus.Completed
     ended.head.messages.head shouldBe UserMessage("first")
     ended.head.messages.last shouldBe AssistantMessage("done")
     ended.head.usage.inputTokens shouldBe 40 // two calls of 20
+  }
+
+  it should "name a run that hands off after its root agent, and the agent active at its end beside it (#2829)" in {
+    val tracing = Recording()
+    val handoff = Completion(
+      "turn-1",
+      Instant.EPOCH,
+      ModelName("test-model"),
+      AssistantMessage(
+        None,
+        Seq(ToolCall(ToolCallId("call-h"), "handoff_to_specialist", ujson.Obj("reason" -> "maths")))
+      ),
+      usage = usage
+    )
+    val specialist = Agent.builder("specialist", Scripted(Right(answer("2x"))))
+    val agent = Agent
+      .builder("triage", Scripted(Right(handoff)))
+      .withHandoffs(Handoff.to("specialist", specialist, "Maths"))
+      .withTracing(tracing)
+      .build()
+      .fold(e => fail(e.message), identity)
+    ok(agent.run(ThreadId("t-handoff"), "derive x^2")).activeAgent.value shouldBe "specialist"
+    val ended = endedOf(tracing)
+    ended.map(_.agent) shouldBe Vector("triage")
+    ended.map(_.activeAgent) shouldBe Vector(Some("specialist"))
   }
 
   it should "end truncated when the answer was cut off at the output limit (RFC 0009, open question 6)" in {
@@ -324,7 +352,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     val agent   = traced(Scripted(Right(cut)), tracing)
     agent.run(ThreadId("t-cut"), "go").fold(e => fail(e.message), identity)
     val ended = endedOf(tracing)
-    ended.map(_.status) shouldBe Vector("truncated")
+    ended.map(_.status.name) shouldBe Vector("truncated")
     ended.head.messages.last shouldBe AssistantMessage("half an ans")
   }
 
@@ -348,7 +376,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       e.usage.promptTokens shouldBe 20
       e.usage.completionTokens shouldBe 10
       e.usage.totalTokens shouldBe 30
-      e.model shouldBe "test-model"
+      e.model shouldBe ModelName("test-model")
       e.operation shouldBe "agent_completion"
     }
   }
@@ -367,10 +395,10 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     eventually(endedOf(tracing).size shouldBe 1)
   }
 
-  it should "trace a blocked turn with no messages and status blocked:<guardrail>" in {
+  it should "trace a blocked turn with no messages, status blocked and the guardrail that blocked it" in {
     val marker  = "SECRET-42"
     val tracing = Recording()
-    val guard   = new LengthCheck(1, 3)
+    val guard   = LengthCheck(1, 3)
     val agent = Agent
       .builder("assistant", Scripted(Right(answer(s"leaking $marker"))))
       .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(guard)))
@@ -380,9 +408,63 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     ok(agent.run(ThreadId("t6"), "tell me")).status should matchPattern { case AgentStatus.Blocked(_, _) => }
     val ended = endedOf(tracing)
     ended.size shouldBe 1
-    ended.head.status shouldBe s"blocked:${guard.name}"
+    ended.head.status shouldBe TraceEvent.RunStatus.Blocked
+    ended.head.blockedBy shouldBe Some(guard.name)
     ended.head.messages shouldBe empty
     tracing.all.foreach(e => (e.toJson.render() should not).include(marker))
+  }
+
+  it should "trace a turn blocked at admission or in beforeAgent as blocked too, with no reason (#2829, #2854)" in {
+    val marker = "SECRET-42"
+    val stacks = Vector[(String, AgentMiddleware)](
+      "QuotesInput" -> new GuardrailMiddleware(input = Seq(quoting), output = Nil),
+      "blocks-late" -> new BlocksLate(marker)
+    )
+    stacks.foreach { case (blocker, middleware) =>
+      val tracing = Recording()
+      val agent = Agent
+        .builder("assistant", Scripted(Right(answer("never sent"))))
+        .withMiddleware(middleware)
+        .withTracing(tracing)
+        .build()
+        .fold(e => fail(e.message), identity)
+      ok(agent.run(ThreadId(s"t-$blocker"), s"my card is $marker")).status should matchPattern {
+        case AgentStatus.Blocked(`blocker`, Some(_)) =>
+      }
+      val ended = endedOf(tracing)
+      ended.map(_.status) shouldBe Vector(TraceEvent.RunStatus.Blocked)
+      ended.map(_.blockedBy) shouldBe Vector(Some(blocker))
+      ended.head.messages shouldBe empty
+      tracing.all.collect { case e: TraceEvent.ErrorOccurred => e } shouldBe empty
+      tracing.all.foreach(e => (e.toJson.render() should not).include(marker))
+    }
+  }
+
+  it should "give a model call's chat span the call's duration (#2829)" in {
+    val tracing = Recording()
+    val slow = new LLMClient {
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+        Thread.sleep(80)
+        Right(answer("done"))
+      }
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conversation, options)
+      override def getContextWindow(): Int     = 4096
+      override def getReserveCompletion(): Int = 1024
+    }
+    ok(traced(slow, tracing).run(ThreadId("t-chat-span"), "go"))
+    val calls = tracing.custom.filter(_.name == "agent.model_call_completed")
+    calls should have size 1
+    val span = calls.head.span.getOrElse(fail("the model call has no span"))
+    java.time.Duration.between(span.startedAt, calls.head.timestamp).toMillis should be >= 80L
+  }
+
+  /** Refuses every turn in `beforeAgent`, with a reason quoting `secret`. */
+  final private class BlocksLate(secret: String) extends AgentMiddleware {
+    val id: MiddlewareId = MiddlewareId("blocks-late")
+    override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] =
+      block(s"refused $secret")
   }
 
   /** An input guardrail whose reason quotes the text it refused, as a PII or prompt-injection match does. */
@@ -391,9 +473,16 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     def validate(value: String): Result[String] = Left(ValidationError.invalid("input", s"refused '$value'"))
   }
 
-  /** Replaces `secret` in the turn's query, as a PII-masking middleware does. */
+  /** Replaces `secret` in the turn's query as it is admitted, as a PII-masking middleware does. */
   final private class Redacting(secret: String) extends AgentMiddleware {
     val id: MiddlewareId = MiddlewareId("redacting")
+    override def admit(query: String, context: AdmissionContext): Result[String] =
+      Right(query.replace(secret, "[REDACTED]"))
+  }
+
+  /** Replaces `secret` in `beforeAgent`: after the turn's first checkpoint is stored. */
+  final private class RedactingLate(secret: String) extends AgentMiddleware {
+    val id: MiddlewareId = MiddlewareId("redacting-late")
     override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] =
       Right(BoundaryResult(text.replace(secret, "[REDACTED]")))
   }
@@ -414,7 +503,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       .fold(e => fail(e.message), identity)
 
     ok(agent.run(thread, s"my card is $marker")).status match {
-      case AgentStatus.Blocked(guardrail, reason) =>
+      case AgentStatus.Blocked(guardrail, Some(reason)) =>
         guardrail shouldBe "QuotesInput"
         reason should include(marker)
       case other => fail(s"expected Blocked, got $other")
@@ -431,7 +520,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     tracing.all.foreach(e => (e.toJson.render() should not).include(marker))
   }
 
-  it should "stay on the closing checkpoint's outcome, which rebuilds the turn's status from the thread (#2793)" in {
+  it should "be in no checkpoint: the closing one names the guardrail only (#2853)" in {
     val marker = "SECRET-42"
     val store  = new InMemoryCheckpointer()
     val thread = ThreadId("t-outcome")
@@ -443,16 +532,13 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       .fold(e => fail(e.message), identity)
     ok(agent.run(thread, s"my card is $marker"))
 
-    // the documented limit: the checkpoint store holds the reason, and with it whatever the reason quotes
     val history = stored(store.history(thread, None, 100))
-    history.flatMap(_.outcome) should matchPattern {
-      case Vector(RunOutcome.Blocked("QuotesInput", reason: String)) if reason.contains(marker) =>
-    }
-    // and nothing else of the blocked turn: its earlier checkpoints, which held the query, are retracted
-    history.map(_.withOutcome(None)).foreach(c => (c.toString should not).include(marker))
+    history.flatMap(_.outcome) shouldBe Vector(RunOutcome.Blocked("QuotesInput"))
+    // nothing of the blocked turn is readable: neither the reason nor the query it quotes
+    history.foreach(c => (c.toString should not).include(marker))
   }
 
-  "A query a beforeAgent hook redacts" should "be redacted in the thread, the event log and the trace (#2793)" in {
+  "A query an admit stage redacts" should "be redacted in the thread, the event log and the trace (#2793)" in {
     val marker  = "SECRET-42"
     val store   = new InMemoryCheckpointer()
     val tracing = Recording()
@@ -476,7 +562,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     tracing.all.foreach(e => (e.toJson.render() should not).include(marker))
   }
 
-  it should "still be in the run's first checkpoint as submitted: the hook runs after it is stored (#2793)" in {
+  it should "be in no checkpoint as submitted: admission runs before the turn is stored (#2854)" in {
     val marker = "SECRET-42"
     val store  = new InMemoryCheckpointer()
     val thread = ThreadId("t-first")
@@ -488,7 +574,25 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       .fold(e => fail(e.message), identity)
     ok(agent.run(thread, s"my card is $marker"))
 
-    // the documented limit: a redacting hook does not keep the submitted query out of checkpoint history
+    val history = stored(store.history(thread, None, 100))
+    history.filter(_.toString.contains(marker)) shouldBe empty
+    history.map(_.status) should contain(CheckpointStatus.Running)
+    history.exists(_.toString.contains("[REDACTED]")) shouldBe true
+  }
+
+  "A query a beforeAgent hook redacts" should "still be in the run's first checkpoint: redact in admit (#2854)" in {
+    val marker = "SECRET-42"
+    val store  = new InMemoryCheckpointer()
+    val thread = ThreadId("t-late")
+    val agent = Agent
+      .builder("assistant", Scripted(Right(answer("done"))))
+      .withMiddleware(new RedactingLate(marker))
+      .withRuntime(new GraphRuntime(store))
+      .build()
+      .fold(e => fail(e.message), identity)
+    ok(agent.run(thread, s"my card is $marker")).messages.map(_.content).mkString should include("[REDACTED]")
+
+    // beforeAgent keeps its semantics: it runs inside the checkpointed input step, on a query already stored
     val holding = stored(store.history(thread, None, 100)).filter(_.toString.contains(marker))
     holding.map(_.status) shouldBe Vector(CheckpointStatus.Running)
   }
@@ -500,9 +604,15 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       .isLeft shouldBe true
     val ended = endedOf(tracing)
     ended.size shouldBe 1
-    ended.head.status shouldBe "failed"
+    ended.head.status shouldBe TraceEvent.RunStatus.Failed
     ended.head.messages shouldBe empty
-    tracing.all.collect { case e: TraceEvent.ErrorOccurred => e }.size shouldBe 1
+    val errors = tracing.all.collect { case e: TraceEvent.ErrorOccurred => e }
+    errors.size shouldBe 1
+    // the run's error as it is - an LLMError, with its type - not an exception wrapped around its message (#2800)
+    errors.head.errorType should not be "RuntimeException"
+    errors.head.errorType should not be empty
+    errors.head.message should include("down")
+    errors.head.cause shouldBe None
   }
 
   it should "trace a cancelled run as cancelled" in {
@@ -514,9 +624,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
         new CountDownLatch(1).await() // until interrupted
         Right(answer("never"))
       }
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 4096
@@ -526,7 +634,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     entered.await(5, TimeUnit.SECONDS) shouldBe true
     run.cancel()
     run.await()
-    eventually(endedOf(tracing).map(_.status) shouldBe Vector("cancelled"))
+    eventually(endedOf(tracing).map(_.status.name) shouldBe Vector("cancelled"))
   }
 
   it should "trace a run that ends without a terminal event as ErrorOccurred, with no AgentRunEnded" in {
@@ -546,6 +654,32 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     tracing.all.collect { case e: TraceEvent.ErrorOccurred => e }.size shouldBe 1
   }
 
+  // A known limit, pinned (#2829): a run's span is sent when it ends, so a run that never ends sends none.
+  it should "leave a run that died under a span no AgentRunEnded names, and place its recovery under that span" in {
+    val tracing = Recording()
+    val agent = Agent
+      .builder("assistant", Scripted(Right(answer("done")), Right(answer("done"))))
+      .withRuntime(GraphRuntime(new NoTerminal(refusals = 1)))
+      .withTracing(tracing)
+      .build()
+      .fold(e => fail(e.message), identity)
+    agent.start(ThreadId("t11"), "go").fold(e => fail(e.message), identity).await().isLeft shouldBe true
+    endedOf(tracing) shouldBe empty
+    // every event of the run that died is under one span: its run's, which the backend is never sent
+    val unsent = tracing.custom.flatMap(_.span).flatMap(_.parent).distinct
+    unsent should have size 1
+
+    ok(agent.recover(ThreadId("t11")))
+    val recovered = endedOf(tracing)
+    recovered should have size 1
+    val span = recovered.head.span.getOrElse(fail("the recovered run has no span"))
+    // the recovery is a run of its own, in the same trace, continuing the span of the run that died
+    span.context.traceId shouldBe unsent.head.traceId
+    span.context.spanId should not be unsent.head.spanId
+    span.parent shouldBe Some(unsent.head)
+    endedOf(tracing).map(_.span.map(_.context.spanId)) should not contain Some(unsent.head.spanId)
+  }
+
   it should "keep two runs on one thread apart" in {
     val tracing = Recording()
     val agent   = traced(Scripted(Right(answer("first answer")), Right(answer("second answer"))), tracing)
@@ -560,7 +694,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
 
   it should "report each run's own usage on its AgentRunEnded, not the thread's" in {
     val tracing = Recording()
-    val costed  = (text: String) => answer(text).withEstimatedCost(Some(0.25))
+    val costed  = (text: String) => answer(text).withEstimatedCost(BigDecimal("0.25"))
     val agent   = traced(Scripted(Right(costed("first answer")), Right(costed("second answer"))), tracing)
     ok(agent.run(ThreadId("t11"), "one"))
     val two = ok(agent.run(ThreadId("t11"), "two"))
@@ -572,7 +706,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       e.usage.inputTokens shouldBe 20
       e.usage.outputTokens shouldBe 10
       e.usage.totalCost shouldBe BigDecimal("0.25")
-      e.usage.byModel.keySet shouldBe Set("test-model")
+      e.usage.byModel.keySet shouldBe Set(ModelName("test-model"))
     }
   }
 
@@ -609,7 +743,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       Seq(UserMessage("one"), AssistantMessage("first answer")),
       Seq(UserMessage("two"), AssistantMessage("second answer"))
     )
-    ended.map(_.status) shouldBe Vector("completed", "completed")
+    ended.map(_.status.name) shouldBe Vector("completed", "completed")
     ended.map(_.usage.requestCount) shouldBe Vector(1L, 1L)
   }
 }

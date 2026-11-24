@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
+
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ AuthenticationError, NetworkError, RateLimitError, ServiceError, ValidationError }
@@ -37,7 +39,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
     options: CompletionOptions = CompletionOptions()
   ) = {
     val chunks = ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conv, options, chunk => chunks += chunk)
+    val result = client.streamComplete(conv, options)(chunk => chunks += chunk)
     (result, chunks.toList)
   }
 
@@ -48,7 +50,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         val completion = new BedrockClient(config(url)).complete(conversation, CompletionOptions()).toOption.value
 
         completion.content shouldBe "Hello! How can I help you?"
-        completion.model shouldBe Model
+        completion.model.asString shouldBe Model
         completion.usage.map(u => (u.promptTokens, u.completionTokens, u.totalTokens)) shouldBe Some((10, 8, 18))
       }
     }
@@ -85,7 +87,8 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
             UserMessage("2+2?")
           )
         )
-        new BedrockClient(config(url)).complete(conv, CompletionOptions(maxTokens = Some(100), temperature = 0.25))
+        new BedrockClient(config(url))
+          .complete(conv, CompletionOptions(maxTokens = Some(100), temperature = Some(0.25)))
       }
 
       val (path, body) = seen.value
@@ -139,7 +142,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
       withServer("/")(sendJsonResponse(_, 200, body)) { url =>
         val completion = new BedrockClient(config(url)).complete(conversation, CompletionOptions()).toOption.value
         completion.toolCalls should have size 1
-        completion.toolCalls.head.id shouldBe "tc-42"
+        completion.toolCalls.head.id shouldBe ToolCallId("tc-42")
         completion.toolCalls.head.name shouldBe "get_weather"
         completion.toolCalls.head.arguments("location").str shouldBe "Paris"
         completion.toolCalls.head.arguments("days").num shouldBe 3.0
@@ -152,7 +155,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         body = bodyOf(exchange)
         sendJsonResponse(exchange, 200, converseResponse("The weather is 22C"))
       } { url =>
-        val tool = ToolBuilder[Map[String, Any], String](
+        val tool = ToolBuilder[String](
           "get_weather",
           "Returns current weather for a location",
           Schema
@@ -162,8 +165,8 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         val conv = Conversation(
           Seq(
             UserMessage("What is the weather in London?"),
-            AssistantMessage(None, Seq(ToolCall("tc-1", "get_weather", ujson.Obj("location" -> "London")))),
-            ToolMessage(toolCallId = "tc-1", content = """{"temp": 22}""")
+            AssistantMessage(None, Seq(ToolCall(ToolCallId("tc-1"), "get_weather", ujson.Obj("location" -> "London")))),
+            ToolMessage(toolCallId = ToolCallId("tc-1"), content = """{"temp": 22}""")
           )
         )
         new BedrockClient(config(url)).complete(conv, CompletionOptions(tools = Seq(tool)))
@@ -200,7 +203,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
       }
 
       exchanges should have size 1
-      exchanges.head.provider shouldBe "bedrock"
+      exchanges.head.provider.asString shouldBe "bedrock"
       exchanges.head.model shouldBe Some(Model)
       exchanges.head.requestBody should include("Hello")
       exchanges.head.responseBody.value should include("Logged response")
@@ -258,7 +261,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         chunks.flatMap(_.content) shouldBe List("Hel", "lo!")
         val completion = result.toOption.value
         completion.content shouldBe "Hello!"
-        completion.model shouldBe Model
+        completion.model.asString shouldBe Model
         completion.usage.map(u => (u.promptTokens, u.completionTokens)) shouldBe Some((10, 5))
         chunks.last.finishReason shouldBe Some(FinishReason.Stop)
       }
@@ -299,7 +302,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         val completion = result.toOption.value
         completion.toolCalls should have size 1
         completion.message.toolCalls shouldBe completion.toolCalls
-        completion.toolCalls.head.id shouldBe "tc-9"
+        completion.toolCalls.head.id shouldBe ToolCallId("tc-9")
         completion.toolCalls.head.name shouldBe "get_weather"
         completion.toolCalls.head.arguments("location").str shouldBe "Rome"
       }
@@ -371,7 +374,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
       client.close()
       client.close() // idempotent
       client.complete(conversation, CompletionOptions()).isLeft shouldBe true
-      client.streamComplete(conversation, CompletionOptions(), _ => ()).isLeft shouldBe true
+      client.streamComplete(conversation, CompletionOptions())(_ => ()).isLeft shouldBe true
     }
 
     "close an async client that streaming started" in {
@@ -405,7 +408,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
 
     "build with the default credential chain when the config names no credentials" in {
       BedrockClient(
-        BedrockConfig("us-east-1", Model, 32000, 4096, endpointUrl = Some("http://localhost:1"))
+        BedrockConfig("us-east-1", ModelName(Model), 32000, 4096, endpointUrl = Some(BaseUrl("http://localhost:1")))
       ).isRight shouldBe true
     }
   }

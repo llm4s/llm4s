@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.XaiConfig
 import org.llm4s.llmconnect.model._
@@ -25,8 +27,8 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
   private def config(baseUrl: String, model: String = "grok-4.7"): XaiConfig =
     XaiConfig(
       apiKey = Secret("xai-test-key"),
-      model = model,
-      baseUrl = baseUrl,
+      model = ModelName(model),
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 500000,
       reserveCompletion = 8192
     )
@@ -50,7 +52,7 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
     withServer("/chat/completions") { exchange =>
       sent.set(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8))
       sendSseResponse(exchange, openAISseBody(Seq("No."), model))
-    }(baseUrl => new XaiClient(config(baseUrl, model)).streamComplete(conv, options, _ => ()).isRight shouldBe true)
+    }(baseUrl => new XaiClient(config(baseUrl, model)).streamComplete(conv, options)(_ => ()).isRight shouldBe true)
     val streamBody = ujson.read(sent.get)
     completeBody.obj.contains("stream") shouldBe false
     streamBody("stream").bool shouldBe true
@@ -149,7 +151,7 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
     } { baseUrl =>
       val chunks = ListBuffer.empty[StreamedChunk]
       val completion = new XaiClient(config(baseUrl, "grok-3-mini"))
-        .streamComplete(conversation, CompletionOptions(), chunks += _)
+        .streamComplete(conversation, CompletionOptions())(chunks += _)
         .value
       chunks.flatMap(_.thinkingDelta) shouldBe Seq("91 = ", "7 x 13.")
       completion.thinking shouldBe Some("91 = 7 x 13.")
@@ -186,9 +188,17 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "report a level it sends as another, and nothing for one it takes" in {
-    XaiDialect.addReasoning(ujson.Obj(), "grok-4.5", CompletionOptions().withReasoning(ReasoningEffort.Max)) shouldBe
+    XaiDialect.addReasoning(
+      ujson.Obj(),
+      ModelName("grok-4.5"),
+      CompletionOptions().withReasoning(ReasoningEffort.Max)
+    ) shouldBe
       List(RequestAdjustment.Adjusted(RequestOption.Reasoning, "max", "high", "grok-4.5 has no max level"))
-    XaiDialect.addReasoning(ujson.Obj(), "grok-4.7", CompletionOptions().withReasoning(ReasoningEffort.XHigh)) shouldBe
+    XaiDialect.addReasoning(
+      ujson.Obj(),
+      ModelName("grok-4.7"),
+      CompletionOptions().withReasoning(ReasoningEffort.XHigh)
+    ) shouldBe
       Nil
   }
 
@@ -199,7 +209,7 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
     ).foreach(options => sentBodies("grok-4.7", options).foreach(_("reasoning_effort") shouldBe ujson.Str("low")))
     XaiDialect.addReasoning(
       ujson.Obj(),
-      "grok-4.7",
+      ModelName("grok-4.7"),
       CompletionOptions().withThinking(Thinking.Off).withReasoning(ReasoningEffort.High)
     ) shouldBe List(
       RequestAdjustment.Adjusted(RequestOption.Thinking, "Off", "low", "grok-4.7 cannot stop reasoning"),
@@ -208,10 +218,18 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "report adaptive thinking as not needed and a thinking budget as dropped" in {
-    XaiDialect.addReasoning(ujson.Obj(), "grok-4.7", CompletionOptions().withThinking(Thinking.Adaptive)) shouldBe
+    XaiDialect.addReasoning(
+      ujson.Obj(),
+      ModelName("grok-4.7"),
+      CompletionOptions().withThinking(Thinking.Adaptive)
+    ) shouldBe
       List(RequestAdjustment.NotNeeded(RequestOption.Thinking, "grok-4.7 sets how much it reasons by its effort"))
     XaiDialect
-      .addReasoning(ujson.Obj(), "grok-4.7", CompletionOptions().withThinking(Thinking.budget(2048).toOption.get))
+      .addReasoning(
+        ujson.Obj(),
+        ModelName("grok-4.7"),
+        CompletionOptions().withThinking(Thinking.budget(2048).toOption.get)
+      )
       .map(_.option) shouldBe List(RequestOption.Thinking)
   }
 
@@ -247,7 +265,7 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
           body.obj.keySet should contain noneOf ("presence_penalty", "frequency_penalty")
         }
         val body = ujson.Obj("presence_penalty" -> 0.5, "frequency_penalty" -> 0.3)
-        XaiDialect.addReasoning(body, model, options) shouldBe List(
+        XaiDialect.addReasoning(body, ModelName(model), options) shouldBe List(
           RequestAdjustment
             .Dropped(RequestOption.PresencePenalty, s"$model is a reasoning model, which rejects presence_penalty"),
           RequestAdjustment.Dropped(

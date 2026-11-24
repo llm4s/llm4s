@@ -1,11 +1,13 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.error.{ CancelledError, LLMError, NetworkError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
-import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse, InputPurpose }
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse, InputPurpose }
+import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testutil.FixtureEmbeddingProvider
@@ -38,11 +40,11 @@ class JEmbeddingClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
       )
     )
 
-  private val configured = EmbeddingModelConfig("embed-model", 1536)
+  private val configured = EmbeddingModelConfig(ModelName("embed-model"), 1536)
 
   private def clientOver(provider: EmbeddingProvider): JEmbeddingClient =
     Llm4s.wrapEmbeddingClient(
-      new EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil)),
+      EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil)),
       configured
     )
 
@@ -221,7 +223,7 @@ class JEmbeddingClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
 
   /** A loaded config's client as the facade hands it out, a failure read as Java reads it. */
   private def created(
-    loaded: Result[(String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)]
+    loaded: Result[org.llm4s.llmconnect.config.EmbeddingProviderConfig]
   ): Either[LlmException, JEmbeddingClient] =
     FacadeInternals.embeddingClient(loaded).left.map(new LlmException(_))
 

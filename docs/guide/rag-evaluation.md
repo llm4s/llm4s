@@ -3,8 +3,9 @@ layout: page
 title: RAG Evaluation
 description: "Measure the quality of a RAG pipeline in Scala with RAGAS metrics (faithfulness, relevancy, context precision and recall) and the LLM4S benchmark harness."
 search_title: "Evaluate RAG pipelines in Scala with RAGAS metrics"
-parent: User Guide
-nav_order: 18
+parent: RAG and Data
+nav_order: 305
+grand_parent: User Guide
 ---
 
 # RAG Evaluation & Benchmarking
@@ -207,7 +208,7 @@ llm4s {
   providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o"
+      model    = "gpt-5.6-terra"
     }
   }
 }
@@ -312,11 +313,10 @@ val runner: Result[BenchmarkRunner] = for {
   given ModelRegistryService = registryService
   providerCfg <- Llm4sConfig.defaultProvider()
   llm         <- LLMConnect.getClient(providerCfg)
-  embedding   <- Llm4sConfig.embeddings()
-  (embeddingProvider, embeddingCfg) = embedding
-  embed <- EmbeddingClient.from(embeddingProvider, embeddingCfg)
+  embeddingCfg   <- Llm4sConfig.embeddings()
+  embed <- EmbeddingClient.from(embeddingCfg)
   resolveEmbedding = (name: String) =>
-    if (name.equalsIgnoreCase(embeddingProvider)) Right(embeddingCfg)
+    if (name.equalsIgnoreCase(embeddingCfg.providerId.asString)) Right(embeddingCfg)
     else Left(ConfigurationError(s"No embedding configuration for provider '$name'"))
 } yield BenchmarkRunner(llm, embed, resolveEmbedding)
 

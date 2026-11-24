@@ -47,9 +47,9 @@ class SemanticBlocksSpec extends AnyFlatSpec with Matchers {
       UserMessage("Get the weather"),
       AssistantMessage(
         content = "Let me check.",
-        toolCalls = Seq(ToolCall("call_1", "weather", ujson.Obj()))
+        toolCalls = Seq(ToolCall(ToolCallId("call_1"), "weather", ujson.Obj()))
       ),
-      ToolMessage("""{"temp": 20}""", "call_1"),
+      ToolMessage("""{"temp": 20}""", ToolCallId("call_1")),
       AssistantMessage("It's 20 degrees.")
     )
 
@@ -122,7 +122,7 @@ class SemanticBlocksSpec extends AnyFlatSpec with Matchers {
 
   it should "handle tool message without preceding user message" in {
     val messages = Seq(
-      ToolMessage("""{"result": "data"}""", "orphan_call")
+      ToolMessage("""{"result": "data"}""", ToolCallId("orphan_call"))
     )
 
     val result = SemanticBlocks.groupIntoSemanticBlocks(messages)
@@ -150,11 +150,11 @@ class SemanticBlocksSpec extends AnyFlatSpec with Matchers {
       .addAssistantMessage(
         AssistantMessage(
           content = "Checking...",
-          toolCalls = Seq(ToolCall("call_1", "tool", ujson.Obj()))
+          toolCalls = Seq(ToolCall(ToolCallId("call_1"), "tool", ujson.Obj()))
         )
       )
 
-    val withTool = block.addToolMessage(ToolMessage("result", "call_1"))
+    val withTool = block.addToolMessage(ToolMessage("result", ToolCallId("call_1")))
     withTool.messages.length shouldBe 3
   }
 
@@ -186,7 +186,7 @@ class SemanticBlocksSpec extends AnyFlatSpec with Matchers {
   }
 
   "SemanticBlock.standaloneTool" should "create tool block" in {
-    val block = SemanticBlock.standaloneTool(ToolMessage("data", "call_1"))
+    val block = SemanticBlock.standaloneTool(ToolMessage("data", ToolCallId("call_1")))
 
     block.blockType shouldBe SemanticBlockType.StandaloneTool
     block.messages.length shouldBe 1
@@ -204,9 +204,9 @@ class SemanticBlocksSpec extends AnyFlatSpec with Matchers {
       UserMessage("What about pattern matching?"),
       AssistantMessage(
         content = "Let me find an example.",
-        toolCalls = Seq(ToolCall("call_1", "search_docs", ujson.Obj("query" -> "pattern matching")))
+        toolCalls = Seq(ToolCall(ToolCallId("call_1"), "search_docs", ujson.Obj("query" -> "pattern matching")))
       ),
-      ToolMessage("""{"result": "Pattern matching uses match/case"}""", "call_1"),
+      ToolMessage("""{"result": "Pattern matching uses match/case"}""", ToolCallId("call_1")),
       AssistantMessage("Pattern matching in Scala works like this...")
     )
 

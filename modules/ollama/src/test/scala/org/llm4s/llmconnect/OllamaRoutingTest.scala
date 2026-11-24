@@ -1,11 +1,12 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 
 class OllamaRoutingTest extends AnyFunSuite with Matchers with EitherValues {
   private val registryService        = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
@@ -16,12 +17,12 @@ class OllamaRoutingTest extends AnyFunSuite with Matchers with EitherValues {
 
   test("provider-based getClientResult returns OllamaClient") {
     val cfg = OllamaConfig(
-      model = "llama3.1",
-      baseUrl = "http://localhost:11434",
+      model = ModelName("llama3.1"),
+      baseUrl = BaseUrl("http://localhost:11434"),
       contextWindow = 8192,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderId("ollama"), cfg)
+    val res = LLMConnect.getClient(ProviderId("ollama"), cfg, LlmClientOptions.default)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OllamaClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -29,20 +30,20 @@ class OllamaRoutingTest extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("OllamaConfig.from(reader) uses provided base URL") {
-    val cfg = OllamaConfig.fromValues("mistral:latest", "http://lan-host:11434").value
-    cfg.baseUrl shouldBe "http://lan-host:11434"
-    cfg.model shouldBe "mistral:latest"
+    val cfg = OllamaConfig.fromValues(ModelName("mistral:latest"), BaseUrl("http://lan-host:11434")).value
+    cfg.baseUrl shouldBe BaseUrl("http://lan-host:11434")
+    cfg.model.asString shouldBe "mistral:latest"
   }
 
   test("LLMConnect.getClient returns OllamaClient for Ollama provider") {
     val cfg = OllamaConfig
       .fromValues(
-        modelName = "llama3.1",
-        baseUrl = "http://localhost:11434"
+        modelName = ModelName("llama3.1"),
+        baseUrl = BaseUrl("http://localhost:11434")
       )
       .value
 
-    val res = LLMConnect.getClient(ProviderId("ollama"), cfg)
+    val res = LLMConnect.getClient(ProviderId("ollama"), cfg, LlmClientOptions.default)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OllamaClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")

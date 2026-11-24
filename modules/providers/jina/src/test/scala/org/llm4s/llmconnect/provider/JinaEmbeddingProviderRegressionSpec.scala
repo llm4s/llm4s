@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -10,8 +11,13 @@ import org.scalatest.matchers.should.Matchers
 /** Regressions for response alignment: the vector at position i must belong to input i. */
 class JinaEmbeddingProviderRegressionSpec extends AnyFlatSpec with Matchers {
 
-  private val modelCfg = EmbeddingModelConfig("jina-embeddings-v3", 1024)
-  private val cfg      = EmbeddingProviderConfig("http://jina-test", "jina-embeddings-v3", Secret("k"))
+  private val modelCfg = EmbeddingModelConfig(ModelName("jina-embeddings-v3"), 1024)
+  private val cfg = EmbeddingProviderConfig(
+    ProviderId("jina"),
+    BaseUrl("http://jina-test"),
+    ModelName("jina-embeddings-v3"),
+    Some(Secret("k"))
+  )
 
   private def run(body: String, n: Int) =
     JinaEmbeddingProvider

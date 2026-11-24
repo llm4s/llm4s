@@ -85,10 +85,14 @@ class ImageGenerationFactorySpec extends AnyFunSuite with Matchers {
 
   test("OpenAIConfig's toString hides the key and shows the model and base URL") {
     val text =
-      OpenAIConfig(apiKey = Secret(secretKey), model = "gpt-image-1", baseUrl = "https://openai.example").toString
+      OpenAIConfig(
+        apiKey = Secret(secretKey),
+        model = "gpt-image-2.6-sunburst",
+        baseUrl = "https://openai.example"
+      ).toString
     (text should not).include(secretKey)
     text should include("apiKey=***")
-    text should include("model=gpt-image-1")
+    text should include("model=gpt-image-2.6-sunburst")
     text should include("baseUrl=https://openai.example")
   }
 

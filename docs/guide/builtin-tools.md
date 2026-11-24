@@ -3,8 +3,10 @@ layout: page
 title: Built-in Tools
 description: "Ready-made agent tools in LLM4S: calculator, date and time, UUID, JSON, files, HTTP, shell and web search, with the bundles and their configuration."
 search_title: "Built-in agent tools in LLM4S: files, HTTP, web search"
-parent: User Guide
-nav_order: 10
+parent: Agents
+nav_order: 212
+grand_parent: User Guide
+cites_closed_issues: [1723, 1734, 1766, 1807]
 ---
 
 # Built-in Tools
@@ -62,7 +64,7 @@ import org.llm4s.toolapi.builtin.http.HttpConfig
 val tools = BuiltinTools.customSafe(
   fileConfig = Some(FileConfig(allowedPaths = Some(Seq("/srv/agent-data")))),
   httpConfig = Some(HttpConfig.restricted(Seq("api.example.com")))
-) // Result[Seq[ToolFunction[_, _]]]
+) // Result[Seq[ToolFunction[_]]]
 ```
 
 ## 2. Register the tools
@@ -147,8 +149,8 @@ import org.llm4s.toolapi.builtin.search.DuckDuckGoSearchTool
 val registry = for {
   config <- ToolsConfigLoader.loadDuckDuckGoSearchTool()
   search <- DuckDuckGoSearchTool.create(config)
-  toolRegistry <- ToolRegistry.of(core :+ search)
   core   <- BuiltinTools.coreSafe
+  toolRegistry <- ToolRegistry.of(core :+ search)
 } yield toolRegistry
 ```
 

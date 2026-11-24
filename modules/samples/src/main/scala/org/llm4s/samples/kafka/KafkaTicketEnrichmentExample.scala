@@ -20,7 +20,7 @@ import scala.concurrent.duration.*
  * sbt "samples/runMain org.llm4s.samples.kafka.KafkaTicketEnrichmentExample --bootstrap host:9092"
  * }}}
  *
- * Without `--scripted` the model is the default provider of `application.conf` (`llm4s.providers.provider`), and each
+ * Without `--scripted` the model is the default provider of `application.conf` (`llm4s.defaultProvider`), and each
  * call is traced to the configured tracing backend. Stop it with Ctrl-C: it stops consuming, finishes the records in
  * flight, commits their offsets and closes.
  */
@@ -79,8 +79,9 @@ object KafkaTicketEnrichmentExample extends IOApp {
           registry <- Llm4sConfig.modelRegistryService()
           config   <- Llm4sConfig.defaultProvider()
           tracing  <- Llm4sConfig.tracing()
+          tracer   <- Tracing.fromSettings(tracing)
           client   <- LLMConnect.getClient(config)(using registry)
-        } yield TracingLLMClient(client, Tracing.create(tracing), config)
+        } yield TracingLLMClient(client, tracer, config)
       }.flatMap {
         case Right(client) => IO.pure(client)
         case Left(error)   => IO.raiseError(new LLMException(error))

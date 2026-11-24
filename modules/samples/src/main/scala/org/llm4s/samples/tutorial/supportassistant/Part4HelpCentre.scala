@@ -50,7 +50,7 @@ object Part4HelpCentre {
       given ModelRegistryService = models
       config = RAG
         .builder()
-        .withEmbeddings(BagOfWordsEmbeddings.id.asString, BagOfWordsEmbeddings.Model, BagOfWordsEmbeddings.Dimensions)
+        .withEmbeddings(BagOfWordsEmbeddings.id.asString, BagOfWordsEmbeddings.Model.asString, BagOfWordsEmbeddings.Dimensions)
         .withTopK(2)
         .withSystemPrompt(helpCentrePrompt)
         .withLLM(client)
@@ -85,7 +85,7 @@ object Part4HelpCentre {
 
   case class HelpPassage(article: String, text: String) derives ReadWriter
 
-  def helpTool(rag: RAG): Result[ToolFunction[HelpQuery, Seq[HelpPassage]]] =
+  def helpTool(rag: RAG): Result[ToolFunction[Seq[HelpPassage]]] =
     Tool.of[HelpQuery, Seq[HelpPassage]]("search_help_centre", "Passages of Acme Shop's help-centre articles") {
       query =>
         rag

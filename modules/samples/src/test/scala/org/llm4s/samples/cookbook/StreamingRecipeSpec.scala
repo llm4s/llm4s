@@ -1,5 +1,6 @@
 package org.llm4s.samples.cookbook
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -37,7 +38,7 @@ class StreamingRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
     val client = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Left(ServiceError(500, "test", "the recipe should stream"))
-      def streamComplete(conversation: Conversation, options: CompletionOptions, onChunk: StreamedChunk => Unit) = {
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(onChunk: StreamedChunk => Unit) = {
         onChunk(StreamedChunk("s", None, thinkingDelta = Some("thinking...")))
         onChunk(StreamedChunk("s", Some("Hello")))
         onChunk(StreamedChunk("s", Some("")))
@@ -47,8 +48,7 @@ class StreamingRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
           Completion(
             id = "s",
             created = Instant.EPOCH,
-            content = "Hello world",
-            model = "m",
+            model = ModelName("m"),
             message = AssistantMessage("Hello world")
           )
         )

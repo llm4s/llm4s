@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.llmconnect.model._
@@ -17,7 +19,9 @@ class MistralDialectSpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val client =
-    new MistralClient(MistralConfig(Secret("k"), "mistral-small-latest", "http://localhost:1", 128000, 4096))
+    new MistralClient(
+      MistralConfig(Secret("k"), ModelName("mistral-small-latest"), BaseUrl("http://localhost:1"), 128000, 4096)
+    )
 
   "MistralDialect.encodeToolCallId" should "pass one of Mistral's own ids through unchanged" in {
     MistralDialect.encodeToolCallId("D681PevKs") shouldBe "D681PevKs"
@@ -39,8 +43,11 @@ class MistralDialectSpec extends AnyFlatSpec with Matchers {
       Conversation(
         Seq(
           UserMessage("Weather?"),
-          AssistantMessage(None, List(ToolCall("call_0fypS1hVX", "get_weather", ujson.Obj("city" -> "Paris")))),
-          ToolMessage("""{"temp":21}""", "call_0fypS1hVX")
+          AssistantMessage(
+            None,
+            List(ToolCall(ToolCallId("call_0fypS1hVX"), "get_weather", ujson.Obj("city" -> "Paris")))
+          ),
+          ToolMessage("""{"temp":21}""", ToolCallId("call_0fypS1hVX"))
         )
       ),
       CompletionOptions()
@@ -54,7 +61,7 @@ class MistralDialectSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "send tools and a JSON-schema response format in the standard shape" in {
-    val tool = ToolBuilder[Map[String, Any], String](
+    val tool = ToolBuilder[String](
       "get_weather",
       "Weather for a city",
       Schema.`object`[Map[String, Any]]("args").withProperty(Schema.property("city", Schema.string("City")))
@@ -101,7 +108,7 @@ class MistralDialectSpec extends AnyFlatSpec with Matchers {
     )
 
     completion.content shouldBe "4"
-    completion.message.contentOpt shouldBe Some("4")
+    completion.message.text shouldBe Some("4")
     completion.thinking shouldBe Some("Add them.")
     completion.usage shouldBe Some(TokenUsage(5, 9, 14))
   }

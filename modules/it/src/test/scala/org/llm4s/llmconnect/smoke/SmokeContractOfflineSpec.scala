@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Local
@@ -13,7 +15,8 @@ import org.llm4s.llmconnect.model.{
   ResponseFormat,
   StreamedChunk,
   TokenUsage,
-  ToolCall
+  ToolCall,
+  ToolCallId
 }
 import org.llm4s.llmconnect.provider.{ CohereClient, DeepSeekClient, OpenAIClient, OpenRouterClient }
 import org.llm4s.model.ModelRegistryService
@@ -67,16 +70,24 @@ class SmokeContractOfflineSpec
   }
 
   private def deepSeek(): LLMClient =
-    DeepSeekClient(DeepSeekConfig.fromValues("fake-model", Secret("test-key"), server.baseUrl).value).value
+    DeepSeekClient(
+      DeepSeekConfig.fromValues(ModelName("fake-model"), Secret("test-key"), BaseUrl(server.baseUrl)).value
+    ).value
 
   private def openRouter(): LLMClient =
-    new OpenRouterClient(OpenAIConfig.fromValues("fake-model", Secret("test-key"), server.baseUrl).value)
+    new OpenRouterClient(
+      OpenAIConfig.fromValues(ModelName("fake-model"), Secret("test-key"), BaseUrl(server.baseUrl)).value
+    )
 
   private def cohere(): LLMClient =
-    CohereClient(CohereConfig.fromValues("fake-model", Secret("test-key"), server.baseUrl).value).value
+    CohereClient(
+      CohereConfig.fromValues(ModelName("fake-model"), Secret("test-key"), BaseUrl(server.baseUrl)).value
+    ).value
 
   private def openAI(): LLMClient =
-    OpenAIClient(OpenAIConfig.fromValues("fake-model", Secret("test-key"), s"${server.baseUrl}/v1").value).value
+    OpenAIClient(
+      OpenAIConfig.fromValues(ModelName("fake-model"), Secret("test-key"), BaseUrl(s"${server.baseUrl}/v1")).value
+    ).value
 
   /**
    * The real clients the contract runs through, with how each reports reasoning: DeepSeek returns the thinking text
@@ -93,7 +104,7 @@ class SmokeContractOfflineSpec
   private val checked: Seq[Capability] = Capability.values.toSeq.filterNot(_ == Capability.Reasoning)
 
   private def reasoningSetup(client: LLMClient, expectsText: Boolean): ReasoningSetup =
-    ReasoningSetup(client, CompletionOptions(temperature = 0.0, maxTokens = Some(64)), expectsText)
+    ReasoningSetup(client, CompletionOptions(temperature = Some(0.0), maxTokens = Some(64)), expectsText)
 
   private def failedMessage(outcome: Outcome): Option[String] = outcome match {
     case Outcome.Failed(message) => Some(message)
@@ -244,7 +255,8 @@ class SmokeContractOfflineSpec
     val gone = new FakeOpenAIServer()
     val base = gone.baseUrl
     gone.close()
-    val client = DeepSeekClient(DeepSeekConfig.fromValues("fake-model", Secret("test-key"), base).value).value
+    val client =
+      DeepSeekClient(DeepSeekConfig.fromValues(ModelName("fake-model"), Secret("test-key"), BaseUrl(base)).value).value
     failedMessage(SmokeChecks.run(Capability.SystemPrompt, client)).value should startWith("[system message]")
     client.close()
   }
@@ -263,10 +275,8 @@ class SmokeContractOfflineSpec
     Completion(
       id = "stub",
       created = Instant.EPOCH,
-      content = content,
-      model = "stub",
-      message = AssistantMessage(contentOpt = Some(content), toolCalls = toolCalls),
-      toolCalls = toolCalls,
+      model = ModelName("stub"),
+      message = AssistantMessage(text = Some(content), toolCalls = toolCalls),
       usage = usage
     )
 
@@ -277,9 +287,7 @@ class SmokeContractOfflineSpec
   ): LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       onComplete(conversation, options)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = onStream(conversation, options, onChunk)
     override def getContextWindow(): Int     = 8192
@@ -290,8 +298,10 @@ class SmokeContractOfflineSpec
 
   it should "fail a streamed tool call whose chunk arrives without its call's id" in {
     val client = stub(onStream = (_, _, onChunk) => {
-      onChunk(StreamedChunk(id = "s", content = None, toolCall = Some(ToolCall("", "get_secret_code", vaultCall))))
-      Right(completion("", List(ToolCall("call_1", "get_secret_code", vaultCall))))
+      onChunk(
+        StreamedChunk(id = "s", content = None, toolCall = Some(ToolCall(ToolCallId(""), "get_secret_code", vaultCall)))
+      )
+      Right(completion("", List(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))))
     })
     failedMessage(SmokeChecks.run(Capability.StreamedToolCalling, client)).value should (
       startWith("[streamed tool call]").and(include("without their call's id"))
@@ -301,9 +311,13 @@ class SmokeContractOfflineSpec
   it should "hold a streamed tool call whose chunks all carry an id" in {
     val client = stub(onStream = (_, _, onChunk) => {
       onChunk(
-        StreamedChunk(id = "s", content = None, toolCall = Some(ToolCall("call_1", "get_secret_code", vaultCall)))
+        StreamedChunk(
+          id = "s",
+          content = None,
+          toolCall = Some(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))
+        )
       )
-      Right(completion("", List(ToolCall("call_1", "get_secret_code", vaultCall))))
+      Right(completion("", List(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))))
     })
     SmokeChecks.run(Capability.StreamedToolCalling, client) shouldBe Outcome.Held
   }
@@ -315,10 +329,14 @@ class SmokeContractOfflineSpec
     val client = stub(onStream = (_, _, onChunk) => {
       Seq[ujson.Value](ujson.Str("{\"topic"), ujson.Str(":"), ujson.Str("\"vault\"}")).foreach { fragment =>
         onChunk(
-          StreamedChunk(id = "s", content = None, toolCall = Some(ToolCall("call_1", "get_secret_code", fragment)))
+          StreamedChunk(
+            id = "s",
+            content = None,
+            toolCall = Some(ToolCall(ToolCallId("call_1"), "get_secret_code", fragment))
+          )
         )
       }
-      Right(completion("", List(ToolCall("call_1", "get_secret_code", vaultCall))))
+      Right(completion("", List(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))))
     })
     failedMessage(SmokeChecks.run(Capability.StreamedToolCalling, client)).value should (
       startWith("[streamed tool call]").and(include("did not reassemble")).and(include("malformed tool call"))
@@ -333,11 +351,11 @@ class SmokeContractOfflineSpec
           StreamedChunk(
             id = "s",
             content = None,
-            toolCall = Some(ToolCall("call_1", "get_secret_code", ujson.Str(fragment)))
+            toolCall = Some(ToolCall(ToolCallId("call_1"), "get_secret_code", ujson.Str(fragment)))
           )
         )
       }
-      Right(completion("", List(ToolCall("call_1", "get_secret_code", vaultCall))))
+      Right(completion("", List(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))))
     })
     failedMessage(SmokeChecks.run(Capability.StreamedToolCalling, client)).value should (
       startWith("[streamed tool call]").and(include("reassembled from the streamed chunks"))
@@ -347,19 +365,28 @@ class SmokeContractOfflineSpec
   it should "fail a tool call that names the wrong tool, has an empty id, or has arguments that do not fit" in {
     def toolClient(call: ToolCall): LLMClient = stub(onComplete = (_, _) => Right(completion("", List(call))))
     failedMessage(
-      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall("call_1", "other_tool", vaultCall)))
+      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall(ToolCallId("call_1"), "other_tool", vaultCall)))
     ).value should include("instead of 'get_secret_code'")
     failedMessage(
-      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall("", "get_secret_code", vaultCall)))
+      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall(ToolCallId(""), "get_secret_code", vaultCall)))
     ).value should include("empty id")
     failedMessage(
-      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall("call_1", "get_secret_code", ujson.Obj("nope" -> 1))))
+      SmokeChecks.run(
+        Capability.ToolCalling,
+        toolClient(ToolCall(ToolCallId("call_1"), "get_secret_code", ujson.Obj("nope" -> 1)))
+      )
     ).value should include("does not declare nope")
     failedMessage(
-      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall("call_1", "get_secret_code", ujson.Obj())))
+      SmokeChecks.run(
+        Capability.ToolCalling,
+        toolClient(ToolCall(ToolCallId("call_1"), "get_secret_code", ujson.Obj()))
+      )
     ).value should include("do not fit the tool's schema")
     failedMessage(
-      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall("call_1", "get_secret_code", ujson.Arr())))
+      SmokeChecks.run(
+        Capability.ToolCalling,
+        toolClient(ToolCall(ToolCallId("call_1"), "get_secret_code", ujson.Arr()))
+      )
     ).value should include("not a JSON object")
     failedMessage(
       SmokeChecks.run(Capability.ToolCalling, stub(onComplete = (_, _) => Right(completion("I will not use it"))))

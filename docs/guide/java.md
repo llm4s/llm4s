@@ -3,8 +3,10 @@ layout: page
 title: Java
 description: "Call an LLM from Java with llm4s-java-api: add the dependency, configure a provider, send a prompt or conversation and read failures without Scala."
 search_title: "Call LLMs from Java with LLM4S"
-parent: User Guide
-nav_order: 19
+parent: Java and Kotlin
+nav_order: 401
+grand_parent: User Guide
+cites_closed_issues: [1495, 1496, 1740, 1850, 2476, 2534]
 ---
 
 # Using LLM4S from Java
@@ -108,12 +110,11 @@ Scala users write: a named section per provider, and one section named as the de
 ```hocon
 # src/main/resources/application.conf
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }
@@ -125,12 +126,11 @@ the shared credential for `openai`, so the section needs only `provider` and `mo
 
 ```hocon
 llm4s {
+  defaultProvider = "claude"
   providers {
-    provider = "claude"
-
     claude {                              # key from ANTHROPIC_API_KEY
       provider = "anthropic"
-      model    = "claude-sonnet-4-20250514"
+      model    = "claude-sonnet-5-5"
     }
 
     ollama-local {
@@ -155,7 +155,7 @@ server that speaks OpenAI's chat-completions API) and `azureOpenAi()`. Each take
 ```java
 LlmResult<JLlmClient> openai = Llm4s.openAi()
     .apiKey(apiKey)
-    .model("gpt-4o-mini")
+    .model("gpt-5.6-luna")
     .build();
 LlmResult<JLlmClient> local = Llm4s.ollama()
     .model("llama3.2")
@@ -182,7 +182,7 @@ otherwise use, as a section's `contextWindow` does. `metrics(MetricsCollector)` 
 `build()` sends no request and does not throw. A required field left out - or set to `null` or a blank string, as
 `System.getenv` returns for a variable that is not set - is a failed result of kind `VALIDATION` whose message names
 it (`Field 'apiKey' is required`), as is a value out of range, such as a context window of zero. A builder is
-immutable, so one can be kept and forked: `base.model("gpt-4o")` returns a new builder and leaves `base` as it was.
+immutable, so one can be kept and forked: `base.model("gpt-5.6-terra")` returns a new builder and leaves `base` as it was.
 Its `toString` prints the API key as `***`, an OpenAI-compatible server's headers by name only, and a base URL or
 endpoint without its userinfo, query or fragment, so a builder can be logged.
 
@@ -210,8 +210,8 @@ essentials and fills in the rest (the default base URL, and a context window and
 model name):
 
 ```java
-LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(Secret.apply(apiKey), "gpt-4o-mini"));
-LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(Secret.apply(apiKey), "claude-sonnet-4-20250514"));
+LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(Secret.apply(apiKey), "gpt-5.6-luna"));
+LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(Secret.apply(apiKey), "claude-sonnet-5-5"));
 LlmResult<JLlmClient> local = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"));
 ```
 
@@ -246,7 +246,7 @@ for a gateway that requires mutual TLS, a key store with the client certificate 
 ```java
 LlmResult<JLlmClient> corporate = Llm4s.openAi()
     .apiKey(apiKey)
-    .model("gpt-4o")
+    .model("gpt-5.6-terra")
     .proxy("http://proxy.corp:3128")
     .proxyCredentials(proxyUser, proxyPassword)
     .nonProxyHosts("localhost", "*.internal")
@@ -388,8 +388,9 @@ The builder has `temperature`, `topP`, `maxTokens`, `presencePenalty`, `frequenc
 budget). `JThinking.budget` throws `IllegalArgumentException` for `n <= 0`; a provider fits a positive budget to its own
 range (Anthropic: at least `1024` and below the token limit) and reports that it did. An explicit `thinking` wins over
 `reasoning`; see [Cost controls](cost-controls#thinking-and-reasoning-effort) for what each provider sends. A setting
-you leave out keeps the library's default: temperature `0.7`, top-p `1.0`, no penalties, and no token limit, reasoning
-level or thinking mode. The built options have an accessor of the same name for each setting. `maxTokens()` returns an
+you leave out is not sent, so the provider's default applies: no temperature, top-p, penalties, token limit, reasoning
+level or thinking mode. The built options have an accessor of the same name for each setting. `temperature()`, `topP()`,
+`presencePenalty()` and `frequencyPenalty()` return an `OptionalDouble`, `maxTokens()` an
 `OptionalInt`, `reasoning()` an `Optional<JReasoningEffort>` and `thinking()` an `Optional<JThinking>`, empty when unset.
 Their setters also take an `OptionalInt` or `Optional`, so an empty one clears the value.
 
@@ -747,7 +748,10 @@ result.status().guardrail().ifPresent(g ->
   query or an answer, and `json()`, which checks only an answer - `inputGuardrails` does not compile with it. Each list
   runs in order. A guardrail that fails ends the turn `BLOCKED`, with the guardrail's name in `status().guardrail()` and
   its reason in `status().reason()`; a blocked query stores nothing of the turn, a blocked answer is not kept, and the
-  conversation stays usable. Guardrails written in Java are not available yet.
+  conversation stays usable. Input guardrails run before the turn is stored, so a blocked query is in no checkpoint,
+  event or trace, and the reason - which may quote the query - is on the result of the blocked turn and never stored.
+  They sit where a Scala agent's `withInputGuardrails` and `withOutputGuardrails` put them, innermost in the agent's
+  middleware. Guardrails written in Java are not available yet.
 - **Context window.** `JContextWindow.lastMessages(n)` sends each model call at most the `n` most recent messages,
   dropping the oldest first. The system prompt is always sent and not counted; the current turn is always sent whole; a
   tool call is never sent without its result. Only what is sent is pruned: `messages()` of a result still has the whole
@@ -777,7 +781,7 @@ import kotlin.time.Duration.Companion.seconds
 
 val client = Llm4s.openAi {                // also anthropic, gemini, ollama, openAiCompatible, azureOpenAi
     apiKey = System.getenv("OPENAI_API_KEY")
-    model = "gpt-4o-mini"
+    model = "gpt-5.6-luna"
     requestTimeout = 30.seconds
 }
 

@@ -53,10 +53,10 @@ class LLMClientPekkoSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
   it should "pass the conversation and the options to the provider" in {
     val seen = new java.util.concurrent.atomic.AtomicReference[(Int, Double)]((-1, Double.NaN))
     val client = new LLMClientStub((conversation, options, _) => {
-      seen.set((conversation.messages.size, options.temperature))
+      seen.set((conversation.messages.size, options.temperature.getOrElse(Double.NaN)))
       Right(Fixtures.completion)
     })
-    val options = org.llm4s.llmconnect.model.CompletionOptions(temperature = 0.25)
+    val options = org.llm4s.llmconnect.model.CompletionOptions(temperature = Some(0.25))
     Await.result(LLMClientPekko(client).streamComplete(Fixtures.conversation, options).runWith(Sink.seq), Patience)
     seen.get shouldBe ((1, 0.25))
   }

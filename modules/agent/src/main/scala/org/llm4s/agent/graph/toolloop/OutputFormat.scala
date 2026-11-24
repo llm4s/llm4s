@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.toolloop
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.graph.middleware.{ MiddlewareId, PromptSection }
 import org.llm4s.agent.graph.tool.ToolArgumentValidator
 import org.llm4s.error.ValidationError
@@ -20,7 +20,7 @@ import scala.util.Try
  * and a second ends the turn with [[org.llm4s.agent.graph.GraphError.OutputInvalid]]. Build one with
  * [[OutputFormat.of]]; `AgentBuilder.withOutput` does.
  */
-@Stable
+@Experimental
 final class OutputFormat private (val schema: ujson.Value, reads: ujson.Value => Option[String]):
 
   /** The `responseFormat` a model call of the agent that offers no tools is made with. */
@@ -67,7 +67,7 @@ final class OutputFormat private (val schema: ujson.Value, reads: ujson.Value =>
       .left
       .map(OutputFormat.bounded)
 
-@Stable
+@Experimental
 object OutputFormat:
 
   /** Most problems an answer is reported with: to the model in the corrective request, and in `OutputInvalid`. */
@@ -81,7 +81,7 @@ object OutputFormat:
 
   /** The id of the format's prompt section, and the owner its size is reported under. */
   private[toolloop] val SectionId: String   = "response-format"
-  private[toolloop] val Owner: MiddlewareId = MiddlewareId("response-format")
+  private[toolloop] val Owner: MiddlewareId = MiddlewareId.ResponseFormat
 
   private val Instruction =
     "When you give your final answer, reply with only a JSON value matching this JSON Schema, with no other text:"

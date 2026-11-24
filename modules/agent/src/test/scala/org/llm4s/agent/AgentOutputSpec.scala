@@ -71,7 +71,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   it should "send no response format on a call that offers the agent's tools, so the model can still call them" in {
     val echo   = SpecTools.tool("echo")((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
     val client = new ScriptedLLMClient(Right(calling(call("c1", "echo"))), Right(CompletionFixture.simple(valid)))
-    val result = built(withFormat(client).withTools(SpecTools.set(echo))).run("bill Acme").value
+    val result = built(withFormat(client).withToolSet(SpecTools.set(echo))).run("bill Acme").value
 
     result.decodeOutput[Invoice] shouldBe Right(Invoice("Acme", 12.5))
     client.calls.map(_._2.tools.nonEmpty) shouldBe Vector(true, true)
@@ -97,7 +97,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       ): Result[ModelResponse] = next(request.withTools(ToolSet.empty))
     }
     val client = answers(valid)
-    built(withFormat(client).withTools(SpecTools.set(echo)).withMiddleware(toolless)).run("bill Acme").value
+    built(withFormat(client).withToolSet(SpecTools.set(echo)).withMiddleware(toolless)).run("bill Acme").value
 
     client.calls.head._2.responseFormat shouldBe format
   }
@@ -107,7 +107,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val client = new ScriptedLLMClient(Right(calling(call("c1", "echo"))), Right(CompletionFixture.simple(valid)))
     built(
       withFormat(client)
-        .withTools(SpecTools.set(echo))
+        .withToolSet(SpecTools.set(echo))
         .withCompletionOptions(CompletionOptions().withResponseFormat(ResponseFormat.Json))
     ).run("bill Acme").value
 
@@ -207,7 +207,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       Right(calling(call("c1", "echo"))),
       Right(CompletionFixture.simple(valid))
     )
-    val result = built(withFormat(client).withTools(SpecTools.set(echo))).run("bill Acme").value
+    val result = built(withFormat(client).withToolSet(SpecTools.set(echo))).run("bill Acme").value
 
     result.decodeOutput[Invoice] shouldBe Right(Invoice("Acme", 12.5))
     result.usage.requestCount shouldBe 3
@@ -348,7 +348,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       Right(CompletionFixture.simple(invalid)),
       Right(CompletionFixture.simple(valid))
     )
-    val agent  = built(withFormat(client).withTools(SpecTools.set(echo)))
+    val agent  = built(withFormat(client).withToolSet(SpecTools.set(echo)))
     val thread = ThreadId("tools-removed")
 
     agent.run(thread, "bill Acme").error shouldBe a[GraphError.OutputInvalid]
@@ -373,7 +373,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       Right(CompletionFixture.simple(invalid)),
       Right(CompletionFixture.simple(invalid))
     )
-    val agent  = built(withFormat(client).withTools(SpecTools.set(write)).withRuntime(new GraphRuntime(store)))
+    val agent  = built(withFormat(client).withToolSet(SpecTools.set(write)).withRuntime(new GraphRuntime(store)))
     val thread = ThreadId("restored")
 
     agent.run(thread, "first").value
@@ -410,7 +410,10 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       (Right(calling(call("c1", "write", "one"))) +: Vector.fill(4)(Right(CompletionFixture.simple(invalid))))*
     )
     val agent = built(
-      withFormat(scripted).withTools(SpecTools.set(write)).withMiddleware(reviewer).withRuntime(new GraphRuntime(store))
+      withFormat(scripted)
+        .withToolSet(SpecTools.set(write))
+        .withMiddleware(reviewer)
+        .withRuntime(new GraphRuntime(store))
     )
     val thread = ThreadId("restored-after-question")
 
@@ -473,7 +476,7 @@ class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         ToolArgumentValidator.default.validate(schema, arguments)
     }
     val tools   = ToolSet.of(noMinimum).fold(e => fail(e.message), identity)
-    val refused = Agent.builder("extractor", answers()).withTools(tools).withOutput(invoiceSchema).build()
+    val refused = Agent.builder("extractor", answers()).withToolSet(tools).withOutput(invoiceSchema).build()
     refused.left.map(_.message).swap.getOrElse("") should include("minimum")
   }
 

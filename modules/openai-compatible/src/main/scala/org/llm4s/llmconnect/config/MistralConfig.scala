@@ -4,7 +4,7 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -35,24 +35,26 @@ import org.llm4s.types.Result
 @Experimental
 final case class MistralConfig private (
   apiKey: Secret,
-  model: String,
-  baseUrl: String,
+  model: ModelName,
+  baseUrl: BaseUrl,
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                      = ProviderId("mistral")
-  override def endpointUrl: Option[String]                                 = Some(baseUrl)
-  override def withModel(model: String): MistralConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): MistralConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): MistralConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): MistralConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                   = ProviderId("mistral")
+  override def endpointUrl: Option[BaseUrl]                             = Some(baseUrl)
+  override def withModel(model: ModelName): MistralConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): MistralConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[MistralConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): MistralConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): MistralConfig                    = copy(apiKey = apiKey)
-  def withBaseUrl(baseUrl: String): MistralConfig                  = copy(baseUrl = baseUrl)
+  def withBaseUrl(baseUrl: BaseUrl): MistralConfig                 = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): MistralConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): MistralConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
@@ -61,7 +63,7 @@ final case class MistralConfig private (
 
 @Experimental
 object MistralConfig:
-  val DEFAULT_BASE_URL: String = "https://api.mistral.ai"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://api.mistral.ai")
 
   /** The context window `apply` uses when none is given; [[fromValues]] resolves the model's own. */
   val DEFAULT_CONTEXT_WINDOW: Int = 128000
@@ -75,8 +77,8 @@ object MistralConfig:
    */
   def apply(
     apiKey: Secret,
-    model: String,
-    baseUrl: String = DEFAULT_BASE_URL,
+    model: ModelName,
+    baseUrl: BaseUrl = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
     timeouts: ProviderTimeouts = ProviderTimeouts.default
@@ -96,11 +98,11 @@ object MistralConfig:
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,
    * which do not see Scala default arguments. Set the rest with the `with*` setters.
    */
-  def apply(apiKey: Secret, model: String): MistralConfig =
+  def apply(apiKey: Secret, model: ModelName): MistralConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
-  private val mistralFallback: String => (Int, Int) =
-    _ => (DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)
+  private val mistralFallback: ModelName => ContextLimits =
+    _ => ContextLimits(DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)
 
   /**
    * The versioned API base the chat client posts `/chat/completions` under: the configured
@@ -110,9 +112,9 @@ object MistralConfig:
    * that Mistral's own OpenAI-SDK examples use works too. The old client appended `/v1`
    * unconditionally and so posted to `/v1/v1/chat/completions` for such a URL.
    */
-  def apiBaseUrl(baseUrl: String): String =
-    val root = baseUrl.trim.stripSuffix("/")
-    if root.endsWith("/v1") then root else s"$root/v1"
+  def apiBaseUrl(baseUrl: BaseUrl): BaseUrl =
+    val root = baseUrl.asUrl.trim.stripSuffix("/")
+    BaseUrl(if root.endsWith("/v1") then root else s"$root/v1")
 
   /**
    * Constructs a [[MistralConfig]], resolving `contextWindow` and `reserveCompletion` from the
@@ -125,16 +127,16 @@ object MistralConfig:
    * @return `Left(ConfigurationError)` for a blank `apiKey` or `baseUrl`.
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     apiKey: Secret,
-    baseUrl: String
+    baseUrl: BaseUrl
   )(using resolver: ContextWindowResolver): Result[MistralConfig] =
     for {
       _ <- ProviderConfig.nonEmpty("Mistral", "apiKey", apiKey.reveal)
-      _ <- ProviderConfig.nonEmpty("Mistral", "baseUrl", baseUrl)
+      _ <- ProviderConfig.nonEmpty("Mistral", "baseUrl", baseUrl.asUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
-        lookupProviders = Seq("mistral"),
+      val ContextLimits(cw, rc) = resolver.resolve(
+        lookupProviders = Seq(ProviderId("mistral")),
         modelName = modelName,
         defaultContextWindow = DEFAULT_CONTEXT_WINDOW,
         defaultReserve = DEFAULT_RESERVE_COMPLETION,

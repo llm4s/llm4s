@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -26,9 +27,7 @@ final private[agent] class DeterministicFakeLLMClient(
   ): Result[Completion] =
     Right(response)
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     complete(conversation, options)
@@ -66,9 +65,7 @@ final private[agent] class TwoTurnDeterministicFakeLLMClient(
     if (hasToolResult || hasAssistantMessage) Right(second) else Right(first)
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     complete(conversation, options)
@@ -97,9 +94,7 @@ final private[agent] class FailingLLMClient(error: LLMError) extends LLMClient {
   ): Result[Completion] =
     Left(error)
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     Left(error)
@@ -132,9 +127,7 @@ final private[agent] class NTurnFakeLLMClient(responses: Completion*) extends LL
     else Right(responses(index % responses.size))
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     complete(conversation, options)
@@ -162,11 +155,10 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-${System.nanoTime()}",
       created = Instant.now(),
-      content = text,
-      model = "test-model",
+      model = ModelName("test-model"),
       message = message,
-      toolCalls = Nil,
-      usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
+      usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30)),
+      finishReason = FinishReason.Stop
     )
   }
 
@@ -178,15 +170,13 @@ private[agent] object CompletionFixture {
    * @param callId Tool call identifier; defaults to `"call-1"`.
    */
   def withToolCall(name: String, args: ujson.Value, callId: String = "call-1"): Completion = {
-    val tc      = ToolCall(id = callId, name = name, arguments = args)
+    val tc      = ToolCall(id = ToolCallId(callId), name = name, arguments = args)
     val message = AssistantMessage("", Seq(tc))
     Completion(
       id = s"fixture-tc-${System.nanoTime()}",
       created = Instant.now(),
-      content = "",
-      model = "test-model",
+      model = ModelName("test-model"),
       message = message,
-      toolCalls = List(tc),
       usage = Some(TokenUsage(promptTokens = 15, completionTokens = 5, totalTokens = 20))
     )
   }
@@ -196,10 +186,8 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-msg-${System.nanoTime()}",
       created = Instant.now(),
-      content = message.content,
-      model = "test-model",
+      model = ModelName("test-model"),
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
     )
 
@@ -217,11 +205,10 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-usage-${System.nanoTime()}",
       created = Instant.now(),
-      content = text,
-      model = "test-model",
+      model = ModelName("test-model"),
       message = message,
-      toolCalls = Nil,
-      usage = Some(TokenUsage(promptTokens = prompt, completionTokens = completion, totalTokens = prompt + completion))
+      usage = Some(TokenUsage(promptTokens = prompt, completionTokens = completion, totalTokens = prompt + completion)),
+      finishReason = FinishReason.Stop
     )
   }
 }
@@ -255,9 +242,7 @@ final private[agent] class ScriptedLLMClient(responses: Result[Completion]*) ext
       .getOrElse(Left(org.llm4s.error.ValidationError("scripted", s"no response scripted for call $index")))
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = complete(conversation, options)
 
@@ -335,7 +320,8 @@ private[agent] object SpecTools {
 
   def tool(name: String)(run: (Text, ToolContext) => ToolOutcome): AgentTool[Text] = AgentTool(spec(name))(run)
 
-  def call(id: String, name: String, text: String = "x"): ToolCall = ToolCall(id, name, ujson.Obj("text" -> text))
+  def call(id: String, name: String, text: String = "x"): ToolCall =
+    ToolCall(ToolCallId(id), name, ujson.Obj("text" -> text))
 
   def calling(calls: ToolCall*): Completion = CompletionFixture.withMessage(AssistantMessage(None, calls))
 }

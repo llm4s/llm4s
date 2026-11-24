@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import com.sun.net.httpserver.HttpServer
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.model.{
@@ -29,7 +31,8 @@ class AnthropicThinkingSpec extends AnyFlatSpec with Matchers {
 
   private given registry: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
-  private def caps(model: String): Option[ModelCapabilities] = registry.lookup(model).toOption.map(_.capabilities)
+  private def caps(model: String): Option[ModelCapabilities] =
+    registry.lookup(ModelName(model)).toOption.map(_.capabilities)
 
   private def plan(model: String, options: CompletionOptions, maxTokens: Int = 64000): Plan =
     AnthropicThinking.plan(model, options, maxTokens, caps(model))
@@ -210,7 +213,7 @@ class AnthropicThinkingSpec extends AnyFlatSpec with Matchers {
       |"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}""".stripMargin
 
   /** The request body `complete` sends to `model`, and the completion's adjustments. */
-  private def sent(model: String, options: CompletionOptions): (ujson.Value, List[RequestAdjustment]) = {
+  private def sent(model: String, options: CompletionOptions): (ujson.Value, Seq[RequestAdjustment]) = {
     val seen   = new AtomicReference[String]()
     val server = HttpServer.create(new InetSocketAddress("localhost", 0), 0)
     server.createContext(
@@ -228,8 +231,8 @@ class AnthropicThinkingSpec extends AnyFlatSpec with Matchers {
     try {
       val config = AnthropicConfig(
         apiKey = Secret("test-key"),
-        model = model,
-        baseUrl = s"http://localhost:${server.getAddress.getPort}",
+        model = ModelName(model),
+        baseUrl = BaseUrl(s"http://localhost:${server.getAddress.getPort}"),
         contextWindow = 200000,
         reserveCompletion = 4096
       )
@@ -249,9 +252,9 @@ class AnthropicThinkingSpec extends AnyFlatSpec with Matchers {
 
   it should "send thinking disabled with the temperature, which a non-thinking request may set" in {
     val (body, adjustments) =
-      sent("claude-opus-4-6", CompletionOptions(maxTokens = Some(4096)).withThinking(Thinking.Off))
+      sent("claude-opus-4-6", CompletionOptions(maxTokens = Some(4096)).withTemperature(0.7).withThinking(Thinking.Off))
     body("thinking") shouldBe ujson.Obj("type" -> "disabled")
-    body.obj.keySet should contain("temperature")
+    body("temperature").num shouldBe 0.7
     body.obj.keySet should not contain "output_config"
     adjustments shouldBe Nil
   }

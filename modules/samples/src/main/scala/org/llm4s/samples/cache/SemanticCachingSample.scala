@@ -1,5 +1,6 @@
 package org.llm4s.samples.cache
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ConfigurationError
@@ -52,7 +53,7 @@ object SemanticCachingSample extends App {
           conv3           <- Conversation.userOnly("What is the capital of Germany?")
         } yield {
           val tracing        = new ConsoleTracing()
-          val embeddingModel = EmbeddingModelConfig("text-embedding-3-small", 1536)
+          val embeddingModel = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)
           Using.resource(
             new CachingLLMClient(
               baseClient = baseLLMClient,
@@ -83,21 +84,22 @@ object SemanticCachingSample extends App {
     println("=== Semantic Caching Demo ===\n")
     OpenAIConfig
       .fromValues(
-        modelName = "gpt-4o-mini",
+        modelName = ModelName("gpt-5.6-luna"),
         apiKey = Secret(apiKey),
         organization = None,
-        baseUrl = "https://api.openai.com"
+        baseUrl = BaseUrl("https://api.openai.com")
       )
       .flatMap(openAIConfig => OpenAIClient(openAIConfig))
   }
 
   private def createEmbeddingClient(apiKey: String)(using ModelRegistryService): Result[EmbeddingClient] = {
     val embeddingConfig = EmbeddingProviderConfig(
-      baseUrl = "https://api.openai.com",
-      model = "text-embedding-3-small",
-      apiKey = Secret(apiKey)
+      providerId = ProviderId("openai"),
+      baseUrl = BaseUrl("https://api.openai.com"),
+      model = ModelName("text-embedding-3-small"),
+      apiKey = Some(Secret(apiKey))
     )
-    EmbeddingClient.from("openai", embeddingConfig)
+    EmbeddingClient.from(embeddingConfig.withProviderId(ProviderId("openai")))
   }
 
   private def createCacheConfig(): Result[CacheConfig] =
@@ -158,7 +160,7 @@ object SemanticCachingSample extends App {
     // Demo 4: Options mismatch (should miss cache)
     println("--- Demo 4: Same query, different options (should miss cache) ---")
     println(s"Query 5 (same as #1, but temperature=0.9): $query1")
-    cachingClient.complete(conv1, CompletionOptions(temperature = 0.9)) match {
+    cachingClient.complete(conv1, CompletionOptions(temperature = Some(0.9))) match {
       case Right(completion) => println(s"Response: ${completion.content}\n")
       case Left(error)       => println(s"Error: ${error.message}\n")
     }

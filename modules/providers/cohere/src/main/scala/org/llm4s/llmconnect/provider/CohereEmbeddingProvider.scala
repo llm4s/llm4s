@@ -1,11 +1,14 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.config.CohereEmbeddingConfigKeys
 import org.llm4s.error.{ CancelledError, NetworkError, RateLimitError, TimeoutError }
 import org.llm4s.http.{ HttpClientOptions, HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
+import org.llm4s.error.EmbeddingError
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -79,23 +82,23 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some("https://api.cohere.com"),
+    defaultBaseUrl = Some(BaseUrl("https://api.cohere.com")),
     // Bound to the shared llm4s.credentials.cohere.apiKey in this module's reference.conf.
-    apiKeyEnv = Seq(CohereEmbeddingConfigKeys.COHERE_API_KEY),
-    modelEnv = Some(CohereEmbeddingConfigKeys.COHERE_EMBEDDING_MODEL)
+    apiKeyEnv = Seq(CohereEmbeddingConfigKeys.COHERE_API_KEY)
   )
 
   /** Default output dimensions; the client does not send an `output_dimension` parameter. */
-  override val modelDimensions: Map[String, Int] = Map(
-    "embed-v4.0"                    -> 1536,
-    "embed-english-v3.0"            -> 1024,
-    "embed-multilingual-v3.0"       -> 1024,
-    "embed-english-light-v3.0"      -> 384,
-    "embed-multilingual-light-v3.0" -> 384
+  override val modelDimensions: Map[ModelName, Int] = Map(
+    ModelName("embed-v4.0")                    -> 1536,
+    ModelName("embed-english-v3.0")            -> 1024,
+    ModelName("embed-multilingual-v3.0")       -> 1024,
+    ModelName("embed-english-light-v3.0")      -> 384,
+    ModelName("embed-multilingual-light-v3.0") -> 384
   )
 
   /** Builds the provider for the SPI: the input type follows each request's purpose; see [[fromConfig]] to fix it. */
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+    Right(create(config, None, context.httpClient.getOrElse(Llm4sHttpClient.create(HttpClientOptions(config.network)))))
 
   /** Creates an [[EmbeddingProvider]] backed by Cohere whose `input_type` follows each request's [[org.llm4s.llmconnect.model.InputPurpose]]. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
@@ -170,13 +173,13 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
   ): EmbeddingProvider =
     new EmbeddingProvider {
       private val logger = LoggerFactory.getLogger(getClass)
-      private val url    = endpoint(cfg.baseUrl)
+      private val url    = endpoint(cfg.baseUrl.asUrl)
 
       override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
         CancelledError.attempt("cohere.embed")(embedBatches(request))
 
       private def embedBatches(request: EmbeddingRequest): Result[EmbeddingResponse] = {
-        val model     = request.model.name
+        val model     = request.model.name.asString
         val input     = request.input
         val inputType = explicitInputType.getOrElse(CohereInputType.forPurpose(request.purpose))
         val metadata = Map(
@@ -229,7 +232,12 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
             .currentApiKey()
             .flatMap(key =>
               httpClient
-                .post(url, headers(key.reveal), payload.render(), timeout = cfg.timeouts.requestOr(120.seconds))
+                .post(
+                  url,
+                  headers(key.fold("")(_.reveal)),
+                  payload.render(),
+                  timeout = cfg.timeouts.requestOr(120.seconds)
+                )
                 .left
                 .map {
                   // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)

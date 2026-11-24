@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.error.{ CancelledError, ServiceError, ValidationError }
@@ -20,15 +21,14 @@ import java.time.Instant
  */
 class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
-  private val toolCall = ToolCall("call-1", "weather", ujson.Obj("city" -> "Paris"))
+  private val toolCall = ToolCall(ToolCallId("call-1"), "weather", ujson.Obj("city" -> "Paris"))
 
   private val full: Completion = Completion(
     id = "reply-1",
     created = Instant.EPOCH,
-    content = "Let me check.",
-    model = "gpt-4o-2024-08-06",
-    message = AssistantMessage("Let me check.").withThinking("The user wants the weather."),
-    toolCalls = List(toolCall, ToolCall("call-2", "clock", ujson.Obj())),
+    model = ModelName("gpt-4o-2024-08-06"),
+    message = AssistantMessage("Let me check.", Seq(toolCall, ToolCall(ToolCallId("call-2"), "clock", ujson.Obj())))
+      .withThinking("The user wants the weather."),
     usage = Some(
       TokenUsage(
         promptTokens = 120,
@@ -42,7 +42,7 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     estimatedCost = Some(0.0015)
   )
 
-  private val bare: Completion = Completion("reply-2", Instant.EPOCH, "4", "m", AssistantMessage("4"))
+  private val bare: Completion = Completion("reply-2", Instant.EPOCH, ModelName("m"), AssistantMessage("4"))
 
   /** A client that records each conversation and options it is sent, and answers with `reply`. */
   private class Recording(reply: => Result[Completion]) extends LLMClient {
@@ -51,7 +51,7 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       sent += (c -> o)
       reply
     }
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
@@ -125,20 +125,17 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   it should "give the cost as core's agent usage adds it, so a reply's cost and an agent turn's total agree" in {
     val cost  = 0.1 + 0.2 // 0.30000000000000004 as a Double
     val reply = Llm4s.wrapClient(replying(full.withEstimatedCost(cost))).completion("q").get()
-    val turn  = UsageSummary().add("m", full.usage.get, Some(cost))
+    val turn  = UsageSummary().add(ModelName("m"), full.usage.get, Some(cost))
 
     reply.estimatedCost.get() shouldBe turn.totalCost.bigDecimal
   }
 
-  it should "read a cost that is not a number as unknown, not fail" in {
-    Seq(Double.NaN, Double.PositiveInfinity).foreach { cost =>
-      val result = Llm4s.wrapClient(replying(full.withEstimatedCost(cost))).completion("q")
-      result.get().estimatedCost.isPresent shouldBe false
-    }
-  }
-
   it should "read a null text as empty, as the agent's messages do" in {
-    Llm4s.wrapClient(replying(bare.withContent(null))).completion("q").get().content shouldBe ""
+    Llm4s
+      .wrapClient(replying(bare.withMessage(bare.message.withContent(null: String))))
+      .completion("q")
+      .get()
+      .content shouldBe ""
   }
 
   it should "send the query as one user message with default options" in {
@@ -157,7 +154,7 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     client.sent.toList shouldBe List(
       conversation -> CompletionOptions(),
-      conversation -> CompletionOptions(temperature = 0.1, maxTokens = Some(64))
+      conversation -> CompletionOptions(temperature = Some(0.1), maxTokens = Some(64))
     )
   }
 
@@ -197,7 +194,7 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val throwing = new Recording(throw new IllegalStateException("provider bug"))
     Llm4s.wrapClient(throwing).completion("q").getError().getMessage should include("provider bug")
 
-    val unreadable = full.withToolCalls(List(ToolCall("c", "t", null)))
+    val unreadable = full.withMessage(full.message.withToolCalls(Seq(ToolCall(ToolCallId("c"), "t", null))))
     Llm4s.wrapClient(replying(unreadable)).completion("q").isFailure shouldBe true
   }
 
@@ -233,7 +230,7 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     reply(full) shouldBe reply(full)
     reply(full).hashCode shouldBe reply(full).hashCode
-    reply(full) should not be reply(full.withModel("other"))
+    reply(full) should not be reply(full.withModel(ModelName("other")))
     reply(full) should not be reply(full.withEstimatedCost(None))
     reply(full) should not be reply(full.withServedTier(ServiceTier.Flex))
     reply(full.withServedTier(ServiceTier.Flex)) shouldBe reply(full.withServedTier(ServiceTier.Flex))
@@ -305,7 +302,8 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   it should "count what an agent turn's usage sums: prompt tokens as input, completion and thinking as output" in {
     val tokens = full.usage.get
     val usage  = FacadeInternals.tokenUsage(tokens)
-    val turn   = FacadeInternals.usageSummary(UsageSummary().add("m", tokens, None).add("m", tokens, None))
+    val turn =
+      FacadeInternals.usageSummary(UsageSummary().add(ModelName("m"), tokens, None).add(ModelName("m"), tokens, None))
 
     turn.inputTokens shouldBe 2L * usage.promptTokens
     turn.outputTokens shouldBe 2L * (usage.completionTokens + usage.thinkingTokens)

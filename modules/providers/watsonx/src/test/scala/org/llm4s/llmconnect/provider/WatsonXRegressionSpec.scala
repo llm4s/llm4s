@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.LLMError
 import org.llm4s.http.HttpResponse
@@ -72,8 +74,8 @@ class WatsonXRegressionSpec extends AnyFunSuite with Matchers:
         )
     )
     val c = new WatsonXClient(config, httpClient = http)
-    c.streamComplete(hi, CompletionOptions(), _ => ()).isLeft shouldBe true
-    c.streamComplete(hi, CompletionOptions(), _ => ()).map(_.content) shouldBe Right("ok")
+    c.streamComplete(hi, CompletionOptions())(_ => ()).isLeft shouldBe true
+    c.streamComplete(hi, CompletionOptions())(_ => ()).map(_.content) shouldBe Right("ok")
   }
 
   test("an IAM answer that is valid JSON but not an object is an error, not an exception") {
@@ -95,7 +97,7 @@ class WatsonXRegressionSpec extends AnyFunSuite with Matchers:
   test("a trailing slash or stray whitespace on baseUrl does not produce a double slash in the endpoint") {
     Seq("https://wx.example.com/", "https://wx.example.com//", "  https://wx.example.com ").foreach { base =>
       val cfg = WatsonXConfig
-        .fromValues("m", Secret(ApiKey), Some("p"), baseUrl = base)
+        .fromValues(ModelName("m"), Secret(ApiKey), Some("p"), baseUrl = BaseUrl(base))
         .getOrElse(fail(s"config for '$base' should be valid"))
       val http = routed(_ => Right(iamToken()), _ => Right(chatReply))
       new WatsonXClient(cfg, httpClient = http).complete(hi, CompletionOptions())
@@ -132,7 +134,7 @@ class WatsonXRegressionSpec extends AnyFunSuite with Matchers:
             )
           )
         )
-      ).streamComplete(hi, CompletionOptions(), _ => ()).left.toOption match
+      ).streamComplete(hi, CompletionOptions())(_ => ()).left.toOption match
         case Some(error) =>
           List(error.message, error.formatted).foreach { text =>
             (text should not).include(ApiKey)

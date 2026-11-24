@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
@@ -20,7 +21,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
 
   private val options = CompletionOptions().withTemperature(0.5).withMaxTokens(64)
 
-  private val addTool: ToolFunction[?, ?] = ToolBuilder[Map[String, Any], String](
+  private val addTool: ToolFunction[?] = ToolBuilder[String](
     "add",
     "Adds two numbers",
     Schema
@@ -39,8 +40,8 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
       Seq(
         SystemMessage("s"),
         UserMessage("u1"),
-        AssistantMessage(Some("a1"), Seq(ToolCall("call-7", "add", ujson.Obj("a" -> 1, "b" -> 2)))),
-        ToolMessage("3", "call-7"),
+        AssistantMessage(Some("a1"), Seq(ToolCall(ToolCallId("call-7"), "add", ujson.Obj("a" -> 1, "b" -> 2)))),
+        ToolMessage("3", ToolCallId("call-7")),
         UserMessage("u2")
       )
     )
@@ -94,7 +95,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
   }
 
   test("an assistant turn that is only tool calls has no content field") {
-    val turn = AssistantMessage(None, Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1))))
+    val turn = AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "add", ujson.Obj("a" -> 1))))
     val msg  = ujson.read(body(Conversation(Seq(UserMessage("u"), turn))))("messages")(1)
     msg.obj.keySet shouldBe Set("role", "tool_calls")
   }
@@ -153,10 +154,19 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
     )
   }
 
-  test("defaulted options send no penalty and no response_format: the body is unchanged") {
-    ujson.read(body(x)).obj.keySet shouldBe Set("model_id", "messages", "temperature", "project_id")
-    val zeroed = CompletionOptions().withPresencePenalty(0.0).withFrequencyPenalty(0.0).withResponseFormat(None)
-    body(x, zeroed) shouldBe body(x)
+  test("defaulted options send no sampling parameter and no response_format") {
+    ujson.read(body(x)).obj.keySet shouldBe Set("model_id", "messages", "project_id")
+    body(x, CompletionOptions().withResponseFormat(None)) shouldBe body(x)
+  }
+
+  test("a sampling parameter set to the value that used to be its default is sent (#2807)") {
+    val explicit =
+      CompletionOptions().withTemperature(0.7).withTopP(1.0).withPresencePenalty(0.0).withFrequencyPenalty(0.0)
+    val sent = ujson.read(body(x, explicit))
+    sent("temperature").num shouldBe 0.7
+    sent("top_p").num shouldBe 1.0
+    sent("presence_penalty").num shouldBe 0.0
+    sent("frequency_penalty").num shouldBe 0.0
   }
 
   test("each penalty is sent on its own when only it is set, and a negative one too") {
@@ -170,7 +180,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
 
   // ---- reasoning_effort
 
-  private val gptOss = config.copy(model = "openai/gpt-oss-120b")
+  private val gptOss = config.copy(model = ModelName("openai/gpt-oss-120b"))
 
   private def gptOssBody(opts: CompletionOptions, cfg: org.llm4s.llmconnect.config.WatsonXConfig = gptOss): String =
     new WatsonXClient(cfg, httpClient = routed(_ => Right(iamToken()), _ => Right(chatReply)))
@@ -182,7 +192,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
   test("golden: a gpt-oss model is sent reasoning_effort low, medium and high for Low, Medium and High") {
     Seq(ReasoningEffort.Low -> "low", ReasoningEffort.Medium -> "medium", ReasoningEffort.High -> "high").foreach { (effort, wire) =>
       gptOssBody(CompletionOptions().withReasoning(effort)) shouldBe
-        s"""{"model_id":"openai/gpt-oss-120b","messages":[{"role":"user","content":"x"}],"temperature":0.7,"project_id":"project-1","reasoning_effort":"$wire"}"""
+        s"""{"model_id":"openai/gpt-oss-120b","messages":[{"role":"user","content":"x"}],"project_id":"project-1","reasoning_effort":"$wire"}"""
     }
   }
 
@@ -231,7 +241,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
     ReasoningEffort.values.foreach(effort => body(x, CompletionOptions().withReasoning(effort)) shouldBe body(x))
     ReasoningEffort.values.foreach { effort =>
       WatsonXClient.reasoningAdjustments(
-        WatsonXTestConfig.config.model,
+        WatsonXTestConfig.config.model.asString,
         CompletionOptions().withReasoning(effort)
       ) match
         case List(RequestAdjustment.Dropped(RequestOption.Reasoning, _)) => succeed
@@ -256,7 +266,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
 
   private def streamedBody(opts: CompletionOptions): String =
     val http = streaming(streamOf(bytes(streamed)))
-    new WatsonXClient(config, httpClient = http).streamComplete(x, opts, _ => ()) shouldBe a[Right[?, ?]]
+    new WatsonXClient(config, httpClient = http).streamComplete(x, opts)(_ => ()) shouldBe a[Right[?, ?]]
     val sent = http.modelRequests.loneElement
     sent.url should include("/ml/v1/text/chat_stream")
     sent.body
@@ -314,7 +324,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
 
   test("a call's arguments go on the wire as a JSON string: an object, a string holding one, anything else {}") {
     def argumentsSent(arguments: ujson.Value): String =
-      val turn = AssistantMessage(None, Seq(ToolCall("c1", "add", arguments)))
+      val turn = AssistantMessage(None, Seq(ToolCall(ToolCallId("c1"), "add", arguments)))
       ujson.read(body(Conversation(Seq(turn))))("messages")(0)("tool_calls")(0)("function")("arguments").str
     argumentsSent(ujson.Obj("a" -> 1)) shouldBe """{"a":1}"""
     argumentsSent(ujson.Str("""{"a": 2}""")) shouldBe """{"a":2}"""
@@ -328,10 +338,19 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
   test("two calls in one assistant turn keep their ids and order, and each tool result its own call id") {
     val turn = AssistantMessage(
       None,
-      Seq(ToolCall("c1", "add", ujson.Obj("a" -> 1)), ToolCall("c2", "add", ujson.Obj("a" -> 2)))
+      Seq(
+        ToolCall(ToolCallId("c1"), "add", ujson.Obj("a" -> 1)),
+        ToolCall(ToolCallId("c2"), "add", ujson.Obj("a" -> 2))
+      )
     )
     val messages = ujson
-      .read(body(Conversation(Seq(UserMessage("u"), turn, ToolMessage("r2", "c2"), ToolMessage("r1", "c1")))))(
+      .read(
+        body(
+          Conversation(
+            Seq(UserMessage("u"), turn, ToolMessage("r2", ToolCallId("c2")), ToolMessage("r1", ToolCallId("c1")))
+          )
+        )
+      )(
         "messages"
       )
       .arr
@@ -344,7 +363,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
     val opts     = CompletionOptions().withReasoning(ReasoningEffort.Medium)
     val expected = gptOssBody(opts)
     val stream   = streaming(streamOf(bytes(streamed)))
-    new WatsonXClient(gptOss, httpClient = stream).streamComplete(x, opts, _ => ()) shouldBe a[Right[?, ?]]
+    new WatsonXClient(gptOss, httpClient = stream).streamComplete(x, opts)(_ => ()) shouldBe a[Right[?, ?]]
     stream.modelRequests.loneElement.body shouldBe expected
     val http = routed(_ => Right(iamToken()), _ => Right(chatReply))
     new WatsonXClient(gptOss, httpClient = http).complete(x, opts) shouldBe a[Right[?, ?]]

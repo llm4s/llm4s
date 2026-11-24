@@ -3,8 +3,9 @@ layout: page
 title: Serving an Agent over HTTP
 description: "Reference apps that serve an LLM4S agent over HTTP with http4s, ZIO HTTP, Tapir and Play: a chat endpoint, a streamed endpoint, cancellation and tests."
 search_title: "Serve an LLM agent over HTTP in Scala"
-parent: User Guide
-nav_order: 36
+parent: Agents
+nav_order: 215
+grand_parent: User Guide
 ---
 
 # Serving an Agent over HTTP
@@ -37,7 +38,7 @@ sbt "examplesHttp/run --fake"
 ```
 
 With a model: the app loads the provider at startup through `Llm4sConfig`, from the named section
-`llm4s.providers.provider` names. The module's `application.conf` uses the samples' default, a local Ollama
+`llm4s.defaultProvider` names. The module's `application.conf` uses the samples' default, a local Ollama
 (`ollama pull llama3` first, or set `OLLAMA_MODEL`), and has `openai-main` and `anthropic-main` sections that use
 `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`:
 
@@ -83,7 +84,7 @@ agent
   .collect {
     case AgentStreamItem.Event(AgentEvents.TextDelta(d)) => event("delta", ChatProtocol.delta(d.attempt, d.text))
     case AgentStreamItem.Event(AgentEvents.ToolCallStarted(t)) =>
-      event("tool_call", ChatProtocol.toolCall(t.toolCallId, t.tool))
+      event("tool_call", ChatProtocol.toolCall(t.toolCallId.asString, t.tool))
     case AgentStreamItem.Done(result) => event("done", ChatProtocol.result(result))
   }
   .handleErrorWith(error => Stream.emit(event("error", ChatProtocol.streamError(HttpErrors.of(llmError(error))))))
@@ -99,7 +100,7 @@ agent
   .collect {
     case AgentStreamItem.Event(AgentEvents.TextDelta(d)) => event("delta", ChatProtocol.delta(d.attempt, d.text))
     case AgentStreamItem.Event(AgentEvents.ToolCallStarted(t)) =>
-      event("tool_call", ChatProtocol.toolCall(t.toolCallId, t.tool))
+      event("tool_call", ChatProtocol.toolCall(t.toolCallId.asString, t.tool))
     case AgentStreamItem.Done(result) => event("done", ChatProtocol.result(result))
   }
   .catchAllCause(cause => ZStream.succeed(event("error", ChatProtocol.streamError(HttpErrors.of(llmError(cause))))))
@@ -261,7 +262,7 @@ provider <- settings.defaultProvider()
 client   <- LLMConnect.getClient(provider)(using registry)
 ```
 
-The precedence is the library's: JVM system properties (`-Dllm4s.providers.provider=openai-main`) override Play's
+The precedence is the library's: JVM system properties (`-Dllm4s.defaultProvider=openai-main`) override Play's
 configuration, which overrides each llm4s module's `reference.conf` - so `llm4s.credentials.<provider>.apiKey`, bound
 to the vendor's variable such as `OPENAI_API_KEY`, applies without a line in `application.conf`. A key a test sets with
 `GuiceApplicationBuilder().configure(...)` is part of Play's configuration, so it reaches llm4s too. The module's
@@ -319,7 +320,7 @@ val run = agent
   .collect {
     case AgentStreamItem.Event(AgentEvents.TextDelta(d)) => event("delta", ChatProtocol.delta(d.attempt, d.text))
     case AgentStreamItem.Event(AgentEvents.ToolCallStarted(t)) =>
-      event("tool_call", ChatProtocol.toolCall(t.toolCallId, t.tool))
+      event("tool_call", ChatProtocol.toolCall(t.toolCallId.asString, t.tool))
     case AgentStreamItem.Done(result) => event("done", ChatProtocol.result(result))
   }
   .recover { case error => event("error", ChatProtocol.streamError(HttpErrors.of(llmError(error)))) }

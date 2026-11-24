@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderName }
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderTimeouts }
@@ -29,8 +31,8 @@ final class AnthropicConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers wi
   private def config(baseUrl: String, timeouts: ProviderTimeouts): AnthropicConfig =
     AnthropicConfig(
       apiKey = Secret("test-key"),
-      model = "claude-3-5-sonnet-latest",
-      baseUrl = baseUrl,
+      model = ModelName("claude-3-5-sonnet-latest"),
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 200000,
       reserveCompletion = 4096
     ).withTimeouts(timeouts)
@@ -49,7 +51,7 @@ final class AnthropicConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers wi
              |}
              |""".stripMargin
         ),
-        "main"
+        ProviderName("main")
       )
       .value
 
@@ -87,7 +89,7 @@ final class AnthropicConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers wi
     LocalProviderTestServer.withServer("/")(LocalProviderTestServer.streamThenHold(_, first)) { baseUrl =>
       val client  = new AnthropicClient(config(baseUrl, ProviderTimeouts(stream = Some(500.millis))))
       val started = System.nanoTime()
-      val result  = client.streamComplete(hello, CompletionOptions(), _ => ())
+      val result  = client.streamComplete(hello, CompletionOptions())(_ => ())
       val elapsed = (System.nanoTime() - started).nanos
 
       result.isLeft shouldBe true
@@ -119,7 +121,7 @@ final class AnthropicConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers wi
       val client = new AnthropicClient(
         config(baseUrl, ProviderTimeouts(request = Some(300.millis), stream = Some(20.seconds)))
       )
-      val result = client.streamComplete(hello, CompletionOptions(), _ => ())
+      val result = client.streamComplete(hello, CompletionOptions())(_ => ())
       result.value.content shouldBe "Hello"
     }
   }

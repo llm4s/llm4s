@@ -4,7 +4,7 @@ title: Error Recovery
 description: "Recover from LLM failures with LLM4S: ReliableClient retries, circuit breaker and deadline, falling back between providers, and recovering agent runs."
 search_title: "LLM error recovery: retries, fallback, circuit breaker"
 parent: Real-World Application Patterns
-grand_parent: User Guide
+grand_parent: Operations
 nav_order: 5
 ---
 
@@ -52,7 +52,7 @@ def resilient(client: LLMClient): ReliableClient = {
     circuitBreaker = CircuitBreakerConfig(failureThreshold = 5, recoveryTimeout = 30.seconds),
     deadline = Some(45.seconds)
   )
-  new ReliableClient(client, "openai-main", config)
+  ReliableClient(client, "openai-main", config)
 }
 ```
 

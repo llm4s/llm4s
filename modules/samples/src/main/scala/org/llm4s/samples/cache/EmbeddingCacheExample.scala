@@ -6,9 +6,8 @@ import org.llm4s.llmconnect.caching.{ CacheStats, CachedEmbeddingClient, InMemor
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -66,7 +65,7 @@ object EmbeddingCacheExample {
 
     for {
       cache <- InMemoryEmbeddingCache.create(maxSize = 1000, ttl = Some(1.hour))
-      cached = new CachedEmbeddingClient(new EmbeddingClient(counting), cache)
+      cached = new CachedEmbeddingClient(EmbeddingClient(counting), cache)
       first  <- step(cached, "1. first call", Seq("hello world"))
       second <- step(cached, "2. same text again", Seq("hello world"))
       third  <- step(cached, "3. one cached, one new", Seq("hello world", "something new"))
@@ -97,11 +96,11 @@ object EmbeddingCacheExample {
       service    <- Llm4sConfig.modelRegistryService()
       report <- {
         given ModelRegistryService = service
-        val (providerName, config) = embeddings
+        val config                 = embeddings
         val registry               = summon[ProviderRegistry]
         for {
-          descriptor <- registry.resolveEmbedding(ProviderId(providerName))
-          provider   <- descriptor.build(config)
+          descriptor <- registry.resolveEmbedding(config.providerId)
+          provider   <- descriptor.build(config, EmbeddingBuildContext())
           report     <- run(provider, EmbeddingModelConfig(config.model, textModel.dimensions))
         } yield report
       }

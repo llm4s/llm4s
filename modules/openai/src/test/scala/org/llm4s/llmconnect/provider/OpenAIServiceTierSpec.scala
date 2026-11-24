@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.openai.core.ObjectMappers
 import com.openai.models.chat.completions.ChatCompletionCreateParams
@@ -27,11 +29,16 @@ final class OpenAIServiceTierSpec extends AnyFlatSpec with Matchers with EitherV
       |"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}""".stripMargin
 
   private val openAI: OpenAIConfig =
-    OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), "https://example.invalid/v1").value
+    OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl("https://example.invalid/v1")).value
 
   private val azure: AzureConfig =
     AzureConfig
-      .fromValues("gpt-4o", Secret("azure-key"), "https://r.openai.azure.com", AzureConfig.DEFAULT_API_VERSION)
+      .fromValues(
+        ModelName("gpt-4o"),
+        Secret("azure-key"),
+        BaseUrl("https://r.openai.azure.com"),
+        AzureConfig.DEFAULT_API_VERSION
+      )
       .value
 
   /** The request body and completion of `complete` for `provider`. */
@@ -123,7 +130,7 @@ final class OpenAIServiceTierSpec extends AnyFlatSpec with Matchers with EitherV
     ).map(OpenAISdkFixtures.chunk)
     val completion = OpenAIClient
       .forTest("gpt-4o", transport(streaming = _ => OpenAISdkFixtures.stream(chunks*)), openAI)
-      .streamComplete(hello, CompletionOptions(), _ => ())
+      .streamComplete(hello, CompletionOptions())(_ => ())
       .value
     (completion.content, completion.servedTier) shouldBe ("ok", Some(ServiceTier.Flex))
   }

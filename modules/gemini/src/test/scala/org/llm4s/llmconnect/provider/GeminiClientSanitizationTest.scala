@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.model.ModelRegistryService
@@ -32,8 +34,8 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
   private val client = new GeminiClient(
     GeminiConfig(
       apiKey = Secret("test-api-key"),
-      model = "gemini-2.0-flash-preview",
-      baseUrl = "https://generativelanguage.googleapis.com/v1beta",
+      model = ModelName("gemini-2.0-flash-preview"),
+      baseUrl = BaseUrl("https://generativelanguage.googleapis.com/v1beta"),
       contextWindow = 32768,
       reserveCompletion = 8192
     )
@@ -47,8 +49,8 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     name: String,
     description: String,
     schema: org.llm4s.toolapi.ObjectSchema[Map[String, Any]]
-  ): Result[ToolFunction[Map[String, Any], String]] =
-    ToolBuilder[Map[String, Any], String](name, description, schema)
+  ): Result[ToolFunction[String]] =
+    ToolBuilder[String](name, description, schema)
       .withHandler(_ => Right("result"))
       .buildSafe()
 

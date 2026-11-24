@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.Safety
 import org.llm4s.error.{ CancelledError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.EmbeddingClient
@@ -46,7 +47,7 @@ final class JEmbeddingClient private[javaapi] (
   FacadeToken.check(token, "JEmbeddingClient")
 
   /** The model as a request names it; a model whose dimensions are not declared asks for none, as no provider sends them. */
-  private val modelConfig = EmbeddingModelConfig(configured, declared.orElse(0))
+  private val modelConfig = EmbeddingModelConfig(ModelName(configured), declared.orElse(0))
 
   /** The embedding model this client asks for, as configured. */
   def model: String = configured

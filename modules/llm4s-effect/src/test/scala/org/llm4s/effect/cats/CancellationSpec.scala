@@ -1,5 +1,6 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
@@ -19,6 +20,7 @@ import org.llm4s.llmconnect.model.{
   Conversation,
   StreamedChunk,
   ToolCall,
+  ToolCallId,
   ToolMessage
 }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
@@ -99,7 +101,7 @@ class CancellationSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val toolStarted  = new CountDownLatch(1)
     val sawInterrupt = new AtomicBoolean(false)
     val block        = new AtomicBoolean(true)
-    val blocking = ToolBuilder[Map[String, Any], String](
+    val blocking = ToolBuilder[String](
       "block",
       "blocks until interrupted",
       Schema.`object`[Map[String, Any]]("params")
@@ -117,15 +119,15 @@ class CancellationSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       case Right(t) => t
       case Left(e)  => fail(s"could not build tool: $e")
     }
-    val call = ToolCall(id = "c1", name = "block", arguments = ujson.Obj())
+    val call = ToolCall(id = ToolCallId("c1"), name = "block", arguments = ujson.Obj())
     // Calls the tool until a tool result is in the conversation, then answers: a recovered run
     // does not repeat the model calls it already finished.
     val scripted: LLMClient = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         if (c.messages.exists(_.isInstanceOf[ToolMessage]))
-          Right(Completion("t", Instant.EPOCH, "finished", "m", AssistantMessage(Some("finished"))))
-        else Right(Completion("t", Instant.EPOCH, "", "m", AssistantMessage("", Seq(call)), toolCalls = List(call)))
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+          Right(Completion("t", Instant.EPOCH, ModelName("m"), AssistantMessage(Some("finished"))))
+        else Right(Completion("t", Instant.EPOCH, ModelName("m"), AssistantMessage("", Seq(call))))
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 4096
       def getReserveCompletion(): Int = 256

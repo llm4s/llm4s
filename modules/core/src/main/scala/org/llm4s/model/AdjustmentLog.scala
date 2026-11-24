@@ -35,7 +35,7 @@ final private[llm4s] class AdjustmentLog(
   private val fullOnce = new AtomicBoolean(false)
 
   /** Logs each of `adjustments` the first time this client sees its option for `model`. */
-  def record(model: String, adjustments: List[RequestAdjustment]): Unit =
+  def record(model: String, adjustments: Seq[RequestAdjustment]): Unit =
     adjustments.foreach { adjustment =>
       val key = (model, adjustment.option)
       if (!seen.contains(key)) {

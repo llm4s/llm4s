@@ -103,7 +103,7 @@ object ResearcherAgentExample {
    */
   private def createResearchTools(
     braveConfig: org.llm4s.config.BraveSearchToolConfig
-  ): Seq[org.llm4s.toolapi.ToolFunction[_, _]] = {
+  ): Seq[org.llm4s.toolapi.ToolFunction[_]] = {
     val tools = for {
       web  <- BraveSearchTool.create(braveConfig, BraveSearchCategory.Web, Some(BraveSearchConfig(count = 10)))
       news <- BraveSearchTool.create(braveConfig, BraveSearchCategory.News, Some(BraveSearchConfig(count = 10)))

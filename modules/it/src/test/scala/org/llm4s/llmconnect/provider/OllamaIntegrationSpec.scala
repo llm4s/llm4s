@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
@@ -33,8 +35,8 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
   private val baseUrl   = "http://localhost:11434"
 
   private val config = OllamaConfig(
-    model = testModel,
-    baseUrl = baseUrl,
+    model = ModelName(testModel),
+    baseUrl = BaseUrl(baseUrl),
     contextWindow = 8192,
     reserveCompletion = 4096
   )
@@ -76,6 +78,28 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  // ---- validate(): POST /api/show (#2855) ----
+
+  it should "validate a model the server has" in {
+    Tier.require(ollamaAvailable, s"Ollama not available with model $testModel")
+
+    withClient(_.validate() shouldBe Right(()))
+  }
+
+  it should "report a model the server does not have as the 404 a completion gets, with the pull hint" in {
+    Tier.require(ollamaAvailable, s"Ollama not available with model $testModel")
+
+    val client = new OllamaClient(config.withModel(ModelName("llm4s-no-such-model:latest")))
+    val result = client.validate()
+    client.close()
+    result match {
+      case Left(error: org.llm4s.error.ServiceError) =>
+        error.httpStatus shouldBe 404
+        error.message should include("ollama pull")
+      case other => fail(s"expected a ServiceError 404, got $other")
+    }
+  }
+
   it should "stream a response with chunks" in {
     Tier.require(ollamaAvailable, s"Ollama not available with model $testModel")
 
@@ -83,9 +107,8 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
       val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
       val result = client.streamComplete(
         conversation("Say hello in one word"),
-        CompletionOptions(),
-        c => chunks += c
-      )
+        CompletionOptions()
+      )(c => chunks += c)
 
       result.isRight shouldBe true
       val completion = result.toOption.get

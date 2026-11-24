@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.UnsupportedContentPartError
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model._
@@ -31,7 +33,9 @@ class OpenAICompatibleContentPartsSpec extends AnyFlatSpec with Matchers with Ei
   }
 
   private val client =
-    OpenAICompatibleClient(OpenAICompatibleConfig(model = "m", baseUrl = deadBaseUrl, apiKey = None)).value
+    OpenAICompatibleClient(
+      OpenAICompatibleConfig(model = ModelName("m"), baseUrl = BaseUrl(deadBaseUrl), apiKey = None)
+    ).value
 
   private def messagesOf(conversation: Conversation): ujson.Value =
     client.createRequestBody(conversation, CompletionOptions())("messages")
@@ -58,8 +62,8 @@ class OpenAICompatibleContentPartsSpec extends AnyFlatSpec with Matchers with Ei
     val conversation = Conversation(
       Seq(
         UserMessage("go"),
-        AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("c1", "t", ujson.Obj()))),
-        ToolMessage(Vector(ContentPart.Text("a"), ContentPart.Text("b")), "c1")
+        AssistantMessage(text = None, toolCalls = Seq(ToolCall(ToolCallId("c1"), "t", ujson.Obj()))),
+        ToolMessage(Vector(ContentPart.Text("a"), ContentPart.Text("b")), ToolCallId("c1"))
       )
     )
     messagesOf(conversation)(2)("content") shouldBe ujson.Str("a\nb")
@@ -75,8 +79,8 @@ class OpenAICompatibleContentPartsSpec extends AnyFlatSpec with Matchers with Ei
     val inTool = Conversation(
       Seq(
         UserMessage("go"),
-        AssistantMessage(contentOpt = None, toolCalls = Seq(ToolCall("c1", "t", ujson.Obj()))),
-        ToolMessage(Vector(imageUrl), "c1")
+        AssistantMessage(text = None, toolCalls = Seq(ToolCall(ToolCallId("c1"), "t", ujson.Obj()))),
+        ToolMessage(Vector(imageUrl), ToolCallId("c1"))
       )
     )
     refused(inTool, imageUrl, "tool")

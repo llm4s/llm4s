@@ -1,5 +1,6 @@
 package org.llm4s.samples.guides
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -43,16 +44,13 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
         Completion(
           id = "script",
           created = Instant.EPOCH,
-          content = reply,
-          model = "script",
+          model = ModelName("script"),
           message = AssistantMessage(reply)
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -122,7 +120,7 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
     .withRequiredField("a", Schema.integer("The first"))
     .withRequiredField("b", Schema.integer("The second"))
 
-  val addTool = ToolBuilder[Map[String, Any], ujson.Value]("add", "Adds two integers", addSchema)
+  val addTool = ToolBuilder[ujson.Value]("add", "Adds two integers", addSchema)
     .withHandler { extractor =>
       toCirce(extractor.params).as[AddArgs] match {
         case Right(args) => Right(fromCirce(AddResult(args.a.toLong + args.b).asJson))
@@ -231,7 +229,7 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
   given JsonValueCodec[AddResult] = JsonCodecMaker.make
   given ReadWriter[AddResult]     = jsoniterReadWriter[AddResult]
 
-  val addToolViaJsoniter = ToolBuilder[Map[String, Any], AddResult]("add", "Adds two integers", addSchema)
+  val addToolViaJsoniter = ToolBuilder[AddResult]("add", "Adds two integers", addSchema)
     .withHandler { extractor =>
       Try(readJsoniter[AddArgs](extractor.params)).toEither
         .map(args => AddResult(args.a.toLong + args.b))

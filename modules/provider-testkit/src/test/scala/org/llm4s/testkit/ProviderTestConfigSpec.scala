@@ -59,7 +59,7 @@ class ProviderTestConfigSpec extends AnyWordSpec with Matchers with EitherValues
 
     "build the descriptor's config, defaults applied" in {
       ProviderTestConfig.loadProvider("acme-main", acmeMain, Map("ACME_API_KEY" -> "sk-acme")).value shouldBe
-        AcmeConfig("sk-acme", "acme-large", AcmeProvider.DefaultBaseUrl)
+        AcmeConfig("sk-acme", ModelName("acme-large"), AcmeProvider.DefaultBaseUrl)
     }
 
     "fail as an application would when no key is available" in {
@@ -70,14 +70,14 @@ class ProviderTestConfigSpec extends AnyWordSpec with Matchers with EitherValues
   "loadEmbeddings" should {
 
     "select the embedding provider and build its config" in {
-      val (id, config) = ProviderTestConfig
+      val config = ProviderTestConfig
         .loadEmbeddings("""llm4s.embeddings.model = "acme/acme-small"""", Map("ACME_API_KEY" -> "sk-acme"))
         .value
 
-      id shouldBe AcmeEmbeddings.id.asString
-      config.model shouldBe "acme-small"
-      config.apiKey.reveal shouldBe "sk-acme"
-      config.baseUrl shouldBe AcmeProvider.DefaultBaseUrl
+      config.providerId.asString shouldBe AcmeEmbeddings.id.asString
+      config.model.asString shouldBe "acme-small"
+      config.apiKey.map(_.reveal) shouldBe Some("sk-acme")
+      config.baseUrl.asUrl shouldBe AcmeProvider.DefaultBaseUrl
     }
 
     "fail for an embedding provider no module supplies" in {

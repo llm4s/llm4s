@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
@@ -34,10 +36,10 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
   private def config(key: String): OpenAIConfig =
     OpenAIConfig
       .fromValues(
-        modelName = "openai/gpt-4o-mini",
+        modelName = ModelName("openai/gpt-4o-mini"),
         apiKey = Secret(key),
         organization = None,
-        baseUrl = "https://openrouter.ai/api/v1"
+        baseUrl = BaseUrl("https://openrouter.ai/api/v1")
       )
       .value
 
@@ -60,7 +62,7 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
     val client = new OpenRouterClient(config(apiKey.get))
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+    val result = client.streamComplete(conversation, CompletionOptions())(c => chunks += c)
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
       result.isRight shouldBe true
@@ -85,4 +87,10 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
   override protected def contractClient(key: String): Result[LLMClient] = Right(new OpenRouterClient(config(key)))
 
   registerCapabilityContract()
+
+  // ---- validate(): GET /key (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    Some(Right(new OpenRouterClient(config("sk-or-invalid-key-for-testing"))))
+
+  registerValidationContract()
 }

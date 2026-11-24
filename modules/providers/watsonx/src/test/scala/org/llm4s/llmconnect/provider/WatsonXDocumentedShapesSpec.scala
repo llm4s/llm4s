@@ -22,7 +22,7 @@ class WatsonXDocumentedShapesSpec extends AnyFunSuite with Matchers with LoneEle
   import StubHttp.*
   import WatsonXTestConfig.config
 
-  private val addTool: ToolFunction[?, ?] = ToolBuilder[Map[String, Any], String](
+  private val addTool: ToolFunction[?] = ToolBuilder[String](
     "add",
     "Adds two numbers",
     Schema
@@ -60,7 +60,7 @@ class WatsonXDocumentedShapesSpec extends AnyFunSuite with Matchers with LoneEle
     val http       = routed(_ => Right(iamToken()), _ => Right(documentedReply))
     val completion = new WatsonXClient(config, httpClient = http).complete(conversation, withTools)
     val call       = completion.fold(e => fail(e.toString), identity).toolCalls.loneElement
-    call.id shouldBe "H6KoCbaZV"
+    call.id shouldBe ToolCallId("H6KoCbaZV")
     call.name shouldBe "add"
     call.arguments shouldBe ujson.Obj("a" -> 2, "b" -> 4)
     completion.toOption.get.message.toolCalls.loneElement shouldBe call
@@ -71,8 +71,8 @@ class WatsonXDocumentedShapesSpec extends AnyFunSuite with Matchers with LoneEle
     val http = routed(_ => Right(iamToken()), _ => Right(chatReply))
     val followUp = Conversation(
       conversation.messages ++ Seq(
-        AssistantMessage(None, Seq(ToolCall("H6KoCbaZV", "add", ujson.Obj("a" -> 2, "b" -> 4)))),
-        ToolMessage("6", "H6KoCbaZV")
+        AssistantMessage(None, Seq(ToolCall(ToolCallId("H6KoCbaZV"), "add", ujson.Obj("a" -> 2, "b" -> 4)))),
+        ToolMessage("6", ToolCallId("H6KoCbaZV"))
       )
     )
     new WatsonXClient(config, httpClient = http).complete(followUp, withTools).isRight shouldBe true

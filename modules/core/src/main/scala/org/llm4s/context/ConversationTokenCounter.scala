@@ -1,16 +1,15 @@
 package org.llm4s.context
 
 import org.llm4s.annotation.Stable
-import org.llm4s.context.tokens.{ TokenizerMapping, Tokenizer }
+import org.llm4s.context.tokens.{ StringTokenizer, Tokenizer, TokenizerId }
 import org.llm4s.error.TokenizerError
-import org.llm4s.identity.TokenizerId
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
 /**
- * Counts tokens in conversations and messages using configurable tokenizers.
- * Provides accurate token counting for context management and budget planning.
+ * Counts tokens in conversations and messages with a [[tokens.StringTokenizer]]: one of the bundled
+ * jtokkit vocabularies, or your own through [[ConversationTokenCounter.of]].
  *
  * Token counting is essential for:
  *  - Ensuring conversations fit within model context windows
@@ -25,7 +24,7 @@ import org.slf4j.LoggerFactory
  * @example
  * {{{
  * val result = for {
- *   counter <- ConversationTokenCounter.forModel("gpt-4o")
+ *   counter <- ConversationTokenCounter.o200k()
  * } yield {
  *   counter.countConversation(conversation)
  * }
@@ -38,11 +37,11 @@ import org.slf4j.LoggerFactory
  * }
  * }}}
  *
- * @see [[ConversationTokenCounter.forModel]] for model-aware counter creation
+ * @see [[ConversationTokenCounter.create]] for a counter over a bundled vocabulary
  * @see [[TokenBreakdown]] for detailed per-message token analysis
  */
 @Stable
-class ConversationTokenCounter private (tokenizer: org.llm4s.context.tokens.StringTokenizer) {
+final class ConversationTokenCounter private (tokenizer: StringTokenizer) {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
@@ -61,7 +60,7 @@ class ConversationTokenCounter private (tokenizer: org.llm4s.context.tokens.Stri
   }
 
   /**
-   * Get detailed token breakdown for debugging
+   * A per-message token breakdown, for debugging
    */
   def getTokenBreakdown(conversation: Conversation): TokenBreakdown = {
     val messageInfos = conversation.messages.map(createMessageTokenInfo)
@@ -76,7 +75,7 @@ class ConversationTokenCounter private (tokenizer: org.llm4s.context.tokens.Stri
   }
 
   // media is not in the text view: estimated, so images and documents count against the window
-  private def mediaTokens(parts: Vector[ContentPart]): Int = parts.map(ContentPart.estimatedTokens).sum
+  private def mediaTokens(parts: Seq[ContentPart]): Int = parts.map(ContentPart.estimatedTokens).sum
 
   // Thinking counts too: Anthropic, Bedrock, Ollama, DeepSeek, Z.ai, OpenRouter and Mistral send it
   // back, and a short answer can carry thousands of reasoning tokens. Providers that drop it
@@ -99,7 +98,7 @@ class ConversationTokenCounter private (tokenizer: org.llm4s.context.tokens.Stri
     countTextContent(message.content) + countTextContent(s"tool_call_id:${message.toolCallId}")
 
   private def countTextContent(text: String): Int =
-    tokenizer.encode(text).length
+    tokenizer.count(text)
 
   private def countToolCall(toolCall: ToolCall): Int = {
     val nameTokens = countTextContent(toolCall.name)
@@ -109,7 +108,7 @@ class ConversationTokenCounter private (tokenizer: org.llm4s.context.tokens.Stri
 
   private def createMessageTokenInfo(message: Message): MessageTokenInfo =
     MessageTokenInfo(
-      role = message.role.name,
+      role = message.role,
       tokens = countMessage(message),
       preview = message.content.take(50)
     )
@@ -122,25 +121,16 @@ class ConversationTokenCounter private (tokenizer: org.llm4s.context.tokens.Stri
 /**
  * Factory methods for creating [[ConversationTokenCounter]] instances.
  *
- * Provides model-aware counter creation that automatically selects the appropriate
- * tokenizer based on the model name. Supports OpenAI, Anthropic, Azure, and Ollama models.
- *
- * ==Tokenizer Selection==
- *
- * Different models use different tokenization schemes:
- *  - '''GPT-4o, o1''': Uses `o200k_base` tokenizer
- *  - '''GPT-4, GPT-3.5''': Uses `cl100k_base` tokenizer
- *  - '''Claude models''': Uses `cl100k_base` approximation (may differ 20-30%)
- *  - '''Ollama models''': Uses `cl100k_base` approximation
+ * A counter is built over a tokenizer, never over a model name: which vocabulary a model uses is its
+ * vendor's knowledge, so the mapping lives in the vendor's module (`OpenAITokenizers.counterFor` in
+ * `llm4s-openai`). For a model with no public tokenizer, `cl100k()` is the usual approximation; counts
+ * can differ from the provider's by 20-30%.
  *
  * @example
  * {{{
- * // Model-aware creation (recommended)
- * val counter = ConversationTokenCounter.forModel("openai/gpt-4o")
- *
- * // Direct tokenizer selection
- * val openAICounter = ConversationTokenCounter.openAI()
- * val gpt4oCounter = ConversationTokenCounter.openAI_o200k()
+ * val approximate = ConversationTokenCounter.cl100k()
+ * val larger      = ConversationTokenCounter.o200k()
+ * val own         = ConversationTokenCounter.of(myTokenizer)
  * }}}
  */
 object ConversationTokenCounter {
@@ -150,68 +140,20 @@ object ConversationTokenCounter {
   private[llm4s] def estimateOpaqueTokens(data: String): Int = (data.length + 3) / 4
 
   /**
-   * Test-only factory to avoid reflection in tests.
+   * A counter over the given tokenizer: one of the bundled ones
+   * ([[tokens.Tokenizer.lookupStringTokenizer]]) or your own implementation of
+   * [[tokens.StringTokenizer]].
    */
-  private[context] def forTest(
-    tokenizer: org.llm4s.context.tokens.StringTokenizer
-  ): ConversationTokenCounter =
+  def of(tokenizer: StringTokenizer): ConversationTokenCounter =
     new ConversationTokenCounter(tokenizer)
 
   /**
-   * Create a token counter for a specific tokenizer.
+   * Create a token counter for a bundled tokenizer vocabulary.
    *
    * @param tokenizerId The tokenizer to use (e.g., `TokenizerId.CL100K_BASE`)
-   * @return A Result containing the counter, or an error if the tokenizer is unavailable
+   * @return A Result containing the counter, or a `TokenizerError` if the vocabulary is not bundled
    */
-  def apply(tokenizerId: TokenizerId): Result[ConversationTokenCounter] =
-    createCounter(tokenizerId)
-
-  /**
-   * Create a token counter using the OpenAI `cl100k_base` tokenizer.
-   *
-   * Suitable for GPT-4, GPT-3.5-turbo, and most embedding models.
-   * This is the most common OpenAI tokenizer and a reasonable fallback for unknown models.
-   *
-   * @return A Result containing the counter, or an error if the tokenizer is unavailable
-   */
-  def openAI(): Result[ConversationTokenCounter] =
-    apply(TokenizerId.CL100K_BASE)
-
-  /**
-   * Create a token counter using the OpenAI `o200k_base` tokenizer.
-   *
-   * Suitable for GPT-4o and o1 series models which use this newer tokenizer
-   * with a larger vocabulary (200k tokens vs 100k).
-   *
-   * @return A Result containing the counter, or an error if the tokenizer is unavailable
-   */
-  def openAI_o200k(): Result[ConversationTokenCounter] =
-    apply(TokenizerId.O200K_BASE)
-
-  /**
-   * Create a token counter for a specific model name with automatic tokenizer selection.
-   *
-   * This is the '''recommended''' way to create token counters as it automatically
-   * selects the appropriate tokenizer based on the model name and provider.
-   *
-   * The model name should be in the format `provider/model-name` (e.g., `openai/gpt-4o`,
-   * `anthropic/claude-3-sonnet`). Plain model names are also supported.
-   *
-   * @param modelName The model identifier (e.g., "gpt-4o", "openai/gpt-4o", "claude-3-sonnet")
-   * @return A Result containing the counter, or an error if the tokenizer is unavailable
-   * @see [[tokens.TokenizerMapping]] for the full model-to-tokenizer mapping
-   */
-  def forModel(modelName: String): Result[ConversationTokenCounter] = {
-    val tokenizerId  = TokenizerMapping.getTokenizerId(modelName)
-    val accuracyInfo = TokenizerMapping.getAccuracyInfo(modelName)
-
-    logger.info(s"Creating token counter for model '$modelName' using $tokenizerId")
-    logger.debug(s"Tokenizer accuracy: ${accuracyInfo.description}")
-
-    apply(tokenizerId)
-  }
-
-  private def createCounter(tokenizerId: TokenizerId): Result[ConversationTokenCounter] =
+  def create(tokenizerId: TokenizerId): Result[ConversationTokenCounter] =
     Tokenizer.lookupStringTokenizer(tokenizerId) match {
       case Some(tokenizer) =>
         logger.debug(s"Successfully created tokenizer for $tokenizerId")
@@ -220,6 +162,24 @@ object ConversationTokenCounter {
         logger.error(s"Tokenizer not available for $tokenizerId")
         Left(TokenizerError.notAvailable(tokenizerId.name))
     }
+
+  /**
+   * Create a token counter using the `cl100k_base` vocabulary: the common approximation for a model
+   * whose own tokenizer is not public.
+   *
+   * @return A Result containing the counter, or an error if the tokenizer is unavailable
+   */
+  def cl100k(): Result[ConversationTokenCounter] =
+    create(TokenizerId.CL100K_BASE)
+
+  /**
+   * Create a token counter using the `o200k_base` vocabulary, which has a larger vocabulary
+   * (200k tokens against 100k).
+   *
+   * @return A Result containing the counter, or an error if the tokenizer is unavailable
+   */
+  def o200k(): Result[ConversationTokenCounter] =
+    create(TokenizerId.O200K_BASE)
 }
 
 /**
@@ -250,7 +210,7 @@ final case class TokenBreakdown private (
 
   private def formatMessageLine(msgWithIndex: (MessageTokenInfo, Int)): String = {
     val (msgInfo, index) = msgWithIndex
-    f"${index + 1}%2d. [${msgInfo.role}%9s] ${msgInfo.tokens}%3d tokens: ${msgInfo.preview}...\n"
+    f"${index + 1}%2d. [${msgInfo.role.name}%9s] ${msgInfo.tokens}%3d tokens: ${msgInfo.preview}...\n"
   }
 }
 
@@ -266,13 +226,13 @@ object TokenBreakdown {
  */
 @Stable
 final case class MessageTokenInfo private (
-  role: String,
+  role: MessageRole,
   tokens: Int,
   preview: String
 ) {
 
   /** Sets the message role. */
-  def withRole(role: String): MessageTokenInfo = copy(role = role)
+  def withRole(role: MessageRole): MessageTokenInfo = copy(role = role)
 
   /** Sets the message's token count. */
   def withTokens(tokens: Int): MessageTokenInfo = copy(tokens = tokens)
@@ -284,6 +244,6 @@ final case class MessageTokenInfo private (
 object MessageTokenInfo {
 
   /** Creates a [[MessageTokenInfo]]. */
-  def apply(role: String, tokens: Int, preview: String): MessageTokenInfo =
+  def apply(role: MessageRole, tokens: Int, preview: String): MessageTokenInfo =
     new MessageTokenInfo(role, tokens, preview)
 }

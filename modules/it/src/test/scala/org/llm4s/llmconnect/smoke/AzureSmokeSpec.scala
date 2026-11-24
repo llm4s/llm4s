@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 
 import org.llm4s.error.AuthenticationError
@@ -67,8 +69,8 @@ class AzureSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Pr
   private def config(key: String, at: String): AzureConfig =
     AzureConfig
       .fromValues(
-        modelName = deployment.getOrElse("gpt-4o-mini"),
-        endpoint = at,
+        modelName = ModelName(deployment.getOrElse("gpt-4o-mini")),
+        endpoint = BaseUrl(at),
         apiKey = Secret(key),
         apiVersion = AzureConfig.DEFAULT_API_VERSION
       )
@@ -101,7 +103,7 @@ class AzureSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Pr
 
     val client = OpenAIClient(classic(credentials.get)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, options, c => chunks += c)
+    val result = client.streamComplete(conversation, options)(c => chunks += c)
     client.close()
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
@@ -144,4 +146,11 @@ class AzureSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Pr
   override protected def contractClient(key: String): Result[LLMClient] = OpenAIClient(classic(key))
 
   registerCapabilityContract()
+
+  // ---- validate(): the resource's model listing; the deployment is not looked up (#2855) ----
+  override protected def invalidKeyClient: Option[Result[LLMClient]] =
+    endpoint.map(at => OpenAIClient(config("invalid-key-for-testing", at)))
+  override protected def noInvalidKeyClient: String = "AZURE_API_BASE not set: there is no resource to refuse a key"
+
+  registerValidationContract()
 }

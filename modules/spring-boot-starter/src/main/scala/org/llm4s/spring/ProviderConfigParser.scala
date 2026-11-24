@@ -1,5 +1,7 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ConfigurationError
 import org.llm4s.javaapi.{ LlmResult, ProviderModules }
 import org.llm4s.security.Secret
@@ -47,7 +49,7 @@ object ProviderConfigParser {
           invalid(
             s"Unknown provider: '$unknown'. The flat llm4s.provider key supports openai, anthropic and ollama; " +
               s"configure any other provider under llm4s.providers.<name> " +
-              s"(llm4s.providers.provider=<name>, llm4s.providers.<name>.provider=<id>). " +
+              s"(llm4s.default-provider=<name>, llm4s.providers.<name>.provider=<id>). " +
               s"Providers on the classpath: $registered",
             "llm4s.provider"
           )
@@ -65,9 +67,9 @@ object ProviderConfigParser {
       LlmResult.success(
         OpenAIConfig(
           apiKey = Secret(apiKey),
-          model = model,
+          model = ModelName(model),
           organization = org,
-          baseUrl = baseUrl,
+          baseUrl = BaseUrl(baseUrl),
           contextWindow = p.contextWindow,
           reserveCompletion = p.reserveCompletion
         )
@@ -84,8 +86,8 @@ object ProviderConfigParser {
       LlmResult.success(
         AnthropicConfig(
           apiKey = Secret(apiKey),
-          model = model,
-          baseUrl = baseUrl,
+          model = ModelName(model),
+          baseUrl = BaseUrl(baseUrl),
           contextWindow = p.contextWindow,
           reserveCompletion = p.reserveCompletion
         )
@@ -97,8 +99,8 @@ object ProviderConfigParser {
     val baseUrl = Some(text(p.baseUrl)).filter(_.nonEmpty).getOrElse("http://localhost:11434")
     LlmResult.success(
       OllamaConfig(
-        model = model,
-        baseUrl = baseUrl,
+        model = ModelName(model),
+        baseUrl = BaseUrl(baseUrl),
         contextWindow = p.contextWindow,
         reserveCompletion = p.reserveCompletion
       )

@@ -1,7 +1,7 @@
 package org.llm4s.agent.guardrails
 
-import org.llm4s.annotation.Stable
-import org.llm4s.agent.graph.middleware.ModelContext
+import org.llm4s.annotation.Experimental
+import org.llm4s.agent.graph.middleware.UsageAccounting
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -99,7 +99,7 @@ import org.llm4s.util.Redaction
  * }
  * }}}
  */
-@Stable
+@Experimental
 trait LLMGuardrail extends OutputGuardrail {
 
   /**
@@ -134,8 +134,8 @@ trait LLMGuardrail extends OutputGuardrail {
    * or to set other options.
    */
   def completionOptions: CompletionOptions = CompletionOptions(
-    temperature = 0.0,   // Deterministic for consistent judging
-    maxTokens = Some(10) // We only need a short numeric response
+    temperature = Some(0.0), // Deterministic for consistent judging
+    maxTokens = Some(10)     // We only need a short numeric response
   )
 
   /**
@@ -150,7 +150,7 @@ trait LLMGuardrail extends OutputGuardrail {
   override def validate(value: String): Result[String] = judged(value, llmClient)
 
   /** As `validate(value)`, the judge called through `context.accounted(llmClient)`, so its call is counted. */
-  override def validate(value: String, context: ModelContext): Result[String] =
+  override def validateIn(value: String, context: UsageAccounting): Result[String] =
     judged(value, context.accounted(llmClient))
 
   private def judged(value: String, client: LLMClient): Result[String] = {
@@ -233,6 +233,7 @@ Score (0-1):"""
       )
 }
 
+@Experimental
 object LLMGuardrail {
 
   /**

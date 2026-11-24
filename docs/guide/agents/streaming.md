@@ -6,6 +6,7 @@ search_title: "Stream agent events in Scala: tokens and tool calls"
 nav_order: 5
 parent: Agents
 grand_parent: User Guide
+cites_closed_issues: [1920]
 ---
 
 # Streaming Events
@@ -13,6 +14,9 @@ grand_parent: User Guide
 
 Watch an agent's turn as it happens: the answer token by token, each tool call, each model call.
 {: .fs-6 .fw-300 }
+
+{: .note }
+> **Experimental at 1.0.** The streaming API on this page (`withStreaming`, `Agent.stream`, `AgentRun.subscribe`, `StreamEvent` and the event types) is `@Experimental`: usable, but outside the 1.x compatibility promise, so it can change in a minor release, with a migration note. The stable core of `llm4s-agent` - building an agent, running, continuing and recovering a thread, handoffs and guardrails - is listed in [API Stability](../../reference/api-stability#tiers-in-the-code).
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -64,7 +68,7 @@ never duplicated by a retry or a `recover`. They carry no message content.
 
 | Event | Fields | Sent |
 |---|---|---|
-| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls`, `usage`, `estimatedCost`, `provider`, `adjustments`, `finishReason` | after each provider call returns a completion - every attempt a retrying wrapper makes, numbered in `attempts`, and (`attempts` 0) each call a hook makes through `ModelContext.accounted` |
+| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls`, `usage`, `estimatedCost`, `provider`, `adjustments`, `finishReason`, `servedTier`, `duration` | after each provider call returns a completion - every attempt a retrying wrapper makes, numbered in `attempts`, and (`attempts` 0) each call a hook makes through `ModelContext.accounted` |
 | `ToolExecuted` | `agent`, `toolCallId`, `tool`, `duration`, `outcome` (`Succeeded`, `Errored`, `Denied`, `Rejected`, `NeedsApproval`, `Asked`) | when a tool call's outcome is recorded |
 | `HandedOff` | `from`, `to` | when the model routes a handoff |
 | `GuardrailBlocked` | `guardrail`, `phase` (`Input`, `Output`) | when a guardrail blocks a turn |
@@ -95,6 +99,9 @@ model's turn ended, `Stop`, `ToolCalls`, `Length` or `Other(raw)`. `Length` mean
 the run still ends `Completed` with that answer, so check the event when a cut answer matters. It is `None` for usage
 a hook records without a call (`ModelContext.recordUsage`) and in an event stored before the field existed. Tracing
 reports it on the call's span as `gen_ai.response.finish_reasons`.
+
+`duration` is how long the provider call took, measured around the client: the length of the call's `chat` span in a
+trace. It is zero for usage a hook records without a call and in an event stored before the field existed.
 
 ```scala
 import org.llm4s.llmconnect.model.FinishReason
@@ -145,8 +152,9 @@ long, with what usage), and a blocked answer is in no stored event.
 A guardrail's reason can quote what it refused, so it follows the same rule: the events of a blocked
 run (`agent.guardrail_blocked`, `graph.task_failed`, `graph.run_failed`) name the guardrail and
 nothing else - the failure message is `Guardrail '<name>' blocked` - and so does a trace of the run.
-The reason is on `AgentStatus.Blocked`, for the caller. The rule is about events, not checkpoints:
-see [Limits](#limits) for what the checkpoint store holds.
+The reason is on the `AgentStatus.Blocked` of the run that was blocked, for the caller, and in no store: the
+run's closing checkpoint names the guardrail too, and nothing else. For everything else the rule is about events,
+not checkpoints: see [Limits](#limits) for what the checkpoint store holds.
 
 ## Attempts
 
@@ -470,17 +478,18 @@ stable carried in the payload, such as the tool call's `IdempotencyKey`, never b
   through the kernel event, not through an `agent.*` event. The events that begin a run
   (`graph.run_started` and those of a `recover` or `resume`) also record the run's `tenantId` and
   `principal`: identifiers, not message content, but personal data if you put a person's name there.
-- **Checkpoints hold content.** The content rule is about events. A blocked run's closing checkpoint
-  records `RunOutcome.Blocked(guardrail, reason)`, so that the turn's status can be rebuilt from the
-  thread (a parent agent reads a delegated child's refusal this way), and outcomes are stored in
-  plain even under `EncryptingCheckpointer`. A guardrail whose reason must not be stored should not
-  quote its input.
-- **A `beforeAgent` hook does not keep the submitted query out of the store.** The run's first
-  checkpoint holds the query as it was submitted, and the hook runs after that checkpoint is
-  committed: what the hook returns is what joins the conversation, but the original stays in
-  checkpoint history until it is pruned (an input guardrail's Block removes it, with the turn). To
-  keep text out of the store, redact it before `agent.run`; to protect what is stored, wrap the store
-  in `EncryptingCheckpointer` (see [durable checkpointers](durable-checkpointers)).
+- **Checkpoints hold content.** The content rule is about events: a thread's state is its messages.
+  A run's outcome is on its closing checkpoint, so that the turn's status can be rebuilt from the
+  thread (a parent agent reads a delegated child's refusal this way). A blocked run's is
+  `RunOutcome.Blocked(guardrail)`, the name only: a status rebuilt from it has no reason. A failed
+  run's holds its error's message and an invalid typed answer's its schema errors, which
+  `EncryptingCheckpointer` seals.
+- **A `beforeAgent` hook does not keep the submitted query out of the store; `admit` does.** A turn's
+  first checkpoint holds its query, and `beforeAgent` runs after that checkpoint is committed: what the
+  hook returns is what joins the conversation, but the query it was given stays in checkpoint history
+  until it is pruned. To keep text out of the store, rewrite or refuse it in `admit`, which runs before
+  the turn is stored and is where input guardrails run; see [Admission](middleware#admission). To protect
+  what is stored, wrap the store in `EncryptingCheckpointer` (see [durable checkpointers](durable-checkpointers)).
 - **Live events are not replayed**, and a late `subscribe` misses earlier ones. A subscription
   receives every live event sent after `subscribe` returns, so `GraphRuntime.subscribe` followed by
   `start` sees all of the run's - unless more arrive than its `capacity` holds, while it replays or

@@ -93,8 +93,8 @@ class ToolRegistryShapeSpec extends AnyFlatSpec with Matchers {
 
 object ToolRegistryShapeSpec {
 
-  def tool(name: String, reply: String): ToolFunction[Map[String, Any], String] =
-    ToolBuilder[Map[String, Any], String](name, s"Replies $reply", Schema.`object`[Map[String, Any]]("No arguments"))
+  def tool(name: String, reply: String): ToolFunction[String] =
+    ToolBuilder[String](name, s"Replies $reply", Schema.`object`[Map[String, Any]]("No arguments"))
       .withHandler(_ => Right(reply))
       .buildSafe()
       .toOption
@@ -104,8 +104,8 @@ object ToolRegistryShapeSpec {
 
   /** A registry whose tools are not in `tools`: every call must go through its `execute`. */
   final class Remote extends ToolRegistry {
-    val calls                          = new AtomicInteger(0)
-    def tools: Seq[ToolFunction[_, _]] = Seq.empty
+    val calls                       = new AtomicInteger(0)
+    def tools: Seq[ToolFunction[_]] = Seq.empty
     def execute(request: ToolCallRequest): Either[ToolCallError, ujson.Value] = {
       val n = calls.incrementAndGet()
       if (n == 1) Left(ToolCallError.Timeout(request.functionName, 1.milli)) else Right(ujson.Str(s"remote-$n"))

@@ -1,17 +1,24 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.annotation.Stable
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ OpenAICompatibleConfigKeys, OpenAICompatibleModelLister, ProviderModelLister }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAICompatibleConfig, ProviderConfig }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, TokenExchangeConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigKey,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderFeatures
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -198,10 +205,9 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
 
   override val modelLister: Option[ProviderModelLister] = Some(OpenAICompatibleModelLister)
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
-    configOf(providerName, section)
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    given ContextWindowResolver = context.contextWindows
+    configOf(context.providerName, section)
 
   /**
    * [[buildConfig]], typed: the config a section describes, its context window from the model registry when the
@@ -235,10 +241,10 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
       tokenExchange     <- tokenExchangeOf(providerName, section)
       config <- OpenAICompatibleConfig
         .fromValues(
-          model = section.model.asString,
+          model = section.model,
           baseUrl = baseUrl,
           apiKey = section.apiKey.map(k => Secret(k.asKey)),
-          contextWindow = contextWindow.orElse(registryWindow(baseUrl)),
+          contextWindow = contextWindow.orElse(registryWindow(baseUrl.asUrl)),
           reserveCompletion = reserveCompletion,
           headers = section.headers,
           streamUsage = streamUsage,
@@ -283,7 +289,7 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
     explicit: Option[String]
   )(using resolver: ContextWindowResolver): Option[Int] =
     explicit.orElse(inferRegistryProvider(baseUrl)).flatMap { registryProvider =>
-      resolver.strictContextWindow(registryProvider, model) match
+      resolver.strictContextWindow(ProviderId(registryProvider), ModelName(model)) match
         case Some(window) if window < OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW =>
           val message =
             s"Configured provider '$providerName': ignoring the model registry's contextWindow $window for " +
@@ -345,16 +351,15 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
           )
         )
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[OpenAICompatibleConfig](id, config)
       .flatMap(
         OpenAICompatibleClient(
           _,
-          options.metrics,
-          options.exchangeLogging,
-          Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+          context.metrics,
+          context.exchangeLogging,
+          Llm4sHttpClient.suppliedOrFromConfig(context.httpClient)
         )
       )

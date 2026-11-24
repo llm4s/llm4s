@@ -1,5 +1,6 @@
 package org.llm4s.rag.benchmark
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.chunking.ChunkerFactory
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
@@ -50,15 +51,12 @@ class BenchmarkRunnerSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock",
           created = Instant.EPOCH,
-          content = "A mock answer.",
-          model = "mock-model",
-          message = AssistantMessage(contentOpt = Some("A mock answer.")),
+          model = ModelName("mock-model"),
+          message = AssistantMessage(text = Some("A mock answer.")),
           usage = Some(TokenUsage(50, 25, 75))
         )
       )
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -105,10 +103,17 @@ class BenchmarkRunnerSpec extends AnyFlatSpec with Matchers {
 
   /** Resolves any provider name to a dummy config — tests never hit real endpoints. */
   private val dummyResolve: String => Result[EmbeddingProviderConfig] = _ =>
-    Right(EmbeddingProviderConfig(apiKey = Secret("key"), baseUrl = "http://localhost", model = "test"))
+    Right(
+      EmbeddingProviderConfig(
+        providerId = ProviderId("fixture"),
+        apiKey = Some(Secret("key")),
+        baseUrl = BaseUrl("http://localhost"),
+        model = ModelName("test")
+      )
+    )
 
-  private def goodEmbed: EmbeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
-  private def badEmbed: EmbeddingClient  = new EmbeddingClient(new FailingEmbeddingProvider())
+  private def goodEmbed: EmbeddingClient = EmbeddingClient(new MockEmbeddingProvider())
+  private def badEmbed: EmbeddingClient  = EmbeddingClient(new FailingEmbeddingProvider())
   private def mockLLM: MockLLMClient     = new MockLLMClient()
 
   // =========================================================================
@@ -286,7 +291,7 @@ class BenchmarkRunnerSpec extends AnyFlatSpec with Matchers {
         Left(EvaluationError("capture complete — stop indexing"))
       }
     }
-    val capturing = new EmbeddingClient(capturingProvider)
+    val capturing = EmbeddingClient(capturingProvider)
     val stubDM    = new StubDatasetManager(dedupDataset)
     val runner    = new BenchmarkRunner(mockLLM, capturing, dummyResolve, stubDM)
 

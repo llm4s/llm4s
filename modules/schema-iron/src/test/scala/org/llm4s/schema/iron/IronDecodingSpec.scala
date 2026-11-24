@@ -23,7 +23,7 @@ class IronDecodingSpec extends AnyFlatSpec with Matchers {
 
   private val review = Review("Great kettle", 4, List("kitchen"))
 
-  private val book: Either[String, org.llm4s.toolapi.ToolFunction[Booking, Confirmation]] =
+  private val book: Either[String, org.llm4s.toolapi.ToolFunction[Confirmation]] =
     Tool
       .of[Booking, Confirmation]("book", "Books a stay")(b => Right(Confirmation(s"${b.guest}-${b.nights}")))
       .left

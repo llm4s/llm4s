@@ -106,8 +106,8 @@ object HTTPTool {
   /**
    * Create an HTTP tool with the given configuration, returning a Result for safe error handling.
    */
-  def createSafe(config: HttpConfig = HttpConfig()): Result[ToolFunction[Map[String, Any], HTTPResult]] =
-    ToolBuilder[Map[String, Any], HTTPResult](
+  def createSafe(config: HttpConfig = HttpConfig()): Result[ToolFunction[HTTPResult]] =
+    ToolBuilder[HTTPResult](
       name = "http_request",
       description = s"Make HTTP requests to fetch or send data. " +
         s"Allowed methods: ${config.allowedMethods.mkString(", ")}. " +
@@ -147,14 +147,14 @@ object HTTPTool {
       case Some(c) if KeyedMethods.contains(method.trim.toUpperCase(Locale.ROOT)) =>
         val current = headers.getOrElse(Map.empty)
         if (current.keys.exists(k => headerKey(k) == "idempotency-key")) headers
-        else Some(current + ("Idempotency-Key" -> c.idempotencyKey))
+        else Some(current + ("Idempotency-Key" -> c.idempotencyKey.asString))
       case _ => headers
     }
 
   /**
    * Default HTTP tool instance, returning a Result for safe error handling.
    */
-  val toolSafe: Result[ToolFunction[Map[String, Any], HTTPResult]] = createSafe()
+  val toolSafe: Result[ToolFunction[HTTPResult]] = createSafe()
 
   /**
    * Read a response body without ever holding more than `maxBytes + 1` bytes.

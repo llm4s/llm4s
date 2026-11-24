@@ -43,8 +43,8 @@ final case class Served(by: String, text: String)
 /** Two providers, each retried on its own, the second asked only when the first still fails. */
 final class FallbackClients(primary: LLMClient, fallback: LLMClient, config: ReliabilityConfig) {
   // Build these once and keep them: each circuit breaker counts failures across calls.
-  private val first  = new ReliableClient(primary, "primary", config)
-  private val second = new ReliableClient(fallback, "fallback", config)
+  private val first  = ReliableClient(primary, "primary", config)
+  private val second = ReliableClient(fallback, "fallback", config)
 
   def ask(question: String): Result[Served] = {
     val conversation = Conversation(Seq(UserMessage(question)))
@@ -92,7 +92,7 @@ sbt "samples/runMain org.llm4s.samples.cookbook.FallbackRecipe"          # scrip
 sbt "samples/runMain org.llm4s.samples.cookbook.FallbackRecipe --live"   # the provider your configuration names
 ```
 
-The first command needs nothing but sbt. The second uses the section `llm4s.providers.provider` names; see
+The first command needs nothing but sbt. The second uses the section `llm4s.defaultProvider` names; see
 [running the samples](../../getting-started/configuration#running-the-samples). CI runs every recipe against its scripted client, and checks
 that the program on this page is the source file, so what you read here compiles and works.
 
@@ -104,8 +104,8 @@ Build the two clients from two named sections of your configuration, and drop th
 for {
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
-  primary  <- Llm4sConfig.provider("openai-main").flatMap(config => LLMConnect.getClient(config))
-  fallback <- Llm4sConfig.provider("claude").flatMap(config => LLMConnect.getClient(config))
+  primary  <- Llm4sConfig.provider(ProviderName("openai-main")).flatMap(config => LLMConnect.getClient(config))
+  fallback <- Llm4sConfig.provider(ProviderName("claude")).flatMap(config => LLMConnect.getClient(config))
   served   <- new FallbackClients(primary, fallback, FallbackRecipe.config).ask(question)
 } yield served
 ```

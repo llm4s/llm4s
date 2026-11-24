@@ -25,8 +25,9 @@ Define the nodes, routes and joins of a workflow yourself and run it on durable 
 ## Overview
 
 The graph runtime in `org.llm4s.agent.graph` is what every `Agent` runs on, and you can build graphs on it directly
-with `GraphBuilder`. Each type's stability tier is its `@Stable` or `@Experimental` annotation
-([API stability](../../reference/api-stability)).
+with `GraphBuilder`.
+
+> **Experimental at 1.0.** The graph API on this page (`GraphBuilder`, `CompiledGraph`, `GraphRuntime`, state keys, nodes, routing and interrupts) is `@Experimental`: usable, but outside the 1.x compatibility promise, so it can change in a minor release, with a migration note. The run ids, `RunConfig` and its settings are part of the stable core of `llm4s-agent`, which is listed in [API Stability](../../reference/api-stability#tiers-in-the-code).
 
 Use a graph when the shape of the work is known in advance:
 
@@ -238,7 +239,8 @@ val config = RunConfig(
 
 - `maxSupersteps` (default 1000) counts the supersteps of one run. A run that reaches it with work still scheduled
   fails with `GraphError.SuperstepLimitExceeded`; the checkpoint stays `Running`, and `recover` continues with a fresh
-  allowance.
+  allowance. The error is a `NonRecoverableError`, so nothing retries it for you: the limit guards against a graph
+  that does not stop, and continuing past it is your call.
 - `timeout` (default none) is measured from the run's claim on the thread. When it passes, the run stops as a cancel
   stops it and fails with `GraphError.DeadlineExceeded`; `recover` with a new budget continues it. Nodes can read the
   deadline as `context.deadline`.

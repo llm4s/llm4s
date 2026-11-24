@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import io.opentelemetry.api.trace.{ SpanKind, StatusCode }
 import io.opentelemetry.sdk.common.CompletableResultCode
 import io.opentelemetry.sdk.trace.`export`.SpanExporter
@@ -110,9 +111,9 @@ class OpenTelemetrySpanTreeSpec extends AnyWordSpec with Matchers:
             "thread-1/~task/researcher/abc",
             "child-run",
             "researcher",
-            "completed",
+            TraceEvent.RunStatus.Completed,
             Seq(UserMessage(secret), AssistantMessage("a secret answer")),
-            UsageSummary().add("gpt-x", TokenUsage(5, 2, 7), None),
+            UsageSummary().add(ModelName("gpt-x"), TokenUsage(5, 2, 7), None),
             t0.plusSeconds(4),
             parentThreadId = Some("thread-1"),
             parentRunId = Some("parent-run"),
@@ -138,7 +139,7 @@ class OpenTelemetrySpanTreeSpec extends AnyWordSpec with Matchers:
             "thread-1",
             "parent-run",
             "lead",
-            "failed",
+            TraceEvent.RunStatus.Failed,
             Seq(UserMessage(secret)),
             UsageSummary(),
             t0.plusSeconds(6),

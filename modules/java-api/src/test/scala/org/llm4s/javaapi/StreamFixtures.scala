@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentBuilder }
 import org.llm4s.agent.graph.{
   Checkpointer,
@@ -32,7 +33,7 @@ private[javaapi] object StreamFixtures {
   val ParkSeconds: Long = 120L
 
   def completion(text: String): Completion =
-    Completion(id = "id", created = Instant.EPOCH, content = text, model = "m", message = AssistantMessage(Some(text)))
+    Completion(id = "id", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage(Some(text)))
 
   def chunk(i: Int): StreamedChunk = StreamedChunk(id = s"c$i", content = Some("x"))
 
@@ -42,7 +43,7 @@ private[javaapi] object StreamFixtures {
     onComplete: () => Result[Completion]
   ) extends LLMClient {
     def complete(c: Conversation, o: CompletionOptions): Result[Completion] = onComplete()
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       onStream(onChunk)
     def getContextWindow(): Int     = 4096
     def getReserveCompletion(): Int = 256

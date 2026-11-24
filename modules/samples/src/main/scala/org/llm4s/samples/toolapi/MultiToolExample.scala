@@ -89,12 +89,12 @@ object MultiToolExample {
       }
 
     val result = for {
-      calculatorTool <- ToolBuilder[Map[String, Any], CalculationResult](
+      calculatorTool <- ToolBuilder[CalculationResult](
         "calculator",
         "Performs basic arithmetic operations",
         calculatorSchema
       ).withHandler(calculatorHandler).buildSafe()
-      searchTool <- ToolBuilder[Map[String, Any], SearchResult](
+      searchTool <- ToolBuilder[SearchResult](
         "search",
         "Searches for information",
         searchSchema

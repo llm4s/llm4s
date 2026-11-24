@@ -68,7 +68,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
         .find(_.moduleClass == "org.llm4s.llmconnect.spi.fixtures.FixtureProviderModule")
         .getOrElse(fail(s"fixture module was not reported: ${registry.report.describe}"))
 
-      fixtureModule.providerIds shouldBe Seq("fixturecloud")
+      fixtureModule.providerIds.map(_.asString) shouldBe Seq("fixturecloud")
       fixtureModule.source should not be empty
     }
 
@@ -106,7 +106,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
 
     "find an embedding-only provider module" in {
       // Voyage's shape: embeddings and no chat client. The module never overrides
-      // `chatProviders`, so this is also the test that the default is usable.
+      // `providers`, so this is also the test that the default is usable.
       val registry = ProviderRegistry.discover(loaderFor("embeddings"))
 
       registry.resolveEmbedding(ProviderId("fixtureembed")) shouldBe Right(FixtureEmbeddings)
@@ -119,8 +119,8 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
         .find(_.moduleClass == "org.llm4s.llmconnect.spi.fixtures.FixtureEmbeddingModule")
         .getOrElse(fail(s"embedding module was not reported: ${registry.report.describe}"))
 
-      module.providerIds shouldBe empty
-      module.embeddingProviderIds shouldBe Seq("fixtureembed")
+      module.providerIds.map(_.asString) shouldBe empty
+      module.embeddingProviderIds.map(_.asString) shouldBe Seq("fixtureembed")
       module.contribution should include("embeddings: fixtureembed")
     }
 
@@ -160,15 +160,16 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
         val id: ProviderId                 = ProviderId("fixturecloud")
         val configSpec: ProviderConfigSpec = ProviderConfigSpec()
 
-        def buildConfig(providerName: String, section: org.llm4s.config.ProvidersConfigModel.NamedProviderConfig)(using
-          org.llm4s.llmconnect.config.ContextWindowResolver
+        def buildConfig(
+          section: org.llm4s.config.NamedProviderConfig,
+          context: org.llm4s.llmconnect.spi.ProviderConfigContext
         ): org.llm4s.types.Result[org.llm4s.llmconnect.config.ProviderConfig] =
           Left(org.llm4s.error.ConfigurationError("replacement"))
 
-        def buildClient(
+        def build(
           config: org.llm4s.llmconnect.config.ProviderConfig,
-          options: org.llm4s.llmconnect.LlmClientOptions
-        )(using org.llm4s.model.ModelRegistryService): org.llm4s.types.Result[org.llm4s.llmconnect.LLMClient] =
+          context: org.llm4s.llmconnect.spi.ProviderBuildContext
+        ): org.llm4s.types.Result[org.llm4s.llmconnect.LLMClient] =
           Left(org.llm4s.error.ConfigurationError("replacement"))
 
       val registry = ProviderRegistry.discover(loaderFor("good")).withProvider(replacement)

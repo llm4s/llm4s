@@ -30,7 +30,7 @@ object MyApp extends IOApp.Simple {
 
 ## Obtaining the client
 
-`LLMClientIO.resource[F]` loads the default provider with `Llm4sConfig.defaultProvider()`, builds the client and releases it when the scope ends, so `llm4s.providers.provider` must name a section in your `application.conf`. If you already hold an `LLMClient`, wrap it with `LLMClientIO[F](client)`. `client.agent(id)(configure)` builds an `AgentIO[F]` from `Agent.builder(id, client)` with `configure` applied.
+`LLMClientIO.resource[F]` loads the default provider with `Llm4sConfig.defaultProvider()`, builds the client and releases it when the scope ends, so `llm4s.defaultProvider` must name a section in your `application.conf`. If you already hold an `LLMClient`, wrap it with `LLMClientIO[F](client)`. `client.agent(id)(configure)` builds an `AgentIO[F]` from `Agent.builder(id, client)` with `configure` applied.
 
 ## Errors
 

@@ -1,13 +1,17 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName }
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId, ProviderName }
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderRegistry }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderRegistry
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.matchers.should.Matchers
@@ -21,33 +25,34 @@ import java.nio.file.{ Files, Path }
 class ApiKeyFileConfigSpec extends AnyWordSpec with Matchers with EitherValues with OptionValues:
 
   /** A config that cannot take an `ApiKeyProvider` (the trait's default `withApiKeyProvider`), holding its key. */
-  final private case class StaticKeyConfig(key: String, providerId: ProviderId) extends ProviderConfig:
-    val model: String                            = "m"
-    val contextWindow: Int                       = 8192
-    val reserveCompletion: Int                   = 1024
-    val endpointUrl: Option[String]              = None
-    def withModel(model: String): ProviderConfig = this
+  final private case class StaticKeyConfig(key: String, providerId: ProviderId)
+      extends org.llm4s.testutil.FixedProviderSettings:
+    val model: ModelName                            = ModelName("m")
+    val contextWindow: Int                          = 8192
+    val reserveCompletion: Int                      = 1024
+    val endpointUrl: Option[BaseUrl]                = None
+    def withModel(model: ModelName): ProviderConfig = this
 
   /** A provider whose key is read when its config is built, not per request. */
   private object NoRotation extends ProviderDescriptor:
-    val id: ProviderId                 = ProviderId("norotation")
-    val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(FixtureChatProvider.DefaultBaseUrl)
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] =
-      ProviderDescriptor.requireApiKey(providerName, section).map(key => StaticKeyConfig(key.reveal, id))
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
-      FixtureChatProvider.buildClient(config, options)
+    val id: ProviderId = ProviderId("norotation")
+    val configSpec: ProviderConfigSpec =
+      ProviderConfigSpec.apiKeyAndDefaultBaseUrl(BaseUrl(FixtureChatProvider.DefaultBaseUrl))
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+      ProviderDescriptor.requireApiKey(context.providerName, section).map(key => StaticKeyConfig(key.reveal, id))
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+      FixtureChatProvider.build(config, context)
 
   /** A provider that takes no API key, as Ollama and Bedrock do. */
   private object Keyless extends ProviderDescriptor:
-    val id: ProviderId                 = ProviderId("keylessprovider")
-    val configSpec: ProviderConfigSpec = ProviderConfigSpec(defaultBaseUrl = Some(FixtureChatProvider.DefaultBaseUrl))
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] = Right(StaticKeyConfig("", id))
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
-      FixtureChatProvider.buildClient(config, options)
+    val id: ProviderId = ProviderId("keylessprovider")
+    val configSpec: ProviderConfigSpec =
+      ProviderConfigSpec(defaultBaseUrl = Some(BaseUrl(FixtureChatProvider.DefaultBaseUrl)))
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] = Right(
+      StaticKeyConfig("", id)
+    )
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+      FixtureChatProvider.build(config, context)
 
   private given ProviderRegistry = ProviderRegistry.of(FixtureChatProvider, NoRotation, Keyless)
 
@@ -63,7 +68,7 @@ class ApiKeyFileConfigSpec extends AnyWordSpec with Matchers with EitherValues w
     s"llm4s.providers.main { provider = $provider, model = m, $body }\n"
 
   private def load(hocon: String): Result[ProviderConfig] =
-    Llm4sConfig.provider(ConfigSource.string(hocon), "main")
+    Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("main"))
 
   private def validated(hocon: String): Result[NamedProviderConfig] =
     ProvidersConfigLoader.loadSections(ConfigSource.string(hocon)).flatMap(_.validated(ProviderName("main")))

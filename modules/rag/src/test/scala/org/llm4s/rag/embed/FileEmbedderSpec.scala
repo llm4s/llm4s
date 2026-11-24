@@ -1,9 +1,11 @@
 package org.llm4s.rag.embed
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, LocalEmbeddingModels }
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.error.EmbeddingError
+import org.llm4s.llmconnect.provider.{ EmbeddingProvider, MultimodalEmbeddingProvider }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.scalatest.funsuite.AnyFunSuite
@@ -26,8 +28,8 @@ class FileEmbedderSpec extends AnyFunSuite with Matchers {
       )
   }
 
-  private val mockClient      = new EmbeddingClient(new MockEmbeddingProvider())
-  private val testTextModel   = EmbeddingModelConfig("test-model", 128)
+  private val mockClient      = EmbeddingClient(new MockEmbeddingProvider())
+  private val testTextModel   = EmbeddingModelConfig(ModelName("test-model"), 128)
   private val defaultChunking = TextChunkingConfig(enabled = false, size = 1000, overlap = 100)
 
   private val testLocalModels = LocalEmbeddingModels(
@@ -60,7 +62,7 @@ class FileEmbedderSpec extends AnyFunSuite with Matchers {
       result.isRight shouldBe true
       val vectors = result.toOption.get
       vectors.length shouldBe 1
-      vectors.head.modality shouldBe Text
+      vectors.head.modality shouldBe Modality.Text
       vectors.head.model shouldBe "test-model"
     }
   }
@@ -110,7 +112,7 @@ class FileEmbedderSpec extends AnyFunSuite with Matchers {
       result.isRight shouldBe true
       val vectors = result.toOption.get
       vectors.length should be > 1
-      vectors.foreach(_.modality shouldBe Text)
+      vectors.foreach(_.modality shouldBe Modality.Text)
     }
   }
 
@@ -260,7 +262,7 @@ class FileEmbedderSpec extends AnyFunSuite with Matchers {
       result.isRight shouldBe true
       val vectors = result.toOption.get
       vectors.length shouldBe 1
-      vectors.head.modality shouldBe Image
+      vectors.head.modality shouldBe Modality.Image
       vectors.head.meta should contain("experimental" -> "true")
       vectors.head.meta should contain("provider" -> "local-experimental")
     }
@@ -282,38 +284,55 @@ class FileEmbedderSpec extends AnyFunSuite with Matchers {
       result.isRight shouldBe true
       val vectors = result.toOption.get
       vectors.length shouldBe 1
-      vectors.head.modality shouldBe Audio
+      vectors.head.modality shouldBe Modality.Audio
       vectors.head.meta should contain("experimental" -> "true")
     }
   }
 
   test("multimodal real provider path - image calls embedMultimodal and returns provider result") {
-    val multimodalProvider = new EmbeddingProvider {
-      override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
-        Right(
-          EmbeddingResponse(
-            embeddings = request.input.map(_ => (1 to request.model.dimensions).map(i => i.toDouble / 100).toSeq),
-            metadata = Map("provider" -> "mock-multimodal")
-          )
-        )
-
-      override def embedMultimodal(
-        request: org.llm4s.llmconnect.model.MultimediaEmbeddingRequest
-      ): Result[EmbeddingResponse] =
+    val multimodalProvider = new MultimodalEmbeddingProvider {
+      override def embedMultimodal(request: MultimediaEmbeddingRequest): Result[EmbeddingResponse] =
         Right(
           EmbeddingResponse(
             embeddings = Seq((1 to request.model.dimensions).map(i => i.toDouble / 50).toSeq),
-            metadata = Map("provider" -> "mock-multimodal", "modality" -> request.modality.toString)
+            metadata = Map(
+              "provider" -> "mock-multimodal",
+              "modality" -> request.modality.toString,
+              "inputs"   -> request.inputs.map(i => s"${i.mime}:${i.sizeBytes}").mkString(",")
+            )
           )
         )
     }
 
-    val multimodalClient = new EmbeddingClient(multimodalProvider)
-
     withBinaryTempFile(".png", pngHeader) { file =>
       val result = FileEmbedder.encodeFromPath(
         file.toPath,
-        multimodalClient,
+        mockClient,
+        FileEmbeddingConfig(
+          textModel = testTextModel,
+          localModels = testLocalModels,
+          chunking = defaultChunking,
+          experimentalStubs = false
+        ),
+        multimodal = Some(multimodalProvider)
+      )
+
+      result.isRight shouldBe true
+      val vectors = result.toOption.get
+      vectors.length shouldBe 1
+      vectors.head.modality shouldBe Modality.Image
+      (vectors.head.meta should contain).key("provider")
+      vectors.head.meta("provider") shouldBe "mock-multimodal"
+      vectors.head.meta("inputs") shouldBe s"image/png:${pngHeader.length}"
+      vectors.head.dim shouldBe vectors.head.values.length
+    }
+  }
+
+  test("multimodal real provider path - a media file with no multimodal provider fails, naming the way out") {
+    withBinaryTempFile(".png", pngHeader) { file =>
+      val result = FileEmbedder.encodeFromPath(
+        file.toPath,
+        mockClient,
         FileEmbeddingConfig(
           textModel = testTextModel,
           localModels = testLocalModels,
@@ -322,12 +341,11 @@ class FileEmbedderSpec extends AnyFunSuite with Matchers {
         )
       )
 
-      result.isRight shouldBe true
-      val vectors = result.toOption.get
-      vectors.length shouldBe 1
-      vectors.head.modality shouldBe Image
-      (vectors.head.meta should contain).key("provider")
-      vectors.head.meta("provider") shouldBe "mock-multimodal"
+      val error = result.left.toOption.getOrElse(fail("expected an error"))
+      error shouldBe a[EmbeddingError]
+      error.code shouldBe None
+      error.message should include("No multimodal embedding provider for the image file")
+      error.message should include("experimentalStubs")
     }
   }
 

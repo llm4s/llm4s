@@ -1,5 +1,6 @@
 package org.llm4s.assistant
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.agent.{ Suspension, AgentResultFixture, AgentStatus }
@@ -31,14 +32,11 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test-id",
           created = Instant.EPOCH,
-          content = response,
-          model = "test-model",
+          model = ModelName("test-model"),
           message = AssistantMessage(response, toolCalls = List.empty)
         )
       }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -120,7 +118,7 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "describe a guardrail block as the response" in {
-    val state = emptySessionState().withResult(AgentResultFixture(AgentStatus.Blocked("NoSecrets", "leaks")))
+    val state = emptySessionState().withResult(AgentResultFixture(AgentStatus.Blocked("NoSecrets", Some("leaks"))))
     assistantAgent().extractFinalResponse(state) shouldBe Right("Blocked by guardrail 'NoSecrets': leaks")
   }
 
@@ -175,12 +173,10 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
 
   it should "keep a turn that ends without an answer in the session, its reason as the response" in {
     val looping = new LLMClient {
-      private val call = ToolCall("c", "missing_tool", ujson.Obj())
+      private val call = ToolCall(ToolCallId("c"), "missing_tool", ujson.Obj())
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-        Right(Completion("loop", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call)))
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+        Right(Completion("loop", Instant.EPOCH, ModelName("test-model"), AssistantMessage(None, Seq(call))))
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 4096

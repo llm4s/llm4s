@@ -29,12 +29,12 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
   def createDelayingTool(
     name: String,
     delayMs: Long = 0
-  ): Result[ToolFunction[Map[String, Any], TestResult]] = {
+  ): Result[ToolFunction[TestResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Test parameters")
       .withProperty(Schema.property("input", Schema.string("Input value")))
 
-    ToolBuilder[Map[String, Any], TestResult](
+    ToolBuilder[TestResult](
       name,
       s"Test tool with ${delayMs}ms delay",
       schema
@@ -75,12 +75,12 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
     /** The `input` of each call, in the order the calls started. */
     def startOrder: Seq[String] = startedIn.asScala.toSeq
 
-    def tool(name: String): Result[ToolFunction[Map[String, Any], TestResult]] = {
+    def tool(name: String): Result[ToolFunction[TestResult]] = {
       val schema = Schema
         .`object`[Map[String, Any]]("Test parameters")
         .withProperty(Schema.property("input", Schema.string("Input value")))
 
-      ToolBuilder[Map[String, Any], TestResult](name, "Test tool that observes concurrency", schema)
+      ToolBuilder[TestResult](name, "Test tool that observes concurrency", schema)
         .withHandler { extractor =>
           extractor.getString("input").flatMap { input =>
             peak.accumulateAndGet(active.incrementAndGet(), (a, b) => math.max(a, b))
@@ -298,7 +298,7 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
 
   it should "handle mixed success and failure results" in {
     // Create a tool that fails for a specific input
-    ToolBuilder[Map[String, Any], TestResult](
+    ToolBuilder[TestResult](
       "failing_tool",
       "Tool that fails on 'fail' input",
       Schema

@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import cats.Id
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.trace.store.{ InMemoryTraceStore, TraceQuery }
@@ -27,7 +28,7 @@ object TraceCollectorExample {
       collector <- TraceCollectorTracing[Id](store)
 
       // 1. Record a tool call, some events and an error
-      _ <- collector.traceEvent(TraceEvent.AgentInitialized("What is 2 + 2?", Vector("calculator")))
+      _ <- collector.traceEvent(TraceEvent.CustomEvent("question", ujson.Obj("text" -> "What is 2 + 2?")))
       _ <- collector.traceToolCall(
         "calculator",
         """{"expression":"2 + 2"}""",
@@ -35,8 +36,8 @@ object TraceCollectorExample {
         scala.concurrent.duration.Duration.Zero,
         success = true
       )
-      _ <- collector.traceEvent(TraceEvent.CompletionReceived("completion-1", Model, 0, "2 + 2 is 4."))
-      _ <- collector.traceEvent(TraceEvent.TokenUsageRecorded(TokenUsage(12, 7, 19), Model, "completion"))
+      _ <- collector.traceEvent(TraceEvent.CompletionReceived("completion-1", ModelName(Model), 0, "2 + 2 is 4."))
+      _ <- collector.traceEvent(TraceEvent.TokenUsageRecorded(TokenUsage(12, 7, 19), ModelName(Model), "completion"))
       _ <- collector.traceError(new IllegalStateException("model call timed out"), "second question")
 
       // 2. Read the spans back
@@ -56,7 +57,7 @@ object TraceCollectorExample {
       _      = println("\n=== Console and store together ===")
       before = store.getSpans(collector.traceId).size
       both   = TracingComposer.combine(collector, new ConsoleTracing(captureContent = true))
-      _ <- both.traceEvent(TraceEvent.AgentInitialized("What is 3 + 3?", Vector("calculator")))
+      _ <- both.traceEvent(TraceEvent.CustomEvent("question", ujson.Obj("text" -> "What is 3 + 3?")))
       _ <- both.traceToolCall(
         "calculator",
         """{"expression":"3 + 3"}""",

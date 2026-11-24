@@ -5,6 +5,7 @@ description: "Add LLM4S to an sbt build: JDK 21 and Scala 3.7 requirements, the 
 search_title: "Install LLM4S: add the Scala LLM library to sbt"
 parent: Getting Started
 nav_order: 1
+cites_closed_issues: [2274, 2479]
 ---
 
 # Installation
@@ -509,7 +510,7 @@ Java v2 `bedrockruntime` artifact (Apache-2.0, the same SDK release train `llm4s
 ```hocon
 llm4s.providers.claude-bedrock {
   provider = "bedrock"
-  model    = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  model    = "us.anthropic.claude-sonnet-5-5"   # an inference profile id
   region   = ${?AWS_REGION}
 }
 ```
@@ -573,7 +574,8 @@ libraryDependencies += "org.llm4s" %% "llm4s-watsonx" % llm4sVersion
 ```
 
 The IBM watsonx.ai chat provider (`provider = "watsonx"`), brings no dependency beyond
-`llm4s-core`. See [IBM watsonx.ai](../guide/providers#ibm-watsonxai).
+`llm4s-core`. It is Beta and ships unverified against the live watsonx.ai service: no test has run against a real
+account. See [IBM watsonx.ai](../guide/providers#ibm-watsonxai).
 
 ### For Perplexity
 
@@ -894,7 +896,9 @@ libraryDependencies += "org.llm4s" %% "llm4s-agent-testkit" % llm4sVersion % Tes
 
 `CheckpointerContract`, the suite every `Checkpointer` must pass: commits, event numbering, compaction, run-claim
 leases and fencing, and two runtimes contending over one store. It requires JDK 21, as `llm4s-agent` does. See
-[Durable Checkpointers](../guide/agents/durable-checkpointers#testing-it-with-the-contract-suite).
+[Durable Checkpointers](../guide/agents/durable-checkpointers#testing-it-with-the-contract-suite). The module's other
+suites (`RunQueueContract`, `LongTermStoreContract`, `FileBackendContract`, `FileToolsContract`, `DelegationContract`
+and `ReplayContract`) are in [Store Contract Suites](../guide/agents/contract-suites).
 
 ### For Workspace (Containerized Execution)
 
@@ -929,12 +933,11 @@ section with `${?VAR}`:
 ```hocon
 # src/main/resources/application.conf
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }
@@ -1053,17 +1056,17 @@ Response: LLM4S is working!
    (`llm4s-openai`) is a dependency - it is what binds the variable
 2. If the section sets its own `apiKey = ${?SOME_VAR}`, check that variable too
 3. Check the error names the section you meant to load - only that section is validated, so
-   if it names another, `llm4s.providers.provider` points somewhere you did not expect
+   if it names another, `llm4s.defaultProvider` points somewhere you did not expect
 
 ### "Configured provider '...' was not found" or an unknown provider id
 
-**Problem**: `llm4s.providers.provider` names a section that does not exist, or a section's
+**Problem**: `llm4s.defaultProvider` names a section that does not exist, or a section's
 `provider = "..."` id is not registered.
 
-**Solution**: make `llm4s.providers.provider` match a section name exactly, and add the module
+**Solution**: make `llm4s.defaultProvider` match a section name exactly, and add the module
 for the provider id (for example `llm4s-openai` for `provider = "openai"`; see
 [Optional Dependencies](#optional-dependencies)). Model names go in the section's `model`
-without a provider prefix: `model = "gpt-4o"` for OpenAI, not `openai/gpt-4o`.
+without a provider prefix: `model = "gpt-5.6-terra"` for OpenAI, not `openai/gpt-5.6-terra`.
 
 ### Compilation Errors
 

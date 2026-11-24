@@ -1,10 +1,11 @@
 package org.llm4s.metrics
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.reliability.ReliabilityMetrics
 import com.typesafe.config.ConfigFactory
 import io.prometheus.metrics.model.registry.PrometheusRegistry
 import org.llm4s.config.{ Llm4sConfig, MetricsConfigLoader }
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.model.*
@@ -60,13 +61,11 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
       extends BaseLifecycleLLMClient {
     protected def clientDescription = "stub client"
     protected def providerName      = "openai"
-    protected def modelName         = "gpt-4o"
+    protected def modelName         = ModelName("gpt-4o")
     protected def metrics           = collector
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       completeWithMetrics(reply())
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = completeWithMetrics(reply())
     def getContextWindow(): Int     = 128000
@@ -80,11 +79,10 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
       Completion(
         id = "c1",
         created = Instant.EPOCH,
-        content = "ok",
-        model = "gpt-4o",
+        model = ModelName("gpt-4o"),
         message = AssistantMessage("ok"),
         usage = usage,
-        estimatedCost = cost
+        estimatedCost = cost.map(BigDecimal.decimal)
       )
     )
 
@@ -141,7 +139,7 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
       given ModelRegistryService = registryService
       configured <- MetricsConfigLoader.default()
       (metrics, endpoint) = configured
-      client <- LLMConnect.getClient(providerConfig, metrics).left.map { error =>
+      client <- LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics)).left.map { error =>
         endpoint.foreach(_.stop()) // release the server if client creation fails
         error
       }
@@ -187,7 +185,7 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
   "a streamed call" should "be recorded once, when the stream has finished" in
     withEndpoint { (metrics, endpoint) =>
       val client = new Stub(metrics, () => answer(Some(TokenUsage(10, 5, 15)), None))
-      client.streamComplete(conversation, CompletionOptions(), _ => ()).isRight shouldBe true
+      client.streamComplete(conversation, CompletionOptions())(_ => ()).isRight shouldBe true
 
       samples(scrape(endpoint)) should contain(
         """llm4s_requests_total{model="gpt-4o",provider="openai",status="success"} 1.0"""
@@ -266,14 +264,13 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
       }
     }
 
-  "the ten series the guide lists" should "all exist once calls have been made" in
+  // The five image series the guide lists beside these are `ImageMetrics` in llm4s-image, pinned through this
+  // collector by `ImageMetricsSeriesSpec` there (#2801).
+  "the five series of the collector that the guide lists" should "all exist once calls have been made" in
     withEndpoint { (metrics, endpoint) =>
       metrics.observeRequest("openai", "gpt-4o", Outcome.Error(ErrorKind.Timeout), 1.second)
       metrics.addTokens("openai", "gpt-4o", 1L, 1L)
       metrics.recordCost("openai", "gpt-4o", 0.01)
-      metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Error(ErrorKind.Timeout), 2.seconds, 1)
-      metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 2.seconds, 2)
-      metrics.recordImageGenerationCost("openai", "dall-e-3", 0.08, 2)
 
       val families = samples(scrape(endpoint)).map(_.takeWhile(c => c != '{' && c != ' ')).toSet
       List(
@@ -281,12 +278,7 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
         "llm4s_tokens_total",
         "llm4s_cost_usd_total",
         "llm4s_errors_total",
-        "llm4s_request_duration_seconds_count",
-        "llm4s_image_generations_total",
-        "llm4s_images_generated_total",
-        "llm4s_image_generation_duration_seconds_count",
-        "llm4s_image_generation_cost_usd_total",
-        "llm4s_image_generation_errors_total"
+        "llm4s_request_duration_seconds_count"
       ).foreach(name => families should contain(name))
     }
 
@@ -326,30 +318,38 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "forward the image-generation methods too, as the guide says" in {
-    final class CountingImages extends MetricsCollector {
-      var images                                                                             = 0
-      override def observeRequest(p: String, m: String, o: Outcome, d: FiniteDuration): Unit = ()
-      override def addTokens(p: String, m: String, in: Long, out: Long): Unit                = ()
-      override def recordCost(p: String, m: String, usd: Double): Unit                       = ()
-      override def observeImageGeneration(
-        provider: String,
-        model: String,
-        operation: String,
-        outcome: Outcome,
-        duration: FiniteDuration,
-        imageCount: Int
-      ): Unit = images += 1
-      override def recordImageGenerationCost(provider: String, model: String, costUsd: Double, imageCount: Int): Unit =
-        images += 1
+  it should "forward generic metrics too, image generation's among them, as the guide says" in {
+    final class CountingGeneric extends MetricsCollector {
+      var generic                                                                                    = 0
+      override def observeRequest(p: String, m: String, o: Outcome, d: FiniteDuration): Unit         = ()
+      override def addTokens(p: String, m: String, in: Long, out: Long): Unit                        = ()
+      override def recordCost(p: String, m: String, usd: Double): Unit                               = ()
+      override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit = generic += 1
+      override def observe(metric: Metric.Timer, labelValues: Seq[String], duration: FiniteDuration): Unit =
+        generic += 1
     }
-    val counting = new CountingImages
+    val counting = new CountingGeneric
     val composed = MetricsCollector.compose(counting)
-    composed.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 1.second, 1)
-    composed.recordImageGenerationCost("openai", "dall-e-3", 0.04, 1)
-    // compose forwards both image methods, so the child receives each call (#1609; see the guide's Metrics section)
-    counting.images shouldBe 2
+    composed.increment(Metric.counter("llm4s.image.generations", "Image generation operations", "provider"), Seq("p"))
+    composed.observe(
+      Metric.timer("llm4s.image.generation.duration", "Duration", Seq(1.second), "provider"),
+      Seq("p"),
+      1.second
+    )
+    // compose forwards the generic methods, so the child receives each call (#1609; see the guide's Metrics section)
+    counting.generic shouldBe 2
   }
+
+  "MetricsCollector.Errors" should "add to llm4s_errors_total, the family observeRequest counts failures in" in
+    withEndpoint { (metrics, endpoint) =>
+      metrics.observeRequest("openai", "gpt-4o", Outcome.Error(ErrorKind.Timeout), 1.second)
+      metrics.increment(MetricsCollector.Errors, Seq("openai", "timeout"))
+      metrics.increment(MetricsCollector.Errors, Seq("openai", "network"))
+
+      val served = samples(scrape(endpoint))
+      served should contain("""llm4s_errors_total{error_type="timeout",provider="openai"} 2.0""")
+      served should contain("""llm4s_errors_total{error_type="network",provider="openai"} 1.0""")
+    }
 
   "the build-the-pieces-yourself snippet" should "retain the endpoint and surface a bind failure as a Left" in {
     // Mirrors the guide's "Or build the pieces yourself" block (port 0 here, for a free port):

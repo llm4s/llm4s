@@ -1,10 +1,11 @@
 ---
 layout: page
 title: Pick Your Stack
-parent: User Guide
+parent: Frameworks and Runtimes
 description: "One LLM4S program in plain Result, cats-effect, ZIO and Pekko side by side: the semantics every effect bridge shares, and the honest differences."
 search_title: "LLM4S effect systems: cats-effect, ZIO, Pekko compared"
-nav_order: 50
+nav_order: 501
+grand_parent: User Guide
 ---
 
 # Pick Your Stack
@@ -36,8 +37,8 @@ import scala.concurrent.duration.FiniteDuration
 val greeting: Conversation = Conversation(Seq(UserMessage("Say hello in five words.")))
 val question: String       = "What should I pack for Oslo?"
 
-val temperature: Result[ToolFunction[Map[String, Any], Double]] =
-  ToolBuilder[Map[String, Any], Double](
+val temperature: Result[ToolFunction[Double]] =
+  ToolBuilder[Double](
     "get_temperature",
     "Current temperature in a city, in Celsius.",
     Schema.`object`[Map[String, Any]]("Parameters").withProperty(Schema.property("city", Schema.string("City name")))
@@ -69,7 +70,7 @@ def plainProgram(client: LLMClient, timeout: FiniteDuration): String = {
   def program: Result[String] = {
     val reply = new StringBuilder
     for {
-      _      <- client.streamComplete(greeting, CompletionOptions(), _.content.foreach(reply.append))
+      _      <- client.streamComplete(greeting, CompletionOptions())(_.content.foreach(reply.append))
       tool   <- temperature
       tools  <- ToolRegistry.of(Seq(tool))
       agent  <- Agent.builder("assistant", client).withTools(tools).build()

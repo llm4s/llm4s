@@ -46,7 +46,7 @@ A: `ToolOutputCompressor` (`org.llm4s.context`) compresses large tool outputs in
 ## Streaming Issues
 
 **Q: streamComplete returns a result but my callback sees nothing**
-A: `client.streamComplete(conversation, options, onChunk)` calls `onChunk` with each `StreamedChunk` as it arrives and returns the accumulated `Completion` when the stream ends. Read the text from each chunk's `content` in the callback; the returned `Completion` already holds the whole reply. A stream that ends without the provider's end marker is a `Left`, not a short `Completion`.
+A: `client.streamComplete(conversation, options)(onChunk)` calls `onChunk` with each `StreamedChunk` as it arrives and returns the accumulated `Completion` when the stream ends. Read the text from each chunk's `content` in the callback; the returned `Completion` already holds the whole reply. A stream that ends without the provider's end marker is a `Left`, not a short `Completion`.
 
 ## Provider-Specific Issues
 

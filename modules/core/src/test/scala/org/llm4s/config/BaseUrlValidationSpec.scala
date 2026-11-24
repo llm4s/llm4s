@@ -1,7 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.types.ProviderModelTypes.ApiKey
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.error.ConfigurationError
 import org.llm4s.testutil.FixtureChatConfig
 import org.scalatest.EitherValues
@@ -129,8 +129,8 @@ class BaseUrlValidationSpec extends AnyWordSpec with Matchers with EitherValues:
     def source(badUrl: String) =
       ConfigSource.string(
         s"""
+           |llm4s.defaultProvider = "good"
            |llm4s.providers {
-           |  provider = "good"
            |  good { provider = "fixturechat", model = "fixture-model", apiKey = "good-key", baseUrl = "https://good.example.com/v1" }
            |  bad  { provider = "fixturechat", model = "fixture-model", apiKey = "bad-key", baseUrl = "$badUrl" }
            |}
@@ -138,14 +138,14 @@ class BaseUrlValidationSpec extends AnyWordSpec with Matchers with EitherValues:
       )
 
     "not be affected by another section's bad baseUrl" in {
-      Llm4sConfig.provider(source("not a url"), "good").value match
+      Llm4sConfig.provider(source("not a url"), ProviderName("good")).value match
         case cfg: FixtureChatConfig => cfg.baseUrl shouldBe "https://good.example.com/v1"
         case other                  => fail(s"Expected FixtureChatConfig, got $other")
       Llm4sConfig.defaultProvider(source("not a url")).isRight shouldBe true
     }
 
     "fail for the section whose baseUrl is bad" in {
-      Llm4sConfig.provider(source("not a url"), "bad").left.value.message should include(
+      Llm4sConfig.provider(source("not a url"), ProviderName("bad")).left.value.message should include(
         "llm4s.providers.bad.baseUrl"
       )
     }
@@ -166,11 +166,11 @@ class BaseUrlValidationSpec extends AnyWordSpec with Matchers with EitherValues:
       )
 
     "accept an http(s) baseUrl" in {
-      load("http://localhost:8080/v1").value._2.baseUrl shouldBe "http://localhost:8080/v1"
+      load("http://localhost:8080/v1").value.baseUrl.asUrl shouldBe "http://localhost:8080/v1"
     }
 
     "treat a blank baseUrl as unset, so the provider's default applies" in {
-      load("  ").value._2.baseUrl shouldBe "https://fixtureembedding.invalid/v1"
+      load("  ").value.baseUrl.asUrl shouldBe "https://fixtureembedding.invalid/v1"
     }
 
     "refuse a baseUrl that is not an http(s) URL, naming llm4s.embeddings.<id>.baseUrl" in {

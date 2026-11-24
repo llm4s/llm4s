@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -55,7 +56,7 @@ class VertexAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   private val credentials: Option[String] = project.filter(_ => hasCredentials)
 
   private def config(projectId: String, credentialFile: Option[String] = None): VertexAIConfig =
-    VertexAIConfig.fromValues(model, projectId, location, credentialFile).value
+    VertexAIConfig.fromValues(ModelName(model), projectId, location, credentialFile).value
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 
@@ -82,7 +83,7 @@ class VertexAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
 
     val client = VertexAIClient(config(credentials.get)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, options, c => chunks += c)
+    val result = client.streamComplete(conversation, options)(c => chunks += c)
     client.close()
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
@@ -130,4 +131,12 @@ class VertexAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   override protected def contractClient(projectId: String): Result[LLMClient] = VertexAIClient(config(projectId))
 
   registerCapabilityContract()
+
+  // ---- validate(): publishers.models.get (#2855) ----
+  override protected def noInvalidKeyClient: String =
+    "Vertex AI's credentials are the environment's: the spec has no refused token to send"
+  override protected def unknownModelClient(projectId: String): Option[Result[LLMClient]] =
+    Some(VertexAIClient(config(projectId).withModel(ModelName("llm4s-no-such-model"))))
+
+  registerValidationContract()
 }

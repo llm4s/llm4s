@@ -1,15 +1,17 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId, ProviderName }
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.provider.{ OpenRouterClient, OpenRouterProvider }
-import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
+import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import pureconfig.ConfigSource
+import org.llm4s.llmconnect.spi.ProviderBuildContext
 
 /**
  * Which provider an `OpenAIConfig` reports (#1132 follow-up).
@@ -25,7 +27,9 @@ class OpenAIConfigProviderIdSpec extends AnyWordSpec with Matchers with EitherVa
   private given ContextWindowResolver = ContextWindowResolver(summon[ModelRegistryService])
 
   private def config(baseUrl: String, providerId: Option[ProviderId] = None) =
-    OpenAIConfig.fromValues("gpt-4o-mini", Secret("sk-test"), baseUrl, providerId = providerId).value
+    OpenAIConfig
+      .fromValues(ModelName("gpt-4o-mini"), Secret("sk-test"), BaseUrl(baseUrl), providerId = providerId)
+      .value
 
   "OpenAIConfig.providerId" should {
 
@@ -43,12 +47,19 @@ class OpenAIConfigProviderIdSpec extends AnyWordSpec with Matchers with EitherVa
 
     "keep the id through withModel, and show it in toString" in {
       val requesty = config("https://router.requesty.ai/v1", Some(ProviderId("requesty")))
-      requesty.withModel("other").providerId shouldBe ProviderId("requesty")
+      requesty.withModel(ModelName("other")).providerId shouldBe ProviderId("requesty")
       requesty.toString should include("providerId=requesty")
     }
 
     "default to None when built with the primary constructor" in {
-      OpenAIConfig(Secret("k"), "m", None, "https://api.openai.com/v1", 8192, 4096).explicitProviderId shouldBe None
+      OpenAIConfig(
+        Secret("k"),
+        ModelName("m"),
+        None,
+        BaseUrl("https://api.openai.com/v1"),
+        8192,
+        4096
+      ).explicitProviderId shouldBe None
     }
   }
 
@@ -67,12 +78,14 @@ class OpenAIConfigProviderIdSpec extends AnyWordSpec with Matchers with EitherVa
         |""".stripMargin
 
     "report openrouter even with a base URL that is not openrouter.ai's" in {
-      Llm4sConfig.provider(ConfigSource.string(hocon), "or-proxy").value.providerId shouldBe ProviderId("openrouter")
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("or-proxy")).value.providerId shouldBe ProviderId(
+        "openrouter"
+      )
     }
 
     "reach the OpenRouter client through LLMConnect" in {
-      val cfg = Llm4sConfig.provider(ConfigSource.string(hocon), "or-proxy").value
+      val cfg = Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("or-proxy")).value
       LLMConnect.getClient(cfg).value shouldBe an[OpenRouterClient]
-      OpenRouterProvider.buildClient(cfg, LlmClientOptions()).value shouldBe an[OpenRouterClient]
+      OpenRouterProvider.build(cfg, ProviderBuildContext.of()).value shouldBe an[OpenRouterClient]
     }
   }

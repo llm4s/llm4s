@@ -2,27 +2,31 @@ package org.llm4s.testkit
 
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ CancelledError, UnsupportedContentPartError }
-import org.llm4s.http.{ HttpRequest, HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.http.{ HttpNetworkSettings, HttpRequest, HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.config.{
   ContextWindowResolver,
   EmbeddingModelConfig,
   EmbeddingProviderConfig,
-  ProviderConfig
+  ProviderConfig,
+  ProviderTimeouts
 }
 import org.llm4s.llmconnect.model.{ Conversation, EmbeddingRequest, MessageRole, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
   EmbeddingProviderDescriptor,
   Llm4sProviderModule,
+  ProviderBuildContext,
+  ProviderConfigContext,
   ProviderDescriptor,
   ProviderModuleReport,
   ProviderRegistry
 }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.llmconnect.{ EmbeddingClientOptions, LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.auth.ApiKeyProvider
-import org.llm4s.types.ProviderModelTypes.{ ApiKey, ProviderId }
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 import org.scalactic.source.Position
 import org.scalatest.exceptions.{ StackDepthException, TestFailedException }
@@ -106,17 +110,19 @@ trait ProviderModuleChecks extends Assertions:
   def assertSoleSupplier(module: Llm4sProviderModule)(using pos: Position): Assertion =
     val report    = ProviderRegistry.discover().report
     val className = module.getClass.getName
-    def suppliers(kind: String, ids: Seq[String], of: ProviderModuleReport => Seq[String]): Unit =
+    def suppliers(kind: String, ids: Seq[ProviderId], of: ProviderModuleReport => Seq[ProviderId]): Unit =
       ids.foreach { id =>
         val owners = report.modules.filter(m => of(m).contains(id)).map(_.moduleClass)
         if owners != Seq(className) then
-          failAt(s"$kind id '$id' should be supplied by $className alone, but is supplied by ${owners.mkString(", ")}")
+          failAt(
+            s"$kind id '${id.asString}' should be supplied by $className alone, but is supplied by ${owners.mkString(", ")}"
+          )
       }
-    suppliers("chat", module.chatProviders.map(_.id.asString), _.providerIds)
-    suppliers("embedding", module.embeddingProviders.map(_.id.asString), _.embeddingProviderIds)
-    val names = (module.chatProviders.flatMap(d => d.aliases.map(ProviderId(_).asString) + d.id.asString) ++
+    suppliers("chat", module.providers.map(_.id), _.providerIds)
+    suppliers("embedding", module.embeddingProviders.map(_.id), _.embeddingProviderIds)
+    val names = (module.providers.flatMap(d => d.aliases.map(ProviderId(_).asString) + d.id.asString) ++
       module.embeddingProviders.flatMap(d => d.aliases.map(ProviderId(_).asString) + d.id.asString)).toSet
-    report.collisions.find(c => names.contains(c.id)).foreach { c =>
+    report.collisions.find(c => names.contains(c.id.asString)).foreach { c =>
       failAt(s"${c.subject} collides: ${c.droppedModule.getOrElse("an earlier registration")} and ${c.keptModule}")
     }
     succeed
@@ -134,7 +140,7 @@ trait ProviderModuleChecks extends Assertions:
    * registration half of a module spec in one line. A module that lists no provider at all fails.
    */
   def assertModule(module: Llm4sProviderModule)(using pos: Position): Assertion =
-    if module.chatProviders.isEmpty && module.embeddingProviders.isEmpty then
+    if module.providers.isEmpty && module.embeddingProviders.isEmpty then
       failAt(s"${module.getClass.getName} lists no chat or embedding provider")
     assertDiscovered(module)
     assertSoleSupplier(module)
@@ -144,7 +150,7 @@ trait ProviderModuleChecks extends Assertions:
     Position
   ): Assertion =
     val className = module.getClass.getName
-    module.chatProviders.foreach { descriptor =>
+    module.providers.foreach { descriptor =>
       val id = descriptor.id.asString
       registry.resolve(descriptor.id) match
         case Right(found) if found == descriptor => ()
@@ -172,7 +178,7 @@ trait ProviderModuleChecks extends Assertions:
 
   /**
    * Builds a client the way `LLMConnect.getClient` does: `descriptor.buildConfig` on `section`,
-   * then `descriptor.buildClient` on the config it returned.
+   * then `descriptor.build` on the config it returned.
    *
    * @param descriptor    the chat descriptor under test
    * @param section       a section as validation would leave it; build one in code, or load one
@@ -189,8 +195,8 @@ trait ProviderModuleChecks extends Assertions:
     given ModelRegistryService  = modelRegistry
     given ContextWindowResolver = ContextWindowResolver(modelRegistry)
     descriptor
-      .buildConfig("provider-testkit", section)
-      .flatMap(descriptor.buildClient(_, options))
+      .buildConfig(section, ProviderConfigContext.of("provider-testkit"))
+      .flatMap(descriptor.build(_, ProviderBuildContext.of(options)))
 
   /**
    * [[buildClient]], failing the test on a `Left`. The config-to-client round trip.
@@ -208,7 +214,7 @@ trait ProviderModuleChecks extends Assertions:
       case Left(error)   => failAt(s"${descriptor.id.asString} failed to build a client: ${error.message}")
 
   /**
-   * `descriptor.buildClient` returns a `Left` - rather than throwing, or building a client - when
+   * `descriptor.build` returns a `Left` - rather than throwing, or building a client - when
    * handed a `ProviderConfig` some other provider built. `ProviderDescriptor.expectConfig` is the
    * usual way to get this right.
    */
@@ -217,7 +223,7 @@ trait ProviderModuleChecks extends Assertions:
     modelRegistry: ModelRegistryService = ProviderModuleChecks.defaultModelRegistry
   )(using pos: Position): Assertion =
     given ModelRegistryService = modelRegistry
-    descriptor.buildClient(ProviderModuleChecks.ForeignConfig, LlmClientOptions.default) match
+    descriptor.build(ProviderModuleChecks.ForeignConfig, ProviderBuildContext.of()) match
       case Left(_) => succeed
       case Right(client) =>
         failAt(s"${descriptor.id.asString} accepted another provider's config and built $client")
@@ -272,7 +278,7 @@ trait ProviderModuleChecks extends Assertions:
             ModelCallContractRun.expect(c, "complete", completed)
           val chunks = ListBuffer.empty[StreamedChunk]
           val streamed =
-            ModelCallContractRun.call(path, reply.stream, client)(_.streamComplete(_, onChunk = chunks += _))
+            ModelCallContractRun.call(path, reply.stream, client)(_.streamComplete(_)(chunks += _))
           ModelCallContractRun.expect(c, "streamComplete", streamed)
           streamed.foreach(ModelCallContractRun.delivered(c, chunks.toList, _))
     }
@@ -307,7 +313,7 @@ trait ProviderModuleChecks extends Assertions:
     // the LLM client is closed even when a check fails, so a failing provider leaks nothing
     val checked = scala.util
       .Try(sent("complete")(client.complete(conversation)))
-      .flatMap(_ => scala.util.Try(sent("streamComplete")(client.streamComplete(conversation, onChunk = _ => ()))))
+      .flatMap(_ => scala.util.Try(sent("streamComplete")(client.streamComplete(conversation)(_ => ()))))
     val closing = scala.util.Try(client.close())
     checked.get
     closing.get
@@ -331,7 +337,7 @@ trait ProviderModuleChecks extends Assertions:
    */
   def assertEmbeddingCancelsWhenInterrupted(provider: EmbeddingProvider)(using pos: Position): Assertion =
     assertCallCancelsWhenInterrupted("embed")(
-      provider.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig("test-model", 8)))
+      provider.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig(ModelName("test-model"), 8)))
     )
 
   /**
@@ -372,7 +378,7 @@ trait ProviderModuleChecks extends Assertions:
   def assertCancelsStreamWhenInterrupted(client: LLMClient)(using pos: Position): Assertion =
     val firstChunk = new CountDownLatch(1)
     interrupted("streamComplete") {
-      client.streamComplete(Conversation(Seq(UserMessage("Hello"))), onChunk = _ => firstChunk.countDown())
+      client.streamComplete(Conversation(Seq(UserMessage("Hello"))))(_ => firstChunk.countDown())
     } {
       if !firstChunk.await(10, TimeUnit.SECONDS) then
         failAt("streamComplete delivered no chunk before the server stalled")
@@ -649,14 +655,40 @@ trait ProviderModuleChecks extends Assertions:
    * selected id in `registry`, then `build` it from `config`.
    *
    * Load `config` from HOCON with [[ProviderTestConfig.loadEmbeddings]], or construct one.
+   *
+   * @param options the caller's options; the defaults suit a test. Pass
+   *                `EmbeddingClientOptions().withHttpClient(client)` to check that the provider sends its
+   *                requests through a supplied HTTP client.
    */
   def assertBuildsEmbeddingProvider(
     descriptor: EmbeddingProviderDescriptor,
-    config: EmbeddingProviderConfig
+    config: EmbeddingProviderConfig,
+    options: EmbeddingClientOptions = EmbeddingClientOptions.default
   )(using pos: Position): EmbeddingProvider =
-    descriptor.build(config) match
+    descriptor.build(config, EmbeddingBuildContext(options)) match
       case Right(provider) => provider
       case Left(error) => failAt(s"${descriptor.id.asString} failed to build an embedding provider: ${error.message}")
+
+  /**
+   * An embedding provider built with `EmbeddingClientOptions.withHttpClient` sends its `embed` request through
+   * the supplied client, and does not close it: the caller owns it (#2811). The supplied client records the
+   * request and answers `400`, so no server is needed and the call ends in a `Left`. Every embedding provider
+   * that sends HTTP requests must pass.
+   *
+   * @param descriptor the embedding descriptor under test
+   * @param config     a config for it; its base URL is never contacted
+   */
+  def assertEmbeddingUsesSuppliedHttpClient(
+    descriptor: EmbeddingProviderDescriptor,
+    config: EmbeddingProviderConfig
+  )(using pos: Position): Assertion =
+    val http     = new ProviderModuleChecks.RecordingHttpClient
+    val provider = assertBuildsEmbeddingProvider(descriptor, config, EmbeddingClientOptions().withHttpClient(http))
+    provider.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig(config.model, 8)))
+    if http.requests.isEmpty then
+      failAt(s"${descriptor.id.asString}: embed sent no request through the supplied HTTP client")
+    if http.closed then failAt(s"${descriptor.id.asString} closed the HTTP client its caller supplied")
+    succeed
 
   // ---- API key rotation ----
 
@@ -695,7 +727,7 @@ trait ProviderModuleChecks extends Assertions:
   )(using pos: Position): Assertion =
     assertSendsRotatedKey(respond, path, "embed") { (baseUrl, keys) =>
       val built = provider(baseUrl, keys)
-      (() => built.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig("test-model", 8))), () => ())
+      (() => built.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig(ModelName("test-model"), 8))), () => ())
     }
 
   /** Two calls through what `open` builds, the key rotated between them; each must carry the key then held. */
@@ -765,11 +797,11 @@ trait ProviderModuleChecks extends Assertions:
    */
   def assertEmbeddingCredentialBindings(
     descriptor: EmbeddingProviderDescriptor,
-    model: String,
+    model: ModelName,
     registry: ProviderRegistry = ProviderRegistry.default
   )(using pos: Position): Assertion =
     given ProviderRegistry = registry
-    CredentialsRoundTrip.embeddingBindings(descriptor, model).foreach { (variable, key) =>
+    CredentialsRoundTrip.embeddingBindings(descriptor, model.asString).foreach { (variable, key) =>
       if key != Right(s"key-from-$variable") then
         failAt(
           s"${descriptor.id.asString} declares $variable in apiKeyEnv, but with only it set the embeddings key is " +
@@ -803,7 +835,7 @@ object ProviderModuleChecks extends ProviderModuleChecks:
       .fold(error => failAt(s"llm4s model registry failed to load: ${error.message}"), identity)
 
   /**
-   * The HTTP client [[assertUsesSuppliedHttpClient]] supplies: it records each request's method and URL and
+   * The HTTP client [[assertUsesSuppliedHttpClient]] and [[assertEmbeddingUsesSuppliedHttpClient]] supply: it records each request's method and URL and
    * answers every one `400` with an OpenAI-style error body.
    */
   final private[testkit] class RecordingHttpClient extends Llm4sHttpClient:
@@ -821,9 +853,15 @@ object ProviderModuleChecks extends ProviderModuleChecks:
 
   /** A config no real provider builds, to prove a descriptor refuses what is not its own. */
   private object ForeignConfig extends ProviderConfig:
-    val providerId: ProviderId                   = ProviderId("provider-testkit-foreign")
-    val model: String                            = "foreign-model"
-    val contextWindow: Int                       = 8192
-    val reserveCompletion: Int                   = 1024
-    val endpointUrl: Option[String]              = None
-    def withModel(model: String): ProviderConfig = this
+    val providerId: ProviderId                                        = ProviderId("provider-testkit-foreign")
+    val model: ModelName                                              = ModelName("foreign-model")
+    val contextWindow: Int                                            = 8192
+    val reserveCompletion: Int                                        = 1024
+    val endpointUrl: Option[BaseUrl]                                  = None
+    def withModel(model: ModelName): ProviderConfig                   = this
+    def timeouts: ProviderTimeouts                                    = ProviderTimeouts.default
+    def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig      = this
+    def network: HttpNetworkSettings                                  = HttpNetworkSettings.default
+    def withNetwork(network: HttpNetworkSettings): ProviderConfig     = this
+    def apiKeyProvider: Option[ApiKeyProvider]                        = None
+    def withApiKeyProvider(provider: ApiKeyProvider): Result[Nothing] = ProviderConfig.noApiKeyProvider(providerId)

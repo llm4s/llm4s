@@ -16,6 +16,9 @@ start, follow, cancel or delete any thread, a run whose machine dies is picked u
 whole deployment.
 {: .fs-6 .fw-300 }
 
+{: .note }
+> **Experimental at 1.0.** The API on this page (shared checkpointers, run claims, the run queue and worker in `agent.service`) is `@Experimental`: usable, but outside the 1.x compatibility promise, so it can change in a minor release, with a migration note. The stable core of `llm4s-agent` - building an agent, running, continuing and recovering a thread, handoffs and guardrails - is listed in [API Stability](../../reference/api-stability#tiers-in-the-code).
+
 ## Table of contents
 {: .no_toc .text-delta }
 
@@ -76,6 +79,8 @@ llm4s.agent.checkpointer {
 ```
 
 ```scala
+import org.llm4s.config.{ CheckpointerConfigLoader, RuntimeConfigLoader }
+
 for
   store    <- CheckpointerConfigLoader.open()           // close it when the process stops
   runtime  <- RuntimeConfigLoader.runtime(store.checkpointer)
@@ -100,6 +105,11 @@ instance that accepted the request, owns the run: it records each attempt's `Run
 thread, so a run is attempted at least once and applied at most once, however many workers try it.
 
 ```scala
+import org.llm4s.agent.{ Agent, AgentId }
+import org.llm4s.agent.graph.ThreadId
+import org.llm4s.agent.service.{ AgentWorker, QueuedAgent, QueuedInput, RunSubmitter }
+import org.llm4s.config.{ RunQueueConfigLoader, WorkerConfigLoader }
+
 // every instance
 for
   agent     <- Agent.builder("assistant", client).withRuntime(runtime).build()
@@ -113,12 +123,19 @@ yield
   submitter
 
 // an endpoint, on any instance
-submitter.submit(ThreadId("t-42"), AgentId("assistant"), QueuedInput.query("Summarise the report"), Some(tenant))
-// -> Ticket(entryId, threadId, position, existing)
+AgentId.of("assistant").flatMap { agentId =>
+  submitter.submit(ThreadId("t-42"), agentId, QueuedInput.query("Summarise the report"), Some(tenant))
+} // -> Right(Ticket(entryId, threadId, position, existing))
 ```
 
 - **Every instance runs the same agents under the same ids.** A worker takes only entries for the agent ids it was
   built with; a typed agent goes in as `QueuedAgent.typed(boundAgent)`.
+- **A queued query is stored as you submit it.** `QueuedInput.query(text)` is in the queue before any guardrail has
+  seen it, and the worker that takes it runs the agent's input guardrails before the turn's first checkpoint. To keep
+  what a guardrail would refuse or rewrite out of the queue as well, admit the query on the submitting instance and
+  queue the result: `agent.admit(threadId, text).map(QueuedInput.admitted)`. The entry then holds the query as the
+  guardrails left it - or, for a refused one, only the refusing guardrail's name - and the worker does not run them
+  again. See [Admission](middleware#admission).
 - **Following a run** is `submitter.follow(tenant, entryId, after, limit, wait)`, a page at a time from a thread
   sequence number: it waits for the next commit on whichever machine makes it, and resuming from the last number seen
   repeats nothing. `submitter.await(tenant, entryId, timeout)` waits for the entry to close.
@@ -195,8 +212,13 @@ identity, so two machines name the same spans without coordinating.
 
 Spans are emitted by the agent's tracing: build the agent `withTracing(tracing)` with a backend from
 `llm4s-observability-otel` (`TRACING_MODE=opentelemetry`) or `llm4s-observability` (Langfuse). Delegated child runs
-sit under the tool call that started them. No message content goes into a span attribute, and no guardrail reason:
-a blocked run's failure names only the guardrail. Any other failure's error message is recorded as it is.
+sit under the tool call that started them. The spans of the run's events - its model calls, tool calls and
+`graph.*` and `agent.*` events - carry no message content, tool argument or tool result in either backend, and no
+guardrail reason: a blocked run's failure names only the guardrail. Any other failure's error message is recorded as
+it is, and the events that begin a run carry its `tenantId` and `principal`. The turn's messages are another matter:
+OpenTelemetry records only how many there were, but Langfuse records them, as the trace's input and output and as one
+span per message. [Agent tracing and metrics](../observability/agents#content) says how to drop them before they are
+sent.
 
 ## Metrics
 
@@ -204,6 +226,10 @@ Give the worker and a `MeteredCheckpointer` the same `MetricsCollector` (`Promet
 `llm4s-observability-prometheus`, or `MicrometerMetrics` from `llm4s-observability-micrometer`):
 
 ```scala
+import org.llm4s.agent.metrics.MeteredCheckpointer
+import org.llm4s.config.RuntimeConfigLoader
+import org.llm4s.metrics.PrometheusMetrics
+
 val metrics      = new PrometheusMetrics(registry)
 val checkpointer = MeteredCheckpointer(store.checkpointer, metrics)   // runs, claims, commits, child tasks
 val runtime      = RuntimeConfigLoader.runtime(checkpointer)

@@ -25,7 +25,31 @@ sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config path/to/appl
 | Preset | Allowed providers |
 |---|---|
 | `dev` / `dev-sandbox` (`ConfigPolicy.devSandbox`) | `openai`, `anthropic`, `ollama`, `gemini`, `deepseek`, `openai-compatible` |
-| `prod` / `prod-safe` (`ConfigPolicy.prodSafeDefaults`) | `openai`, `anthropic`, `azure`, `gemini`, `deepseek`, with pinned model patterns; every chat section must set its own `apiKey` |
+| `prod` / `prod-safe` (`ConfigPolicy.prodSafeDefaults`) | `openai`, `anthropic`, `bedrock`, `azure`, `gemini`, `deepseek`, each limited to its vendor's current model generations; every chat section must set its own `apiKey` |
+
+## Which models `prod` allows
+
+The `prod` preset allows each provider's current model **generations**, not a list of releases, so it does not go
+stale when a vendor ships a new model in a current family, and still refuses a retired generation. The families are
+`ConfigPolicy.ModelFamilies` (checked 2026-11-24), matched as whole ids:
+
+| Provider | Allowed | Examples allowed | Examples refused |
+|---|---|---|---|
+| `openai` | GPT-5 and GPT-6, every point release and variant | `gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-6-luna` | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1` |
+| `anthropic` | Claude 5 and later in every tier; Opus and Sonnet from 4.6; Haiku 4.5 | `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-opus-4-8` | `claude-3-5-sonnet-latest`, `claude-sonnet-4-5` |
+| `bedrock` | the same Claude families, bare or with a cross-region prefix | `us.anthropic.claude-sonnet-5-5` | `anthropic.claude-3-5-sonnet-20241022-v2:0` |
+| `gemini` | Gemini 3, every point release and variant | `gemini-3.8-flash` | `gemini-2.5-pro` |
+| `deepseek` | `deepseek-chat`, `deepseek-reasoner` | | |
+| `azure` | any deployment name (the operator chooses it) | | |
+
+`ConfigPolicy.prodModelPatterns` is the list as `<provider>/<pattern>`. The preset stays a production guard: a model
+outside these generations, or a provider outside the list, needs an explicit decision in your own policy
+(`withAllowedModelPatterns((ConfigPolicy.prodModelPatterns :+ "openai/gpt-4.1")*)`). When a vendor starts a new
+generation, `ModelFamilies` gains one pattern.
+
+Each provider's context cap is the largest input window among its current models in the bundled model metadata
+(openai and azure 1050000, anthropic and bedrock 1000000, gemini 1048576, deepseek 163840), so no allowed model is
+refused for its own native window.
 
 ## Explicit keys in prod
 
@@ -45,11 +69,8 @@ explicitly, and pin the endpoints and models it may use:
 
 ```scala
 val policy = ConfigPolicy.prodSafeDefaults
-  .withAllowedProviders("openai", "anthropic", "azure", "gemini", "deepseek", "openai-compatible")
-  .withAllowedModelPatterns(
-    "^openai/gpt-4o(-mini)?$", // ...and the other preset patterns you still need
-    "^openai-compatible/openai/gpt-oss-120b$"
-  )
+  .withAllowedProviders("openai", "anthropic", "bedrock", "azure", "gemini", "deepseek", "openai-compatible")
+  .withAllowedModelPatterns((ConfigPolicy.prodModelPatterns :+ "^openai-compatible/openai/gpt-oss-120b$")*)
   .withRequiredBaseUrlPattern(
     CatalogEnvironment.Prod,
     "^https://(api\\.openai\\.com/v1|api\\.groq\\.com/openai/v1)$"
@@ -57,7 +78,8 @@ val policy = ConfigPolicy.prodSafeDefaults
 ```
 
 Note that `withAllowedProviders` and `withAllowedModelPatterns` replace the preset's lists rather
-than adding to them, so repeat the entries you want to keep. Patterns are regular
+than adding to them, so repeat the entries you want to keep (`ConfigPolicy.prodModelPatterns` holds the
+preset's patterns). Patterns are regular
 expressions that must match the **whole** `<provider>/<model>` (or URL): `openai/gpt-4o` no longer
 allows `openai/gpt-4o-mini`, nor a dated snapshot such as `openai/gpt-4o-2024-08-06` (write
 `openai/gpt-4o(-.*)?` for those).
@@ -76,8 +98,8 @@ provider ids (trimmed, `Locale.ROOT`, an alias such as `google` folded onto `gem
 per-provider cap or pin that names no registered provider and is not in `allowedProviders` is an
 `[unknownProvider]` violation, so a typo cannot leave a provider silently unpinned.
 
-The `prod` preset caps each provider at its current models' window (openai/azure 128000, anthropic
-200000, gemini 1048576, deepseek 131072) and keeps an environment-wide fallback of 1048576 for any
+The `prod` preset caps each provider at its current models' largest window (openai/azure 1050000, anthropic/bedrock
+1000000, gemini 1048576, deepseek 163840) and keeps an environment-wide fallback of 1048576 for any
 provider without an entry (one added with `withAllowedProviders`, such as `openai-compatible`);
 a model above it needs an explicit per-provider cap. `dev` caps at 1048576. Per-provider recipes are in the
 [providers guide](../../docs/guide/providers.md#openai-compatible-endpoints).

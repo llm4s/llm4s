@@ -3,8 +3,10 @@ layout: page
 title: Your HTTP Client
 description: "Send the provider clients' requests through the sttp backend your service already has, and test a provider call against sttp's stub backend."
 search_title: "Use your own sttp backend as the LLM4S HTTP transport"
-parent: User Guide
-nav_order: 52
+parent: Core
+nav_order: 112
+grand_parent: User Guide
+cites_closed_issues: [2341]
 ---
 
 # Your HTTP client
@@ -95,6 +97,7 @@ import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.sttp.SttpLlm4sHttpClient
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import sttp.client4.testing.{ RecordingBackend, RichTestingRequest, SyncBackendStub }
@@ -116,7 +119,7 @@ class ChatRequestSpec extends AnyFlatSpec with Matchers {
 
     val answer = for {
       client <- LLMConnect.getClient(
-        OpenAICompatibleConfig("my-model", "http://llm.test/v1"),
+        OpenAICompatibleConfig(ModelName("my-model"), BaseUrl("http://llm.test/v1")),
         LlmClientOptions.default.withHttpClient(new SttpLlm4sHttpClient(backend))
       )
       completion <- client.complete(Conversation(Seq(UserMessage("What is Scala?"))), CompletionOptions())

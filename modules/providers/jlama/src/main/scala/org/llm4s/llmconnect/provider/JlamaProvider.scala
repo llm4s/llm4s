@@ -1,13 +1,19 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.annotation.Experimental
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, JlamaConfig, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.annotation.Experimental
+import org.llm4s.config.NamedProviderConfig
+import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.config.{ JlamaConfig, ProviderConfig }
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigKey,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderFeatures
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.types.Result
 
 import java.nio.file.{ Path, Paths }
@@ -55,19 +61,15 @@ object JlamaProvider extends ProviderDescriptor:
     )
   )
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     (for
       modelDir <- parseDir(section.extra(ModelDirKey))
       threads  <- parseThreads(section.extra(ThreadsKey))
-      config   <- JlamaConfig.fromValues(section.model.asString, modelDir, threads)
-    yield config).left.map(ProviderConfig.inSection(providerName))
+      config   <- JlamaConfig.fromValues(section.model, modelDir, threads)
+    yield config).left.map(ProviderConfig.inSection(context.providerName))
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
-    ProviderDescriptor.expectConfig[JlamaConfig](id, config).flatMap(JlamaClient(_, options.metrics))
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    ProviderDescriptor.expectConfig[JlamaConfig](id, config).flatMap(JlamaClient(_, context.metrics))
 
   /** The section's `modelDir`; a leading `~` stands for the user's home, as in the declared default. */
   private def parseDir(raw: Option[String]): Result[Path] =

@@ -1,7 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.annotation.{ Experimental, Stable }
-import org.llm4s.config.ProvidersConfigModel.{ ApiKey, BaseUrl, NamedProviderConfig, ProviderId }
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, BaseUrl, ProviderId }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.auth.{ TokenExchange, TokenExchangeConfig }
 import org.llm4s.security.TokenGenerations
@@ -76,7 +76,7 @@ object MistralModelLister extends ProviderModelLister:
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
     // The same normalisation chat applies, so a base URL that already carries `/v1` does not
     // list `/v1/v1/models`.
-    val apiBase = config.baseUrl.map(url => BaseUrl(MistralConfig.apiBaseUrl(url.asUrl)))
+    val apiBase = config.baseUrl.map(MistralConfig.apiBaseUrl)
     delegate.listModels(config.withBaseUrl(apiBase), httpClient)
 
 /**
@@ -94,7 +94,7 @@ object OpenAICompatibleModelLister extends ProviderModelLister:
   private val delegate =
     ProviderModelListers.openAICompatible(
       ProviderId(OpenAICompatibleConfig.ProviderIdName),
-      defaultBaseUrl = "",
+      defaultBaseUrl = BaseUrl(""),
       apiKeyRequired = false
     )
 
@@ -121,11 +121,11 @@ object OpenAICompatibleModelLister extends ProviderModelLister:
         case Some(exchange) =>
           val held = generations(exchange)
           TokenExchange.rfc8693With(exchange, httpClient, held.subjects)().map { token =>
-            held.access.rotate(token.value)
-            config.withApiKey(None).withHeaders(valid.headers.updated("Authorization", s"Bearer ${token.value}"))
+            held.access.rotate(token.value.reveal)
+            config.withApiKey(None).withHeaders(valid.headers.updated("Authorization", s"Bearer ${token.value.reveal}"))
           }
       models <- delegate.listModels(
-        listed.withAuth(None).withBaseUrl(Some(BaseUrl(valid.baseUrl))),
+        listed.withAuth(None).withBaseUrl(Some(valid.baseUrl)),
         httpClient
       )
     yield models

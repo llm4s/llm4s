@@ -22,7 +22,7 @@ object ErrorMessageDemonstration extends App {
     .withProperty(Schema.property("location", Schema.string("Storage location")))
 
   val result = for {
-    inventoryTool <- ToolBuilder[Map[String, Any], Result](
+    inventoryTool <- ToolBuilder[Result](
       "add_inventory_item",
       "Adds an item to the inventory system",
       schema

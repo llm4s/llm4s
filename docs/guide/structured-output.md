@@ -3,8 +3,9 @@ layout: page
 title: Structured Output
 description: "Get a typed value instead of free text with completeStructured: describe the type, set options and handle replies that do not comply."
 search_title: "Structured output from LLMs in Scala with LLM4S"
-parent: User Guide
-nav_order: 6
+parent: Core
+nav_order: 106
+grand_parent: User Guide
 ---
 
 # Structured Output with completeStructured
@@ -263,7 +264,7 @@ taken from its code:
 | Gemini, Vertex AI | `responseMimeType: application/json` and `responseSchema` set to the schema | Yes, by Gemini |
 | Ollama | The schema as the top-level `format` field of `/api/chat` | Yes, on Ollama 0.5 or later; an older server rejects or ignores it. `name` and `strict` are ignored |
 | Anthropic | **Nothing is enforced.** The schema is appended to the system prompt as an instruction to answer with JSON only | **No**: best effort. Expect section 7 errors more often |
-| watsonx (Beta) | `response_format` of type `json_schema`, with your `name` and `strict` (`ResponseFormat.Json` as `json_object`) | Depends on the model; not confirmed against the live service (see [watsonx.ai](providers#ibm-watsonxai)) |
+| watsonx (Beta) | `response_format` of type `json_schema`, with your `name` and `strict` (`ResponseFormat.Json` as `json_object`) | Depends on the model; `llm4s-watsonx` ships unverified against the live service (see [watsonx.ai](providers#ibm-watsonxai)) |
 | Perplexity | `response_format` of type `json_schema`, with your `name` and `strict`; `ResponseFormat.Json` is refused with a `ValidationError` | The routed model decides |
 | Jlama | **Nothing.** `responseFormat` is reported `Dropped` in `Completion.adjustments` | **No** |
 | AWS Bedrock | **Nothing.** This client does not read `responseFormat` | **No**: the model sees only your conversation |
