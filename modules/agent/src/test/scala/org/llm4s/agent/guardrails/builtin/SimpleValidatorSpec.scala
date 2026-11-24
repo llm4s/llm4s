@@ -13,12 +13,12 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   // -- Empty and boundary cases --
 
   "LengthCheck" should "accept empty string when min is 0" in {
-    val check = new LengthCheck(0, 100)
+    val check = LengthCheck(0, 100)
     check.validate("") shouldBe Right("")
   }
 
   it should "reject empty string when min is 1" in {
-    val check  = new LengthCheck(1, 100)
+    val check  = LengthCheck(1, 100)
     val result = check.validate("")
     result.isLeft shouldBe true
     result.swap.toOption.get.message should include("0 characters")
@@ -26,12 +26,12 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "accept single character at min=1 max=1" in {
-    val check = new LengthCheck(1, 1)
+    val check = LengthCheck(1, 1)
     check.validate("x") shouldBe Right("x")
   }
 
   it should "reject two characters when max is 1" in {
-    val check = new LengthCheck(0, 1)
+    val check = LengthCheck(0, 1)
     check.validate("ab").isLeft shouldBe true
   }
 
@@ -42,16 +42,16 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
     val emoji = "\uD83D\uDE00\uD83D\uDE01\uD83D\uDE02"
     emoji.length shouldBe 6
 
-    val check = new LengthCheck(1, 6)
+    val check = LengthCheck(1, 6)
     check.validate(emoji) shouldBe Right(emoji)
 
     // Max=5 rejects because Java String length is 6
-    val strict = new LengthCheck(1, 5)
+    val strict = LengthCheck(1, 5)
     strict.validate(emoji).isLeft shouldBe true
   }
 
   it should "count multi-byte unicode by Java char count" in {
-    val check = new LengthCheck(1, 10)
+    val check = LengthCheck(1, 10)
     val cjk   = "你好世界" // 4 chars
     check.validate(cjk) shouldBe Right(cjk)
   }
@@ -59,15 +59,15 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   // -- Constructor validation --
 
   it should "throw on negative min" in {
-    an[IllegalArgumentException] should be thrownBy new LengthCheck(-1, 10)
+    an[IllegalArgumentException] should be thrownBy LengthCheck(-1, 10)
   }
 
   it should "throw when max < min" in {
-    an[IllegalArgumentException] should be thrownBy new LengthCheck(10, 5)
+    an[IllegalArgumentException] should be thrownBy LengthCheck(10, 5)
   }
 
   it should "allow min == max" in {
-    val check = new LengthCheck(5, 5)
+    val check = LengthCheck(5, 5)
     check.validate("12345") shouldBe Right("12345")
     check.validate("1234").isLeft shouldBe true
     check.validate("123456").isLeft shouldBe true
@@ -76,13 +76,13 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   // -- Error message content --
 
   it should "include character count in too-short error" in {
-    val check  = new LengthCheck(10, 100)
+    val check  = LengthCheck(10, 100)
     val result = check.validate("abc")
     result.swap.toOption.get.message should include("3 characters")
   }
 
   it should "include character count in too-long error" in {
-    val check  = new LengthCheck(1, 5)
+    val check  = LengthCheck(1, 5)
     val result = check.validate("abcdefghij")
     result.swap.toOption.get.message should include("10 characters")
     result.swap.toOption.get.message should include("maximum: 5")
@@ -91,11 +91,11 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   // -- Properties --
 
   it should "have name 'LengthCheck'" in {
-    new LengthCheck(0, 10).name shouldBe "LengthCheck"
+    LengthCheck(0, 10).name shouldBe "LengthCheck"
   }
 
   it should "include bounds in description" in {
-    val check = new LengthCheck(5, 100)
+    val check = LengthCheck(5, 100)
     check.description.get should include("5")
     check.description.get should include("100")
   }
@@ -103,7 +103,7 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   // -- Both input and output guardrail --
 
   it should "work as OutputGuardrail via transform identity" in {
-    val check = new LengthCheck(1, 100)
+    val check = LengthCheck(1, 100)
     check.transform("hello") shouldBe "hello"
   }
 
@@ -114,19 +114,19 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   // -- Whitespace splitting behavior --
 
   "ProfanityFilter" should "not detect profanity embedded in longer words" in {
-    val filter = new ProfanityFilter()
+    val filter = ProfanityFilter()
     // "badword" is in the default list, but "badwords" is a different token
     filter.validate("badwords are not matched as substrings") shouldBe
       Right("badwords are not matched as substrings")
   }
 
   it should "detect default bad words by exact token match" in {
-    val filter = new ProfanityFilter()
+    val filter = ProfanityFilter()
     filter.validate("this is inappropriate content").isLeft shouldBe true
   }
 
   it should "detect bad words regardless of position" in {
-    val filter = new ProfanityFilter()
+    val filter = ProfanityFilter()
     filter.validate("badword at the start").isLeft shouldBe true
     filter.validate("at the end badword").isLeft shouldBe true
     filter.validate("in badword the middle").isLeft shouldBe true
@@ -135,12 +135,12 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   // -- Case sensitivity --
 
   it should "detect UPPERCASE bad words in case-insensitive mode" in {
-    val filter = new ProfanityFilter()
+    val filter = ProfanityFilter()
     filter.validate("INAPPROPRIATE behavior").isLeft shouldBe true
   }
 
   it should "detect MiXeD case bad words in case-insensitive mode" in {
-    val filter = new ProfanityFilter()
+    val filter = ProfanityFilter()
     filter.validate("bAdWoRd here").isLeft shouldBe true
   }
 
@@ -154,7 +154,7 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "detect dotted and dotless Turkish I, fullwidth, accented and zero-width-split spellings" in {
-    val filter = new ProfanityFilter()
+    val filter = ProfanityFilter()
     filter.validate("İNAPPROPRIATE behavior").isLeft shouldBe true
     filter.validate("ınappropriate behavior").isLeft shouldBe true
     filter.validate("ｂａｄｗｏｒｄ here").isLeft shouldBe true
@@ -214,19 +214,19 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "split on tabs and newlines as well as spaces" in {
-    val filter = new ProfanityFilter()
+    val filter = ProfanityFilter()
     filter.validate("first\tbadword\tsecond").isLeft shouldBe true
     filter.validate("first\nbadword\nsecond").isLeft shouldBe true
   }
 
   it should "detect a bad word after leading whitespace" in {
-    val filter = new ProfanityFilter()
+    val filter = ProfanityFilter()
     // split("\\s+") yields an empty leading token; matching must still work
     filter.validate("   badword").isLeft shouldBe true
   }
 
   it should "NOT detect bad words attached to punctuation (known limitation)" in {
-    val filter = new ProfanityFilter()
+    val filter = ProfanityFilter()
     // Tokens are split on whitespace only, so trailing punctuation makes the
     // token "badword." which is not an exact match against the word list.
     filter.validate("that is a badword.") shouldBe Right("that is a badword.")
@@ -236,20 +236,20 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   // -- Clean text --
 
   it should "pass through clean text unchanged" in {
-    val filter = new ProfanityFilter()
+    val filter = ProfanityFilter()
     val input  = "This is perfectly clean and acceptable text"
     filter.validate(input) shouldBe Right(input)
   }
 
   it should "pass empty string" in {
-    val filter = new ProfanityFilter()
+    val filter = ProfanityFilter()
     filter.validate("") shouldBe Right("")
   }
 
   // -- Error message --
 
   it should "not reveal specific bad words in error message" in {
-    val filter = new ProfanityFilter()
+    val filter = ProfanityFilter()
     val result = filter.validate("this is badword text")
     result.swap.toOption.get.message should include("inappropriate content")
     (result.swap.toOption.get.message should not).include("badword")
@@ -258,15 +258,15 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   // -- Properties --
 
   it should "have name 'ProfanityFilter'" in {
-    new ProfanityFilter().name shouldBe "ProfanityFilter"
+    ProfanityFilter().name shouldBe "ProfanityFilter"
   }
 
   it should "have a description" in {
-    new ProfanityFilter().description shouldBe defined
+    ProfanityFilter().description shouldBe defined
   }
 
   it should "work as both InputGuardrail and OutputGuardrail" in {
-    val filter = new ProfanityFilter()
+    val filter = ProfanityFilter()
     filter.transform("hello") shouldBe "hello"
   }
 
@@ -278,12 +278,12 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
 
   "RegexValidator" should "match partial strings via findFirstIn" in {
     // findFirstIn finds a match anywhere, not full-match
-    val validator = new RegexValidator("[0-9]+".r)
+    val validator = RegexValidator("[0-9]+".r)
     validator.validate("abc123def") shouldBe Right("abc123def")
   }
 
   it should "fail when pattern is anchored and input doesn't fully match" in {
-    val validator = new RegexValidator("^[0-9]+$".r)
+    val validator = RegexValidator("^[0-9]+$".r)
     validator.validate("abc123").isLeft shouldBe true
   }
 
@@ -321,20 +321,17 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "support constructor with custom error message" in {
-    val validator = new RegexValidator("^[0-9]+$".r, Some("Digits required"))
+    val validator = RegexValidator("^[0-9]+$".r, "Digits required")
     val result    = validator.validate("abc")
     result.swap.toOption.get.message should include("Digits required")
   }
 
-  it should "return fallback error when constructor receives one" in {
-    val validator = new RegexValidator(
-      "^[0-9]+$".r,
-      Some("Digits required"),
-      Some("Forced fallback path")
-    )
-    val result = validator.validate("123")
+  it should "fail every text with the fallback error, not the custom message, when its pattern does not compile" in {
+    val validator = RegexValidator("(", "Digits required")
+    val result    = validator.validate("123")
     result.isLeft shouldBe true
-    result.swap.toOption.get.message should include("Forced fallback path")
+    result.swap.toOption.get.message should include("Invalid or unsafe regex pattern")
+    (result.swap.toOption.get.message should not).include("Digits required")
   }
 
   // -- Phone preset --
@@ -387,7 +384,7 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   // -- Default error message --
 
   it should "include pattern in default error message" in {
-    val validator = new RegexValidator("^test$".r)
+    val validator = RegexValidator("^test$".r)
     val result    = validator.validate("nope")
     result.swap.toOption.get.message should include("does not match pattern")
   }
@@ -395,23 +392,23 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   // -- Properties --
 
   "RegexValidator" should "have name 'RegexValidator'" in {
-    new RegexValidator("[a-z]+".r).name shouldBe "RegexValidator"
+    RegexValidator("[a-z]+".r).name shouldBe "RegexValidator"
   }
 
   it should "include pattern in description" in {
-    val validator = new RegexValidator("^[0-9]+$".r)
+    val validator = RegexValidator("^[0-9]+$".r)
     validator.description.get should include("^[0-9]+$")
   }
 
   // -- Edge cases --
 
   it should "handle empty string input" in {
-    val validator = new RegexValidator("^$".r)
+    val validator = RegexValidator("^$".r)
     validator.validate("") shouldBe Right("")
   }
 
   it should "reject empty string when pattern requires content" in {
-    val validator = new RegexValidator("^[a-z]+$".r)
+    val validator = RegexValidator("^[a-z]+$".r)
     validator.validate("").isLeft shouldBe true
   }
 

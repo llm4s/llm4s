@@ -59,10 +59,26 @@ the Stable surface. It runs its own fixtures first (`StabilityTiers.selfTest`), 
 such a leak fails the build. It reads sources, not classes, because Scala compiles `private[llm4s]` to a public
 bytecode member. It covers every module in 1.0 Scope's Frozen-at-1.0 tier (`stabilityTierModules` in `build.sbt`):
 `llm4s-core`, `llm4s-openai`, `llm4s-openai-compatible`, `llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama` and
-`llm4s-agent` ([#2778](https://github.com/llm4s/llm4s/issues/2778)). In `llm4s-agent` the agent, graph, event,
-middleware and guardrail APIs are `@Stable`; the harness, the run queue and worker (`agent.service`), encryption,
-subagent definition (`agent.delegation`), permissions, the checkpointer SPI and settings, the RAG guardrails and
-`org.llm4s.assistant` are `@Experimental`.
+`llm4s-agent` ([#2778](https://github.com/llm4s/llm4s/issues/2778)). `llm4s-agent` has a small Stable core
+([#2785](https://github.com/llm4s/llm4s/issues/2785)), so that the runtime underneath can keep improving in 1.x:
+
+| Package | `@Stable` |
+|---|---|
+| `org.llm4s.agent` | `Agent`, `AgentBuilder`, `AgentResult`, `AgentStatus`, `AgentRun`, `Handoff`, `AgentId` |
+| `org.llm4s.agent.graph` | `ThreadId`, `RunId`, `InterruptId`, `NodeId`, `TenantId`, `Principal`, `RunConfig`, `RunBudgets`, `RetentionPolicy`, `RunStatus` |
+| `org.llm4s.agent.guardrails` | `Guardrail`, `InputGuardrail`, `OutputGuardrail` |
+| `org.llm4s.agent.guardrails.builtin` | `LengthCheck`, `ProfanityFilter`, `JSONValidator`, `RegexValidator` |
+
+Everything else in the module is `@Experimental`: the graph runtime, checkpoints and the `Checkpointer` contract,
+events and streaming, middleware (`GuardrailMiddleware` included), the tool and tool-loop APIs, delegation, the
+harness, the run queue and worker (`agent.service`), encryption, metrics, the other guardrails and
+`org.llm4s.assistant`. So are the members of the Stable types that name them: on `AgentBuilder`, `withTools(ToolSet)`,
+`withMiddleware`, `withHarness`, `withSubagents`, `withDelegation`, `withMaxPromptSectionTokens`, `withRuntime`,
+`withStreaming` and `withInterruptBefore`/`After`; on `Agent`, `loop`, `delegation`, `children`, `subscribeChild`,
+`abandon`, `resume`, `startResume`, `stream`, `streamResume` and `streamRecover`; on `AgentResult`, `approve`,
+`reject`, `edit`, `reply` and `proceed`; `AgentRun.subscribe`; on `RunConfig`, `withInterruptBefore`/`After` and
+`withChildRetention`; `Guardrail.validate(value, context)`; and the `AgentStatus.Suspended` case. Streaming, human
+review and durable persistence are usable at 1.0, but not promised.
 
 The same check enforces [RFC 0004](../rfcs/#index): a public member of a `@Stable` type must not expose a
 third-party type, because freezing the signature would freeze the library behind it
@@ -110,17 +126,19 @@ a case that may grow holds one growth-safe class, and is read by name through it
 ```scala
 @Stable
 enum AgentStatus:
-  case Completed(answer: String)         // closed: exactly the answer, listed in GrowthExempted
-  case Suspended(suspension: Suspension) // may grow: Suspension is a `final case class Suspension private (...)`
+  case Completed(answer: String)                       // closed: exactly the answer, listed in GrowthExempted
+  @Experimental case Suspended(suspension: Suspension) // may grow: `final case class Suspension private (...)`
 
 status match
   case AgentStatus.Suspended(suspension) => suspension.approvals
 ```
 
-Every case with fields is on the allow-list with its reason: the wrapper as "holding only its growth-safe
-`Suspension`", a closed case (a single value, an error or outcome case whose fields are what it is, a stored form
-whose derived codec is a wire format) as what it is exactly. A case of an `@Experimental` enum, or one marked
-`@Experimental` itself, is not checked.
+Every case with fields of a `@Stable` enum is on the allow-list with its reason: a wrapper as "holding only its
+growth-safe" payload, a closed case (a single value, an error or outcome case whose fields are what it is, a stored
+form whose derived codec is a wire format) as what it is exactly. A case of an `@Experimental` enum, or one marked
+`@Experimental` itself, is not checked and has no entry: `AgentStatus.Suspended` is one
+([#2785](https://github.com/llm4s/llm4s/issues/2785)), and holds a `Suspension` all the same, so that it can be
+promoted without changing shape.
 
 `scripts/check-tier-drift.sh` (also a CI quick check, and it needs no sbt) keeps this page, the tiers in
 [1.0 Scope](v1-scope) and the lists in `build.sbt` from drifting apart: the modules that call `mimaFrozen`
@@ -157,6 +175,14 @@ no filter is needed for them. A top-level type that 1.0 Scope marks Beta or Expe
 [Tiers in the Code](#tiers-in-the-code)); anything else a frozen module contains that 1.0 Scope marks Beta or
 Experimental needs a `ProblemFilters.exclude` entry that says why. There are none yet because no baseline is
 set (see [The Baseline](#the-baseline)).
+
+An `@Experimental` *member* of a Stable type is skipped only partly, because MiMa 1.1 reads a Scala 3 member's
+annotations from TASTy, for methods alone, and by name ([#2785](https://github.com/llm4s/llm4s/issues/2785)):
+
+- an `@Experimental def` is skipped, and so is **every overload of the same name**, Stable or not;
+- an `@Experimental val` is still checked: write it as a `def`;
+- an `@Experimental` enum `case` (`AgentStatus.Suspended`) may change shape freely, but removing it is reported once,
+  as the companion's field (`MissingFieldProblem`), which needs a filter.
 
 If you find yourself importing from a Beta or Experimental package, please open an issue: it likely
 means the stable API is missing something.

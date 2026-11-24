@@ -90,8 +90,11 @@ quarter ([Support Policy](support-policy#release-cadence)).
 **0.7.0, the baseline release, in addition:**
 
 - [ ] Review `llm4s-agent`'s tiers one last time (`sbt stabilityTierCheck` covers it since
-      [#2778](https://github.com/llm4s/llm4s/issues/2778): what is `@Stable` here is what 1.0 promises), and decide the
-      Beta parts inside frozen modules ([The Baseline](api-stability#the-baseline)).
+      [#2778](https://github.com/llm4s/llm4s/issues/2778)): the `@Stable` core of
+      [#2785](https://github.com/llm4s/llm4s/issues/2785) is what 1.0 promises, everything else `@Experimental`.
+      Check that no Stable overload shares its name with an `@Experimental` one, which MiMa would skip with it
+      ([What MiMa Covers](api-stability#what-mima-covers)), and decide the Beta parts inside frozen modules
+      ([The Baseline](api-stability#the-baseline)).
 - [ ] Run `scripts/mima-dry-run.sh` on the commit to tag ([Release readiness](#release-readiness-a-mima-dry-run)).
 - [ ] After the release is on Central, set `mimaBaselineVersion = Some("0.7.0")` in a follow-up pull request
       ([Setting and bumping the baseline](api-stability#setting-and-bumping-the-baseline)), and change the pages that

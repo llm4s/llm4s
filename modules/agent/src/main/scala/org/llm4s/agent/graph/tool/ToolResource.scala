@@ -1,11 +1,11 @@
 package org.llm4s.agent.graph.tool
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 
 import java.util.Locale
 
 /** What a tool call does to a [[ToolResource]]; permission rules match on it. */
-@Stable
+@Experimental
 enum Operation:
   case Read, Write, Delete, Execute, Network, Invoke
 
@@ -20,5 +20,5 @@ enum Operation:
  * `operation`, and the `target` a permission rule's [[Glob]] matches - a tool name, a path or a URL.
  * A tool that declares none touches `ToolResource(Operation.Invoke, <its name>)`.
  */
-@Stable
+@Experimental
 final case class ToolResource(operation: Operation, target: String)

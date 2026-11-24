@@ -22,22 +22,19 @@ The code is
 ## Guardrails
 
 A guardrail checks text, or rewrites it, at the edge of a run. Input guardrails run on the customer's message before
-the model sees it; output guardrails run on the final answer before the customer does. They are middleware, set once
-on the agent:
+the model sees it; output guardrails run on the final answer before the customer does. They are set once on the
+agent, with the builder:
 
 ```scala
 import org.llm4s.agent.Agent
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.agent.guardrails.builtin.{ LengthCheck, PIIMasker, PromptInjectionDetector }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 
-val guardrails: GuardrailMiddleware =
-  new GuardrailMiddleware(
-    input = Seq(LengthCheck(1, 2000), PromptInjectionDetector(), PIIMasker()),
-    output = Seq(PIIMasker())
-  )
+val inputGuardrails: Seq[InputGuardrail]   = Seq(LengthCheck(1, 2000), PromptInjectionDetector(), PIIMasker())
+val outputGuardrails: Seq[OutputGuardrail] = Seq(PIIMasker())
 
 def safeAgent(client: LLMClient): Result[Agent] =
   for {
@@ -48,7 +45,8 @@ def safeAgent(client: LLMClient): Result[Agent] =
       .builder("support", client)
       .withSystemPrompt("You are the support assistant of Acme Shop. Use the tools; never guess an order's status.")
       .withTools(registry)
-      .withMiddleware(guardrails)
+      .withInputGuardrails(inputGuardrails*)
+      .withOutputGuardrails(outputGuardrails*)
       .build()
   } yield agent
 ```

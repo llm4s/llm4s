@@ -196,18 +196,13 @@ Both cover `SSN`, `CreditCard`, `Email` and `Phone` by default; `PIIType.all` ad
 
 ```scala
 import org.llm4s.agent.Agent
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin.{ PIIDetector, PIIMasker }
 import org.llm4s.agent.guardrails.patterns.PIIPatterns.PIIType
 
 val guarded = Agent
   .builder("support", client)
-  .withMiddleware(
-    GuardrailMiddleware(
-      input = Seq(PIIMasker(PIIType.all)), // mask before the model sees the query
-      output = Seq(PIIDetector())          // block an answer that still contains PII
-    )
-  )
+  .withInputGuardrails(PIIMasker(PIIType.all)) // mask before the model sees the query
+  .withOutputGuardrails(PIIDetector())         // block an answer that still contains PII
   .build()
 ```
 

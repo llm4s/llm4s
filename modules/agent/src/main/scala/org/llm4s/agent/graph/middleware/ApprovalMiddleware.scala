@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.graph.tool.{ ToolContext, ToolOutcome }
 
 /**
@@ -8,7 +8,7 @@ import org.llm4s.agent.graph.tool.{ ToolContext, ToolOutcome }
  * let the call through; a call that is already approved always passes. A tool's own approval
  * request is unaffected.
  */
-@Stable
+@Experimental
 final class ApprovalMiddleware(
   requires: ToolCallRequest => Option[String],
   val id: MiddlewareId = MiddlewareId("approval")
@@ -18,6 +18,7 @@ final class ApprovalMiddleware(
     if context.approved then next()
     else requires(request).fold(next())(ToolOutcome.NeedsApproval(_))
 
+@Experimental
 object ApprovalMiddleware:
 
   /** Asks for every tool whose hints are not `readOnly`. */

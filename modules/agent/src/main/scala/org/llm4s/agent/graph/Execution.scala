@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.LLMError
 import upickle.default.ReadWriter
 
@@ -9,7 +9,7 @@ import upickle.default.ReadWriter
  * join activations and any parked continuations. Advance it with [[CompiledGraph.step]]; answer
  * its interrupts with [[CompiledGraph.resume]]; persist it with [[CompiledGraph.snapshot]].
  */
-@Stable
+@Experimental
 final class Execution private[graph] (
   private[graph] val owner: GraphOwner,
   val superstep: Int,
@@ -184,7 +184,7 @@ final private[graph] case class DynamicActivation(
  * The outcome of a run. Its cases are closed: each is exactly the thread's [[ThreadState]] and what the run ended
  * with, and anything more about the thread goes on `ThreadState`.
  */
-@Stable
+@Experimental
 enum RunResult[+O]:
   case Completed[+O](state: ThreadState, output: O, supersteps: Int) extends RunResult[O]
 
@@ -200,7 +200,7 @@ enum RunResult[+O]:
   case Failed(state: ThreadState, error: LLMError) extends RunResult[Nothing]
 
 /** The outcome of one superstep. */
-@Stable
+@Experimental
 enum Step[+O]:
   case Next(execution: Execution)     extends Step[Nothing]
   case Done[+O](result: RunResult[O]) extends Step[O]
@@ -215,7 +215,7 @@ enum Step[+O]:
  * [[CompiledGraph.restore]] compares with its own; `None` on a snapshot written before shapes were recorded (#1934),
  * which is matched by `fingerprint` alone.
  */
-@Stable
+@Experimental
 final case class GraphSnapshot private (
   graphId: String,
   graphVersion: String,
@@ -254,6 +254,7 @@ final case class GraphSnapshot private (
       )
       .toSet ++ parked.map(p => p.originTask -> p.originLineage)
 
+@Experimental
 object GraphSnapshot:
 
   def apply(

@@ -901,19 +901,14 @@ for {
 
 ### [Guardrails](guardrails)
 
-Validate inputs and outputs for safety. Guardrails are middleware on the agent:
+Validate inputs and outputs for safety. Guardrails are set on the agent:
 
 ```scala
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 
 val agent = Agent.builder("assistant", client)
-  .withMiddleware(
-    new GuardrailMiddleware(
-      input = Seq(new LengthCheck(1, 10000), new ProfanityFilter()),
-      output = Seq(new JSONValidator())
-    )
-  )
+  .withInputGuardrails(LengthCheck(1, 10000), ProfanityFilter())
+  .withOutputGuardrails(JSONValidator())
   .build()
 ```
 

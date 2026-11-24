@@ -15,6 +15,9 @@ Pause an agent's turn for a person: to approve a tool call, answer a question, r
 look at what a step did before the next one runs.
 {: .fs-6 .fw-300 }
 
+{: .note }
+> **Experimental at 1.0.** The human-review API on this page (`AgentStatus.Suspended`, `resume`, `startResume`, `approve`, `reject`, `edit`, `reply`, `proceed`, breakpoints and the approval middleware) is `@Experimental`: usable, but outside the 1.x compatibility promise, so it can change in a minor release, with a migration note. The stable core of `llm4s-agent` - building an agent, running, continuing and recovering a thread, handoffs and guardrails - is listed in [API Stability](../../reference/api-stability#tiers-in-the-code).
+
 ## Table of contents
 {: .no_toc .text-delta }
 

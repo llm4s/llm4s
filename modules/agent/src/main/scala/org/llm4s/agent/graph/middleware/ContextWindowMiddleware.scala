@@ -1,20 +1,20 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.{ ContextPruning, ContextWindowConfig }
 import org.llm4s.llmconnect.model.{ Message, MessageRole }
 import org.llm4s.types.Result
 
 /**
  * Prunes the messages each model call is sent to `config`, leaving the stored history whole. The
- * system prompt, which reaches the model call first, is kept out of pruning and stays first; it
+ * system prompt is not one of the messages (`ModelRequest.systemPrompt`), so it is never pruned and
  * is not counted against `maxMessages` or `maxTokens`. A tool call is never sent without its
  * results, nor a result without its call; the current turn (from the latest user message) is
  * never pruned - the strategy runs on the history before it, with the budget the turn leaves - and
  * the pruned history starts with a user message, so a send may exceed the budget when the current
  * turn alone is larger.
  */
-@Stable
+@Experimental
 final class ContextWindowMiddleware(
   config: ContextWindowConfig,
   tokenCounter: Message => Int = ContextPruning.defaultTokenCounter,
@@ -24,5 +24,6 @@ final class ContextWindowMiddleware(
   override def wrapModelCall(request: ModelRequest, context: ModelContext)(
     next: ModelRequest => Result[ModelResponse]
   ): Result[ModelResponse] =
+    // a system message another wrapper put among the messages is kept as the prompt was, first and unpruned
     val (system, others) = request.messages.partition(_.role == MessageRole.System)
     next(request.withMessages(system ++ ContextPruning.prune(others, config, tokenCounter).toVector))

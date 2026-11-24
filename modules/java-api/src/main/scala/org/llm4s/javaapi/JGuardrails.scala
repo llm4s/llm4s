@@ -52,14 +52,14 @@ object JGuardrails {
     guardrail(
       if (min < 0) Left(ValidationError.invalid("min", s"must be at least 0, was $min"))
       else if (max < min) Left(ValidationError.invalid("max", s"must be at least min ($min), was $max"))
-      else Right(new LengthCheck(min, max))
+      else Right(LengthCheck(min, max))
     )
 
   /**
    * Text that contains no word of the built-in word list, compared without regard to case. The list is deliberately
    * minimal: use it as an example of a word filter, not as a production profanity list.
    */
-  def profanity(): JGuardrail = guardrail(Right(new ProfanityFilter()))
+  def profanity(): JGuardrail = guardrail(Right(ProfanityFilter()))
 
   /** Text that contains a match of `pattern`, in `java.util.regex` syntax; an unsafe or invalid pattern fails every text. */
   def regex(pattern: String): JGuardrail =
@@ -73,7 +73,7 @@ object JGuardrails {
     } yield RegexValidator(p, m))
 
   /** An answer that is valid JSON. It checks answers only, so it goes in `outputGuardrails`. */
-  def json(): JOutputGuardrail = new JOutputGuardrail(FacadeToken.INSTANCE, Right(new JSONValidator()))
+  def json(): JOutputGuardrail = new JOutputGuardrail(FacadeToken.INSTANCE, Right(JSONValidator()))
 
   private def guardrail(g: Result[InputGuardrail & OutputGuardrail]): JGuardrail =
     new JGuardrail(FacadeToken.INSTANCE, g)

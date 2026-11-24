@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.agent.graph.middleware.ModelContext
 import org.llm4s.types.Result
 
@@ -35,6 +35,7 @@ trait Guardrail[A] {
    * and on the run's terminal event even when the task fails (design §4.22); one that combines guardrails passes
    * `context` on to each. `GuardrailMiddleware` and `GuardrailReviewMiddleware` call this form.
    */
+  @Experimental
   def validate(value: A, @unused context: ModelContext): Result[A] = validate(value)
 
   /**

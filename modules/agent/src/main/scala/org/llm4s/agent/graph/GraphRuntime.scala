@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.model.UsageSummary
@@ -24,7 +24,7 @@ import scala.util.control.Exception.catching
  * runs anything, and makes everything durable before it returns - so a returned
  * [[RunResult.Suspended]] has been persisted and can be resumed by another process.
  */
-@Stable
+@Experimental
 enum Durability:
   /** Each task result and superstep is committed before the run moves on. */
   case Sync
@@ -45,6 +45,7 @@ enum Durability:
   case OnExit
 
 /** Runs compiled graphs on durable threads; see [[GraphRuntime]]. */
+@Experimental
 object GraphRuntime:
   private val logger = LoggerFactory.getLogger(classOf[GraphRuntime])
 
@@ -224,7 +225,7 @@ object GraphRuntime:
  * [[StreamEvent.Live]] and [[StreamEvent.LiveGap]], which have no `seq`, and treats [[StreamEvent.Disconnected]] as the
  * end of the subscription, not as a record: it carries `lastSeq` and a reason.
  */
-@Stable
+@Experimental
 final class GraphRuntime(
   checkpointer: Checkpointer,
   clock: Clock = Clock.systemUTC(),

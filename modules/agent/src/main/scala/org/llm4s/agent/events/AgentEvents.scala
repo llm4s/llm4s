@@ -1,6 +1,6 @@
 package org.llm4s.agent.events
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.graph.EventType
 
 /**
@@ -19,7 +19,7 @@ import org.llm4s.agent.graph.EventType
  * [[GuardrailBlocked]]. Live (current subscribers only): [[ModelCallStarted]], [[TextDelta]],
  * [[ThinkingDelta]], [[ToolCallStarted]], [[ToolCallResult]].
  */
-@Stable
+@Experimental
 object AgentEvents:
   val ModelCallCompleted: EventType[org.llm4s.agent.events.ModelCallCompleted] =
     EventType("agent.model_call_completed", 1)

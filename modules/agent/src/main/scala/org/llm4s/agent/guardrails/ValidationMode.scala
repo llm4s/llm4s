@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 
 /**
  * Mode for combining multiple guardrails.
@@ -8,9 +8,10 @@ import org.llm4s.annotation.Stable
  * Determines how validation results are combined when multiple
  * guardrails are applied to the same value.
  */
-@Stable
+@Experimental
 sealed trait ValidationMode
 
+@Experimental
 object ValidationMode {
 
   /**

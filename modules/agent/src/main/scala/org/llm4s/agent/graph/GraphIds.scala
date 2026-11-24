@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.{ Experimental, Stable }
 
 /** Stable identifier of a node in a compiled graph; persisted in snapshots. */
 opaque type NodeId = String
@@ -19,17 +19,17 @@ object NodeId:
   def apply(value: String): NodeId         = value
   extension (id: NodeId) def value: String = id
 
-@Stable
+@Experimental
 object TaskId:
   def apply(value: String): TaskId         = value
   extension (id: TaskId) def value: String = id
 
-@Stable
+@Experimental
 object JoinId:
   def apply(value: String): JoinId         = value
   extension (id: JoinId) def value: String = id
 
-@Stable
+@Experimental
 object StateKeyId:
   def apply(value: String): StateKeyId         = value
   extension (id: StateKeyId) def value: String = id
@@ -55,7 +55,7 @@ object ThreadId:
    * The id's shape decides nothing: a thread is a child thread only when its checkpoint records a [[RunOrigin]], so a
    * caller naming a top-level thread like this gets a top-level thread.
    */
-  def child(parent: ThreadId, agent: org.llm4s.agent.AgentId, call: IdempotencyKey): ThreadId =
+  private[llm4s] def child(parent: ThreadId, agent: org.llm4s.agent.AgentId, call: IdempotencyKey): ThreadId =
     val digest = KeyDigest.of(Seq("llm4s-child-v1", parent, call.value, agent.value)).take(24)
     s"$parent/~task/${agent.value}/$digest"
 
@@ -99,7 +99,7 @@ object Principal:
 /** The provider's identifier of one tool call; unique within a conversation. */
 opaque type ToolCallId = String
 
-@Stable
+@Experimental
 object ToolCallId:
   def apply(value: String): ToolCallId         = value
   extension (id: ToolCallId) def value: String = id
@@ -118,7 +118,7 @@ object ToolCallId:
  */
 opaque type IdempotencyKey = String
 
-@Stable
+@Experimental
 object IdempotencyKey:
 
   /** A key with this exact value, such as one read back from an external system's log. */
@@ -183,7 +183,7 @@ object IdempotencyKey:
 /** The name of a tool, as the model calls it. */
 opaque type ToolName = String
 
-@Stable
+@Experimental
 object ToolName:
   def apply(value: String): ToolName           = value
   extension (name: ToolName) def value: String = name
@@ -196,7 +196,7 @@ object ToolName:
  */
 opaque type FencingToken = Long
 
-@Stable
+@Experimental
 object FencingToken:
   def apply(value: Long): FencingToken            = value
   extension (token: FencingToken) def value: Long = token

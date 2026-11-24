@@ -22,7 +22,7 @@ class MiddlewarePlacementSpec extends AnyFlatSpec with Matchers with EitherValue
   private def summarizer = new SummarizationMiddleware(SummaryTrigger.Messages(10), compressor = compressor)
 
   /** A middleware that must wrap every `Inner`, as `kind` says. */
-  final private class Outer(name: String, kind: String => Placement, after: Set[MiddlewareId] = Set.empty)
+  final private class Outer(name: String, kind: String => Placement, after: Set[MiddlewareRef] = Set.empty)
       extends AgentMiddleware {
     val id                 = MiddlewareId(name)
     override def runsAfter = after
@@ -31,7 +31,7 @@ class MiddlewarePlacementSpec extends AnyFlatSpec with Matchers with EitherValue
       case _        => None
     }
   }
-  final private class Inner(name: String, before: Set[MiddlewareId] = Set.empty) extends AgentMiddleware {
+  final private class Inner(name: String, before: Set[MiddlewareRef] = Set.empty) extends AgentMiddleware {
     val id                  = MiddlewareId(name)
     override def runsBefore = before
   }
@@ -49,11 +49,11 @@ class MiddlewarePlacementSpec extends AnyFlatSpec with Matchers with EitherValue
 
   it should "check the order runsBefore and runsAfter arranged, not the registration order" in {
     // registered outer first, but its runsAfter arranges it inside: refused
-    val arrangedInside = new Outer("out", Placement.Outside(_), after = Set(MiddlewareId("in")))
+    val arrangedInside = new Outer("out", Placement.Outside(_), after = Set(MiddlewareRef(MiddlewareId("in"))))
     MiddlewareStack.of(arrangedInside, new Inner("in")).isLeft shouldBe true
     // registered inner first, but its runsBefore keeps it outside: refused
     MiddlewareStack
-      .of(new Inner("in", before = Set(MiddlewareId("out"))), new Outer("out", Placement.Outside(_)))
+      .of(new Inner("in", before = Set(MiddlewareRef(MiddlewareId("out")))), new Outer("out", Placement.Outside(_)))
       .isLeft shouldBe
       true
     // registered inner first, and the outer arranged outside it by its runsAfter naming nothing: refused, registration
@@ -62,7 +62,7 @@ class MiddlewarePlacementSpec extends AnyFlatSpec with Matchers with EitherValue
     // registered inner first, with the outer arranged outside it by the inner's runsAfter: accepted
     final class Placed extends AgentMiddleware {
       val id                 = MiddlewareId("in")
-      override def runsAfter = Set(MiddlewareId("out"))
+      override def runsAfter = Set(MiddlewareRef(MiddlewareId("out")))
     }
     MiddlewareStack.of(new Placed, new Outer("out", Placement.Outside(_))).value.ordered.map(_.id.value) shouldBe
       Vector("out", "in")

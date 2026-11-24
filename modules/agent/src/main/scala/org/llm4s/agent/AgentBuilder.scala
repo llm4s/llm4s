@@ -2,7 +2,14 @@ package org.llm4s.agent
 
 import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.agent.graph.{ BreakpointPhase, GraphRuntime, NodeId, RetentionPolicy }
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, MiddlewareStack, PermissionMiddleware }
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  GuardrailMiddleware,
+  MiddlewareId,
+  MiddlewareStack,
+  PermissionMiddleware
+}
+import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolArgumentValidator, ToolSet }
 import org.llm4s.agent.graph.toolloop.{ LoopAgent, LoopHandoff, ModelStep, OutputFormat, ToolLoop }
 import org.llm4s.agent.delegation.{
@@ -60,7 +67,9 @@ final class AgentBuilder private (
   private val harness: Option[HarnessProfile],
   private val subagents: Vector[TypedAgent[?, ?]],
   private val delegation: Option[DelegationConfig],
-  private val inherited: AgentBuilder.Inherited
+  private val inherited: AgentBuilder.Inherited,
+  inputGuardrails: Vector[InputGuardrail],
+  outputGuardrails: Vector[OutputGuardrail]
 ):
 
   private def copy(
@@ -81,7 +90,9 @@ final class AgentBuilder private (
     harness: Option[HarnessProfile] = harness,
     subagents: Vector[TypedAgent[?, ?]] = subagents,
     delegation: Option[DelegationConfig] = delegation,
-    inherited: AgentBuilder.Inherited = inherited
+    inherited: AgentBuilder.Inherited = inherited,
+    inputGuardrails: Vector[InputGuardrail] = inputGuardrails,
+    outputGuardrails: Vector[OutputGuardrail] = outputGuardrails
   ): AgentBuilder =
     new AgentBuilder(
       id,
@@ -103,10 +114,13 @@ final class AgentBuilder private (
       harness,
       subagents,
       delegation,
-      inherited
+      inherited,
+      inputGuardrails,
+      outputGuardrails
     )
 
   /** The agent's tools, replacing any set before, checked with the set's validator. */
+  @Experimental
   def withTools(tools: ToolSet): AgentBuilder = copy(tools = tools.tools, validator = tools.validator)
 
   /**
@@ -129,12 +143,42 @@ final class AgentBuilder private (
    * and its `afterAgent` on every final answer, after the answering agent's own - so a
    * [[org.llm4s.agent.graph.middleware.GuardrailMiddleware]] on the root still applies after a
    * handoff. A handoff target's boundary hooks apply only while it is active, and model and tool
-   * wrappers (`wrapModelCall`, `wrapToolCall`) only to the agent they are given to.
+   * wrappers (`wrapModelCall`, `wrapToolCall`) only to the agent they are given to. [[build]] refuses a middleware
+   * whose id the agent uses itself (`MiddlewareId.reserved`: `agent-guardrails`, `delegation`, ...).
    */
+  @Experimental
   def withMiddleware(middleware: AgentMiddleware*): AgentBuilder = copy(middleware = this.middleware ++ middleware)
 
   /** Appends `handoffs` to the agent's handoffs, in order. */
   def withHandoffs(handoffs: Handoff*): AgentBuilder = copy(handoffs = this.handoffs ++ handoffs)
+
+  /**
+   * Appends `guardrails` to the checks every turn's query goes through before the model sees it, in order; a second
+   * call adds to the first. A guardrail that fails ends the turn `AgentStatus.Blocked(name, reason)` and the turn
+   * stores nothing; one that transforms the query passes its result to the next. On the root agent they guard the
+   * whole family, as a root `GuardrailMiddleware` does: they run on every turn's query, whichever agent is active.
+   *
+   * The input and output guardrails set here run as one `GuardrailMiddleware` with the id `agent-guardrails`, innermost
+   * in this agent's stack, closest to the model: after every middleware given to [[withMiddleware]] (and a harness's),
+   * so its input checks run after their `beforeAgent`s and its output checks before their `afterAgent`s. A middleware
+   * that must not see a blocked answer, such as a semantic memory, so works with them as it is. A
+   * `GuardrailMiddleware` added with `withMiddleware` still runs, in its own place, outside these, so both apply. For
+   * another placement or a constraint on the order, use `withMiddleware(new GuardrailMiddleware(...))`, which is
+   * `@Experimental`.
+   */
+  @varargs
+  def withInputGuardrails(guardrails: InputGuardrail*): AgentBuilder =
+    copy(inputGuardrails = inputGuardrails ++ guardrails)
+
+  /**
+   * Appends `guardrails` to the checks every final answer goes through, in order; a second call adds to the first. A
+   * guardrail that fails ends the turn `AgentStatus.Blocked(name, reason)` and the turn - query, tool calls and
+   * answer - is not kept; one that transforms the answer passes its result to the next, and the last result is the
+   * answer stored. They run as described at [[withInputGuardrails]].
+   */
+  @varargs
+  def withOutputGuardrails(guardrails: OutputGuardrail*): AgentBuilder =
+    copy(outputGuardrails = outputGuardrails ++ guardrails)
 
   /**
    * The response format of this agent's answers (design 4.26): `schema`, rendered strict, replacing any set
@@ -194,6 +238,7 @@ final class AgentBuilder private (
    * The most every middleware's prompt sections may add to one model request together, at least 1 and 8192 by
    * default, estimated at four characters a token. A request over it fails the run, naming each section's size.
    */
+  @Experimental
   def withMaxPromptSectionTokens(n: Int): AgentBuilder = copy(maxPromptSectionTokens = n)
 
   /**
@@ -201,6 +246,7 @@ final class AgentBuilder private (
    * [[build]]. A runtime keeps every thread - a one-shot [[Agent.run]]'s too - until
    * [[Agent.forget]] removes it.
    */
+  @Experimental
   def withRuntime(runtime: GraphRuntime): AgentBuilder = copy(runtime = Some(runtime))
 
   /**
@@ -215,6 +261,7 @@ final class AgentBuilder private (
    * It changes nothing stored, so it is not part of the graph's version: a thread runs on with
    * streaming switched on or off.
    */
+  @Experimental
   def withStreaming(): AgentBuilder = copy(streaming = true)
 
   /**
@@ -226,6 +273,7 @@ final class AgentBuilder private (
    * after an approval or a question is not held before again: the reviewer has just seen it. Java and
    * Kotlin call it with plain arguments: `withInterruptBefore(AgentNode.valueOf("Tool"))`.
    */
+  @Experimental
   @varargs
   def withInterruptBefore(nodes: AgentNode*): AgentBuilder = copy(interruptBefore = interruptBefore ++ nodes)
 
@@ -237,6 +285,7 @@ final class AgentBuilder private (
    * release replays the held routes in a superstep of its own, which counts against
    * `RunBudgets.maxSupersteps`. See [[withInterruptBefore]].
    */
+  @Experimental
   @varargs
   def withInterruptAfter(nodes: AgentNode*): AgentBuilder = copy(interruptAfter = interruptAfter ++ nodes)
 
@@ -368,10 +417,34 @@ final class AgentBuilder private (
     nodes.flatMap(loop.breakpointNodes(AgentId.unsafe(id), _, phase))
 
   /**
+   * The middleware this builder was given: those of [[withMiddleware]], then the guardrails of [[withInputGuardrails]]
+   * and [[withOutputGuardrails]] as one `GuardrailMiddleware`, innermost. One instance per builder, as `effective`'s.
+   */
+  private lazy val ownMiddleware: Vector[AgentMiddleware] =
+    middleware ++ Option
+      .when(inputGuardrails.nonEmpty || outputGuardrails.nonEmpty)(
+        new GuardrailMiddleware(inputGuardrails, outputGuardrails, AgentBuilder.GuardrailsId)
+      )
+      .toVector
+
+  /**
    * The tools, middleware and prompt this agent runs with, its harness's included, and the retention its harness
    * sets; assembled once per builder, so its middleware are one set of instances however often it is built.
    */
   private lazy val effective: Result[AgentBuilder.Effective] =
+    // an id the agent uses itself is refused by name, whether or not it installs its own middleware under it (#2795)
+    // (the agent's own middleware classes are private to llm4s, so only the library can have passed one in)
+    val users = middleware.filterNot(m => m.isInstanceOf[DelegationMiddleware] || m.isInstanceOf[AncestorPermissions])
+    val reserved = users.map(_.id).distinct.flatMap { used =>
+      MiddlewareId.reserved.get(used).map { purpose =>
+        s"agent '$id': middleware id '${used.value}' is reserved for $purpose: give your middleware another id"
+      }
+    }
+    if reserved.nonEmpty then Left(ValidationError("middleware stack", reserved.toList))
+    else installed
+
+  /** [[effective]], once the middleware given to this builder are known to use no reserved id. */
+  private def installed: Result[AgentBuilder.Effective] =
     // a subagent's: every ancestor's permission rules outermost (design 4.45), then the parent middleware it was granted,
     // outside its harness's and its own; and its granted tools after its own
     // the guard also reads the agent's own permission rules, so a call they deny is denied before an ancestor asks
@@ -380,7 +453,7 @@ final class AgentBuilder private (
       Option.when(inherited.ancestors.nonEmpty)(new AncestorPermissions(inherited.ancestors, ownRules)).toVector
     harness match
       case None =>
-        val stack = ancestors(middleware) ++ inherited.middleware ++ middleware
+        val stack = ancestors(ownMiddleware) ++ inherited.middleware ++ ownMiddleware
         Right(
           AgentBuilder.Effective(
             tools ++ inherited.tools,
@@ -411,11 +484,11 @@ final class AgentBuilder private (
           profile.assembled.map { h =>
             val allTools = h.tools ++ tools ++ inherited.tools
             // inside the harness's permissions and outside its other middleware (design 4.48)
-            val outer = ancestors(h.middleware ++ middleware) ++ inherited.middleware ++
+            val outer = ancestors(h.middleware ++ ownMiddleware) ++ inherited.middleware ++
               h.middleware.takeWhile(_.isInstanceOf[PermissionMiddleware])
             AgentBuilder.Effective(
               allTools,
-              ancestors(h.middleware ++ middleware) ++ inherited.middleware ++ h.middleware ++ middleware,
+              ancestors(h.middleware ++ ownMiddleware) ++ inherited.middleware ++ h.middleware ++ ownMiddleware,
               Some(h.systemPrompt),
               Some(h.retention),
               // the general-purpose subagent's grant is computed from this agent's actual tools
@@ -489,11 +562,11 @@ final class AgentBuilder private (
     val installed = effective.getOrElse(
       AgentBuilder.Effective(
         tools,
-        middleware,
+        ownMiddleware,
         systemPrompt,
         None,
         subagents,
-        middleware.size
+        ownMiddleware.size
       )
     )
     val settings = ujson.Obj(
@@ -536,6 +609,9 @@ final class AgentBuilder private (
 
 object AgentBuilder:
 
+  /** The id of the `GuardrailMiddleware` that `withInputGuardrails` and `withOutputGuardrails` install. */
+  private[agent] val GuardrailsId: MiddlewareId = MiddlewareId.AgentGuardrails
+
   private[agent] def apply(id: String, client: LLMClient): AgentBuilder =
     new AgentBuilder(
       id,
@@ -557,7 +633,9 @@ object AgentBuilder:
       harness = None,
       subagents = Vector.empty,
       delegation = None,
-      inherited = Inherited.root
+      inherited = Inherited.root,
+      inputGuardrails = Vector.empty,
+      outputGuardrails = Vector.empty
     )
 
   /** A stand-in for a task tool of `spec`, for a plan's inventory only: it is never run. */

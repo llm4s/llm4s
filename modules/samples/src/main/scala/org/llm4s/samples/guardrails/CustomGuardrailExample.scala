@@ -1,7 +1,6 @@
 package org.llm4s.samples.guardrails
 
 import org.llm4s.agent.{ Agent, AgentStatus }
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.InputGuardrail
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ValidationError
@@ -65,7 +64,7 @@ object CustomGuardrailExample extends App {
     // Run with custom guardrail
     agent <- Agent
       .builder("custom-guardrail", client)
-      .withMiddleware(GuardrailMiddleware(Seq(customGuardrail), Seq.empty))
+      .withInputGuardrails(customGuardrail)
       .build()
     state <- agent.run("Tell me about Scala programming language features")
   } yield state
@@ -99,7 +98,7 @@ object CustomGuardrailExample extends App {
     customGuardrail = new KeywordRequirementGuardrail(Set("scala", "programming"))
     agent <- Agent
       .builder("custom-guardrail-missing", client)
-      .withMiddleware(GuardrailMiddleware(Seq(customGuardrail), Seq.empty))
+      .withInputGuardrails(customGuardrail)
       .build()
 
     // This should be blocked - doesn't contain required keywords

@@ -346,7 +346,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   "LLM guardrails" should "compose with function-based guardrails" in {
     val mockClient   = new ScoringJudgeClient("0.9")
     val llmGuardrail = LLMSafetyGuardrail(mockClient)
-    val lengthCheck  = new LengthCheck(1, 1000)
+    val lengthCheck  = LengthCheck(1, 1000)
 
     val composite = CompositeGuardrail.all(Seq(lengthCheck, llmGuardrail))
 
@@ -357,7 +357,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
   it should "fail composite if any guardrail fails" in {
     val mockClient   = new ScoringJudgeClient("0.2") // LLM says unsafe
     val llmGuardrail = LLMSafetyGuardrail(mockClient)
-    val lengthCheck  = new LengthCheck(1, 1000)      // Length is fine
+    val lengthCheck  = LengthCheck(1, 1000)          // Length is fine
 
     val composite = CompositeGuardrail.all(Seq(lengthCheck, llmGuardrail))
 

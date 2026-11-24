@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory
 @Stable
 final class Agent private[agent] (
   val id: AgentId,
-  val loop: ToolLoop,
+  toolLoop: ToolLoop,
   private[agent] val runtime: GraphRuntime,
   tracing: Option[Tracing],
   interruptBefore: Set[NodeId] = Set.empty,
@@ -57,6 +57,13 @@ final class Agent private[agent] (
    */
   @Experimental
   def delegation: DelegationPlan = delegationPlan
+
+  /**
+   * The compiled model/tool loop: its graph (`loop.graph`, to restore a checkpoint's state or read the graph's
+   * version) and the nodes each agent of the family runs. Internals of the runtime, so `@Experimental`.
+   */
+  @Experimental
+  def loop: ToolLoop = toolLoop
 
   /**
    * `config` with the agent's static breakpoints ([[AgentBuilder.withInterruptBefore]],
@@ -181,6 +188,7 @@ final class Agent private[agent] (
    * child's own history, checkpoints and events through the runtime by its id; a child thread cannot be run, resumed,
    * forked, updated or forgotten directly (`GraphError.ChildThread`): forgetting its parent forgets it.
    */
+  @Experimental
   def children(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Vector[ChildThread]] =
     @scala.annotation.tailrec
     def pages(after: Option[ThreadId], found: Vector[ChildThread]): Result[Vector[ChildThread]] =
@@ -199,6 +207,7 @@ final class Agent private[agent] (
    * what a parent's merged stream reported as a gap (`Nested(child, LiveGap(0))`). The subscription is the thread's:
    * cancel it when done.
    */
+  @Experimental
   def subscribeChild(ref: ChildRef, afterSeq: Long = 0L, config: RunConfig = RunConfig())(
     listener: StreamEvent => Unit
   ): Result[Subscription] =
@@ -245,6 +254,7 @@ final class Agent private[agent] (
    * by the next worker to take it, `EntryOutcome.Failed(FailureReason.Abandoned)`, with nothing run again - also when
    * the thread has taken other turns in between - and the entries queued behind it on the thread run after it.
    */
+  @Experimental
   def abandon(
     threadId: ThreadId,
     reason: String = Agent.AbandonedResult,
@@ -272,6 +282,7 @@ final class Agent private[agent] (
    * grouped by the parent interrupt they go through and reach the child when its `task` call resumes (design 4.46).
    * A composite id that is not pending is refused (`GraphError.InvalidResume`), as any other interrupt is.
    */
+  @Experimental
   def resume(
     threadId: ThreadId,
     answers: Map[InterruptId, ujson.Value],
@@ -280,6 +291,7 @@ final class Agent private[agent] (
     blocking(startResume(threadId, answers, config))
 
   /** [[resume]], returning at once with the running turn - to cancel it, or to await its result. */
+  @Experimental
   def startResume(
     threadId: ThreadId,
     answers: Map[InterruptId, ujson.Value],
@@ -348,6 +360,7 @@ final class Agent private[agent] (
    * `StreamEvent.Nested(child, event)` after the turn's `SubagentEvents.TaskStarted` for it - a grandchild's nested
    * twice - in the subscription's live slots, so an overflow is a `LiveGap`. Match them with `EventHandlers.onChild`.
    */
+  @Experimental
   def stream(
     threadId: ThreadId,
     query: String,
@@ -360,6 +373,7 @@ final class Agent private[agent] (
     startWith(threadId, query, config, history, Some(Listening(listener, NoEnd, drain = true, nested)))
 
   /** [[startResume]] with `listener` subscribed first; see [[stream]]. */
+  @Experimental
   def streamResume(
     threadId: ThreadId,
     answers: Map[InterruptId, ujson.Value],
@@ -371,6 +385,7 @@ final class Agent private[agent] (
     resumeWith(threadId, answers, config, Listening(listener, NoEnd, drain = true, nested))
 
   /** [[startRecover]] with `listener` subscribed first; see [[stream]]. */
+  @Experimental
   def streamRecover(threadId: ThreadId, config: RunConfig = RunConfig(), nested: Boolean = false)(
     listener: StreamEvent => Unit
   ): Result[AgentRun] =

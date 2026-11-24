@@ -92,13 +92,13 @@ class GrowthProneTypesSpec extends AnyFlatSpec with Matchers {
     request.toolName shouldBe ToolName("search")
   }
 
-  it should "change one field per setter" in {
-    val other   = ToolCall("call-2", "lookup", ujson.Obj())
+  it should "be read-only: built whole, with the tool's default resource when it is given none" in {
     val request = ToolCallRequest(spec, call)
 
-    request.withCall(other).toolCallId shouldBe ToolCallId("call-2")
-    request.withSpec(spec).toolCallId shouldBe ToolCallId("call-1")
     request.call shouldBe call
+    request.spec shouldBe spec
+    request.resources shouldBe Vector(spec.defaultResource)
+    ToolCallRequest(spec, call, Vector.empty) shouldBe request
   }
 
   it should "have no public constructor and no public copy" in {

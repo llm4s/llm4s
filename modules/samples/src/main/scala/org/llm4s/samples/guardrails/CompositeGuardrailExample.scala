@@ -1,7 +1,6 @@
 package org.llm4s.samples.guardrails
 
 import org.llm4s.agent.{ Agent, AgentStatus }
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails._
 import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
@@ -25,7 +24,7 @@ object CompositeGuardrailExample extends App {
 
   logger.info("=== Composite Guardrail Example ===")
 
-  // A composite is a `Guardrail[String]`, not an `InputGuardrail`, and `GuardrailMiddleware` takes input
+  // A composite is a `Guardrail[String]`, not an `InputGuardrail`, and `withInputGuardrails` takes input
   // guardrails: `InputGuardrail.from` adapts it (a cast would throw a ClassCastException when the agent is built).
 
   // A blocked input is a successful run whose status is Blocked, not a Left; so is any run that
@@ -40,8 +39,8 @@ object CompositeGuardrailExample extends App {
 
   val safetyChecks = CompositeGuardrail.all(
     Seq(
-      new LengthCheck(min = 1, max = 10000),
-      new ProfanityFilter()
+      LengthCheck(min = 1, max = 10000),
+      ProfanityFilter()
     )
   )
 
@@ -52,7 +51,7 @@ object CompositeGuardrailExample extends App {
     client <- LLMConnect.getClient(providerCfg)
     agent <- Agent
       .builder("composite-guardrail-1", client)
-      .withMiddleware(GuardrailMiddleware(Seq(InputGuardrail.from(safetyChecks)), Seq.empty))
+      .withInputGuardrails(InputGuardrail.from(safetyChecks))
       .build()
     state <- agent.run("Tell me about Scala programming")
   } yield state
@@ -74,9 +73,9 @@ object CompositeGuardrailExample extends App {
 
   val languageDetection = CompositeGuardrail.any(
     Seq(
-      new RegexValidator(".*\\b(scala|functional)\\b.*".r),
-      new RegexValidator(".*\\b(java|object-oriented)\\b.*".r),
-      new RegexValidator(".*\\b(python|dynamic)\\b.*".r)
+      RegexValidator(".*\\b(scala|functional)\\b.*".r),
+      RegexValidator(".*\\b(java|object-oriented)\\b.*".r),
+      RegexValidator(".*\\b(python|dynamic)\\b.*".r)
     )
   )
 
@@ -87,7 +86,7 @@ object CompositeGuardrailExample extends App {
     client <- LLMConnect.getClient(providerCfg)
     agent <- Agent
       .builder("composite-guardrail-2", client)
-      .withMiddleware(GuardrailMiddleware(Seq(InputGuardrail.from(languageDetection)), Seq.empty))
+      .withInputGuardrails(InputGuardrail.from(languageDetection))
       .build()
     state <- agent.run("Tell me about Scala programming")
   } yield state
@@ -108,8 +107,8 @@ object CompositeGuardrailExample extends App {
 
   val sequentialChecks = CompositeGuardrail.sequential(
     Seq(
-      new LengthCheck(min = 1, max = 10000), // Check this first (cheap)
-      new ProfanityFilter()                  // Only check if length passes
+      LengthCheck(min = 1, max = 10000), // Check this first (cheap)
+      ProfanityFilter()                  // Only check if length passes
     )
   )
 
@@ -120,7 +119,7 @@ object CompositeGuardrailExample extends App {
     client <- LLMConnect.getClient(providerCfg)
     agent <- Agent
       .builder("composite-guardrail-3", client)
-      .withMiddleware(GuardrailMiddleware(Seq(InputGuardrail.from(sequentialChecks)), Seq.empty))
+      .withInputGuardrails(InputGuardrail.from(sequentialChecks))
       .build()
     state <- agent.run("What is functional programming?")
   } yield state
@@ -143,14 +142,14 @@ object CompositeGuardrailExample extends App {
   val combinedValidation: InputGuardrail = new InputGuardrail {
     val safetyLayer = CompositeGuardrail.all(
       Seq(
-        new LengthCheck(1, 10000),
-        new ProfanityFilter()
+        LengthCheck(1, 10000),
+        ProfanityFilter()
       )
     )
 
     val businessLayer = CompositeGuardrail.any(
       Seq(
-        new RegexValidator(".*\\b(scala|java|python|rust)\\b.*".r)
+        RegexValidator(".*\\b(scala|java|python|rust)\\b.*".r)
       )
     )
 
@@ -171,7 +170,7 @@ object CompositeGuardrailExample extends App {
     client <- LLMConnect.getClient(providerCfg)
     agent <- Agent
       .builder("composite-guardrail-4", client)
-      .withMiddleware(GuardrailMiddleware(Seq(combinedValidation), Seq.empty))
+      .withInputGuardrails(combinedValidation)
       .build()
     state <- agent.run("Tell me about Scala programming best practices")
   } yield state

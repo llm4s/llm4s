@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.trace.{ TraceEvent, Tracing }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -20,7 +20,7 @@ import org.slf4j.LoggerFactory
  * through `AgentTracing` instead, which adds usage and `AgentRunEnded`; use `attach` for graphs of
  * your own.
  */
-@Stable
+@Experimental
 object TracingSubscriber:
 
   private val logger = LoggerFactory.getLogger(getClass)
