@@ -27,10 +27,10 @@ import java.time.Instant
  * Cloud smoke test for Langfuse: an agent run traced to a real Langfuse project arrives there.
  *
  * The LLM is a mock - the only live service is Langfuse - so this costs nothing but a trace in
- * the project it points at. It checks that the ingestion API accepts every batch
- * `LangfuseTracing` sends for a run with a tool call, and then reads the run's conversation
- * trace back through Langfuse's public API. The shape of each batch is covered without a
- * network by `LangfuseTracingSpec`, `LangfuseTracingEdgeCasesSpec` and
+ * the project it points at. It checks that Langfuse's OpenTelemetry endpoint accepts every
+ * export `LangfuseTracing` sends for a run with a tool call (#2883), and then reads the run's
+ * events back through Langfuse's observations API. The shape of each export is covered without a
+ * network by `LangfuseTracingSpec`, `LangfuseTracingEdgeCasesSpec`, `LangfuseOtlpServerSpec` and
  * `LangfuseTracingAgentRunSpec` in `llm4s-observability`.
  *
  * Requires `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`, and `LANGFUSE_URL` for anything
@@ -53,13 +53,13 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
       secretKey <- config.secretKey
     } yield (publicKey, secretKey)
 
-  /** A LangfuseTracing that keeps the result of every batch it sends; the agent swallows them. */
+  /** A LangfuseTracing that keeps the result of every export it sends; the agent swallows them. */
   private class CheckedLangfuseTracing(publicKey: Secret, secretKey: Secret)
       extends LangfuseTracing(config.url, publicKey, secretKey, config.env, config.release, config.version) {
     val results: mutable.Buffer[Result[Unit]] = mutable.Buffer.empty
 
-    override protected def sendBatch(events: Seq[ujson.Obj]): Result[Unit] = {
-      val result = super.sendBatch(events)
+    override protected def sendBatch(request: ujson.Obj): Result[Unit] = {
+      val result = super.sendBatch(request)
       results.synchronized(results += result)
       result
     }
@@ -109,7 +109,7 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   implicit override val patienceConfig: PatienceConfig =
     PatienceConfig(timeout = Span(60, Seconds), interval = Span(2, Seconds))
 
-  "Langfuse" should "accept every batch of a traced agent run, and serve its trace back" in {
+  "Langfuse" should "accept every export of a traced agent run, and serve its events back" in {
     Tier.require(keys.isDefined, "LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set")
     val (publicKey, secretKey) = keys.get
 
@@ -132,7 +132,7 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
     tracing.results should not be empty
     all(tracing.results) shouldBe Right(())
 
-    val apiBase = DefaultLangfuseBatchSender.normalizeIngestionUrl(config.url).stripSuffix("/api/public/ingestion")
+    val apiBase = LangfuseOtlp.baseUrl(config.url)
     val auth =
       "Basic " + Base64.getEncoder.encodeToString(
         s"${publicKey.reveal}:${secretKey.reveal}".getBytes(StandardCharsets.UTF_8)
@@ -141,24 +141,28 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
 
     eventually {
       val response = http.get(
-        s"$apiBase/api/public/observations",
+        s"$apiBase/api/public/v2/observations",
         headers = Map("Authorization" -> auth),
-        params = Map("name" -> "graph.run_completed", "limit" -> "50"),
+        params = Map("name" -> "graph.run_completed", "fields" -> "core,basic,io", "limit" -> "50"),
         timeout = scala.concurrent.duration.Duration(30, "seconds")
       ) match {
         case Right(r)    => r
-        case Left(error) => fail(s"GET /api/public/observations failed: ${error.message}")
+        case Left(error) => fail(s"GET /api/public/v2/observations failed: ${error.message}")
       }
-      withClue(s"GET /api/public/observations returned ${response.statusCode}: ") {
+      withClue(s"GET /api/public/v2/observations returned ${response.statusCode}: ") {
         response.statusCode shouldBe 200
       }
-      // The agent traces its run as graph.* events, each carrying the thread it ran on.
+      // The agent traces its run as graph.* events, each carrying the thread it ran on. The v2 API
+      // returns input as the raw string sent: here, the event's data as JSON text.
+      def input(observation: ujson.Value): Option[ujson.Value] =
+        observation.obj.get("input").flatMap(_.strOpt).flatMap(text => scala.util.Try(ujson.read(text)).toOption)
       val ours = ujson
         .read(response.body)("data")
         .arr
-        .filter(_("input").objOpt.exists(_.get("threadId").exists(_.str == threadId)))
+        .flatMap(input)
+        .filter(_.objOpt.exists(_.get("threadId").exists(_.str == threadId)))
       ours should not be empty
-      ours.map(_("input")("runId").str) shouldBe Seq(done.runId.value)
+      ours.map(_("runId").str) shouldBe Seq(done.runId.value)
     }
   }
 }

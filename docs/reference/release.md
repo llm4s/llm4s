@@ -129,9 +129,6 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
 - [ ] Run `WatsonXAssumptionProbeSpec` (`modules/it`, `@Cloud`) against a real watsonx.ai account and record which
       assumptions held on the [IBM watsonx.ai](../guide/providers#ibm-watsonxai) section; without an account, keep
       every page's statement that `llm4s-watsonx` ships unverified against the live service.
-- [ ] Langfuse: move the `langfuse` tracing mode off the legacy ingestion API that Langfuse Cloud removed on
-      2026-11-16 onto its OpenTelemetry endpoint, or keep the warning in
-      [Langfuse Monitoring Workflow](../guide/observability/index#langfuse-monitoring-workflow).
 - [ ] Release-day wording pass: the pages that call LLM4S pre-1.0 or say the compatibility promise is still to come.
       In `README.md`, "Current Status" ("LLM4S is under active pre-1.0 development", "The path to 1.0 is focused on");
       `docs/why-llm4s.md` ("LLM4S is pre-1.0 and Scala 3 only", "Frozen modules will be binary compatible across 1.x");

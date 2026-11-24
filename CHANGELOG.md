@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `LangfuseBatchSender` has `sendTraces` and `sendScores` in place of `sendBatch`, `LANGFUSE_URL` is the host (`LangfuseConfig.DEFAULT_URL` is `https://cloud.langfuse.com`), and an unplaced run's Langfuse trace id is `TraceContext.rootFor(runId).traceId`
+  ([migration](docs/reference/migration.md#the-langfuse-backend-sends-opentelemetry-spans-2883)) [#2883](https://github.com/llm4s/llm4s/issues/2883).
 - `CompletionOptions.temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are `Option[Double]`, `None` unless set, and no client sends an unset one
   ([migration](docs/reference/migration.md#completionoptions-sampling-parameters-are-optional-and-unset-ones-are-not-sent-2807)) [#2807](https://github.com/llm4s/llm4s/issues/2807).
 - `Completion` reads `content` and `toolCalls` from its `message`: `apply` takes neither, and `withContent`, `withToolCalls` and `asText` are removed
@@ -600,6 +602,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** The image generation metrics are `ImageMetrics` in `llm4s-image`, generic metrics every backend exports; `MetricsCollector` has no image method. Every exported series keeps its name, type, labels and buckets, pinned by `ImageMetricsSeriesSpec`
   ([migration](docs/reference/migration.md#image-metrics-are-imagemetrics-in-llm4s-image-2801)) [#2801](https://github.com/llm4s/llm4s/issues/2801).
 - **Added** `MetricsCollector.Errors`, the failed-operations counter (`llm4s_errors_total`) as a `Metric`, so a module above core adds its failed operations to it [#2801](https://github.com/llm4s/llm4s/issues/2801).
+- **Fixed** The `langfuse` tracing mode sends OTLP/HTTP JSON to Langfuse's OpenTelemetry endpoint (`/api/public/otel/v1/traces`),
+  as Langfuse removed `/api/public/ingestion` from Langfuse Cloud on 2026-11-16; `RAGASLangfuseObserver` scores go to `/api/public/scores`
+  ([migration](docs/reference/migration.md#the-langfuse-backend-sends-opentelemetry-spans-2883)) [#2883](https://github.com/llm4s/llm4s/issues/2883).
 - **Fixed** Langfuse traces were created public - readable, messages included, by anyone holding a trace's URL - and all as user
   `llm4s-user`: they are private unless `llm4s.tracing.langfuse.public = true`, and `userId` is the run's `RunConfig.principal`
   (new `TraceEvent.AgentRunEnded.userId`), or not sent [#2828](https://github.com/llm4s/llm4s/issues/2828).
