@@ -3,8 +3,9 @@ layout: page
 title: Coming from Python
 description: "LLM code in Python (OpenAI SDK, LangChain, LlamaIndex, Pydantic) next to the same thing in Scala 3 with LLM4S, one Scala concept per step."
 search_title: "From Python LangChain and OpenAI SDK to Scala 3 with LLM4S"
-parent: User Guide
-nav_order: 53
+parent: Coming from Another Library
+nav_order: 604
+grand_parent: User Guide
 ---
 
 # Coming from Python

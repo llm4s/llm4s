@@ -3,7 +3,9 @@ layout: page
 title: Modular RAG Example
 description: "A modular RAG example for LLM4S: ingestion, retrieval and generation as separate modules, how to run the sample and use your own document folder."
 search_title: "Modular RAG example in Scala with LLM4S"
-parent: User Guide
+parent: RAG and Data
+nav_order: 307
+grand_parent: User Guide
 ---
 
 # Modular RAG Example

@@ -3,8 +3,9 @@ layout: page
 title: Coming from sttp-ai or openai-scala-client
 description: "Move a Scala app from sttp-ai or openai-scala-client to LLM4S: calls side by side with compiled code, and when to stay on your client."
 search_title: "Migrate from sttp-ai or openai-scala-client to LLM4S"
-parent: User Guide
-nav_order: 41
+parent: Coming from Another Library
+nav_order: 603
+grand_parent: User Guide
 ---
 
 # Coming from sttp-ai or openai-scala-client

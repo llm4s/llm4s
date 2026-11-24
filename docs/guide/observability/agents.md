@@ -4,7 +4,7 @@ title: Agent tracing and metrics
 description: "Instrument an LLM4S agent service: the trace each run sends to Langfuse or OpenTelemetry, the agent runtime and run queue metrics, usage, cost and alerts."
 search_title: "Trace and monitor LLM agent runs in Scala"
 parent: Monitoring
-grand_parent: User Guide
+grand_parent: Operations
 nav_order: 4
 ---
 

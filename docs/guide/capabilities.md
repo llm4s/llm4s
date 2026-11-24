@@ -3,8 +3,9 @@ layout: page
 title: Capability-Typed Clients
 description: "Check once that a model can see images or call tools, then let the Scala compiler refuse a client that was not checked (llm4s-capabilities, experimental)."
 search_title: "Capability-typed LLM clients in Scala 3"
-parent: User Guide
-nav_order: 43
+parent: Core
+nav_order: 109
+grand_parent: User Guide
 ---
 
 # Capability-Typed Clients

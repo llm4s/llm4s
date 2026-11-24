@@ -3,8 +3,9 @@ layout: page
 title: Image Generation
 description: "Generate images from Scala with LLM4S: OpenAI GPT Image and DALL-E, Stability AI, Hugging Face or a Stable Diffusion server, with options."
 search_title: "Generate images in Scala with LLM4S"
-parent: User Guide
-nav_order: 8
+parent: Core
+nav_order: 116
+grand_parent: User Guide
 ---
 
 # Image Generation with LLM4S

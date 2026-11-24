@@ -3,8 +3,9 @@ layout: page
 title: Document Loaders
 description: "Load documents into LLM4S RAG from text, files, directories, URLs, a web crawl or S3, combine loaders, and keep an index in step with ingest, sync and refresh."
 search_title: "Document loaders for Scala RAG: files, URLs, web crawler, S3"
-parent: User Guide
-nav_order: 56
+parent: RAG and Data
+nav_order: 303
+grand_parent: User Guide
 ---
 
 # Document Loaders

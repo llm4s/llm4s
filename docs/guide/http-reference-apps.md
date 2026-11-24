@@ -3,8 +3,9 @@ layout: page
 title: Serving an Agent over HTTP
 description: "Reference apps that serve an LLM4S agent over HTTP with http4s, ZIO HTTP, Tapir and Play: a chat endpoint, a streamed endpoint, cancellation and tests."
 search_title: "Serve an LLM agent over HTTP in Scala"
-parent: User Guide
-nav_order: 36
+parent: Agents
+nav_order: 215
+grand_parent: User Guide
 ---
 
 # Serving an Agent over HTTP

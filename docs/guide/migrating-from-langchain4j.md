@@ -3,8 +3,9 @@ layout: page
 title: Coming from LangChain4j or Spring AI
 description: "Move from LangChain4j or Spring AI to LLM4S: concepts side by side, with working code for model calls, typed output, tools, memory and RAG."
 search_title: "Migrate from LangChain4j or Spring AI to LLM4S"
-parent: User Guide
-nav_order: 27
+parent: Coming from Another Library
+nav_order: 602
+grand_parent: User Guide
 ---
 
 # Coming from LangChain4j or Spring AI

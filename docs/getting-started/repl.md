@@ -3,8 +3,9 @@ layout: page
 title: Try llm4s in the REPL
 description: "One import for the Scala CLI REPL, Metals worksheets and scripts: ask, extract, chat, history and lastUsage, with an offline session that needs no API key."
 search_title: "Try LLM4S in the Scala REPL, a worksheet or a script"
-parent: Getting Started
-nav_order: 16
+parent: Build Tools and Playgrounds
+nav_order: 6
+grand_parent: Getting Started
 ---
 
 # Try llm4s in the REPL

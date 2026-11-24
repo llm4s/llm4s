@@ -3,8 +3,9 @@ layout: page
 title: Maven Quick Start
 description: "A complete Maven pom.xml that compiles and runs a first LLM call from Java with llm4s-java-api, built against the library in CI."
 search_title: "Call an LLM from Java with Maven and LLM4S"
-parent: Getting Started
-nav_order: 9
+parent: Build Tools and Playgrounds
+nav_order: 2
+grand_parent: Getting Started
 ---
 
 # Maven Quick Start

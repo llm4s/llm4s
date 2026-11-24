@@ -143,7 +143,7 @@ class PekkoGuideSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "have the front matter of a User Guide page" in {
-    guide should startWith("---\nlayout: page\ntitle: Apache Pekko Integration\nparent: User Guide\n")
+    guide should startWith("---\nlayout: page\ntitle: Apache Pekko Integration\nparent: Frameworks and Runtimes\n")
   }
 
   it should "link only without the .md extension, which the site does not serve" in {

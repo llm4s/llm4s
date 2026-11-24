@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Reference
-description: "Reference for LLM4S: contributing, API stability, compatibility and support policy, security, roadmap, and project documentation."
+description: "Reference for LLM4S: API stability, compatibility and support policy, migration, troubleshooting, security, licences, benchmarks and the roadmap."
 nav_order: 7
 has_children: true
 ---
@@ -12,15 +12,15 @@ Technical reference materials for LLM4S development and maintenance.
 
 ## Contributing
 
-Start here if you want to contribute to the project.
+The contributor guides are in the [Contribute](../contribute/) section: the
+[Contributing Guide](../contribute/contributing), the [code review guidelines](../contribute/review-guidelines), the
+[Contributor Testing Guide](../contribute/testing-guide), [Test Coverage](../contribute/test-coverage), the
+[merge queue](../contribute/merge-queue), the [Release Process](../contribute/release) and
+[Verifying Releases](../contribute/verifying-releases). What stays here is the reference a contributor shares with
+users:
 
-- **[Contributing Guide](contributing)** - How to submit your first PR (read this first)
-- **[Code Review Guidelines](review-guidelines)** - Coding standards and patterns expected in PRs
-- **[Contributor Testing Guide](testing-guide)** - How to write and run tests in this repository
-- **[Test Coverage](test-coverage)** - Coverage tooling and thresholds
 - **[Configuration Boundary](configuration-boundary)** - How configuration is isolated from core code
 - **[Scalafix Rules](scalafix)** - Linting rules, and the migration rules that rewrite user code
-- **[Protecting main (merge queue)](merge-queue)** - Why two green PRs can break `main` together, and how maintainers enable the merge queue that prevents it
 - **[RFCs](../rfcs/)** - How to propose a change to a Frozen module's public API, and the log of decisions
 - **[Code of Conduct](https://github.com/llm4s/llm4s/blob/main/CODE_OF_CONDUCT.md)** - Community guidelines
 
@@ -31,8 +31,8 @@ Start here if you want to contribute to the project.
 - **[API Stability](api-stability)** - How binary compatibility is checked with MiMa, which modules are covered, and how to add a filter
 - **[Support Policy](support-policy)** - Which releases get fixes, the supported platforms and end of support
 - **[Migration Guide](migration)** - The note for every breaking change since 0.4.1; start from [Migrating from 0.x to 1.0](../migrations/0x-to-1x)
-- **[Release Process](release)** - How releases are cut, and the checklist for each
-- **[Verifying Releases](verifying-releases)** - Checking a jar's PGP signature and the build provenance of the jars, SBOMs and container image
+- **[Release Process](../contribute/release)** - How releases are cut, and the checklist for each
+- **[Verifying Releases](../contribute/verifying-releases)** - Checking a jar's PGP signature and the build provenance of the jars, SBOMs and container image
 - **[Compatibility Matrix](compatibility-matrix)** - What each provider supports with LLM4S, and the versions of the stack around it LLM4S is tested with, generated from the code
 
 ## Using LLM4S

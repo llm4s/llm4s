@@ -20,7 +20,7 @@ dependencies are scanned for known vulnerabilities.
   deploy or the container image. Attaching it re-uploads over an existing file, so re-running the job is safe.
 - **Not on Maven Central.** Up to 0.6.0 each module also published a `-cyclonedx.json` beside its jar. From the
   next release it does not: Sonatype limits the organisation to 1,000 uploaded files a month, and the Release
-  copies are the pruned, checked ones (see [What is published](release#what-is-published-to-maven-central)).
+  copies are the pruned, checked ones (see [What is published](../contribute/release#what-is-published-to-maven-central)).
 - **On every pull request.** CI builds and validates the same files and uploads them as the `sbom` workflow artifact
   for 14 days, so a change that breaks their generation is found before a release.
 
@@ -109,7 +109,7 @@ scripts/osv-new-findings.sh target/osv.json        # the report; add a base repo
 ## What is not covered
 
 - The SBOMs are not PGP-signed. From the first release after 0.6.0 the release workflow attests their build
-  provenance, so a downloaded BOM can be tied to the run that generated it: see [Verifying Releases](verifying-releases#check-an-sbom).
+  provenance, so a downloaded BOM can be tied to the run that generated it: see [Verifying Releases](../contribute/verifying-releases#check-an-sbom).
 - They list dependencies, not licences: the licences are in a separate report per module, attached to the same
   Release and checked against a policy on every pull request ([Dependency licences](licences)). Nor do they say
   anything about vulnerabilities by themselves: a finding comes from a scan of the BOM at a point in time.

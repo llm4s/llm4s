@@ -3,8 +3,9 @@ layout: page
 title: Derived Schemas
 description: "Derive the JSON schema for structured output and typed tools from a Scala case class with llm4s-schema-derivation (experimental)."
 search_title: "Derive JSON schemas from Scala case classes for LLMs"
-parent: User Guide
-nav_order: 28
+parent: Core
+nav_order: 107
+grand_parent: User Guide
 ---
 
 # Derived Schemas

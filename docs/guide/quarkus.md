@@ -3,8 +3,9 @@ layout: page
 title: Quarkus
 description: "Call a model from a Quarkus app with the quarkus-llm4s extension: JLlmClient beans from application.properties, checked at build time, with a readiness check."
 search_title: "Use LLM4S with Quarkus: the quarkus-llm4s extension"
-parent: User Guide
-nav_order: 37
+parent: Java and Kotlin
+nav_order: 409
+grand_parent: User Guide
 ---
 
 # Using LLM4S with Quarkus

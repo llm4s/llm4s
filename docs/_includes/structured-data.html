@@ -4,8 +4,8 @@
 
   - The home page is the project: a SoftwareSourceCode whose version is the latest published release.
   - /foundation/ is the LLM4S Foundation: an Organization whose sameAs is `social.links` in _config.yml.
-  - A documentation page with a `parent` gets a BreadcrumbList built from `parent` and `grand_parent`, the same
-    hierarchy as its navigation.
+  - A documentation page with a `parent` gets a BreadcrumbList built by following `parent` (and `grand_parent`) up
+    to the top, the same hierarchy as its navigation.
 
   The first two replace jekyll-seo-tag's generic block (a WebSite headed "Home", a WebPage), which would describe the
   same page differently: docs/_plugins/structured_data.rb drops that block from a page carrying a script marked
@@ -37,28 +37,34 @@
 "sameAs":{{ site.social.links | jsonify }}}
 </script>
 {%- elsif page.parent %}
-{%- assign llm4s_found = false -%}
-{%- if page.grand_parent -%}
-  {%- assign llm4s_top = site.pages | where: "title", page.grand_parent | where_exp: "p", "p.parent == nil" | first -%}
-  {%- assign llm4s_up = site.pages | where: "title", page.parent | where: "parent", page.grand_parent | first -%}
-  {%- if llm4s_top and llm4s_up -%}{%- assign llm4s_found = true -%}{%- endif -%}
-{%- else -%}
-  {%- assign llm4s_top = nil -%}
-  {%- assign llm4s_up = site.pages | where: "title", page.parent | where_exp: "p", "p.parent == nil" | first -%}
-  {%- if llm4s_up -%}{%- assign llm4s_found = true -%}{%- endif -%}
-{%- endif -%}
+{%- comment -%}
+  Walk up from the page: each ancestor is the page titled `parent` (under `grand_parent`, when the page names one).
+  The User Guide is four levels deep (User Guide > Operations > Monitoring > a page), so this follows the chain
+  rather than reading two fixed levels.
+{%- endcomment -%}
+{%- assign llm4s_chain = "" | split: "" -%}
+{%- assign llm4s_cur = page -%}
+{%- assign llm4s_found = true -%}
+{%- for llm4s_level in (1..5) -%}
+  {%- unless llm4s_cur.parent -%}{%- break -%}{%- endunless -%}
+  {%- assign llm4s_candidates = site.pages | where: "title", llm4s_cur.parent -%}
+  {%- if llm4s_cur.grand_parent -%}
+    {%- assign llm4s_candidates = llm4s_candidates | where: "parent", llm4s_cur.grand_parent -%}
+  {%- endif -%}
+  {%- assign llm4s_up = llm4s_candidates | first -%}
+  {%- unless llm4s_up -%}{%- assign llm4s_found = false -%}{%- break -%}{%- endunless -%}
+  {%- assign llm4s_chain = llm4s_chain | unshift: llm4s_up -%}
+  {%- assign llm4s_cur = llm4s_up -%}
+{%- endfor -%}
 {%- comment -%} A crumb whose page cannot be found would have no URL, which makes the list invalid: emit none. {%- endcomment -%}
 {%- if llm4s_found %}
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[
 {"@type":"ListItem","position":1,"name":"Home","item":{{ "/" | absolute_url | jsonify }}},
-{%- assign llm4s_pos = 2 -%}
-{%- if llm4s_top %}
-{"@type":"ListItem","position":{{ llm4s_pos }},"name":{{ llm4s_top.title | jsonify }},"item":{{ llm4s_top.url | absolute_url | jsonify }}},
-{%- assign llm4s_pos = llm4s_pos | plus: 1 -%}
-{%- endif %}
-{"@type":"ListItem","position":{{ llm4s_pos }},"name":{{ llm4s_up.title | jsonify }},"item":{{ llm4s_up.url | absolute_url | jsonify }}},
-{"@type":"ListItem","position":{{ llm4s_pos | plus: 1 }},"name":{{ page.title | jsonify }},"item":{{ page.url | absolute_url | jsonify }}}]}
+{%- for llm4s_crumb in llm4s_chain %}
+{"@type":"ListItem","position":{{ forloop.index | plus: 1 }},"name":{{ llm4s_crumb.title | jsonify }},"item":{{ llm4s_crumb.url | absolute_url | jsonify }}},
+{%- endfor %}
+{"@type":"ListItem","position":{{ llm4s_chain.size | plus: 2 }},"name":{{ page.title | jsonify }},"item":{{ page.url | absolute_url | jsonify }}}]}
 </script>
 {%- endif %}
 {%- endif %}

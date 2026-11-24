@@ -4,7 +4,7 @@ title: RAG for Enterprise
 description: "Production RAG with llm4s-rag: chunking, loading and syncing large document sets, hybrid search with reranking, permissions, evaluation and cost."
 search_title: "Enterprise RAG patterns for Scala LLM applications"
 parent: Real-World Application Patterns
-grand_parent: User Guide
+grand_parent: Operations
 nav_order: 2
 ---
 

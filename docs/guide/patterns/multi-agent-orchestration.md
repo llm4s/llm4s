@@ -4,7 +4,7 @@ title: Multi-Agent Orchestration
 description: "Choose how several LLM4S agents work together in Scala: handoffs for routing, subagent delegation for bounded tasks, and agent graphs for parallel work."
 search_title: "Multi-agent orchestration patterns for Scala LLM apps"
 parent: Real-World Application Patterns
-grand_parent: User Guide
+grand_parent: Operations
 nav_order: 1
 ---
 

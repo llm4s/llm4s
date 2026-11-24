@@ -17,6 +17,10 @@ Each feature is its own module next to `llm4s-core` (the agent runtime in `llm4s
 provider in its own module, and so on); each guide names the module it needs, and
 [Installation](/getting-started/installation#optional-dependencies) lists them all.
 
+The sidebar groups the guides as [Core](core), [Agents](agents/), [RAG and Data](rag),
+[Java and Kotlin](java-and-kotlin), [Frameworks and Runtimes](frameworks-and-runtimes),
+[Coming from Another Library](coming-from) and [Operations](operations). This page lists them all.
+
 ## Available Guides
 
 ### Fundamentals
@@ -29,6 +33,7 @@ provider in its own module, and so on); each guide names the module it needs, an
 - **[Structured Output](structured-output)** - `completeStructured`: typed replies from a schema, which providers enforce it, and what a bad reply looks like
 - **[Derived Schemas](derived-schemas)** - Write the type once: `llm4s-schema-derivation` builds the `completeStructured` schema from a case class with `derives`
 - **[Multimodal Content](multimodal)** - Send images and documents in a user message or a tool result, and check before the request whether the provider takes them
+- **[Media Types](media-types)** - `llm4s-media`: the `MediaType`, `MediaCategory` and `MediaSource` vocabulary that multimodal messages, image generation and RAG extraction share
 - **[Capability-Typed Clients](capabilities)** - Check once that a model can see images or call tools, and let the compiler refuse an unchecked client (experimental)
 - **[Cost Controls](cost-controls)** - Thinking and reasoning effort per provider, provider-side prompt caching and service tiers
 - **[Caching](caching)** - Cache embeddings (exact) and model responses (semantic): configuration, keys, TTL, eviction and what the cache reports
@@ -59,6 +64,7 @@ provider in its own module, and so on); each guide names the module it needs, an
   - **[Graphs](agents/graphs)** - Build your own workflow on the graph runtime: typed state, fan-out and joins, routing, interrupts, retries
   - **[Writing Middleware](agents/middleware)** - Hooks around an agent's turn, model calls and tool calls: logging, redaction, tool policy, prompt context
   - **[Running Agents on Several Machines](agents/multiple-machines)** - Several instances sharing threads through one PostgreSQL database
+  - **[Store Contract Suites](agents/contract-suites)** - Test your own `Checkpointer`, `RunQueue`, `LongTermStore` or `FileBackend` with the suites in `llm4s-agent-testkit`
 - **[Context Window Pruning](context-window-pruning)** - Keep a long conversation within the model's context window
 - **[Built-in Tools](builtin-tools)** - Calculator, date and time, UUID, JSON, files, HTTP, shell and web search tools, the bundles that hold them, and what each one can do
 - **[Build Your Own Tool](custom-tools)** - Write a tool with `ToolBuilder`: the `Schema` DSL, reading arguments, returning errors, registering it with an agent and testing it

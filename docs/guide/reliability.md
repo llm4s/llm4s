@@ -3,8 +3,9 @@ layout: page
 title: Reliable LLM Calling
 description: "Wrap any LLM4S client in ReliableClient: retry policies, a circuit breaker, deadlines, local rate limiting and metrics for provider calls."
 search_title: "Retries and circuit breakers for LLM calls in Scala"
-parent: User Guide
-nav_order: 58
+parent: Core
+nav_order: 104
+grand_parent: User Guide
 ---
 
 # Reliable LLM Calling

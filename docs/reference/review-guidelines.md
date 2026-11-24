@@ -2,11 +2,14 @@
 layout: page
 title: Master code review guidelines
 description: "The LLM4S code review policy for the CI review bot and human reviewers: severity rubric, comment format, repository map and low-noise rules."
-nav_order: 9
+nav_order: 2
 redirect_from:
+  - /reference/review-guidelines
+  - /reference/review-guidelines.html
   - /reference/review-guidelines.main.backup
   - /reference/review-guidelines.main.backup.html
-parent: Reference
+parent: Contribute
+permalink: /contribute/review-guidelines
 ---
 
 # llm4s Master review guidelines
@@ -237,7 +240,7 @@ Prefer straightforward ADT over advanced type-level programming unless justified
 Before 1.0 a wrong API is fixed outright: a breaking change needs a CHANGELOG *Breaking changes* line and a migration
 note (and, from the 0.7.0 baseline, a MiMa filter), never a `@deprecated` shim. From 1.0 a breaking change to a Frozen
 module needs a deprecation cycle and a major release. See the
-[Compatibility and Deprecation Policy](compatibility-policy).
+[Compatibility and Deprecation Policy](../reference/compatibility-policy).
 
 **P7. Soft functional style - pragmatism over purity**
 Immutable data and pure functions by default, without being religious about pure FP. If the simple solution works, use
@@ -1018,7 +1021,7 @@ Iterator.continually(rs).takeWhile(_.next()).map(extractRow).toSeq
 
 **Check**:
 
-- [ ] Breaking change? A line under the CHANGELOG's `### Breaking changes` and a note in the [Migration Guide](migration); from the 0.7.0 baseline, a narrow MiMa filter in a frozen module
+- [ ] Breaking change? A line under the CHANGELOG's `### Breaking changes` and a note in the [Migration Guide](../reference/migration); from the 0.7.0 baseline, a narrow MiMa filter in a frozen module
 - [ ] Before 1.0: no `@deprecated` member and no compatibility shim; the old API is removed. From 1.0: deprecate, and keep the old API until the next major release
 - [ ] ScalaDoc on all `trait`, `case class`, public `def` with params
 - [ ] Binary compatibility check via MiMa (if applicable)
@@ -2454,8 +2457,8 @@ Before submitting a PR, verify:
 
 
 - [Testing Guide](testing-guide) - Detailed testing practices
-- [Configuration Boundary](configuration-boundary) - Config architecture
-- [Scalafix Rules](scalafix) - Automated enforcement
+- [Configuration Boundary](../reference/configuration-boundary) - Config architecture
+- [Scalafix Rules](../reference/scalafix) - Automated enforcement
 
 ---
 

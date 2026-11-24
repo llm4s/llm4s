@@ -3,8 +3,9 @@ layout: page
 title: Providers
 description: "Which LLM providers LLM4S supports, including OpenAI, Anthropic, Azure, Gemini and Ollama, how to select one and configure its API key and models."
 search_title: "LLM providers for Scala: OpenAI, Anthropic, Gemini, Ollama"
-parent: User Guide
-nav_order: 2
+parent: Core
+nav_order: 102
+grand_parent: User Guide
 ---
 
 # Providers Guide
@@ -46,7 +47,7 @@ CI, so this table does not repeat it:
 | **Jlama** | `jlama` | In-process | A small open model run inside your JVM: no API key, no server (`llm4s-jlama`, Experimental) | Easy |
 | **IBM watsonx.ai** | `watsonx` | Cloud Enterprise | Granite, Llama and Mistral models under IBM governance | Medium |
 | **Perplexity** | `perplexity` | Cloud | Agent API: web-search answers with citations, from Perplexity's and other vendors' models (`llm4s-perplexity`) | Easy |
-| **Amazon Bedrock** | `bedrock` | Cloud Enterprise | Models on AWS, through the Converse API (`llm4s-bedrock`) | Medium |
+| **Amazon Bedrock** | `bedrock` | Cloud Enterprise | Models on AWS, through the Converse API (`llm4s-bedrock`); see [Amazon Bedrock](#amazon-bedrock) | Medium |
 | **Requesty** | `requesty` | Cloud gateway | Many vendors' models behind one key | Easy |
 
 Missing a vendor? See [Writing a Provider](writing-a-provider) to publish your own provider module.
@@ -587,6 +588,70 @@ llm4s.providers.perplexity-main {
   (`fetch_url`, `finance_search`, ...), background runs and `previous_response_id`.
 - No live call was made while writing this module. The `@Cloud` suite `PerplexitySmokeSpec` runs it against
   the service with `PERPLEXITY_API_KEY`.
+
+## Amazon Bedrock
+
+> **Beta** ([1.0 scope](../reference/v1-scope)).
+
+Models hosted on AWS (Anthropic Claude, Meta Llama, Mistral, Amazon Nova and Titan, and others), through
+Bedrock's Converse and ConverseStream APIs. It lives in its own module, `llm4s-bedrock`, built on the AWS SDK for
+Java v2 `bedrockruntime` artifact; adding the dependency registers the `bedrock` provider. It is a chat provider
+only: the module has no embedding provider.
+
+```sbt
+libraryDependencies += "org.llm4s" %% "llm4s-bedrock" % llm4sVersion
+```
+
+```hocon
+llm4s.providers.claude-bedrock {
+  provider = "bedrock"
+  model    = "anthropic.claude-3-5-sonnet-20241022-v2:0"   # or an inference profile, us.anthropic....
+  region   = ${?AWS_REGION}                                 # required, never defaulted
+}
+```
+
+**Credentials.** Bedrock has no API key: it authenticates with AWS credentials, so there is no
+`llm4s.credentials.bedrock` block and no `apiKey`. The section's explicit `accessKeyId` and `secretAccessKey` are
+used when it sets them; otherwise its `profile`; otherwise the AWS SDK's default credential chain (environment
+variables, `~/.aws/credentials`, an EC2 instance profile, an ECS task role).
+
+| Key | Required | Meaning |
+|---|---|---|
+| `model` | yes | A Bedrock model id, or a regional inference profile id (`us.`, `eu.`, `apac.` or `global.` before the model id) |
+| `region` | yes | The AWS region that hosts the model, e.g. `us-east-1`. Bind it with `${?AWS_REGION}`; a section without it is refused |
+| `profile` | no | A shared-config profile to authenticate with (`${?AWS_PROFILE}`) |
+| `accessKeyId`, `secretAccessKey` | no | Explicit static credentials (`${?AWS_ACCESS_KEY_ID}`, `${?AWS_SECRET_ACCESS_KEY}`). Set both or neither, and not together with `profile` |
+| `sessionToken` | no | The session token of temporary credentials (`${?AWS_SESSION_TOKEN}`); needs the two keys above |
+| `baseUrl` | no | An endpoint override: a VPC endpoint, or a test server |
+| `timeouts` | no | `timeouts { request = 3m, stream = 15m }`. `request` is the SDK's API-call timeout for `Converse`; `stream` is a deadline on the whole `ConverseStream` call. Without the block the SDK keeps its default for requests and a stream has no limit. Either expiry is a `TimeoutError` ([Timeouts](../getting-started/configuration#timeouts)) |
+
+No environment variable is read by the module itself: the `AWS_*` names above are the conventional ones, bound in
+the section with `${?...}`, or found by the AWS SDK's default chain.
+
+**Model ids** are Bedrock's, not the vendor's: `anthropic.claude-3-5-sonnet-20241022-v2:0`, not the Anthropic
+API's id for the same model. Which models a region serves, and which need an inference profile rather than the bare
+model id, is in the [Bedrock model list](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html).
+The context window and the completion reserve come from the [model registry](../reference/model-metadata), for a
+bare id and for an inference profile alike.
+
+Behaviour to know about:
+
+- **Streaming and tools.** `complete` uses Converse and `streamComplete` ConverseStream, both with tool calling.
+  `onChunk` runs on the calling thread, in order; interrupting that thread cancels the request and returns
+  `Left(CancelledError)`.
+- **Structured output is not enforced.** The client does not read `CompletionOptions.responseFormat`, so the model
+  sees only your conversation: put the format in the prompt ([Structured Output](structured-output#8-what-each-provider-does-with-the-schema)).
+- **Reasoning.** `CompletionOptions`' reasoning and thinking settings are not sent, and the completion reports
+  them as dropped ([Cost Controls](cost-controls)). Reasoning blocks a model returns are kept, and signed and
+  redacted ones go back unchanged on the next turn ([Thinking in conversation history](#thinking-in-conversation-history)).
+- **Prompt caching and service tiers** are sent, as `cachePoint` blocks and `serviceTier`
+  ([Cost Controls](cost-controls)).
+- **Images and documents** go inline or as an `s3://` URL ([Multimodal content](multimodal)).
+- **Errors.** `ThrottlingException` and `ServiceQuotaExceededException` become `RateLimitError`,
+  `ValidationException` a `ValidationError`, `AccessDeniedException` (and any 401 or 403) an
+  `AuthenticationError`, a timeout a `TimeoutError`.
+- **Tests.** `sbt bedrock/test` runs the unit tests with no AWS account. The `@Cloud` suite `BedrockSmokeSpec`
+  runs the client against the service and needs AWS credentials.
 
 ## Azure OpenAI
 

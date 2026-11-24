@@ -3,8 +3,9 @@ layout: page
 title: Comparing LLM4S
 description: "How LLM4S compares with LangChain4j, Spring AI, Koog and Embabel for JVM LLM apps: capabilities, gaps, and when to choose or avoid it."
 search_title: "LLM4S vs LangChain4j, Spring AI, Koog and Embabel"
-parent: User Guide
-nav_order: 26
+parent: Coming from Another Library
+nav_order: 601
+grand_parent: User Guide
 # Issues this page links, by how it cites them. scripts/check-cited-issues.sh (weekly, and on docs pull requests)
 # fails when a cites_open_issues issue is closed, a cites_closed_issues issue is open, or a linked issue is in neither.
 cites_open_issues: [1442]

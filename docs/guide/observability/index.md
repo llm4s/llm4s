@@ -3,8 +3,9 @@ layout: page
 title: Monitoring
 description: "Monitor LLM4S applications in production: logging, tracing with Langfuse or OpenTelemetry, metrics, token usage and cost, and provider reliability."
 search_title: "Monitor LLM apps in Scala: tracing, metrics and cost"
-nav_order: 21
-parent: User Guide
+nav_order: 705
+parent: Operations
+grand_parent: User Guide
 has_children: true
 ---
 

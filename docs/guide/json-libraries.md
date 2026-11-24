@@ -3,8 +3,9 @@ layout: page
 title: JSON Libraries
 description: "Use LLM4S with circe, play-json, zio-json or jsoniter-scala: pass your own types in and get them back without writing a second schema."
 search_title: "Use LLM4S with circe, play-json, zio-json and jsoniter-scala"
-parent: User Guide
-nav_order: 17
+parent: Core
+nav_order: 114
+grand_parent: User Guide
 ---
 
 # Using LLM4S with circe, play-json, zio-json and jsoniter-scala
