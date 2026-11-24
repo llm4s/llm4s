@@ -2,7 +2,8 @@ package org.llm4s.trace
 
 import org.llm4s.trace.model._
 import org.llm4s.trace.store.TraceStore
-import org.llm4s.types.{ Result, TraceId }
+import org.llm4s.trace.model.TraceId
+import org.llm4s.types.Result
 import org.llm4s.util.LiftToResult
 
 import java.util.UUID

@@ -3,7 +3,7 @@ package org.llm4s.rag
 import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.EmbeddingClient
-import org.llm4s.llmconnect.model.EmbeddingError
+import org.llm4s.error.EmbeddingError
 import org.llm4s.model.{ ModelRegistryService, ModelRegistryTestSupport }
 import org.llm4s.rag.loader.{ Document, TextLoader }
 import org.llm4s.testutil.{ MockEmbeddingProviders, MockLLMClients }
@@ -42,7 +42,7 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionVa
     config: RAGConfig = RAGConfig.default,
     llm: Option[MockLLMClients.SimpleMock] = None
   ): RAG = {
-    val embeddingClient = new EmbeddingClient(new MockEmbeddingProviders.BagOfWordsMock())
+    val embeddingClient = EmbeddingClient(new MockEmbeddingProviders.BagOfWordsMock())
     val effectiveConfig = llm.fold(config)(config.withLLM)
     RAG
       .buildWithClient(effectiveConfig, embeddingClient)
@@ -423,7 +423,7 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionVa
   }
 
   it should "find one specific document in a larger corpus" in {
-    val embeddings = new EmbeddingClient(new MockEmbeddingProviders.BagOfWordsMock(1024))
+    val embeddings = EmbeddingClient(new MockEmbeddingProviders.BagOfWordsMock(1024))
     val big        = RAG.buildWithClient(RAGConfig.default, embeddings).fold(err => fail(err.message), identity)
     val docs       = (0 until 200).map(i => f"doc-$i%03d" -> f"filler text number zq$i%04d about topic ${i % 7}%d")
     ingestAll(big, docs)
@@ -661,7 +661,7 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionVa
   // -----------------------------------------------------------------------
 
   "RAGPipelineIntegration failures" should "surface an embedding failure on ingest and index nothing" in {
-    val client = new EmbeddingClient(new MockEmbeddingProviders.FailingMock("provider down"))
+    val client = EmbeddingClient(new MockEmbeddingProviders.FailingMock("provider down"))
     val rag    = RAG.buildWithClient(RAGConfig.default, client).fold(err => fail(err.message), identity)
 
     val result = rag.ingestText("Some content about Scala.", "doc-x")
@@ -672,7 +672,7 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionVa
   }
 
   it should "surface an embedding failure on query" in {
-    val client = new EmbeddingClient(new MockEmbeddingProviders.FailingMock("provider down"))
+    val client = EmbeddingClient(new MockEmbeddingProviders.FailingMock("provider down"))
     val rag    = RAG.buildWithClient(RAGConfig.default, client).fold(err => fail(err.message), identity)
     rag.query("anything").left.value shouldBe a[EmbeddingError]
   }
@@ -684,7 +684,7 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionVa
   }
 
   it should "reject an LLM-reranking config when no LLM is configured" in {
-    val client = new EmbeddingClient(new MockEmbeddingProviders.BagOfWordsMock())
+    val client = EmbeddingClient(new MockEmbeddingProviders.BagOfWordsMock())
     RAG.buildWithClient(RAGConfig.default.withLLMReranking, client).left.value shouldBe a[ConfigurationError]
   }
 

@@ -139,20 +139,18 @@ object EmbeddingExample {
     qOpt: Option[Seq[Double]],
     topDims: Int
   ): Seq[Row] = {
-    def topKAbs(values: Array[Float], k: Int): Seq[(Int, Float)] = {
-      val withIdx: Array[(Int, Float)] =
-        values.iterator.zipWithIndex.map { case (v, i) => (i, math.abs(v)) }.toArray
-      scala.util.Sorting.stableSort(withIdx, (a: (Int, Float), b: (Int, Float)) => a._2 > b._2)
-      withIdx.take(math.min(k, withIdx.length)).map { case (i, _) => (i, values(i)) }.toSeq
-    }
+    def topKAbs(values: Seq[Double], k: Int): Seq[(Int, Float)] =
+      values.zipWithIndex
+        .sortBy { case (v, _) => -math.abs(v) } // stable: equal magnitudes keep their order
+        .take(k)
+        .map { case (v, i) => (i, v.toFloat) }
 
     val modalityStr = vecs.head.modality.toString
     val scored: Seq[(EmbeddingVector, Option[Double])] =
       if (modalityStr == "Text" && qOpt.isDefined) {
         val q = qOpt.get
         vecs.map { v =>
-          val d = v.values.map(_.toDouble).toSeq // already L2
-          v -> Some(SimilarityUtils.cosineSimilarity(d, q))
+          v -> Some(SimilarityUtils.cosineSimilarity(v.values, q)) // already L2
         }
       } else vecs.map(v => v -> None)
 

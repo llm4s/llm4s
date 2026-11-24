@@ -2,11 +2,10 @@ package org.llm4s.llmconnect.caching
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.llm4s.trace.{ TraceEvent, Tracing }
 
@@ -15,8 +14,6 @@ import scala.concurrent.duration._
 import scala.collection.mutable.ListBuffer
 
 class CachingLLMClientTest extends AnyFunSuite with Matchers {
-
-  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   class MockTracing extends Tracing {
     val events = ListBuffer[TraceEvent]()
@@ -31,12 +28,6 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     override def getZone: ZoneId               = ZoneId.of("UTC")
     override def withZone(zone: ZoneId): Clock = this
     override def instant(): Instant            = currentTime
-  }
-
-  class MockProvider extends EmbeddingProvider {
-    def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = Left(
-      org.llm4s.error.ProcessingError("mock", "Mock provider not implemented")
-    )
   }
 
   class MockLLMClient extends LLMClient {
@@ -67,8 +58,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     override def close(): Unit               = ()
   }
 
-  class MockEmbeddingClient(responses: Map[String, Seq[Double]])
-      extends EmbeddingClient(new MockProvider(), None, "embedding") {
+  class MockEmbeddingClient(responses: Map[String, Seq[Double]]) extends EmbeddingProvider {
     var lastInput: Option[String] = None
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
       val text = request.input.head

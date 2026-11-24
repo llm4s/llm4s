@@ -247,7 +247,7 @@ class JinaEmbeddingProviderBehaviourSpec extends AnyFlatSpec with Matchers {
     embed(failingWith(late), Seq("a")).left.toOption.get shouldBe late
 
     val invalid = embed(failingWith(org.llm4s.error.ValidationError("request", "bad URL")), Seq("a")).left.toOption.get
-    invalid shouldBe a[org.llm4s.llmconnect.model.EmbeddingError]
+    invalid shouldBe a[org.llm4s.error.EmbeddingError]
     invalid.message should startWith("HTTP request failed")
   }
 

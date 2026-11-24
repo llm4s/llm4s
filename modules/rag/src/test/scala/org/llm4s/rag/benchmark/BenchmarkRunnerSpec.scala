@@ -107,8 +107,8 @@ class BenchmarkRunnerSpec extends AnyFlatSpec with Matchers {
   private val dummyResolve: String => Result[EmbeddingProviderConfig] = _ =>
     Right(EmbeddingProviderConfig(apiKey = Secret("key"), baseUrl = "http://localhost", model = "test"))
 
-  private def goodEmbed: EmbeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
-  private def badEmbed: EmbeddingClient  = new EmbeddingClient(new FailingEmbeddingProvider())
+  private def goodEmbed: EmbeddingClient = EmbeddingClient(new MockEmbeddingProvider())
+  private def badEmbed: EmbeddingClient  = EmbeddingClient(new FailingEmbeddingProvider())
   private def mockLLM: MockLLMClient     = new MockLLMClient()
 
   // =========================================================================
@@ -286,7 +286,7 @@ class BenchmarkRunnerSpec extends AnyFlatSpec with Matchers {
         Left(EvaluationError("capture complete — stop indexing"))
       }
     }
-    val capturing = new EmbeddingClient(capturingProvider)
+    val capturing = EmbeddingClient(capturingProvider)
     val stubDM    = new StubDatasetManager(dedupDataset)
     val runner    = new BenchmarkRunner(mockLLM, capturing, dummyResolve, stubDM)
 

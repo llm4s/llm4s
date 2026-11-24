@@ -51,7 +51,7 @@ object DeterministicCompressionExample {
   }
 
   private def createTokenCounter(): Result[ConversationTokenCounter] =
-    ConversationTokenCounter.openAI()
+    ConversationTokenCounter.cl100k()
 
   private def runCompressionTests(tokenCounter: ConversationTokenCounter): Result[CompressionResults] = {
     val testFixtures      = getTestFixtures()

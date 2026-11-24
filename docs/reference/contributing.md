@@ -194,6 +194,38 @@ val apiKey = sys.env.getOrElse("OPENAI_API_KEY", "")
 
 See [Configuration Boundary](../reference/configuration-boundary) and [Scalafix Rules](../reference/scalafix) for details.
 
+### Follow the naming conventions
+
+**Factories.** The name says where the value comes from; the return type says whether building it can fail. A
+factory that can fail returns `Result[X]`, and none throws.
+
+| Name | Builds the value from | Examples |
+|---|---|---|
+| `apply` | the type's own fields | `CompletionOptions()`, `EmbeddingRequest(input, model)` |
+| `of` | values that are not simply its fields: the items it holds, the thing it wraps, a raw id | `ToolRegistry.of(tools)`, `ConversationTokenCounter.of(tokenizer)`, `AgentId.of("assistant")` |
+| `create` | something it has to look up, allocate or check first | `ConversationTokenCounter.create(tokenizerId)`, `ContextManager.create(counter)`, `HeadroomPercent.create(0.1)` |
+| `from`, `fromX` | another representation: configuration, JSON, a file, another type | `EmbeddingClient.from(provider, cfg)`, `Llm4sConfig.from(config)`, `ArtifactKey.fromContent(text)` |
+| `forX` | a key that selects one of several | `OpenAITokenizers.counterFor(model)` |
+
+`new` is for a plain class with nothing to check. A type that validates its arguments, or that may gain a field,
+has a private constructor and is built through its companion.
+
+**Sum types.** A closed set of plain values is a Scala 3 `enum` (`Modality`, `ContextStage`). When a case carries
+fields it is a `sealed trait` with one `final case class X private` per case, each with its companion `apply` and
+`with*` setters: an `enum` case with fields has a public constructor and `copy`, which a new field would break.
+
+**Accessors.** A method that returns a value is named for the value (`usage`, `contextWindow`), not `getUsage`.
+The `getX` methods still in the library (`LLMClient.getContextWindow` among them) predate this and are renamed
+together, not one at a time.
+
+**Constants.** `PascalCase`, as the Scala style guide has it: `MaxDepth`, `DefaultTimeout`. The exception is a
+constant named after an external identifier, which keeps that spelling (`TokenizerId.CL100K_BASE`).
+
+**Newtypes.** An identifier or quantity with its own type is an `opaque type` with a companion: `apply` when every
+value is valid, `create` returning a `Result` when not, and an `as...` accessor to unwrap it (`asString`,
+`asRatio`). Use the newtype in a public signature where one exists (`ProviderId`, `ModelName`) instead of a
+`String`.
+
 ### Run scalafmt
 
 ```bash

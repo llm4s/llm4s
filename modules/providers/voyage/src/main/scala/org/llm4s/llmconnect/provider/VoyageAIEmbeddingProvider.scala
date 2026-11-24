@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescript
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.llmconnect.model._
+import org.llm4s.error.EmbeddingError
 import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
 import ujson.{ Arr, Obj }

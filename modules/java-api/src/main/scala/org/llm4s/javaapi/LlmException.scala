@@ -1,7 +1,6 @@
 package org.llm4s.javaapi
 
 import org.llm4s.error.*
-import org.llm4s.llmconnect.model.EmbeddingError
 
 import java.time.Duration
 import java.util.{ Optional, OptionalInt }
@@ -69,8 +68,8 @@ object LlmException {
  *
  * Every concrete error class in `org.llm4s.error` has an entry in [[byClass]], and `LlmErrorKindSpec` scans that
  * package and fails when one has not, so a new error class is given a kind on purpose rather than falling to
- * [[LlmErrorKind.OTHER]] by accident. Outside that package, only core's `EmbeddingError` has a kind of its own, the one
- * its status means, since `JEmbeddingClient` hands it to Java callers.
+ * [[LlmErrorKind.OTHER]] by accident. `EmbeddingError`'s entry is the kind of a provider's error response; [[of]] reads
+ * the one it is given by its status, since `JEmbeddingClient` hands it to Java callers.
  */
 private[javaapi] object LlmErrorKinds {
 
@@ -81,6 +80,7 @@ private[javaapi] object LlmErrorKinds {
     classOf[TimeoutError]                -> LlmErrorKind.TIMEOUT,
     classOf[NetworkError]                -> LlmErrorKind.NETWORK,
     classOf[ServiceError]                -> LlmErrorKind.SERVICE,
+    classOf[EmbeddingError]              -> LlmErrorKind.SERVICE,
     classOf[ValidationError]             -> LlmErrorKind.VALIDATION,
     classOf[InvalidInputError]           -> LlmErrorKind.VALIDATION,
     classOf[UnsupportedContentPartError] -> LlmErrorKind.VALIDATION,

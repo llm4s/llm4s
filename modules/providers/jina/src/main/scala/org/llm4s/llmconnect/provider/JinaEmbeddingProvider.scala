@@ -5,6 +5,7 @@ import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
 import org.llm4s.http.{ HttpClientOptions, HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result

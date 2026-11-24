@@ -2,7 +2,7 @@ package org.llm4s.context
 
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.error.TokenizerError
-import org.llm4s.identity.TokenizerId
+import org.llm4s.context.tokens.{ StringTokenizer, Token, Tokenizer, TokenizerId }
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -12,56 +12,50 @@ import org.slf4j.LoggerFactory
 class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
 
   override def withFixture(test: NoArgTest): Outcome = {
-    val tokenizerMappingLogger = LoggerFactory
-      .getLogger("org.llm4s.context.tokens.TokenizerMapping$")
-      .asInstanceOf[LBLogger]
     val conversationCounterLogger = LoggerFactory
       .getLogger("org.llm4s.context.ConversationTokenCounter$")
       .asInstanceOf[LBLogger]
 
-    val previousTokenizerMappingLevel    = tokenizerMappingLogger.getLevel
     val previousConversationCounterLevel = conversationCounterLogger.getLevel
 
-    tokenizerMappingLogger.setLevel(Level.OFF)
     conversationCounterLogger.setLevel(Level.OFF)
 
     try super.withFixture(test)
-    finally {
-      tokenizerMappingLogger.setLevel(previousTokenizerMappingLevel)
+    finally
       conversationCounterLogger.setLevel(previousConversationCounterLevel)
-    }
   }
 
   // ============ Factory Methods ============
 
-  "ConversationTokenCounter.forModel" should "select correct tokenizer for GPT-4o models" in {
-    val result = ConversationTokenCounter.forModel("gpt-4o")
+  "ConversationTokenCounter.of" should "count with a tokenizer the caller supplies" in {
+    // one token per word, counted without building the token list
+    val words = new StringTokenizer {
+      def encode(text: String): List[Token] = fail("counting must go through count")
+      override def count(text: String): Int = text.split("\\s+").count(_.nonEmpty)
+    }
+    val counter = ConversationTokenCounter.of(words)
 
-    result.isRight shouldBe true
+    // 3 words + 4 tokens of message overhead
+    counter.countMessage(UserMessage("three little words")) shouldBe 7
   }
 
-  it should "select correct tokenizer for GPT-4 models" in {
-    val result = ConversationTokenCounter.forModel("gpt-4")
-
-    result.isRight shouldBe true
+  "StringTokenizer.count" should "default to the length of the encoding" in {
+    val tokenizer = new StringTokenizer {
+      def encode(text: String): List[Token] = text.toList.map(c => Token(c.toInt))
+    }
+    tokenizer.count("abcd") shouldBe 4
   }
 
-  it should "select correct tokenizer for Claude models" in {
-    // Claude uses cl100k_base as approximation
-    val result = ConversationTokenCounter.forModel("claude-3-sonnet")
-
-    result.isRight shouldBe true
+  it should "agree with encode for the bundled vocabularies" in {
+    val text = "Counting tokens, <|endoftext|> included: naïve café 東京."
+    Seq(TokenizerId.CL100K_BASE, TokenizerId.O200K_BASE, TokenizerId.R50K_BASE).foreach { id =>
+      val tokenizer = Tokenizer.lookupStringTokenizer(id).getOrElse(fail(s"no tokenizer for $id"))
+      withClue(id.name)(tokenizer.count(text) shouldBe tokenizer.encode(text).length)
+    }
   }
 
-  it should "fallback gracefully for unknown models" in {
-    val result = ConversationTokenCounter.forModel("unknown-model-xyz")
-
-    // Should still succeed with fallback tokenizer
-    result.isRight shouldBe true
-  }
-
-  "ConversationTokenCounter.openAI" should "create counter with cl100k_base tokenizer" in {
-    val result = ConversationTokenCounter.openAI()
+  "ConversationTokenCounter.cl100k" should "create counter with cl100k_base tokenizer" in {
+    val result = ConversationTokenCounter.cl100k()
 
     result.isRight shouldBe true
   }
@@ -70,7 +64,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   // ordinary text, never read as control tokens or refused.
   it should "count text containing special-token names instead of failing" in {
     val specials = "page <|endoftext|> more <|fim_prefix|> x <|fim_middle|> y <|fim_suffix|> z <|endofprompt|>"
-    Seq(ConversationTokenCounter.openAI(), ConversationTokenCounter.openAI_o200k()).foreach { result =>
+    Seq(ConversationTokenCounter.cl100k(), ConversationTokenCounter.o200k()).foreach { result =>
       val counter = result.fold(e => fail(e.message), identity)
       counter.countMessage(ToolMessage(specials, "c1")) should be > counter.countMessage(ToolMessage("page", "c1"))
       counter.countMessage(UserMessage(specials)) should be > 0
@@ -89,20 +83,20 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
     tokens.map(_.tokenId) should not contain 100257
   }
 
-  "ConversationTokenCounter.openAI_o200k" should "create counter with o200k_base tokenizer" in {
-    val result = ConversationTokenCounter.openAI_o200k()
+  "ConversationTokenCounter.o200k" should "create counter with o200k_base tokenizer" in {
+    val result = ConversationTokenCounter.o200k()
 
     result.isRight shouldBe true
   }
 
   "ConversationTokenCounter.apply" should "accept valid tokenizer IDs" in {
-    val result = ConversationTokenCounter(TokenizerId.CL100K_BASE)
+    val result = ConversationTokenCounter.create(TokenizerId.CL100K_BASE)
 
     result.isRight shouldBe true
   }
 
   it should "fail for invalid tokenizer IDs" in {
-    val result = ConversationTokenCounter(TokenizerId("invalid_tokenizer"))
+    val result = ConversationTokenCounter.create(TokenizerId("invalid_tokenizer"))
 
     result.isLeft shouldBe true
     result.swap.toOption.get shouldBe a[TokenizerError]
@@ -111,7 +105,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   // ============ countMessage ============
 
   "ConversationTokenCounter.countMessage" should "count user messages correctly" in {
-    val counter = ConversationTokenCounter.openAI().toOption.get
+    val counter = ConversationTokenCounter.cl100k().toOption.get
     val message = UserMessage("Hello world")
 
     val tokens = counter.countMessage(message)
@@ -121,7 +115,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "count assistant messages with tool calls" in {
-    val counter = ConversationTokenCounter.openAI().toOption.get
+    val counter = ConversationTokenCounter.cl100k().toOption.get
     val message = AssistantMessage(
       content = "Let me check that.",
       toolCalls = Seq(
@@ -136,7 +130,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "count tool messages correctly" in {
-    val counter = ConversationTokenCounter.openAI().toOption.get
+    val counter = ConversationTokenCounter.cl100k().toOption.get
     val message = ToolMessage(content = """{"temp": 20}""", toolCallId = "call_1")
 
     val tokens = counter.countMessage(message)
@@ -145,7 +139,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "count system messages correctly" in {
-    val counter = ConversationTokenCounter.openAI().toOption.get
+    val counter = ConversationTokenCounter.cl100k().toOption.get
     val message = SystemMessage("You are a helpful assistant.")
 
     val tokens = counter.countMessage(message)
@@ -154,7 +148,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "include message overhead in count" in {
-    val counter  = ConversationTokenCounter.openAI().toOption.get
+    val counter  = ConversationTokenCounter.cl100k().toOption.get
     val emptyish = UserMessage("a") // minimal content
     val tokens   = counter.countMessage(emptyish)
 
@@ -165,7 +159,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   // ============ countConversation ============
 
   "ConversationTokenCounter.countConversation" should "sum all message tokens plus overhead" in {
-    val counter      = ConversationTokenCounter.openAI().toOption.get
+    val counter      = ConversationTokenCounter.cl100k().toOption.get
     val conversation = ContextTestFixtures.smallConversation
 
     val total = counter.countConversation(conversation)
@@ -176,7 +170,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return just overhead for empty conversation" in {
-    val counter      = ConversationTokenCounter.openAI().toOption.get
+    val counter      = ConversationTokenCounter.cl100k().toOption.get
     val conversation = Conversation(Seq.empty)
 
     val total = counter.countConversation(conversation)
@@ -185,7 +179,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "scale with conversation size" in {
-    val counter = ConversationTokenCounter.openAI().toOption.get
+    val counter = ConversationTokenCounter.cl100k().toOption.get
 
     val small  = counter.countConversation(ContextTestFixtures.smallConversation)
     val medium = counter.countConversation(ContextTestFixtures.mediumConversation)
@@ -198,7 +192,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   // ============ getTokenBreakdown ============
 
   "ConversationTokenCounter.getTokenBreakdown" should "return per-message counts" in {
-    val counter      = ConversationTokenCounter.openAI().toOption.get
+    val counter      = ConversationTokenCounter.cl100k().toOption.get
     val conversation = ContextTestFixtures.smallConversation
 
     val breakdown = counter.getTokenBreakdown(conversation)
@@ -209,7 +203,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "provide message role in breakdown" in {
-    val counter = ConversationTokenCounter.openAI().toOption.get
+    val counter = ConversationTokenCounter.cl100k().toOption.get
     val conversation = Conversation(
       Seq(
         UserMessage("Hello"),
@@ -219,12 +213,12 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
 
     val breakdown = counter.getTokenBreakdown(conversation)
 
-    breakdown.messages(0).role shouldBe "user"
-    breakdown.messages(1).role shouldBe "assistant"
+    breakdown.messages(0).role shouldBe MessageRole.User
+    breakdown.messages(1).role shouldBe MessageRole.Assistant
   }
 
   it should "provide message preview in breakdown" in {
-    val counter      = ConversationTokenCounter.openAI().toOption.get
+    val counter      = ConversationTokenCounter.cl100k().toOption.get
     val longContent  = "A" * 100
     val conversation = Conversation(Seq(UserMessage(longContent)))
 
@@ -235,7 +229,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "produce readable prettyPrint output" in {
-    val counter      = ConversationTokenCounter.openAI().toOption.get
+    val counter      = ConversationTokenCounter.cl100k().toOption.get
     val conversation = ContextTestFixtures.smallConversation
 
     val breakdown = counter.getTokenBreakdown(conversation)
@@ -249,7 +243,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   // ============ Consistency Tests ============
 
   "ConversationTokenCounter" should "produce consistent counts for same input" in {
-    val counter      = ConversationTokenCounter.openAI().toOption.get
+    val counter      = ConversationTokenCounter.cl100k().toOption.get
     val conversation = ContextTestFixtures.mediumConversation
 
     val count1 = counter.countConversation(conversation)
@@ -261,7 +255,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "count differently sized messages proportionally" in {
-    val counter = ConversationTokenCounter.openAI().toOption.get
+    val counter = ConversationTokenCounter.cl100k().toOption.get
 
     val short = counter.countMessage(UserMessage("Hi"))
     val long  = counter.countMessage(UserMessage("This is a much longer message with many more words"))
@@ -300,7 +294,7 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
   }
 
   "countMessage" should "count a message's media, which its text view leaves out" in {
-    val counter = ConversationTokenCounter.forModel("gpt-4o").toOption.get
+    val counter = ConversationTokenCounter.o200k().toOption.get
     val image = ContentPart
       .image(org.llm4s.media.MediaSource.Url(java.net.URI.create("https://e.com/a.png")), org.llm4s.media.MediaType.Png)
       .toOption

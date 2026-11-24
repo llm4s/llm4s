@@ -53,7 +53,7 @@ class RAGPipelinePurposeSpec extends AnyFlatSpec with Matchers {
     val vectors  = VectorStoreFactory.inMemory().fold(e => fail(e.formatted), identity)
     val keywords = KeywordIndex.inMemory().fold(e => fail(e.formatted), identity)
     val pipeline =
-      RAGPipeline.withStores(RAGExperimentConfig.default, NoopLLM, new EmbeddingClient(provider), vectors, keywords)
+      RAGPipeline.withStores(RAGExperimentConfig.default, NoopLLM, EmbeddingClient(provider), vectors, keywords)
     try test(pipeline, provider)
     finally pipeline.close()
   }

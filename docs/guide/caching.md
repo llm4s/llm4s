@@ -97,7 +97,7 @@ import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
 
 // A CachedEmbeddingClient is an EmbeddingProvider; wrap it where an EmbeddingClient is required.
-InMemoryEmbeddingCache.create().map(cache => new EmbeddingClient(new CachedEmbeddingClient(base, cache)))
+InMemoryEmbeddingCache.create().map(cache => EmbeddingClient(new CachedEmbeddingClient(base, cache)))
 ```
 
 `cacheStats` returns `Some(CacheStats(size, hits, misses))` for a backend that keeps statistics (`InMemoryEmbeddingCache` does), and `None` for one that does not; `totalRequests` and `hitRatePercent` are computed from `hits` and `misses`. Every looked-up text counts, so the two calls above give 3 misses and 1 hit (25%), and a text repeated inside one request counts once per occurrence. `clearCache()` calls the backend's `clear()` and returns its `Result`: `InMemoryEmbeddingCache` empties itself and resets its statistics.

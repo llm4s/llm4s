@@ -4,7 +4,7 @@ import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.http.{ HttpResponse, MockHttpClient, StubbedHttpCalls }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
-import org.llm4s.llmconnect.model.{ EmbeddingRequest, Image, MultimediaEmbeddingRequest }
+import org.llm4s.llmconnect.model.EmbeddingRequest
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.Outcome
 import org.scalatest.flatspec.AnyFlatSpec
@@ -174,16 +174,6 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFacto
     (http.onPost _).when(*, *, *, *).returns(Left(refused))
 
     JinaEmbeddingProvider.forTest(cfg, http).embed(req) shouldBe Left(refused)
-  }
-
-  "multimodal embedding" should "be 501 Not Implemented, as Jina text embeddings are text only" in {
-    val mockHttp = new MockHttpClient(httpOk(embeddingBody(Seq(Seq(0.1)))))
-    val result = JinaEmbeddingProvider
-      .forTest(cfg, mockHttp)
-      .embedMultimodal(MultimediaEmbeddingRequest(inputs = Seq.empty, model = modelCfg, modality = Image))
-
-    result.left.toOption.get.code shouldBe Some("501")
-    mockHttp.postCallCount shouldBe 0
   }
 
   "errors" should "redact credentials echoed in the body of a 401, a 429 or any other failure (#1674)" in {

@@ -1,6 +1,6 @@
 package org.llm4s.schema
 
-import org.llm4s.context.tokens.TokenizerMapping
+import org.llm4s.testutil.DocumentedFixture
 import org.llm4s.schema.MethodFixtures.*
 import org.llm4s.toolapi.{ ToolCallError, ToolCallRequest, ToolFunction, ToolRegistry }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -109,11 +109,11 @@ class DerivedToolsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "read Scaladoc from the TASTy of a class compiled in another run" in {
-    val exact = built(Tool.fromMethod(TokenizerMapping.isExactMapping))
-    exact.name shouldBe "is_exact_mapping"
-    exact.description should startWith("Check if the tokenizer mapping is exact or approximate for a model.")
-    parameters(exact)("properties")("modelName")("description").str shouldBe "The model identifier"
-    exact.execute(ujson.Obj("modelName" -> "gpt-4o")) shouldBe Right(ujson.Bool(true))
+    val palindrome = built(Tool.fromMethod(DocumentedFixture.isPalindrome))
+    palindrome.name shouldBe "is_palindrome"
+    palindrome.description should startWith("Check if a word is a palindrome.")
+    parameters(palindrome)("properties")("word")("description").str shouldBe "The word to check"
+    palindrome.execute(ujson.Obj("word" -> "Level")) shouldBe Right(ujson.Bool(true))
   }
 
   "Scaladoc" should "be read as its main text and its @param tags, with links written as their text" in {

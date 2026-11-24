@@ -4,6 +4,7 @@ import org.llm4s.chunking.{ ChunkerFactory, DocumentChunk, DocumentChunker }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.*
+import org.llm4s.error.EmbeddingError
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result

@@ -5,7 +5,8 @@ import org.llm4s.testutil.TestTimeLimit
 import org.llm4s.error.{ CancelledError, LLMError, NetworkError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
-import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse, InputPurpose }
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse, InputPurpose }
+import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testutil.FixtureEmbeddingProvider
@@ -42,7 +43,7 @@ class JEmbeddingClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
 
   private def clientOver(provider: EmbeddingProvider): JEmbeddingClient =
     Llm4s.wrapEmbeddingClient(
-      new EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil)),
+      EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil)),
       configured
     )
 
