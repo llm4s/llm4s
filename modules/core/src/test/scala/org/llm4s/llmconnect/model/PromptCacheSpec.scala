@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.provider.CostEstimator
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.{ ModelCapabilities, ModelMetadata, ModelMode, ModelPricing, PromptCacheReport, UnmappedOptions }
@@ -62,7 +63,7 @@ class PromptCacheSpec extends AnyFlatSpec with Matchers with org.scalatest.Eithe
 
   private def metadata(pricing: ModelPricing) =
     ModelMetadata(
-      modelId = "m",
+      modelId = ModelName("m"),
       provider = "anthropic",
       mode = ModelMode.Chat,
       maxInputTokens = None,
@@ -129,16 +130,22 @@ class PromptCacheSpec extends AnyFlatSpec with Matchers with org.scalatest.Eithe
 
   "ModelMetadata.fromJson" should "read the 1-hour cache-write price" in {
     ModelMetadata
-      .fromJson("m", ujson.Obj("cache_creation_input_token_cost_above_1hr" -> 6e-6))
+      .fromJson(ModelName("m"), ujson.Obj("cache_creation_input_token_cost_above_1hr" -> 6e-6))
       .value
       .pricing
       .cacheCreationInputTokenCostAbove1hr shouldBe Some(6e-6)
-    ModelMetadata.fromJson("m", ujson.Obj()).value.pricing.cacheCreationInputTokenCostAbove1hr shouldBe None
+    ModelMetadata.fromJson(ModelName("m"), ujson.Obj()).value.pricing.cacheCreationInputTokenCostAbove1hr shouldBe None
   }
 
   "The bundled metadata" should "carry the 1-hour price for a current Claude model" in {
     val registry = org.llm4s.model.ModelRegistryTestSupport.defaultService()
-    registry.lookup("claude-opus-4-7").toOption.get.pricing.cacheCreationInputTokenCostAbove1hr.isDefined shouldBe true
+    registry
+      .lookup(ModelName("claude-opus-4-7"))
+      .toOption
+      .get
+      .pricing
+      .cacheCreationInputTokenCostAbove1hr
+      .isDefined shouldBe true
   }
 
   "TokenUsage.longCacheCreationTokens" should "be unset by default and set by its setters" in {
@@ -149,7 +156,7 @@ class PromptCacheSpec extends AnyFlatSpec with Matchers with org.scalatest.Eithe
   }
 
   "StreamingAccumulator" should "carry the 1-hour cache writes onto the streamed completion's usage" in {
-    val accumulator = StreamingAccumulator("test-model")
+    val accumulator = StreamingAccumulator(ModelName("test-model"))
     accumulator.updateUsage(
       TokenUsage(100, 0, 0, cacheCreationTokens = Some(80), longCacheCreationTokens = Some(80))
     )

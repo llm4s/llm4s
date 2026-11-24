@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ NetworkError, ValidationError }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
@@ -26,7 +27,7 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
       Completion(
         id = "c",
         created = Instant.EPOCH,
-        model = "mock-model",
+        model = ModelName("mock-model"),
         message = AssistantMessage(text),
         usage = Some(TokenUsage(4, 3, 7))
       )

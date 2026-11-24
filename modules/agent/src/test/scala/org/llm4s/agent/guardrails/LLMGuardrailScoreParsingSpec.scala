@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -24,7 +25,7 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test-id",
           created = Instant.EPOCH,
-          model = "test-model",
+          model = ModelName("test-model"),
           message = AssistantMessage(reply),
           usage = None
         )

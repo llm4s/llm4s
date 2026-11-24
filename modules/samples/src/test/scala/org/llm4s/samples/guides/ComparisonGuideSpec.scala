@@ -1,5 +1,6 @@
 package org.llm4s.samples.guides
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.agent.memory.SimpleMemoryManager
 import org.llm4s.config.Llm4sConfig
@@ -34,7 +35,7 @@ import java.time.Instant
 class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def completionOf(message: AssistantMessage): Completion =
-    Completion(id = "script", created = Instant.EPOCH, model = "script", message = message)
+    Completion(id = "script", created = Instant.EPOCH, model = ModelName("script"), message = message)
 
   /** Answers every request with `reply(conversation)` and records the requests. */
   private class ScriptedClient(reply: Conversation => AssistantMessage) extends LLMClient {

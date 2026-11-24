@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
@@ -17,10 +19,10 @@ class LLMConnectEnvReaderRoutingTest extends AnyFunSuite with Matchers with Eith
   test("LLMConnect.getClient returns OpenRouterClient when OpenAI baseUrl points to openrouter.ai") {
     val cfg = OpenAIConfig
       .fromValues(
-        modelName = "gpt-4o",
+        modelName = ModelName("gpt-4o"),
         apiKey = Secret("sk-test"),
         organization = None,
-        baseUrl = "https://openrouter.ai/api/v1"
+        baseUrl = BaseUrl("https://openrouter.ai/api/v1")
       )
       .value
 

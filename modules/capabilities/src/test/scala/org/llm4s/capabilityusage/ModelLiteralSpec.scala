@@ -55,7 +55,7 @@ class ModelLiteralSpec extends AnyFlatSpec with Matchers with EitherValues {
       Capability.PromptCaching
     )
     embeddings.capabilities shouldBe Nil
-    (gpt4o.provider, gpt4o.model, gpt4o.id) shouldBe (("openai", "gpt-4o", "openai/gpt-4o"))
+    (gpt4o.provider, gpt4o.model.asString, gpt4o.id) shouldBe (("openai", "gpt-4o", "openai/gpt-4o"))
     o3mini.toString shouldBe "ModelRef(openai/o3-mini, Tools & StructuredOutput & Reasoning & PromptCaching)"
   }
 

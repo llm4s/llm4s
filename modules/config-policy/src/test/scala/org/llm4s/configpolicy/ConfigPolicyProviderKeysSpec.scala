@@ -1,5 +1,6 @@
 package org.llm4s.configpolicy
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
@@ -33,7 +34,7 @@ class ConfigPolicyProviderKeysSpec extends AnyWordSpec with Matchers with Either
     ConfigPolicyEngine.check(config, policy, env).map(_.rule)
 
   private def openai(url: String): OpenAIConfig =
-    OpenAIConfig.fromValues("gpt-4o", Secret("k"), url).value
+    OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("k"), BaseUrl(url)).value
 
   private def fromSection(section: String): ProviderConfig =
     Llm4sConfig
@@ -49,13 +50,13 @@ class ConfigPolicyProviderKeysSpec extends AnyWordSpec with Matchers with Either
     "cap a provider that has no per-provider entry, so opting one in cannot leave it unbounded" in {
       val huge =
         OpenAICompatibleConfig
-          .fromValues(ModelName("m"), "https://gateway.example/v1", contextWindow = Some(10000000))
+          .fromValues(ModelName("m"), BaseUrl("https://gateway.example/v1"), contextWindow = Some(10000000))
           .value
       rules(huge, optedIn, CatalogEnvironment.Prod) should contain("maxContextWindow")
 
       val large =
         OpenAICompatibleConfig
-          .fromValues(ModelName("m"), "https://gateway.example/v1", contextWindow = Some(1000000))
+          .fromValues(ModelName("m"), BaseUrl("https://gateway.example/v1"), contextWindow = Some(1000000))
           .value
       rules(large, optedIn, CatalogEnvironment.Prod) should not contain "maxContextWindow"
     }
@@ -63,7 +64,7 @@ class ConfigPolicyProviderKeysSpec extends AnyWordSpec with Matchers with Either
     "let a per-provider entry replace the fallback cap" in {
       val huge =
         OpenAICompatibleConfig
-          .fromValues(ModelName("m"), "https://gateway.example/v1", contextWindow = Some(10000000))
+          .fromValues(ModelName("m"), BaseUrl("https://gateway.example/v1"), contextWindow = Some(10000000))
           .value
       val policy = optedIn.withMaxContextWindow(CatalogEnvironment.Prod, "openai-compatible", 20000000)
       rules(huge, policy, CatalogEnvironment.Prod) should not contain "maxContextWindow"
@@ -185,13 +186,14 @@ class ConfigPolicyProviderKeysSpec extends AnyWordSpec with Matchers with Either
 
   "the prod preset's model patterns" should {
     "need an explicit suffix pattern to allow dated snapshots" in {
-      val snapshot = OpenAIConfig.fromValues("gpt-4o-2024-08-06", Secret("k"), "https://api.openai.com/v1").value
+      val snapshot =
+        OpenAIConfig.fromValues(ModelName("gpt-4o-2024-08-06"), Secret("k"), BaseUrl("https://api.openai.com/v1")).value
       rules(snapshot, ConfigPolicy.prodSafeDefaults, CatalogEnvironment.Prod) should contain("allowedModels")
 
       val widened = ConfigPolicy.prodSafeDefaults.withAllowedModelPatterns("openai/gpt-4o(-.*)?")
       rules(snapshot, widened, CatalogEnvironment.Prod) should not contain "allowedModels"
       rules(
-        OpenAIConfig.fromValues("gpt-4o", Secret("k"), "https://api.openai.com/v1").value,
+        OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("k"), BaseUrl("https://api.openai.com/v1")).value,
         widened,
         CatalogEnvironment.Prod
       ) should not contain "allowedModels"
@@ -207,7 +209,9 @@ class ConfigPolicyProviderKeysSpec extends AnyWordSpec with Matchers with Either
       .withMaxContextWindow(CatalogEnvironment.Prod, "openai-compatible", 131072)
 
     def groq(url: String, window: Int): ProviderConfig =
-      OpenAICompatibleConfig.fromValues(ModelName("openai/gpt-oss-120b"), url, contextWindow = Some(window)).value
+      OpenAICompatibleConfig
+        .fromValues(ModelName("openai/gpt-oss-120b"), BaseUrl(url), contextWindow = Some(window))
+        .value
 
     "accept the Groq section at its native window" in {
       rules(groq("https://api.groq.com/openai/v1", 131072), recipe, CatalogEnvironment.Prod) shouldBe empty
@@ -228,7 +232,7 @@ class ConfigPolicyProviderKeysSpec extends AnyWordSpec with Matchers with Either
   "the prod preset's fallback cap" should {
     "admit an opted-in provider at 500000 (xAI) without a cap of its own" in {
       val xai = OpenAICompatibleConfig
-        .fromValues(ModelName("grok-4"), "https://api.x.ai/v1", contextWindow = Some(500000))
+        .fromValues(ModelName("grok-4"), BaseUrl("https://api.x.ai/v1"), contextWindow = Some(500000))
         .value
       rules(xai, optedIn, CatalogEnvironment.Prod) should not contain "maxContextWindow"
     }

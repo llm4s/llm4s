@@ -1760,7 +1760,13 @@ final class RAG private (
       .flatMap { response =>
         response.usage.foreach(u => meter.addEmbeddingTokens(u.totalTokens))
         response.embeddings.headOption
-          .toRight(EmbeddingError(None, "Embedding provider returned empty embeddings list", embeddingModelConfig.name))
+          .toRight(
+            EmbeddingError(
+              None,
+              "Embedding provider returned empty embeddings list",
+              embeddingModelConfig.name.asString
+            )
+          )
           .map(_.map(_.toFloat).toArray)
       }
   }
@@ -1773,7 +1779,7 @@ final class RAG private (
           EmbeddingError(
             None,
             "Embedding provider returned empty embeddings list",
-            embeddingModelConfig.name
+            embeddingModelConfig.name.asString
           )
         )
       } else if (response.embeddings.length != texts.length) {
@@ -1783,7 +1789,7 @@ final class RAG private (
             s"Embedding provider returned ${response.embeddings.length} ${
                 if (response.embeddings.length == 1) "embedding" else "embeddings"
               } for batch of ${texts.length} texts",
-            embeddingModelConfig.name
+            embeddingModelConfig.name.asString
           )
         )
       } else {
@@ -2138,7 +2144,7 @@ object RAG {
           for {
             providerConfig <- resolveEmbeddingProvider(id.asString)
             model          <- embeddingModel(config, descriptor, Some(providerConfig.model.asString))
-            provider       <- descriptor.build(providerConfig.withModel(ModelName(model)), EmbeddingBuildContext())
+            provider       <- descriptor.build(providerConfig.withModel(model), EmbeddingBuildContext())
           } yield (EmbeddingClient(provider).withProviderId(id), model)
       }
       (client, model) = clientAndModel
@@ -2168,9 +2174,10 @@ object RAG {
     config: RAGConfig,
     descriptor: EmbeddingProviderDescriptor,
     resolvedModel: Option[String]
-  ): Result[String] =
+  ): Result[ModelName] =
     config.embeddingModel
       .orElse(resolvedModel.filter(_.trim.nonEmpty))
+      .map(ModelName(_))
       .orElse(descriptor.configSpec.defaultModel)
       .toRight(
         ConfigurationError(
@@ -2183,7 +2190,7 @@ object RAG {
   private def createEmbeddingModelConfig(
     config: RAGConfig,
     descriptor: EmbeddingProviderDescriptor,
-    model: String
+    model: ModelName
   ): EmbeddingModelConfig = {
     // A model the provider does not declare still embeds; 1536 (OpenAI's small model) is the
     // historical fallback for a dimension nothing states.

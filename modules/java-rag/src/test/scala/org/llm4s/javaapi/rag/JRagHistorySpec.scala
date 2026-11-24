@@ -1,5 +1,6 @@
 package org.llm4s.javaapi.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.error.RateLimitError
@@ -24,7 +25,7 @@ class JRagHistorySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val conversations: ArrayBuffer[Conversation] = ArrayBuffer.empty
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       conversations += conversation
-      failure.toLeft(Completion("id", Instant.EPOCH, "fixed", AssistantMessage(reply)))
+      failure.toLeft(Completion("id", Instant.EPOCH, ModelName("fixed"), AssistantMessage(reply)))
     }
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit

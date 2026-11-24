@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.LangfuseConfig
@@ -33,7 +34,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val result = tracing.traceEvent(TraceEvent.CompletionReceived("comp-1", "gpt-4", 2, "Hello world"))
+    val result = tracing.traceEvent(TraceEvent.CompletionReceived("comp-1", ModelName("gpt-4"), 2, "Hello world"))
 
     result.isRight shouldBe true
     val body  = ujson.read(mock.lastBody.get)
@@ -51,12 +52,12 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
       ujson.read(mock.lastBody.get)("batch")(0)("body")("metadata")("service_tier").str
     }
     tierOf(
-      _.traceEvent(TraceEvent.CompletionReceived("c", "m", 0, "x", servedTier = Some(ServiceTier.Priority)))
+      _.traceEvent(TraceEvent.CompletionReceived("c", ModelName("m"), 0, "x", servedTier = Some(ServiceTier.Priority)))
     ) shouldBe
       "priority"
-    val completion = Completion("c", Instant.EPOCH, "m", AssistantMessage("x"))
+    val completion = Completion("c", Instant.EPOCH, ModelName("m"), AssistantMessage("x"))
       .withServedTier(ServiceTier.Other("scale"))
-    tierOf(_.traceCompletion(completion, "m")) shouldBe "scale"
+    tierOf(_.traceCompletion(completion, ModelName("m"))) shouldBe "scale"
   }
 
   // =========================================================================
@@ -105,7 +106,8 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val result = tracing.traceEvent(TraceEvent.TokenUsageRecorded(TokenUsage(100, 50, 150), "gpt-4", "completion"))
+    val result =
+      tracing.traceEvent(TraceEvent.TokenUsageRecorded(TokenUsage(100, 50, 150), ModelName("gpt-4"), "completion"))
 
     result.isRight shouldBe true
     val body  = ujson.read(mock.lastBody.get)
@@ -140,7 +142,9 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   it should "carry the run's usage in the AgentRunEnded trace's metadata" in {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
-    val usage   = UsageSummary().add("m", TokenUsage(10, 5, 15), Some(0.5)).add("m", TokenUsage(2, 1, 3), None)
+    val usage = UsageSummary()
+      .add(ModelName("m"), TokenUsage(10, 5, 15), Some(0.5))
+      .add(ModelName("m"), TokenUsage(2, 1, 3), None)
     val event = TraceEvent.AgentRunEnded(
       "thread-1",
       "run-1",
@@ -184,7 +188,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracing = makeTracing(mock)
 
     val result = tracing.traceEvent(
-      TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(500, 500), "text-embedding-3-small", "indexing", 10)
+      TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(500, 500), ModelName("text-embedding-3-small"), "indexing", 10)
     )
 
     result.isRight shouldBe true
@@ -204,7 +208,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val result = tracing.traceEvent(TraceEvent.CostRecorded(0.005, "gpt-4", "completion", 1000, "total"))
+    val result = tracing.traceEvent(TraceEvent.CostRecorded(0.005, ModelName("gpt-4"), "completion", 1000, "total"))
 
     result.isRight shouldBe true
     val body  = ujson.read(mock.lastBody.get)
@@ -403,11 +407,11 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "comp-test",
       created = Instant.EPOCH,
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage(Some("test response"), Seq.empty)
     )
 
-    val result = tracing.traceCompletion(completion, "gpt-4")
+    val result = tracing.traceCompletion(completion, ModelName("gpt-4"))
 
     result.isRight shouldBe true
     val body  = ujson.read(mock.lastBody.get)
@@ -425,11 +429,11 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "comp-tools",
       created = Instant.EPOCH,
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage(Some("Let me calculate"), Seq(toolCall))
     )
 
-    val result = tracing.traceCompletion(completion, "gpt-4")
+    val result = tracing.traceCompletion(completion, ModelName("gpt-4"))
 
     result.isRight shouldBe true
     val body  = ujson.read(mock.lastBody.get)

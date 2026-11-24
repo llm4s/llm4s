@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect._
@@ -67,7 +68,7 @@ object ProviderFallbackExample extends App {
     (
       "Ollama",
       OllamaConfig(
-        baseUrl = "http://localhost:11434",
+        baseUrl = BaseUrl("http://localhost:11434"),
         model = ModelName("llama3"),
         contextWindow = 8192,
         reserveCompletion = 4096

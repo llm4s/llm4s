@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
@@ -24,7 +25,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
   private val testConfig = ZaiConfig(
     apiKey = Secret("test-api-key"),
     model = ModelName("GLM-4.7"),
-    baseUrl = "https://api.z.ai/api/paas/v4",
+    baseUrl = BaseUrl("https://api.z.ai/api/paas/v4"),
     contextWindow = 128000,
     reserveCompletion = 4096
   )
@@ -272,7 +273,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
     completion.id shouldBe "chatcmpl-123"
     completion.created shouldBe Instant.ofEpochSecond(1677652288L)
-    completion.model shouldBe "GLM-4.7"
+    completion.model shouldBe ModelName("GLM-4.7")
     completion.content shouldBe "Hello! How can I help you today?"
     completion.usage shouldBe Some(TokenUsage(10, 15, 25))
     completion.toolCalls shouldBe empty
@@ -643,7 +644,7 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
     Completion(
       id = json("id").str,
       created = Instant.ofEpochSecond(json("created").num.toLong),
-      model = json("model").str,
+      model = ModelName(json("model").str),
       message = AssistantMessage(
         text = Some(contentStr),
         toolCalls = toolCalls.toList
@@ -728,7 +729,7 @@ class ZaiClientMetricsSpec extends AnyFlatSpec with Matchers {
   private val testConfig = ZaiConfig(
     apiKey = Secret("test-key"),
     model = ModelName("test-model"),
-    baseUrl = "http://test.com",
+    baseUrl = BaseUrl("http://test.com"),
     contextWindow = 128000,
     reserveCompletion = 4096
   )

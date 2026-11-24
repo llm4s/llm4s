@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.ReasoningEffort
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -19,7 +20,7 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
     pricing: ModelPricing = ModelPricing(),
     deprecationDate: Option[LocalDate] = None
   ): ModelMetadata = ModelMetadata(
-    modelId = modelId,
+    modelId = ModelName(modelId),
     provider = provider,
     mode = mode,
     maxInputTokens = maxInputTokens,
@@ -33,7 +34,7 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
   private val baseCapabilities = ModelCapabilities()
 
   "ModelMetadata setters" should "set modelId without changing other fields" in {
-    baseMetadata.withModelId("replacement-model") shouldBe metadata(modelId = "replacement-model")
+    baseMetadata.withModelId(ModelName("replacement-model")) shouldBe metadata(modelId = "replacement-model")
     baseMetadata shouldBe metadata()
   }
 

@@ -101,7 +101,7 @@ class EmbeddingTimeoutsConfigSpec extends AnyWordSpec with Matchers with EitherV
             EmbeddingProviderConfig(
               ProviderId("fixtureembedding"),
               BaseUrl("http://x"),
-              ModelName(context.modelOverride.getOrElse("m")),
+              context.modelOverride.getOrElse(ModelName("m")),
               Some(Secret("k"))
             )
           )

@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ AgentResult, AgentStatus }
 import org.llm4s.agent.delegation.{ ChildInterrupt, DelegatedRequest }
 import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, InterruptId }
@@ -69,7 +70,7 @@ private[llm4s] object FacadeInternals {
    * refusal left is an unlisted model, which is not a failure here.
    */
   private def declaredDimensions(provider: String, model: String): OptionalInt =
-    ModelDimensionRegistry.getDimension(provider, model).fold(_ => OptionalInt.empty(), OptionalInt.of)
+    ModelDimensionRegistry.getDimension(provider, ModelName(model)).fold(_ => OptionalInt.empty(), OptionalInt.of)
 
   /**
    * What both public `Llm4s.createClient` overloads do: the client for `config`, reporting every call to `metrics` (a
@@ -265,7 +266,7 @@ private[llm4s] object FacadeInternals {
   /** `usage` as Java and Kotlin callers read it. */
   def usageSummary(usage: UsageSummary): JUsageSummary = {
     val byModel =
-      new java.util.TreeMap[String, JModelUsage](usage.byModel.map((m, u) => m -> modelUsage(u)).asJava)
+      new java.util.TreeMap[String, JModelUsage](usage.byModel.map((m, u) => m.asString -> modelUsage(u)).asJava)
     new JUsageSummary(
       usage.requestCount,
       usage.inputTokens,
@@ -295,7 +296,7 @@ private[llm4s] object FacadeInternals {
     new JCompletion(
       completion.id,
       Option(completion.content).getOrElse(""),
-      completion.model,
+      completion.model.asString,
       java.util.List.copyOf(completion.toolCalls.map(toolCall).asJava),
       completion.usage.map(tokenUsage).toJava,
       completion.estimatedCost.map(_.bigDecimal).toJava,

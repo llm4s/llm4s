@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.javaapi.services.AiServiceFixtures.*
 import org.llm4s.javaapi.services.{ ChatMemoryStore, ChatTurn }
 import org.llm4s.llmconnect.LLMClient
@@ -26,7 +27,7 @@ class AiServiceSpec extends AnyWordSpec with TestTimeLimit with Matchers {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       val n       = sent.synchronized { sent += conversation; sent.size - 1 }
       val message = script(n)
-      Right(Completion(s"r$n", Instant.EPOCH, "recording", message))
+      Right(Completion(s"r$n", Instant.EPOCH, ModelName("recording"), message))
     }
 
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(

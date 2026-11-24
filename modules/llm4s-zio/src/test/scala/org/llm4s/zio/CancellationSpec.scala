@@ -1,5 +1,6 @@
 package org.llm4s.zio
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 
@@ -127,8 +128,8 @@ object CancellationSpec extends ZIOSpecDefault {
         val scripted: LLMClient = new LLMClient {
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
             if (c.messages.exists(_.isInstanceOf[ToolMessage]))
-              Right(Completion("t", Instant.EPOCH, "m", AssistantMessage(Some("finished"))))
-            else Right(Completion("t", Instant.EPOCH, "m", AssistantMessage("", Seq(call))))
+              Right(Completion("t", Instant.EPOCH, ModelName("m"), AssistantMessage(Some("finished"))))
+            else Right(Completion("t", Instant.EPOCH, ModelName("m"), AssistantMessage("", Seq(call))))
           def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] =

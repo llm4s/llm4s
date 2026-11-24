@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -154,7 +155,7 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-${System.nanoTime()}",
       created = Instant.now(),
-      model = "test-model",
+      model = ModelName("test-model"),
       message = message,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30)),
       finishReason = FinishReason.Stop
@@ -174,7 +175,7 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-tc-${System.nanoTime()}",
       created = Instant.now(),
-      model = "test-model",
+      model = ModelName("test-model"),
       message = message,
       usage = Some(TokenUsage(promptTokens = 15, completionTokens = 5, totalTokens = 20))
     )
@@ -185,7 +186,7 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-msg-${System.nanoTime()}",
       created = Instant.now(),
-      model = "test-model",
+      model = ModelName("test-model"),
       message = message,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
     )
@@ -204,7 +205,7 @@ private[agent] object CompletionFixture {
     Completion(
       id = s"fixture-usage-${System.nanoTime()}",
       created = Instant.now(),
-      model = "test-model",
+      model = ModelName("test-model"),
       message = message,
       usage = Some(TokenUsage(promptTokens = prompt, completionTokens = completion, totalTokens = prompt + completion)),
       finishReason = FinishReason.Stop

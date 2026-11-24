@@ -1,5 +1,6 @@
 package org.llm4s.agent.harness
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ AgentId, CompletionFixture, ScriptedLLMClient }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.GraphTestSupport.*
@@ -333,7 +334,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     summaryOf(model.last).value shouldBe "the summary"
     val usage = state.get(LoopKeys.usage).value
     usage.byModel.keySet should contain("test-model")
-    usage.byModel("test-model").inputTokens shouldBe 100L
+    usage.byModel(ModelName("test-model")).inputTokens shouldBe 100L
     // it was sent the new messages, and asked for at most maxSummaryTokens
     val (conversation, options) = client.calls.head
     conversation.messages.last.content should (include("user: u1").and(include("assistant: a1")))

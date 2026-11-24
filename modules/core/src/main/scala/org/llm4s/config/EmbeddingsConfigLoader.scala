@@ -150,7 +150,7 @@ private[config] object EmbeddingsConfigLoader {
       resolved   <- resolveApiKey(section, keyFile, descriptor, source)
       config <- descriptor.buildConfig(
         section.withApiKey(resolved.map(_.value)).withExtras(extras),
-        EmbeddingConfigContext(selected.modelOverride)
+        EmbeddingConfigContext(selected.modelOverride.map(ModelName(_)))
       )
       network <- HttpNetworkReader.load(source)
       // The timeouts block is read once, for every provider, as a chat section's is; the proxy and TLS

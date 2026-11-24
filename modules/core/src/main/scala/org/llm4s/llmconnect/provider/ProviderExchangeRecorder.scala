@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeOutcome }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -28,7 +29,7 @@ final case class ProviderExchangeCall private (
   provider: ProviderId,
   startedAt: Instant,
   requestBody: String,
-  model: Option[String],
+  model: Option[ModelName],
   responseBody: Option[String],
   requestId: Option[String],
   correlationId: Option[String]
@@ -44,10 +45,10 @@ final case class ProviderExchangeCall private (
   def withRequestBody(requestBody: String): ProviderExchangeCall = copy(requestBody = requestBody)
 
   /** Sets the model. */
-  def withModel(model: String): ProviderExchangeCall = copy(model = Some(model))
+  def withModel(model: ModelName): ProviderExchangeCall = copy(model = Some(model))
 
   /** Sets or clears the model. */
-  def withModel(model: Option[String]): ProviderExchangeCall = copy(model = model)
+  def withModel(model: Option[ModelName]): ProviderExchangeCall = copy(model = model)
 
   /** Sets the response body. */
   def withResponseBody(responseBody: String): ProviderExchangeCall = copy(responseBody = Some(responseBody))
@@ -75,7 +76,7 @@ object ProviderExchangeCall {
     provider: ProviderId,
     startedAt: Instant,
     requestBody: String,
-    model: Option[String] = None,
+    model: Option[ModelName] = None,
     responseBody: Option[String] = None,
     requestId: Option[String] = None,
     correlationId: Option[String] = None

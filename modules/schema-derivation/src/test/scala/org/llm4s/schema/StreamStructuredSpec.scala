@@ -2,6 +2,7 @@ package org.llm4s.schema
 
 // The build compiles with -source:3.3, which turns off field access by name on named tuples; Scala 3.7's default
 // source level, which users have, has it.
+import org.llm4s.types.ProviderModelTypes.ModelName
 import scala.language.`3.7`
 
 import org.llm4s.error.ValidationError
@@ -150,7 +151,7 @@ class StreamStructuredSpec extends AnyFlatSpec with Matchers with ScalaCheckProp
         onChunk(StreamedChunk("s", None, thinkingDelta = Some("""{"vendor": "thinking"}""")))
         onChunk(StreamedChunk("s", Some("")))
         onChunk(StreamedChunk("s", Some(invoiceJson)))
-        Right(Completion("s", Instant.EPOCH, "m", AssistantMessage(invoiceJson)))
+        Right(Completion("s", Instant.EPOCH, ModelName("m"), AssistantMessage(invoiceJson)))
       }
       override def getContextWindow(): Int     = 4096
       override def getReserveCompletion(): Int = 1024

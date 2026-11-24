@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.{ OpenTelemetryConfig, TracingSettings }
 import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary, UserMessage }
 import org.llm4s.trace.spi.TracingBackends
@@ -66,7 +67,7 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
 
     "map an ended agent run to an invoke_agent span" in {
       val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
-      val usage   = UsageSummary().add("m", TokenUsage(10, 5, 15), None)
+      val usage   = UsageSummary().add(ModelName("m"), TokenUsage(10, 5, 15), None)
       val event = TraceEvent.AgentRunEnded(
         "thread-1",
         "run-1",

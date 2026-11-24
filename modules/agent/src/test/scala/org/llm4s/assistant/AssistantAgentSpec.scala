@@ -1,5 +1,6 @@
 package org.llm4s.assistant
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.agent.{ Suspension, AgentResultFixture, AgentStatus }
@@ -31,7 +32,7 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test-id",
           created = Instant.EPOCH,
-          model = "test-model",
+          model = ModelName("test-model"),
           message = AssistantMessage(response, toolCalls = List.empty)
         )
       }
@@ -174,7 +175,7 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
     val looping = new LLMClient {
       private val call = ToolCall("c", "missing_tool", ujson.Obj())
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-        Right(Completion("loop", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call))))
+        Right(Completion("loop", Instant.EPOCH, ModelName("test-model"), AssistantMessage(None, Seq(call))))
       override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)

@@ -4,14 +4,14 @@ import org.llm4s.config.{ DiscoveredModel, Llm4sConfig }
 import org.llm4s.llmconnect.config.{ OpenAIConfig, ProviderConfig }
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
-import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderName }
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderName }
 
 object ProviderConfigNewtypesTest {
   val openai = OpenAIConfig(
     apiKey = Secret("sk-..."),
     model = ModelName("gpt-4o"),
     organization = None,
-    baseUrl = "https://api.openai.com/v1",
+    baseUrl = BaseUrl("https://api.openai.com/v1"),
     contextWindow = 128000,
     reserveCompletion = 4096
   )

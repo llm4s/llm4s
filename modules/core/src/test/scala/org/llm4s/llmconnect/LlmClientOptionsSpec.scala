@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import java.time.Instant
@@ -69,7 +70,7 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
     val exchange = ProviderExchange(
       exchangeId = "ex-1",
       provider = ProviderId("ollama"),
-      model = Some("gemma3:27b"),
+      model = Some(ModelName("gemma3:27b")),
       requestId = Some("req-1"),
       correlationId = Some("corr-1"),
       startedAt = startedAt,

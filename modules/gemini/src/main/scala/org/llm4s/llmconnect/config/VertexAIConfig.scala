@@ -96,7 +96,7 @@ object VertexAIConfig:
   private val DefaultContextWindow     = 1048576
   private val DefaultReserveCompletion = 8192
 
-  private val vertexAiFallback: String => ContextLimits =
+  private val vertexAiFallback: ModelName => ContextLimits =
     _ => ContextLimits(DefaultContextWindow, DefaultReserveCompletion)
 
   /**
@@ -135,7 +135,7 @@ object VertexAIConfig:
    * with the `with*` setters, or use [[fromValues]] to consult the bundled model catalogue.
    */
   def apply(projectId: String, model: ModelName): VertexAIConfig = {
-    val ContextLimits(cw, rc) = vertexAiFallback(model.asString)
+    val ContextLimits(cw, rc) = vertexAiFallback(model)
     apply(projectId, DEFAULT_LOCATION, model, None, cw, rc)
   }
 
@@ -149,7 +149,7 @@ object VertexAIConfig:
    * @param credentialFilePath Optional path to a Google JSON credential file.
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     projectId: String,
     location: String = DEFAULT_LOCATION,
     credentialFilePath: Option[String] = None
@@ -168,7 +168,7 @@ object VertexAIConfig:
       VertexAIConfig(
         projectId = projectId,
         location = location,
-        model = ModelName(modelName),
+        model = modelName,
         credentialFilePath = credentialFilePath,
         contextWindow = cw,
         reserveCompletion = rc

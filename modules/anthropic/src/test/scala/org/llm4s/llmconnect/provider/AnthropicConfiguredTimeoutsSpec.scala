@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderName }
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
@@ -31,7 +32,7 @@ final class AnthropicConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers wi
     AnthropicConfig(
       apiKey = Secret("test-key"),
       model = ModelName("claude-3-5-sonnet-latest"),
-      baseUrl = baseUrl,
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 200000,
       reserveCompletion = 4096
     ).withTimeouts(timeouts)

@@ -2,6 +2,7 @@ package org.llm4s.schema.guide
 
 // The build compiles with -source:3.3, which turns off named tuple values and field access by name; Scala 3.7's
 // default source level, which the guide's readers have, has them.
+import org.llm4s.types.ProviderModelTypes.ModelName
 import scala.language.`3.7`
 
 import org.llm4s.llmconnect.LLMClient
@@ -323,7 +324,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   private class Scripted(reply: String) extends LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, ModelName("test-model"), AssistantMessage(reply)))
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)

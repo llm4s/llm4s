@@ -1,5 +1,6 @@
 package org.llm4s.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.SimpleError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.LLMClient
@@ -197,7 +198,7 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
         case None =>
           http
             .post(url, Map("Content-Type" -> "application/json"), encode(rewrite(c.messages)).render(), 10.seconds)
-            .map(_ => Completion("id", Instant.EPOCH, "test", AssistantMessage("done")))
+            .map(_ => Completion("id", Instant.EPOCH, ModelName("test"), AssistantMessage("done")))
     def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 1000

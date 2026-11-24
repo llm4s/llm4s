@@ -163,7 +163,9 @@ final class RAGPipeline private (
       response <- tracedEmbeddingClient.withOperation("query").embed(request)
       _ = { embeddingTokens = response.usage.map(_.totalTokens) }
       queryEmbedding <- response.embeddings.headOption
-        .toRight(EmbeddingError(None, "Embedding provider returned empty embeddings list", embeddingModelConfig.name))
+        .toRight(
+          EmbeddingError(None, "Embedding provider returned empty embeddings list", embeddingModelConfig.name.asString)
+        )
         .map(_.map(_.toFloat).toArray)
       results <-
         if (config.useReranker) {
@@ -336,7 +338,7 @@ object RAGPipeline {
     tracer: Option[Tracing] = None
   ): Result[RAGPipeline] = {
     val embeddingModelConfig = EmbeddingModelConfig(
-      config.embeddingConfig.model,
+      ModelName(config.embeddingConfig.model),
       config.embeddingConfig.dimensions
     )
 
@@ -382,7 +384,7 @@ object RAGPipeline {
     tracer: Option[Tracing] = None
   ): RAGPipeline = {
     val embeddingModelConfig = EmbeddingModelConfig(
-      config.embeddingConfig.model,
+      ModelName(config.embeddingConfig.model),
       config.embeddingConfig.dimensions
     )
 

@@ -1,5 +1,6 @@
 package org.llm4s.samples.embeddingsupport
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.samples.embeddingsupport.{
   EmbeddingQuery,
   EmbeddingRuntimeSettings,
@@ -181,7 +182,8 @@ object EmbeddingExample {
     ui: EmbeddingUiSettings
   ): Option[Seq[Double]] = {
     if (query == null || query.trim.isEmpty) return None
-    val dims = org.llm4s.llmconnect.config.ModelDimensionRegistry.getDimension(provider.toLowerCase, modelName) match {
+    val dims = org.llm4s.llmconnect.config.ModelDimensionRegistry
+      .getDimension(provider.toLowerCase, ModelName(modelName)) match {
       case Right(d) => d
       case Left(err) =>
         println(yellow(s"[WARN] Could not determine dimensions: ${err.formatted}")(ui))
@@ -189,7 +191,7 @@ object EmbeddingExample {
     }
     val req = EmbeddingRequest(
       Seq(query),
-      org.llm4s.llmconnect.config.EmbeddingModelConfig(modelName, dims),
+      org.llm4s.llmconnect.config.EmbeddingModelConfig(ModelName(modelName), dims),
       InputPurpose.Query
     )
     client.embed(req) match {

@@ -1,5 +1,6 @@
 package org.llm4s.samples.reliability
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ LLMError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -56,7 +57,7 @@ object ErrorRecoveryExample {
         Completion(
           id = "demo",
           created = Instant.now(),
-          model = "demo-model",
+          model = ModelName("demo-model"),
           message = AssistantMessage(text)
         )
       }

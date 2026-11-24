@@ -40,7 +40,7 @@ class CohereSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
   private def config(key: String): CohereConfig =
     CohereConfig
       .fromValues(
-        modelName = "command-a-03-2025",
+        modelName = ModelName("command-a-03-2025"),
         apiKey = Secret(key),
         baseUrl = CohereConfig.DEFAULT_BASE_URL
       )

@@ -1,5 +1,6 @@
 package org.llm4s.pekko
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReference }
 import java.util.concurrent.locks.LockSupport
@@ -33,7 +34,7 @@ import java.time.Instant
 private[pekko] object Fixtures {
 
   val completion: Completion =
-    Completion(id = "id", created = Instant.EPOCH, model = "m", message = AssistantMessage(Some("ok")))
+    Completion(id = "id", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage(Some("ok")))
 
   val conversation: Conversation = Conversation(Seq(UserMessage("ping")))
 
@@ -244,8 +245,9 @@ private[pekko] object Fixtures {
           val n = calls.getAndIncrement()
           if (n < turns) {
             val call = ToolCall(s"call-$n", "pinger", ujson.Obj("text" -> "x"))
-            Right(Completion(s"c$n", Instant.EPOCH, "m", AssistantMessage(None, Seq(call))))
-          } else if (n == turns) Right(Completion(s"c$n", Instant.EPOCH, "m", AssistantMessage(Some("done"))))
+            Right(Completion(s"c$n", Instant.EPOCH, ModelName("m"), AssistantMessage(None, Seq(call))))
+          } else if (n == turns)
+            Right(Completion(s"c$n", Instant.EPOCH, ModelName("m"), AssistantMessage(Some("done"))))
           else boom
         }
       )

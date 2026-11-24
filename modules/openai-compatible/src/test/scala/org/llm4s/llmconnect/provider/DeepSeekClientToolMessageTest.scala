@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.model.ModelRegistryService
@@ -25,7 +26,7 @@ private[provider] object DeepSeekRequestBodyTestHelper {
   private val testConfig = DeepSeekConfig(
     apiKey = Secret("test-key"),
     model = ModelName("deepseek-chat"),
-    baseUrl = "https://api.deepseek.com/beta",
+    baseUrl = BaseUrl("https://api.deepseek.com/beta"),
     contextWindow = 4000,
     reserveCompletion = 512
   )

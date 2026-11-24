@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.llmconnect.provider.CostEstimator
 import org.scalatest.flatspec.AnyFlatSpec
@@ -12,7 +13,7 @@ class ModelRegistryMemoSpec extends AnyFlatSpec with Matchers:
 
   private def model(id: String, provider: String): ModelMetadata =
     ModelMetadata(
-      modelId = id,
+      modelId = ModelName(id),
       provider = provider,
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
@@ -41,7 +42,7 @@ class ModelRegistryMemoSpec extends AnyFlatSpec with Matchers:
     override def updated[V1 >: ModelMetadata](key: String, value: V1): Map[String, V1] = underlying.updated(key, value)
 
   private def counting(): (CountingMap, ModelRegistryService) =
-    val map = new CountingMap(models.map(m => m.modelId -> m).toMap)
+    val map = new CountingMap(models.map(m => m.modelId.asString -> m).toMap)
     (map, new DefaultModelRegistryService(map))
 
   private val usage = TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150)
@@ -49,10 +50,10 @@ class ModelRegistryMemoSpec extends AnyFlatSpec with Matchers:
   "CostEstimator.estimate" should "scan the registry once for a model it does not know, not on every reply" in {
     val (map, registry)        = counting()
     given ModelRegistryService = registry
-    CostEstimator.estimate("bench-model", usage) shouldBe None
+    CostEstimator.estimate(ModelName("bench-model"), usage) shouldBe None
     val afterFirst = map.scans.get()
     afterFirst should be > 0
-    (1 to 100).foreach(_ => CostEstimator.estimate("bench-model", usage) shouldBe None)
+    (1 to 100).foreach(_ => CostEstimator.estimate(ModelName("bench-model"), usage) shouldBe None)
     map.scans.get() shouldBe afterFirst
   }
 
@@ -60,17 +61,17 @@ class ModelRegistryMemoSpec extends AnyFlatSpec with Matchers:
     val (map, registry)        = counting()
     given ModelRegistryService = registry
     (1 to 10).foreach { _ =>
-      CostEstimator.estimate("model-b", usage): Unit
-      registry.lookup("model-b").map(_.modelId) shouldBe Right("model-b")
+      CostEstimator.estimate(ModelName("model-b"), usage): Unit
+      registry.lookup(ModelName("model-b")).map(_.modelId) shouldBe Right(ModelName("model-b"))
     }
     map.scans.get() shouldBe 0
   }
 
   "lookup(provider, model)" should "scan once for a pair it does not know" in {
     val (map, registry) = counting()
-    registry.lookup("acme", "nope").isLeft shouldBe true
+    registry.lookup("acme", ModelName("nope")).isLeft shouldBe true
     val afterFirst = map.scans.get()
-    (1 to 10).foreach(_ => registry.lookup("acme", "nope").isLeft shouldBe true)
+    (1 to 10).foreach(_ => registry.lookup("acme", ModelName("nope")).isLeft shouldBe true)
     map.scans.get() shouldBe afterFirst
   }
 
@@ -88,20 +89,20 @@ class ModelRegistryMemoSpec extends AnyFlatSpec with Matchers:
     )
     ids.foreach { id =>
       val expected = DefaultModelRegistryService.findModel(map, id)
-      registry.lookup(id) shouldBe expected
-      registry.lookup(id) shouldBe expected
+      registry.lookup(ModelName(id)) shouldBe expected
+      registry.lookup(ModelName(id)) shouldBe expected
     }
-    registry.lookup("model-a").left.toOption.get.message should include("Model not found: model-a")
-    registry.lookup("zebra/model-d").map(_.modelId) shouldBe Right("zebra/model-d")
-    registry.lookup("model-d").isLeft shouldBe true
-    registry.lookup("other/model-b").map(_.modelId) shouldBe Right("model-b")
+    registry.lookup(ModelName("model-a")).left.toOption.get.message should include("Model not found: model-a")
+    registry.lookup(ModelName("zebra/model-d")).map(_.modelId) shouldBe Right(ModelName("zebra/model-d"))
+    registry.lookup(ModelName("model-d")).isLeft shouldBe true
+    registry.lookup(ModelName("other/model-b")).map(_.modelId) shouldBe Right(ModelName("model-b"))
   }
 
   it should "stop remembering past its bound, and still answer" in {
     val (map, registry) = counting()
-    (0 until DefaultModelRegistryService.MaxMemoized).foreach(i => registry.lookup(s"unknown-$i"))
+    (0 until DefaultModelRegistryService.MaxMemoized).foreach(i => registry.lookup(ModelName(s"unknown-$i")))
     val full = map.scans.get()
-    registry.lookup("one-more").isLeft shouldBe true
-    registry.lookup("one-more").isLeft shouldBe true
+    registry.lookup(ModelName("one-more")).isLeft shouldBe true
+    registry.lookup(ModelName("one-more")).isLeft shouldBe true
     map.scans.get() should be > full + 3 // each lookup past the bound scans again
   }

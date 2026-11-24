@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.caching.guide.CachingGuideSnippets
@@ -33,7 +34,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
 
   // ----------------------------------------------------------------------------------------------------
 
-  private val ModelA = EmbeddingModelConfig("test-embedding", 3)
+  private val ModelA = EmbeddingModelConfig(ModelName("test-embedding"), 3)
 
   private def conversation(text: String): Conversation = Conversation.userOnly(text).value
 
@@ -71,7 +72,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
         new FakeEmbeddingClient,
         InMemoryEmbeddingCache.create().value,
         (text, model, purpose) => {
-          seen += ((text, model, purpose)); CacheKeyGenerator.embeddingKey(text, model, purpose)
+          seen += ((text, model.asString, purpose)); CacheKeyGenerator.embeddingKey(text, model, purpose)
         }
       )
       cached.embed(EmbeddingRequest(Seq("x"), ModelA))
@@ -85,14 +86,14 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
     "keep a query for model m apart from a document for a model named m#query" in {
       val base   = new FakeEmbeddingClient
       val cached = new CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
-      cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig("m", 3), InputPurpose.Query))
-      cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig("m#query", 3)))
+      cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig(ModelName("m"), 3), InputPurpose.Query))
+      cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig(ModelName("m#query"), 3)))
       base.calls.get shouldBe 2
     }
 
     "not let a colon in the text or the model name make two keys collide" in {
-      CacheKeyGenerator.embeddingKey("a:b", "c", InputPurpose.Document) should not be
-        CacheKeyGenerator.embeddingKey("a", "b:c", InputPurpose.Document)
+      CacheKeyGenerator.embeddingKey("a:b", ModelName("c"), InputPurpose.Document) should not be
+        CacheKeyGenerator.embeddingKey("a", ModelName("b:c"), InputPurpose.Document)
     }
 
     "key on whatever the custom key function says" in {
@@ -106,11 +107,11 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
       val snippet = new CachingGuideSnippets.TenantKey(new FakeEmbeddingClient)
       import snippet.tenantKey
       val doc = InputPurpose.Document
-      tenantKey("b:c")("a", "m", doc) should not be tenantKey("c")("a:b", "m", doc)
-      tenantKey("t")("a:b", "c", doc) should not be tenantKey("t")("a", "b:c", doc)
-      tenantKey("t")("x", "m", doc) shouldBe tenantKey("t")("x", "m", doc)
-      tenantKey("t")("x", "m", doc) should not be tenantKey("u")("x", "m", doc)
-      tenantKey("t")("x", "m", doc) should not be tenantKey("t")("x", "m", InputPurpose.Query)
+      tenantKey("b:c")("a", ModelName("m"), doc) should not be tenantKey("c")("a:b", ModelName("m"), doc)
+      tenantKey("t")("a:b", ModelName("c"), doc) should not be tenantKey("t")("a", ModelName("b:c"), doc)
+      tenantKey("t")("x", ModelName("m"), doc) shouldBe tenantKey("t")("x", ModelName("m"), doc)
+      tenantKey("t")("x", ModelName("m"), doc) should not be tenantKey("u")("x", ModelName("m"), doc)
+      tenantKey("t")("x", ModelName("m"), doc) should not be tenantKey("t")("x", ModelName("m"), InputPurpose.Query)
     }
 
     "expire an entry strictly after its TTL, counting the expired read as a miss" in {
@@ -422,7 +423,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
           Completion(
             id = s"id-$n",
             created = Instant.EPOCH,
-            model = "fake-model",
+            model = ModelName("fake-model"),
             message = AssistantMessage(s"answer $n"),
             usage = None
           )

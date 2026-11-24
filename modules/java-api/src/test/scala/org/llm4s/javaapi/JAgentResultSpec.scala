@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.{ AgentStatus, Suspension }
@@ -212,9 +213,9 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   private def usage = UsageSummary()
-    .add("gpt-b", TokenUsage(10, 5, 15, Some(2)), Some(0.25))
-    .add("gpt-a", TokenUsage(3, 1, 4), None)
-    .add("gpt-b", TokenUsage(1, 1, 2), Some(0.5))
+    .add(ModelName("gpt-b"), TokenUsage(10, 5, 15, Some(2)), Some(0.25))
+    .add(ModelName("gpt-a"), TokenUsage(3, 1, 4), None)
+    .add(ModelName("gpt-b"), TokenUsage(1, 1, 2), Some(0.5))
 
   "JUsageSummary" should "report the totals, and each model's share sorted by model name, in JDK types" in {
     val u = FacadeInternals.usageSummary(usage)
@@ -257,7 +258,14 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     def summary(cost: String) =
       FacadeInternals.usageSummary(
-        UsageSummary(1L, 2L, 3L, 0L, BigDecimal(cost), Map("m" -> ModelUsage(1L, 2L, 3L, 0L, BigDecimal(cost))))
+        UsageSummary(
+          1L,
+          2L,
+          3L,
+          0L,
+          BigDecimal(cost),
+          Map(ModelName("m") -> ModelUsage(1L, 2L, 3L, 0L, BigDecimal(cost)))
+        )
       )
     summary("1.0") shouldBe summary("1.00")
     summary("1.0").hashCode shouldBe summary("1.00").hashCode
@@ -276,7 +284,7 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     Completion(
       "id",
       Instant.EPOCH,
-      "m",
+      ModelName("m"),
       AssistantMessage(Some(text)),
       usage = Some(TokenUsage(7, 3, 10)),
       estimatedCost = Some(0.01)
@@ -368,7 +376,7 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def toolCall: Completion = {
     val call = ToolCall("call-1", "echo", ujson.Obj("input" -> "hi"))
-    Completion("id", Instant.EPOCH, "m", AssistantMessage(None, Seq(call)))
+    Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(None, Seq(call)))
   }
 
   private def echoTools: ToolRegistry =

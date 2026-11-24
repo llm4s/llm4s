@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -17,12 +18,12 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
       "supports_vision"           -> true
     )
 
-    val result = ModelMetadata.fromJson("gpt-4o", json)
+    val result = ModelMetadata.fromJson(ModelName("gpt-4o"), json)
 
     result.isRight shouldBe true
     val metadata = result.getOrElse(fail("Failed to parse metadata"))
 
-    metadata.modelId shouldBe "gpt-4o"
+    metadata.modelId shouldBe ModelName("gpt-4o")
     metadata.provider shouldBe "openai"
     metadata.mode shouldBe ModelMode.Chat
     metadata.maxInputTokens shouldBe Some(128000)
@@ -37,12 +38,12 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
       "mode"             -> "chat"
     )
 
-    val result = ModelMetadata.fromJson("custom-model", json)
+    val result = ModelMetadata.fromJson(ModelName("custom-model"), json)
 
     result.isRight shouldBe true
     val metadata = result.getOrElse(fail("Failed to parse metadata"))
 
-    metadata.modelId shouldBe "custom-model"
+    metadata.modelId shouldBe ModelName("custom-model")
     metadata.provider shouldBe "custom"
     metadata.maxInputTokens shouldBe None
     metadata.maxOutputTokens shouldBe None
@@ -50,7 +51,7 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
 
   it should "correctly identify context window" in {
     val metadata = ModelMetadata(
-      modelId = "test-model",
+      modelId = ModelName("test-model"),
       provider = "test",
       mode = ModelMode.Chat,
       maxInputTokens = Some(100000),
@@ -65,7 +66,7 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
 
   it should "fall back to maxOutputTokens for context window" in {
     val metadata = ModelMetadata(
-      modelId = "test-model",
+      modelId = ModelName("test-model"),
       provider = "test",
       mode = ModelMode.Chat,
       maxInputTokens = None,
@@ -86,7 +87,7 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
     )
 
     val metadata = ModelMetadata(
-      modelId = "test-model",
+      modelId = ModelName("test-model"),
       provider = "test",
       mode = ModelMode.Chat,
       maxInputTokens = Some(100000),
@@ -109,7 +110,7 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
     val futureDate = java.time.LocalDate.now().plusDays(1)
 
     val deprecatedModel = ModelMetadata(
-      modelId = "deprecated-model",
+      modelId = ModelName("deprecated-model"),
       provider = "test",
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
@@ -120,7 +121,7 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
     )
 
     val currentModel = ModelMetadata(
-      modelId = "current-model",
+      modelId = ModelName("current-model"),
       provider = "test",
       mode = ModelMode.Chat,
       maxInputTokens = Some(4096),
@@ -136,7 +137,7 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
 
   it should "generate a readable description" in {
     val metadata = ModelMetadata(
-      modelId = "gpt-4o",
+      modelId = ModelName("gpt-4o"),
       provider = "openai",
       mode = ModelMode.Chat,
       maxInputTokens = Some(128000),

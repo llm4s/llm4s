@@ -1,5 +1,6 @@
 package org.llm4s.reliability
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ RateLimitError, TimeoutError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -34,7 +35,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
   }
 
   private def ok: Result[Completion] = Right(
-    Completion("id", Instant.EPOCH, "model", AssistantMessage("content"))
+    Completion("id", Instant.EPOCH, ModelName("model"), AssistantMessage("content"))
   )
 
   private def timingOut: Result[Completion] = Left(TimeoutError("slow", 1.second, "complete"))

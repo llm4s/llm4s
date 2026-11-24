@@ -113,7 +113,7 @@ class VoyageEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
     "report the dimensions of the configured Voyage model" in {
       withProps(Map("llm4s.embeddings.model" -> "voyage/voyage-3-lite", "llm4s.embeddings.voyage.apiKey" -> "vk")) {
         val settings = Llm4sConfig.textEmbeddingModel().value
-        settings.name shouldBe "voyage-3-lite"
+        settings.name shouldBe ModelName("voyage-3-lite")
         settings.dimensions shouldBe 512
       }
     }
@@ -147,20 +147,20 @@ class VoyageEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
   "ModelDimensionRegistry" should {
 
     "know the documented Voyage models" in {
-      ModelDimensionRegistry.getDimension("voyage", "voyage-3").value shouldBe 1024
+      ModelDimensionRegistry.getDimension("voyage", ModelName("voyage-3")).value shouldBe 1024
     }
 
     "give voyage-3-large its default size, not 1536" in {
-      ModelDimensionRegistry.getDimension("voyage", "voyage-3-large").value shouldBe 1024
+      ModelDimensionRegistry.getDimension("voyage", ModelName("voyage-3-large")).value shouldBe 1024
     }
 
     "resolve the voyageai alias and ignore the provider's case" in {
-      ModelDimensionRegistry.getDimension("voyageai", "voyage-3").value shouldBe 1024
-      ModelDimensionRegistry.getDimension("Voyage", "voyage-3").value shouldBe 1024
+      ModelDimensionRegistry.getDimension("voyageai", ModelName("voyage-3")).value shouldBe 1024
+      ModelDimensionRegistry.getDimension("Voyage", ModelName("voyage-3")).value shouldBe 1024
     }
 
     "name the model and provider when Voyage does not declare the model" in {
-      ModelDimensionRegistry.getDimension("voyage", "gpt-4o").left.value.formatted should include(
+      ModelDimensionRegistry.getDimension("voyage", ModelName("gpt-4o")).left.value.formatted should include(
         "Unknown model 'gpt-4o' for provider 'voyage'"
       )
     }

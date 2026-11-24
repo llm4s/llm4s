@@ -1,5 +1,6 @@
 package org.llm4s.capability
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Experimental
 
 /**
@@ -16,7 +17,7 @@ import org.llm4s.annotation.Experimental
  * @param capabilities the capabilities in `C`, in the order of [[Capability.values]]
  */
 @Experimental
-final class ModelRef[+C] private (val provider: String, val model: String, val capabilities: List[Capability]) {
+final class ModelRef[+C] private (val provider: String, val model: ModelName, val capabilities: List[Capability]) {
 
   /** `provider/model`, as written in the literal. */
   def id: String = s"$provider/$model"
@@ -28,7 +29,7 @@ object ModelRef {
 
   /** Called only by the code `model"..."` expands to, with names it has taken from [[Capability.values]]. */
   private[capability] def unsafeOf[C](provider: String, model: String, names: List[String]): ModelRef[C] =
-    new ModelRef[C](provider, model, names.map(Capability.valueOf))
+    new ModelRef[C](provider, ModelName(model), names.map(Capability.valueOf))
 }
 
 extension (inline context: StringContext) {

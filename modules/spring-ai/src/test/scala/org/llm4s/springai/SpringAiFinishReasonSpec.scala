@@ -1,5 +1,6 @@
 package org.llm4s.springai
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, FinishReason, ToolCall }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -15,7 +16,7 @@ class SpringAiFinishReasonSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "c",
       created = Instant.EPOCH,
-      model = "m",
+      model = ModelName("m"),
       message = AssistantMessage(Some("x"), calls),
       finishReason = reason
     )

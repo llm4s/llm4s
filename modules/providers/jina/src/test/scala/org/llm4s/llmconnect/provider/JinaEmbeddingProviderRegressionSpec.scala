@@ -11,7 +11,7 @@ import org.scalatest.matchers.should.Matchers
 /** Regressions for response alignment: the vector at position i must belong to input i. */
 class JinaEmbeddingProviderRegressionSpec extends AnyFlatSpec with Matchers {
 
-  private val modelCfg = EmbeddingModelConfig("jina-embeddings-v3", 1024)
+  private val modelCfg = EmbeddingModelConfig(ModelName("jina-embeddings-v3"), 1024)
   private val cfg = EmbeddingProviderConfig(
     ProviderId("jina"),
     BaseUrl("http://jina-test"),

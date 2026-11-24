@@ -1,5 +1,6 @@
 package org.llm4s.samples.metrics
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect, LlmClientOptions }
@@ -152,7 +153,7 @@ object CostTrackingExample {
     for {
       conversation <- Conversation.create(Seq(UserMessage(RequestPrompt)))
       completion   <- client.complete(conversation)
-    } yield RequestCost(completion.model, completion.usage, completion.estimatedCost)
+    } yield RequestCost(completion.model.asString, completion.usage, completion.estimatedCost)
 
   private def demonstrateCustomPricing(
     providerCfg: ProviderConfig,
@@ -201,7 +202,7 @@ object CostTrackingExample {
       }
     } yield {
       val custom = ModelMetadata(
-        modelId = modelId,
+        modelId = ModelName(modelId),
         provider = provider,
         mode = ModelMode.Chat,
         maxInputTokens = None,
@@ -213,12 +214,12 @@ object CostTrackingExample {
         ),
         deprecationDate = None
       )
-      ModelRegistryService.fromModels(known.filterNot(_.modelId == modelId) :+ custom)
+      ModelRegistryService.fromModels(known.filterNot(_.modelId.asString == modelId) :+ custom)
     }
 
   /** Whether `registry` has an input price for `model`, which is what makes an estimated cost possible. */
   private[samples] def isPriced(registry: ModelRegistryService, model: String): Boolean =
-    registry.lookup(model).toOption.exists(_.pricing.inputCostPerToken.isDefined)
+    registry.lookup(ModelName(model)).toOption.exists(_.pricing.inputCostPerToken.isDefined)
 
   private def dollars(amount: BigDecimal): String = "$" + amount.setScale(6, BigDecimal.RoundingMode.HALF_UP)
 

@@ -216,11 +216,11 @@ class OpenTelemetryTracing private[trace] (
           .builder()
           .put(TraceAttributes.EventType, "generation-create")
           .put(TraceAttributes.OperationName, TraceAttributes.Chat)
-          .put(TraceAttributes.RequestModel, e.model)
+          .put(TraceAttributes.RequestModel, e.model.asString)
           .put(TraceAttributes.ToolCalls, e.toolCalls.toLong)
         if (e.id.nonEmpty) builder.put(TraceAttributes.ResponseId, e.id)
         e.provider.foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p.asString)))
-        e.responseModel.foreach(m => builder.put(TraceAttributes.ResponseModel, m))
+        e.responseModel.foreach(m => builder.put(TraceAttributes.ResponseModel, m.asString))
         if (e.finishReasons.nonEmpty) builder.put(TraceAttributes.FinishReasons, e.finishReasons.asJava)
         e.usage.foreach { u =>
           builder.put(TraceAttributes.InputTokens, u.promptTokens.toLong)
@@ -234,7 +234,7 @@ class OpenTelemetryTracing private[trace] (
           if (e.input.nonEmpty) builder.put(TraceAttributes.InputMessages, inputMessages(e.input))
           builder.put(TraceAttributes.OutputMessages, outputMessage(e.content, e.finishReasons.headOption))
         }
-        (TraceAttributes.spanName(TraceAttributes.Chat, e.model), builder.build())
+        (TraceAttributes.spanName(TraceAttributes.Chat, e.model.asString), builder.build())
 
       case e: TraceEvent.ToolExecuted =>
         val builder = Attributes
@@ -253,7 +253,7 @@ class OpenTelemetryTracing private[trace] (
 
       case e: TraceEvent.ErrorOccurred if e.operation.isDefined =>
         val operation = e.operation.getOrElse(TraceAttributes.Chat)
-        val model     = e.model.getOrElse("")
+        val model     = e.model.fold("")(_.asString)
         val builder = Attributes
           .builder()
           .put(TraceAttributes.EventType, "event-create")
@@ -286,7 +286,7 @@ class OpenTelemetryTracing private[trace] (
           Attributes
             .builder()
             .put(TraceAttributes.EventType, "event-create")
-            .put("gen_ai.request.model", e.model)
+            .put("gen_ai.request.model", e.model.asString)
             .put("operation", e.operation)
             .put("gen_ai.usage.input_tokens", e.usage.promptTokens.toLong)
             .put("gen_ai.usage.output_tokens", e.usage.totalOutputTokens.toLong)
@@ -388,13 +388,13 @@ class OpenTelemetryTracing private[trace] (
           .builder()
           .put(TraceAttributes.EventType, "embedding-usage")
           .put(TraceAttributes.OperationName, TraceAttributes.Embeddings)
-          .put(TraceAttributes.RequestModel, e.model)
+          .put(TraceAttributes.RequestModel, e.model.asString)
           .put("operation", e.operation)
           .put("input_count", e.inputCount.toLong)
           .put(TraceAttributes.InputTokens, e.usage.promptTokens.toLong)
           .put("gen_ai.usage.total_tokens", e.usage.totalTokens.toLong)
         e.provider.foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p.asString)))
-        (TraceAttributes.spanName(TraceAttributes.Embeddings, e.model), builder.build())
+        (TraceAttributes.spanName(TraceAttributes.Embeddings, e.model.asString), builder.build())
 
       case e: TraceEvent.CostRecorded =>
         (
@@ -402,7 +402,7 @@ class OpenTelemetryTracing private[trace] (
           Attributes
             .builder()
             .put(TraceAttributes.EventType, "cost")
-            .put("gen_ai.request.model", e.model)
+            .put("gen_ai.request.model", e.model.asString)
             .put("operation", e.operation)
             .put("token_count", e.tokenCount.toLong)
             .put("cost.usd", e.costUsd)
@@ -450,7 +450,7 @@ class OpenTelemetryTracing private[trace] (
         val builder = Attributes
           .builder()
           .put(TraceAttributes.EventType, "image-generation")
-          .put("gen_ai.request.model", e.model)
+          .put("gen_ai.request.model", e.model.asString)
           .put("operation", e.operation)
           .put("image_count", e.imageCount.toLong)
           .put("size", e.size)

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.UnsupportedContentPartError
 import org.llm4s.llmconnect.config.OllamaConfig
@@ -19,7 +20,7 @@ class OllamaContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
     new OllamaClient(
       OllamaConfig(
         model = ModelName("llava"),
-        baseUrl = "http://localhost:11434",
+        baseUrl = BaseUrl("http://localhost:11434"),
         contextWindow = 4096,
         reserveCompletion = 512
       )

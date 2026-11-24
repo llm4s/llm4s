@@ -54,7 +54,7 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
     NamedProviderConfig(
       provider = descriptor.id,
       model = ModelName("test-model"),
-      baseUrl = descriptor.configSpec.defaultBaseUrl.orElse(Some("http://localhost:8000/v1")).map(BaseUrl(_)),
+      baseUrl = descriptor.configSpec.defaultBaseUrl.orElse(Some(BaseUrl("http://localhost:8000/v1"))),
       apiKey = Some(ApiKey("test-key")),
     )
 

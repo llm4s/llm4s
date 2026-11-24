@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -19,10 +21,10 @@ class OpenAICompatibleConfigRedactionSpec extends AnyFlatSpec with Matchers with
   "Provider config toString" should "not leak apiKey values" in {
     val openai = OpenAIConfig
       .fromValues(
-        modelName = "gpt-4",
+        modelName = ModelName("gpt-4"),
         apiKey = Secret(secret),
         organization = Some("org"),
-        baseUrl = "https://example.invalid/v1"
+        baseUrl = BaseUrl("https://example.invalid/v1")
       )
       .value
     (openai.toString should not).include(secret)
@@ -30,9 +32,9 @@ class OpenAICompatibleConfigRedactionSpec extends AnyFlatSpec with Matchers with
 
     val zai = ZaiConfig
       .fromValues(
-        modelName = "glm-4.5",
+        modelName = ModelName("glm-4.5"),
         apiKey = Secret(secret),
-        baseUrl = "https://example.invalid"
+        baseUrl = BaseUrl("https://example.invalid")
       )
       .value
     (zai.toString should not).include(secret)

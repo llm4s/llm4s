@@ -325,7 +325,7 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
 
   private def entry(modelId: String, provider: String, maxInput: Option[Int]): ModelMetadata =
     ModelMetadata(
-      modelId = modelId,
+      modelId = ModelName(modelId),
       provider = provider,
       mode = ModelMode.Chat,
       maxInputTokens = maxInput,

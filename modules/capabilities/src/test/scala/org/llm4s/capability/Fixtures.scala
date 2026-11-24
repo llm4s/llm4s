@@ -1,5 +1,6 @@
 package org.llm4s.capability
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.model.{ ModelCapabilities, ModelMetadata, ModelMode, ModelPricing, ModelRegistryService }
 
 /** Model metadata for the specs: one model with every capability and one with none. */
@@ -7,7 +8,7 @@ object Fixtures {
 
   def model(id: String, capabilities: ModelCapabilities): ModelMetadata =
     ModelMetadata(
-      modelId = id,
+      modelId = ModelName(id),
       provider = "acme",
       mode = ModelMode.Chat,
       maxInputTokens = Some(8192),

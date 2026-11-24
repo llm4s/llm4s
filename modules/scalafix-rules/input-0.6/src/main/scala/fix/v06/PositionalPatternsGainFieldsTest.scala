@@ -19,7 +19,7 @@ object PositionalPatternsGainFieldsTest {
   }
 
   // gained finishReason since 0.6.0 (RFC 0009 PR 6, #2687)
-  def model(event: ModelCallCompleted): String = event match {
+  def model(event: ModelCallCompleted) = event match {
     case ModelCallCompleted(_, model, _, _, _, _, _, _) => model
   }
 
@@ -29,7 +29,7 @@ object PositionalPatternsGainFieldsTest {
   }
 
   // gained servedTier since 0.6.0 (#2750)
-  def completionModel(event: TraceEvent): Option[String] = event match {
+  def completionModel(event: TraceEvent) = event match {
     case TraceEvent.CompletionReceived(_, model, _, _, _, _, _, _, _, _, _, _, _, _) => Some(model)
     case _ => None
   }

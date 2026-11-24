@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName, ProviderId }
 import org.llm4s.error.ValidationError
@@ -43,7 +44,7 @@ object ProviderModelListers:
    */
   def openAICompatible(
     provider: ProviderId,
-    defaultBaseUrl: String,
+    defaultBaseUrl: BaseUrl,
     modelsPath: String = "/models",
     extraHeaders: Map[String, String] = Map.empty,
     apiKeyRequired: Boolean = true,

@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.graph.{ InMemoryCheckpointer, ThreadId }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -27,7 +28,7 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val calls = new CopyOnWriteArrayList[Call]()
     private def reply(c: Conversation, o: CompletionOptions, streamed: Boolean): Result[Completion] = {
       calls.add(Call(c.messages.toSeq, o.tools.map(_.name), streamed))
-      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(answer)))
+      Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(answer)))
     }
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = reply(c, o, streamed = false)
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] = {
@@ -206,7 +207,7 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       val n    = calls.incrementAndGet()
       val call = ToolCall(s"c$n", "add", ujson.Obj("a" -> 1, "b" -> 2))
-      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(None, Seq(call))))
+      Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(None, Seq(call))))
     }
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)

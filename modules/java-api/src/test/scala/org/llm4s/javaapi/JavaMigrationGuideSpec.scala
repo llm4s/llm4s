@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.testutil.TestTimeLimit
@@ -65,13 +66,13 @@ class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matcher
           Completion(
             "1",
             Instant.EPOCH,
-            "m",
+            ModelName("m"),
             AssistantMessage(text = None, toolCalls = List(call))
           )
         )
       else {
         val toolOutput = c.messages.collect { case m: ToolMessage => m.content }.mkString
-        Right(Completion("2", Instant.EPOCH, "m", AssistantMessage(toolOutput)))
+        Right(Completion("2", Instant.EPOCH, ModelName("m"), AssistantMessage(toolOutput)))
       }
     }
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
@@ -163,7 +164,7 @@ class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matcher
       val model = new LLMClient {
         override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
           seen.synchronized(seen += c.messages.collect { case m: UserMessage => m.content }.toSeq)
-          Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("ok")))
+          Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("ok")))
         }
         override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit) =
           complete(c, o)

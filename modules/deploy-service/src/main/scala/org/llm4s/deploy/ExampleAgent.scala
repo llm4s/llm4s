@@ -1,5 +1,6 @@
 package org.llm4s.deploy
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentId }
 import org.llm4s.agent.graph.GraphRuntime
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContent, ToolOutcome, ToolSet }
@@ -49,7 +50,7 @@ final class DemoModel(toolDelay: FiniteDuration) extends LLMClient:
     Completion(
       id = s"demo-${java.util.UUID.randomUUID()}",
       created = Instant.now(),
-      model = "demo",
+      model = ModelName("demo"),
       message = message,
       usage = Some(TokenUsage(promptTokens = 0, completionTokens = 0, totalTokens = 0)),
       finishReason = if (message.toolCalls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop

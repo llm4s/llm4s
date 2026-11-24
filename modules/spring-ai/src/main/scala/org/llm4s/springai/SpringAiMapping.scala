@@ -1,5 +1,6 @@
 package org.llm4s.springai
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ValidationError
 import org.llm4s.javaapi.LlmException
 import org.llm4s.llmconnect.model.{
@@ -206,7 +207,7 @@ private[springai] object SpringAiMapping {
       text = completion.content,
       toolCalls = completion.toolCalls,
       id = completion.id,
-      model = completion.model,
+      model = completion.model.asString,
       usage = completion.usage,
       finish = Some(finishOf(completion))
     )
@@ -221,7 +222,7 @@ private[springai] object SpringAiMapping {
       text = "",
       toolCalls = completion.toolCalls,
       id = completion.id,
-      model = completion.model,
+      model = completion.model.asString,
       usage = completion.usage,
       finish = Some(finishOf(completion))
     )
@@ -362,7 +363,7 @@ private[springai] object SpringAiMapping {
             Completion(
               id = meta.flatMap(m => Option(m.getId)).filter(_.nonEmpty).getOrElse(UUID.randomUUID().toString),
               created = Instant.now(),
-              model = meta.flatMap(m => Option(m.getModel)).getOrElse(""),
+              model = ModelName(meta.flatMap(m => Option(m.getModel)).getOrElse("")),
               message = AssistantMessage(text = Option(text).filter(_.nonEmpty), toolCalls = calls),
               usage = meta.flatMap(m => Option(m.getUsage)).flatMap(tokenUsage),
               // Spring AI's reason as the model reported it: it has no common vocabulary to map

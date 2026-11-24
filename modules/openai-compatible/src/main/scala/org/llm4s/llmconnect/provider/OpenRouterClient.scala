@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
@@ -84,7 +86,7 @@ class OpenRouterClient(
       OpenAICompatibleClient.Settings(
         providerName = "openrouter",
         displayName = "OpenRouter",
-        model = config.model.asString,
+        model = config.model,
         baseUrl = config.baseUrl,
         credential = OpenRouterClient.credential(config),
         contextWindow = config.contextWindow,
@@ -183,7 +185,7 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
   // OpenRouter's `/models` answers without a key, so it would pass a wrong one; `GET /key` describes the key sent
   // and answers 401 to a wrong one (https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key, read
   // 2026-11-24)
-  override def validationUrl(baseUrl: String, model: String): Option[String] = Some(s"$baseUrl/key")
+  override def validationUrl(baseUrl: BaseUrl, model: ModelName): Option[String] = Some(s"${baseUrl.asUrl}/key")
 
   override val headers: Seq[(String, String)] =
     Seq("HTTP-Referer" -> "https://github.com/llm4s/llm4s", "X-Title" -> "LLM4S")
@@ -221,8 +223,8 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
    * is `Dropped` (this dialect sends Anthropic models a budget only) and the budget comes from
    * `reasoning`. On any other model a `thinking` is `Dropped`.
    */
-  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] = {
-    val modelLower       = model.toLowerCase
+  override def addReasoning(body: ujson.Obj, model: ModelName, options: CompletionOptions): List[RequestAdjustment] = {
+    val modelLower       = model.asString.toLowerCase
     val isAnthropicModel = modelLower.contains("claude") || modelLower.contains("anthropic")
     val isOpenAIReasoningModel =
       modelLower.contains("o1") || modelLower.contains("o3") || modelLower.contains("o4")

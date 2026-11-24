@@ -1,5 +1,6 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import java.util.concurrent.CopyOnWriteArrayList
@@ -55,11 +56,11 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   private def text(s: String): Completion =
-    Completion(id = "t", created = Instant.EPOCH, model = "m", message = AssistantMessage(Some(s)))
+    Completion(id = "t", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage(Some(s)))
 
   private def toolCall(i: Int): Completion = {
     val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = ujson.Obj("v" -> "x")))
-    Completion(id = s"t$i", created = Instant.EPOCH, model = "m", message = AssistantMessage("", calls))
+    Completion(id = s"t$i", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage("", calls))
   }
 
   private def tools: ToolRegistry = ToolRegistry.of(Seq(echoTool)).toOption.get

@@ -92,8 +92,8 @@ object DocumentQAExample extends App {
         .embeddings()
         .flatMap { cfg =>
           val dims =
-            ModelDimensionRegistry.getDimension(cfg.providerId.asString, cfg.model.asString).getOrElse(1536)
-          val modelCfg = EmbeddingModelConfig(cfg.model.asString, dims)
+            ModelDimensionRegistry.getDimension(cfg.providerId.asString, cfg.model).getOrElse(1536)
+          val modelCfg = EmbeddingModelConfig(cfg.model, dims)
           EmbeddingClient.from(cfg).map(client => LLMEmbeddingService(client, modelCfg))
         } match {
         case Right(realService) =>

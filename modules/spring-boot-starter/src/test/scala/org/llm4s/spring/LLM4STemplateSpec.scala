@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ServiceError
 import org.llm4s.javaapi.{ ConversationBuilder, JLlmClientTestFactory, LlmException }
 import org.llm4s.llmconnect.LLMClient
@@ -23,7 +24,7 @@ class LLM4STemplateSpec extends AnyFlatSpec with Matchers {
 
   private def successTemplate(text: String) = StarterTestSupport.template(
     JLlmClientTestFactory.create(
-      stubClient(Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(text))))
+      stubClient(Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(text))))
     )
   )
 

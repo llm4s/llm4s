@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError, ProcessingError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
@@ -162,7 +163,7 @@ class WatsonXClient(
 
   protected def clientDescription: String = s"watsonx client for model ${config.model}"
   protected def providerName: String      = "watsonx"
-  protected def modelName: String         = config.model.asString
+  protected def modelName: ModelName      = config.model
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else [[WatsonXClient.DefaultRequestTimeout]]. */
   protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(DefaultRequestTimeout)
@@ -368,7 +369,7 @@ class WatsonXClient(
     token: String,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    val accumulator                   = StreamingAccumulator(config.model.asString)
+    val accumulator                   = StreamingAccumulator(config.model)
     val calls                         = mutable.LinkedHashMap.empty[Int, PartialCall]
     var promptTokens, generatedTokens = 0
     var terminal: Option[String]      = None
@@ -535,7 +536,7 @@ class WatsonXClient(
       Left(ServiceError(502, providerName, s"generation ended abnormally with finish_reason '$reason'"))
     else Right(())
 
-  private def estimateCost(usage: TokenUsage): Option[BigDecimal] = CostEstimator.estimate(config.model.asString, usage)
+  private def estimateCost(usage: TokenUsage): Option[BigDecimal] = CostEstimator.estimate(config.model, usage)
 
   private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): Result[ujson.Obj] =
     PartEncoding
@@ -629,7 +630,7 @@ class WatsonXClient(
               id = json.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).getOrElse(java.util.UUID.randomUUID().toString),
               created = Instant.ofEpochSecond(nowSeconds()),
               usage = usage,
-              model = config.model.asString,
+              model = config.model,
               message = AssistantMessage(Some(text).filter(_.nonEmpty), toolCalls).withThinking(thinking),
               estimatedCost = usage.flatMap(estimateCost),
               finishReason = toFinishReason(reason)
@@ -650,7 +651,7 @@ class WatsonXClient(
         provider = ProviderId(providerName),
         startedAt = startedAt,
         requestBody = requestBody,
-        model = Some(config.model.asString),
+        model = Some(config.model),
         responseBody = Option(responseBody).filter(_.nonEmpty)
       ),
       result

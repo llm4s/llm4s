@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
@@ -86,14 +87,14 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
         Completion(
           "turn-1",
           Instant.EPOCH,
-          "test-model",
+          ModelName("test-model"),
           AssistantMessage("", Seq(toolCall)),
           Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
         ),
         Completion(
           "turn-2",
           Instant.EPOCH,
-          "test-model",
+          ModelName("test-model"),
           AssistantMessage("Echoed."),
           usage = Some(TokenUsage(promptTokens = 30, completionTokens = 5, totalTokens = 35))
         )

@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.config.LangfuseConfigLoader
@@ -99,8 +100,8 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
     val usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
     new SequencedClient(
       Seq(
-        Completion("turn-1", Instant.EPOCH, "mock-model", AssistantMessage("", Seq(call)), usage),
-        Completion("turn-2", Instant.EPOCH, "mock-model", AssistantMessage("Echoed."), usage = usage)
+        Completion("turn-1", Instant.EPOCH, ModelName("mock-model"), AssistantMessage("", Seq(call)), usage),
+        Completion("turn-2", Instant.EPOCH, ModelName("mock-model"), AssistantMessage("Echoed."), usage = usage)
       )
     )
   }

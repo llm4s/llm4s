@@ -8,7 +8,7 @@ import scalafix.v1._
  * [[FromValuesKeyFirst]], [[CompletionCreatedToInstant]], [[PositionalPatternsGainFields]], [[DuplicateApisRemoved]],
  * the [[RemovedApis_1_0]] lints, and for the breaks since 0.6.0 [[ThinkingReplacesBudgetTokens]],
  * [[FinishReasonTyped]], [[CompressionRuleTransform]], [[AgentCopyToWithSetters]], [[ResultSyntaxMoved]],
- * [[ProviderConfigNewtypes]], [[ToolFunctionOneTypeParameter]] and the [[AgentStatusGainsTruncated]] lint. It grows as
+ * [[ProviderConfigNewtypes]], [[ModelIdNewtypes]], [[ToolFunctionOneTypeParameter]] and the [[AgentStatusGainsTruncated]] lint. It grows as
  * the 1.0 breaks land (#1281).
  *
  * It assumes code compiled against 0.5.x: `CredentialsToSecret`, `CompletionCreatedToInstant` and
@@ -35,6 +35,7 @@ class Llm4sMigrate_1_0 extends SemanticRule("Llm4sMigrate_1_0") {
     new AgentStatusGainsTruncated,
     new ResultSyntaxMoved,
     new ProviderConfigNewtypes,
+    new ModelIdNewtypes(FromValuesKeyFirst.configs),
     new SamplingOptionsOptional,
     new CompletionFromMessage,
     new MessageAndConversationShapes,

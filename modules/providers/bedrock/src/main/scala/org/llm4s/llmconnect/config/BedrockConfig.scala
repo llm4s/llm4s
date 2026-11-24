@@ -90,7 +90,7 @@ object BedrockConfig:
    *         reverse), a session token without credentials, or credentials together with a profile.
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     region: String,
     credentials: Option[BedrockCredentials] = None,
     profile: Option[String] = None,
@@ -98,7 +98,7 @@ object BedrockConfig:
   )(using resolver: ContextWindowResolver): Result[BedrockConfig] =
     for
       _ <- ProviderConfig.nonEmpty("Bedrock", "region", region)
-      _ <- ProviderConfig.nonEmpty("Bedrock", "model", modelName)
+      _ <- ProviderConfig.nonEmpty("Bedrock", "model", modelName.asString)
       _ <- credentials.fold[Result[Unit]](Right(())) { c =>
         for
           _ <- ProviderConfig.nonEmpty("Bedrock", "accessKeyId", c.accessKeyId.reveal)
@@ -120,7 +120,7 @@ object BedrockConfig:
       )
       BedrockConfig(
         region = region,
-        model = ModelName(modelName),
+        model = modelName,
         contextWindow = cw,
         reserveCompletion = rc,
         credentials = credentials,

@@ -1,5 +1,6 @@
 package org.llm4s.assistant
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
@@ -33,7 +34,7 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAn
         Completion(
           id = "test-id",
           created = Instant.EPOCH,
-          model = "test-model",
+          model = ModelName("test-model"),
           message = AssistantMessage(response, toolCalls = List.empty)
         )
       )

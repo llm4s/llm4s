@@ -61,8 +61,8 @@ object RAGASFactory {
     embeddingConfig: org.llm4s.llmconnect.config.EmbeddingProviderConfig
   )(using ProviderRegistry): Result[EmbeddingModelConfig] =
     ModelDimensionRegistry
-      .getDimension(embeddingConfig.providerId.asString, embeddingConfig.model.asString)
-      .map(dims => EmbeddingModelConfig(embeddingConfig.model.asString, dims))
+      .getDimension(embeddingConfig.providerId.asString, embeddingConfig.model)
+      .map(dims => EmbeddingModelConfig(embeddingConfig.model, dims))
 
   /**
    * Create evaluator with all default metrics.

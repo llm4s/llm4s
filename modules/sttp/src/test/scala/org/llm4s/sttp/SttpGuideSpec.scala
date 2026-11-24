@@ -1,5 +1,6 @@
 package org.llm4s.sttp
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
@@ -48,7 +49,7 @@ class SttpGuideSpec extends AnyFlatSpec with Matchers {
 
     val answer = for {
       client <- LLMConnect.getClient(
-        OpenAICompatibleConfig(ModelName("my-model"), "http://llm.test/v1"),
+        OpenAICompatibleConfig(ModelName("my-model"), BaseUrl("http://llm.test/v1")),
         LlmClientOptions.default.withHttpClient(new SttpLlm4sHttpClient(backend))
       )
       completion <- client.complete(Conversation(Seq(UserMessage("What is Scala?"))), CompletionOptions())
@@ -76,7 +77,7 @@ class SttpGuideSpec extends AnyFlatSpec with Matchers {
 
     val streamed = for {
       client <- LLMConnect.getClient(
-        OpenAICompatibleConfig(ModelName("my-model"), "http://llm.test/v1"),
+        OpenAICompatibleConfig(ModelName("my-model"), BaseUrl("http://llm.test/v1")),
         LlmClientOptions.default.withHttpClient(new SttpLlm4sHttpClient(backend))
       )
       completion <- client.streamComplete(

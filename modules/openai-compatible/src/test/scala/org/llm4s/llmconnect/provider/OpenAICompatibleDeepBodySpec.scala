@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.config.ProviderModelListers
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName, ProviderId }
@@ -38,7 +39,7 @@ class OpenAICompatibleDeepBodySpec extends AnyFlatSpec with Matchers {
 
   private def client(baseUrl: String) =
     new OpenAICompatibleClient(
-      OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), baseUrl, None)),
+      OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), BaseUrl(baseUrl), None)),
       OpenAICompatibleDialect.Standard
     )
 
@@ -46,7 +47,7 @@ class OpenAICompatibleDeepBodySpec extends AnyFlatSpec with Matchers {
     val provider = ProviderId("deepseek")
     val config   = NamedProviderConfig(provider, ModelName("m"), baseUrl = None, apiKey = Some(ApiKey("k")))
     ProviderModelListers
-      .openAICompatible(provider, "https://api.example.test")
+      .openAICompatible(provider, BaseUrl("https://api.example.test"))
       .listModels(config, MockHttpClient(HttpResponse(200, body, Map.empty)))
   }
 

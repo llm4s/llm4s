@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -37,7 +38,7 @@ import org.llm4s.types.Result
  *
  *   override val configSpec = EmbeddingConfigSpec(
  *     requiresApiKey = true,
- *     defaultBaseUrl = Some("https://api.jina.ai/v1"),
+ *     defaultBaseUrl = Some(BaseUrl("https://api.jina.ai/v1")),
  *     apiKeyEnv      = Seq("JINA_API_KEY")   // what llm4s.credentials.jina.apiKey binds
  *   )
  *
@@ -82,10 +83,10 @@ trait EmbeddingProviderDescriptor:
    * dimensionality up front is told it is unknown. Override [[dimensionsOf]]
    * instead when model names have variants that share a size.
    */
-  def modelDimensions: Map[String, Int] = Map.empty
+  def modelDimensions: Map[ModelName, Int] = Map.empty
 
   /** The vector dimensions of `model`, when this provider knows them. */
-  def dimensionsOf(model: String): Option[Int] = modelDimensions.get(model)
+  def dimensionsOf(model: ModelName): Option[Int] = modelDimensions.get(model)
 
   /**
    * Turns this provider's config section into the `EmbeddingProviderConfig` its

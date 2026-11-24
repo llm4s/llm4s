@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.ReasoningEffort
 import org.llm4s.types.Result
@@ -26,7 +27,7 @@ import java.time.LocalDate
  */
 @Stable
 final case class ModelMetadata private (
-  modelId: String,
+  modelId: ModelName,
   provider: String,
   mode: ModelMode = ModelMode.Chat,
   maxInputTokens: Option[Int] = None,
@@ -35,7 +36,7 @@ final case class ModelMetadata private (
   pricing: ModelPricing = ModelPricing(),
   deprecationDate: Option[LocalDate] = None
 ) {
-  def withModelId(modelId: String): ModelMetadata                      = copy(modelId = modelId)
+  def withModelId(modelId: ModelName): ModelMetadata                   = copy(modelId = modelId)
   def withProvider(provider: String): ModelMetadata                    = copy(provider = provider)
   def withMode(mode: ModelMode): ModelMetadata                         = copy(mode = mode)
   def withMaxInputTokens(maxInputTokens: Int): ModelMetadata           = copy(maxInputTokens = Some(maxInputTokens))
@@ -108,7 +109,7 @@ object ModelMetadata {
 
   /** Creates a [[ModelMetadata]]: a chat model with no limits, capabilities, prices or deprecation unless given. */
   def apply(
-    modelId: String,
+    modelId: ModelName,
     provider: String,
     mode: ModelMode = ModelMode.Chat,
     maxInputTokens: Option[Int] = None,
@@ -138,7 +139,7 @@ object ModelMetadata {
    * Create ModelMetadata from raw JSON values. An entry whose `deprecation_date` is not a `YYYY-MM-DD` date is an
    * error, as is one whose fields have the wrong JSON type.
    */
-  def fromJson(modelId: String, data: ujson.Value): Result[ModelMetadata] = {
+  def fromJson(modelId: ModelName, data: ujson.Value): Result[ModelMetadata] = {
     import org.llm4s.syntax.toResult
     scala.util
       .Try {

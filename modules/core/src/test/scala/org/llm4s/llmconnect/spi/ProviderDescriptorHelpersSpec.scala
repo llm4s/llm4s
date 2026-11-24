@@ -29,7 +29,7 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
   private val providerName = "my-provider"
   private val providerId   = ProviderId("fixturechat")
 
-  private val specWithDefault = ProviderConfigSpec(defaultBaseUrl = Some("https://default.example.com"))
+  private val specWithDefault = ProviderConfigSpec(defaultBaseUrl = Some(BaseUrl("https://default.example.com")))
   private val specNoDefault   = ProviderConfigSpec()
 
   private def section(
@@ -152,12 +152,12 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
       section(baseUrl = Some("https://section.example.com")),
       specWithDefault
     )
-    result shouldBe Right("https://section.example.com")
+    result shouldBe Right(BaseUrl("https://section.example.com"))
   }
 
   it should "fall back to the spec's default when the section sets no baseUrl" in {
     ProviderDescriptor.resolveBaseUrl(providerName, section(), specWithDefault) shouldBe
-      Right("https://default.example.com")
+      Right(BaseUrl("https://default.example.com"))
   }
 
   it should "fail naming the section when neither it nor the spec has a base URL" in {
@@ -201,7 +201,7 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
     ProviderConfigSpec(
       requiresApiKey,
       requiresBaseUrl,
-      defaultBaseUrl,
+      defaultBaseUrl.map(BaseUrl(_)),
       baseUrlExample,
       baseUrlEnv,
       extras,
@@ -219,12 +219,12 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
   }
 
   "withDefaultBaseUrl" should "set defaultBaseUrl from a String and leave every other field unchanged" in {
-    fullSpec().withDefaultBaseUrl("https://other.example.com") shouldBe
+    fullSpec().withDefaultBaseUrl(BaseUrl("https://other.example.com")) shouldBe
       fullSpec(defaultBaseUrl = Some("https://other.example.com"))
   }
 
   it should "set defaultBaseUrl from an Option, including clearing it with None" in {
-    fullSpec().withDefaultBaseUrl(Some("https://other.example.com")) shouldBe
+    fullSpec().withDefaultBaseUrl(Some(BaseUrl("https://other.example.com"))) shouldBe
       fullSpec(defaultBaseUrl = Some("https://other.example.com"))
     fullSpec().withDefaultBaseUrl(None) shouldBe fullSpec(defaultBaseUrl = None)
   }
@@ -292,10 +292,11 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
   // ---------------------------------------------------------------------------------------------
 
   "apiKeyAndDefaultBaseUrl" should "require an api key and default the base URL, with the given apiKeyEnv" in {
-    val built = ProviderConfigSpec.apiKeyAndDefaultBaseUrl("https://api.example.com/v1", Seq("EXAMPLE_API_KEY"))
+    val built =
+      ProviderConfigSpec.apiKeyAndDefaultBaseUrl(BaseUrl("https://api.example.com/v1"), Seq("EXAMPLE_API_KEY"))
     built shouldBe ProviderConfigSpec(
       requiresApiKey = true,
-      defaultBaseUrl = Some("https://api.example.com/v1"),
+      defaultBaseUrl = Some(BaseUrl("https://api.example.com/v1")),
       apiKeyEnv = Seq("EXAMPLE_API_KEY")
     )
     built.requiresBaseUrl shouldBe false
@@ -305,6 +306,6 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
   }
 
   it should "default apiKeyEnv to empty when not given" in {
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl("https://api.example.com/v1") shouldBe
-      ProviderConfigSpec(requiresApiKey = true, defaultBaseUrl = Some("https://api.example.com/v1"))
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(BaseUrl("https://api.example.com/v1")) shouldBe
+      ProviderConfigSpec(requiresApiKey = true, defaultBaseUrl = Some(BaseUrl("https://api.example.com/v1")))
   }

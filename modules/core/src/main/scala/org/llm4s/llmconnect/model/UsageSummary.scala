@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 
 import upickle.default.{ ReadWriter => RW, macroRW, readwriter }
@@ -158,7 +159,7 @@ object ModelUsage {
  * @param thinkingTokens total thinking/reasoning tokens, the part of `outputTokens` that was thinking; zero
  *                       where no provider reports any
  * @param totalCost      total estimated cost in USD; `BigDecimal(0)` when unavailable
- * @param byModel        per-model breakdown; keyed by the model identifier string
+ * @param byModel        per-model breakdown; keyed by the model identifier
  * @param cachedTokens   total input tokens served from a provider's prompt cache (cache reads), a part of
  *                       `inputTokens`; zero where no provider reports any
  * @param cacheCreationTokens total input tokens written into a provider's prompt cache, a part of `inputTokens`;
@@ -177,7 +178,7 @@ final case class UsageSummary private (
   outputTokens: Long = 0L,
   thinkingTokens: Long = 0L,
   totalCost: BigDecimal = BigDecimal(0),
-  byModel: Map[String, ModelUsage] = Map.empty[String, ModelUsage],
+  byModel: Map[ModelName, ModelUsage] = Map.empty[ModelName, ModelUsage],
   cachedTokens: Long = 0L,
   cacheCreationTokens: Long = 0L
 ) {
@@ -198,7 +199,7 @@ final case class UsageSummary private (
   def withTotalCost(totalCost: BigDecimal): UsageSummary = copy(totalCost = totalCost)
 
   /** Sets the per-model breakdown, keyed by model identifier. */
-  def withByModel(byModel: Map[String, ModelUsage]): UsageSummary = copy(byModel = byModel)
+  def withByModel(byModel: Map[ModelName, ModelUsage]): UsageSummary = copy(byModel = byModel)
 
   /** Sets the total input tokens served from a provider's prompt cache. */
   def withCachedTokens(cachedTokens: Long): UsageSummary = copy(cachedTokens = cachedTokens)
@@ -216,7 +217,7 @@ final case class UsageSummary private (
    * @param usage token-usage record from a [[org.llm4s.llmconnect.model.Completion]]
    * @param cost  optional estimated cost in USD; treated as zero when absent
    */
-  def add(model: String, usage: TokenUsage, cost: Option[BigDecimal]): UsageSummary = {
+  def add(model: ModelName, usage: TokenUsage, cost: Option[BigDecimal]): UsageSummary = {
     val thinking = usage.thinkingTokens.getOrElse(0)
 
     val costValue = cost.getOrElse(BigDecimal(0))
@@ -323,7 +324,7 @@ object UsageSummary {
     outputTokens: Long = 0L,
     thinkingTokens: Long = 0L,
     totalCost: BigDecimal = BigDecimal(0),
-    byModel: Map[String, ModelUsage] = Map.empty[String, ModelUsage],
+    byModel: Map[ModelName, ModelUsage] = Map.empty[ModelName, ModelUsage],
     cachedTokens: Long = 0L,
     cacheCreationTokens: Long = 0L
   ): UsageSummary =

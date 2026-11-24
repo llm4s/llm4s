@@ -1,5 +1,6 @@
 package org.llm4s.reliability
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ ContentFilteredError, NetworkError, TimeoutError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -23,7 +24,7 @@ class ReliableClientStreamReplaySpec extends AnyFlatSpec with Matchers {
   private val conversation = Conversation(Seq(UserMessage("hi")))
 
   private def completion(text: String) =
-    Completion(id = "c", created = Instant.EPOCH, model = "m", message = AssistantMessage(text))
+    Completion(id = "c", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage(text))
 
   private val timeout = TimeoutError("connection reset", 1.second, "test")
 

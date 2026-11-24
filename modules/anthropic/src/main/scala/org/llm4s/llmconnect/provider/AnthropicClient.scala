@@ -1,4 +1,5 @@
 package org.llm4s.llmconnect.provider
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 
@@ -168,7 +169,7 @@ class AnthropicClient(
 
   // Initialize Anthropic client
   private val client = {
-    val builder = AnthropicOkHttpClient.builder().baseUrl(config.baseUrl)
+    val builder = AnthropicOkHttpClient.builder().baseUrl(config.baseUrl.asUrl)
     config.workloadIdentity match {
       case None =>
         config.apiKeyProvider match {
@@ -189,7 +190,7 @@ class AnthropicClient(
         val profile = ProfileConfig
           .builder()
           .authentication(auth.build())
-          .baseUrl(config.baseUrl)
+          .baseUrl(config.baseUrl.asUrl)
           .organizationId(wi.organizationId)
         wi.workspaceId.foreach(profile.workspaceId)
         builder
@@ -198,7 +199,7 @@ class AnthropicClient(
           // the SDK has added its bearer, and registers it before it is sent.
           .addInterceptor(new AnthropicClient.RegisteringBearer)
     }
-    AnthropicClient.withNetwork(builder, config.network, config.baseUrl).build()
+    AnthropicClient.withNetwork(builder, config.network, config.baseUrl.asUrl).build()
   }
 
   // The timeout goes on each call, not on the SDK client: the client's timeout is one value for every
@@ -211,7 +212,7 @@ class AnthropicClient(
 
   protected def clientDescription: String = s"Anthropic client for model ${config.model}"
   protected def providerName: String      = "anthropic"
-  protected def modelName: String         = config.model.asString
+  protected def modelName: ModelName      = config.model
 
   // sealed thinking is replayed only to the provider and model id it was produced by (see ReplayOrigin)
   private val replayOrigin = ReplayOrigin(providerName, config.model.asString)
@@ -227,7 +228,7 @@ class AnthropicClient(
     // Transform options and messages for model-specific constraints
     TransformationResult
       .transform(
-        config.model.asString,
+        config.model,
         options,
         conversation.messages,
         RequestTransformer.default(registryService),
@@ -325,7 +326,7 @@ curl https://api.anthropic.com/v1/messages \
     // Transform options and messages for model-specific constraints
     TransformationResult
       .transform(
-        config.model.asString,
+        config.model,
         options,
         conversation.messages,
         RequestTransformer.default(registryService),
@@ -370,7 +371,7 @@ curl https://api.anthropic.com/v1/messages \
         val requestBody   = serializeRequestBody(messageParams)
 
         // Create accumulator for building the final completion
-        val accumulator = StreamingAccumulator(config.model.asString)
+        val accumulator = StreamingAccumulator(config.model)
         // the sources the streamed text blocks cite, each once, in order
         val citations                        = mutable.LinkedHashSet.empty[Citation]
         var currentMessageId: Option[String] = None
@@ -554,7 +555,7 @@ curl https://api.anthropic.com/v1/messages \
         }.toEither.left
           .map(AnthropicClient.mapError(_))
           // an `error` event throws in the SDK, mapped above; a stream that ends with neither is cut off
-          .filterOrElse(_ => stopped, AnthropicClient.unfinished(config.baseUrl))
+          .filterOrElse(_ => stopped, AnthropicClient.unfinished(config.baseUrl.asUrl))
 
         // Return the accumulated completion; a refusal fails the stream, as it fails `complete`, the text already
         // delivered staying delivered
@@ -567,7 +568,7 @@ curl https://api.anthropic.com/v1/messages \
                 .toLeft(c)
             )
             .map { c =>
-              val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model.asString, u))
+              val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
               // the accumulator knows only the thinking text; the blocks carry their signatures
               val message =
                 if (thinkingBlocks.isEmpty) c.message
@@ -606,7 +607,7 @@ curl https://api.anthropic.com/v1/messages \
 
   /** This client's model's registry capabilities, looked up once: the registry is a static snapshot. */
   private lazy val capabilities: Option[ModelCapabilities] =
-    registryService.lookup(config.model.asString).toOption.map(_.capabilities)
+    registryService.lookup(config.model).toOption.map(_.capabilities)
 
   /** Puts `plan`'s `thinking` and `output_config.effort` on the request. */
   private def applyThinking(builder: MessageCreateParams.Builder, plan: AnthropicThinking.Plan): Unit = {
@@ -866,12 +867,12 @@ curl https://api.anthropic.com/v1/messages \
       )
 
       // Estimate cost using CostEstimator
-      val cost = CostEstimator.estimate(config.model.asString, tokenUsage)
+      val cost = CostEstimator.estimate(config.model, tokenUsage)
 
       // Create completion
       Completion(
         id = response.id(),
-        model = response.model().asString(),
+        model = ModelName(response.model().asString()),
         created = Instant.now(),
         message = message,
         usage = Some(tokenUsage),
@@ -953,7 +954,7 @@ curl https://api.anthropic.com/v1/messages \
   private def modelSupportsTemperature: Boolean = {
     val disallowedByRegistry =
       registryService
-        .lookup(config.model.asString)
+        .lookup(config.model)
         .toOption
         .flatMap(_.capabilities.disallowedParams)
         .exists(_.contains("temperature"))
@@ -981,7 +982,7 @@ curl https://api.anthropic.com/v1/messages \
         provider = ProviderId(providerName),
         startedAt = startedAt,
         requestBody = requestBody,
-        model = Some(config.model.asString),
+        model = Some(config.model),
         responseBody = responseBody
       ),
       result

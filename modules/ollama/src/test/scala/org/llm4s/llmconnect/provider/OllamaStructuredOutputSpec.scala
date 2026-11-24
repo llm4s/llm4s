@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import com.sun.net.httpserver.HttpServer
 import org.llm4s.error.ValidationError
@@ -54,7 +55,12 @@ class OllamaStructuredOutputSpec extends AnyFunSuite with Matchers with BeforeAn
 
   private def mkClient(baseUrl: String = "http://localhost:11434"): OllamaClient =
     new OllamaClient(
-      OllamaConfig(model = ModelName("llama3.1"), baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512)
+      OllamaConfig(
+        model = ModelName("llama3.1"),
+        baseUrl = BaseUrl(baseUrl),
+        contextWindow = 4096,
+        reserveCompletion = 512
+      )
     )
 
   private def body(rf: Option[ResponseFormat], stream: Boolean, opts: CompletionOptions = CompletionOptions()) =

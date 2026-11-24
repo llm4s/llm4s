@@ -1,5 +1,6 @@
 package org.llm4s.reranker
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -14,7 +15,7 @@ class LLMRerankerSpec extends AnyFlatSpec with Matchers {
   private def mockCompletion(content: String): Completion = Completion(
     id = "test-id",
     created = Instant.now(),
-    model = "test-model",
+    model = ModelName("test-model"),
     message = AssistantMessage(content)
   )
 

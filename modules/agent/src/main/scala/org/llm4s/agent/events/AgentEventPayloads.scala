@@ -1,5 +1,6 @@
 package org.llm4s.agent.events
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.model.{ FinishReason, RequestAdjustment, ServiceTier, TokenUsage }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -114,7 +115,7 @@ object CallUsage:
 @Experimental
 final case class ModelCallCompleted private (
   agent: String,
-  model: String,
+  model: ModelName,
   attempts: Int,
   toolCalls: Int,
   usage: Option[CallUsage],
@@ -126,7 +127,7 @@ final case class ModelCallCompleted private (
   duration: FiniteDuration = Duration.Zero
 ):
   def withAgent(value: String): ModelCallCompleted                        = copy(agent = value)
-  def withModel(value: String): ModelCallCompleted                        = copy(model = value)
+  def withModel(value: ModelName): ModelCallCompleted                     = copy(model = value)
   def withAttempts(value: Int): ModelCallCompleted                        = copy(attempts = value)
   def withToolCalls(value: Int): ModelCallCompleted                       = copy(toolCalls = value)
   def withUsage(value: CallUsage): ModelCallCompleted                     = copy(usage = Some(value))
@@ -146,7 +147,7 @@ final case class ModelCallCompleted private (
 object ModelCallCompleted:
   def apply(
     agent: String,
-    model: String,
+    model: ModelName,
     attempts: Int,
     toolCalls: Int,
     usage: Option[CallUsage],

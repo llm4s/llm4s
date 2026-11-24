@@ -2,6 +2,7 @@
 // anything package-private.
 package org.llm4s.capabilityusage
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.capability.*
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ ContentPart, Conversation, UserMessage }
@@ -23,7 +24,7 @@ class CapabilityCompileErrorsSpec extends AnyFlatSpec with Matchers {
     c.describe(image, "One-line alt text").map(_.content)
 
   def checkedOnce(client: LLMClient)(using ModelRegistryService): Result[Capable[Vision & Tools]] =
-    client.requireCapabilities[Vision & Tools]("openai", "gpt-4o")
+    client.requireCapabilities[Vision & Tools]("openai", ModelName("gpt-4o"))
 
   "A Capable[Tools]" should "not be accepted where a Capable[Vision] is needed" in {
     val errors = scala.compiletime.testing.typeCheckErrors(

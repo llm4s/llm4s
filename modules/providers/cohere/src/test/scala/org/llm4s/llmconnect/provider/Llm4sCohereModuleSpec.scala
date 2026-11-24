@@ -127,8 +127,8 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "answer through ModelDimensionRegistry" in {
       given ProviderRegistry = ProviderRegistry.default
-      ModelDimensionRegistry.getDimension("cohere", "embed-english-v3.0") shouldBe Right(1024)
-      ModelDimensionRegistry.getDimension("cohere", "embed-v4.0") shouldBe Right(1536)
+      ModelDimensionRegistry.getDimension("cohere", ModelName("embed-english-v3.0")) shouldBe Right(1024)
+      ModelDimensionRegistry.getDimension("cohere", ModelName("embed-v4.0")) shouldBe Right(1536)
       CohereEmbeddingProvider.modelDimensions.values.foreach(_ should be > 0)
     }
   }

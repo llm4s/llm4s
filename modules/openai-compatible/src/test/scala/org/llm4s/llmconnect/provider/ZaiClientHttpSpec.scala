@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
@@ -30,7 +31,7 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
     ZaiConfig(
       apiKey = Secret("test-key"),
       model = ModelName("GLM-4.7"),
-      baseUrl = baseUrl,
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -71,7 +72,7 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
         result.isRight shouldBe true
         val completion = result.toOption.get
         completion.content shouldBe "Hello from Z.ai!"
-        completion.model shouldBe "GLM-4.7"
+        completion.model shouldBe ModelName("GLM-4.7")
         completion.id shouldBe "chatcmpl-zai-test"
         completion.usage shouldBe defined
         completion.usage.get.promptTokens shouldBe 8

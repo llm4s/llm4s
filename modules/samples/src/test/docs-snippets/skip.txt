@@ -207,7 +207,7 @@ guide/rag-evaluation.md | 27d416bdf9 | skip | API reference: the case class as d
 guide/rag-evaluation.md | 965bf6f7ad | skip | API reference: the case classes' fields and members without their bodies
 guide/rag-evaluation.md | bf46734ded | skip | API reference: the class's signature and members without their bodies
 guide/rag-evaluation.md | f2b322db11 | skip | API reference: the object's members without their bodies
-tutorials/support-assistant/part-4-help-centre.md | 95b1c19f04 | with | import org.llm4s.samples.tutorial.supportassistant.Part4HelpCentre.articles
+tutorials/support-assistant/part-4-help-centre.md | 256a3f8dde | with | import org.llm4s.samples.tutorial.supportassistant.Part4HelpCentre.articles
 tutorials/support-assistant/part-4-help-centre.md | ce8185ac81 | with | import org.llm4s.rag.RAG; import org.llm4s.types.Result
 tutorials/support-assistant/part-4-help-centre.md | 2c732129e1 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.rag.RAG; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools
 tutorials/support-assistant/part-5-safety-memory.md | 8eaffdfd48 | with | import org.llm4s.samples.tutorial.supportassistant.Part3Tools

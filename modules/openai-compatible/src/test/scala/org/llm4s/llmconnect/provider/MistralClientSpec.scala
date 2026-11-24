@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
@@ -49,7 +50,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
     MistralConfig(
       apiKey = Secret("test-key"),
       model = ModelName("mistral-small-latest"),
-      baseUrl = baseUrl,
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -555,7 +556,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
     val cfg = MistralConfig(
       apiKey = Secret("key"),
       model = ModelName("mistral-small-latest"),
-      baseUrl = "https://example.invalid",
+      baseUrl = BaseUrl("https://example.invalid"),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -567,7 +568,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
     val cfg = MistralConfig(
       apiKey = Secret("key"),
       model = ModelName("mistral-small-latest"),
-      baseUrl = "https://example.invalid",
+      baseUrl = BaseUrl("https://example.invalid"),
       contextWindow = 128000,
       reserveCompletion = 4096
     )

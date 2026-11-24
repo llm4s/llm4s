@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.UnsupportedContentPartError
@@ -42,7 +43,7 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
     GeminiConfig(
       apiKey = Secret("k"),
       model = ModelName("gemini-2.0-flash"),
-      baseUrl = "https://generativelanguage.googleapis.com/v1beta",
+      baseUrl = BaseUrl("https://generativelanguage.googleapis.com/v1beta"),
       contextWindow = 1048576,
       reserveCompletion = 8192
     ),

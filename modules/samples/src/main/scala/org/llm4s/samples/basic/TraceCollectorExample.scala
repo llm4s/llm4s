@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import cats.Id
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.trace.store.{ InMemoryTraceStore, TraceQuery }
@@ -35,8 +36,8 @@ object TraceCollectorExample {
         scala.concurrent.duration.Duration.Zero,
         success = true
       )
-      _ <- collector.traceEvent(TraceEvent.CompletionReceived("completion-1", Model, 0, "2 + 2 is 4."))
-      _ <- collector.traceEvent(TraceEvent.TokenUsageRecorded(TokenUsage(12, 7, 19), Model, "completion"))
+      _ <- collector.traceEvent(TraceEvent.CompletionReceived("completion-1", ModelName(Model), 0, "2 + 2 is 4."))
+      _ <- collector.traceEvent(TraceEvent.TokenUsageRecorded(TokenUsage(12, 7, 19), ModelName(Model), "completion"))
       _ <- collector.traceError(new IllegalStateException("model call timed out"), "second question")
 
       // 2. Read the spans back

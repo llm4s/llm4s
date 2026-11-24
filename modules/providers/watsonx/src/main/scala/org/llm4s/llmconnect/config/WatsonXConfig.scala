@@ -35,7 +35,7 @@ final case class WatsonXConfig(
   projectId: String,
   spaceId: Option[String],
   model: ModelName,
-  baseUrl: String,
+  baseUrl: BaseUrl,
   apiVersion: String,
   iamUrl: String,
   contextWindow: Int,
@@ -45,7 +45,7 @@ final case class WatsonXConfig(
   override val apiKeyProvider: Option[ApiKeyProvider] = None
 ) extends ProviderConfig:
   override val providerId: ProviderId                                   = ProviderId("watsonx")
-  override def endpointUrl: Option[BaseUrl]                             = Some(BaseUrl(baseUrl))
+  override def endpointUrl: Option[BaseUrl]                             = Some(baseUrl)
   override def withModel(model: ModelName): WatsonXConfig               = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): WatsonXConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): WatsonXConfig = copy(network = network)
@@ -59,7 +59,7 @@ final case class WatsonXConfig(
       s"reserveCompletion=$reserveCompletion, timeouts=$timeouts${apiKeyProvider.fold("")(p => s", apiKeyProvider=$p")})"
 
 object WatsonXConfig:
-  val DEFAULT_BASE_URL: String = "https://us-south.ml.cloud.ibm.com"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://us-south.ml.cloud.ibm.com")
 
   /**
    * The `version` date sent when a section sets no `apiVersion`: the one IBM's Python SDK, `ibm-watsonx-ai`
@@ -74,8 +74,8 @@ object WatsonXConfig:
   private val DefaultContextWindow     = 8192
   private val DefaultReserveCompletion = 4096
 
-  private def watsonxFallback(modelName: String): ContextLimits =
-    modelName match
+  private def watsonxFallback(modelName: ModelName): ContextLimits =
+    modelName.asString match
       case name if name.contains("mistral-large") => ContextLimits(32768, DefaultReserveCompletion)
       case name if name.contains("llama-2")       => ContextLimits(4096, DefaultReserveCompletion)
       case _                                      => ContextLimits(DefaultContextWindow, DefaultReserveCompletion)
@@ -104,18 +104,18 @@ object WatsonXConfig:
    * `::1`), neither a `projectId` nor a `spaceId`, or both, is a `ConfigurationError`.
    */
   def fromValues(
-    modelName: String,
+    modelName: ModelName,
     apiKey: Secret,
     projectId: Option[String],
     spaceId: Option[String] = None,
-    baseUrl: String = DEFAULT_BASE_URL,
+    baseUrl: BaseUrl = DEFAULT_BASE_URL,
     apiVersion: String = DEFAULT_API_VERSION,
     iamUrl: String = DEFAULT_IAM_URL
   )(using resolver: ContextWindowResolver): Result[WatsonXConfig] =
     // A trailing slash would put `//` in every endpoint (`$baseUrl/ml/v1/...`); stray whitespace
     // would make the URL unparseable.
     val key     = apiKey.reveal.trim
-    val base    = baseUrl.trim.replaceAll("/+$", "")
+    val base    = baseUrl.asUrl.trim.replaceAll("/+$", "")
     val version = apiVersion.trim
     val iam     = iamUrl.trim
     val project = projectId.map(_.trim).filter(_.nonEmpty)
@@ -149,8 +149,8 @@ object WatsonXConfig:
         apiKey = Secret(key),
         projectId = project.getOrElse(""),
         spaceId = space,
-        model = ModelName(modelName),
-        baseUrl = base,
+        model = modelName,
+        baseUrl = BaseUrl(base),
         apiVersion = version,
         iamUrl = iam,
         contextWindow = cw,

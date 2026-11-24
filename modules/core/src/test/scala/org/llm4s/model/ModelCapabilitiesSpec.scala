@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.ReasoningEffort
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -183,7 +184,7 @@ class ModelCapabilitiesSpec extends AnyFlatSpec with Matchers {
 
   private def metaWith(caps: ModelCapabilities): ModelMetadata =
     ModelMetadata(
-      modelId = "test-model",
+      modelId = ModelName("test-model"),
       provider = "test",
       mode = ModelMode.Chat,
       maxInputTokens = None,

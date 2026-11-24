@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
@@ -29,7 +30,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
   private val testConfig = AnthropicConfig(
     apiKey = Secret("test-key"),
     model = ModelName("claude-sonnet-4-5"),
-    baseUrl = "https://api.anthropic.com",
+    baseUrl = BaseUrl("https://api.anthropic.com"),
     contextWindow = 200000,
     reserveCompletion = 4096
   )
@@ -120,7 +121,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   "a response" should "put its thinking blocks on the message, signatures and redacted data intact" in {
     withServer(thinkingToolUseReply) { (baseUrl, _) =>
-      val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      val completion = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
         .complete(Conversation(Seq(UserMessage("Weather in Paris?"))), CompletionOptions())
         .toOption
         .get
@@ -135,7 +136,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   "a streamed response" should "assemble each thinking block with its signature, and redacted thinking, on the message" in {
     withServer(streamedThinkingReply) { (baseUrl, _) =>
-      val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      val completion = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
         .streamComplete(Conversation(Seq(UserMessage("Weather in Paris?"))), CompletionOptions())(_ => ())
         .toOption
         .get
@@ -150,7 +151,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   "the follow-up request" should "send the tool-call turn back with its thinking blocks first, then tool_result" in {
     withServer(thinkingToolUseReply, finalReply) { (baseUrl, seen) =>
-      val client = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      val client = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
       val ask    = UserMessage("Weather in Paris?")
       val first  = client.complete(Conversation(Seq(ask)), CompletionOptions()).toOption.get
       val answer = ToolMessage("sunny", "toolu_1")
@@ -387,7 +388,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   "the client" should "bind returned sealed thinking, so a pruned follow-up request does not send it" in {
     withServer(thinkingToolUseReply, finalReply, finalReply) { (baseUrl, seen) =>
-      val client  = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      val client  = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
       val history = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather in Paris?"))
       val first   = client.complete(Conversation(history), CompletionOptions()).toOption.get
       first.message.thinkingBinding shouldBe defined
@@ -406,7 +407,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
   "a streamed response" should "bind its sealed thinking to the request" in {
     withServer(streamedThinkingReply) { (baseUrl, _) =>
       val ask = UserMessage("Weather in Paris?")
-      val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      val completion = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
         .streamComplete(Conversation(Seq(ask)), CompletionOptions())(_ => ())
         .toOption
         .get

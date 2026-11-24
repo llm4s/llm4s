@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse, InputPurpose }
@@ -20,7 +21,7 @@ class CachedEmbeddingClientPurposeSpec extends AnyFlatSpec with Matchers {
 
   private given org.llm4s.model.ModelRegistryService = ModelRegistryTestSupport.defaultService()
 
-  private val model = EmbeddingModelConfig("test-model", 2)
+  private val model = EmbeddingModelConfig(ModelName("test-model"), 2)
 
   /** A provider that answers with a vector naming the purpose it was asked for, and records every request. */
   final private class PurposeEchoProvider extends EmbeddingProvider {
@@ -99,8 +100,8 @@ class CachedEmbeddingClientPurposeSpec extends AnyFlatSpec with Matchers {
   it should "keep a query for model m apart from a document for a model named m#query" in {
     val (provider, _, client) = setup()
 
-    client.embed(EmbeddingRequest(Seq("same text"), EmbeddingModelConfig("m", 2), InputPurpose.Query))
-    val doc = client.embed(EmbeddingRequest(Seq("same text"), EmbeddingModelConfig("m#query", 2)))
+    client.embed(EmbeddingRequest(Seq("same text"), EmbeddingModelConfig(ModelName("m"), 2), InputPurpose.Query))
+    val doc = client.embed(EmbeddingRequest(Seq("same text"), EmbeddingModelConfig(ModelName("m#query"), 2)))
 
     doc.map(_.embeddings.head) shouldBe Right(Seq(0.0, 1.0))
     provider.requests should have size 2
@@ -112,7 +113,7 @@ class CachedEmbeddingClientPurposeSpec extends AnyFlatSpec with Matchers {
     val client = new CachedEmbeddingClient(
       EmbeddingClient(new PurposeEchoProvider),
       cache,
-      (text, modelName, purpose) => { seen += ((text, modelName, purpose)); s"$purpose|$modelName|$text" }
+      (text, modelName, purpose) => { seen += ((text, modelName.asString, purpose)); s"$purpose|$modelName|$text" }
     )
 
     client.embed(EmbeddingRequest(Seq("t"), model))

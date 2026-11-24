@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
@@ -25,7 +26,7 @@ class AnthropicWebSearchSpec extends AnyFlatSpec with Matchers {
   private val testConfig = AnthropicConfig(
     apiKey = Secret("test-key"),
     model = ModelName("claude-sonnet-4-5"),
-    baseUrl = "https://api.anthropic.com",
+    baseUrl = BaseUrl("https://api.anthropic.com"),
     contextWindow = 200000,
     reserveCompletion = 4096
   )
@@ -131,7 +132,7 @@ class AnthropicWebSearchSpec extends AnyFlatSpec with Matchers {
         .withHandler(_ => Right("x"))
         .buildSafe()
         .fold(e => fail(e.toString), identity)
-      new AnthropicClient(testConfig.withBaseUrl(baseUrl).withWebSearch(true))
+      new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)).withWebSearch(true))
         .complete(conversation, CompletionOptions().withTools(Seq(tool)))
         .isRight shouldBe true
       val sent = tools(seen().head)
@@ -142,7 +143,7 @@ class AnthropicWebSearchSpec extends AnyFlatSpec with Matchers {
 
   it should "put each cited web or search-result source on Completion.citations once, skipping document citations" in {
     withServer(searchedReply) { (baseUrl, _) =>
-      val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl).withWebSearch(true))
+      val completion = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)).withWebSearch(true))
         .complete(conversation, CompletionOptions())
         .fold(e => fail(e.message), identity)
       completion.citations shouldBe expected
@@ -157,7 +158,7 @@ class AnthropicWebSearchSpec extends AnyFlatSpec with Matchers {
   it should "read the citations of a streamed answer, without turning the search into a tool call" in {
     withServer(streamedReply) { (baseUrl, _) =>
       val chunks = List.newBuilder[StreamedChunk]
-      val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl).withWebSearch(true))
+      val completion = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)).withWebSearch(true))
         .streamComplete(conversation, CompletionOptions())(c => chunks += c)
         .fold(e => fail(e.message), identity)
       completion.citations shouldBe expected
@@ -169,7 +170,7 @@ class AnthropicWebSearchSpec extends AnyFlatSpec with Matchers {
 
   "a client without webSearch" should "send no web_search tool" in {
     withServer(searchedReply) { (baseUrl, seen) =>
-      new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
         .complete(conversation, CompletionOptions())
         .isRight shouldBe true
       tools(seen().head) shouldBe empty

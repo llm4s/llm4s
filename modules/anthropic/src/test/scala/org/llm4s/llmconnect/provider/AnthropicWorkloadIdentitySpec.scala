@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
@@ -195,7 +196,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
         val byHand = AnthropicConfig(
           Secret(""),
           ModelName("claude-test"),
-          fake.refusedBaseUrl,
+          BaseUrl(fake.refusedBaseUrl),
           200000,
           4096,
           Some(AnthropicWorkloadIdentity(file, "fdrl_1", "org_1"))
@@ -269,7 +270,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     val identity = AnthropicWorkloadIdentity(Path.of("/var/run/svid.jwt"), "fdrl_1", "org_1")
 
     def fromValues(baseUrl: String, apiKey: String = "") =
-      AnthropicConfig.fromValues("claude-test", Secret(apiKey), baseUrl, Some(identity))
+      AnthropicConfig.fromValues(ModelName("claude-test"), Secret(apiKey), BaseUrl(baseUrl), Some(identity))
 
     "keep the workload identity and the timeouts independently" in {
       import scala.concurrent.duration.DurationInt
@@ -316,19 +317,21 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     }
 
     "leave a plain-http baseUrl alone without workload identity" in {
-      AnthropicConfig.fromValues("claude-test", Secret("sk-ant"), "http://api.example").isRight shouldBe true
+      AnthropicConfig
+        .fromValues(ModelName("claude-test"), Secret("sk-ant"), BaseUrl("http://api.example"))
+        .isRight shouldBe true
     }
 
     "be refused by AnthropicClient when built with apply or changed with a with* setter" in {
       val valid = fromValues("https://api.anthropic.com").value
       val bad = Seq(
-        valid.withBaseUrl("http://api.example"),
-        valid.withBaseUrl("https://gateway.example"),
+        valid.withBaseUrl(BaseUrl("http://api.example")),
+        valid.withBaseUrl(BaseUrl("https://gateway.example")),
         valid.withApiKey(Secret("sk-ant")),
         AnthropicConfig(
           Secret(""),
           ModelName("claude-test"),
-          "http://localhost@api.example",
+          BaseUrl("http://localhost@api.example"),
           200000,
           4096,
           Some(identity)
@@ -351,7 +354,10 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       for (field, blank) <- blanks do
         withClue(field) {
           val error =
-            AnthropicConfig.fromValues("claude-test", Secret(""), "https://api.anthropic.com", Some(blank)).left.value
+            AnthropicConfig
+              .fromValues(ModelName("claude-test"), Secret(""), BaseUrl("https://api.anthropic.com"), Some(blank))
+              .left
+              .value
           error shouldBe a[ConfigurationError]
           error.asInstanceOf[ConfigurationError].missingKeys shouldBe List(field)
           error.message should include(field)
@@ -383,7 +389,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
         AnthropicConfig(Secret("sk-ant"), ModelName("claude-test")).withWorkloadIdentity(identity),
         AnthropicConfig(Secret("sk-ant"), ModelName("claude-test")).withWorkloadIdentity(Some(identity)),
         federated.withApiKey(Secret("sk-ant")),
-        federated.withBaseUrl("https://gateway.example"),
+        federated.withBaseUrl(BaseUrl("https://gateway.example")),
         federated.withWorkloadIdentity(identity.withOrganizationId("")),
         federated.withWorkloadIdentity(None)
       )

@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.sqlite
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.*
@@ -60,7 +61,7 @@ class SqliteKernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   private def completion(message: AssistantMessage): Completion =
-    Completion("c", Instant.EPOCH, "m", message, Some(TokenUsage(10, 5, 15)))
+    Completion("c", Instant.EPOCH, ModelName("m"), message, Some(TokenUsage(10, 5, 15)))
 
   /** Plays `turns`; the call numbered `failOn` fails while `failing` is set. */
   final private class Model(failing: AtomicBoolean, failOn: Int, turns: AssistantMessage*) extends ModelStep {

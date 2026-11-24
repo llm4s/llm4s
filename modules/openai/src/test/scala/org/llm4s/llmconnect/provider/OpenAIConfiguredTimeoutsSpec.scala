@@ -75,7 +75,7 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
   // ---- the value reaches the call ----
 
   private def openAIConfig(baseUrl: String, timeouts: ProviderTimeouts): OpenAIConfig =
-    OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl).value.withTimeouts(timeouts)
+    OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl(baseUrl)).value.withTimeouts(timeouts)
 
   "A configured request timeout" should "end a completion from a server that never answers" in {
     LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
@@ -156,7 +156,8 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
         )
       )
       val started = System.nanoTime()
-      val result  = provider.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("text-embedding-3-small", 1536)))
+      val result =
+        provider.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)))
       val elapsed = (System.nanoTime() - started).nanos
 
       result.isLeft shouldBe true

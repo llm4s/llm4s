@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ read, write }
@@ -136,7 +137,7 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "be what Completion.thinking reports" in {
-    val completion = Completion("id", Instant.EPOCH, "m", signed)
+    val completion = Completion("id", Instant.EPOCH, ModelName("m"), signed)
     completion.thinking shouldBe signed.thinkingText
     completion.hasThinking shouldBe true
   }

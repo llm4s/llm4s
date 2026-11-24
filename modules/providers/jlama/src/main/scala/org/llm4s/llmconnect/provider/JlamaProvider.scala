@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Experimental
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
@@ -65,7 +65,7 @@ object JlamaProvider extends ProviderDescriptor:
     (for
       modelDir <- parseDir(section.extra(ModelDirKey))
       threads  <- parseThreads(section.extra(ThreadsKey))
-      config   <- JlamaConfig.fromValues(ModelName(section.model.asString), modelDir, threads)
+      config   <- JlamaConfig.fromValues(section.model, modelDir, threads)
     yield config).left.map(ProviderConfig.inSection(context.providerName))
 
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -24,11 +25,11 @@ object ModelDimensionRegistry {
    *         registered - the registry's error, naming what is - or is registered but does
    *         not declare `model`.
    */
-  def getDimension(provider: String, model: String)(using registry: ProviderRegistry): Result[Int] =
+  def getDimension(provider: String, model: ModelName)(using registry: ProviderRegistry): Result[Int] =
     registry
       .resolveEmbedding(registry.canonicalEmbeddingId(provider))
       .flatMap(_.dimensionsOf(model).toRight(unknownModel(provider, model)))
 
-  private def unknownModel(provider: String, model: String): ConfigurationError =
+  private def unknownModel(provider: String, model: ModelName): ConfigurationError =
     ConfigurationError(s"[ModelDimensionRegistry] Unknown model '$model' for provider '$provider'")
 }

@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.testutil.TestTimeLimit
@@ -15,7 +16,7 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val stubClient: LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage("ok")))
+      Right(Completion("id", Instant.EPOCH, ModelName("test-model"), AssistantMessage("ok")))
     override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
@@ -51,7 +52,7 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       apiKey = Secret("sk-test-key"),
       model = ModelName("gpt-4o"),
       organization = None,
-      baseUrl = "https://api.openai.com/v1",
+      baseUrl = BaseUrl("https://api.openai.com/v1"),
       contextWindow = 128000,
       reserveCompletion = 4096
     )
@@ -95,7 +96,7 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       override def recordCost(provider: String, model: String, costUsd: Double): Unit = ()
     }
 
-    val config = OllamaConfig(ModelName("llama3.2"), s"http://127.0.0.1:${server.getAddress.getPort}")
+    val config = OllamaConfig(ModelName("llama3.2"), BaseUrl(s"http://127.0.0.1:${server.getAddress.getPort}"))
     val answer = FacadeInternals.createClient(config, metrics).get().complete("hello")
     server.stop(0)
 
@@ -109,7 +110,7 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     import org.llm4s.llmconnect.config.OllamaConfig
     FacadeInternals.createClient(null, org.llm4s.metrics.MetricsCollector.noop).isFailure shouldBe true
     FacadeInternals
-      .createClient(OllamaConfig(ModelName("llama3.2"), "http://127.0.0.1:1"), null)
+      .createClient(OllamaConfig(ModelName("llama3.2"), BaseUrl("http://127.0.0.1:1")), null)
       .isSuccess shouldBe true
   }
 
@@ -117,7 +118,7 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val closed = new java.util.concurrent.atomic.AtomicBoolean(false)
     val own = new LLMClient {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-        Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("mine")))
+        Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("mine")))
       override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       override def getContextWindow(): Int     = 4096
@@ -148,10 +149,10 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       }
     }
     val core   = EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil))
-    val client = Llm4s.wrapEmbeddingClient(core, EmbeddingModelConfig("mine", 2))
+    val client = Llm4s.wrapEmbeddingClient(core, EmbeddingModelConfig(ModelName("mine"), 2))
     (client.model, client.dimensions) shouldBe (("mine", java.util.OptionalInt.of(2)))
     client.embed(java.util.List.of("a")).get().vectors.get(0).toList shouldBe List(1.0f, 0.0f)
-    asked.get.model shouldBe EmbeddingModelConfig("mine", 2)
+    asked.get.model shouldBe EmbeddingModelConfig(ModelName("mine"), 2)
   }
 
   it should "refuse a null client or model at once" in {
@@ -159,7 +160,7 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
     import org.llm4s.model.ModelRegistryService
     val core = EmbeddingClient(_ => Right(EmbeddingResponse(Seq.empty)))(using ModelRegistryService.fromModels(Nil))
-    (the[NullPointerException] thrownBy Llm4s.wrapEmbeddingClient(null, EmbeddingModelConfig("m", 1)) should
+    (the[NullPointerException] thrownBy Llm4s.wrapEmbeddingClient(null, EmbeddingModelConfig(ModelName("m"), 1)) should
       have).message("client must not be null")
     (the[NullPointerException] thrownBy Llm4s.wrapEmbeddingClient(core, null) should have)
       .message("model must not be null")

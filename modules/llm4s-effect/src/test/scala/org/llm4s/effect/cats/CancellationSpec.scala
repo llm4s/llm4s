@@ -1,5 +1,6 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
@@ -123,8 +124,8 @@ class CancellationSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val scripted: LLMClient = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         if (c.messages.exists(_.isInstanceOf[ToolMessage]))
-          Right(Completion("t", Instant.EPOCH, "m", AssistantMessage(Some("finished"))))
-        else Right(Completion("t", Instant.EPOCH, "m", AssistantMessage("", Seq(call))))
+          Right(Completion("t", Instant.EPOCH, ModelName("m"), AssistantMessage(Some("finished"))))
+        else Right(Completion("t", Instant.EPOCH, ModelName("m"), AssistantMessage("", Seq(call))))
       def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 4096

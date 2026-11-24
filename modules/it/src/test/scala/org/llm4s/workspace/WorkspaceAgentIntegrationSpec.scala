@@ -1,5 +1,6 @@
 package org.llm4s.workspace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Workspace
@@ -79,7 +80,7 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
         Completion(
           id = s"mock-$turn",
           created = Instant.EPOCH,
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = message,
           usage = None
         )

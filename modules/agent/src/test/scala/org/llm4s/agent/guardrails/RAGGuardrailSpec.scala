@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.guardrails.rag._
 import org.llm4s.error.{ NetworkError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
@@ -34,7 +35,7 @@ class RAGGuardrailSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test-id",
           created = Instant.now(),
-          model = "test-model",
+          model = ModelName("test-model"),
           message = AssistantMessage(response),
           usage = Some(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150))
         )

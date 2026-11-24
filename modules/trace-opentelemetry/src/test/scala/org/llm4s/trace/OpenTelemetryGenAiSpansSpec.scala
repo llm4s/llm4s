@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.{ SpanKind, StatusCode }
 import io.opentelemetry.sdk.common.CompletableResultCode
@@ -62,7 +63,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
       Completion(
         id = "chatcmpl-1",
         created = Instant.EPOCH,
-        model = "gpt-4o-2024-08-06",
+        model = ModelName("gpt-4o-2024-08-06"),
         message = AssistantMessage(Answer),
         usage = Some(TokenUsage(12, 7, 19))
       )
@@ -174,7 +175,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
 
   "An embedding call through EmbeddingClient" should {
 
-    val model = EmbeddingModelConfig("text-embedding-3-small", 1536)
+    val model = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)
 
     def provider(result: Result[EmbeddingResponse]): EmbeddingProvider = new EmbeddingProvider:
       def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = result

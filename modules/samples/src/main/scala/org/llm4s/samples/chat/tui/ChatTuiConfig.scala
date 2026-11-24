@@ -1,5 +1,6 @@
 package org.llm4s.samples.chat.tui
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.config.{ Llm4sConfig, OpenAICompatibleConfigKeys }
@@ -119,66 +120,66 @@ object ChatTuiConfig:
     provider match {
       case "openai" =>
         requireKey("OPENAI_API_KEY").flatMap { apiKey =>
-          val baseUrl = getOrElse("OPENAI_BASE_URL", OpenAIProvider.DEFAULT_BASE_URL)
+          val baseUrl = getOrElse("OPENAI_BASE_URL", OpenAIProvider.DEFAULT_BASE_URL.asUrl)
           val org     = get("OPENAI_ORGANIZATION").filter(_.nonEmpty)
-          OpenAIConfig.fromValues(model, apiKey, baseUrl, org)
+          OpenAIConfig.fromValues(ModelName(model), apiKey, BaseUrl(baseUrl), org)
         }
 
       case "openrouter" =>
         requireKey("OPENROUTER_API_KEY").flatMap { apiKey =>
-          val baseUrl = getOrElse("OPENAI_BASE_URL", OpenRouterProvider.DEFAULT_BASE_URL)
-          OpenAIConfig.fromValues(model, apiKey, baseUrl)
+          val baseUrl = getOrElse("OPENAI_BASE_URL", OpenRouterProvider.DEFAULT_BASE_URL.asUrl)
+          OpenAIConfig.fromValues(ModelName(model), apiKey, BaseUrl(baseUrl))
         }
 
       case "requesty" =>
         requireKey("REQUESTY_API_KEY").flatMap { apiKey =>
-          val baseUrl = getOrElse("OPENAI_BASE_URL", RequestyProvider.DEFAULT_BASE_URL)
-          OpenAIConfig.fromValues(model, apiKey, baseUrl)
+          val baseUrl = getOrElse("OPENAI_BASE_URL", RequestyProvider.DEFAULT_BASE_URL.asUrl)
+          OpenAIConfig.fromValues(ModelName(model), apiKey, BaseUrl(baseUrl))
         }
 
       case "anthropic" =>
         requireKey("ANTHROPIC_API_KEY").flatMap { apiKey =>
-          val baseUrl = getOrElse("ANTHROPIC_BASE_URL", AnthropicConfig.DEFAULT_BASE_URL)
-          AnthropicConfig.fromValues(model, apiKey, baseUrl)
+          val baseUrl = getOrElse("ANTHROPIC_BASE_URL", AnthropicConfig.DEFAULT_BASE_URL.asUrl)
+          AnthropicConfig.fromValues(ModelName(model), apiKey, BaseUrl(baseUrl))
         }
 
       case "ollama" =>
         val baseUrl = getOrElse("OLLAMA_BASE_URL", "http://localhost:11434")
-        OllamaConfig.fromValues(model, baseUrl)
+        OllamaConfig.fromValues(ModelName(model), BaseUrl(baseUrl))
 
       case "gemini" =>
         // Gemini accepts either GOOGLE_API_KEY or GEMINI_API_KEY.
         val key = get("GEMINI_API_KEY").orElse(get("GOOGLE_API_KEY")).filter(_.nonEmpty)
         key match {
           case Some(apiKey) =>
-            val baseUrl = getOrElse("GEMINI_BASE_URL", GeminiConfig.DEFAULT_BASE_URL)
-            GeminiConfig.fromValues(model, Secret(apiKey), baseUrl)
+            val baseUrl = getOrElse("GEMINI_BASE_URL", GeminiConfig.DEFAULT_BASE_URL.asUrl)
+            GeminiConfig.fromValues(ModelName(model), Secret(apiKey), BaseUrl(baseUrl))
           case None =>
             Left(ConfigurationError("LLM_MODEL=gemini/... requires GOOGLE_API_KEY or GEMINI_API_KEY"))
         }
 
       case "zai" =>
         requireKey("ZAI_API_KEY").flatMap { apiKey =>
-          val baseUrl = getOrElse("ZAI_BASE_URL", ZaiConfig.DEFAULT_BASE_URL)
-          ZaiConfig.fromValues(model, apiKey, baseUrl)
+          val baseUrl = getOrElse("ZAI_BASE_URL", ZaiConfig.DEFAULT_BASE_URL.asUrl)
+          ZaiConfig.fromValues(ModelName(model), apiKey, BaseUrl(baseUrl))
         }
 
       case "deepseek" =>
         requireKey("DEEPSEEK_API_KEY").flatMap { apiKey =>
-          val baseUrl = getOrElse("DEEPSEEK_BASE_URL", DeepSeekConfig.DEFAULT_BASE_URL)
-          DeepSeekConfig.fromValues(model, apiKey, baseUrl)
+          val baseUrl = getOrElse("DEEPSEEK_BASE_URL", DeepSeekConfig.DEFAULT_BASE_URL.asUrl)
+          DeepSeekConfig.fromValues(ModelName(model), apiKey, BaseUrl(baseUrl))
         }
 
       case "mistral" =>
         requireKey("MISTRAL_API_KEY").flatMap { apiKey =>
-          val baseUrl = getOrElse("MISTRAL_BASE_URL", MistralConfig.DEFAULT_BASE_URL)
-          MistralConfig.fromValues(model, apiKey, baseUrl)
+          val baseUrl = getOrElse("MISTRAL_BASE_URL", MistralConfig.DEFAULT_BASE_URL.asUrl)
+          MistralConfig.fromValues(ModelName(model), apiKey, BaseUrl(baseUrl))
         }
 
       case "cohere" =>
         requireKey("COHERE_API_KEY").flatMap { apiKey =>
-          val baseUrl = getOrElse("COHERE_BASE_URL", CohereConfig.DEFAULT_BASE_URL)
-          CohereConfig.fromValues(model, apiKey, baseUrl)
+          val baseUrl = getOrElse("COHERE_BASE_URL", CohereConfig.DEFAULT_BASE_URL.asUrl)
+          CohereConfig.fromValues(ModelName(model), apiKey, BaseUrl(baseUrl))
         }
 
       case OpenAICompatibleConfig.ProviderIdName =>
@@ -187,7 +188,7 @@ object ChatTuiConfig:
         requireValue(OpenAICompatibleConfigKeys.OPENAI_COMPATIBLE_BASE_URL).flatMap { baseUrl =>
           OpenAICompatibleConfig.fromValues(
             model = ModelName(model),
-            baseUrl = baseUrl,
+            baseUrl = BaseUrl(baseUrl),
             apiKey = get(OpenAICompatibleConfigKeys.OPENAI_COMPATIBLE_API_KEY).map(Secret(_))
           )
         }

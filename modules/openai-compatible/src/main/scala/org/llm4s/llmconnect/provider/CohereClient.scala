@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Experimental
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
@@ -46,7 +48,7 @@ class CohereClient(
       OpenAICompatibleClient.Settings(
         providerName = "cohere",
         displayName = "Cohere",
-        model = config.model.asString,
+        model = config.model,
         baseUrl = CohereConfig.compatibilityBaseUrl(config.baseUrl),
         credential = OpenAICompatibleClient.keyCredential(config.apiKey, config.apiKeyProvider),
         contextWindow = config.contextWindow,
@@ -105,10 +107,10 @@ private[llm4s] object CohereDialect extends OpenAICompatibleDialect:
    * Compatibility API itself documents chat completions and embeddings only, so it has no such request; the native
    * one takes the same bearer key, answers 401 to a wrong one and 404 to a model it does not have.
    */
-  override def validationUrl(baseUrl: String, model: String): Option[String] =
-    Option.when(baseUrl.endsWith(CohereConfig.COMPATIBILITY_PATH)) {
-      val root = baseUrl.stripSuffix(CohereConfig.COMPATIBILITY_PATH)
-      s"$root/v1/models/${URLEncoder.encode(model, StandardCharsets.UTF_8).replace("+", "%20")}"
+  override def validationUrl(baseUrl: BaseUrl, model: ModelName): Option[String] =
+    Option.when(baseUrl.asUrl.endsWith(CohereConfig.COMPATIBILITY_PATH)) {
+      val root = baseUrl.asUrl.stripSuffix(CohereConfig.COMPATIBILITY_PATH)
+      s"$root/v1/models/${URLEncoder.encode(model.asString, StandardCharsets.UTF_8).replace("+", "%20")}"
     }
 
   override val systemRole: String = "developer"

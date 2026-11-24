@@ -133,7 +133,7 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       withProps(props) {
         val pure = Llm4sConfig.textEmbeddingModel().fold(err => fail(err.toString), identity)
 
-        pure.name shouldBe "text-embedding-3-small"
+        pure.name shouldBe ModelName("text-embedding-3-small")
 
         // And explicitly via the registry as an extra safety check
         val expectedDims =
@@ -219,16 +219,16 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
     "declare the documented model dimensions" in {
       given ProviderRegistry = ProviderRegistry.default
 
-      ModelDimensionRegistry.getDimension("openai", "text-embedding-3-small").value shouldBe 1536
-      ModelDimensionRegistry.getDimension("openai", "text-embedding-3-large").value shouldBe 3072
-      ModelDimensionRegistry.getDimension("OpenAI", "text-embedding-3-small").value shouldBe 1536
+      ModelDimensionRegistry.getDimension("openai", ModelName("text-embedding-3-small")).value shouldBe 1536
+      ModelDimensionRegistry.getDimension("openai", ModelName("text-embedding-3-large")).value shouldBe 3072
+      ModelDimensionRegistry.getDimension("OpenAI", ModelName("text-embedding-3-small")).value shouldBe 1536
       OpenAIEmbeddingProvider.modelDimensions should not be empty
     }
 
     "name the model when asked for one it does not declare" in {
       given ProviderRegistry = ProviderRegistry.default
 
-      ModelDimensionRegistry.getDimension("openai", "gpt-4o").left.value.formatted should include(
+      ModelDimensionRegistry.getDimension("openai", ModelName("gpt-4o")).left.value.formatted should include(
         "Unknown model 'gpt-4o' for provider 'openai'"
       )
     }

@@ -1,5 +1,6 @@
 package org.llm4s.samples.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.model.{ ModelMetadata, ModelMode, ModelRegistryService }
 import org.slf4j.LoggerFactory
@@ -29,7 +30,7 @@ object ModelMetadataExample extends App:
     case Right(service) =>
       logger.info("Example 1: Looking up GPT-4o metadata")
       logger.info("-" * 80)
-      service.lookup("gpt-4o") match {
+      service.lookup(ModelName("gpt-4o")) match {
         case Right(metadata) =>
           logger.info("Model ID: {}", metadata.modelId)
           logger.info("Provider: {}", metadata.provider)
@@ -46,7 +47,7 @@ object ModelMetadataExample extends App:
       // Example 2: Check model capabilities
       logger.info("Example 2: Checking Claude 3.7 Sonnet capabilities")
       logger.info("-" * 80)
-      service.lookup("claude-3-7-sonnet-latest") match {
+      service.lookup(ModelName("claude-3-7-sonnet-latest")) match {
         case Right(metadata) =>
           logger.info("Model: {}", metadata.modelId)
           logger.info("Supports function calling: {}", metadata.supports("function_calling"))
@@ -98,7 +99,7 @@ object ModelMetadataExample extends App:
       // Example 5: Estimate costs
       logger.info("Example 5: Estimating completion costs")
       logger.info("-" * 80)
-      service.lookup("gpt-4o") match {
+      service.lookup(ModelName("gpt-4o")) match {
         case Right(metadata) =>
           val inputTokens  = 10000
           val outputTokens = 2000
@@ -120,7 +121,7 @@ object ModelMetadataExample extends App:
       logger.info("Example 6: Creating a registry snapshot with a custom model")
       logger.info("-" * 80)
       val customModel = ModelMetadata(
-        modelId = "my-custom-llm-v1",
+        modelId = ModelName("my-custom-llm-v1"),
         provider = "custom",
         mode = ModelMode.Chat,
         maxInputTokens = Some(32000),
@@ -140,7 +141,7 @@ object ModelMetadataExample extends App:
       val customService = ModelRegistryService.fromModels(Seq(customModel))
       logger.info("Created registry snapshot for custom model: {}", customModel.modelId)
 
-      customService.lookup("my-custom-llm-v1") match {
+      customService.lookup(ModelName("my-custom-llm-v1")) match {
         case Right(metadata) =>
           logger.info("  Description: {}", metadata.description)
           logger.info("  Context window: {} tokens", metadata.contextWindow.get)
@@ -181,7 +182,7 @@ object ModelMetadataExample extends App:
       ModelRegistryService.fromJsonString(customJson) match {
         case Right(jsonService) =>
           logger.info("Custom metadata snapshot created successfully")
-          jsonService.lookup("my-experimental-model") match {
+          jsonService.lookup(ModelName("my-experimental-model")) match {
             case Right(metadata) =>
               logger.info("  Model: {}", metadata.modelId)
               logger.info("  Provider: {}", metadata.provider)

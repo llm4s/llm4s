@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -25,7 +26,7 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "c-1",
       created = createdAt,
-      model = "model-a",
+      model = ModelName("model-a"),
       message = AssistantMessage("answer")
     )
   private val fullUsage = tokenUsage()
@@ -47,7 +48,7 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = id,
       created = created,
-      model = model,
+      model = ModelName(model),
       message = message,
       usage = usage,
       estimatedCost = estimatedCost,
@@ -60,7 +61,7 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
 
     fullCompletion.withId("c-2") shouldBe completion(id = "c-2")
     fullCompletion.withCreated(later) shouldBe completion(created = later)
-    fullCompletion.withModel("model-b") shouldBe completion(model = "model-b")
+    fullCompletion.withModel(ModelName("model-b")) shouldBe completion(model = "model-b")
     fullCompletion.withMessage(message) shouldBe completion(message = message)
   }
 

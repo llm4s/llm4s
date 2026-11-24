@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
@@ -34,7 +35,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     apiKey = Secret("test-key"),
     model = ModelName("anthropic/claude-3.5-sonnet"),
     organization = None,
-    baseUrl = "https://openrouter.ai/api/v1",
+    baseUrl = BaseUrl("https://openrouter.ai/api/v1"),
     contextWindow = 200000,
     reserveCompletion = 4096
   )
@@ -44,7 +45,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
       apiKey = Secret("test-key"),
       model = ModelName("anthropic/claude-3.5-sonnet"),
       organization = None,
-      baseUrl = baseUrl,
+      baseUrl = BaseUrl(baseUrl),
       contextWindow = 200000,
       reserveCompletion = 4096
     )

@@ -277,7 +277,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.spi.*
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ProviderId }
 import org.llm4s.types.Result
 
 object AcmeProvider extends ProviderDescriptor:
@@ -286,7 +286,7 @@ object AcmeProvider extends ProviderDescriptor:
 
   val configSpec: ProviderConfigSpec = ProviderConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some("https://api.acme.example/v1"),
+    defaultBaseUrl = Some(BaseUrl("https://api.acme.example/v1")),
     apiKeyEnv      = Seq("ACME_API_KEY"), // what reference.conf binds
     extras         = Seq(
       ProviderConfigKey.optional("region", "the Acme region serving the model", default = Some("eu-west"))
@@ -302,7 +302,7 @@ object AcmeProvider extends ProviderDescriptor:
       apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
       region  <- ProviderDescriptor.requireExtra(context.providerName, section, "region")
-      config  <- AcmeConfig.fromValues(apiKey, section.model.asString, baseUrl, region)
+      config  <- AcmeConfig.fromValues(apiKey, section.model, baseUrl, region)
     yield config
 
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
@@ -408,7 +408,7 @@ an idempotent `close()`, a closed-state check, and metrics around each call. You
 protected def metrics: MetricsCollector       // from MetricsRecording; use options.metrics
 protected def clientDescription: String        // "Acme client for model x", for the closed error
 protected def providerName: String             // metrics label, e.g. "acme"
-protected def modelName: String
+protected def modelName: ModelName
 protected def releaseResources(): Unit = ()    // called once, from close()
 ```
 
@@ -696,7 +696,7 @@ final class AcmeClient(
   protected val metrics: MetricsCollector  = clientOptions.metrics
   protected def clientDescription: String = s"Acme client for model ${config.model}"
   protected def providerName: String      = "acme"
-  protected def modelName: String         = config.model.asString
+  protected def modelName: ModelName      = config.model
 
   private val transformer = RequestTransformer.default(registry)
   private val headers     = Map("Authorization" -> s"Bearer ${config.apiKey}", "Content-Type" -> "application/json")
@@ -767,14 +767,14 @@ object AcmeEmbeddings extends EmbeddingProviderDescriptor:
 
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some("https://api.acme.example/v1"),
-    defaultModel   = Some("acme-embed-1"),
+    defaultBaseUrl = Some(BaseUrl("https://api.acme.example/v1")),
+    defaultModel   = Some(ModelName("acme-embed-1")),
     apiKeyEnv      = Seq("ACME_API_KEY"),
     modelEnv       = Some("ACME_EMBEDDING_MODEL")
   )
 
   // What ModelDimensionRegistry answers from; override dimensionsOf for model-name variants.
-  override val modelDimensions: Map[String, Int] = Map("acme-embed-1" -> 1024)
+  override val modelDimensions: Map[ModelName, Int] = Map(ModelName("acme-embed-1") -> 1024)
 
   def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
     Right(

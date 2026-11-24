@@ -1,5 +1,6 @@
 package org.llm4s.samples.toolapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -25,7 +26,7 @@ class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherVa
     private var calls = 0
 
     private def reply(message: AssistantMessage): Completion =
-      Completion(id = s"script-$calls", created = Instant.EPOCH, model = "script", message = message)
+      Completion(id = s"script-$calls", created = Instant.EPOCH, model = ModelName("script"), message = message)
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       calls += 1

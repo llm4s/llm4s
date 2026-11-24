@@ -13,7 +13,7 @@ object CopyToWithSettersTest {
   def reply(message: AssistantMessage, text: String): AssistantMessage =
     message.withContent(text)
 
-  def local(config: OllamaConfig): OllamaConfig = config.withBaseUrl("http://localhost:11434")
+  def local(config: OllamaConfig): OllamaConfig = config.withContextWindow(8192)
 
   def claude(config: AnthropicConfig): AnthropicConfig =
     config
