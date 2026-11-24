@@ -46,7 +46,7 @@ class CohereClient(
       OpenAICompatibleClient.Settings(
         providerName = "cohere",
         displayName = "Cohere",
-        model = config.model,
+        model = config.model.asString,
         baseUrl = CohereConfig.compatibilityBaseUrl(config.baseUrl),
         credential = OpenAICompatibleClient.keyCredential(config.apiKey, config.apiKeyProvider),
         contextWindow = config.contextWindow,

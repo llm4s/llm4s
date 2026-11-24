@@ -49,7 +49,7 @@ class ZaiClient(
       OpenAICompatibleClient.Settings(
         providerName = "zai",
         displayName = "Z.ai",
-        model = config.model,
+        model = config.model.asString,
         baseUrl = config.baseUrl,
         credential = OpenAICompatibleClient.keyCredential(config.apiKey, config.apiKeyProvider),
         contextWindow = config.contextWindow,

@@ -89,9 +89,8 @@ a "no SLF4J providers were found" warning and drops the logs. `//FILES` puts a f
 
 ```hocon
 llm4s {
+  defaultProvider = "ollama-local"
   providers {
-    provider = "ollama-local"
-
     ollama-local {
       provider = "ollama"
       model    = "llama3"

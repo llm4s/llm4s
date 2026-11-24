@@ -41,7 +41,7 @@ Mix `ProviderModuleChecks` into a spec of any ScalaTest style.
 ```scala
 package com.acme.llm4s
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.*

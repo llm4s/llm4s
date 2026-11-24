@@ -64,23 +64,23 @@ uses that instead. A variable exported in one terminal is not seen by an IDE run
 
 **Fix.** Export the variable in the shell that starts the JVM (or set it in the IDE run configuration), or set
 `apiKey` in the section. The error names the section it is about: if it is not the one you meant, check
-`llm4s.providers.provider`. See [API keys](configuration#api-keys).
+`llm4s.defaultProvider`. See [API keys](configuration#api-keys).
 
 ## 2. No default provider configured {#no-default-provider}
 
 **Symptom** (a `ConfigurationError`):
 
 ```text
-No default provider configured under llm4s.providers.provider
+No default provider configured under llm4s.defaultProvider
 See https://llm4s.org/getting-started/troubleshooting#no-default-provider
 Run the doctor to check your whole setup: sbt "Test/runMain org.llm4s.doctor.DoctorCli" with llm4s-doctor as a test dependency (https://llm4s.org/reference/doctor)
 ```
 
-**Cause.** `Llm4sConfig.defaultProvider()` loads the section that `llm4s.providers.provider` names, and the key is
+**Cause.** `Llm4sConfig.defaultProvider()` loads the section that `llm4s.defaultProvider` names, and the key is
 not set, usually because no `application.conf` defines it.
 
 **Fix.** Add the key to your `application.conf` (see [Named provider sections](configuration#named-provider-sections)),
-or load a section by name with `Llm4sConfig.provider("<name>")`.
+or load a section by name with `Llm4sConfig.provider(ProviderName("<name>"))`.
 
 ## 3. Configured provider was not found {#provider-not-found}
 
@@ -92,8 +92,8 @@ See https://llm4s.org/getting-started/troubleshooting#provider-not-found
 Run the doctor to check your whole setup: sbt "Test/runMain org.llm4s.doctor.DoctorCli" with llm4s-doctor as a test dependency (https://llm4s.org/reference/doctor)
 ```
 
-**Cause.** `llm4s.providers.provider` (or the name you passed to `Llm4sConfig.provider(...)`) names a section that
-does not exist, for example through a typo, or a `-Dllm4s.providers.provider=...` override.
+**Cause.** `llm4s.defaultProvider` (or the name you passed to `Llm4sConfig.provider(...)`) names a section that
+does not exist, for example through a typo, or a `-Dllm4s.defaultProvider=...` override.
 
 **Fix.** Make the name match a section under `llm4s.providers` exactly.
 
@@ -282,7 +282,7 @@ endpoint itself is not found. A local Ollama that has not pulled the model answe
 [problem 9](#ollama-model-missing).
 
 **Fix.** Check the section's `model` against the provider's model list: `Llm4sConfig.listModels()` lists the models
-of the default section's provider, and `Llm4sConfig.listModels("<name>")` those of a named section. If the model is
+of the default section's provider, and `Llm4sConfig.listModels(ProviderName("<name>"))` those of a named section. If the model is
 right, check `baseUrl` (an OpenAI-compatible server's usually ends in `/v1`).
 
 

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.JlamaConfig
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.types.Result
@@ -13,7 +14,7 @@ import scala.collection.mutable
 object JlamaTestEngines:
 
   val config: JlamaConfig =
-    JlamaConfig.fromValues("tjake/Llama-3.2-1B-Instruct-JQ4").fold(e => sys.error(e.message), identity)
+    JlamaConfig.fromValues(ModelName("tjake/Llama-3.2-1B-Instruct-JQ4")).fold(e => sys.error(e.message), identity)
 
   /** What a [[ScriptedEngine]] was asked to do. */
   final case class Request(turns: Seq[JlamaTurn], temperature: Float, maxNewTokens: Int)

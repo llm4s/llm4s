@@ -63,8 +63,8 @@ The key, a base URL and a second account's key follow the same rules as for chat
 
 ## 4. Embedding some texts
 
-`Llm4sConfig.embeddings()` reads those settings and returns the provider id with its
-`EmbeddingProviderConfig`; `EmbeddingClient.from` builds the client from them. An `EmbeddingRequest` carries the
+`Llm4sConfig.embeddings()` reads those settings and returns the provider's `EmbeddingProviderConfig`, which
+carries the provider as its `providerId`; `EmbeddingClient.from` builds the client from it. An `EmbeddingRequest` carries the
 texts and an `EmbeddingModelConfig` naming the model and its dimensions, and the `EmbeddingResponse` holds one
 vector per text, in order:
 
@@ -78,14 +78,12 @@ import org.llm4s.types.Result
 
 def embedTexts(texts: Seq[String]): Result[EmbeddingResponse] =
   for {
-    settings  <- Llm4sConfig.embeddings()
-    providerId = settings._1
-    config     = settings._2
+    config    <- Llm4sConfig.embeddings()
     registry  <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
-    dimensions <- ModelDimensionRegistry.getDimension(providerId, config.model)
-    client     <- EmbeddingClient.from(providerId, config)
-    response   <- client.embed(EmbeddingRequest(texts, EmbeddingModelConfig(config.model, dimensions)))
+    dimensions <- ModelDimensionRegistry.getDimension(config.providerId.asString, config.model.asString)
+    client     <- EmbeddingClient.from(config)
+    response   <- client.embed(EmbeddingRequest(texts, EmbeddingModelConfig(config.model.asString, dimensions)))
   } yield response
 ```
 

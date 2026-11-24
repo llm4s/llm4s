@@ -28,7 +28,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-zio" % "{{ site.data.project.latest
 ### Acquire via ZLayer
 
 Use `LLMClientZ.layer` to load the default provider section of your `application.conf` (the one
-`llm4s.providers.provider` names), build the client, and release it on scope exit:
+`llm4s.defaultProvider` names), build the client, and release it on scope exit:
 
 ```scala
 import org.llm4s.llmconnect.model.{Conversation, UserMessage}

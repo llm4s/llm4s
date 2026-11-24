@@ -100,9 +100,11 @@ object RerankerConfigLoader {
           .map(failures => ConfigurationError(s"Failed to read $CohereSection: ${failures.prettyPrint()}"))
 
     for {
-      cohere   <- settings
-      keyFile  <- SharedCredentials.keyFilePath(cohere.apiKeyFile, s"$CohereSection.apiKeyFile")
-      resolved <- SharedCredentials.read(source).resolve(cohere.apiKey, s"$CohereSection.apiKey", CohereId, keyFile)
+      cohere  <- settings
+      keyFile <- SharedCredentials.keyFilePath(cohere.apiKeyFile, s"$CohereSection.apiKeyFile")
+      resolved <- SharedCredentials
+        .read(source)
+        .resolve(cohere.apiKey, s"$CohereSection.apiKey", CohereId, keyFile, Seq(COHERE_API_KEY))
       key <- resolved.toRight(
         ConfigurationError(
           "Missing Cohere reranker apiKey: " +

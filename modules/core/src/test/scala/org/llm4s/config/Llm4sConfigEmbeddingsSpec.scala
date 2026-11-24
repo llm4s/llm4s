@@ -3,7 +3,6 @@ package org.llm4s.config
 // scalafix:off DisableSyntax.NoConfigFactory
 import com.typesafe.config.ConfigFactory
 // scalafix:on DisableSyntax.NoConfigFactory
-import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -37,13 +36,13 @@ class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
         "llm4s.embeddings.fixtureembedding.apiKey"  -> "vk-test"
       )
       withProps(props) {
-        val (provider, cfg): (String, EmbeddingProviderConfig) =
+        val cfg =
           Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
 
-        provider shouldBe "fixtureembedding"
-        cfg.baseUrl shouldBe "https://embeddings.example.test"
-        cfg.model shouldBe "fixture-embed-large"
-        cfg.apiKey.reveal shouldBe "vk-test"
+        cfg.providerId.asString shouldBe "fixtureembedding"
+        cfg.baseUrl.asUrl shouldBe "https://embeddings.example.test"
+        cfg.model.asString shouldBe "fixture-embed-large"
+        cfg.apiKey.map(_.reveal) shouldBe Some("vk-test")
       }
     }
 
@@ -56,13 +55,13 @@ class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
         // No explicit baseUrl - should use default
       )
       withProps(props) {
-        val (provider, cfg): (String, EmbeddingProviderConfig) =
+        val cfg =
           Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
 
-        provider shouldBe "fixtureembedding"
-        cfg.model shouldBe "fixture-embed-small"
-        cfg.baseUrl shouldBe "https://fixtureembedding.invalid/v1" // Default base URL
-        cfg.apiKey.reveal shouldBe "vk-test"
+        cfg.providerId.asString shouldBe "fixtureembedding"
+        cfg.model.asString shouldBe "fixture-embed-small"
+        cfg.baseUrl.asUrl shouldBe "https://fixtureembedding.invalid/v1" // Default base URL
+        cfg.apiKey.map(_.reveal) shouldBe Some("vk-test")
       }
     }
 

@@ -1,5 +1,6 @@
 package org.llm4s.samples.toolapi
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.agent.Agent
 import org.llm4s.agent.graph.tool.ToolSet
 import org.llm4s.agent.harness.{ ExecuteTool, FileTools }
@@ -16,7 +17,7 @@ import scala.util.{ Try, Using }
  * An agent with the harness's file tools and `execute` over a containerised workspace (design §4.33), run with
  * different models.
  *
- * It runs the same prompt with the default named provider section (`llm4s.providers.provider`),
+ * It runs the same prompt with the default named provider section (`llm4s.defaultProvider`),
  * then with each named section given as an argument - by default `openai-main` and
  * `anthropic-main` - loaded with `Llm4sConfig.provider(name)`. A section that is not configured
  * is skipped with its error. Add the sections to the samples' git-ignored
@@ -87,7 +88,7 @@ object WorkspaceToolExample {
             case Right(tools) =>
               val registryServiceRes = Llm4sConfig.modelRegistryService()
 
-              logger.info("Attempting the default provider from configuration (llm4s.providers.provider)...")
+              logger.info("Attempting the default provider from configuration (llm4s.defaultProvider)...")
               registryServiceRes.flatMap { registryService =>
                 given org.llm4s.model.ModelRegistryService = registryService
                 Llm4sConfig.defaultProvider().flatMap(cfg => LLMConnect.getClient(cfg).map(_ -> cfg.model))
@@ -102,7 +103,7 @@ object WorkspaceToolExample {
                 logger.info(s"Testing with named provider section '$sectionName'...")
                 registryServiceRes.flatMap { registryService =>
                   given org.llm4s.model.ModelRegistryService = registryService
-                  Llm4sConfig.provider(sectionName).flatMap(LLMConnect.getClient(_))
+                  Llm4sConfig.provider(ProviderName(sectionName)).flatMap(LLMConnect.getClient(_))
                 } match {
                   case Right(client) => run(client, tools)
                   case Left(err) =>

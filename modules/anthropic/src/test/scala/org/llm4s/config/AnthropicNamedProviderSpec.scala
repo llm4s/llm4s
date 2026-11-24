@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -60,7 +60,7 @@ class AnthropicNamedProviderSpec extends AnyWordSpec with Matchers:
 
     "read webSearch from an anthropic section, off unless set (#1216)" in {
       def load(name: String, body: String) =
-        Llm4sConfig.provider(ConfigSource.string(s"llm4s.providers.$name { $body }"), name)
+        Llm4sConfig.provider(ConfigSource.string(s"llm4s.providers.$name { $body }"), ProviderName(name))
       val anthropic = """provider = "anthropic", model = "claude-sonnet-4-5", apiKey = "k""""
 
       load("a-off", anthropic) should matchPattern { case Right(c: AnthropicConfig) if !c.webSearch => }
@@ -75,7 +75,7 @@ class AnthropicNamedProviderSpec extends AnyWordSpec with Matchers:
     "refuse a webSearch value that is not true or false" in {
       val hocon =
         """llm4s.providers.a-bad { provider = "anthropic", model = "m", apiKey = "k", webSearch = "yes" }"""
-      Llm4sConfig.provider(ConfigSource.string(hocon), "a-bad").left.map(_.message) match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("a-bad")).left.map(_.message) match
         case Left(message) => message should include("webSearch must be true or false, got 'yes'")
         case Right(cfg)    => fail(s"expected an error, got $cfg")
     }
@@ -97,9 +97,9 @@ class AnthropicNamedProviderSpec extends AnyWordSpec with Matchers:
           |}
           |""".stripMargin
 
-      Llm4sConfig.provider(ConfigSource.string(hocon), "anthropic-main") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("anthropic-main")) match
         case Right(anthropic: AnthropicConfig) =>
-          anthropic.model shouldBe "claude-sonnet-4-5"
+          anthropic.model.asString shouldBe "claude-sonnet-4-5"
           anthropic.apiKey.reveal shouldBe "anthropic-key"
           anthropic.baseUrl shouldBe AnthropicConfig.DEFAULT_BASE_URL
         case other =>
@@ -110,8 +110,8 @@ class AnthropicNamedProviderSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "anthropic-proxy"
           |  providers {
-          |    provider = "anthropic-proxy"
           |    anthropic-proxy {
           |      provider = "anthropic"
           |      model = "claude-sonnet-4-5"
@@ -122,7 +122,7 @@ class AnthropicNamedProviderSpec extends AnyWordSpec with Matchers:
           |}
           |""".stripMargin
 
-      Llm4sConfig.provider(ConfigSource.string(hocon), "anthropic-proxy") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("anthropic-proxy")) match
         case Right(anthropic: AnthropicConfig) => anthropic.baseUrl shouldBe "https://anthropic-proxy.example"
         case other                             => fail(s"Expected AnthropicConfig, got $other")
     }

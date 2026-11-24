@@ -1005,7 +1005,7 @@ val results = for {
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
   // The embedding provider's settings come from llm4s.embeddings
-  rag <- RAG.build(config, _ => Llm4sConfig.embeddings().map(_._2))
+  rag <- RAG.build(config, _ => Llm4sConfig.embeddings())
 
   // Documents are stored in PostgreSQL for both vector and keyword search
   _     <- rag.ingestText("PostgreSQL hybrid search combines vector and full-text.", "doc-1")
@@ -1165,7 +1165,7 @@ for {
   reranker <- RerankerConfigLoader.default()   // Option[RerankProviderConfig]; None when disabled
   rag <- RAG.build(
     config,
-    _ => Llm4sConfig.embeddings().map(_._2),
+    _ => Llm4sConfig.embeddings(),
     resolveRerankerConfig = () => Right(reranker)
   )
 } yield rag
@@ -1364,12 +1364,9 @@ val response: Result[Completion] = for {
   given ModelRegistryService = registry
 
   // 1. Create embedding client and vector store
-  settings        <- Llm4sConfig.embeddings()
-  providerId       = settings._1
-  embeddingConfig  = settings._2
-  dimensions      <- ModelDimensionRegistry.getDimension(providerId, embeddingConfig.model)
-  model            = EmbeddingModelConfig(embeddingConfig.model, dimensions)
-  embeddingClient <- EmbeddingClient.from(providerId, embeddingConfig)
+  embeddingConfig <- Llm4sConfig.embeddings()
+  model           <- Llm4sConfig.textEmbeddingModel() // the same model, with its dimensions
+  embeddingClient <- EmbeddingClient.from(embeddingConfig)
   vectorStore     <- VectorStoreFactory.inMemory()
 
   // 2. Ingest documents: one request, one vector per document, in order

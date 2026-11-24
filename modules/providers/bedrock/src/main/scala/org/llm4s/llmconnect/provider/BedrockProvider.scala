@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.BedrockConfigKeys.*
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ BedrockConfig, BedrockCredentials, ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.spi.{

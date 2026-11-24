@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -14,13 +14,22 @@ import org.scalatest.wordspec.AnyWordSpec
  */
 class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
 
-  private val openai   = OpenAIConfig(Secret("k"), "gpt-4o", None, "https://api.openai.com/v1", 128000, 4096)
-  private val zai      = ZaiConfig(Secret("k"), "GLM-4.7", ZaiConfig.DEFAULT_BASE_URL, 200000, 4096)
-  private val deepseek = DeepSeekConfig(Secret("k"), "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
-  private val mistral = MistralConfig(Secret("k"), "mistral-large-latest", MistralConfig.DEFAULT_BASE_URL, 128000, 4096)
-  private val cohere  = CohereConfig(Secret("k"), "command-r", CohereConfig.DEFAULT_BASE_URL, 128000, 4096)
+  private val openai = OpenAIConfig(Secret("k"), ModelName("gpt-4o"), None, "https://api.openai.com/v1", 128000, 4096)
+  private val zai    = ZaiConfig(Secret("k"), ModelName("GLM-4.7"), ZaiConfig.DEFAULT_BASE_URL, 200000, 4096)
+  private val deepseek =
+    DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
+  private val mistral =
+    MistralConfig(Secret("k"), ModelName("mistral-large-latest"), MistralConfig.DEFAULT_BASE_URL, 128000, 4096)
+  private val cohere = CohereConfig(Secret("k"), ModelName("command-r"), CohereConfig.DEFAULT_BASE_URL, 128000, 4096)
   private val generic =
-    OpenAICompatibleConfig("m", "http://localhost:8000/v1", Some(Secret("k")), 32768, 4096, Map("X-Team" -> "search"))
+    OpenAICompatibleConfig(
+      ModelName("m"),
+      "http://localhost:8000/v1",
+      Some(Secret("k")),
+      32768,
+      4096,
+      Map("X-Team" -> "search")
+    )
 
   private val all: Seq[ProviderConfig] = Seq(openai, zai, deepseek, mistral, cohere, generic)
 
@@ -54,8 +63,8 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
   "ProviderConfig.withModel" should {
     "change only the model, preserving type and provider" in {
       all.foreach { config =>
-        val renamed = config.withModel("some-other-model")
-        renamed.model shouldBe "some-other-model"
+        val renamed = config.withModel(ModelName("some-other-model"))
+        renamed.model.asString shouldBe "some-other-model"
         renamed.providerId shouldBe config.providerId
         renamed.getClass shouldBe config.getClass
         renamed.endpointUrl shouldBe config.endpointUrl
@@ -65,9 +74,9 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
     }
 
     "leave provider-specific fields untouched" in {
-      openai.withModel("m").asInstanceOf[OpenAIConfig].apiKey shouldBe openai.apiKey
-      deepseek.withModel("m").asInstanceOf[DeepSeekConfig].apiKey shouldBe deepseek.apiKey
-      generic.withModel("m2").asInstanceOf[OpenAICompatibleConfig].headers shouldBe generic.headers
+      openai.withModel(ModelName("m")).asInstanceOf[OpenAIConfig].apiKey shouldBe openai.apiKey
+      deepseek.withModel(ModelName("m")).asInstanceOf[DeepSeekConfig].apiKey shouldBe deepseek.apiKey
+      generic.withModel(ModelName("m2")).asInstanceOf[OpenAICompatibleConfig].headers shouldBe generic.headers
     }
   }
 
@@ -83,14 +92,14 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
 
   "OpenAICompatibleConfig's two-argument apply and setters" should {
     "build the same config as the defaulted apply, for Java and Kotlin callers" in {
-      val built = OpenAICompatibleConfig("m", "http://localhost:8000/v1")
+      val built = OpenAICompatibleConfig(ModelName("m"), "http://localhost:8000/v1")
         .withApiKey(Secret("k"))
         .withContextWindow(32768)
         .withReserveCompletion(4096)
         .withHeader("X-Team", "search")
       built shouldBe generic
-      OpenAICompatibleConfig("m", "http://localhost:8000/v1") shouldBe
-        OpenAICompatibleConfig("m", "http://localhost:8000/v1", apiKey = None)
+      OpenAICompatibleConfig(ModelName("m"), "http://localhost:8000/v1") shouldBe
+        OpenAICompatibleConfig(ModelName("m"), "http://localhost:8000/v1", apiKey = None)
       built.withStreamUsage(false).streamUsage shouldBe false
       built.withApiKey(None).apiKey shouldBe None
       built.withBaseUrl("http://other/v1").baseUrl shouldBe "http://other/v1"

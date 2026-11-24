@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, PerplexityConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{
@@ -12,7 +13,6 @@ import org.llm4s.llmconnect.spi.{
 }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import java.util.Locale
@@ -83,7 +83,7 @@ object PerplexityProvider extends ProviderDescriptor:
       window    <- parseCount(section.extra(ContextWindowKey), ContextWindowKey, min = 1)
       reserve   <- parseCount(section.extra(ReserveCompletionKey), ReserveCompletionKey, min = 0)
       config <- PerplexityConfig.fromValues(
-        model = model,
+        model = ModelName(model),
         apiKey = apiKey,
         baseUrl = baseUrl,
         webSearch = webSearch,

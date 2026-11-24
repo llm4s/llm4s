@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
+
 // scalafix:off DisableSyntax.NoConfigFactory
 import com.typesafe.config.ConfigFactory
 // scalafix:on DisableSyntax.NoConfigFactory
@@ -74,8 +76,8 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
 
   /** `application.conf` declaring all three providers, each pointing at its own server. */
   private def threeProviders(openAI: String, anthropic: String, ollama: String, extra: String = ""): String =
-    s"""llm4s.providers {
-       |  provider = "openai-it"
+    s"""llm4s.defaultProvider = "openai-it"
+       |llm4s.providers {
        |  openai-it {
        |    provider = "openai"
        |    model    = "gpt-4o-mini"
@@ -139,19 +141,19 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
 
       val openAI = load("openai-it", hocon).value
       openAI shouldBe a[OpenAIConfig]
-      openAI.model shouldBe "gpt-4o-mini"
+      openAI.model.asString shouldBe "gpt-4o-mini"
       openAI.asInstanceOf[OpenAIConfig].baseUrl shouldBe "http://openai.invalid/v1"
       openAI.asInstanceOf[OpenAIConfig].apiKey.reveal shouldBe OpenAIKey
 
       val anthropic = load("claude-it", hocon).value
       anthropic shouldBe a[AnthropicConfig]
-      anthropic.model shouldBe "claude-3-5-haiku-latest"
+      anthropic.model.asString shouldBe "claude-3-5-haiku-latest"
       anthropic.asInstanceOf[AnthropicConfig].baseUrl shouldBe "http://anthropic.invalid"
       anthropic.asInstanceOf[AnthropicConfig].apiKey.reveal shouldBe AnthropicKey
 
       val ollama = load("ollama-it", hocon).value
       ollama shouldBe a[OllamaConfig]
-      ollama.model shouldBe "llama3"
+      ollama.model.asString shouldBe "llama3"
       ollama.asInstanceOf[OllamaConfig].baseUrl shouldBe "http://ollama.invalid"
     }
 
@@ -490,7 +492,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
           ) {
             def answer(): String =
               Llm4sConfig
-                .provider("it380-sysprop")
+                .provider(ProviderName("it380-sysprop"))
                 .flatMap(LLMConnect.getClient(_))
                 .flatMap(client => Using.resource(client)(_.complete(hello)))
                 .value

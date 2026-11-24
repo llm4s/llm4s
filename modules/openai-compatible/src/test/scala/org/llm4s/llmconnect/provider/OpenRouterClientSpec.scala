@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
@@ -31,7 +32,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
   private val testConfig = OpenAIConfig(
     apiKey = Secret("test-key"),
-    model = "anthropic/claude-3.5-sonnet",
+    model = ModelName("anthropic/claude-3.5-sonnet"),
     organization = None,
     baseUrl = "https://openrouter.ai/api/v1",
     contextWindow = 200000,
@@ -41,7 +42,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
   private def localConfig(baseUrl: String): OpenAIConfig =
     OpenAIConfig(
       apiKey = Secret("test-key"),
-      model = "anthropic/claude-3.5-sonnet",
+      model = ModelName("anthropic/claude-3.5-sonnet"),
       organization = None,
       baseUrl = baseUrl,
       contextWindow = 200000,

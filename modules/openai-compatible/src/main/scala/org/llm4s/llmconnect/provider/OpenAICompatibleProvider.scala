@@ -1,9 +1,10 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.annotation.Stable
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ OpenAICompatibleConfigKeys, OpenAICompatibleModelLister, ProviderModelLister }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAICompatibleConfig, ProviderConfig }
@@ -18,7 +19,6 @@ import org.llm4s.llmconnect.spi.{
   ProviderFeatures
 }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -241,7 +241,7 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
       tokenExchange     <- tokenExchangeOf(providerName, section)
       config <- OpenAICompatibleConfig
         .fromValues(
-          model = section.model.asString,
+          model = ModelName(section.model.asString),
           baseUrl = baseUrl,
           apiKey = section.apiKey.map(k => Secret(k.asKey)),
           contextWindow = contextWindow.orElse(registryWindow(baseUrl)),

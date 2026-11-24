@@ -1,5 +1,6 @@
 package org.llm4s.samples.guides
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.llm4s.agent.Agent
@@ -185,7 +186,7 @@ class ScalaClientMigrationGuideSpec extends AnyFlatSpec with Matchers with Eithe
 
   // snippet: named-provider
   def connectTo(section: String): Result[LLMClient] = for {
-    providerConfig  <- Llm4sConfig.provider(section)
+    providerConfig  <- Llm4sConfig.provider(ProviderName(section))
     registryService <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerConfig)

@@ -7,7 +7,7 @@ import org.slf4j.LoggerFactory
 
 /**
  * Demonstrates the new named-providers configuration path by:
- *  - loading the configured default provider name from `llm4s.providers.provider`
+ *  - loading the configured default provider name from `llm4s.defaultProvider`
  *  - loading the corresponding default [[org.llm4s.llmconnect.config.ProviderConfig]]
  *  - sending a single prompt
  *  - printing the response
@@ -40,7 +40,7 @@ object DefaultNamedProviderExample:
     result.fold(
       err =>
         logger.error("Failed to run default named provider example: {}", err.formatted)
-        logger.info("Check llm4s.providers.provider and the named provider entries in application.local.conf.")
+        logger.info("Check llm4s.defaultProvider and the named provider entries in application.local.conf.")
       ,
       { case (providerName, cfg, completion) =>
         logger.info("=== Default Named Provider Example ===")

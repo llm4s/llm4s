@@ -1,5 +1,6 @@
 package org.llm4s.samples.chat.tui
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.config.{ Llm4sConfig, OpenAICompatibleConfigKeys }
 import org.llm4s.error.ConfigurationError
@@ -185,7 +186,7 @@ object ChatTuiConfig:
         // the key is optional because local servers take none.
         requireValue(OpenAICompatibleConfigKeys.OPENAI_COMPATIBLE_BASE_URL).flatMap { baseUrl =>
           OpenAICompatibleConfig.fromValues(
-            model = model,
+            model = ModelName(model),
             baseUrl = baseUrl,
             apiKey = get(OpenAICompatibleConfigKeys.OPENAI_COMPATIBLE_API_KEY).map(Secret(_))
           )

@@ -24,9 +24,8 @@ Each provider you use is a named section of your `application.conf`, and `provid
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
   providers {
-    provider = "openai-main"
-
     openai-main {                   # key from OPENAI_API_KEY
       provider = "openai"
       model    = "gpt-4o-mini"
@@ -54,9 +53,10 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 def clientFor(section: String): Result[LLMClient] = for {
-  providerConfig  <- Llm4sConfig.provider(section)
+  providerConfig  <- Llm4sConfig.provider(ProviderName(section))
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client <- LLMConnect.getClient(providerConfig)

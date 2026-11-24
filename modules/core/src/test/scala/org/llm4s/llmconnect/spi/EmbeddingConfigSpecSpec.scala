@@ -38,34 +38,34 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
 
     "prefer the override to the section and the default" in {
       EmbeddingConfigSpec.resolveModel(id, section, Some("override-model"), withDefault) shouldBe
-        Right("override-model")
+        Right(ModelName("override-model"))
     }
 
     "prefer the section to the default" in {
-      EmbeddingConfigSpec.resolveModel(id, section, None, withDefault) shouldBe Right("section-model")
+      EmbeddingConfigSpec.resolveModel(id, section, None, withDefault) shouldBe Right(ModelName("section-model"))
     }
 
     "use the default when there is no override and no section model" in {
-      EmbeddingConfigSpec.resolveModel(id, noSection, None, withDefault) shouldBe Right("default-model")
+      EmbeddingConfigSpec.resolveModel(id, noSection, None, withDefault) shouldBe Right(ModelName("default-model"))
     }
 
     "skip a blank or whitespace-only override" in {
-      EmbeddingConfigSpec.resolveModel(id, section, Some(""), withDefault) shouldBe Right("section-model")
-      EmbeddingConfigSpec.resolveModel(id, section, Some("   "), withDefault) shouldBe Right("section-model")
+      EmbeddingConfigSpec.resolveModel(id, section, Some(""), withDefault) shouldBe Right(ModelName("section-model"))
+      EmbeddingConfigSpec.resolveModel(id, section, Some("   "), withDefault) shouldBe Right(ModelName("section-model"))
     }
 
     "skip a blank or whitespace-only section model" in {
       val blank      = EmbeddingProviderSection(model = Some(ModelName("")))
       val whitespace = EmbeddingProviderSection(model = Some(ModelName(" \t ")))
-      EmbeddingConfigSpec.resolveModel(id, blank, None, withDefault) shouldBe Right("default-model")
-      EmbeddingConfigSpec.resolveModel(id, whitespace, None, withDefault) shouldBe Right("default-model")
+      EmbeddingConfigSpec.resolveModel(id, blank, None, withDefault) shouldBe Right(ModelName("default-model"))
+      EmbeddingConfigSpec.resolveModel(id, whitespace, None, withDefault) shouldBe Right(ModelName("default-model"))
     }
 
     "trim the override and the section model" in {
       EmbeddingConfigSpec.resolveModel(id, noSection, Some("  override-model "), withDefault) shouldBe
-        Right("override-model")
+        Right(ModelName("override-model"))
       val padded = EmbeddingProviderSection(model = Some(ModelName(" section-model ")))
-      EmbeddingConfigSpec.resolveModel(id, padded, None, withDefault) shouldBe Right("section-model")
+      EmbeddingConfigSpec.resolveModel(id, padded, None, withDefault) shouldBe Right(ModelName("section-model"))
     }
 
     "name EMBEDDING_MODEL and the section path when nothing is set" in {
@@ -93,16 +93,20 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
 
     "prefer the section to the default" in {
       val section = EmbeddingProviderSection(baseUrl = Some(BaseUrl("https://section.acme.example")))
-      EmbeddingConfigSpec.resolveBaseUrl(id, section, withDefault) shouldBe Right("https://section.acme.example")
+      EmbeddingConfigSpec.resolveBaseUrl(id, section, withDefault) shouldBe Right(
+        BaseUrl("https://section.acme.example")
+      )
     }
 
     "use the default when the section has none" in {
-      EmbeddingConfigSpec.resolveBaseUrl(id, noSection, withDefault) shouldBe Right("https://default.acme.example")
+      EmbeddingConfigSpec.resolveBaseUrl(id, noSection, withDefault) shouldBe Right(
+        BaseUrl("https://default.acme.example")
+      )
     }
 
     "use the default when the section's is blank" in {
       val blank = EmbeddingProviderSection(baseUrl = Some(BaseUrl("  ")))
-      EmbeddingConfigSpec.resolveBaseUrl(id, blank, withDefault) shouldBe Right("https://default.acme.example")
+      EmbeddingConfigSpec.resolveBaseUrl(id, blank, withDefault) shouldBe Right(BaseUrl("https://default.acme.example"))
     }
 
     "name the baseUrl path when there is neither" in {
@@ -122,17 +126,19 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
 
     "prefer the section's key to the default, trimmed" in {
       val section = EmbeddingProviderSection(apiKey = Some(Secret("  section-acme-key ")))
-      EmbeddingConfigSpec.resolveApiKey(id, section, withDefault).value.reveal shouldBe "section-acme-key"
+      EmbeddingConfigSpec.resolveApiKey(id, section, withDefault).value.map(_.reveal) shouldBe Some("section-acme-key")
     }
 
     "fall through a blank section key to the default" in {
       val blank = EmbeddingProviderSection(apiKey = Some(Secret("   ")))
-      EmbeddingConfigSpec.resolveApiKey(id, blank, withDefault).value.reveal shouldBe "default-acme-key"
-      EmbeddingConfigSpec.resolveApiKey(id, noSection, withDefault).value.reveal shouldBe "default-acme-key"
+      EmbeddingConfigSpec.resolveApiKey(id, blank, withDefault).value.map(_.reveal) shouldBe Some("default-acme-key")
+      EmbeddingConfigSpec.resolveApiKey(id, noSection, withDefault).value.map(_.reveal) shouldBe Some(
+        "default-acme-key"
+      )
     }
 
-    "give an empty key when there is none and none is required" in {
-      EmbeddingConfigSpec.resolveApiKey(id, noSection, EmbeddingConfigSpec()).value.reveal shouldBe ""
+    "give no key when there is none and none is required" in {
+      EmbeddingConfigSpec.resolveApiKey(id, noSection, EmbeddingConfigSpec()).value shouldBe None
     }
 
     "name the declared variable when a required key is missing" in {

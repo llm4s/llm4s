@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.chunking.{ ChunkMetadata, ChunkerFactory, DocumentChunk, DocumentChunker }
 import org.llm4s.error.Safety
 import org.llm4s.error.{ ConfigurationError, LLMError, ProcessingError, ValidationError }
@@ -17,7 +18,6 @@ import org.llm4s.rag.permissions.*
 import org.llm4s.rag.transform.QueryTransformer
 import org.llm4s.reranker.{ RerankProviderConfig, RerankRequest, Reranker, RerankerFactory }
 import org.llm4s.trace.Tracing
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.*
 
@@ -1993,7 +1993,8 @@ object RAG {
     build(
       config,
       Some(embeddingClient),
-      _ => Right(EmbeddingProviderConfig("", "", Secret(""))),
+      // Never consulted: the client is already built.
+      provider => Right(EmbeddingProviderConfig(ProviderId(provider), BaseUrl(""), ModelName(""))),
       resolveRerankerConfig,
       hybridSearcher
     )
@@ -2136,8 +2137,8 @@ object RAG {
         case None =>
           for {
             providerConfig <- resolveEmbeddingProvider(id.asString)
-            model          <- embeddingModel(config, descriptor, Some(providerConfig.model))
-            provider       <- descriptor.build(providerConfig.withModel(model), EmbeddingBuildContext())
+            model          <- embeddingModel(config, descriptor, Some(providerConfig.model.asString))
+            provider       <- descriptor.build(providerConfig.withModel(ModelName(model)), EmbeddingBuildContext())
           } yield (EmbeddingClient(provider).withProviderId(id), model)
       }
       (client, model) = clientAndModel

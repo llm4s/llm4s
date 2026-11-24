@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.scalatest.EitherValues
@@ -44,8 +45,8 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
       "Mistral apiKey" -> MistralConfig.fromValues("mistral-small-latest", Secret(" "), MistralConfig.DEFAULT_BASE_URL),
       "Cohere apiKey"  -> CohereConfig.fromValues("command-r", Secret(" "), CohereConfig.DEFAULT_BASE_URL),
       "Cohere baseUrl" -> CohereConfig.fromValues("command-r", Secret("key"), " "),
-      "OpenAI-compatible model"   -> OpenAICompatibleConfig.fromValues(" ", "http://localhost:8000/v1"),
-      "OpenAI-compatible baseUrl" -> OpenAICompatibleConfig.fromValues("m", " ")
+      "OpenAI-compatible model"   -> OpenAICompatibleConfig.fromValues(ModelName(" "), "http://localhost:8000/v1"),
+      "OpenAI-compatible baseUrl" -> OpenAICompatibleConfig.fromValues(ModelName("m"), " ")
     )
 
     blanks.foreach { case (field, result) =>
@@ -67,7 +68,7 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
       )
       .value
 
-    config.model shouldBe "gpt-4o"
+    config.model.asString shouldBe "gpt-4o"
     config.apiKey.reveal shouldBe "test-key"
     config.organization shouldBe Some("test-org")
   }
@@ -133,7 +134,7 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
       )
       .value
 
-    config.model shouldBe "GLM-4.7"
+    config.model.asString shouldBe "GLM-4.7"
     config.apiKey.reveal shouldBe "test-key"
     config.baseUrl shouldBe "https://api.z.ai/api/paas/v4"
   }
@@ -197,25 +198,28 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
     val zai: ProviderConfig =
       ZaiConfig.fromValues("GLM-4.7", Secret("key"), "https://api.z.ai/api/paas/v4").value
 
-    openai.model shouldBe "gpt-4o"
-    zai.model shouldBe "GLM-4.7"
+    openai.model.asString shouldBe "gpt-4o"
+    zai.model.asString shouldBe "GLM-4.7"
   }
 
   // ============================ OpenAICompatibleConfig ============================
 
   test("OpenAICompatibleConfig.fromValues needs no API key, and treats a blank one as none") {
-    OpenAICompatibleConfig.fromValues("m", "http://localhost:8000/v1").value.apiKey shouldBe None
+    OpenAICompatibleConfig.fromValues(ModelName("m"), "http://localhost:8000/v1").value.apiKey shouldBe None
     OpenAICompatibleConfig
-      .fromValues("m", "http://localhost:8000/v1", apiKey = Some(Secret("  ")))
+      .fromValues(ModelName("m"), "http://localhost:8000/v1", apiKey = Some(Secret("  ")))
       .value
       .apiKey shouldBe None
-    OpenAICompatibleConfig.fromValues("m", "http://h/v1", apiKey = Some(Secret(" k "))).value.apiKey shouldBe Some(
+    OpenAICompatibleConfig
+      .fromValues(ModelName("m"), "http://h/v1", apiKey = Some(Secret(" k ")))
+      .value
+      .apiKey shouldBe Some(
       Secret("k")
     )
   }
 
   test("OpenAICompatibleConfig.fromValues defaults the window and reserve conservatively") {
-    val cfg = OpenAICompatibleConfig.fromValues("m", "http://localhost:8000/v1/").value
+    val cfg = OpenAICompatibleConfig.fromValues(ModelName("m"), "http://localhost:8000/v1/").value
     cfg.contextWindow shouldBe OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW
     cfg.reserveCompletion shouldBe OpenAICompatibleConfig.DEFAULT_RESERVE_COMPLETION
     cfg.baseUrl shouldBe "http://localhost:8000/v1"
@@ -223,31 +227,31 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
 
   test("OpenAICompatibleConfig.fromValues keeps the default reserve below a small configured window") {
     OpenAICompatibleConfig
-      .fromValues("m", "http://h/v1", contextWindow = Some(4096))
+      .fromValues(ModelName("m"), "http://h/v1", contextWindow = Some(4096))
       .value
       .reserveCompletion shouldBe 1024
   }
 
   test("OpenAICompatibleConfig.fromValues takes a configured window, reserve and headers") {
     val cfg = OpenAICompatibleConfig
-      .fromValues("m", "http://h/v1", None, Some(131072), Some(8192), Map("X-Team" -> "search"))
+      .fromValues(ModelName("m"), "http://h/v1", None, Some(131072), Some(8192), Map("X-Team" -> "search"))
       .value
     (cfg.contextWindow, cfg.reserveCompletion, cfg.headers) shouldBe (131072, 8192, Map("X-Team" -> "search"))
   }
 
   test("OpenAICompatibleConfig.fromValues rejects a non-positive window or an impossible reserve") {
     OpenAICompatibleConfig
-      .fromValues("m", "http://h/v1", contextWindow = Some(0))
+      .fromValues(ModelName("m"), "http://h/v1", contextWindow = Some(0))
       .left
       .value
       .message should include("contextWindow must be positive")
     OpenAICompatibleConfig
-      .fromValues("m", "http://h/v1", contextWindow = Some(1000), reserveCompletion = Some(1000))
+      .fromValues(ModelName("m"), "http://h/v1", contextWindow = Some(1000), reserveCompletion = Some(1000))
       .left
       .value
       .message should include("reserveCompletion must be at least 0 and less than contextWindow (1000)")
     OpenAICompatibleConfig
-      .fromValues("m", "http://h/v1", reserveCompletion = Some(-1))
+      .fromValues(ModelName("m"), "http://h/v1", reserveCompletion = Some(-1))
       .isLeft shouldBe true
   }
 }

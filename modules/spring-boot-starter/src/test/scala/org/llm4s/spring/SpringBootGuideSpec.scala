@@ -344,7 +344,7 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
       val placeholders = List("GOOGLE_API_KEY=gk-from-env", "AZURE_OPENAI_API_KEY=az-from-env")
       blocks.foreach { block =>
         val pairs   = propertyPairs(block)
-        val section = pairs.collectFirst { case p if p.startsWith("llm4s.providers.provider=") => p.split('=')(1) }.get
+        val section = pairs.collectFirst { case p if p.startsWith("llm4s.default-provider=") => p.split('=')(1) }.get
         def value(key: String): String =
           pairs.collectFirst { case p if p.startsWith(s"llm4s.providers.$section.$key=") => p.split("=", 2)(1) }.get
         withClue(s"section $section: ") {

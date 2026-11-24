@@ -8,7 +8,7 @@ getting-started/ollama-quickstart.md | 546e0e227c | skip | sbt build definition,
 getting-started/ollama-quickstart.md | b523e171b9 | skip | sbt build definition, not Scala source
 getting-started/first-example.md | 9beb2bb95c | skip | sbt build definition, not Scala source
 getting-started/first-example.md | a984c0ef30 | skip | three lines of a for-comprehension shown on their own: they are the generators of the full example above
-getting-started/configuration.md | 92f27ec027 | with | import org.llm4s.config.Llm4sConfig
+getting-started/configuration.md | ca91a867d4 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.types.ProviderModelTypes.ProviderName
 getting-started/configuration.md | 9377ccc0b9 | with | import org.llm4s.llmconnect.model._
 getting-started/configuration.md | 04567a0cb2 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 89f9b90d1e | with | import org.llm4s.types.Result

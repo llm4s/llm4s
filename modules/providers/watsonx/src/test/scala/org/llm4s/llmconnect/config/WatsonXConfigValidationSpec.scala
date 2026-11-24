@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.security.Secret
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.provider.WatsonXProvider
 import org.llm4s.model.ModelRegistryTestSupport

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.OptionValues.*
 import org.scalatest.matchers.should.Matchers
@@ -19,7 +20,7 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
     "take the context window and reserve from the model registry" in {
       val config = BedrockConfig.fromValues("anthropic.claude-3-5-sonnet-20241022-v2:0", "us-east-1").toOption.value
       config.region shouldBe "us-east-1"
-      config.model shouldBe "anthropic.claude-3-5-sonnet-20241022-v2:0"
+      config.model.asString shouldBe "anthropic.claude-3-5-sonnet-20241022-v2:0"
       val metadata = registered("anthropic.claude-3-5-sonnet-20241022-v2:0")
       config.contextWindow shouldBe metadata.maxInputTokens.value
       config.reserveCompletion shouldBe metadata.maxOutputTokens.value
@@ -85,7 +86,7 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
           .fromValues("m1", "us-east-1", credentials = Some(BedrockCredentials(Secret("a"), Secret("b"))))
           .toOption
           .value
-      config.withModel("m2") shouldBe config.copy(model = "m2")
+      config.withModel(ModelName("m2")) shouldBe config.copy(model = ModelName("m2"))
     }
 
     "redact credentials in toString" in {

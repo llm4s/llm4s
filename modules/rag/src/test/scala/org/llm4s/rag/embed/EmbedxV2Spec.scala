@@ -1,6 +1,5 @@
 package org.llm4s.rag.embed
 import org.llm4s.llmconnect.EmbeddingClient
-import org.llm4s.llmconnect.config.ModelDimensionRegistry
 import org.llm4s.llmconnect.model._
 import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -228,7 +227,7 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
     vid.head.meta.get("provider") shouldBe Some("local-experimental")
   }
 
-  test("Local model dimensions (Image/Audio/Video) match registry") {
+  test("Local model dimensions (Image/Audio/Video) match the local encoders' table") {
     val localModels =
       LocalEmbeddingModels(
         imageModel = "openclip-vit-b32",
@@ -239,14 +238,14 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
     val audModel = ModelSelector.selectModel(Modality.Audio, localModels).fold(err => fail(err.formatted), identity)
     val vidModel = ModelSelector.selectModel(Modality.Video, localModels).fold(err => fail(err.formatted), identity)
 
-    imgModel.dimensions shouldBe ModelDimensionRegistry
-      .getDimension("local", imgModel.name)
+    imgModel.dimensions shouldBe LocalEmbeddingModels
+      .dimension(imgModel.name)
       .fold(err => fail(err.formatted), identity)
-    audModel.dimensions shouldBe ModelDimensionRegistry
-      .getDimension("local", audModel.name)
+    audModel.dimensions shouldBe LocalEmbeddingModels
+      .dimension(audModel.name)
       .fold(err => fail(err.formatted), identity)
-    vidModel.dimensions shouldBe ModelDimensionRegistry
-      .getDimension("local", vidModel.name)
+    vidModel.dimensions shouldBe LocalEmbeddingModels
+      .dimension(vidModel.name)
       .fold(err => fail(err.formatted), identity)
   }
 }

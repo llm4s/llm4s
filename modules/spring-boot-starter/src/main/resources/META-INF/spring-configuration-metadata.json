@@ -150,7 +150,7 @@
       "defaultValue": 50
     },
     {
-      "name": "llm4s.providers.provider",
+      "name": "llm4s.default-provider",
       "type": "java.lang.String",
       "description": "The name of the llm4s.providers.<name> section the starter uses. Each section sets provider (a provider id such as gemini, azure, bedrock or openai-compatible), model and, as the provider needs, api-key, base-url and the provider's own keys."
     },

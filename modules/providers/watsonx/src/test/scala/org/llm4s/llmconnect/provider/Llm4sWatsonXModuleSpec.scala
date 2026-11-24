@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import com.sun.net.httpserver.HttpExchange
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.WatsonXConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry

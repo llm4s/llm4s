@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.http.HttpResponse
 import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
@@ -19,7 +20,7 @@ class WatsonXReasoningSpec extends AnyFunSuite with Matchers with EitherValues:
   import StubHttp.*
   import WatsonXTestConfig.config
 
-  private val gptOss = config.copy(model = "openai/gpt-oss-120b")
+  private val gptOss = config.copy(model = ModelName("openai/gpt-oss-120b"))
   private val ask    = Conversation(Seq(UserMessage("Horoscope for Aries?")))
 
   private def complete(reply: String): Completion =

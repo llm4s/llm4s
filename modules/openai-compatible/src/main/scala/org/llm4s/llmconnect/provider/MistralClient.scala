@@ -43,7 +43,7 @@ class MistralClient(
       OpenAICompatibleClient.Settings(
         providerName = "mistral",
         displayName = "Mistral",
-        model = config.model,
+        model = config.model.asString,
         baseUrl = MistralConfig.apiBaseUrl(config.baseUrl),
         credential = OpenAICompatibleClient.keyCredential(config.apiKey, config.apiKeyProvider),
         contextWindow = config.contextWindow,

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.scalatest.EitherValues
@@ -35,7 +36,7 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers with EitherValues:
         .fromValues("mistral-small-latest", apiKey = Secret("sk-test"), baseUrl = "https://api.mistral.ai")
         .value
     cfg.apiKey.reveal shouldBe "sk-test"
-    cfg.model shouldBe "mistral-small-latest"
+    cfg.model.asString shouldBe "mistral-small-latest"
     cfg.baseUrl shouldBe "https://api.mistral.ai"
     cfg.contextWindow should be > 0
     cfg.reserveCompletion should be > 0
@@ -85,7 +86,7 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers with EitherValues:
   "MistralConfig.toString" should "redact the API key" in {
     val cfg = MistralConfig(
       apiKey = Secret("sk-secret-key-12345"),
-      model = "mistral-small-latest",
+      model = ModelName("mistral-small-latest"),
       baseUrl = "https://api.mistral.ai",
       contextWindow = 128000,
       reserveCompletion = 4096

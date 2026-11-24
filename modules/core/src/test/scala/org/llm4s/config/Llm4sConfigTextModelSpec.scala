@@ -45,8 +45,7 @@ class Llm4sConfigTextModelSpec extends AnyWordSpec with Matchers with EitherValu
           .textEmbeddingModel()(using ProviderRegistry.default.withEmbeddingProvider(FixtureEmbeddings))
           .value
 
-        settings.provider shouldBe "fixturelocal"
-        settings.modelName shouldBe "fixture-encoder"
+        settings.name shouldBe "fixture-encoder"
         settings.dimensions shouldBe 512
       }
     }

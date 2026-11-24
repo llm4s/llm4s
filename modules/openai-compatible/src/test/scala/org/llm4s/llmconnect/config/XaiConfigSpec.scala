@@ -1,8 +1,8 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId, ProviderName }
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -24,11 +24,11 @@ class XaiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "build a config for the xai provider at the given base URL" in {
     val config = XaiConfig.fromValues("grok-4.7", Secret("k"), XaiConfig.DEFAULT_BASE_URL).value
     config.providerId shouldBe ProviderId("xai")
-    config.model shouldBe "grok-4.7"
+    config.model.asString shouldBe "grok-4.7"
     config.baseUrl shouldBe "https://api.x.ai/v1"
     config.endpointUrl shouldBe Some("https://api.x.ai/v1")
     config.contextWindow should be > 0
-    config.withModel("grok-3-mini").model shouldBe "grok-3-mini"
+    config.withModel(ModelName("grok-3-mini")).model.asString shouldBe "grok-3-mini"
     config.withTimeouts(ProviderTimeouts(request = Some(5.seconds))).timeouts.request shouldBe Some(5.seconds)
   }
 
@@ -49,7 +49,13 @@ class XaiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "XaiConfig.toString" should "redact the API key" in {
     val rendered =
-      XaiConfig(Secret("xai-secret-key-123456"), "grok-4.7", XaiConfig.DEFAULT_BASE_URL, 500000, 8192).toString
+      XaiConfig(
+        Secret("xai-secret-key-123456"),
+        ModelName("grok-4.7"),
+        XaiConfig.DEFAULT_BASE_URL,
+        500000,
+        8192
+      ).toString
     (rendered should not).include("xai-secret-key-123456")
     rendered should include("grok-4.7")
   }
@@ -63,11 +69,11 @@ class XaiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
         |    apiKey   = "xai-key"
         |  }
         |}""".stripMargin
-    Llm4sConfig.provider(ConfigSource.string(hocon), "grok").value match {
+    Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("grok")).value match {
       case xai: XaiConfig =>
         xai.baseUrl shouldBe XaiConfig.DEFAULT_BASE_URL
         xai.apiKey.reveal shouldBe "xai-key"
-        xai.model shouldBe "grok-4.7"
+        xai.model.asString shouldBe "grok-4.7"
       case other => fail(s"Expected XaiConfig, got $other")
     }
   }

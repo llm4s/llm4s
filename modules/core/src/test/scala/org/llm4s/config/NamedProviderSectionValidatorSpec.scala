@@ -1,6 +1,5 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.testutil.FixtureChatProvider

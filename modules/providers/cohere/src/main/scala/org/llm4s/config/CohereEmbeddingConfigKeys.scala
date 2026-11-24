@@ -3,7 +3,7 @@ package org.llm4s.config
 /**
  * Environment-variable names recognised by `llm4s-cohere`.
  *
- * A key belongs with the code that reads it, so these live here and not in `ConfigKeys`, which
+ * A key belongs with the code that reads it, so these live here and not in `llm4s-core`, which
  * must not name variables for a provider that may not be on the classpath. They are bound in
  * this module's `reference.conf`: the key under the shared `llm4s.credentials.cohere`, the base
  * URL and model under `llm4s.embeddings.cohere`.

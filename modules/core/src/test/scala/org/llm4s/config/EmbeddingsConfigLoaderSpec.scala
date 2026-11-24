@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import pureconfig.ConfigSource
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -40,11 +41,11 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
       result.isRight shouldBe true
-      val (provider, cfg) = result.value
-      provider shouldBe "fixtureembedding"
-      cfg.model shouldBe "fixture-embed-large"
-      cfg.apiKey.reveal shouldBe "vk-test-key"
-      cfg.baseUrl shouldBe "https://fixtureembedding.invalid/v1"
+      val cfg = result.value
+      cfg.providerId.asString shouldBe "fixtureembedding"
+      cfg.model.asString shouldBe "fixture-embed-large"
+      cfg.apiKey.map(_.reveal) shouldBe Some("vk-test-key")
+      cfg.baseUrl.asUrl shouldBe "https://fixtureembedding.invalid/v1"
     }
 
     "fail with clear error for invalid model format (missing slash)" in {
@@ -185,7 +186,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
       result.isRight shouldBe true
-      result.value._2.baseUrl shouldBe "https://fixtureembedding.invalid/v1"
+      result.value.baseUrl.asUrl shouldBe "https://fixtureembedding.invalid/v1"
     }
   }
 
@@ -218,10 +219,10 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
       result.isRight shouldBe true
-      val (provider, cfg) = result.value
+      val cfg = result.value
       // Unified format should take precedence
-      provider shouldBe "fixtureembedding"
-      cfg.model shouldBe "fixture-embed-large"
+      cfg.providerId.asString shouldBe "fixtureembedding"
+      cfg.model.asString shouldBe "fixture-embed-large"
     }
   }
 
@@ -302,7 +303,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
       result.isRight shouldBe true
-      result.value._2.model shouldBe "fixture-embed-small"
+      result.value.model.asString shouldBe "fixture-embed-small"
     }
 
     "trim whitespace from API keys" in {
@@ -321,7 +322,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
       result.isRight shouldBe true
-      result.value._2.apiKey.reveal shouldBe "vk-trimmed"
+      result.value.apiKey.map(_.reveal) shouldBe Some("vk-trimmed")
     }
 
     "treat empty model string as missing" in {
@@ -350,23 +351,22 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
     val keyOnly = """llm4s.embeddings.fixtureembedding.apiKey = "vk-test-key""""
 
     "load the named model's provider section and key, with no llm4s.embeddings.model set" in {
-      val (provider, cfg) =
+      val cfg =
         Llm4sConfig.embeddingsFor(ConfigSource.string(keyOnly), "fixtureembedding/fixture-embed-large").value
-      provider shouldBe "fixtureembedding"
-      cfg.model shouldBe "fixture-embed-large"
-      cfg.apiKey.reveal shouldBe "vk-test-key"
-      cfg.baseUrl shouldBe "https://fixtureembedding.invalid/v1"
+      cfg.providerId.asString shouldBe "fixtureembedding"
+      cfg.model.asString shouldBe "fixture-embed-large"
+      cfg.apiKey.map(_.reveal) shouldBe Some("vk-test-key")
+      cfg.baseUrl.asUrl shouldBe "https://fixtureembedding.invalid/v1"
     }
 
     "use the named model over the one llm4s.embeddings.model selects, and take an alias in any case" in {
       val hocon = s"""$keyOnly\nllm4s.embeddings.model = "fixtureembedding/fixture-embed-small""""
       EmbeddingsConfigLoader
         .loadProviderFor(ConfigSource.string(hocon), " Fixture-Embedding-AI/fixture-embed-large ")
-        .value shouldBe ("fixtureembedding" -> EmbeddingsConfigLoader
+        .value shouldBe EmbeddingsConfigLoader
         .loadProvider(ConfigSource.string(hocon))
         .value
-        ._2
-        .withModel("fixture-embed-large"))
+        .withModel(ModelName("fixture-embed-large"))
     }
 
     "refuse a model that is not provider/model" in {

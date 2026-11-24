@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.error.{ ConfigurationError, LLMError, TroubleshootingLinks }
 import org.llm4s.error.TroubleshootingLinks.Entry
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -31,8 +32,8 @@ class TroubleshootingConfigErrorsSpec extends AnyWordSpec with Matchers with Eit
     }
 
   private val fixtureSection =
-    """llm4s.providers {
-      |  provider = "main"
+    """llm4s.defaultProvider = "main"
+      |llm4s.providers {
       |  main {
       |    provider = "fixturechat"
       |    model    = "fixture-model"
@@ -44,7 +45,11 @@ class TroubleshootingConfigErrorsSpec extends AnyWordSpec with Matchers with Eit
     "link #missing-api-key, from the default provider and from a section loaded by name" in {
       val prefix = "is missing required fields:\n  - apiKey: set "
       assertLinked(Llm4sConfig.defaultProvider(source(fixtureSection)).left.value, Entry.MissingApiKey, prefix)
-      assertLinked(Llm4sConfig.provider(source(fixtureSection), "main").left.value, Entry.MissingApiKey, prefix)
+      assertLinked(
+        Llm4sConfig.provider(source(fixtureSection), ProviderName("main")).left.value,
+        Entry.MissingApiKey,
+        prefix
+      )
     }
 
     "link #missing-api-key for an embeddings block too" in {
@@ -69,12 +74,12 @@ class TroubleshootingConfigErrorsSpec extends AnyWordSpec with Matchers with Eit
       assertLinked(
         Llm4sConfig.defaultProvider(source(hocon)).left.value,
         Entry.NoDefaultProvider,
-        "No default provider configured under llm4s.providers.provider"
+        "No default provider configured under llm4s.defaultProvider"
       )
       assertLinked(
         Llm4sConfig.defaultProviderName(source(hocon)).left.value,
         Entry.NoDefaultProvider,
-        "No default provider configured under llm4s.providers.provider"
+        "No default provider configured under llm4s.defaultProvider"
       )
     }
   }
@@ -82,13 +87,17 @@ class TroubleshootingConfigErrorsSpec extends AnyWordSpec with Matchers with Eit
   "An unknown section" should {
     "link #provider-not-found, as the default and by name" in {
       val hocon =
-        """llm4s.providers {
-          |  provider = "typo"
+        """llm4s.defaultProvider = "typo"
+          |llm4s.providers {
           |  main { provider = "fixturechat", model = "m", apiKey = "k" }
           |}
           |""".stripMargin
       assertLinked(Llm4sConfig.defaultProvider(source(hocon)).left.value, Entry.ProviderNotFound, "' was not found")
-      assertLinked(Llm4sConfig.provider(source(hocon), "other").left.value, Entry.ProviderNotFound, "' was not found")
+      assertLinked(
+        Llm4sConfig.provider(source(hocon), ProviderName("other")).left.value,
+        Entry.ProviderNotFound,
+        "' was not found"
+      )
       assertLinked(Llm4sConfig.providers(source(hocon)).left.value, Entry.ProviderNotFound, "Configured provider '")
     }
   }
@@ -96,8 +105,8 @@ class TroubleshootingConfigErrorsSpec extends AnyWordSpec with Matchers with Eit
   "A provider that is not registered" should {
     "link #provider-not-registered" in {
       val hocon =
-        """llm4s.providers {
-          |  provider = "main"
+        """llm4s.defaultProvider = "main"
+          |llm4s.providers {
           |  main { provider = "openai", model = "gpt-4o-mini", apiKey = "k" }
           |}
           |""".stripMargin
@@ -128,8 +137,8 @@ class TroubleshootingConfigErrorsSpec extends AnyWordSpec with Matchers with Eit
 
     "link #application-conf-not-loaded when one section cannot be read" in {
       val hocon =
-        """llm4s.providers {
-          |  provider = "main"
+        """llm4s.defaultProvider = "main"
+          |llm4s.providers {
           |  main = "not an object"
           |}
           |""".stripMargin
@@ -144,7 +153,7 @@ class TroubleshootingConfigErrorsSpec extends AnyWordSpec with Matchers with Eit
   "A section that loads" should {
     "carry no link" in {
       Llm4sConfig
-        .provider(source(fixtureSection + "llm4s.providers.main.apiKey = \"k\"\n"), "main")
+        .provider(source(fixtureSection + "llm4s.providers.main.apiKey = \"k\"\n"), ProviderName("main"))
         .isRight shouldBe true
     }
   }

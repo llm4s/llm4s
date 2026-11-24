@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.http.{ HttpResponse, MockHttpClient, StubbedHttpCalls }
@@ -27,9 +28,10 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFacto
   }
 
   private val cfg = EmbeddingProviderConfig(
-    baseUrl = "http://jina-test",
-    model = "jina-embeddings-v3",
-    apiKey = Secret("jina-test-key")
+    providerId = ProviderId("jina"),
+    baseUrl = BaseUrl("http://jina-test"),
+    model = ModelName("jina-embeddings-v3"),
+    apiKey = Some(Secret("jina-test-key"))
   )
 
   private val modelCfg = EmbeddingModelConfig("jina-embeddings-v3", 1024)
@@ -110,7 +112,7 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockHttp = new MockHttpClient(httpOk(embeddingBody(Seq(Seq(0.1)))))
 
     JinaEmbeddingProvider
-      .forTest(cfg.withBaseUrl("https://api.jina.ai/v1/"), mockHttp)
+      .forTest(cfg.withBaseUrl(BaseUrl("https://api.jina.ai/v1/")), mockHttp)
       .embed(EmbeddingRequest(Seq("test"), modelCfg))
 
     mockHttp.lastUrl.get shouldBe "https://api.jina.ai/v1/embeddings"

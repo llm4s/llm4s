@@ -23,7 +23,7 @@ import scala.util.matching.Regex
  * {{{
  * val (provider, embeddingProviderCfg) = /* load embedding provider config */
  * val result = for {
- *   embeddingClient <- EmbeddingClient.from(provider, embeddingProviderCfg)
+ *   embeddingClient <- EmbeddingClient.from(embeddingProviderCfg)
  * } yield {
  *   val modelConfig = EmbeddingModelConfig("text-embedding-3-small", 1536)
  *   val chunker = SemanticChunker(embeddingClient, modelConfig, similarityThreshold = 0.5)

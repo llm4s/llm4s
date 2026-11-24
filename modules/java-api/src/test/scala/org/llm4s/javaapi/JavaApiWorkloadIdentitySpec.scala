@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.testutil.TestTimeLimit
 
@@ -17,7 +18,7 @@ import org.scalatest.wordspec.AnyWordSpec
 class JavaApiWorkloadIdentitySpec extends AnyWordSpec with TestTimeLimit with Matchers {
 
   private def exchanging(fake: FakeTokenExchangeServer, baseUrl: String): OpenAICompatibleConfig =
-    OpenAICompatibleConfig("m", baseUrl).withTokenExchange(
+    OpenAICompatibleConfig(ModelName("m"), baseUrl).withTokenExchange(
       TokenExchangeConfig(
         IdentitySource.Literal(Secret("eyJ.svid.sig")),
         s"${fake.baseUrl}${FakeTokenExchangeServer.TokenPath}"

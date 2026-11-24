@@ -36,8 +36,8 @@ object TokenWindowExample {
       given org.llm4s.model.ModelRegistryService = registryService
       modelName                                  = providerCfg.model
       client       <- LLMConnect.getClient(providerCfg)
-      tokenCounter <- createTokenCounter(modelName)
-      demoResults  <- runDemo(client, tokenCounter, modelName)
+      tokenCounter <- createTokenCounter(modelName.asString)
+      demoResults  <- runDemo(client, tokenCounter, modelName.asString)
     } yield demoResults
 
     result.fold(

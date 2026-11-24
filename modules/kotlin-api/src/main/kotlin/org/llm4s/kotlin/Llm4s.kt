@@ -39,7 +39,7 @@ object Llm4s {
 
     /**
      * Creates an [LLMClientKt] from the default provider section of `application.conf`
-     * (the one `llm4s.providers.provider` names).
+     * (the one `llm4s.defaultProvider` names).
      * Throws [LLMException] if the provider cannot be configured.
      */
     fun createDefaultClient(): LLMClientKt {

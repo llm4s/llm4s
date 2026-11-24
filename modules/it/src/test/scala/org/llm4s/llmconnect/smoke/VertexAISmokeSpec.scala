@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -135,7 +136,7 @@ class VertexAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   override protected def noInvalidKeyClient: String =
     "Vertex AI's credentials are the environment's: the spec has no refused token to send"
   override protected def unknownModelClient(projectId: String): Option[Result[LLMClient]] =
-    Some(VertexAIClient(config(projectId).withModel("llm4s-no-such-model")))
+    Some(VertexAIClient(config(projectId).withModel(ModelName("llm4s-no-such-model"))))
 
   registerValidationContract()
 }

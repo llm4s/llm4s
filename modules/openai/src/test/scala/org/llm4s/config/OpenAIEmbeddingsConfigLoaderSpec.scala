@@ -35,11 +35,11 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
       val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
       result.isRight shouldBe true
-      val (provider, cfg) = result.value
-      provider shouldBe "openai"
-      cfg.model shouldBe "text-embedding-3-small"
-      cfg.apiKey.reveal shouldBe "sk-test-embedding"
-      cfg.baseUrl shouldBe "https://api.openai.com/v1"
+      val cfg = result.value
+      cfg.providerId.asString shouldBe "openai"
+      cfg.model.asString shouldBe "text-embedding-3-small"
+      cfg.apiKey.map(_.reveal) shouldBe Some("sk-test-embedding")
+      cfg.baseUrl.asUrl shouldBe "https://api.openai.com/v1"
     }
 
     "use custom baseUrl when provided for OpenAI embeddings" in {
@@ -60,8 +60,8 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
       val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
       result.isRight shouldBe true
-      val (_, cfg) = result.value
-      cfg.baseUrl shouldBe "https://custom-openai.proxy.com/v1"
+      val cfg = result.value
+      cfg.baseUrl.asUrl shouldBe "https://custom-openai.proxy.com/v1"
     }
 
     "fail with clear error when OpenAI API key is missing for embeddings" in {
@@ -103,7 +103,7 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
       val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
       result.isRight shouldBe true
-      result.value._2.baseUrl shouldBe "https://api.openai.com/v1"
+      result.value.baseUrl.asUrl shouldBe "https://api.openai.com/v1"
     }
   }
 }

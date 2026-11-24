@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.AnthropicConfigKeys
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ContextWindowResolver }
 import org.llm4s.llmconnect.spi.{ ProviderBuildContext, ProviderConfigContext, ProviderRegistry }
@@ -129,7 +129,8 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
     given ContextWindowResolver = ContextWindowResolver(summon[ModelRegistryService])
     AnthropicProvider
       .buildConfig(section.withBaseUrl(Some(BaseUrl(baseUrl))), ProviderConfigContext.of("rotation"))
-      .flatMap(config => AnthropicProvider.build(config.withApiKeyProvider(keys), ProviderBuildContext.of()))
+      .flatMap(_.withApiKeyProvider(keys))
+      .flatMap(AnthropicProvider.build(_, ProviderBuildContext.of()))
       .fold(error => fail(error.message), identity)
 
   "a client built by the anthropic descriptor" should {

@@ -1,11 +1,11 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.config.CohereEmbeddingConfigKeys
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ModelDimensionRegistry }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.{ LocalProviderTestServer, ProviderModuleChecks, ProviderTestConfig }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -33,7 +33,12 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
         val config =
-          EmbeddingProviderConfig(baseUrl = baseUrl, model = "embed-english-v3.0", apiKey = Secret("test-key"))
+          EmbeddingProviderConfig(
+            providerId = ProviderId("cohere"),
+            baseUrl = BaseUrl(baseUrl),
+            model = ModelName("embed-english-v3.0"),
+            apiKey = Some(Secret("test-key"))
+          )
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(CohereEmbeddingProvider, config))
       }
     }
@@ -41,7 +46,12 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
       assertEmbeddingUsesSuppliedHttpClient(
         CohereEmbeddingProvider,
-        EmbeddingProviderConfig(baseUrl = "http://localhost:1", model = "test-model", apiKey = Secret("test-key"))
+        EmbeddingProviderConfig(
+          providerId = ProviderId("cohere"),
+          baseUrl = BaseUrl("http://localhost:1"),
+          model = ModelName("test-model"),
+          apiKey = Some(Secret("test-key"))
+        )
       )
     }
 
@@ -54,8 +64,13 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
         )
       ) { (baseUrl, keys) =>
         val config =
-          EmbeddingProviderConfig(baseUrl = baseUrl, model = "embed-english-v3.0", apiKey = Secret("test-key"))
-        assertBuildsEmbeddingProvider(CohereEmbeddingProvider, config.withApiKeyProvider(keys))
+          EmbeddingProviderConfig(
+            providerId = ProviderId("cohere"),
+            baseUrl = BaseUrl(baseUrl),
+            model = ModelName("embed-english-v3.0"),
+            apiKey = Some(Secret("test-key"))
+          )
+        assertBuildsEmbeddingProvider(CohereEmbeddingProvider, config.withApiKeyProvider(Some(keys)))
       }
     }
   }
@@ -66,20 +81,20 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "bind COHERE_API_KEY to llm4s.credentials.cohere.apiKey" in {
       CohereEmbeddingProvider.configSpec.apiKeyEnv shouldBe Seq(CohereEmbeddingConfigKeys.COHERE_API_KEY)
-      assertEmbeddingCredentialBindings(CohereEmbeddingProvider, "embed-english-v3.0")
+      assertEmbeddingCredentialBindings(CohereEmbeddingProvider, ModelName("embed-english-v3.0"))
     }
 
     "build a Cohere embedding provider from the selected block, as an application does" in {
-      val (_, config) = ProviderTestConfig
+      val config = ProviderTestConfig
         .loadEmbeddings(
           """llm4s.embeddings.model = "cohere/embed-english-v3.0"""",
           Map("COHERE_API_KEY" -> "cohere-test")
         )
         .fold(error => fail(error.message), identity)
 
-      config.model shouldBe "embed-english-v3.0"
-      config.apiKey.reveal shouldBe "cohere-test"
-      config.baseUrl shouldBe "https://api.cohere.com"
+      config.model.asString shouldBe "embed-english-v3.0"
+      config.apiKey.map(_.reveal) shouldBe Some("cohere-test")
+      config.baseUrl.asUrl shouldBe "https://api.cohere.com"
       assertBuildsEmbeddingProvider(CohereEmbeddingProvider, config)
     }
 
@@ -93,7 +108,7 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     }
 
     "honour COHERE_EMBEDDING_BASE_URL" in {
-      val (_, config) = ProviderTestConfig
+      val config = ProviderTestConfig
         .loadEmbeddings(
           """llm4s.embeddings.model = "cohere/embed-multilingual-v3.0"""",
           Map(
@@ -103,8 +118,8 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
         )
         .fold(error => fail(error.message), identity)
 
-      config.baseUrl shouldBe "http://proxy.local"
-      config.model shouldBe "embed-multilingual-v3.0"
+      config.baseUrl.asUrl shouldBe "http://proxy.local"
+      config.model.asString shouldBe "embed-multilingual-v3.0"
     }
   }
 

@@ -7,7 +7,7 @@ package org.llm4s.config
  * Named sections read no environment variable by themselves, so the variables here are the
  * conventional AWS ones a user binds in the section (`region = ${?AWS_REGION}`); they appear in
  * the missing-key error message as that binding. A key belongs with the code that reads it, so
- * they are not in `ConfigKeys`.
+ * they are not in `llm4s-core`.
  */
 object BedrockConfigKeys {
 

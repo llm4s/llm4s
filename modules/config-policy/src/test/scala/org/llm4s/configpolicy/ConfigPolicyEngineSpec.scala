@@ -1,5 +1,6 @@
 package org.llm4s.configpolicy
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig, OpenAICompatibleConfig, OpenAIConfig }
@@ -24,12 +25,12 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
     }
 
     "allow the generic openai-compatible provider under the dev preset" in {
-      val cfg = OpenAICompatibleConfig.fromValues("qwen", "http://localhost:8000/v1").value
+      val cfg = OpenAICompatibleConfig.fromValues(ModelName("qwen"), "http://localhost:8000/v1").value
       ConfigPolicyEngine.check(cfg, ConfigPolicy.devSandbox, CatalogEnvironment.Dev) shouldBe empty
     }
 
     "reject the generic openai-compatible provider under the prod preset unless explicitly allowed" in {
-      val cfg = OpenAICompatibleConfig.fromValues("gpt-4o-mini", "https://gateway.example/v1").value
+      val cfg = OpenAICompatibleConfig.fromValues(ModelName("gpt-4o-mini"), "https://gateway.example/v1").value
       ConfigPolicyEngine.check(cfg, ConfigPolicy.prodSafeDefaults, CatalogEnvironment.Prod) should contain(
         PolicyViolation("allowedProviders", "Provider 'openai-compatible' is not allowed")
       )
@@ -116,9 +117,9 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
       val policy = ConfigPolicy.permissive
         .withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "https://api\\.openai\\.com/v1")
         .withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "openai-compatible", "https://api\\.groq\\.com/openai/v1")
-      val groq = OpenAICompatibleConfig.fromValues("m", "https://api.groq.com/openai/v1").value
+      val groq = OpenAICompatibleConfig.fromValues(ModelName("m"), "https://api.groq.com/openai/v1").value
       ConfigPolicyEngine.check(groq, policy, CatalogEnvironment.Prod) shouldBe empty
-      val other = OpenAICompatibleConfig.fromValues("m", "https://api.openai.com/v1").value
+      val other = OpenAICompatibleConfig.fromValues(ModelName("m"), "https://api.openai.com/v1").value
       ConfigPolicyEngine.check(other, policy, CatalogEnvironment.Prod).map(_.rule) should contain("requiredBaseUrl")
       val openai = OpenAIConfig.fromValues("gpt-4o", Secret("k"), "https://api.openai.com/v1").value
       ConfigPolicyEngine.check(openai, policy, CatalogEnvironment.Prod) shouldBe empty
@@ -144,7 +145,7 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
       sections.foreach { section =>
         val cfg = org.llm4s.config.Llm4sConfig
           .providerFrom(
-            pureconfig.ConfigSource.string(s"llm4s { providers { provider = \"main\"\n main { $section } } }")
+            pureconfig.ConfigSource.string(s"llm4s { defaultProvider = \"main\"\n providers { main { $section } } }")
           )
           .value
         withClue(section) {
@@ -155,7 +156,7 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
 
     "accept the documented Groq and xAI recipes under the dev preset" in {
       Seq("https://api.groq.com/openai/v1" -> 131072, "https://api.x.ai/v1" -> 500000).foreach { case (url, window) =>
-        val cfg = OpenAICompatibleConfig.fromValues("m", url, contextWindow = Some(window)).value
+        val cfg = OpenAICompatibleConfig.fromValues(ModelName("m"), url, contextWindow = Some(window)).value
         ConfigPolicyEngine.check(cfg, ConfigPolicy.devSandbox, CatalogEnvironment.Dev) shouldBe empty
       }
     }

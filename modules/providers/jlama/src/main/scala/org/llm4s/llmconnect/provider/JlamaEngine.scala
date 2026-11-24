@@ -57,7 +57,7 @@ private[provider] object JlamaEngine:
   def load(config: JlamaConfig): Result[JlamaEngine] =
     Try {
       config.threads.foreach(setThreads)
-      val (owner, slashName) = config.model.span(_ != '/')
+      val (owner, slashName) = config.model.asString.span(_ != '/')
       val dir                = config.modelDir.toAbsolutePath.toString
       val local              = SafeTensorSupport.constructLocalModelPath(dir, owner, slashName.drop(1))
       if SafeTensorSupport.isModelLocal(local) then logger.info("Loading Jlama model {} from {}", config.model, local)
@@ -67,7 +67,7 @@ private[provider] object JlamaEngine:
           config.model,
           local
         )
-      val modelFile = SafeTensorSupport.maybeDownloadModel(dir, config.model, downloadReporter)
+      val modelFile = SafeTensorSupport.maybeDownloadModel(dir, config.model.asString, downloadReporter)
       new Loaded(ModelSupport.loadModel(modelFile, DType.F32, DType.I8)): JlamaEngine
     }.toEither.left.map(e =>
       ProcessingError(

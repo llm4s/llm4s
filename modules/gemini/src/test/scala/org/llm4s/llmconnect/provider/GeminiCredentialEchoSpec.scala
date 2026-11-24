@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
@@ -19,7 +20,7 @@ final class GeminiCredentialEchoSpec extends AnyFlatSpec with Matchers {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
       val config = GeminiConfig(
         apiKey = Secret(echoKey),
-        model = "gemini-2.0-flash",
+        model = ModelName("gemini-2.0-flash"),
         baseUrl = baseUrl,
         contextWindow = 1048576,
         reserveCompletion = 8192
@@ -33,7 +34,7 @@ final class GeminiCredentialEchoSpec extends AnyFlatSpec with Matchers {
       // A space in the model name makes URI.create throw; the JDK's message quotes the whole URL, ?key= included.
       val config = GeminiConfig(
         apiKey = Secret(echoKey),
-        model = "gemini 1.5",
+        model = ModelName("gemini 1.5"),
         baseUrl = "http://127.0.0.1:1/v1beta",
         contextWindow = 1048576,
         reserveCompletion = 8192

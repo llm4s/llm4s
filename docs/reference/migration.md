@@ -90,7 +90,243 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`ReliableClient`'s private constructor](#reliableclient-has-a-private-constructor-2797),
 [tracing backend aliases and the removal of `Tracing.create`](#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799),
 [image metrics as `ImageMetrics` in `llm4s-image`](#image-metrics-are-imagemetrics-in-llm4s-image-2801)
-and [which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824).
+[which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824),
+[`llm4s.providers.provider` is now `llm4s.defaultProvider`](#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806),
+[`Llm4sConfig` takes `ProviderName`, and `embeddings()` returns the config alone](#llm4sconfig-takes-providername-and-embeddings-returns-the-config-alone-2804)
+and [`ProviderConfig` has no default members, and `EmbeddingProviderConfig` is typed](#providerconfig-has-no-default-members-and-embeddingproviderconfig-is-typed-2805).
+
+## `llm4s.providers.provider` is now `llm4s.defaultProvider` (#2806)
+
+The name of the default provider section used to be a key *inside* `llm4s.providers`, beside the sections it chose
+between. So `provider` meant "the default section" at `llm4s.providers.provider` and "which provider this section
+is" one level down at `llm4s.providers.<name>.provider`, and a section could not be called `provider`. It is now
+`llm4s.defaultProvider`, beside the block; every key of `llm4s.providers` is a section.
+
+**`application.conf`**: move the line out of the block and rename it.
+
+```hocon
+# before
+llm4s {
+  providers {
+    provider = "openai-main"
+    provider = ${?LLM4S_PROVIDER}        # if you bound it to a variable
+    openai-main { provider = "openai", model = "gpt-4o-mini" }
+  }
+}
+
+# after
+llm4s {
+  defaultProvider = "openai-main"
+  defaultProvider = ${?LLM4S_PROVIDER}
+  providers {
+    openai-main { provider = "openai", model = "gpt-4o-mini" }
+  }
+}
+```
+
+| Where | Before | After |
+|---|---|---|
+| HOCON | `llm4s.providers.provider = "x"` | `llm4s.defaultProvider = "x"` |
+| JVM system property | `-Dllm4s.providers.provider=x` | `-Dllm4s.defaultProvider=x` |
+| Spring Boot `application.properties` / YAML | `llm4s.providers.provider=x` | `llm4s.default-provider=x` (`llm4s.defaultProvider` and `llm4s.default_provider` are read too) |
+| Quarkus `application.properties` | `llm4s.providers.provider=x` | `llm4s.default-provider=x` (or `llm4s.defaultProvider`) |
+| Environment | none: the library binds no variable to it | unchanged: bind your own, `llm4s.defaultProvider = ${?MY_VAR}` |
+
+The library never bound an environment variable to this key, so no variable is renamed. The *samples* bind
+`LLM4S_PROVIDER` in their own `application.conf`; that binding moved to `llm4s.defaultProvider` with the key.
+
+**If you do not change it**, `llm4s.providers.provider = "x"` no longer selects anything:
+`Llm4sConfig.defaultProvider()` and `defaultProviderName()` return
+`No default provider configured under llm4s.defaultProvider. llm4s.providers.provider ('x') no longer names the default section: move it out of the providers block, as llm4s.defaultProvider = "x"`.
+The string is also read as a section named `provider` that is not an object, so `providerConfigs()` holds a `Left`
+under `provider`; the other sections load as before, and `Llm4sConfig.provider(ProviderName("x"))` still works.
+
+No Scala method changed name: `Llm4sConfig.defaultProvider()` and `defaultProviderName()` read the new key.
+
+**Also in #2806.** `org.llm4s.config.ConfigKeys` is removed: it held one constant, `ConfigKeys.EMBEDDING_MODEL`;
+write `"EMBEDDING_MODEL"`. Each provider module's own `<Name>ConfigKeys` object is unchanged. The `llm4s.workspace`
+block (`WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT`) is bound by `llm4s-workspace-client`'s `reference.conf`
+instead of core's: nothing changes for an application with the workspace client on its classpath, its only reader;
+one that read `llm4s.workspace.*` itself *without* that module binds the three variables in its own
+`application.conf`.
+
+## `Llm4sConfig` takes `ProviderName`, and `embeddings()` returns the config alone (#2804)
+
+Follows [`Llm4sConfig.providerConfigs()` returns each section's `Result`](#llm4sconfigproviderconfigs-returns-each-sections-result-providers-and-providersconfig-are-internal-2804).
+The `ProviderConfigNewtypes` Scalafix rule ([Scalafix](scalafix#migration-rules)) rewrites a literal or `String` argument of `provider` and `listModels`.
+
+```scala
+import org.llm4s.types.ProviderModelTypes.ProviderName
+
+// before
+Llm4sConfig.provider("openai-main")
+Llm4sConfig.listModels("openai-main")
+// after
+Llm4sConfig.provider(ProviderName("openai-main"))
+Llm4sConfig.listModels(ProviderName("openai-main"))
+```
+
+`defaultProviderName()` already returned a `ProviderName`, so `defaultProviderName().flatMap(Llm4sConfig.provider)`
+needs no conversion. The same holds for `Llm4sSettings`.
+
+**`embeddings()`** returned `Result[(String, EmbeddingProviderConfig)]`, the provider id beside its config. The id is
+now `EmbeddingProviderConfig.providerId`, so it returns `Result[EmbeddingProviderConfig]`, and
+`EmbeddingClient.from` takes the config with no provider name:
+
+```scala
+// before
+for {
+  pair <- Llm4sConfig.embeddings()
+  (provider, config) = pair
+  client <- EmbeddingClient.from(provider, config)
+} yield client
+
+// after
+for {
+  config <- Llm4sConfig.embeddings()          // config.providerId is the canonical provider id
+  client <- EmbeddingClient.from(config)
+} yield client
+```
+
+| Before | After |
+|---|---|
+| `Llm4sConfig.embeddings().map(_._2)` | `Llm4sConfig.embeddings()` |
+| `Llm4sConfig.embeddings().map(_._1)` | `Llm4sConfig.embeddings().map(_.providerId.asString)` |
+| `EmbeddingClient.from("voyage", config)` | `EmbeddingClient.from(config.withProviderId(ProviderId("voyage")))`, or build the config with that id |
+| `EmbeddingClient.from(provider, config, options)` | `EmbeddingClient.from(config, options)` |
+| `RAGASFactory.fromConfigs(providerCfg, (provider, embeddingCfg))`, `basicFromConfigs` (`llm4s-rag`) | `RAGASFactory.fromConfigs(providerCfg, embeddingCfg)` |
+| `ProviderTestConfig.loadEmbeddings(...)`: `Result[(String, EmbeddingProviderConfig)]` (`llm4s-provider-testkit`) | `Result[EmbeddingProviderConfig]` |
+
+**`textEmbeddingModel()`** returned `Llm4sConfig.TextEmbeddingModelSettings(provider, modelName, dimensions)`, a
+copy of `EmbeddingModelConfig` with a provider string. That type is removed; the method returns
+`Result[EmbeddingModelConfig]` (`name`, `dimensions`), which is what an `EmbeddingRequest` takes:
+
+```scala
+// before
+for {
+  settings <- Llm4sConfig.textEmbeddingModel()
+  model = EmbeddingModelConfig(settings.modelName, settings.dimensions)
+} yield model
+// after
+Llm4sConfig.textEmbeddingModel()
+// the provider, if you read settings.provider: Llm4sConfig.embeddings().map(_.providerId)
+```
+
+**`ProvidersConfigModel` is removed.** It was an object used as a namespace: it held `NamedProviderConfig` and
+re-exported every newtype of `org.llm4s.types.ProviderModelTypes`, so each had two import paths.
+
+| Before | After |
+|---|---|
+| `import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig` | `import org.llm4s.config.NamedProviderConfig` |
+| `import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProviderId, ModelName, BaseUrl, ApiKey }` | `import org.llm4s.types.ProviderModelTypes.{ ... }` |
+| `import org.llm4s.config.ProvidersConfigModel.*` | `import org.llm4s.config.NamedProviderConfig` and `import org.llm4s.types.ProviderModelTypes.*` |
+| `ProvidersConfigModel.NamedProviderConfig` in a signature | `NamedProviderConfig` |
+
+A provider module's descriptor is the usual place this appears (`buildConfig(section: NamedProviderConfig, ...)`).
+
+## `ProviderConfig` has no default members, and `EmbeddingProviderConfig` is typed (#2805)
+
+The `ProviderConfigNewtypes` Scalafix rule ([Scalafix](scalafix#migration-rules)) wraps a provider config's named `model = "..."` argument and
+`withModel("...")` in `ModelName(...)`; a model passed by position is left for the compiler to report.
+
+**`ProviderConfig`, for callers:**
+
+| Before | After |
+|---|---|
+| `config.model: String` | `config.model: ModelName`; `config.model.asString` for the string |
+| `config.withModel("gpt-4o")` | `config.withModel(ModelName("gpt-4o"))` |
+| `config.endpointUrl: Option[String]` | `Option[BaseUrl]`; `config.endpointUrl.map(_.asUrl)` |
+| `config.withApiKeyProvider(keys): ProviderConfig` | `Result[ProviderConfig]`: `Llm4sConfig.provider(name).flatMap(_.withApiKeyProvider(keys))` |
+| check `config.apiKeyProvider.isDefined` afterwards | not needed: a config that cannot take one returns a `ConfigurationError` |
+| `OpenAIConfig(apiKey, "gpt-4o")`, and every other provider config's `apply` | `OpenAIConfig(apiKey, ModelName("gpt-4o"))`; `fromValues(...)` still takes the model as a `String` |
+| `BedrockConfig(endpointUrl = Some("https://..."))` | `Some(BaseUrl("https://..."))`; `BedrockConfig.fromValues` still takes `Option[String]` |
+
+On a concrete config the total setter remains: `openAIConfig.withApiKeyProvider(Some(keys)): OpenAIConfig` (and
+`None` to go back to the key the config holds). Configs that authenticate without an API key (`OllamaConfig`,
+`VertexAIConfig`, `BedrockConfig`, `JlamaConfig`) return
+`Left(ConfigurationError("provider '<id>' takes no API key, so its config cannot take an ApiKeyProvider"))`;
+they used to return themselves unchanged.
+
+**`ProviderConfig`, for implementers** (a provider module, a test double): every member is now abstract. Add the six
+that had defaults:
+
+```scala
+final case class AcmeConfig(
+  apiKey: String,
+  model: ModelName,                                   // was String
+  baseUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int,
+  timeouts: ProviderTimeouts = ProviderTimeouts.default,
+  network: HttpNetworkSettings = HttpNetworkSettings.default,
+  apiKeyProvider: Option[ApiKeyProvider] = None
+) extends ProviderConfig:
+  val providerId: ProviderId                                = ProviderId("acme")
+  def endpointUrl: Option[BaseUrl]                          = Some(BaseUrl(baseUrl))   // was Option[String]
+  def withModel(model: ModelName): AcmeConfig               = copy(model = model)      // was (String)
+  def withTimeouts(timeouts: ProviderTimeouts): AcmeConfig  = copy(timeouts = timeouts)
+  def withNetwork(network: HttpNetworkSettings): AcmeConfig = copy(network = network)
+  def withApiKeyProvider(provider: ApiKeyProvider): Result[AcmeConfig] =
+    Right(copy(apiKeyProvider = Some(provider)))
+```
+
+A config that cannot honour one says so rather than inheriting a no-op:
+
+- no API key, or a client that reads the key once: `def apiKeyProvider = None` and
+  `def withApiKeyProvider(p: ApiKeyProvider) = ProviderConfig.noApiKeyProvider(providerId)` (pass a second argument,
+  e.g. `"reads its key once"`, for the reason);
+- no request to time out and no connection to route (a model run in-process): `def timeouts = ProviderTimeouts.default`,
+  `def withTimeouts(t: ProviderTimeouts) = this`, and the same for `network`.
+
+**A section's setting its config does not take now fails the load** instead of being dropped:
+
+- `llm4s.providers.<name>.timeouts: provider '<id>' takes no timeouts, so the block would be ignored - remove it`
+- `llm4s.providers.<name>.http: provider '<id>' takes no proxy or TLS settings, so the block would be ignored - remove it`
+
+Of the providers in this repository only `jlama` is affected: remove `timeouts { ... }` and `http { ... }` from a
+`provider = "jlama"` section. The process-wide `llm4s.http` block (and so `HTTPS_PROXY`) is not an error for it.
+
+**`ContextWindowResolver`** is final, `resolve` returns `ContextLimits(contextWindow, reserveCompletion)` instead of
+`(Int, Int)`, `fallbackResolver` is `String => ContextLimits`, and the `logPrefix` parameter is gone:
+
+```scala
+// before
+val (window, reserve) = resolver.resolve(Seq("acme"), model, 128000, 4096, _ => (128000, 4096), logPrefix = "Acme ")
+// after
+val limits = resolver.resolve(Seq("acme"), model, 128000, 4096, _ => ContextLimits(128000, 4096))
+// limits.contextWindow, limits.reserveCompletion; or: val ContextLimits(window, reserve) = resolver.resolve(...)
+```
+
+**`EmbeddingProviderConfig`:**
+
+```scala
+// before
+EmbeddingProviderConfig(baseUrl = "https://api.voyageai.com/v1", model = "voyage-3", apiKey = Secret(key))
+EmbeddingProviderConfig("http://localhost:11434", "nomic-embed-text", Secret(""))      // a keyless provider
+
+// after
+EmbeddingProviderConfig(ProviderId("voyage"), BaseUrl("https://api.voyageai.com/v1"), ModelName("voyage-3"), Some(Secret(key)))
+EmbeddingProviderConfig(ProviderId("ollama"), BaseUrl("http://localhost:11434"), ModelName("nomic-embed-text"))
+```
+
+| Before | After |
+|---|---|
+| `config.baseUrl: String`, `config.model: String` | `BaseUrl`, `ModelName`; `.asUrl`, `.asString` |
+| `config.apiKey: Secret` (`Secret("")` when there is none) | `Option[Secret]` (`None` when there is none) |
+| `config.withApiKey(secret)` | unchanged; `withApiKey(None)` clears it |
+| `config.currentApiKey(): Result[Secret]` | `Result[Option[Secret]]`; a provider that requires a key turns `None` into its own error |
+| `withBaseUrl(String)`, `withModel(String)` | `withBaseUrl(BaseUrl)`, `withModel(ModelName)` |
+| `EmbeddingConfigSpec.resolveModel` / `resolveBaseUrl` / `resolveApiKey`: `Result[String]` / `Result[String]` / `Result[Secret]` | `Result[ModelName]` / `Result[BaseUrl]` / `Result[Option[Secret]]` |
+
+An `EmbeddingProviderDescriptor` that overrides `buildConfig` passes its `id` as the config's `providerId`; the loader
+sets it to the descriptor's canonical id in any case.
+
+**Local encoders.** `LocalEmbeddingModels` keeps its package, `org.llm4s.llmconnect.config`, but ships in `llm4s-rag`
+(with `ModelSelector`, its only user): add `llm4s-rag` if you used it from core alone.
+`ModelDimensionRegistry.localDimension(model)` is `LocalEmbeddingModels.dimension(model)`;
+`ModelDimensionRegistry.LocalProvider` is removed, and `ModelDimensionRegistry.getDimension("local", model)` no
+longer answers from a built-in table: `local` is a provider id like any other, answered only by a registered
+embedding provider of that id.
 
 ## `ReliableClient` has a private constructor (#2797)
 

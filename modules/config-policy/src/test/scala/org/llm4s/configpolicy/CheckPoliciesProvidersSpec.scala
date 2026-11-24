@@ -18,7 +18,7 @@ class CheckPoliciesProvidersSpec extends AnyWordSpec with Matchers {
 
   private def providerIdFor(section: String): Either[String, ProviderId] =
     Llm4sConfig
-      .providerFrom(ConfigSource.string(s"llm4s { providers { provider = \"main\"\n main { $section } } }"))
+      .providerFrom(ConfigSource.string(s"llm4s { defaultProvider = \"main\"\n providers { main { $section } } }"))
       .map(_.providerId)
       .left
       .map(_.formatted)

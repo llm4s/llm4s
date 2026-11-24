@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -12,7 +13,6 @@ import org.llm4s.llmconnect.spi.{
   ProviderConfigKey,
   ProviderRegistry
 }
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -68,13 +68,13 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       .withEmbeddingProvider(FixtureEmbeddings)
       .withEmbeddingProvider(KeylessFixtureEmbeddings)
 
-  private def load(hocon: String): Result[(String, EmbeddingProviderConfig)] =
+  private def load(hocon: String): Result[EmbeddingProviderConfig] =
     EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
   "an embedding provider core knows nothing about" should {
 
     "be configurable through its own section" in {
-      val (provider, config) = load(
+      val config = load(
         """llm4s {
           |  embeddings {
           |    model = "fixturecloud/fixture-large"
@@ -83,18 +83,19 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
           |}""".stripMargin
       ).value
 
-      provider shouldBe "fixturecloud"
+      config.providerId.asString shouldBe "fixturecloud"
       config shouldBe EmbeddingProviderConfig(
-        baseUrl = "https://tenant.fixture.example/v1",
-        model = "fixture-large",
-        apiKey = Secret("fk-test")
+        providerId = ProviderId("fixturecloud"),
+        baseUrl = BaseUrl("https://tenant.fixture.example/v1"),
+        model = ModelName("fixture-large"),
+        apiKey = Some(Secret("fk-test"))
       )
     }
 
     "fall back to the defaults its descriptor declares" in {
       // The section carries only what the descriptor requires; the base URL is its own
       // default, which core has no way to know.
-      val (_, config) = load(
+      val config = load(
         """llm4s {
           |  embeddings {
           |    model = "fixturecloud/some-model"
@@ -103,11 +104,11 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
           |}""".stripMargin
       ).value
 
-      config.baseUrl shouldBe "https://fixture.example/v1"
+      config.baseUrl.asUrl shouldBe "https://fixture.example/v1"
     }
 
     "prefer the unified EMBEDDING_MODEL over the section's model" in {
-      val (_, config) = load(
+      val config = load(
         """llm4s {
           |  embeddings {
           |    model = "fixturecloud/from-unified"
@@ -116,11 +117,11 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
           |}""".stripMargin
       ).value
 
-      config.model shouldBe "from-unified"
+      config.model.asString shouldBe "from-unified"
     }
 
     "be reachable by an alias it declares" in {
-      val (provider, _) = load(
+      val config = load(
         """llm4s {
           |  embeddings {
           |    model = "fixture-cloud/m"
@@ -130,7 +131,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       ).value
 
       // Reported under the canonical id, not the alias the user typed.
-      provider shouldBe "fixturecloud"
+      config.providerId.asString shouldBe "fixturecloud"
     }
 
     "surface its own requirements as errors" in {
@@ -167,9 +168,10 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
         .value
 
       config shouldBe EmbeddingProviderConfig(
-        baseUrl = "https://fixture.example/v1",
-        model = "m",
-        apiKey = Secret("fk-direct")
+        providerId = ProviderId("fixturecloud"),
+        baseUrl = BaseUrl("https://fixture.example/v1"),
+        model = ModelName("m"),
+        apiKey = Some(Secret("fk-direct"))
       )
     }
   }
@@ -194,7 +196,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       // path - and silently find nothing, replacing the section with defaults.
       given ProviderRegistry = ProviderRegistry.default.withEmbeddingProvider(DottedEmbeddings)
 
-      val (provider, config) = EmbeddingsConfigLoader
+      val config = EmbeddingsConfigLoader
         .loadProvider(
           ConfigSource.string(
             """llm4s {
@@ -207,9 +209,9 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
         )
         .value
 
-      provider shouldBe "acme.embeddings"
-      config.apiKey.reveal shouldBe "ak"
-      config.baseUrl shouldBe "https://tenant.acme.example/v1"
+      config.providerId.asString shouldBe "acme.embeddings"
+      config.apiKey.map(_.reveal) shouldBe Some("ak")
+      config.baseUrl.asUrl shouldBe "https://tenant.acme.example/v1"
     }
 
     "name a quoted path in its errors, so the reader can copy it" in {
@@ -238,10 +240,10 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
     "apply with no section present at all" in {
       // An absent `llm4s.embeddings.<id>` must read as an empty section, not as a
       // config failure - a provider whose defaults cover everything needs no section.
-      val (provider, config) = load("""llm4s { embeddings { model = "keylessfixture/fixture-small" } }""").value
+      val config = load("""llm4s { embeddings { model = "keylessfixture/fixture-small" } }""").value
 
-      provider shouldBe "keylessfixture"
-      config.model shouldBe "fixture-small"
+      config.providerId.asString shouldBe "keylessfixture"
+      config.model.asString shouldBe "fixture-small"
     }
 
     "come from the descriptor rather than reference.conf" in {
@@ -249,14 +251,14 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       // `DefaultOllamaEmbeddingBaseUrl` in the loader - with nothing keeping them in step.
       // Ollama now lives in llm4s-ollama, which checks its own; this is the same property
       // for a provider with no reference.conf block at all.
-      val (_, config) = load("""llm4s { embeddings { model = "keylessfixture/fixture-small" } }""").value
+      val config = load("""llm4s { embeddings { model = "keylessfixture/fixture-small" } }""").value
 
-      config.baseUrl shouldBe "http://localhost:9999"
-      config.apiKey.reveal shouldBe "fixture-not-required"
+      config.baseUrl.asUrl shouldBe "http://localhost:9999"
+      config.apiKey.map(_.reveal) shouldBe Some("fixture-not-required")
     }
 
     "still let a section override them" in {
-      val (_, config) = load(
+      val config = load(
         """llm4s {
           |  embeddings {
           |    model = "keylessfixture/fixture-large"
@@ -265,8 +267,8 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
           |}""".stripMargin
       ).value
 
-      config.baseUrl shouldBe "http://gpu-box:9999"
-      config.model shouldBe "fixture-large"
+      config.baseUrl.asUrl shouldBe "http://gpu-box:9999"
+      config.model.asString shouldBe "fixture-large"
     }
   }
 
@@ -300,11 +302,11 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
 
     given ProviderRegistry = ProviderRegistry.ofEmbeddings(RegionalEmbeddings, ClashingEmbeddings)
 
-    def loaded(hocon: String): Result[(String, EmbeddingProviderConfig)] =
+    def loaded(hocon: String): Result[EmbeddingProviderConfig] =
       EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
     "reach the config the descriptor builds, defaults applied and undeclared keys left out" in {
-      val (_, config) = loaded(
+      val config = loaded(
         """llm4s.embeddings {
           |  model = "regionalfixture/regional-large"
           |  regionalfixture { region = " eu-west ", colour = "blue" }
@@ -317,7 +319,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
     }
 
     "let the section override a default" in {
-      val (_, config) = loaded(
+      val config = loaded(
         """llm4s.embeddings {
           |  model = "regionalfixture/regional-large"
           |  regionalfixture { region = "us-east", task = "clustering" }
@@ -352,7 +354,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
     }
 
     "keep extra values out of the config's toString" in {
-      val (_, config) = loaded(
+      val config = loaded(
         """llm4s.embeddings {
           |  model = "regionalfixture/regional-large"
           |  regionalfixture { region = "eu-west-secret" }

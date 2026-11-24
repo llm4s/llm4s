@@ -89,7 +89,7 @@ class WatsonXApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues:
       val throwing = new ApiKeyProvider:
         def current(): Result[ApiKey] = throw new IllegalStateException("vault unreachable")
       val http   = StubHttp.routed(_ => Right(StubHttp.iamToken()), _ => Right(StubHttp.chatReply))
-      val config = WatsonXTestConfig.config.withApiKeyProvider(throwing)
+      val config = WatsonXTestConfig.config.withApiKeyProvider(Some(throwing))
       config.toString should include("apiKeyProvider=")
       config.withApiKeyProvider(None).apiKeyProvider shouldBe None
       val client = new WatsonXClient(config, httpClient = http)

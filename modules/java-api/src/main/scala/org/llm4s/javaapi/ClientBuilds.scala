@@ -1,7 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ValidationError
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings, HttpProxy, HttpTls }
 import org.llm4s.llmconnect.config.{

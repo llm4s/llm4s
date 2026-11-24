@@ -88,7 +88,7 @@ final class LlmCheck(
 
 object LlmCheck {
 
-  /** The check against the process's own configuration: `llm4s.providers.provider` and its section. */
+  /** The check against the process's own configuration: `llm4s.defaultProvider` and its section. */
   def default(): LlmCheck =
     new LlmCheck(
       () => Llm4sConfig.defaultProvider(),

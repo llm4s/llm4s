@@ -33,9 +33,8 @@ section's own `apiKey`, else the shared `llm4s.credentials.<id>.apiKey` this mod
 `reference.conf` binds to the variable above:
 
 ```hocon
+llm4s.defaultProvider = "openai-main"         # the default section
 llm4s.providers {
-  provider = "openai-main"         # the default section
-
   openai-main {
     provider = "openai"
     model    = "gpt-4o-mini"
@@ -76,9 +75,10 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderName
 
 val reply = for {
-  providerConfig  <- Llm4sConfig.provider("openai-main")
+  providerConfig  <- Llm4sConfig.provider(ProviderName("openai-main"))
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client     <- LLMConnect.getClient(providerConfig)

@@ -29,6 +29,12 @@ abstract class CopyToSetters(name: String) extends SemanticRule(name) {
   /** Fields that were a `String` (or `Option[String]`, when `true`) and are a `Secret` now: the value is wrapped. */
   protected def secrets: Map[(String, String), Boolean] = Map.empty
 
+  /**
+   * Fields that were a `String` and are a newtype of `org.llm4s.types.ProviderModelTypes` now, with the newtype's
+   * name: the value is wrapped, `withModel("gpt-4o")` being `withModel(ModelName("gpt-4o"))` (#2805).
+   */
+  protected def newtypes: Map[(String, String), String] = Map.empty
+
   /** Whether `new X(...)` is reported: its constructor is private as well. */
   protected def reportNew: Boolean = false
 
@@ -62,8 +68,27 @@ abstract class CopyToSetters(name: String) extends SemanticRule(name) {
             )
           }
     }.asPatch
-    rewrites + (if (wrapsSecret) Migration.importOnce("org.llm4s.security", "Secret") else Patch.empty)
+    val imports = wrappedNewtypes.foldLeft(Patch.empty)((p, newtype) =>
+      p + Migration.importOnce("org.llm4s.types.ProviderModelTypes", newtype)
+    )
+    rewrites + (if (wrapsSecret) Migration.importOnce("org.llm4s.security", "Secret") else Patch.empty) + imports
   }
+
+  /** The newtypes a rewritten `copy` wraps a value in, so the file needs each imported. */
+  private def wrappedNewtypes(implicit doc: SemanticDocument): List[String] =
+    if (newtypes.isEmpty) Nil
+    else
+      doc.tree
+        .collect {
+          case t: Term.Apply if isCopy(t.fun) && t.argClause.values.forall(_.is[Term.Assign]) =>
+            Migration.callee(t).filter(_.endsWith("#copy().")).map(Migration.owner).toList.flatMap { owner =>
+              val fields = t.argClause.values.collect { case Term.Assign(Term.Name(field), _) => field }
+              if (fields.exists(f => removed.contains(owner -> f))) Nil
+              else fields.flatMap(f => newtypes.get(owner -> f))
+            }
+        }
+        .flatten
+        .distinct
 
   /** Whether a rewritten `copy` sets a field that is a `Secret` now, so the file needs `Secret` imported. */
   private def wrapsSecret(implicit doc: SemanticDocument): Boolean =
@@ -116,7 +141,8 @@ abstract class CopyToSetters(name: String) extends SemanticRule(name) {
 
   private def argument(owner: String, field: String, rhs: Term): String =
     secrets.get(owner -> field) match {
-      case None => CopyToSetters.value(rhs)
+      case None =>
+        newtypes.get(owner -> field).fold(CopyToSetters.value(rhs))(n => s"$n(${CopyToSetters.value(rhs)})")
       case Some(optional) =>
         if (!optional) s"Secret(${rhs.pos.text})"
         else
@@ -156,10 +182,11 @@ class CopyToWithSetters extends CopyToSetters("CopyToWithSetters") {
   override def description: String =
     "Rewrites .copy(field = value) on the llm4s growth-prone types to .withField(value) setters"
 
-  override protected def types: Set[String]                     = CopyToWithSetters.types
-  override protected def release: String                        = "0.5.0"
-  override protected def removed: Map[(String, String), String] = CopyToWithSetters.removed
-  override protected def setter(owner: String, field: String)   = CopyToWithSetters.setter(owner, field)
+  override protected def types: Set[String]                      = CopyToWithSetters.types
+  override protected def release: String                         = "0.5.0"
+  override protected def removed: Map[(String, String), String]  = CopyToWithSetters.removed
+  override protected def setter(owner: String, field: String)    = CopyToWithSetters.setter(owner, field)
+  override protected def newtypes: Map[(String, String), String] = CopyToWithSetters.newtypes
   override protected def privateCopyGuide(owner: String): String =
     Migration.guide05("7-errors-cancellation-and-types")
 }
@@ -184,6 +211,12 @@ object CopyToWithSetters {
     "org/llm4s/llmconnect/config/AnthropicConfig",
     "org/llm4s/llmconnect/config/OllamaConfig"
   )
+
+  /** The provider configs' `model`, a `String` in 0.4.1 and a `ModelName` now (#2805). */
+  val newtypes: Map[(String, String), String] =
+    Seq("OpenAIConfig", "AnthropicConfig", "OllamaConfig")
+      .map(config => ("org/llm4s/llmconnect/config/" + config, "model") -> "ModelName")
+      .toMap
 
   /** A setter whose name is not `with` and the field's name. */
   private val renamed: Map[(String, String), String] = Map(

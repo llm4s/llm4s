@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.spi
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
 import org.llm4s.llmconnect.provider.EmbeddingProvider

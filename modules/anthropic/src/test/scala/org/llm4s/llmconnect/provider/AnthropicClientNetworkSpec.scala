@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpNetworkSettings, HttpProxy, HttpTls }
 import org.llm4s.llmconnect.config.AnthropicConfig
@@ -29,7 +30,7 @@ final class AnthropicClientNetworkSpec extends AnyFlatSpec with Matchers with Ei
   private val BaseUrl = "http://api.anthropic.test"
 
   private def config(baseUrl: String, network: HttpNetworkSettings): AnthropicConfig =
-    AnthropicConfig(Secret("sk-ant-test"), "claude-sonnet-4-5").withBaseUrl(baseUrl).withNetwork(network)
+    AnthropicConfig(Secret("sk-ant-test"), ModelName("claude-sonnet-4-5")).withBaseUrl(baseUrl).withNetwork(network)
 
   private def via(proxy: HttpProxy) = HttpNetworkSettings(proxy = Some(proxy.withNonProxyHosts(Nil)))
 

@@ -1,11 +1,10 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, OllamaConfig, ProviderConfig }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -29,7 +28,7 @@ class OllamaInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
     window shouldBe config.contextWindow
 
   private def assertBuildsEmbeddings(provider: String, config: EmbeddingProviderConfig): Unit =
-    EmbeddingClient.from(provider, config).value.providerId shouldBe Some(ProviderId(provider))
+    EmbeddingClient.from(config).value.providerId shouldBe Some(ProviderId(provider))
 
   "llm4s-ollama, configured in code" should {
     "build an Ollama chat client from a model and base URL" in {
@@ -39,7 +38,12 @@ class OllamaInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
     "build an Ollama embedding client from a base URL and model" in {
       assertBuildsEmbeddings(
         "ollama",
-        EmbeddingProviderConfig(baseUrl = "http://localhost:11434", model = "nomic-embed-text", apiKey = Secret(""))
+        EmbeddingProviderConfig(
+          providerId = ProviderId("ollama"),
+          baseUrl = BaseUrl("http://localhost:11434"),
+          model = ModelName("nomic-embed-text"),
+          apiKey = None
+        )
       )
     }
   }

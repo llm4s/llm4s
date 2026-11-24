@@ -23,7 +23,7 @@ class ChatModuleSpec extends AnyFlatSpec with Matchers {
 
   "ChatModule.client" should "load the provider section named in the llm4s block of Play's configuration" in {
     val config = configuration(
-      "llm4s.providers.provider"       -> "local",
+      "llm4s.defaultProvider"          -> "local",
       "llm4s.providers.local.provider" -> "ollama",
       "llm4s.providers.local.model"    -> "llama3:latest",
       "llm4s.providers.local.baseUrl"  -> "http://127.0.0.1:11434"
@@ -34,7 +34,7 @@ class ChatModuleSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail with a ConfigurationError when the section it names is not there" in {
-    ChatModule.client(configuration("llm4s.providers.provider" -> "absent")) match {
+    ChatModule.client(configuration("llm4s.defaultProvider" -> "absent")) match {
       case Left(error) => error shouldBe a[ConfigurationError]
       case Right(_)    => fail("a client for a section that does not exist")
     }
@@ -46,7 +46,7 @@ class ChatModuleSpec extends AnyFlatSpec with Matchers {
 
   "The application" should "not start when the provider section cannot be loaded" in {
     val thrown = the[Exception] thrownBy
-      GuiceApplicationBuilder().configure("llm4s.providers.provider" -> "absent").build()
+      GuiceApplicationBuilder().configure("llm4s.defaultProvider" -> "absent").build()
     thrown.getMessage should include("absent")
   }
 

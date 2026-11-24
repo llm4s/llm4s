@@ -83,8 +83,8 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     requireApiKey(config.apiKey).map(_ => provider(config, apiKeyOf(config), _ => (), context.httpClient))
 
   /** A blank `apiKey` would be sent as an empty bearer token: a `ConfigurationError` instead. */
-  private def requireApiKey(key: Secret): Result[Unit] =
-    ProviderConfig.nonEmpty("OpenAI embeddings", "apiKey", key.reveal)
+  private def requireApiKey(key: Option[Secret]): Result[Secret] =
+    ProviderConfig.nonEmpty("OpenAI embeddings", "apiKey", key.fold("")(_.reveal)).map(_ => key.getOrElse(Secret("")))
 
   /**
    * Creates an OpenAI embedding provider from configuration.
@@ -97,7 +97,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
   private def apiKeyOf(cfg: EmbeddingProviderConfig): () => Result[String] =
-    () => cfg.currentApiKey().flatMap(key => requireApiKey(key).map(_ => key.reveal))
+    () => cfg.currentApiKey().flatMap(requireApiKey).map(_.reveal)
 
   /**
    * An embedding provider that authenticates with bearer tokens from `tokenProvider` rather than an API key
@@ -143,7 +143,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
         "model" -> model
       )
 
-      val url = embeddingsUrl(cfg.baseUrl)
+      val url = embeddingsUrl(cfg.baseUrl.asUrl)
       logger.debug(s"[OpenAIEmbeddingProvider] POST $url model=$model inputs=${input.size}")
 
       // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.

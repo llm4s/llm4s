@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import pureconfig.ConfigSource
@@ -13,8 +13,8 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "fixturechat-primary"
           |  providers {
-          |    provider = "fixturechat-primary"
           |    fixturechat-primary {
           |      provider = "fixturechat"
           |      model = "fixture-model"
@@ -60,8 +60,8 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "fixturechat-main"
           |  providers {
-          |    provider = "fixturechat-main"
           |    fixturechat-primary {
           |      provider = "fixturechat"
           |      model = "fixture-model"
@@ -103,8 +103,8 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "missing-provider"
           |  providers {
-          |    provider = "missing-provider"
           |    fixturechat-primary {
           |      provider = "fixturechat"
           |      model = "fixture-model"
@@ -156,8 +156,8 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
       val hocon =
         """
           |llm4s {
+          |  defaultProvider = "fixturechat-primary"
           |  providers {
-          |    provider = "fixturechat-primary"
           |    fixturechat-primary {
           |      provider = "fixturechat"
           |      model = "fixture-model"

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
+
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.llmconnect.config.{ BedrockConfig, BedrockCredentials }
@@ -21,11 +23,11 @@ private[provider] object BedrockTestSupport {
   def config(endpointUrl: String, model: String = Model): BedrockConfig =
     BedrockConfig(
       region = "us-east-1",
-      model = model,
+      model = ModelName(model),
       contextWindow = 32000,
       reserveCompletion = 4096,
       credentials = Some(BedrockCredentials(Secret("test-key-id"), Secret("test-secret-key"))),
-      endpointUrl = Some(endpointUrl)
+      endpointUrl = Some(BaseUrl(endpointUrl))
     )
 
   def converseResponse(text: String): String =

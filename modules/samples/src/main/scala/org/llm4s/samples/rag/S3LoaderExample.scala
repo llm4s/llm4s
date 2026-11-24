@@ -56,11 +56,11 @@ object S3LoaderExample {
     val ragResult = for {
       service       <- Llm4sConfig.modelRegistryService()
       embeddingPair <- Llm4sConfig.embeddings()
-      (providerName, embeddingCfg) = embeddingPair
+      embeddingCfg = embeddingPair
       rag <- RAG.build(
         RAG
           .builder()
-          .withEmbeddings(providerName, embeddingCfg.model),
+          .withEmbeddings(embeddingCfg.providerId.asString, embeddingCfg.model.asString),
         _ => Right(embeddingCfg)
       )(using service)
     } yield rag

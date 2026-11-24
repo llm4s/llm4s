@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import com.anthropic.models.messages.{ CitationsSearchResultLocation, CitationsWebSearchResultLocation, ContentBlock }
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.model.Citation
 import org.llm4s.llmconnect.spi.ProviderConfigKey

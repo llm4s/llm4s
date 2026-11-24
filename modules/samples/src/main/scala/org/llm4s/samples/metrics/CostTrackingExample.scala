@@ -117,8 +117,8 @@ object CostTrackingExample {
       // Demos 4 and 5: a second client, priced from a registry that carries the custom price.
       custom <- demonstrateCustomPricing(providerCfg, registry, session)
     } yield CostReport(
-      model = providerCfg.model,
-      priced = isPriced(registry, providerCfg.model),
+      model = providerCfg.model.asString,
+      priced = isPriced(registry, providerCfg.model.asString),
       perRequest = levels.perRequest,
       agent = levels.agent,
       session = levels.session,
@@ -162,7 +162,7 @@ object CostTrackingExample {
     for {
       priced <- withCustomPricing(
         registry,
-        providerCfg.model,
+        providerCfg.model.asString,
         providerCfg.providerId.asString,
         ExampleInputPerMillion,
         ExampleOutputPerMillion
@@ -171,7 +171,7 @@ object CostTrackingExample {
       // compose: the session tracker and the demo's own tracker both receive every event.
       request <- withClient(providerCfg, MetricsCollector.compose(session, demoTracker), priced)(requestCost)
     } yield CustomPricing(
-      providerCfg.model,
+      providerCfg.model.asString,
       ExampleInputPerMillion,
       ExampleOutputPerMillion,
       request,

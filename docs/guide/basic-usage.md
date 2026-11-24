@@ -92,9 +92,8 @@ libraryDependencies ++= Seq(
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
@@ -133,13 +132,13 @@ val startup = for {
 ```
 
 The same code works with any configured named provider without modifications: change
-`llm4s.providers.provider`, or load another section with `Llm4sConfig.provider("<name>")`. See
+`llm4s.defaultProvider`, or load another section with `Llm4sConfig.provider(ProviderName("<name>"))`. See
 [Switching providers](../getting-started/configuration#switching-providers).
 
 ### With Explicit Model Selection
 
 The model comes from the section's `model`; to use another one, load a section that names it with
-`Llm4sConfig.provider("<name>")`. To adjust the generation settings of one call, pass {% include api.html t="org.llm4s.llmconnect.model.CompletionOptions" %}:
+`Llm4sConfig.provider(ProviderName("<name>"))`. To adjust the generation settings of one call, pass {% include api.html t="org.llm4s.llmconnect.model.CompletionOptions" %}:
 
 ```scala
 val startup = for {
@@ -320,9 +319,8 @@ with secrets bound from the environment by `${?VAR}`:
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
   providers {
-    provider = "openai-main"
-
     openai-main {
       provider = "openai"
       model    = "gpt-4o"
@@ -355,7 +353,7 @@ export EMBEDDING_MODEL=openai/text-embedding-3-small    # llm4s.embeddings.model
 JVM system properties override `application.conf`, key for key:
 
 ```bash
-java -Dllm4s.providers.provider=claude \
+java -Dllm4s.defaultProvider=claude \
      -Dllm4s.providers.openai-main.model=gpt-4o-mini \
      -jar app.jar
 ```
@@ -443,11 +441,11 @@ response match {
 - Ensure the section's provider module (`llm4s-openai`, `llm4s-anthropic`, ...) is a dependency: without it the
   error says the provider is not registered and lists the providers that are
 - Ensure `application.conf` (in `src/main/resources`) has a section under `llm4s.providers` and
-  that `llm4s.providers.provider` names it - `LLM_MODEL` is not read
+  that `llm4s.defaultProvider` names it - `LLM_MODEL` is not read
 - Ensure the vendor's variable (or the one the section's own `apiKey` binds) is exported in the
   shell that starts the JVM
 - Check the error names the section you meant to load: `defaultProvider()` loads the one
-  `llm4s.providers.provider` names, and only that section is validated
+  `llm4s.defaultProvider` names, and only that section is validated
 
 ### "Connection timeout"
 

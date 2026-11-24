@@ -1,7 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.annotation.Stable
-import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderId }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.error.ConfigurationError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.provider.{ OpenAIProvider, RequestyProvider }
