@@ -68,7 +68,10 @@ you configure is loaded as it is. A missing or unparseable overrides file is not
 An override entry replaces the snapshot's entry of the same id whole, so a correction can drop a key the snapshot
 should not have. An entry with `"llm4s_patch": true` instead sets only the keys it lists and keeps the rest of the
 snapshot's entry, prices included, so a flag LiteLLM does not carry can be added without freezing the entry against
-future refreshes. A patch for an id the snapshot does not have is skipped with a warning. This is how
+future refreshes. A full entry can also add a model newer than the snapshot: `claude-opus-5-5`, `claude-sonnet-5-5`
+and `claude-haiku-5-5` are added this way, with Anthropic's prices (Claude Haiku 5.5's for prompts of up to 100K
+tokens), and are removed from the file once a refresh brings them in. A patch for an id the snapshot does not have is
+skipped with a warning. This is how
 `supports_budget_thinking: false` (`ModelCapabilities.supportsBudgetThinking`) marks the models that reject a manual
 thinking budget ([RFC 0008](../rfcs/0008-generation-controls)):
 

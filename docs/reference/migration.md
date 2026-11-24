@@ -1588,7 +1588,7 @@ Rename them:
 ```hocon
 vertex-main {
   provider = "vertexai"
-  model    = "gemini-2.0-flash"
+  model    = "gemini-3.8-flash"
   project  = "my-gcp-project"    # was endpoint
   location = "europe-west4"      # was organization; optional, default us-central1
 }
@@ -3353,7 +3353,7 @@ and `copy` are private:
   `withCredentialFilePath` and `withWellKnownCredentialPath` (the value or an `Option`) on Vertex AI; `withEndpoint`,
   `withApiKey` and `withApiVersion` on Azure - besides `withModel` and `withTimeouts`.
 - **Java and Kotlin**: call the companion's short `apply` and chain setters instead of the constructor -
-  `GeminiConfig.apply(apiKey, "gemini-2.0-flash").withGoogleSearch(true)`, `VertexAIConfig.apply(projectId, model)`,
+  `GeminiConfig.apply(apiKey, "gemini-3.8-flash").withGoogleSearch(true)`, `VertexAIConfig.apply(projectId, model)`,
   `AzureConfig.apply(endpoint, apiKey, deployment).withApiVersion("2024-10-21")`. They take the default base URL,
   location or API version and a context window from the model name; `fromValues` still consults the bundled model
   catalogue.
@@ -5239,7 +5239,7 @@ now has keys named for what they are:
 # before
 vertex-main {
   provider     = "vertexai"
-  model        = "gemini-2.0-flash"
+  model        = "gemini-3.8-flash"
   endpoint     = "my-gcp-project"
   organization = "europe-west4"
 }
@@ -5247,7 +5247,7 @@ vertex-main {
 # after
 vertex-main {
   provider = "vertexai"
-  model    = "gemini-2.0-flash"
+  model    = "gemini-3.8-flash"
   project  = "my-gcp-project"
   location = "europe-west4"      # optional, default us-central1
 }

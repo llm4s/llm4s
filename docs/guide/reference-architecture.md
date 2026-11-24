@@ -142,7 +142,7 @@ llm4s.providers {
   bedrock-private {
     provider = "bedrock"
     region   = "eu-central-1"
-    model    = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+    model    = "eu.anthropic.claude-sonnet-5-5"   # the EU inference profile: Sonnet 5.5 has no in-Region endpoint
     # baseUrl = "https://vpce-0123456789abcdef0-abcdefgh.bedrock-runtime.eu-central-1.vpce.amazonaws.com"
     #   only when the VPC endpoint's private DNS is off
   }

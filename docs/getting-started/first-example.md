@@ -326,8 +326,8 @@ val uppercased: Result[String] = content.map(_.toUpperCase)
 import org.llm4s.config.Llm4sConfig
 
 // The model belongs to the provider section, so to use another model load the section that names it,
-// for example one with provider = "openai" and model = "gpt-4-turbo"
-val gpt4Turbo = Llm4sConfig.provider("openai-gpt4-turbo")
+// for example one with provider = "openai" and model = "gpt-5.5"
+val gpt55 = Llm4sConfig.provider("openai-gpt-5-5")
 ```
 
 ### Provider-Specific Settings

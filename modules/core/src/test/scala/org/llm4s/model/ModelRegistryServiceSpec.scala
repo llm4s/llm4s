@@ -61,6 +61,20 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         metadata.mode shouldBe ModelMode.Chat
         metadata.contextWindow shouldBe Some(200000)
 
+  it should "know the Claude 5.5 models the snapshot predates, from the embedded overrides" in:
+    val service = defaultService()
+    for (id, input) <- List("claude-opus-5-5" -> 4e-6, "claude-sonnet-5-5" -> 2e-6, "claude-haiku-5-5" -> 1e-7) do
+      val metadata = service.lookup(id).toOption.get
+      metadata.provider shouldBe "anthropic"
+      metadata.mode shouldBe ModelMode.Chat
+      metadata.contextWindow shouldBe Some(1000000)
+      metadata.reserveCompletion shouldBe Some(128000)
+      metadata.pricing.inputCostPerToken shouldBe Some(input)
+      metadata.capabilities.supportsAdaptiveThinking shouldBe Some(true)
+      metadata.capabilities.supportsBudgetThinking shouldBe Some(false)
+    service.lookup("claude-opus-5-5").toOption.get.capabilities.supportsThinkingOff shouldBe Some(false)
+    service.lookup("claude-sonnet-5-5").toOption.get.capabilities.supportsThinkingOff shouldBe Some(false)
+
   it should "load a registry service from a configured URL" in:
     val json =
       """{

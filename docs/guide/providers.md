@@ -256,7 +256,7 @@ llm4s {
 
 ### Available Models
 
-Claude models such as `claude-opus-4-6`, `claude-sonnet-5-5` and `claude-haiku-4-5`; see
+Claude models such as `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5`; see
 [Anthropic's model list](https://docs.anthropic.com/en/docs/about-claude/models). The context window of each comes from
 the [model registry](../reference/model-metadata).
 
@@ -334,7 +334,8 @@ llm4s {
 
 ### Available Models
 
-Gemini models such as `gemini-2.5-flash`, `gemini-2.5-pro` and the Gemini 3 previews; see
+Gemini models such as `gemini-3.8-flash`, `gemini-3.6-flash` and `gemini-3.5-flash-lite`; `gemini-2.5-flash` and
+`gemini-2.5-pro` are deprecated, and Google routes their requests to newer models from 2026-12-01. See
 [Google's model list](https://ai.google.dev/gemini-api/docs/models).
 
 ### Costs
@@ -369,7 +370,7 @@ search, and the sources behind a grounded answer arrive on `Completion.citations
 ```hocon
 llm4s.providers.gemini-search {
   provider     = "gemini"
-  model        = "gemini-2.5-flash"
+  model        = "gemini-3.8-flash"
   googleSearch = true
 }
 ```
@@ -807,7 +808,7 @@ llm4s {
   providers {
     openrouter-main {
       provider = "openrouter"
-      model = "anthropic/claude-3.5-sonnet"
+      model = "anthropic/claude-sonnet-5.5"
       # apiKey defaults to OPENROUTER_API_KEY
       # baseUrl defaults to https://openrouter.ai/api/v1
     }
@@ -1902,8 +1903,8 @@ values are compatible across platforms (the Claude API, Amazon Bedrock and Googl
 of the conditions for a replayed block to be accepted. The API also checks the model that produced it
 (each model reads its own thinking blocks and those of a fixed set of other models) and that everything sent
 before it is unchanged, and rejects the request with a 400 or drops the block when either fails. The two
-clients name the same model differently (`claude-sonnet-4-5-20250929` against
-`anthropic.claude-sonnet-4-5-20250929-v1:0`) and serialise the system prompt and tools through different
+clients name the same model differently (`claude-sonnet-5-5` against
+`eu.anthropic.claude-sonnet-5-5`) and serialise the system prompt and tools through different
 APIs, so this library cannot show that the prefix a block was signed over is the prefix the other platform
 sees. Losing the reasoning context on a failover is safe; a rejected request is not, so each remains its own
 signing authority. Treating them as one would need a mapping between the two model ids and a live check that

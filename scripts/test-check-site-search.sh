@@ -74,6 +74,20 @@ python3 "$ADD" "$WORK/c" >/dev/null 2>&1; expect "an unreadable Scaladoc index f
 site "$WORK/d"; sed -i.bak '/tokenizer.separator/d' "$WORK/d/assets/js/just-the-docs.js"
 node "$CHK" "$WORK/d" "$WORK/d/queries.tsv" >/dev/null 2>&1; expect "a changed just-the-docs search script fails" 1 $?
 
+# docs/assets/js/vendor/lunr.min.js replaces the theme's lunr 2.3.9, whose token-set node keys collide with digit
+# labels (label 1 to node 23 then 4 to node 5, against 1 to 2 then 3 to 45), so the index loses terms and a search
+# throws. The release must still collide (else the override can go) and the site's copy must not.
+collides() { # lunr file: exit 0 when the two nodes get the same key
+  node -e '
+    const lunr = require(process.argv[1]);
+    const node = (id) => { const n = new lunr.TokenSet(); n.id = id; return n; };
+    const a = new lunr.TokenSet(); a.edges = { 1: node(23), 4: node(5) };
+    const b = new lunr.TokenSet(); b.edges = { 1: node(2), 3: node(45) };
+    process.exit(a.toString() === b.toString() ? 0 : 1);' "$1"
+}
+collides "$LUNR"; expect "lunr 2.3.9 merges token-set nodes whose keys collide" 0 $?
+collides "$REPO_ROOT/docs/assets/js/vendor/lunr.min.js"; expect "the site's lunr keeps them apart" 1 $?
+
 # The committed list: twenty queries, each a query, a tab and a site path.
 n="$(grep -vcE '^(#|$)' "$REPO_ROOT/scripts/search-queries.tsv")"
 [ "$n" = 20 ]; expect "search-queries.tsv lists 20 queries ($n)" 0 $?

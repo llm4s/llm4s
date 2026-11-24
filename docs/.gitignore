@@ -4,6 +4,8 @@
 
 .bundle/
 vendor/
+# ...but not the site's own patched lunr, which replaces the theme's (#2832)
+!assets/js/vendor/
 
 _site/
 

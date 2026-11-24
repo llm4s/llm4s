@@ -186,7 +186,7 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
       load(hocon(1), Some("bedrock-private")) match
         case bedrock: BedrockConfig =>
           bedrock.region shouldBe "eu-central-1"
-          bedrock.model shouldBe "anthropic.claude-3-5-sonnet-20240620-v1:0"
+          bedrock.model shouldBe "eu.anthropic.claude-sonnet-5-5"
           bedrock.endpointUrl shouldBe None
           bedrock.credentials shouldBe None
         case other => fail(s"expected a Bedrock section, got $other")

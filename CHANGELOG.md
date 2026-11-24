@@ -240,6 +240,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Changed** No client sends `temperature`, `top_p` or a penalty the caller did not set (OpenAI, the OpenAI-compatible providers, Anthropic, Gemini, Vertex AI, Bedrock, Ollama, watsonx, Perplexity); Jlama, whose engine needs a temperature, uses `0.7` when none is set. [#2807](https://github.com/llm4s/llm4s/issues/2807)
 - **Changed** A provider module's client reports `FinishReason.Unknown` where it read no finish reason, and Perplexity ignores a reported cost that is not a number in favour of the estimate. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Added** The bundled model metadata knows `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-5-5`: a 1M context
+  window, Anthropic's prices, and no thinking budget (nor, on Opus and Sonnet, thinking off) ([#2832](https://github.com/llm4s/llm4s/issues/2832)).
 - **Fixed** A key xAI refuses (HTTP 400) is an `AuthenticationError`, not a `ValidationError` ([#2855](https://github.com/llm4s/llm4s/issues/2855)).
 - **Changed** `HttpErrorMapper.mapHttpError` is `toError`, returning the `LLMError`; `ToolCallRules`, `PartEncoding`
   and `HttpErrorMapper.mapStreamError` are public; `StreamingToolArgumentParser` is removed
@@ -586,6 +588,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** The contributing guide states the naming conventions: what `apply`, `of`, `create`, `from` and `forX`
   mean for a factory, `enum` or `sealed trait` for a sum type, plain accessor names, `PascalCase` constants and
   opaque-type newtypes ([#2822](https://github.com/llm4s/llm4s/issues/2822)).
+- **Fixed** the docs site deploys again: its search ships a patched lunr, since lunr 2.3.9 dropped index terms with
+  digits and the site-search check threw ([#2832](https://github.com/llm4s/llm4s/issues/2832)).
 - **Changed** the docs site groups the User Guide sidebar, and the contributor pages moved from `/reference/` to `/contribute/` (old addresses redirect) [#2834](https://github.com/llm4s/llm4s/issues/2834).
 
 ### Build & tooling
