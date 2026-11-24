@@ -37,11 +37,11 @@ one, the vendor's key.
 
 | Provider id | Artifact | What it needs | Block variables (`llm4s.embeddings.<id>`) |
 |---|---|---|---|
-| `openai` | `llm4s-openai` | `OPENAI_API_KEY` | `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` |
-| `ollama` | `llm4s-ollama` | a running Ollama, no key | `OLLAMA_EMBEDDING_BASE_URL`, `OLLAMA_EMBEDDING_MODEL` |
-| `voyage` | `llm4s-voyage` | `VOYAGE_API_KEY` | `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL` |
-| `jina` | `llm4s-jina` | `JINA_API_KEY` | `JINA_EMBEDDING_BASE_URL`, `JINA_EMBEDDING_MODEL` |
-| `cohere` | `llm4s-cohere` | `COHERE_API_KEY` | `COHERE_EMBEDDING_BASE_URL`, `COHERE_EMBEDDING_MODEL` |
+| `openai` | `llm4s-openai` | `OPENAI_API_KEY` | `OPENAI_EMBEDDING_BASE_URL` |
+| `ollama` | `llm4s-ollama` | a running Ollama, no key | `OLLAMA_EMBEDDING_BASE_URL` |
+| `voyage` | `llm4s-voyage` | `VOYAGE_API_KEY` | `VOYAGE_EMBEDDING_BASE_URL` |
+| `jina` | `llm4s-jina` | `JINA_API_KEY` | `JINA_EMBEDDING_BASE_URL` |
+| `cohere` | `llm4s-cohere` | `COHERE_API_KEY` | `COHERE_EMBEDDING_BASE_URL` |
 
 Some starting points: a hosted general-purpose model (`openai/text-embedding-3-small`), a local one with no key
 and no data leaving the machine (`ollama/nomic-embed-text`), or a provider whose models distinguish queries from

@@ -23,8 +23,7 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
     defaultBaseUrl = Some("https://default.acme.example"),
     defaultModel = Some("default-model"),
     defaultApiKey = Some("default-acme-key"),
-    apiKeyEnv = Seq("ACME_API_KEY"),
-    modelEnv = Some("ACME_MODEL")
+    apiKeyEnv = Seq("ACME_API_KEY")
   )
 
   // ==========================================================================
@@ -34,52 +33,32 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
   "resolveModel" should {
 
     val withDefault = EmbeddingConfigSpec(defaultModel = Some("default-model"))
-    val section     = EmbeddingProviderSection(model = Some(ModelName("section-model")))
 
-    "prefer the override to the section and the default" in {
-      EmbeddingConfigSpec.resolveModel(id, section, Some("override-model"), withDefault) shouldBe
+    "prefer the override to the default" in {
+      EmbeddingConfigSpec.resolveModel(id, Some("override-model"), withDefault) shouldBe
         Right(ModelName("override-model"))
     }
 
-    "prefer the section to the default" in {
-      EmbeddingConfigSpec.resolveModel(id, section, None, withDefault) shouldBe Right(ModelName("section-model"))
-    }
-
-    "use the default when there is no override and no section model" in {
-      EmbeddingConfigSpec.resolveModel(id, noSection, None, withDefault) shouldBe Right(ModelName("default-model"))
+    "use the default when there is no override" in {
+      EmbeddingConfigSpec.resolveModel(id, None, withDefault) shouldBe Right(ModelName("default-model"))
     }
 
     "skip a blank or whitespace-only override" in {
-      EmbeddingConfigSpec.resolveModel(id, section, Some(""), withDefault) shouldBe Right(ModelName("section-model"))
-      EmbeddingConfigSpec.resolveModel(id, section, Some("   "), withDefault) shouldBe Right(ModelName("section-model"))
+      EmbeddingConfigSpec.resolveModel(id, Some(""), withDefault) shouldBe Right(ModelName("default-model"))
+      EmbeddingConfigSpec.resolveModel(id, Some("   "), withDefault) shouldBe Right(ModelName("default-model"))
     }
 
-    "skip a blank or whitespace-only section model" in {
-      val blank      = EmbeddingProviderSection(model = Some(ModelName("")))
-      val whitespace = EmbeddingProviderSection(model = Some(ModelName(" \t ")))
-      EmbeddingConfigSpec.resolveModel(id, blank, None, withDefault) shouldBe Right(ModelName("default-model"))
-      EmbeddingConfigSpec.resolveModel(id, whitespace, None, withDefault) shouldBe Right(ModelName("default-model"))
-    }
-
-    "trim the override and the section model" in {
-      EmbeddingConfigSpec.resolveModel(id, noSection, Some("  override-model "), withDefault) shouldBe
+    "trim the override" in {
+      EmbeddingConfigSpec.resolveModel(id, Some("  override-model "), withDefault) shouldBe
         Right(ModelName("override-model"))
-      val padded = EmbeddingProviderSection(model = Some(ModelName(" section-model ")))
-      EmbeddingConfigSpec.resolveModel(id, padded, None, withDefault) shouldBe Right(ModelName("section-model"))
     }
 
-    "name EMBEDDING_MODEL and the section path when nothing is set" in {
-      val error = EmbeddingConfigSpec.resolveModel(id, noSection, None, EmbeddingConfigSpec()).left.value
+    "name EMBEDDING_MODEL, and no section key, when nothing is set (#2835)" in {
+      val error = EmbeddingConfigSpec.resolveModel(id, None, EmbeddingConfigSpec()).left.value
       error shouldBe a[ConfigurationError]
       error.message should include("EMBEDDING_MODEL=acme/<model>")
-      error.message should endWith("llm4s.embeddings.acme.model)")
-    }
-
-    "also name modelEnv when the spec sets one" in {
-      val spec    = EmbeddingConfigSpec(modelEnv = Some("ACME_MODEL"))
-      val message = EmbeddingConfigSpec.resolveModel(id, noSection, None, spec).left.value.message
-      message should include("EMBEDDING_MODEL=acme/<model>")
-      message should include("llm4s.embeddings.acme.model or ACME_MODEL")
+      error.message should include("llm4s.embeddings.model")
+      (error.message should not).include("llm4s.embeddings.acme.model")
     }
   }
 
@@ -178,7 +157,6 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
       spec.defaultModel shouldBe None
       spec.defaultApiKey shouldBe None
       spec.apiKeyEnv shouldBe empty
-      spec.modelEnv shouldBe None
     }
   }
 
@@ -191,8 +169,7 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
         defaultBaseUrl = full.defaultBaseUrl,
         defaultModel = full.defaultModel,
         defaultApiKey = full.defaultApiKey,
-        apiKeyEnv = full.apiKeyEnv,
-        modelEnv = full.modelEnv
+        apiKeyEnv = full.apiKeyEnv
       )
     }
 
@@ -202,8 +179,7 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
         defaultBaseUrl = Some("https://other.example"),
         defaultModel = full.defaultModel,
         defaultApiKey = full.defaultApiKey,
-        apiKeyEnv = full.apiKeyEnv,
-        modelEnv = full.modelEnv
+        apiKeyEnv = full.apiKeyEnv
       )
       full.withDefaultBaseUrl(Some("https://other.example")) shouldBe full.withDefaultBaseUrl("https://other.example")
       full.withDefaultBaseUrl(None).defaultBaseUrl shouldBe None
@@ -216,8 +192,7 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
         defaultBaseUrl = full.defaultBaseUrl,
         defaultModel = Some("other-model"),
         defaultApiKey = full.defaultApiKey,
-        apiKeyEnv = full.apiKeyEnv,
-        modelEnv = full.modelEnv
+        apiKeyEnv = full.apiKeyEnv
       )
       full.withDefaultModel(Some("other-model")) shouldBe full.withDefaultModel("other-model")
       full.withDefaultModel(None).defaultModel shouldBe None
@@ -230,8 +205,7 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
         defaultBaseUrl = full.defaultBaseUrl,
         defaultModel = full.defaultModel,
         defaultApiKey = Some("other-acme-key"),
-        apiKeyEnv = full.apiKeyEnv,
-        modelEnv = full.modelEnv
+        apiKeyEnv = full.apiKeyEnv
       )
       full.withDefaultApiKey(Some("other-acme-key")) shouldBe full.withDefaultApiKey("other-acme-key")
       full.withDefaultApiKey(None).defaultApiKey shouldBe None
@@ -244,24 +218,9 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
         defaultBaseUrl = full.defaultBaseUrl,
         defaultModel = full.defaultModel,
         defaultApiKey = full.defaultApiKey,
-        apiKeyEnv = Seq("A", "B"),
-        modelEnv = full.modelEnv
+        apiKeyEnv = Seq("A", "B")
       )
       full.withApiKeyEnv(Seq.empty).apiKeyEnv shouldBe empty
-    }
-
-    "set and clear modelEnv" in {
-      full.withModelEnv("OTHER_MODEL") shouldBe EmbeddingConfigSpec(
-        requiresApiKey = true,
-        defaultBaseUrl = full.defaultBaseUrl,
-        defaultModel = full.defaultModel,
-        defaultApiKey = full.defaultApiKey,
-        apiKeyEnv = full.apiKeyEnv,
-        modelEnv = Some("OTHER_MODEL")
-      )
-      full.withModelEnv(Some("OTHER_MODEL")) shouldBe full.withModelEnv("OTHER_MODEL")
-      full.withModelEnv(None).modelEnv shouldBe None
-      full.withModelEnv(None).withModelEnv(full.modelEnv) shouldBe full
     }
   }
 }

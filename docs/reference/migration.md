@@ -1886,9 +1886,20 @@ In HOCON, replace `llm4s.embeddings.provider = "openai"` with
 `llm4s.embeddings.provider` and no model fails to load with
 `llm4s.embeddings.provider ('openai') is no longer read: set EMBEDDING_MODEL (llm4s.embeddings.model) to provider/model, e.g. openai/<model>, and remove llm4s.embeddings.provider`;
 one that sets only the `EMBEDDING_PROVIDER` variable gets `Missing embedding config: set EMBEDDING_MODEL ...`.
-`ConfigKeys.EMBEDDING_PROVIDER` is removed. The model now always comes from `EMBEDDING_MODEL`: a block's own
-`llm4s.embeddings.<id>.model` (and the `<PROVIDER>_EMBEDDING_MODEL` variable bound to it), and a provider's default
-model, applied only to the provider-only form, so move a model set there into `EMBEDDING_MODEL`.
+`ConfigKeys.EMBEDDING_PROVIDER` is removed. The model now always comes from `EMBEDDING_MODEL`, so the per-provider
+model settings only the provider-only form read are removed too ([#2835](https://github.com/llm4s/llm4s/issues/2835)):
+
+| Before | After |
+|---|---|
+| `llm4s.embeddings.<id>.model = "m"` | `llm4s.embeddings.model = "<id>/m"` (`EMBEDDING_MODEL=<id>/m`). A block that still sets `model` fails to load: ``llm4s.embeddings.openai.model ('m') is no longer read: set EMBEDDING_MODEL (llm4s.embeddings.model) to openai/<model>, e.g. openai/m, and remove llm4s.embeddings.openai.model`` |
+| `OPENAI_EMBEDDING_MODEL`, `OLLAMA_EMBEDDING_MODEL`, `VOYAGE_EMBEDDING_MODEL`, `JINA_EMBEDDING_MODEL`, `COHERE_EMBEDDING_MODEL` | not bound or read: put the model in `EMBEDDING_MODEL` |
+| `OpenAIConfigKeys.OPENAI_EMBEDDING_MODEL` and the `*_EMBEDDING_MODEL` constants of `OllamaConfigKeys`, `VoyageConfigKeys`, `JinaConfigKeys` and `CohereEmbeddingConfigKeys` | removed |
+| `EmbeddingConfigSpec(modelEnv = Some("ACME_EMBEDDING_MODEL"))`, `withModelEnv` | removed: drop the argument, and the `model = ${?ACME_EMBEDDING_MODEL}` line from the module's `reference.conf` |
+| `EmbeddingProviderSection(model = ...)`, `section.model`, `withModel` | removed: a descriptor's model is `context.modelOverride`, else `configSpec.defaultModel` |
+| `EmbeddingConfigSpec.resolveModel(id, section, modelOverride, spec)` | `resolveModel(id, modelOverride, spec)` |
+
+`EmbeddingConfigSpec.defaultModel` stays: `llm4s-rag` uses it for a provider chosen without a model
+(`RAGConfig().withEmbeddings("ollama")`).
 
 ## Vertex AI no longer reads `endpoint` and `organization`
 
@@ -1905,10 +1916,13 @@ vertex-main {
 }
 ```
 
-They are now unknown keys: logged with a warning that names them and lists the keys Vertex AI accepts, and ignored.
-A section that sets `endpoint` and no `project` fails with
-`- project: the GCP project ID that owns your Vertex AI resources (set it in application.conf under llm4s.providers.<name>.project)`;
-one that sets `organization` and no `location` uses `us-central1`, so check the warning.
+`endpoint` is now an unknown key: logged with a warning that names it and lists the keys Vertex AI accepts, and
+ignored. A section that sets `endpoint` and no `project` fails with
+`- project: the GCP project ID that owns your Vertex AI resources (set it in application.conf under llm4s.providers.<name>.project)`.
+One that sets `organization` and no `location` fails too, rather than run in `us-central1` unnoticed
+([#2835](https://github.com/llm4s/llm4s/issues/2835)):
+``llm4s.providers.<name> sets `organization`, which Vertex AI no longer reads: the region is `location`. Replace `organization = "europe-west4"` with `location = "europe-west4"`.``
+Beside a `location`, a leftover `organization` is logged and ignored.
 
 For provider authors, the alias mechanism goes with them: `ProviderConfigKey` loses `deprecatedAliases` and
 `withDeprecatedAliases`, and `ProviderConfigSpec.BuiltinAliasKeys` is removed. Before 1.0 a key is renamed outright,

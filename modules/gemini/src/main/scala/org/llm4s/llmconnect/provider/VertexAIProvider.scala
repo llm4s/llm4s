@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.VertexAIAdcConfigLoader
+import org.llm4s.error.ConfigurationError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, VertexAIConfig }
 import org.llm4s.llmconnect.spi.{
@@ -17,6 +18,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 /**
  * Registration for Google Cloud Vertex AI.
@@ -37,7 +39,9 @@ import org.llm4s.types.Result
  * }}}
  *
  * Until [[https://github.com/llm4s/llm4s/issues/1215 #1215]] the project was read
- * from `endpoint` and the location from `organization`; those names are no longer read.
+ * from `endpoint` and the location from `organization`; those names are no longer read. A section that sets
+ * `organization` and no `location` is refused, naming the fix, rather than run in the default region (#2835);
+ * beside a `location`, a leftover `organization` is logged and ignored.
  */
 @Stable
 object VertexAIProvider extends ProviderDescriptor:
@@ -56,6 +60,11 @@ object VertexAIProvider extends ProviderDescriptor:
   /** The key naming the GCP region. */
   val LocationKey: String = "location"
 
+  /** The key that named the region until #1215, read only to refuse a section that still uses it (#2835). */
+  private val RemovedLocationKey = "organization"
+
+  private val logger = LoggerFactory.getLogger(getClass)
+
   val configSpec: ProviderConfigSpec = ProviderConfigSpec(
     extras = Seq(
       ProviderConfigKey(
@@ -63,10 +72,14 @@ object VertexAIProvider extends ProviderDescriptor:
         "the GCP project ID that owns your Vertex AI resources",
         required = true
       ),
+      // No declared default: `buildConfig` applies it, so it can tell a section that set no location (#2835).
       ProviderConfigKey(
         LocationKey,
-        "the GCP region that serves the model, e.g. us-central1",
-        default = Some(VertexAIConfig.DEFAULT_LOCATION)
+        s"the GCP region that serves the model (default ${VertexAIConfig.DEFAULT_LOCATION})"
+      ),
+      ProviderConfigKey(
+        RemovedLocationKey,
+        "no longer read: the GCP region is `location`"
       ),
       GeminiGrounding.GoogleSearchConfigKey
     )
@@ -75,15 +88,38 @@ object VertexAIProvider extends ProviderDescriptor:
   def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     given ContextWindowResolver = context.contextWindows
     for
+      location  <- location(context.providerName, section)
       projectId <- ProviderDescriptor.requireExtra(context.providerName, section, ProjectKey)
       search    <- GeminiGrounding.googleSearch(context.providerName, section)
       config <- VertexAIConfig.fromValues(
         modelName = section.model.asString,
         projectId = projectId,
-        location = section.extra(LocationKey).getOrElse(VertexAIConfig.DEFAULT_LOCATION),
+        location = location,
         credentialFilePath = section.apiKey.map(_.asKey)
       )
     yield config.withGoogleSearch(search)
+
+  /**
+   * The section's `location`, else the default; a section that names its region only with the removed
+   * `organization` is refused, so it does not run in the default region unnoticed.
+   */
+  private def location(providerName: String, section: NamedProviderConfig): Result[String] =
+    (section.extra(LocationKey), section.extra(RemovedLocationKey)) match
+      case (None, Some(region)) =>
+        Left(
+          ConfigurationError(
+            s"llm4s.providers.$providerName sets `$RemovedLocationKey`, which Vertex AI no longer reads: the region " +
+              s"is `$LocationKey`. Replace `$RemovedLocationKey = \"$region\"` with `$LocationKey = \"$region\"`."
+          )
+        )
+      case (location, removed) =>
+        removed.foreach(_ =>
+          logger.warn(
+            s"llm4s.providers.$providerName sets `$RemovedLocationKey`, which is no longer read and is ignored: " +
+              s"the region is `$LocationKey`. Remove `$RemovedLocationKey`."
+          )
+        )
+        Right(location.getOrElse(VertexAIConfig.DEFAULT_LOCATION))
 
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
     given ModelRegistryService = context.modelRegistry

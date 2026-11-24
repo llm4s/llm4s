@@ -76,8 +76,7 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
     requiresApiKey = true,
     defaultBaseUrl = Some("https://api.jina.ai/v1"),
     // Bound to the shared llm4s.credentials.jina.apiKey in this module's reference.conf.
-    apiKeyEnv = Seq(JinaConfigKeys.JINA_API_KEY),
-    modelEnv = Some(JinaConfigKeys.JINA_EMBEDDING_MODEL)
+    apiKeyEnv = Seq(JinaConfigKeys.JINA_API_KEY)
   )
 
   /** Default output dimensions; the client does not send a `dimensions` parameter. */

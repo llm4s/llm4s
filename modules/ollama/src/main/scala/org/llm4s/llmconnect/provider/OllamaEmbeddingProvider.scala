@@ -42,8 +42,7 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
     defaultBaseUrl = Some("http://localhost:11434"),
     defaultModel = Some("nomic-embed-text"),
     // Ollama ignores the field when run locally, but the client still wants a string.
-    defaultApiKey = Some("not-required"),
-    modelEnv = Some("OLLAMA_EMBEDDING_MODEL")
+    defaultApiKey = Some("not-required")
   )
 
   /**

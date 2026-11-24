@@ -42,7 +42,6 @@ object FixtureEmbeddingProvider extends EmbeddingProviderDescriptor:
   val DefaultBaseUrl: String = "https://fixtureembedding.invalid/v1"
 
   val ApiKeyEnv: String = "FIXTURE_EMBEDDING_API_KEY"
-  val ModelEnv: String  = "FIXTURE_EMBEDDING_MODEL"
 
   /** The dimensions of every vector the fixture's provider returns. */
   val Dimensions: Int = 4
@@ -52,8 +51,7 @@ object FixtureEmbeddingProvider extends EmbeddingProviderDescriptor:
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
     defaultBaseUrl = Some(DefaultBaseUrl),
-    apiKeyEnv = Seq(ApiKeyEnv),
-    modelEnv = Some(ModelEnv)
+    apiKeyEnv = Seq(ApiKeyEnv)
   )
 
   override val modelDimensions: Map[String, Int] = Map(

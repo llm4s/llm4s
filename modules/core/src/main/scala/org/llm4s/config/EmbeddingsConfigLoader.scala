@@ -11,7 +11,7 @@ import org.llm4s.llmconnect.spi.{
   ProviderRegistry
 }
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ProviderId }
 import org.llm4s.types.Result
 import pureconfig.error.ConvertFailure
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
@@ -59,9 +59,8 @@ private[config] object EmbeddingsConfigLoader {
       for
         objCursor <- cursor.asObjectCursor
         fields <- PureConfigReader
-          .forProduct3("apiKey", "baseUrl", "model")(
-            (apiKey: Option[Secret], baseUrl: Option[String], model: Option[String]) =>
-              EmbeddingProviderSection(apiKey, baseUrl.map(BaseUrl(_)), model.map(ModelName(_)))
+          .forProduct2("apiKey", "baseUrl")((apiKey: Option[Secret], baseUrl: Option[String]) =>
+            EmbeddingProviderSection(apiKey, baseUrl.map(BaseUrl(_)))
           )
           .from(objCursor)
         timeouts <- ProviderTimeoutsReader.read(objCursor)
@@ -206,7 +205,7 @@ private[config] object EmbeddingsConfigLoader {
     val at   = source.at(path)
     if (!at.value().isRight) Right(EmbeddingProviderSection())
     else
-      at.load[EmbeddingProviderSection]
+      removedModel(source, descriptor).flatMap(_ => at.load[EmbeddingProviderSection]
         .left
         .map { failures =>
           // The path says which key a failure is about, which its description alone ("Cannot convert
@@ -232,7 +231,26 @@ private[config] object EmbeddingsConfigLoader {
                 .validate(EmbeddingConfigSpec.fieldPath(descriptor.id, "baseUrl"), url)
                 .map(_ => section)
             )
-        }
+        })
+  }
+
+  /**
+   * Refuses a section that still sets `model` (#2835): the model is the `<model>` half of `EMBEDDING_MODEL`, and a
+   * section's own was read only by the removed `EMBEDDING_PROVIDER` form. A `null` or an unset `${?VAR}` is absent.
+   */
+  private def removedModel(source: ConfigSource, descriptor: EmbeddingProviderDescriptor): Result[Unit] = {
+    val path = EmbeddingConfigSpec.fieldPath(descriptor.id, "model")
+    trimmed(source.at(path).load[Option[String]].toOption.flatten) match {
+      case None => Right(())
+      case Some(model) =>
+        val id = descriptor.id.asString
+        Left(
+          ConfigurationError(
+            s"$path ('$model') is no longer read: set EMBEDDING_MODEL ($UnifiedModelPath) to $id/<model>, " +
+              s"e.g. $id/$model, and remove $path"
+          )
+        )
+    }
   }
 
   /**

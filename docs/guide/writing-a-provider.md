@@ -158,7 +158,6 @@ llm4s {
   embeddings {
     acme {
       baseUrl = ${?ACME_EMBEDDING_BASE_URL}
-      model   = ${?ACME_EMBEDDING_MODEL}
     }
   }
 }
@@ -769,8 +768,7 @@ object AcmeEmbeddings extends EmbeddingProviderDescriptor:
     requiresApiKey = true,
     defaultBaseUrl = Some("https://api.acme.example/v1"),
     defaultModel   = Some("acme-embed-1"),
-    apiKeyEnv      = Seq("ACME_API_KEY"),
-    modelEnv       = Some("ACME_EMBEDDING_MODEL")
+    apiKeyEnv      = Seq("ACME_API_KEY")
   )
 
   // What ModelDimensionRegistry answers from; override dimensionsOf for model-name variants.

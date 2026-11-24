@@ -24,7 +24,4 @@ object OllamaConfigKeys {
 
   /** Overrides the Ollama embedding base URL; bound to `llm4s.embeddings.ollama.baseUrl`. */
   val OLLAMA_EMBEDDING_BASE_URL = "OLLAMA_EMBEDDING_BASE_URL"
-
-  /** Selects the Ollama embedding model; bound to `llm4s.embeddings.ollama.model`. */
-  val OLLAMA_EMBEDDING_MODEL = "OLLAMA_EMBEDDING_MODEL"
 }
