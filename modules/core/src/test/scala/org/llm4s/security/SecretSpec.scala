@@ -57,4 +57,14 @@ class SecretSpec extends AnyFlatSpec with Matchers {
     val header = Secret.basic("basic-user-0001", null).reveal
     new String(java.util.Base64.getDecoder.decode(header), "UTF-8") shouldBe "basic-user-0001:"
   }
+
+  it should "not register a token made unregistered: the client that sends it does (#2811)" in KnownSecrets.isolated {
+    val t = Secret.unregistered("ya29.unregistered-token-0123456789")
+    t.toString shouldBe "***"
+    t.reveal shouldBe "ya29.unregistered-token-0123456789"
+    t shouldBe Secret.unregistered("ya29.unregistered-token-0123456789")
+    KnownSecrets.scrub("Bearer ya29.unregistered-token-0123456789", "[REDACTED]") shouldBe
+      "Bearer ya29.unregistered-token-0123456789"
+    Secret.unregistered(null).reveal shouldBe ""
+  }
 }

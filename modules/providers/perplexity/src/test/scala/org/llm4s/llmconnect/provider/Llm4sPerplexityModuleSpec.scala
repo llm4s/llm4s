@@ -41,7 +41,7 @@ class Llm4sPerplexityModuleSpec extends AnyWordSpec with Matchers with ProviderM
 
     "contribute the chat provider under the id perplexity and no embeddings" in {
       val module = new Llm4sPerplexityModule
-      module.chatProviders shouldBe Seq(PerplexityProvider)
+      module.providers shouldBe Seq(PerplexityProvider)
       module.embeddingProviders shouldBe empty
       PerplexityProvider.id.asString shouldBe "perplexity"
     }

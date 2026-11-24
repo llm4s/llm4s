@@ -108,7 +108,7 @@ class OpenAIWorkloadIdentitySpec
     "redact the token exchange's reply, and the registered ids, from an SDK error" in KnownSecrets.isolated {
       // Registered as a client registers them (#1932): the ids at construction, the subject token as the SDK reads it.
       val wi = OpenAIWorkloadIdentity(
-        IdentitySource.Literal("opaque-svid-literal-7"),
+        IdentitySource.Literal(Secret("opaque-svid-literal-7")),
         "idp_secret_1",
         "sa_secret_1",
         Some(Secret("client_secret_id_1"))
@@ -200,7 +200,7 @@ class OpenAIWorkloadIdentitySpec
             java.util.concurrent.CompletableFuture.completedFuture(execute(request, options))
           def close(): Unit = ()
         }
-        val wi = OpenAIWorkloadIdentity(IdentitySource.Literal("eyJ.svid.sig"), "idp_1", "sa_1")
+        val wi = OpenAIWorkloadIdentity(IdentitySource.Literal(Secret("eyJ.svid.sig")), "idp_1", "sa_1")
         val config = OpenAIConfig(
           Secret(""),
           "gpt-4o-mini",
@@ -266,7 +266,8 @@ class OpenAIWorkloadIdentitySpec
           baseUrl,
           128000,
           4096,
-          workloadIdentity = Some(OpenAIWorkloadIdentity(IdentitySource.Literal("eyJ.svid.sig"), "idp_1", "sa_1"))
+          workloadIdentity =
+            Some(OpenAIWorkloadIdentity(IdentitySource.Literal(Secret("eyJ.svid.sig")), "idp_1", "sa_1"))
         )
         OpenAIClient(byHand).left.value shouldBe a[ConfigurationError]
         org.llm4s.llmconnect.LLMConnect.getClient(byHand).left.value shouldBe a[ConfigurationError]
@@ -441,7 +442,7 @@ class OpenAIWorkloadIdentitySpec
         "workloadIdentity.identityProviderId" -> identity.withIdentityProviderId(" "),
         "workloadIdentity.serviceAccountId"   -> identity.withServiceAccountId(""),
         "workloadIdentity.clientId"           -> identity.withClientId(Secret(" ")),
-        "workloadIdentity.identityToken"      -> identity.withIdentityToken(IdentitySource.Literal("")),
+        "workloadIdentity.identityToken"      -> identity.withIdentityToken(IdentitySource.Literal(Secret(""))),
         "workloadIdentity.identityTokenFile"  -> identity.withIdentityToken(IdentitySource.File(Path.of("")))
       )
       for (field, blank) <- blanks do

@@ -1,9 +1,14 @@
 package org.llm4s.trace.model
 
-import org.llm4s.types.TraceId
-
 import java.time.Instant
 import java.util.UUID
+
+/**
+ * The id of a trace: the value every span of one traced operation shares.
+ */
+final case class TraceId(value: String) extends AnyVal {
+  override def toString: String = value
+}
 
 /** Unique identifier for a single span within a trace. */
 final case class SpanId(value: String) extends AnyVal {

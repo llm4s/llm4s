@@ -146,7 +146,7 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         Right(EmbeddingResponse(Seq(Vector(1.0, 0.0))))
       }
     }
-    val core   = new EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil))
+    val core   = EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil))
     val client = Llm4s.wrapEmbeddingClient(core, EmbeddingModelConfig("mine", 2))
     (client.model, client.dimensions) shouldBe (("mine", java.util.OptionalInt.of(2)))
     client.embed(java.util.List.of("a")).get().vectors.get(0).toList shouldBe List(1.0f, 0.0f)
@@ -157,7 +157,7 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     import org.llm4s.llmconnect.EmbeddingClient
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
     import org.llm4s.model.ModelRegistryService
-    val core = new EmbeddingClient(_ => Right(EmbeddingResponse(Seq.empty)))(using ModelRegistryService.fromModels(Nil))
+    val core = EmbeddingClient(_ => Right(EmbeddingResponse(Seq.empty)))(using ModelRegistryService.fromModels(Nil))
     (the[NullPointerException] thrownBy Llm4s.wrapEmbeddingClient(null, EmbeddingModelConfig("m", 1)) should
       have).message("client must not be null")
     (the[NullPointerException] thrownBy Llm4s.wrapEmbeddingClient(core, null) should have)

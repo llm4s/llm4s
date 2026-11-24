@@ -4,7 +4,13 @@ import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, EmbeddingProviderSection, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
+  EmbeddingConfigContext,
+  EmbeddingProviderDescriptor,
+  EmbeddingProviderSection,
+  ProviderRegistry
+}
 import org.llm4s.testutil.FixtureEmbeddingProvider
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
@@ -90,9 +96,10 @@ class EmbeddingTimeoutsConfigSpec extends AnyWordSpec with Matchers with EitherV
       object Overriding extends EmbeddingProviderDescriptor:
         val id                  = FixtureEmbeddingProvider.id
         override val configSpec = FixtureEmbeddingProvider.configSpec
-        override def buildConfig(section: EmbeddingProviderSection, modelOverride: Option[String]) =
-          Right(EmbeddingProviderConfig("http://x", modelOverride.getOrElse("m"), Secret("k")))
-        def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = FixtureEmbeddingProvider.build(config)
+        override def buildConfig(section: EmbeddingProviderSection, context: EmbeddingConfigContext) =
+          Right(EmbeddingProviderConfig("http://x", context.modelOverride.getOrElse("m"), Secret("k")))
+        def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+          FixtureEmbeddingProvider.build(config, context)
 
       given ProviderRegistry = ProviderRegistry.ofEmbeddings(Overriding)
       val result = EmbeddingsConfigLoader.loadProvider(

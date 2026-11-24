@@ -2,7 +2,7 @@ package org.llm4s.llmconnect
 
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.config._
-import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.spi.{ ProviderBuildContext, ProviderRegistry }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -40,7 +40,7 @@ object LLMConnect {
     ModelRegistryService,
     ProviderRegistry
   ): Result[LLMClient] =
-    summon[ProviderRegistry].resolve(config.providerId).flatMap(_.buildClient(config, options))
+    summon[ProviderRegistry].resolve(config.providerId).flatMap(_.build(config, ProviderBuildContext.of(options)))
 
   def fromConfig(
     config: ProviderConfig,
@@ -138,7 +138,7 @@ object LLMConnect {
     config: ProviderConfig,
     options: LlmClientOptions = LlmClientOptions.default
   )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
-    summon[ProviderRegistry].resolve(provider).flatMap(_.buildClient(config, options))
+    summon[ProviderRegistry].resolve(provider).flatMap(_.build(config, ProviderBuildContext.of(options)))
 
   /**
    * Constructs an [[LLMClient]], verifying provider/config consistency,

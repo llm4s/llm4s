@@ -54,7 +54,7 @@ class RAGASEvaluatorSpec extends AnyFlatSpec with Matchers {
   }
 
   def createMockEmbeddingClient(): EmbeddingClient =
-    new EmbeddingClient(new MockEmbeddingProvider())
+    EmbeddingClient(new MockEmbeddingProvider())
 
   private val testEmbeddingConfig = EmbeddingModelConfig("test-model", 3)
 

@@ -2054,8 +2054,9 @@ section fails with a configuration error naming it. `llm4s-azure-identity` bring
 `azure-identity` (with `azure-core`, MSAL4J, Netty and Reactor), which is why it is a module of its
 own: `llm4s-openai` alone puts no Azure SDK on your classpath.
 
-In code, any `AccessTokenProvider` authenticates a config, and `AzureEntraId` makes one from Azure's
-`DefaultAzureCredential` or from any other `TokenCredential`:
+In code, any `AccessTokenProvider` authenticates a config - its one method, `current()`, returns the bearer token
+as a `Secret`, so your own is a lambda such as `() => readToken().map(Secret.token)` - and `AzureEntraId` makes
+one from Azure's `DefaultAzureCredential` or from any other `TokenCredential`:
 
 ```scala
 import org.llm4s.llmconnect.LLMConnect

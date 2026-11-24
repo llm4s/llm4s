@@ -183,7 +183,8 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
 
     "be one CLIENT span `embeddings <model>`" in withTracing() { (tracing, spans) =>
       val response = EmbeddingResponse(Seq(Seq(0.1, 0.2)), usage = Some(EmbeddingUsage(5, 5)))
-      new EmbeddingClient(provider(Right(response)), providerId = Some(ProviderId("openai")))
+      EmbeddingClient(provider(Right(response)))
+        .withProviderId(ProviderId("openai"))
         .withTracing(tracing)
         .embed(EmbeddingRequest(input = Seq(Prompt), model = model))
 
@@ -198,7 +199,8 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
     }
 
     "be that span with error.type when it fails" in withTracing() { (tracing, spans) =>
-      new EmbeddingClient(provider(Left(RateLimitError("voyage"))), providerId = Some(ProviderId("voyage")))
+      EmbeddingClient(provider(Left(RateLimitError("voyage"))))
+        .withProviderId(ProviderId("voyage"))
         .withTracing(tracing)
         .embed(EmbeddingRequest(input = Seq(Prompt), model = model))
 

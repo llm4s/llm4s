@@ -136,7 +136,7 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
     val tracer = new Recording
     val config =
       RAGConfig.default.withLLM(client).withQuestionCondenser(QuestionCondenser.llm(client)).withTracing(tracer)
-    val rag = RAG.buildWithClient(config, new EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
+    val rag = RAG.buildWithClient(config, EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
     try {
       rag.ingestText("The blue widget costs 42.", "doc1").fold(e => fail(e.message), identity)
       Embeddings.inputs.clear()

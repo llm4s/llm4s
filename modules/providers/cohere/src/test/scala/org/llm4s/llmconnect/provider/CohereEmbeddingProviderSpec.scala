@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.llmconnect.spi.EmbeddingBuildContext
 import org.llm4s.security.Secret
 import org.llm4s.error.{ CancelledError, NetworkError, RateLimitError }
 import org.llm4s.http.{
@@ -12,7 +13,8 @@ import org.llm4s.http.{
   StreamingHttpResponse
 }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
-import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingUsage }
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingUsage }
+import org.llm4s.error.EmbeddingError
 import org.llm4s.testkit.LocalProviderTestServer
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -467,7 +469,7 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "build a provider for the SPI" in {
-    CohereEmbeddingProvider.build(cfg()).isRight shouldBe true
+    CohereEmbeddingProvider.build(cfg(), EmbeddingBuildContext()).isRight shouldBe true
   }
 
   "an error body" should "be redacted before it reaches the error or the log, whatever the status (#1674)" in {

@@ -134,12 +134,12 @@ trait LLMClientContractBehaviors { this: AnyWordSpec with Matchers =>
     "return context budget equal to contextWindow - reserve when headroom is None" in {
       val client   = createClient()
       val expected = client.getContextWindow() - client.getReserveCompletion()
-      client.getContextBudget(HeadroomPercent.None) shouldBe expected
+      client.getContextBudget(HeadroomPercent.Zero) shouldBe expected
     }
 
     "have monotonically decreasing budgets: None > Light > Standard > Conservative" in {
       val client       = createClient()
-      val none         = client.getContextBudget(HeadroomPercent.None)
+      val none         = client.getContextBudget(HeadroomPercent.Zero)
       val light        = client.getContextBudget(HeadroomPercent.Light)
       val standard     = client.getContextBudget(HeadroomPercent.Standard)
       val conservative = client.getContextBudget(HeadroomPercent.Conservative)

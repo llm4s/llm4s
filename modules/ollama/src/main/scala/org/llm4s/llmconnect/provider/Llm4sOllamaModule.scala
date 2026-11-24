@@ -24,5 +24,5 @@ import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModu
  */
 @Stable
 final class Llm4sOllamaModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor]               = Seq(OllamaProvider)
+  override def providers: Seq[ProviderDescriptor]                   = Seq(OllamaProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(OllamaEmbeddingProvider)

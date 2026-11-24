@@ -40,7 +40,7 @@ object RagFakes {
   val Model: EmbeddingModelConfig = EmbeddingModelConfig("word-count", Vocabulary.size)
 
   def embeddings(provider: EmbeddingProvider): JEmbeddingClient =
-    Llm4s.wrapEmbeddingClient(new EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil)), Model)
+    Llm4s.wrapEmbeddingClient(EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil)), Model)
 
   def embeddings(): JEmbeddingClient = embeddings(new WordEmbeddings())
 
@@ -95,7 +95,7 @@ object RagFakes {
     RAG
       .buildWithEmbeddings(
         RAGConfig.default.withSearchIndex(NoIndex).withLLM(model),
-        new EmbeddingClient(new WordEmbeddings())(using ModelRegistryService.fromModels(Nil)),
+        EmbeddingClient(new WordEmbeddings())(using ModelRegistryService.fromModels(Nil)),
         Model
       )
       .fold(e => throw new AssertionError(e.message), new JRag(RagFacadeToken.INSTANCE, _))

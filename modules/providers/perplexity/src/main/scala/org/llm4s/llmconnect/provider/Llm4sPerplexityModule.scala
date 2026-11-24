@@ -18,4 +18,4 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  * file through its public no-arg constructor.
  */
 final class Llm4sPerplexityModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(PerplexityProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(PerplexityProvider)

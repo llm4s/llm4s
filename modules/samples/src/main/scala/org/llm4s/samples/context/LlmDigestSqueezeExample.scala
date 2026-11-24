@@ -1,6 +1,7 @@
 package org.llm4s.samples.context
 
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.provider.OpenAITokenizers
 import org.llm4s.context.{ ConversationTokenCounter, LLMCompressor }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
@@ -49,7 +50,7 @@ object LlmDigestSqueezeExample {
       given org.llm4s.model.ModelRegistryService = registryService
       modelName                                  = providerCfg.model
       client       <- LLMConnect.getClient(providerCfg)
-      tokenCounter <- ConversationTokenCounter.forModel(modelName)
+      tokenCounter <- OpenAITokenizers.counterFor(modelName).orElse(ConversationTokenCounter.cl100k())
       results      <- runSqueezeTests(client, tokenCounter)
     } yield results
 

@@ -366,7 +366,7 @@ class AsyncCallsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def embedder(reply: EmbeddingRequest => Result[EmbeddingResponse]): JEmbeddingClient =
     Llm4s.wrapEmbeddingClient(
-      new EmbeddingClient(new EmbeddingProvider {
+      EmbeddingClient(new EmbeddingProvider {
         def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = reply(request)
       })(using ModelRegistryService.fromModels(Nil)),
       EmbeddingModelConfig("embed-model", 2)

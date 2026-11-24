@@ -2,11 +2,29 @@ package org.llm4s.testkit
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.http.{ Llm4sHttpClient, MultipartPart }
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
+import org.llm4s.llmconnect.model.{
+  AssistantMessage,
+  Completion,
+  CompletionOptions,
+  Conversation,
+  EmbeddingRequest,
+  EmbeddingResponse,
+  StreamedChunk
+}
+import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
+  EmbeddingConfigSpec,
+  EmbeddingProviderDescriptor,
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderFeatures
+}
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.security.Secret
 import org.llm4s.testkit.fixtures.AcmeProvider
 import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.types.Result
@@ -47,11 +65,10 @@ class SuppliedHttpClientChecksSpec extends AnyWordSpec with Matchers with Provid
     val configSpec: ProviderConfigSpec      = AcmeProvider.configSpec
     override def features: ProviderFeatures = ProviderFeatures.default.withCustomHttpClient(true)
     val clientClosed: AtomicBoolean         = new AtomicBoolean(false)
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] = AcmeProvider.buildConfig(providerName, section)
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
-      Right(new HttpClientUser(options.httpClient, completeSends, streamSends, closesSupplied, clientClosed))
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+      AcmeProvider.buildConfig(section, context)
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+      Right(new HttpClientUser(context.httpClient, completeSends, streamSends, closesSupplied, clientClosed))
 
   final private class HttpClientUser(
     http: Option[Llm4sHttpClient],
@@ -157,5 +174,39 @@ class SuppliedHttpClientChecksSpec extends AnyWordSpec with Matchers with Provid
       http.closed shouldBe false
       http.close()
       http.closed shouldBe true
+    }
+
+    "assertEmbeddingUsesSuppliedHttpClient (#2811)" should {
+
+      val config = EmbeddingProviderConfig("https://acme.invalid/v1", "acme-embed-1", Secret("sk-acme"))
+
+      def descriptor(name: String, sends: Boolean, closes: Boolean): EmbeddingProviderDescriptor =
+        new EmbeddingProviderDescriptor:
+          val id: ProviderId                  = ProviderId(name)
+          val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec()
+          def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+            Right(
+              new EmbeddingProvider:
+                def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
+                  if sends then context.httpClient.foreach(_.post(config.baseUrl, Map.empty, "{}"))
+                  if closes then context.httpClient.foreach(_.close())
+                  Right(EmbeddingResponse(embeddings = Seq(Vector(0.1))))
+            )
+
+      "pass for a provider that sends embed through the supplied client and leaves it open" in {
+        assertEmbeddingUsesSuppliedHttpClient(descriptor("good", sends = true, closes = false), config)
+      }
+
+      "fail for a provider that builds its own client" in {
+        failureOf(
+          assertEmbeddingUsesSuppliedHttpClient(descriptor("bypass", sends = false, closes = false), config)
+        ) should include("bypass: embed sent no request through the supplied HTTP client")
+      }
+
+      "fail for a provider that closes the supplied client" in {
+        failureOf(
+          assertEmbeddingUsesSuppliedHttpClient(descriptor("closer", sends = true, closes = true), config)
+        ) should include("closer closed the HTTP client its caller supplied")
+      }
     }
   }

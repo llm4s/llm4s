@@ -45,7 +45,7 @@ import org.llm4s.llmconnect.auth.{
   AccessTokenProvider,
   ApiKeyProvider,
   CachingAccessTokenProvider,
-  IdentityTokenSource
+  IdentityTokenProvider
 }
 import org.llm4s.llmconnect.config.{
   AzureConfig,
@@ -60,7 +60,7 @@ import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult, UnmappedOptions }
-import org.llm4s.security.{ KnownSecrets, TokenGenerations }
+import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
 import org.llm4s.toolapi.OpenAIToolHelper
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -1385,7 +1385,7 @@ private[provider] object OpenAIClientTransport {
 
   /** The SDK's workload identity for `wi`: a JWT subject token read from `wi.identityToken` on each exchange. */
   private[provider] def sdkWorkloadIdentity(wi: OpenAIWorkloadIdentity): WorkloadIdentity = {
-    val source = IdentityTokenSource.from(wi.identityToken)
+    val source = IdentityTokenProvider.from(wi.identityToken)
     // Each subject token is registered before the SDK sends it, so an exchange error quoting it is scrubbed.
     val subjects = new TokenGenerations
     val subject = new SubjectTokenProvider {
@@ -1395,12 +1395,12 @@ private[provider] object OpenAIClientTransport {
       // in, and `mapError` takes it back out, so a missing token file stays an AuthenticationError.
       override def getToken(httpClient: SdkHttpClient, jsonMapper: JsonMapper): String =
         source
-          .fetch()
+          .current()
           .fold(
             error => throw new IdentityTokenException(error),
             token => {
-              subjects.rotate(token)
-              token
+              subjects.rotate(token.reveal)
+              token.reveal
             }
           )
 
@@ -1517,7 +1517,7 @@ private[provider] object OpenAIClientTransport {
     private val generations = new TokenGenerations
 
     override def get(): String = {
-      val token = tokens.token().fold(error => throw new IdentityTokenException(error), identity)
+      val token = tokens.current().fold(error => throw new IdentityTokenException(error), _.reveal)
       generations.rotate(token)
       lastIssued.set(token)
       token
@@ -1527,7 +1527,7 @@ private[provider] object OpenAIClientTransport {
       Try(call).fold(
         {
           case unauthorized: UnauthorizedException =>
-            Option(lastIssued.get()).foreach(tokens.invalidate)
+            Option(lastIssued.get()).foreach(issued => tokens.invalidate(Secret.unregistered(issued)))
             throw unauthorized
           case other => throw other
         },

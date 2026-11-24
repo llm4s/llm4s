@@ -93,7 +93,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       override def getTokenSync(request: TokenRequestContext): AzureAccessToken =
         throw new IllegalStateException("ManagedIdentityCredential authentication unavailable")
     }
-    val error = AzureEntraId.tokenProvider(unavailable).token().left.value
+    val error = AzureEntraId.tokenProvider(unavailable).current().left.value
     error shouldBe an[AuthenticationError]
     error.message should include("ManagedIdentityCredential authentication unavailable")
     error.message should include(AzureEntraId.CognitiveServicesScope)
@@ -104,7 +104,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       override def getToken(request: TokenRequestContext): Mono[AzureAccessToken] = Mono.empty()
       override def getTokenSync(request: TokenRequestContext): AzureAccessToken   = null
     }
-    AzureEntraId.tokenProvider(empty, "api://custom/.default").token().left.value.message should include(
+    AzureEntraId.tokenProvider(empty, "api://custom/.default").current().left.value.message should include(
       "returned no token for api://custom/.default"
     )
   }

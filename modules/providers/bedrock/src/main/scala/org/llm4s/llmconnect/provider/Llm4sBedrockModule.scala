@@ -4,7 +4,7 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
 
 /**
  * Registers `llm4s-bedrock`'s one provider: AWS Bedrock, under the id `bedrock`. Bedrock supplies
- * a chat client and no embedding provider here, so this module overrides only `chatProviders`.
+ * a chat client and no embedding provider here, so this module overrides only `providers`.
  *
  * Declared in this module's
  * `META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule`, so adding the
@@ -20,4 +20,4 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  * named in the services file through its public no-arg constructor.
  */
 final class Llm4sBedrockModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(BedrockProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(BedrockProvider)

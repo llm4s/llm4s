@@ -4,6 +4,7 @@ import org.llm4s.chunking.ChunkerFactory
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.model._
+import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.rag.evaluation.EvaluationError
 import org.llm4s.types.Result
@@ -197,7 +198,7 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
     keywordIndex = new MockKeywordIndex()
     embeddingProvider = new MockEmbeddingProvider()
     llmClient = new MockLLMClient()
-    embeddingClient = new EmbeddingClient(embeddingProvider)
+    embeddingClient = EmbeddingClient(embeddingProvider)
   }
 
   override def afterEach(): Unit = {
@@ -227,7 +228,7 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
     _pipeline = RAGPipeline.withStores(
       config = RAGExperimentConfig.default,
       llmClient = new MockLLMClient,
-      embeddingClient = new EmbeddingClient(provider),
+      embeddingClient = EmbeddingClient(provider),
       vectorStore = vs,
       keywordIndex = ki
     )
@@ -315,7 +316,7 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
   }
 
   it should "return Left when the embedding provider fails" in {
-    val badClient = new EmbeddingClient(new FailingEmbeddingProvider())
+    val badClient = EmbeddingClient(new FailingEmbeddingProvider())
     val result    = mkPipeline(ec = badClient).indexDocument("doc1", contentWithText)
     result.isLeft shouldBe true
   }
@@ -342,7 +343,7 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
   }
 
   it should "return Left and short-circuit on the first embedding failure" in {
-    val badClient = new EmbeddingClient(new FailingEmbeddingProvider())
+    val badClient = EmbeddingClient(new FailingEmbeddingProvider())
     val p         = mkPipeline(ec = badClient)
     val docs = Seq(
       ("doc1", "Content 1", Map.empty[String, String]),
@@ -378,7 +379,7 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
   }
 
   it should "return Left when the embedding provider fails during search" in {
-    val badClient = new EmbeddingClient(new FailingEmbeddingProvider())
+    val badClient = EmbeddingClient(new FailingEmbeddingProvider())
     val p         = mkPipeline(ec = badClient)
     p.search("any query").isLeft shouldBe true
   }
@@ -445,7 +446,7 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
   }
 
   it should "return Left when the embedding provider fails" in {
-    val badClient = new EmbeddingClient(new FailingEmbeddingProvider())
+    val badClient = EmbeddingClient(new FailingEmbeddingProvider())
     mkPipeline(ec = badClient).answer("any question").isLeft shouldBe true
   }
 

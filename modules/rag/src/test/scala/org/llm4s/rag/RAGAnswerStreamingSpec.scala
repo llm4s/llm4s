@@ -80,7 +80,7 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
 
   private def rag(client: Option[LLMClient], config: RAGConfig = RAGConfig.default): RAG = {
     val withClient = client.fold(config)(config.withLLM)
-    val built = RAG.buildWithClient(withClient, new EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
+    val built      = RAG.buildWithClient(withClient, EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
     // A RAG with a SearchIndex refuses plain ingest (#2716): its one chunk comes from the index
     if (!built.hasPermissions)
       built.ingestText("The answer to everything is 42.", "doc1").fold(e => fail(e.message), identity)

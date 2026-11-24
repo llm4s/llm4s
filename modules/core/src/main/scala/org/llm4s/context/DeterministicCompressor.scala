@@ -1,6 +1,6 @@
 package org.llm4s.context
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -48,7 +48,7 @@ import org.slf4j.LoggerFactory
  * @see [[ToolOutputCompressor]] for the tool compaction implementation
  * @see [[CompressionRule]] for individual compression rules
  */
-@Stable
+@Experimental
 object DeterministicCompressor {
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -162,7 +162,7 @@ object DeterministicCompressor {
  * @param name Identifier for logging and debugging
  * @param transform The transformation function
  */
-@Stable
+@Experimental
 final case class CompressionRule private (name: String, transform: Seq[Message] => Seq[Message]) {
 
   /** Sets the rule's identifier. */
@@ -186,6 +186,7 @@ final case class CompressionRule private (name: String, transform: Seq[Message] 
  *  - '''consolidateExamples''': Merges multiple example messages
  *  - '''compressToolOutputs''': Compresses large tool outputs (see [[ToolOutputCompressor]])
  */
+@Experimental
 object CompressionRule {
 
   /**

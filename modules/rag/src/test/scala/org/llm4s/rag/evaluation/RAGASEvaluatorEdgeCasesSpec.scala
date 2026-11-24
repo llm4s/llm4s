@@ -66,7 +66,7 @@ class RAGASEvaluatorEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   private val embeddingConfig = EmbeddingModelConfig("test-model", 3)
 
-  private def createEmbeddingClient() = new EmbeddingClient(new MockEmbeddingProvider())
+  private def createEmbeddingClient() = EmbeddingClient(new MockEmbeddingProvider())
 
   // ==========================================================================
   // evaluateMetric tests

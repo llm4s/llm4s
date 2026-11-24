@@ -1,13 +1,8 @@
 package org.llm4s.llmconnect.caching
 
 import org.llm4s.annotation.Stable
-import org.llm4s.llmconnect.model.{
-  EmbeddingError,
-  EmbeddingRequest,
-  EmbeddingResponse,
-  InputPurpose,
-  MultimediaEmbeddingRequest
-}
+import org.llm4s.error.EmbeddingError
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse, InputPurpose }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -26,13 +21,11 @@ import org.slf4j.LoggerFactory
  * a failed store leaves the text uncached.
  *
  * It is itself an `EmbeddingProvider`, so it can be passed where one is expected, and wrapped in an
- * `EmbeddingClient` where one of those is: `new EmbeddingClient(cached)`.
+ * `EmbeddingClient` where one of those is: `EmbeddingClient(cached)`.
  *
  * A response that needed the base client keeps that response's `usage`, `metadata`, `modality` and `dim`, with the
  * cached vectors merged in; `usage` counts only the texts sent. A response served wholly from the cache has no
  * `usage` and its `dim` is the vectors' length.
- *
- * Multimodal requests are not cached: [[embedMultimodal]] goes straight to the base client.
  *
  * @param baseClient   The underlying client used to generate embeddings on cache misses.
  * @param cache        The storage backend for the embedding vectors.
@@ -104,10 +97,6 @@ class CachedEmbeddingClient(
       }
     }
   }
-
-  /** Not cached: delegates to the base client. */
-  override def embedMultimodal(request: MultimediaEmbeddingRequest): Result[EmbeddingResponse] =
-    baseClient.embedMultimodal(request)
 
   /** The cache's hit/miss statistics, when it keeps them. */
   def cacheStats: Option[CacheStats] = cache.stats()

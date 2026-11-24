@@ -46,7 +46,7 @@ class RAGDocumentRegistrySpec extends AnyFlatSpec with Matchers {
     searcher: Option[HybridSearcher] = None
   ): RAG =
     RAG
-      .buildWithClient(config, new EmbeddingClient(provider), hybridSearcher = searcher)
+      .buildWithClient(config, EmbeddingClient(provider), hybridSearcher = searcher)
       .fold(e => fail(e.formatted), identity)
 
   "RAGConfig.withDocumentRegistry" should "be the registry sync records into" in {

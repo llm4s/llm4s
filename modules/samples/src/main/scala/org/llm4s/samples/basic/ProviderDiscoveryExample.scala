@@ -20,7 +20,7 @@ import org.llm4s.llmconnect.spi.ProviderRegistry
  *    - Service entry parsing failures (`iterator.hasNext`, such as a malformed `META-INF/services`
  *      file) terminate discovery early; remaining providers on the classpath will not be scanned.
  *    - Module instantiation failures (`iterator.next()`, such as a missing class or dependency)
- *      or descriptor query failures (`module.chatProviders`/`embeddingProviders`) are recorded in
+ *      or descriptor query failures (`module.providers`/`embeddingProviders`) are recorded in
  *      `failures` while allowing discovery to continue loading other healthy providers.
  *  - `collisions`: instances where two modules register the same chat or embedding provider ID.
  *    LLM4S resolves collisions by letting the last-registered descriptor win, and logs the collision.

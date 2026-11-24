@@ -32,7 +32,7 @@ class RAGEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
   private def withRag(test: (RAG, RecordingProvider) => Any): Unit = {
     val provider = new RecordingProvider
     val rag = RAG
-      .buildWithClient(RAGConfig.default, new EmbeddingClient(provider))
+      .buildWithClient(RAGConfig.default, EmbeddingClient(provider))
       .fold(e => fail(s"could not build the RAG: ${e.formatted}"), identity)
     try test(rag, provider)
     finally rag.close()

@@ -61,7 +61,7 @@ object CachingRecipe extends RecipeApp {
       new CachingLLMClient(
         baseClient = client,
         // The stand-in embedding model; see "Use a real provider".
-        embeddingClient = new EmbeddingClient(BagOfWordsEmbeddings.provider),
+        embeddingClient = EmbeddingClient(BagOfWordsEmbeddings.provider),
         embeddingModel = EmbeddingModelConfig(BagOfWordsEmbeddings.Model, BagOfWordsEmbeddings.Dimensions),
         config = config,
         tracing = new NoOpTracing

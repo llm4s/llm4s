@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, EmbeddingProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -45,7 +45,7 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
   }
 
   private val mockLLM             = new MockLLMClient
-  private val mockEmbeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
+  private val mockEmbeddingClient = EmbeddingClient(new MockEmbeddingProvider())
   private val embeddingConfig     = EmbeddingModelConfig("test-model", 3)
 
   "RAGASFactory.create" should "create evaluator with all four default metrics" in {
@@ -155,7 +155,7 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
 
     override val modelDimensions: Map[String, Int] = Map("fixture-768" -> 768)
 
-    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
       Right(new MockEmbeddingProvider)
   }
 

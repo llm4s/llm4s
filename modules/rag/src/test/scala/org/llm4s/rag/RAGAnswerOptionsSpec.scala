@@ -75,7 +75,7 @@ class RAGAnswerOptionsSpec extends AnyFlatSpec with Matchers {
 
   private def rag(client: LLMClient, config: RAGConfig = RAGConfig.default): RAG = {
     val built =
-      RAG.buildWithClient(config.withLLM(client), new EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
+      RAG.buildWithClient(config.withLLM(client), EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
     // A RAG with a SearchIndex refuses plain ingest (#2716): its one chunk comes from the index
     if (!built.hasPermissions)
       built.ingestText("The answer to everything is 42.", "doc1").fold(e => fail(e.message), identity)

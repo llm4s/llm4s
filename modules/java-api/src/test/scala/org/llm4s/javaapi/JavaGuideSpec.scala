@@ -201,7 +201,7 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
     }
     def client: JEmbeddingClient =
       Llm4s.wrapEmbeddingClient(
-        new EmbeddingClient(this)(using ModelRegistryService.fromModels(Nil)),
+        EmbeddingClient(this)(using ModelRegistryService.fromModels(Nil)),
         EmbeddingModelConfig("text-embedding-3-small", 1536)
       )
   }

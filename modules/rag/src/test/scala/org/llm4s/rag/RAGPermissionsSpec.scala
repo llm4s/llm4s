@@ -303,7 +303,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
 
   private def createRAGWithPermissions(): (RAG, MockSearchIndex) = {
     val searchIndex     = new MockSearchIndex()
-    val embeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
+    val embeddingClient = EmbeddingClient(new MockEmbeddingProvider())
     val config          = RAGConfig.default.withSearchIndex(searchIndex)
     val rag             = RAG.buildWithClient(config, embeddingClient).toOption.get
     (rag, searchIndex)
@@ -314,7 +314,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "RAG.queryWithPermissions" should "return error without SearchIndex configured" in {
-    val embeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
+    val embeddingClient = EmbeddingClient(new MockEmbeddingProvider())
     val rag             = RAG.buildWithClient(RAGConfig.default, embeddingClient).toOption.get
     try {
       val result = rag.queryWithPermissions(
@@ -384,7 +384,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "RAG.ingestWithPermissions" should "return error without SearchIndex" in {
-    val embeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
+    val embeddingClient = EmbeddingClient(new MockEmbeddingProvider())
     val rag             = RAG.buildWithClient(RAGConfig.default, embeddingClient).toOption.get
     try {
       val path   = CollectionPath.create("docs").toOption.get
@@ -453,7 +453,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return error without SearchIndex" in {
-    val rag = RAG.buildWithClient(RAGConfig.default, new EmbeddingClient(new MockEmbeddingProvider())).toOption.get
+    val rag = RAG.buildWithClient(RAGConfig.default, EmbeddingClient(new MockEmbeddingProvider())).toOption.get
     try {
       val path = CollectionPath.create("docs").toOption.get
       rag.ingestChunksWithPermissions(path, "doc-1", DocumentChunk.fromTexts(Seq("a"))).left.toOption.get shouldBe
@@ -482,7 +482,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
     }
     val rag =
       RAG
-        .buildWithClient(RAGConfig.default.withSearchIndex(index), new EmbeddingClient(new MockEmbeddingProvider()))
+        .buildWithClient(RAGConfig.default.withSearchIndex(index), EmbeddingClient(new MockEmbeddingProvider()))
         .toOption
         .get
     try {
@@ -529,7 +529,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return error without SearchIndex" in {
-    val rag = RAG.buildWithClient(RAGConfig.default, new EmbeddingClient(new MockEmbeddingProvider())).toOption.get
+    val rag = RAG.buildWithClient(RAGConfig.default, EmbeddingClient(new MockEmbeddingProvider())).toOption.get
     try {
       val path = CollectionPath.create("docs").toOption.get
       rag.ingestBytesWithPermissions(path, "x".getBytes("UTF-8"), "a.txt", "doc-1").left.toOption.get shouldBe
@@ -542,7 +542,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "RAG.deleteFromCollection" should "return error without SearchIndex" in {
-    val embeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
+    val embeddingClient = EmbeddingClient(new MockEmbeddingProvider())
     val rag             = RAG.buildWithClient(RAGConfig.default, embeddingClient).toOption.get
     try {
       val path   = CollectionPath.create("docs").toOption.get
@@ -586,7 +586,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
 
   it should "return error without SearchIndex" in {
     val mockLLM         = new MockLLMClient()
-    val embeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
+    val embeddingClient = EmbeddingClient(new MockEmbeddingProvider())
     val config          = RAGConfig.default.copy(llmClient = Some(mockLLM))
     val rag             = RAG.buildWithClient(config, embeddingClient).toOption.get
     try {
@@ -651,7 +651,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail the build when the config also names document loaders" in {
-    val embeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
+    val embeddingClient = EmbeddingClient(new MockEmbeddingProvider())
     val config = RAGConfig.default.withSearchIndex(new MockSearchIndex()).withDocuments(TextLoader("Text.", "d"))
     isPlainIngestRefusal(RAG.buildWithClient(config, embeddingClient)) shouldBe true
   }
@@ -680,7 +680,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
         Left(ConfigurationError("index unavailable"))
     }
     val rag = RAG
-      .buildWithClient(RAGConfig.default.withSearchIndex(failing), new EmbeddingClient(new MockEmbeddingProvider()))
+      .buildWithClient(RAGConfig.default.withSearchIndex(failing), EmbeddingClient(new MockEmbeddingProvider()))
       .toOption
       .get
     try rag.deleteDocument("doc-1").left.map(_.message) shouldBe Left("index unavailable")
@@ -710,7 +710,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
     RAG
       .buildWithClient(
         config(RAGConfig.default.withSearchIndex(index)),
-        new EmbeddingClient(new MockEmbeddingProvider())
+        EmbeddingClient(new MockEmbeddingProvider())
       )
       .toOption
       .get
@@ -863,7 +863,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
     val rag = RAG
       .buildWithClient(
         RAGConfig.default.withSearchIndex(index).withLLM(llm),
-        new EmbeddingClient(new MockEmbeddingProvider())
+        EmbeddingClient(new MockEmbeddingProvider())
       )
       .toOption
       .get
@@ -909,7 +909,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
           .withSearchIndex(index)
           .withLLM(new MockLLMClient())
           .withGraphStore(new org.llm4s.knowledgegraph.storage.InMemoryGraphStore()),
-        new EmbeddingClient(new MockEmbeddingProvider())
+        EmbeddingClient(new MockEmbeddingProvider())
       )
       .toOption
       .get
@@ -950,7 +950,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
     val rag = RAG
       .buildWithClient(
         RAGConfig.default.withLLM(new MockLLMClient()),
-        new EmbeddingClient(new MockEmbeddingProvider())
+        EmbeddingClient(new MockEmbeddingProvider())
       )
       .toOption
       .get
@@ -968,7 +968,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "RAG.hasPermissions" should "return false without SearchIndex" in {
-    val embeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
+    val embeddingClient = EmbeddingClient(new MockEmbeddingProvider())
     val rag             = RAG.buildWithClient(RAGConfig.default, embeddingClient).toOption.get
     try {
       rag.hasPermissions shouldBe false

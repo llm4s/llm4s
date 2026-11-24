@@ -2,7 +2,7 @@ package org.llm4s.testkit.fixtures
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, EmbeddingProviderConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
   Completion,
@@ -14,14 +14,16 @@ import org.llm4s.llmconnect.model.{
 }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
   EmbeddingConfigSpec,
   EmbeddingProviderDescriptor,
   Llm4sProviderModule,
+  ProviderBuildContext,
+  ProviderConfigContext,
   ProviderConfigSpec,
   ProviderDescriptor
 }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import java.time.Instant
@@ -38,15 +40,13 @@ object AcmeProvider extends ProviderDescriptor:
   val DefaultBaseUrl: String         = "https://acme.invalid/v1"
   val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DefaultBaseUrl, Seq("ACME_API_KEY"))
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     for
-      apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
-      baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
+      apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
+      baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
     yield AcmeConfig(apiKey.reveal, section.model.asString, baseUrl)
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
     ProviderDescriptor.expectConfig[AcmeConfig](id, config).map(AcmeClient(_))
 
 final case class AcmeConfig(apiKey: String, model: String, baseUrl: String) extends ProviderConfig:
@@ -81,7 +81,7 @@ object AcmeEmbeddings extends EmbeddingProviderDescriptor:
     apiKeyEnv = Seq("ACME_API_KEY")
   )
 
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
     if config.model == "acme-retired" then Left(ConfigurationError("acme-retired is no longer served"))
     else
       Right(
@@ -92,23 +92,22 @@ object AcmeEmbeddings extends EmbeddingProviderDescriptor:
 
 /** The well-formed module, named in the test `META-INF/services`. */
 final class Llm4sAcmeModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor]               = Seq(AcmeProvider)
+  override def providers: Seq[ProviderDescriptor]                   = Seq(AcmeProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(AcmeEmbeddings)
 
 // ---- broken variants ----
 
 /** Supplies a provider but is in no services file, so discovery cannot find it. */
 final class UnlistedModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(UnlistedProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(UnlistedProvider)
 
 object UnlistedProvider extends ProviderDescriptor:
   val id: ProviderId                 = ProviderId("unlisted")
   val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl("https://unlisted.invalid")
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] = AcmeProvider.buildConfig(providerName, section)
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
-    AcmeProvider.buildClient(config, options)
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    AcmeProvider.buildConfig(section, context)
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    AcmeProvider.build(config, context)
 
 /** Lists nothing. */
 final class EmptyModule extends Llm4sProviderModule
@@ -120,20 +119,19 @@ final class EmptyModule extends Llm4sProviderModule
 class TwinProvider extends ProviderDescriptor:
   val id: ProviderId                 = ProviderId("twin")
   val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl("https://twin.invalid")
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] = AcmeProvider.buildConfig(providerName, section)
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
-    AcmeProvider.buildClient(config, options)
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    AcmeProvider.buildConfig(section, context)
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    AcmeProvider.build(config, context)
 
 object TwinProviderA extends TwinProvider
 object TwinProviderB extends TwinProvider
 
 final class TwinModuleA extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(TwinProviderA)
+  override def providers: Seq[ProviderDescriptor] = Seq(TwinProviderA)
 
 final class TwinModuleB extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(TwinProviderB)
+  override def providers: Seq[ProviderDescriptor] = Seq(TwinProviderB)
 
 /**
  * Listed, but each descriptor gets something wrong: `greedy` builds a client from any config,
@@ -142,21 +140,19 @@ final class TwinModuleB extends Llm4sProviderModule:
 object GreedyProvider extends ProviderDescriptor:
   val id: ProviderId                 = ProviderId("greedy")
   val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl("https://greedy.invalid")
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] = AcmeProvider.buildConfig(providerName, section)
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    AcmeProvider.buildConfig(section, context)
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
     Right(AcmeClient(AcmeConfig("k", config.model, "https://greedy.invalid")))
 
 object UnboundProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("unbound")
   val configSpec: ProviderConfigSpec =
     ProviderConfigSpec.apiKeyAndDefaultBaseUrl("https://unbound.invalid", Seq("UNBOUND_API_KEY"))
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] = AcmeProvider.buildConfig(providerName, section)
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
-    AcmeProvider.buildClient(config, options)
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    AcmeProvider.buildConfig(section, context)
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    AcmeProvider.build(config, context)
 
 object UnboundEmbeddings extends EmbeddingProviderDescriptor:
   val id: ProviderId = ProviderId("unbound")
@@ -165,8 +161,9 @@ object UnboundEmbeddings extends EmbeddingProviderDescriptor:
     defaultBaseUrl = Some("https://unbound.invalid"),
     apiKeyEnv = Seq("UNBOUND_API_KEY")
   )
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = AcmeEmbeddings.build(config)
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+    AcmeEmbeddings.build(config, context)
 
 final class FlawedModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor]               = Seq(GreedyProvider, UnboundProvider)
+  override def providers: Seq[ProviderDescriptor]                   = Seq(GreedyProvider, UnboundProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(UnboundEmbeddings)

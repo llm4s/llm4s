@@ -95,9 +95,14 @@ whatever it supplies. Both members default to `Nil`.
 
 ```scala
 trait Llm4sProviderModule:
-  def chatProviders: Seq[ProviderDescriptor] = Nil
+  def providers: Seq[ProviderDescriptor] = Nil
   def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Nil
 ```
+
+One naming rule holds across the SPI: **an unprefixed name is the chat half, and `embedding*` the embedding
+half**. So `ProviderDescriptor` and `EmbeddingProviderDescriptor`, `providers` and `embeddingProviders` here, and
+on `ProviderRegistry` `descriptors` / `embeddingDescriptors`, `find` / `findEmbedding`, `resolve` /
+`resolveEmbedding`, `ids` / `embeddingIds`, `of` / `ofEmbeddings` and `withProvider` / `withEmbeddingProvider`.
 
 Implement it as a **`class` with a public no-arg constructor, not an `object`** -
 `java.util.ServiceLoader` instantiates the class it is given, and an `object` has no such
@@ -109,7 +114,7 @@ package com.acme.llm4s
 import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModule, ProviderDescriptor }
 
 final class Llm4sAcmeModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor]               = Seq(AcmeProvider)
+  override def providers: Seq[ProviderDescriptor]                   = Seq(AcmeProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(AcmeEmbeddings)
 ```
 
@@ -173,18 +178,30 @@ trait ProviderDescriptor:
   def configSpec: ProviderConfigSpec
   def features: ProviderFeatures = ProviderFeatures.default
   def modelLister: Option[ProviderModelLister] = None
-  def buildConfig(providerName: String, section: ProvidersConfigModel.NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig]
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient]
+  def buildConfig(section: ProvidersConfigModel.NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig]
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient]
 ```
+
+The embedding descriptor has the same two methods with the same shape: `buildConfig(section, context)` and
+`build(config, context)`. Each takes one context value in place of a list of parameters, so what a later
+provider needs is a new field of the context and not a new signature for every descriptor:
+
+| Context | Carries |
+|---|---|
+| `ProviderConfigContext` | `providerName` (the user's section name, for error messages), `contextWindows` (the `ContextWindowResolver` a config's `fromValues` takes) |
+| `ProviderBuildContext` | `options` (the caller's `LlmClientOptions`; `metrics`, `exchangeLogging` and `httpClient` read it), `modelRegistry` |
+| `EmbeddingConfigContext` | `modelOverride` (the `<model>` half of `EMBEDDING_MODEL=<id>/<model>`) |
+| `EmbeddingBuildContext` | `options` (the caller's `EmbeddingClientOptions`; `httpClient` reads it) |
 
 `buildConfig` receives a section that has **already been validated** against `configSpec`:
 required fields are present, the API key has fallen back to `llm4s.credentials.<id>.apiKey`, and
-`section.extras` holds exactly your declared extra keys, defaults applied. `buildClient` must
+`section.extras` holds exactly your declared extra keys, defaults applied. `build` must
 check the config's type rather than cast - `ProviderDescriptor.expectConfig` does that.
+
+To call a descriptor yourself, in a test say, make the context from what is in scope:
+`descriptor.buildConfig(section, ProviderConfigContext.of("my-section"))` takes the `ContextWindowResolver` in
+scope (with a `ModelRegistryService` in scope, the one over it), and
+`descriptor.build(config, ProviderBuildContext.of(options))` the `ModelRegistryService`.
 
 `aliases` are other names a section's `provider` may use: `ProviderRegistry.find` and `resolve` accept an
 alias as they accept the id. An id always wins, so an alias equal to another provider's id is ignored, and of
@@ -206,9 +223,16 @@ its own federation takes the identity token's file path instead (see `AnthropicP
 The configuration side is `@Stable` ([#1818](https://github.com/llm4s/llm4s/issues/1818)): `AuthConfig`,
 `IdentitySource`, `TokenExchangeConfig`, `AccessToken` and the `AccessTokenProvider` trait, which a Stable
 `NamedProviderConfig`, `ProviderDescriptor.requireAuthExtra` and `OpenAICompatibleClient.Credential` carry. The
-machinery behind them - `TokenExchange`, `CachingAccessTokenProvider` and `IdentityTokenSource` - is still
+machinery behind them - `TokenExchange`, `CachingAccessTokenProvider` and `IdentityTokenProvider` - is still
 `@Experimental`, so keep it out of your own Stable signatures. An `AccessTokenProvider` should return a failure as a
 `Left`; `OpenAICompatibleClient` and `CachingAccessTokenProvider` turn one that throws into an `AuthenticationError`.
+
+The three suppliers of a credential are siblings with one method, `current()`: `ApiKeyProvider.current()` gives an
+`ApiKey`, and `AccessTokenProvider.current()` and `IdentityTokenProvider.current()` a `Secret`, so a token prints
+as `***` and is read with `.reveal` only where it is sent. `AccessTokenProvider.invalidate(rejected: Secret)` has a
+no-op default, so a provider that caches nothing is a lambda: `() => readToken().map(Secret.token)`. An
+`IdentitySource` is the configured form (`File(path)` or `Literal(token: Secret)`), and
+`IdentityTokenProvider.from(source)` the provider that reads it.
 
 ### `ProviderConfigSpec` and `ProviderConfigKey`
 
@@ -241,7 +265,7 @@ reported as unknown and not passed on. Values are strings; parse numbers or bool
 `buildConfig` and return a `ConfigurationError` for a malformed one.
 
 Read the values with `section.extra("region")` (an `Option[String]`) or
-`ProviderDescriptor.requireExtra(providerName, section, "region")` (a `Result[String]`).
+`ProviderDescriptor.requireExtra(context.providerName, section, "region")` (a `Result[String]`).
 
 ### The descriptor
 
@@ -249,7 +273,7 @@ Read the values with `section.extra("region")` (an `Option[String]`) or
 package com.acme.llm4s
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.spi.*
 import org.llm4s.model.ModelRegistryService
@@ -272,27 +296,25 @@ object AcmeProvider extends ProviderDescriptor:
   // Say so if the client cannot stream or call tools; the default claims both.
   override val features: ProviderFeatures = ProviderFeatures(streaming = true, toolCalling = false)
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    given ContextWindowResolver = context.contextWindows // AcmeConfig.fromValues takes it
     for
-      apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
-      baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      region  <- ProviderDescriptor.requireExtra(providerName, section, "region")
+      apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
+      baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
+      region  <- ProviderDescriptor.requireExtra(context.providerName, section, "region")
       config  <- AcmeConfig.fromValues(apiKey, section.model.asString, baseUrl, region)
     yield config
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
-    ProviderDescriptor.expectConfig[AcmeConfig](id, config).map(new AcmeClient(_, options))
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    given ModelRegistryService = context.modelRegistry // AcmeClient's constructor takes it
+    ProviderDescriptor.expectConfig[AcmeConfig](id, config).map(new AcmeClient(_, context.options))
 ```
 
 ### Your `ProviderConfig`
 
 `org.llm4s.llmconnect.config.ProviderConfig` is an open trait: `providerId`, `model`,
 `contextWindow`, `reserveCompletion`, `endpointUrl` and `withModel`. Resolve the window from the
-model registry with `ContextWindowResolver` (the `using` parameter `buildConfig` receives), and
+model registry with `ContextWindowResolver` (`context.contextWindows` in `buildConfig`), and
 keep the key out of `toString`:
 
 ```scala
@@ -599,7 +621,6 @@ The transform never logs. llm4s's own clients log each adjustment at WARN once p
 ```scala
 trait EmbeddingProvider:
   def embed(request: EmbeddingRequest): Result[EmbeddingResponse]
-  def embedMultimodal(request: MultimediaEmbeddingRequest): Result[EmbeddingResponse] // defaults to a 501 error
 ```
 
 What an `EmbeddingProviderDescriptor.build` returns. Report failures as `EmbeddingError(code,
@@ -754,13 +775,42 @@ object AcmeEmbeddings extends EmbeddingProviderDescriptor:
   // What ModelDimensionRegistry answers from; override dimensionsOf for model-name variants.
   override val modelDimensions: Map[String, Int] = Map("acme-embed-1" -> 1024)
 
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
-    Right(AcmeEmbeddingProvider(config, Llm4sHttpClient.create()))
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+    Right(
+      AcmeEmbeddingProvider(
+        config,
+        // the caller's own client, when EmbeddingClientOptions supplied one; else one for the config's proxy and TLS
+        context.httpClient.getOrElse(Llm4sHttpClient.create(HttpClientOptions(config.network)))
+      )
+    )
 ```
 
+`context.httpClient` is the HTTP client a caller passed with
+`EmbeddingClient.from(provider, config, EmbeddingClientOptions().withHttpClient(client))`: send your requests
+through it and do not close it, as a chat client does with `LlmClientOptions.httpClient`. Prove it with
+`assertEmbeddingUsesSuppliedHttpClient(AcmeEmbeddings, config)` in the module spec.
+
+The section a descriptor is handed, `EmbeddingProviderSection`, is typed as a chat section is: `baseUrl` is an
+`Option[BaseUrl]` and `model` an `Option[ModelName]`. A key of your own - a region, an API version - is declared
+in `EmbeddingConfigSpec.extras` with the same `ProviderConfigKey` a chat provider uses:
+
+```scala
+override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
+  requiresApiKey = true,
+  extras = Seq(ProviderConfigKey.optional("region", "the Acme region serving the model", default = Some("eu-west")))
+)
+```
+
+The loader reads `llm4s.embeddings.acme.region`, applies the default, and fails the load naming a required key
+that is missing. The value arrives in `section.extra("region")`, and the default `buildConfig` carries every
+declared key over, so `build` reads `config.extra("region")`. A key you do not declare is not passed on, and a
+name every section has (`EmbeddingConfigSpec.BuiltinKeys`: `apiKey`, `apiKeyFile`, `baseUrl`, `model`,
+`timeouts`) cannot be declared.
+
 `EmbeddingConfigSpec.defaultApiKey` is for a provider that takes a key but needs no real one
-(local Ollama). Override `buildConfig(section, modelOverride)` only when the config cannot be
-expressed with the spec.
+(local Ollama). Override `buildConfig(section, context)` only when the config cannot be
+expressed with the spec; `context.modelOverride` is the `<model>` half of `EMBEDDING_MODEL=<id>/<model>`, which
+takes precedence over the section's `model`.
 
 ## Testing: `Llm4s<Name>ModuleSpec` {#testing}
 
@@ -1034,8 +1084,9 @@ across all 1.x releases, so a provider compiled against 1.0 keeps working. That 
 - the registration SPI in `org.llm4s.llmconnect.spi` - `Llm4sProviderModule`,
   `ProviderDescriptor`, `ProviderConfigSpec`, `ProviderConfigKey`, `ProviderFeatures`,
   `EmbeddingProviderDescriptor`, `EmbeddingConfigSpec`, `EmbeddingProviderSection`,
+  `ProviderConfigContext`, `ProviderBuildContext`, `EmbeddingConfigContext`, `EmbeddingBuildContext`,
   `ProviderRegistry`;
-- `ProviderConfig`, `NamedProviderConfig`, `ContextWindowResolver`, `LlmClientOptions`;
+- `ProviderConfig`, `NamedProviderConfig`, `ContextWindowResolver`, `LlmClientOptions`, `EmbeddingClientOptions`;
 - `BaseLifecycleLLMClient`, `MetricsRecording`, `ProviderExchangeRecorder`,
   `ProviderExchangeLogging`, `HttpErrorMapper`, `CostEstimator`, `EmbeddingProvider`,
   `StreamingAccumulator`, `SSEParser`, `ToolCallRules` (`checked`, `parseArguments`, `wholeCall`),

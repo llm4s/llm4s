@@ -1,6 +1,6 @@
 package org.llm4s.context
 
-import org.llm4s.llmconnect.model.{ AssistantMessage, Conversation, Message, UserMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, Conversation, Message, MessageRole, UserMessage }
 import org.llm4s.types.SemanticBlockId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -36,36 +36,35 @@ class ContextGrowthSafeTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   "ContextStep" should "build through apply and set each field" in {
-    val step = ContextStep("trim", conversation, 100, 80, applied = true)
-    step.withName("other") shouldBe ContextStep("other", conversation, 100, 80, applied = true)
-    step.withConversation(otherConversation) shouldBe ContextStep("trim", otherConversation, 100, 80, applied = true)
-    step.withTokensBefore(120) shouldBe ContextStep("trim", conversation, 120, 80, applied = true)
-    step.withTokensAfter(60) shouldBe ContextStep("trim", conversation, 100, 60, applied = true)
-    step.withApplied(false) shouldBe ContextStep("trim", conversation, 100, 80, applied = false)
+    val step = ContextStep(ContextStage.FinalTokenTrim, conversation, 100, 80, applied = true)
+    step.withStage(ContextStage.HistoryCompression) shouldBe ContextStep(
+      ContextStage.HistoryCompression,
+      conversation,
+      100,
+      80,
+      applied = true
+    )
+    step.withConversation(otherConversation) shouldBe ContextStep(
+      ContextStage.FinalTokenTrim,
+      otherConversation,
+      100,
+      80,
+      applied = true
+    )
+    step.withTokensBefore(120) shouldBe ContextStep(ContextStage.FinalTokenTrim, conversation, 120, 80, applied = true)
+    step.withTokensAfter(60) shouldBe ContextStep(ContextStage.FinalTokenTrim, conversation, 100, 60, applied = true)
+    step.withApplied(false) shouldBe ContextStep(ContextStage.FinalTokenTrim, conversation, 100, 80, applied = false)
   }
 
   it should "keep its constructor and copy private" in {
-    assertDoesNotCompile("""new ContextStep("n", Conversation(Seq.empty), 1, 1, false)""")
-    assertDoesNotCompile("""ContextStep.noOperation("n", Conversation(Seq.empty), 1).copy(name = "x")""")
-  }
-
-  "PipelineStep" should "build through apply and set each field" in {
-    val step = PipelineStep("trim", messages, 100, 80, applied = true)
-    step.withName("other") shouldBe PipelineStep("other", messages, 100, 80, applied = true)
-    step.withMessages(messages.take(1)) shouldBe PipelineStep("trim", messages.take(1), 100, 80, applied = true)
-    step.withTokensBefore(120) shouldBe PipelineStep("trim", messages, 120, 80, applied = true)
-    step.withTokensAfter(60) shouldBe PipelineStep("trim", messages, 100, 60, applied = true)
-    step.withApplied(false) shouldBe PipelineStep("trim", messages, 100, 80, applied = false)
-    step.toContextStep shouldBe ContextStep("trim", Conversation(messages), 100, 80, applied = true)
-  }
-
-  it should "keep its constructor and copy private" in {
-    assertDoesNotCompile("""new PipelineStep("n", Seq.empty, 1, 1, false)""")
-    assertDoesNotCompile("""PipelineStep("n", Seq.empty, 1, 1, false).copy(name = "x")""")
+    assertDoesNotCompile("""new ContextStep(ContextStage.FinalTokenTrim, Conversation(Seq.empty), 1, 1, false)""")
+    assertDoesNotCompile(
+      """ContextStep.noOperation(ContextStage.FinalTokenTrim, Conversation(Seq.empty), 1).copy(applied = true)"""
+    )
   }
 
   "ManagedConversation" should "build through apply and set each field" in {
-    val step    = ContextStep.noOperation("noop", conversation, 10)
+    val step    = ContextStep.noOperation(ContextStage.LLMHistorySqueeze, conversation, 10)
     val managed = ManagedConversation(conversation, 100, 80, Seq(step))
     managed.withConversation(otherConversation) shouldBe ManagedConversation(otherConversation, 100, 80, Seq(step))
     managed.withOriginalTokens(120) shouldBe ManagedConversation(conversation, 120, 80, Seq(step))
@@ -110,60 +109,8 @@ class ContextGrowthSafeTypesSpec extends AnyFlatSpec with Matchers {
     assertDoesNotCompile("""TokenUsageInfo(1, 1, true, 1).copy(currentTokens = 2)""")
   }
 
-  "StructuredInfo" should "build through apply and set each field" in {
-    val empty = StructuredInfo(Seq.empty, Seq.empty, Seq.empty, Seq.empty, Seq.empty, Seq.empty, Seq.empty, Seq.empty)
-    val one   = Seq("x")
-    empty.withIdentifiers(one).identifiers shouldBe one
-    empty.withUrls(one).urls shouldBe one
-    empty.withConstraints(one).constraints shouldBe one
-    empty.withStatusCodes(one).statusCodes shouldBe one
-    empty.withErrors(one).errors shouldBe one
-    empty.withDecisions(one).decisions shouldBe one
-    empty.withToolUsage(one).toolUsage shouldBe one
-    empty.withOutcomes(one).outcomes shouldBe one
-
-    val all = empty
-      .withIdentifiers(one)
-      .withUrls(one)
-      .withConstraints(one)
-      .withStatusCodes(one)
-      .withErrors(one)
-      .withDecisions(one)
-      .withToolUsage(one)
-      .withOutcomes(one)
-    all shouldBe StructuredInfo(one, one, one, one, one, one, one, one)
-    empty.withUrls(one) shouldBe StructuredInfo(
-      Seq.empty,
-      one,
-      Seq.empty,
-      Seq.empty,
-      Seq.empty,
-      Seq.empty,
-      Seq.empty,
-      Seq.empty
-    )
-  }
-
-  it should "keep its constructor and copy private" in {
-    assertDoesNotCompile("""new StructuredInfo(Nil, Nil, Nil, Nil, Nil, Nil, Nil, Nil)""")
-    assertDoesNotCompile("""StructuredInfo(Nil, Nil, Nil, Nil, Nil, Nil, Nil, Nil).copy(urls = Nil)""")
-  }
-
-  "HistoryDigest" should "build through apply and set each field" in {
-    val digest = HistoryDigest("b1", "pair", "text", 42)
-    digest.withBlockId("b2") shouldBe HistoryDigest("b2", "pair", "text", 42)
-    digest.withBlockType("tool") shouldBe HistoryDigest("b1", "tool", "text", 42)
-    digest.withContent("other") shouldBe HistoryDigest("b1", "pair", "other", 42)
-    digest.withOriginalTokens(7) shouldBe HistoryDigest("b1", "pair", "text", 7)
-  }
-
-  it should "keep its constructor and copy private" in {
-    assertDoesNotCompile("""new HistoryDigest("b", "t", "c", 1)""")
-    assertDoesNotCompile("""HistoryDigest("b", "t", "c", 1).copy(content = "x")""")
-  }
-
   "TokenBreakdown" should "build through apply and set each field" in {
-    val info      = MessageTokenInfo("user", 5, "hello")
+    val info      = MessageTokenInfo(MessageRole.User, 5, "hello")
     val breakdown = TokenBreakdown(10, Seq(info), 3)
     breakdown.withTotalTokens(12) shouldBe TokenBreakdown(12, Seq(info), 3)
     breakdown.withMessages(Seq.empty) shouldBe TokenBreakdown(10, Seq.empty, 3)
@@ -176,15 +123,15 @@ class ContextGrowthSafeTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   "MessageTokenInfo" should "build through apply and set each field" in {
-    val info = MessageTokenInfo("user", 5, "hello")
-    info.withRole("assistant") shouldBe MessageTokenInfo("assistant", 5, "hello")
-    info.withTokens(9) shouldBe MessageTokenInfo("user", 9, "hello")
-    info.withPreview("bye") shouldBe MessageTokenInfo("user", 5, "bye")
+    val info = MessageTokenInfo(MessageRole.User, 5, "hello")
+    info.withRole(MessageRole.Assistant) shouldBe MessageTokenInfo(MessageRole.Assistant, 5, "hello")
+    info.withTokens(9) shouldBe MessageTokenInfo(MessageRole.User, 9, "hello")
+    info.withPreview("bye") shouldBe MessageTokenInfo(MessageRole.User, 5, "bye")
   }
 
   it should "keep its constructor and copy private" in {
-    assertDoesNotCompile("""new MessageTokenInfo("user", 1, "p")""")
-    assertDoesNotCompile("""MessageTokenInfo("user", 1, "p").copy(tokens = 2)""")
+    assertDoesNotCompile("""new MessageTokenInfo(MessageRole.User, 1, "p")""")
+    assertDoesNotCompile("""MessageTokenInfo(MessageRole.User, 1, "p").copy(tokens = 2)""")
   }
 
   "SemanticBlock" should "default expectingAssistantResponse to false in apply" in {

@@ -14,7 +14,7 @@ object CachingGuideSnippets {
   // ---- 3. Caching embeddings
 
   def embeddingCache(
-    base: org.llm4s.llmconnect.EmbeddingClient
+    base: org.llm4s.llmconnect.provider.EmbeddingProvider
   ): org.llm4s.types.Result[Option[org.llm4s.llmconnect.caching.CacheStats]] = {
     import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
@@ -32,7 +32,7 @@ object CachingGuideSnippets {
   }
 
   def queryCache(
-    base: org.llm4s.llmconnect.EmbeddingClient
+    base: org.llm4s.llmconnect.provider.EmbeddingProvider
   ): org.llm4s.types.Result[Option[org.llm4s.llmconnect.caching.CacheStats]] = {
     import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
@@ -49,17 +49,17 @@ object CachingGuideSnippets {
     } yield queries.cacheStats
   }
 
-  def asEmbeddingClient(base: org.llm4s.llmconnect.EmbeddingClient)(using
+  def asEmbeddingClient(base: org.llm4s.llmconnect.provider.EmbeddingProvider)(using
     org.llm4s.model.ModelRegistryService
   ): org.llm4s.types.Result[org.llm4s.llmconnect.EmbeddingClient] = {
     import org.llm4s.llmconnect.EmbeddingClient
     import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
 
     // A CachedEmbeddingClient is an EmbeddingProvider; wrap it where an EmbeddingClient is required.
-    InMemoryEmbeddingCache.create().map(cache => new EmbeddingClient(new CachedEmbeddingClient(base, cache)))
+    InMemoryEmbeddingCache.create().map(cache => EmbeddingClient(new CachedEmbeddingClient(base, cache)))
   }
 
-  class TenantKey(base: org.llm4s.llmconnect.EmbeddingClient) {
+  class TenantKey(base: org.llm4s.llmconnect.provider.EmbeddingProvider) {
     import org.llm4s.llmconnect.caching.{ CacheKeyGenerator, CachedEmbeddingClient, InMemoryEmbeddingCache }
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
     import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
@@ -112,7 +112,7 @@ object CachingGuideSnippets {
 
   def semanticCache(
     baseClient: org.llm4s.llmconnect.LLMClient,
-    embeddingClient: org.llm4s.llmconnect.EmbeddingClient,
+    embeddingClient: org.llm4s.llmconnect.provider.EmbeddingProvider,
     tracing: org.llm4s.trace.Tracing,
     cacheConfig: org.llm4s.llmconnect.caching.CacheConfig
   ): org.llm4s.llmconnect.caching.CachingLLMClient = {
@@ -130,7 +130,7 @@ object CachingGuideSnippets {
 
   def ttlClock(
     baseClient: org.llm4s.llmconnect.LLMClient,
-    embeddingClient: org.llm4s.llmconnect.EmbeddingClient,
+    embeddingClient: org.llm4s.llmconnect.provider.EmbeddingProvider,
     tracing: org.llm4s.trace.Tracing,
     cacheConfig: org.llm4s.llmconnect.caching.CacheConfig,
     clock: java.time.Clock

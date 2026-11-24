@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.caching
 
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.caching.guide.CachingGuideSnippets
 import org.llm4s.llmconnect.caching.guide.CachingGuideSnippets.Observing.{ collectingTracing, describe }
@@ -388,14 +388,8 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
 
   // ---- stand-ins for the real clients ---------------------------------------------------------------
 
-  private class NoProvider extends EmbeddingProvider {
-    def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
-      Left(org.llm4s.error.ProcessingError("fake", "the stand-in client never reaches its provider"))
-  }
-
   /** Embeds a text as the vector of the first table entry whose key it contains, else a fixed vector. */
-  private class FakeEmbeddingClient(table: Map[String, Seq[Double]] = Map.empty)
-      extends EmbeddingClient(new NoProvider(), None, "embedding") {
+  private class FakeEmbeddingClient(table: Map[String, Seq[Double]] = Map.empty) extends EmbeddingProvider {
     val calls                      = new AtomicInteger(0)
     val requests                   = ListBuffer.empty[EmbeddingRequest]
     @volatile var failing: Boolean = false

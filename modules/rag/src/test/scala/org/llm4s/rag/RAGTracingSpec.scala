@@ -85,7 +85,7 @@ class RAGTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   private def rag(config: RAGConfig): RAG = {
-    val built = RAG.buildWithClient(config, new EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
+    val built = RAG.buildWithClient(config, EmbeddingClient(Embeddings)).fold(e => fail(e.message), identity)
     if (!built.hasPermissions)
       built.ingestText("The answer to everything is 42.", "doc1").fold(e => fail(e.message), identity)
     built

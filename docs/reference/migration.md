@@ -82,7 +82,11 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [an agent run's trace and metrics report one status](#an-agent-runs-trace-and-metrics-report-one-status-2829),
 [`TraceEvent` carries an error as it is, and `AgentInitialized` is removed](#traceevent-carries-an-error-as-it-is-and-agentinitialized-is-removed-2800),
 [one retry mechanism: `LLMClientRetry` and `ErrorRecovery` are removed](#one-retry-mechanism-llmclientretry-and-errorrecovery-are-removed-2798),
-and [the provider SPI's error mapping, published helpers and report types](#provider-spi-error-mapping-published-helpers-report-types-2811).
+[the provider SPI's error mapping, published helpers and report types](#provider-spi-error-mapping-published-helpers-report-types-2811),
+[the provider SPI's descriptors, embedding sections and credential suppliers](#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811),
+[the Experimental context pipeline and token counters built over a tokenizer](#the-context-pipeline-is-experimental-and-token-counters-are-built-over-a-tokenizer-2818),
+[`Modality` as an enum, multimodal embedding in `llm4s-rag` and a final `EmbeddingClient`](#modality-is-an-enum-multimodal-embedding-lives-in-llm4s-rag-and-embeddingclient-is-final-2808),
+and [opaque newtypes in `org.llm4s.types`](#newtypes-in-orgllm4stypes-are-opaque-and-headroompercent-is-always-valid-2822).
 
 ## Provider SPI: error mapping, published helpers, report types (#2811)
 
@@ -124,10 +128,215 @@ own tool-call check: pass the parsed `Completion` through `ToolCallRules.checked
 
 **Descriptors.** `EmbeddingProviderDescriptor.configSpec` is abstract: a descriptor that relied on the default adds
 `val configSpec = EmbeddingConfigSpec()`. `AccessTokenProvider.invalidate` has a no-op default: an implementation
-adds `override`, and a provider that caches nothing can be a lambda.
+adds `override` and takes the rejected token as a `Secret` (see the next section), and a provider that caches
+nothing can be a lambda.
 
 `requireExtra` and `resolveBaseUrl` name the section in their hint (`llm4s.providers.my-section.region`), where
 they printed `llm4s.providers.<name>.region`.
+
+## Provider SPI: one shape for both descriptors, typed embedding sections, credential suppliers (#2811)
+
+**Both descriptors have `buildConfig(section, context)` and `build(config, context)`.** What was a `using`
+parameter, or a loose argument, is a field of the context.
+
+| Before | After |
+|---|---|
+| `def buildConfig(providerName: String, section: NamedProviderConfig)(using ContextWindowResolver)` | `def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext)` |
+| `providerName` | `context.providerName` |
+| the `ContextWindowResolver` in scope | `given ContextWindowResolver = context.contextWindows` as the method's first line |
+| `def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService)` | `def build(config: ProviderConfig, context: ProviderBuildContext)` |
+| `options.metrics`, `options.exchangeLogging`, `options.httpClient` | `context.metrics`, `context.exchangeLogging`, `context.httpClient` (`context.options` is the whole `LlmClientOptions`) |
+| the `ModelRegistryService` in scope | `given ModelRegistryService = context.modelRegistry` as the method's first line |
+| `override def buildConfig(section: EmbeddingProviderSection, modelOverride: Option[String])` | `override def buildConfig(section: EmbeddingProviderSection, context: EmbeddingConfigContext)`, reading `context.modelOverride` |
+| `def build(config: EmbeddingProviderConfig)` | `def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext)` |
+
+A caller of a descriptor makes the context from what is in scope:
+
+| Before | After |
+|---|---|
+| `descriptor.buildConfig("main", section)` | `descriptor.buildConfig(section, ProviderConfigContext.of("main"))` |
+| `descriptor.buildConfig("main", section)(using resolver)` | `descriptor.buildConfig(section, ProviderConfigContext("main", resolver))` |
+| `descriptor.buildClient(config, options)` | `descriptor.build(config, ProviderBuildContext.of(options))` |
+| `descriptor.buildClient(config, LlmClientOptions.default)` | `descriptor.build(config, ProviderBuildContext.of())` |
+| `embeddings.buildConfig(section, Some("model"))` | `embeddings.buildConfig(section, EmbeddingConfigContext(Some("model")))` |
+| `embeddings.build(config)` | `embeddings.build(config, EmbeddingBuildContext())` |
+
+`ProviderModuleChecks.buildClient` and `assertBuildsClient` in `llm4s-provider-testkit` keep their names and
+arguments; `assertBuildsEmbeddingProvider` gains an optional `EmbeddingClientOptions`.
+
+**An embedding provider can use the caller's HTTP client.**
+`EmbeddingClient.from(provider, config, EmbeddingClientOptions().withHttpClient(client))` hands `client` to the
+provider as `context.httpClient`. A provider of your own should send through it and not close it:
+
+```scala
+def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+  Right(MyEmbeddings(config, context.httpClient.getOrElse(Llm4sHttpClient.create(HttpClientOptions(config.network)))))
+```
+
+`assertEmbeddingUsesSuppliedHttpClient(descriptor, config)` in the module spec proves it.
+
+**`Llm4sProviderModule.chatProviders` is `providers`.** An unprefixed name is the chat half everywhere in the SPI
+(`ProviderDescriptor`, `ProviderRegistry.find`, `ids`, `of`) and `embedding*` the embedding half.
+
+| Before | After |
+|---|---|
+| `override def chatProviders: Seq[ProviderDescriptor] = Seq(MyProvider)` | `override def providers: Seq[ProviderDescriptor] = Seq(MyProvider)` |
+| `module.chatProviders` | `module.providers` |
+
+**`EmbeddingProviderSection` is typed, and an embedding provider can declare keys of its own.**
+
+| Before | After |
+|---|---|
+| `EmbeddingProviderSection(baseUrl = Some("https://x"), model = Some("m"))` | `EmbeddingProviderSection(baseUrl = Some(BaseUrl("https://x")), model = Some(ModelName("m")))` |
+| `section.withBaseUrl("https://x").withModel("m")` | `section.withBaseUrl(BaseUrl("https://x")).withModel(ModelName("m"))` |
+| `section.baseUrl` as a `String` | `section.baseUrl.map(_.asUrl)` |
+| `section.model` as a `String` | `section.model.map(_.asString)` |
+
+`EmbeddingConfigSpec(extras = Seq(ProviderConfigKey.required("region", "...")))` declares
+`llm4s.embeddings.<id>.region`. The loader applies defaults and fails the load naming a required key that is
+missing; the value is `section.extra("region")` in `buildConfig` and `config.extra("region")` in `build`. Keys you do
+not declare are still ignored. Nothing to change for a provider that declares none.
+
+**The three credential suppliers share one verb, and a token is a `Secret`.**
+
+| Before | After |
+|---|---|
+| `tokens.token()` giving a `Result[String]` | `tokens.current()` giving a `Result[Secret]`; `.map(_.reveal)` where the string is sent |
+| `def token(): Result[String] = Right(value)` | `def current(): Result[Secret] = Right(Secret.token(value))` |
+| `override def invalidate(rejected: String): Unit` | `override def invalidate(rejected: Secret): Unit` |
+| `AccessToken(value, expiresAt)` | `AccessToken(Secret.token(value), expiresAt)` |
+| `accessToken.value` as a `String` | `accessToken.value.reveal` |
+| `IdentityTokenSource` | `IdentityTokenProvider` |
+| `source.fetch()` | `provider.current()` |
+| `IdentityTokenSource.static("jwt")` | `IdentityTokenProvider.static(Secret("jwt"))` |
+| `IdentitySource.Literal("jwt")` | `IdentitySource.Literal(Secret("jwt"))` |
+
+`ApiKeyProvider.current()` is unchanged. `IdentitySource` keeps its name: it is the configured form, and
+`IdentityTokenProvider.from(source)` reads it.
+
+## The context pipeline is Experimental, and token counters are built over a tokenizer (#2818)
+
+In `org.llm4s.context` (`llm4s-core`).
+
+**Stability.** `ContextManager`, `ContextConfig`, `ContextStep`, `ManagedConversation`, `TokenWindow`,
+`ConversationWindow`, `TokenUsageInfo`, `DeterministicCompressor`, `CompressionRule`, `ToolOutputCompressor`,
+`ArtifactStore`, `LLMCompressor`, `HistoryCompressor`, `SemanticBlocks`, `SemanticBlock` and `SemanticBlockType` are
+`@Experimental`: they work as before, but are outside the 1.x compatibility promise. `ConversationTokenCounter`,
+`TokenBreakdown`, `MessageTokenInfo` and `org.llm4s.context.tokens` stay `@Stable`.
+
+**Token counters.** A counter is built over a tokenizer, never over a model name, because which vocabulary a model
+uses is its vendor's knowledge:
+
+| Before | After |
+|---|---|
+| `ConversationTokenCounter.forModel("gpt-4o")` | `OpenAITokenizers.counterFor("gpt-4o")` (`org.llm4s.llmconnect.provider`, in `llm4s-openai`) |
+| `ConversationTokenCounter.forModel("claude-...")`, or any model that is not OpenAI's | `ConversationTokenCounter.cl100k()`: the same `cl100k_base` approximation, now asked for by name |
+| `ConversationTokenCounter.openAI()` | `ConversationTokenCounter.cl100k()` |
+| `ConversationTokenCounter.openAI_o200k()` | `ConversationTokenCounter.o200k()` |
+| `ConversationTokenCounter(tokenizerId)` | `ConversationTokenCounter.create(tokenizerId)` |
+| `TokenizerMapping.getTokenizerId(model)` | `OpenAITokenizers.tokenizerFor(model)`, an `Option`: `None` for a model that is not OpenAI's |
+| `TokenizerMapping.getAccuracyInfo(model)`, `isExactMapping(model)`, `TokenizerAccuracy` | removed: a count is exact when `OpenAITokenizers.tokenizerFor(model)` is defined, an approximation otherwise |
+| `import org.llm4s.identity.TokenizerId` | `import org.llm4s.context.tokens.TokenizerId` (the scalafix rule `ResultSyntaxMoved` rewrites it) |
+
+`OpenAITokenizers.counterFor` returns a `Left(TokenizerError)` for a model it does not recognise, where `forModel`
+fell back to `cl100k_base` with a warning; write the fallback yourself where you want it:
+
+```scala
+val counter = OpenAITokenizers.counterFor(model).orElse(ConversationTokenCounter.cl100k())
+```
+
+`gpt-4.1`, `gpt-4.5`, `gpt-5`, `o3` and `o4-mini` now count with `o200k_base`; counts for those models change.
+
+To count with a tokenizer of your own, implement `StringTokenizer` and pass it to `ConversationTokenCounter.of`.
+Token counting calls the new `StringTokenizer.count(text)`, which defaults to `encode(text).length`; override it when
+counting is cheaper than building the list.
+
+**`ContextManager`.** The constructor is private and `withDefaults` is gone: `ContextManager.create(counter)` (its
+`config` now defaults to `ContextConfig.default`) is the one factory. It returns a `Left(ValidationError)` for a
+negative `maxSemanticBlocks` or a `summaryTokenTarget` that is not positive; it no longer checks the headroom, which
+cannot be invalid any more (see the `org.llm4s.types` section below).
+
+**Removed and retyped members.**
+
+- `ContextConfig.enableSubjectiveEdits` and `withEnableSubjectiveEdits` are removed. `ContextManager` never read
+  them. Delete the argument; to apply the subjective rules, call
+  `DeterministicCompressor.compressToCap(messages, counter, cap, enableSubjectiveEdits = true)`.
+- `ContextStep.name: String` is `ContextStep.stage: ContextStage` (`ToolDeterministicCompaction`,
+  `HistoryCompression`, `LLMHistorySqueeze`, `FinalTokenTrim`); `withName` is `withStage`. `step.stage.toString` is
+  the old name.
+- `MessageTokenInfo.role` is a `MessageRole`; `role.name` is the old string.
+- `TokenWindow.trimToBudget` and `fitsInBudget` take `headroom: HeadroomPercent` (default
+  `HeadroomPercent.Standard`) where they took `headroomPercent: Double`.
+- `StructuredInfo`, `HistoryDigest` and `PipelineStep` are private; they appeared in no public signature.
+- `Token` and `TokenizerId` are final.
+
+## `Modality` is an enum, multimodal embedding lives in `llm4s-rag`, and `EmbeddingClient` is final (#2808)
+
+**`Modality`.** The four cases are nested: write `Modality.Text`, `Modality.Image`, `Modality.Audio` and
+`Modality.Video`, or `import org.llm4s.llmconnect.model.Modality.*`. A wildcard import of
+`org.llm4s.llmconnect.model` no longer puts a bare `Text` and `Image` beside `ContentPart.Text` and
+`ContentPart.Image`.
+
+**The multimodal embedding types** keep their package (`org.llm4s.llmconnect.model`) and move from `llm4s-core` to
+`llm4s-rag`; add that dependency if you used them without it.
+
+- `EmbeddingVector.values` is a `Seq[Double]` (it was an `Array[Float]`), the element type of
+  `EmbeddingResponse.embeddings`. `dim` is the number of values: drop the `dim` argument of `EmbeddingVector(...)`,
+  and `withDim` is gone.
+- `RawMediaInput(bytes, mime)` copies the array; read it back as `data: IArray[Byte]`, and its size as `sizeBytes`
+  (was `bytesApprox`). Two inputs with the same bytes and MIME type are equal.
+- `MultimediaEmbeddingRequest.inputs` is a `Seq[RawMediaInput]`. `TextChunkInput`, `ImageInput`, `AudioInput`,
+  `VideoInput` and the `MMInput` trait are removed: nothing in llm4s built or read them. Send media as
+  `RawMediaInput`.
+
+**Multimodal embedding is its own capability.** `EmbeddingProvider.embedMultimodal`, whose default answered every
+provider's call with a `501`, is removed, with `EmbeddingClient.embedMultimodal` and
+`CachedEmbeddingClient.embedMultimodal`. Implement `org.llm4s.llmconnect.provider.MultimodalEmbeddingProvider`
+(`llm4s-rag`) instead, and hand it to `FileEmbedder`:
+
+```scala
+// before: an EmbeddingProvider that overrode embedMultimodal, wrapped in the EmbeddingClient
+FileEmbedder.encodeFromPath(path, client, config)
+
+// after
+val multimodal: MultimodalEmbeddingProvider = request => myEndpoint.embed(request)
+FileEmbedder.encodeFromPath(path, client, config, multimodal = Some(multimodal))
+```
+
+Without one, an image, audio or video file fails with an `EmbeddingError` (no code) that says to pass a provider or
+set `experimentalStubs`; it used to fail with code `501`.
+
+**`EmbeddingClient`** is a final class with a private constructor.
+
+| Before | After |
+|---|---|
+| `new EmbeddingClient(provider)` | `EmbeddingClient(provider)` |
+| `new EmbeddingClient(provider, Some(tracer), "query", Some(id))` | `EmbeddingClient(provider).withTracing(tracer).withOperation("query").withProviderId(id)` |
+| `class Fake extends EmbeddingClient(...)`, `mock[EmbeddingClient]` | implement or mock `EmbeddingProvider`, and wrap it: `EmbeddingClient(fake)` |
+
+`EmbeddingClient.from(provider, cfg)` returns the registry's `ConfigurationError` when no embedding provider has
+that name. It used to rewrite it to `EmbeddingError(code = Some("400"), provider = "config")`; match on
+`ConfigurationError` instead.
+
+**`EmbeddingError`** is `org.llm4s.error.EmbeddingError` (it was in `org.llm4s.llmconnect.model`). Its fields are
+unchanged. The scalafix rule `ResultSyntaxMoved` rewrites the import.
+
+## Newtypes in `org.llm4s.types` are opaque, and `HeadroomPercent` is always valid (#2822)
+
+- **`HeadroomPercent`** has no public constructor: use `HeadroomPercent.create(0.1)`, a `Result`, or a preset.
+  `HeadroomPercent.None` is `HeadroomPercent.Zero` (it shadowed `scala.None`); `isValid` is gone, since every value
+  is valid; read the ratio with `asRatio` (`value` is gone). It no longer prints as a percentage: format
+  `asRatio * 100` where you showed one.
+- **`TokenBudget`, `ContextWindowSize`, `ByteCount` and `ExternalizationThreshold`** were aliases of `Int` and
+  `Long` and checked nothing; write `Int` (`TokenBudget`, `ContextWindowSize`) or `Long`. `LLMClient.getContextBudget`
+  returns an `Int`, as it always did.
+- **`SemanticBlockId`, `ArtifactKey` and `ContentSize`** are opaque types. Build them as before
+  (`ArtifactKey("k")`, `ContentSize.fromString(text)`); read them with `id.asString`, `key.asString` and
+  `size.asBytes` where you wrote `.value` and `.bytes`. They have no `copy`, and they do not match as case-class
+  patterns.
+- **`ExternalizedContent`** is private to `ToolOutputCompressor`; it appeared in no public signature.
+- **`TraceId`** is `org.llm4s.trace.model.TraceId`, in `llm4s-observability`, which was its only user. The scalafix
+  rule `ResultSyntaxMoved` rewrites the import.
 
 ## One retry mechanism: `LLMClientRetry` and `ErrorRecovery` are removed (#2798)
 

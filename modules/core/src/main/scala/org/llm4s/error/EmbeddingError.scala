@@ -1,13 +1,13 @@
-package org.llm4s.llmconnect.model
+package org.llm4s.error
 
 import org.llm4s.annotation.Stable
-import org.llm4s.error.LLMError
 
 /**
  * EmbeddingError represents a structured error returned from
  * an embedding provider (e.g., OpenAI or VoyageAI) or local encoders/extractors.
  *
- * @param code Optional error code, typically an HTTP status (e.g., "401", "400").
+ * @param code Optional error code: the HTTP status of the provider's reply (e.g., "401"), as a string because
+ *             it is [[LLMError.code]]. `None` for an error that is not an HTTP reply.
  * @param message Human-readable error message from the provider or client.
  * @param provider Source component ("openai", "voyage", "encoder", "extractor", etc.)
  */

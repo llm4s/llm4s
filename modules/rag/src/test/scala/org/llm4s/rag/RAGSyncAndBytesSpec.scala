@@ -59,7 +59,7 @@ class RAGSyncAndBytesSpec extends AnyFlatSpec with Matchers {
   ): Result[RAG] = {
     val mockLLM = new MockLLMClient()
     val cfg     = if (withLLM) config.copy(llmClient = Some(mockLLM)) else config
-    val client  = new EmbeddingClient(new MockEmbeddingProvider())
+    val client  = EmbeddingClient(new MockEmbeddingProvider())
     RAG.buildWithClient(cfg, client)
   }
 
