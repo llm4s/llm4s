@@ -85,35 +85,68 @@ object ConfigPolicy {
       .withMaxContextWindow(CatalogEnvironment.Dev, 1048576)
 
   /**
-   * Prod: named providers with pinned model patterns. The generic `openai-compatible` provider is
-   * deliberately '''not''' allowed: it can point at any endpoint, so production must opt in by
-   * adding it (ideally with `withRequiredBaseUrlPattern` for the endpoints it may use).
+   * The model generations each vendor serves (checked 2026-11-24), as whole-match patterns over the bare model id.
+   * A pattern names a family, not a release, so a new model in a current generation (`gpt-6.2-astra`,
+   * `claude-sonnet-5-5`, `gemini-3.8-flash`) passes without an edit here, and a retired generation (`gpt-4o`,
+   * `claude-3-5-sonnet`, `gemini-2.5-pro`) does not. A new generation is one change in this object.
+   */
+  object ModelFamilies {
+
+    /** GPT-5 and GPT-6, every point release and variant: `gpt-5.6-luna`, `gpt-6-luna`, `gpt-6.1-terra`. */
+    val OpenAI: String = raw"gpt-(5|6)(\.\d+)?(-.*)?"
+
+    /** Claude 5 and later in every tier, Opus and Sonnet from 4.6, Haiku 4.5: `claude-haiku-5-5`, `claude-opus-4-8`. */
+    val Anthropic: String = "claude-((fable|mythos|opus|sonnet|haiku)-[5-9]|(opus|sonnet)-4-[6-9]|haiku-4-5)(-.*)?"
+
+    /** Gemini 3, every point release and variant: `gemini-3.8-flash`, `gemini-3-pro-preview`. */
+    val Gemini: String = raw"gemini-3(\.\d+)?(-.*)?"
+
+    /** DeepSeek's two API models. */
+    val DeepSeek: String = "deepseek-(chat|reasoner)"
+
+    /** Claude on Bedrock: the [[Anthropic]] families, bare or behind a cross-region prefix (`us.`, `eu.`, `global.`). */
+    val BedrockAnthropic: String = raw"((us|eu|apac|au|jp|global)\.)?anthropic\." + Anthropic
+  }
+
+  /**
+   * The `prod` preset's model allow-list: `<provider>/<model family>` for each provider it allows. An Azure model is a
+   * deployment name the operator chooses, so any is allowed. `withAllowedModelPatterns` replaces the list it is given:
+   * pass this list with your own patterns added.
+   */
+  val prodModelPatterns: List[String] = List(
+    s"openai/${ModelFamilies.OpenAI}",
+    s"anthropic/${ModelFamilies.Anthropic}",
+    s"bedrock/${ModelFamilies.BedrockAnthropic}",
+    "azure/.*",
+    s"gemini/${ModelFamilies.Gemini}",
+    s"deepseek/${ModelFamilies.DeepSeek}"
+  )
+
+  /**
+   * Prod: named providers, each limited to its vendor's current model generations ([[ModelFamilies]]). The generic
+   * `openai-compatible` provider is deliberately '''not''' allowed: it can point at any endpoint, so production must
+   * opt in by adding it (ideally with `withRequiredBaseUrlPattern` for the endpoints it may use).
    *
    * Every chat section must also set its own `apiKey` in prod (`withOwnApiKeyRequired`): which
    * account a section bills should be written down, not inherited from `OPENAI_API_KEY`.
    */
   val prodSafeDefaults: ConfigPolicy =
     ConfigPolicy()
-      .withAllowedProviders("openai", "anthropic", "azure", "gemini", "deepseek")
-      .withAllowedModelPatterns(
-        "openai/gpt-4o",
-        "openai/gpt-4o-mini",
-        "anthropic/claude-3-5-sonnet.*",
-        "azure/.*",
-        "gemini/gemini-2\\..*",
-        "deepseek/deepseek-chat"
-      )
+      .withAllowedProviders("openai", "anthropic", "bedrock", "azure", "gemini", "deepseek")
+      .withAllowedModelPatterns(prodModelPatterns*)
       // Environment-wide fallback for a provider with no entry below (one added with `withAllowedProviders`,
       // such as the generic `openai-compatible`): the largest window a mainstream hosted model offers today.
       // The few models above it (Llama 4 Scout, 10M) must be allowed with an explicit per-provider cap.
       .withMaxContextWindow(CatalogEnvironment.Prod, 1048576)
-      // Caps follow each provider's current models (Gemini 1M, Claude 200k, DeepSeek 131k, GPT-4o 128k),
-      // so an allowed model is not rejected for its own native window.
-      .withMaxContextWindow(CatalogEnvironment.Prod, "openai", 128000)
-      .withMaxContextWindow(CatalogEnvironment.Prod, "azure", 128000)
-      .withMaxContextWindow(CatalogEnvironment.Prod, "anthropic", 200000)
+      // Each cap is the largest input window among the provider's current models in the bundled model metadata
+      // (GPT-5.5 1,050,000; Claude 1,000,000; Gemini 1,048,576; DeepSeek V3.2 163,840), so an allowed model is never
+      // rejected for its own native window, while a section that sets a larger window is.
+      .withMaxContextWindow(CatalogEnvironment.Prod, "openai", 1050000)
+      .withMaxContextWindow(CatalogEnvironment.Prod, "azure", 1050000)
+      .withMaxContextWindow(CatalogEnvironment.Prod, "anthropic", 1000000)
+      .withMaxContextWindow(CatalogEnvironment.Prod, "bedrock", 1000000)
       .withMaxContextWindow(CatalogEnvironment.Prod, "gemini", 1048576)
-      .withMaxContextWindow(CatalogEnvironment.Prod, "deepseek", 131072)
+      .withMaxContextWindow(CatalogEnvironment.Prod, "deepseek", 163840)
       .withOwnApiKeyRequired(CatalogEnvironment.Prod)
 
   def preset(name: String): Option[ConfigPolicy] =

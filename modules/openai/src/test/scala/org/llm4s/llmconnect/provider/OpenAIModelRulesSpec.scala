@@ -372,6 +372,12 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
           ("gpt-5", true),
           ("gpt5", true),
           ("openai/gpt-5", true),
+          // ...and GPT-6 (#2886)
+          ("gpt-5.6-luna", true),
+          ("gpt-6-luna", true),
+          ("gpt-6.1-terra", true),
+          ("openai/gpt-6.2-astra", true),
+          ("gpt-35-turbo", false),
           // Standard models do NOT require max_completion_tokens
           ("gpt-4o", false),
           ("claude-3", false),
@@ -388,5 +394,68 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
             OpenAIModelRules.requiresMaxCompletionTokens(modelId) shouldBe expected
           }
         }
+  }
+
+  // ============================================
+  // Tool calls on Chat Completions (#2886)
+  // ============================================
+
+  private lazy val noopTool =
+    org.llm4s.toolapi
+      .ToolBuilder[String](
+        "noop",
+        "Does nothing",
+        org.llm4s.toolapi.Schema.`object`[Map[String, Any]]("No parameters")
+      )
+      .withHandler(_ => Right("ok"))
+      .buildSafe()
+      .fold(e => fail(e.formatted), identity)
+
+  private lazy val withTool = CompletionOptions().withTools(Seq(noopTool))
+
+  test("toolsOnChatCompletions follows OpenAI's model pages, by family, snapshot and prefix") {
+    import OpenAIModelRules.ToolCalls
+    OpenAIModelRules.toolsOnChatCompletions("gpt-6-luna") shouldBe ToolCalls.OnlyWithoutReasoning
+    OpenAIModelRules.toolsOnChatCompletions("openai/gpt-6-luna") shouldBe ToolCalls.OnlyWithoutReasoning
+    OpenAIModelRules.toolsOnChatCompletions("gpt-6-luna-2026-10-01") shouldBe ToolCalls.OnlyWithoutReasoning
+    OpenAIModelRules.toolsOnChatCompletions("gpt-6.1-terra") shouldBe ToolCalls.ResponsesApiOnly
+    OpenAIModelRules.toolsOnChatCompletions("GPT-6.1-TERRA") shouldBe ToolCalls.ResponsesApiOnly
+    Seq("gpt-5.6-luna", "gpt-5.6-terra", "gpt-6.2-astra", "gpt-6-lunar", "gpt-6.1-terra-mini", "gpt-4o").foreach { m =>
+      withClue(m)(OpenAIModelRules.toolsOnChatCompletions(m) shouldBe ToolCalls.Unrestricted)
+    }
+  }
+
+  test("a request with tools to gpt-6.1-terra is refused, naming the Responses API") {
+    val error = OpenAIModelRules.checkTools("gpt-6.1-terra", withTool).left.value
+    error shouldBe a[org.llm4s.error.ValidationError]
+    error.message should include("Responses API")
+    error.message should include("gpt-6.1-terra")
+    OpenAIModelRules.checkTools("gpt-6.1-terra", CompletionOptions()) shouldBe Right(())
+    OpenAIModelRules.checkTools("gpt-6-luna", withTool) shouldBe Right(())
+  }
+
+  test("a request with tools to gpt-6-luna sends reasoning_effort none and reports what it overrode") {
+    import org.llm4s.llmconnect.model.{ ReasoningEffort, RequestAdjustment, RequestOption, Thinking }
+    val reason = "gpt-6-luna calls tools on Chat Completions only with reasoning_effort none"
+
+    OpenAIModelRules.forcedToolEffort("gpt-6-luna", withTool) shouldBe Some(
+      (
+        com.openai.models.ReasoningEffort.NONE,
+        List(RequestAdjustment.Adjusted(RequestOption.Reasoning, "model default", "none", reason))
+      )
+    )
+    OpenAIModelRules
+      .forcedToolEffort("gpt-6-luna", withTool.withReasoning(ReasoningEffort.High).withThinking(Thinking.Adaptive))
+      .map(_._2) shouldBe Some(
+      List(
+        RequestAdjustment.Adjusted(RequestOption.Reasoning, ReasoningEffort.High.name, "none", reason),
+        RequestAdjustment.Adjusted(RequestOption.Thinking, "Adaptive", "Off", reason)
+      )
+    )
+    // thinking = Off already asks for no reasoning: nothing to report
+    OpenAIModelRules.forcedToolEffort("gpt-6-luna", withTool.withThinking(Thinking.Off)).map(_._2) shouldBe Some(Nil)
+    // no tools, or another model: the usual effort plan applies
+    OpenAIModelRules.forcedToolEffort("gpt-6-luna", CompletionOptions()) shouldBe None
+    OpenAIModelRules.forcedToolEffort("gpt-5.6-luna", withTool) shouldBe None
   }
 }

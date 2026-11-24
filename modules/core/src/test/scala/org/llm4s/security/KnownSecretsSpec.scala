@@ -17,11 +17,21 @@ class KnownSecretsSpec extends AnyFlatSpec with Matchers {
     KnownSecrets.scrub("""{"k":"tok/en+with\"quote&amp"}""", P) shouldBe s"""{"k":"$P"}"""
   }
 
-  it should "refuse a value under 8 characters and log once" in KnownSecrets.isolated {
+  it should "refuse a value under 8 characters, counting it without keeping it" in KnownSecrets.isolated {
     KnownSecrets.register("abc", KnownSecrets.Kind.Configured)
     KnownSecrets.register("abc", KnownSecrets.Kind.Configured)
     KnownSecrets.scrub("key abc", P) shouldBe "key abc"
-    KnownSecrets.refusedCount shouldBe 1
+    KnownSecrets.refusedCount shouldBe 2
+    KnownSecrets.size shouldBe 0
+  }
+
+  it should "hold nothing for many distinct refused short values (#2888)" in KnownSecrets.isolated {
+    val before = KnownSecrets.snapshot
+    (0 until 20000).foreach(i => KnownSecrets.register(f"s$i%06d", KnownSecrets.Kind.Token))
+    (KnownSecrets.snapshot should be).theSameInstanceAs(before)
+    KnownSecrets.refusedCount shouldBe 20000L
+    KnownSecrets.size shouldBe 0
+    KnownSecrets.scrub("s000001", P) shouldBe "s000001"
   }
 
   it should "forget a value" in KnownSecrets.isolated {

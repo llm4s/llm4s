@@ -4,7 +4,7 @@ import org.llm4s.util.{ ExactMatcher, Redaction }
 import org.slf4j.LoggerFactory
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicLong, AtomicReference }
 
 /**
  * Every credential llm4s holds, so that diagnostic text can be scrubbed of it by exact match (layer A of
@@ -38,40 +38,51 @@ private[llm4s] object KnownSecrets {
   /**
    * Entries ordered from least to most recently registered, plus the matcher over their forms. `overCapWarned` is
    * set once, by the first registration that leaves the registry over [[Cap]], so that the warning is logged once.
+   * `refusals` counts the values refused for being shorter than [[MinLength]]; the values themselves are never kept,
+   * so refusing many distinct ones holds no memory and no credential (#2888).
    */
   final private case class State(
     entries: Vector[Entry],
     matcher: Matcher,
-    refused: Set[String],
+    refusals: AtomicLong,
     overCapWarned: AtomicBoolean
   )
 
-  private def empty  = State(Vector.empty, new Matcher(Vector.empty), Set.empty, new AtomicBoolean(false))
+  private def empty  = State(Vector.empty, new Matcher(Vector.empty), new AtomicLong(0), new AtomicBoolean(false))
   private val global = new AtomicReference[State](empty)
   // set only by `isolated`; inherited by threads the test body starts
   private val scoped                        = new InheritableThreadLocal[AtomicReference[State]]
   private def state: AtomicReference[State] = Option(scoped.get()).getOrElse(global)
 
   def register(value: String, kind: Kind): Unit = Option(value).map(_.trim).foreach { v =>
+    if (v.length < MinLength) refuse()
+    else add(v, kind)
+  }
+
+  /** Counts a refused short value without keeping it, and logs the first refusal only. */
+  private def refuse(): Unit =
+    if (state.get().refusals.getAndIncrement() == 0)
+      log.debug(
+        s"Not registering a credential shorter than $MinLength characters: it is not scrubbed from diagnostics " +
+          "(logged once; later refusals are counted only)"
+      )
+
+  private def add(v: String, kind: Kind): Unit = {
     val after = state.updateAndGet { s =>
-      if (v.length < MinLength) {
-        if (!s.refused.contains(v)) log.debug(s"Not registering a credential shorter than $MinLength characters")
-        s.copy(refused = s.refused + v)
-      } else
-        s.entries.indexWhere(_.value == v) match {
-          case -1 => rebuild(evict(s.entries :+ Entry(v, kind, 1)), s.refused, s.overCapWarned)
-          case i  =>
-            // Configured outranks Identifier, which outranks Token: a value that is also a configured key is never
-            // evicted or forgotten. A token registered again is in use again, so it moves to the most recent end and
-            // is the last to be evicted. The forms are unchanged, so the matcher is kept.
-            val e       = s.entries(i)
-            val kept    = if (e.kind == Kind.Configured || kind == Kind.Token) e.kind else kind
-            val updated = e.copy(kind = kept, holds = e.holds + 1)
-            val entries =
-              if (updated.kind == Kind.Token) s.entries.patch(i, Nil, 1) :+ updated
-              else s.entries.updated(i, updated)
-            s.copy(entries = entries)
-        }
+      s.entries.indexWhere(_.value == v) match {
+        case -1 => rebuild(evict(s.entries :+ Entry(v, kind, 1)), s.refusals, s.overCapWarned)
+        case i  =>
+          // Configured outranks Identifier, which outranks Token: a value that is also a configured key is never
+          // evicted or forgotten. A token registered again is in use again, so it moves to the most recent end and
+          // is the last to be evicted. The forms are unchanged, so the matcher is kept.
+          val e       = s.entries(i)
+          val kept    = if (e.kind == Kind.Configured || kind == Kind.Token) e.kind else kind
+          val updated = e.copy(kind = kept, holds = e.holds + 1)
+          val entries =
+            if (updated.kind == Kind.Token) s.entries.patch(i, Nil, 1) :+ updated
+            else s.entries.updated(i, updated)
+          s.copy(entries = entries)
+      }
     }
     if (after.entries.size > Cap && after.overCapWarned.compareAndSet(false, true))
       log.warn(
@@ -113,7 +124,7 @@ private[llm4s] object KnownSecrets {
           val e = s.entries(i)
           if (e.kind != Kind.Token) s
           else if (e.holds > 1) s.copy(entries = s.entries.updated(i, e.copy(holds = e.holds - 1)))
-          else rebuild(s.entries.patch(i, Nil, 1), s.refused, s.overCapWarned)
+          else rebuild(s.entries.patch(i, Nil, 1), s.refusals, s.overCapWarned)
       }
     }: Unit
   }
@@ -122,8 +133,11 @@ private[llm4s] object KnownSecrets {
     if (text == null || text.isEmpty) text
     else state.get().matcher.built.fold(text)(_.replaceAll(text, placeholder))
 
-  private[llm4s] def size: Int            = state.get().entries.size
-  private[security] def refusedCount: Int = state.get().refused.size
+  private[llm4s] def size: Int             = state.get().entries.size
+  private[security] def refusedCount: Long = state.get().refusals.get()
+
+  /** The current registry snapshot, to check that an operation left it untouched (tests only). */
+  private[security] def snapshot: AnyRef = state.get()
 
   /**
    * Runs `body` against an empty registry of its own, seen by the calling thread and the threads it starts, and never
@@ -156,6 +170,6 @@ private[llm4s] object KnownSecrets {
   /** Whether the over-[[Cap]] warning has been logged for the current registry (tests only). */
   private[security] def overCapWarned: Boolean = state.get().overCapWarned.get()
 
-  private def rebuild(entries: Vector[Entry], refused: Set[String], warned: AtomicBoolean): State =
-    State(entries, new Matcher(entries), refused, warned)
+  private def rebuild(entries: Vector[Entry], refusals: AtomicLong, warned: AtomicBoolean): State =
+    State(entries, new Matcher(entries), refusals, warned)
 }

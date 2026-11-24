@@ -70,15 +70,12 @@ class ConfigPolicyProviderKeysSpec extends AnyWordSpec with Matchers with Either
       rules(huge, policy, CatalogEnvironment.Prod) should not contain "maxContextWindow"
     }
 
-    "reject, for every provider it caps, a model whose native window is over that cap" in {
+    "reject a model whose native window is over its provider's cap" in {
       // (section, the provider's cap): each model's registry window is asserted to exceed the cap first,
-      // so the test cannot pass vacuously if the registry data moves.
+      // so the test cannot pass vacuously if the registry data moves. The caps are the current models' largest
+      // windows (#2885), so only an older model with a larger one is over: Gemini's 2M experimental model.
       val overWindow = Seq(
-        """provider = "openai", model = "o1", apiKey = "k""""                                         -> 128000,
-        """provider = "azure", model = "o1", endpoint = "https://x.openai.azure.com", apiKey = "k"""" -> 128000,
-        """provider = "anthropic", model = "claude-opus-4-6", apiKey = "k""""                         -> 200000,
-        """provider = "gemini", model = "gemini-exp-1206", apiKey = "k""""                            -> 1048576,
-        """provider = "deepseek", model = "deepseek-v3.2", apiKey = "k""""                            -> 131072
+        """provider = "gemini", model = "gemini-exp-1206", apiKey = "k"""" -> 1048576
       )
       overWindow.foreach { case (section, cap) =>
         withClue(section) {

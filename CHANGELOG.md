@@ -172,6 +172,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [migration](docs/reference/migration.md#reliableclients-metrics-are-generic-metrics-2801).
 - `HuggingFaceClient` calls Hugging Face Inference Providers (`hf-inference`); `HuggingFaceConfig` gains `baseUrl`, and
   `Parameters.inferenceSteps` is `num_inference_steps`; [migration](docs/reference/migration.md#the-hugging-face-image-client-calls-inference-providers-2832).
+- `OpenAIConfig` (image) defaults to `gpt-image-2.6-sunburst`, and `OpenAIImageClient.deprecationWarningMessage` is `retirementWarning`;
+  [migration](docs/reference/migration.md#the-openai-image-client-defaults-to-gpt-image-26-sunburst-2884).
 - `MetricsCollector.observeImageGeneration` and `recordImageGenerationCost` are removed, with `MicrometerMetrics.Names`' five image constants: the image metrics are `ImageMetrics` in `llm4s-image`, recorded through `increment`/`observe`; the exported series are unchanged;
   [migration](docs/reference/migration.md#image-metrics-are-imagemetrics-in-llm4s-image-2801).
 - `Tracing` has one abstract method, `traceEvent(TraceEvent)`: `traceToolCall`, `traceError`, `traceCompletion` and `traceTokenUsage` are `final`
@@ -259,6 +261,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `HuggingFaceClient` posted to `api-inference.huggingface.co`, which Hugging Face retired: it calls
   `router.huggingface.co/hf-inference` in the documented text-to-image format, defaults to a model `hf-inference` serves
   and checks health through the Hub API ([migration](docs/reference/migration.md#the-hugging-face-image-client-calls-inference-providers-2832)) [#2832](https://github.com/llm4s/llm4s/issues/2832).
+- **Fixed** `OpenAIImageClient` defaulted to `dall-e-2`, which OpenAI shut down, and `editImage` always sent it: the default is
+  `gpt-image-2.6-sunburst`, `editImage` sends the configured model, and a GPT Image request carries no `response_format` or `style` ([migration](docs/reference/migration.md#the-openai-image-client-defaults-to-gpt-image-26-sunburst-2884)) [#2884](https://github.com/llm4s/llm4s/issues/2884).
+- **Fixed** `llm4s-openai` sends `max_completion_tokens` to the GPT-6 models; a request with tools to `gpt-6-luna` is sent
+  `reasoning_effort: none` (reported as a `RequestAdjustment`), and one to `gpt-6.1-terra`, which calls tools only on the Responses API, is refused with a `ValidationError` [#2886](https://github.com/llm4s/llm4s/issues/2886).
 - **Added** Bundled model metadata for `claude-sonnet-5-5`, `claude-haiku-5-5`, their Bedrock ids, `gpt-5.6-luna`,
   `gpt-5.6-terra` and `gemini-3.8-flash`, as overrides until the next LiteLLM refresh [#2832](https://github.com/llm4s/llm4s/issues/2832).
 - **Changed** No client sends `temperature`, `top_p` or a penalty the caller did not set (OpenAI, the OpenAI-compatible providers, Anthropic, Gemini, Vertex AI, Bedrock, Ollama, watsonx, Perplexity); Jlama, whose engine needs a temperature, uses `0.7` when none is set. [#2807](https://github.com/llm4s/llm4s/issues/2807)
@@ -466,6 +472,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   starting with `[HISTORY_SUMMARY]`, so `TokenWindow` no longer pins a message that merely quotes the marker [#2505](https://github.com/llm4s/llm4s/issues/2505).
 - **Fixed** message and conversation validation name the field they reject (`content`, `toolCallId`, `toolMessage`,
   `conversation`) and give the reason as the violation, where field and reason were swapped [#2796](https://github.com/llm4s/llm4s/issues/2796).
+- **Fixed** the credential registry no longer keeps each value it refuses for being under 8 characters: it counts them and
+  logs the first refusal only, so many short `Secret`s neither grow memory nor stay held [#2888](https://github.com/llm4s/llm4s/issues/2888).
 
 ### Agent runtime
 
@@ -627,8 +635,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 - **Changed** Examples use current model ids (OpenAI `gpt-5.6-luna`/`gpt-5.6-terra` for the deprecated `gpt-4o` family,
-  `claude-sonnet-5-5`, `gemini-3.8-flash`, Bedrock `us.anthropic.claude-sonnet-5-5`); the watsonx pages say it ships unverified, the
-  observability guide that Langfuse Cloud removed the ingestion API the `langfuse` mode uses, and the release checklist gains the checks [#2832](https://github.com/llm4s/llm4s/issues/2832).
+  `claude-sonnet-5-5`, `gemini-3.8-flash`, Bedrock `us.anthropic.claude-sonnet-5-5`), as do the enterprise deploy overlay, its LiteLLM gateway config and the Kotlin KDoc; the watsonx pages say it ships unverified, the
+  observability guide that Langfuse Cloud removed the ingestion API the `langfuse` mode uses, and the release checklist gains the checks [#2832](https://github.com/llm4s/llm4s/issues/2832) [#2887](https://github.com/llm4s/llm4s/issues/2887).
 - **Added** The contributing guide states the naming conventions: what `apply`, `of`, `create`, `from` and `forX`
   mean for a factory, `enum` or `sealed trait` for a sum type, plain accessor names, `PascalCase` constants and
   opaque-type newtypes ([#2822](https://github.com/llm4s/llm4s/issues/2822)).
@@ -639,6 +647,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Fixed** the config-policy `prod` and `staging-balanced` presets allowed only retired models (`gpt-4o`, `claude-3-5-sonnet`, `gemini-2.x`, `gemini-1.5-pro`) and capped windows below current models: they allow each vendor's current model generations (`ConfigPolicy.ModelFamilies`, Bedrock's Claude ids included), and each cap is the largest current window in the bundled model metadata ([migration](docs/reference/migration.md#the-config-policy-prod-preset-allows-model-generations-2885)) [#2885](https://github.com/llm4s/llm4s/issues/2885).
 - **Changed** the Beta parts inside frozen modules, `org.llm4s.assistant` and the Mistral, Cohere and xAI dialects, are left out of the 0.7.0 MiMa baseline: `stabilityTierCheck` keeps each of their types `@Experimental` (`stabilityExperimentalFiles`), which MiMa skips with its nested types ([The Baseline](docs/reference/api-stability.md#the-baseline)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
 - **Added** `scripts/check-docs.sh` runs every documentation check of Quick Checks that needs no sbt; every docs page needs a `description`, and a page that links an llm4s issue must declare how it cites it ([#2833](https://github.com/llm4s/llm4s/issues/2833)).
 - **Added** Scalafix rules `SamplingOptionsOptional`, `CompletionFromMessage`, `MessageAndConversationShapes` and `ClientEntryPoints`, part of `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6` ([#2807](https://github.com/llm4s/llm4s/issues/2807), [#2809](https://github.com/llm4s/llm4s/issues/2809), [#2810](https://github.com/llm4s/llm4s/issues/2810)). `PositionalPatternsGainFields` no longer covers `Completion`, whose extractor also lost two fields.

@@ -221,6 +221,7 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
+      _ <- OpenAIModelRules.checkTools(model, transformed.options)
       adjustments             = openAIAdjustments(options, transformed)
       transformedConversation = conversation.withMessages(transformed.messages)
       params <- buildParams(
@@ -259,6 +260,7 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
+      .flatMap(transformed => OpenAIModelRules.checkTools(model, transformed.options).map(_ => transformed))
       .flatMap { transformed =>
         val adjustments             = openAIAdjustments(options, transformed)
         val transformedConversation = conversation.withMessages(transformed.messages)
@@ -568,7 +570,10 @@ class OpenAIClient private[provider] (
 
   /** The `reasoning_effort` for `options` and what was not sent as asked (see [[OpenAIReasoning.plan]]). */
   private def effortPlan(options: CompletionOptions): OpenAIReasoning.EffortPlan =
-    OpenAIReasoning.plan(model, options, reasoningCapabilities, sendsEffort)
+    OpenAIModelRules.forcedToolEffort(model, options) match {
+      case Some((effort, adjustments)) => OpenAIReasoning.EffortPlan(Some(effort), adjustments)
+      case None                        => OpenAIReasoning.plan(model, options, reasoningCapabilities, sendsEffort)
+    }
 
   /**
    * Everything reported for a request: the sampling a reasoning model leaves out, what `reasoning` and `thinking`

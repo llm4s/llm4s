@@ -193,6 +193,16 @@ Requests to a reasoning model also follow OpenAI's rules for them: `maxTokens` i
 `temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are not sent, since those models
 reject non-default values. (`gpt-oss` models keep their sampling parameters.)
 
+`llm4s-openai` speaks Chat Completions, where some models restrict tool calls (OpenAI's model pages for
+[`gpt-6-luna`](https://developers.openai.com/api/docs/models/gpt-6-luna) and
+[`gpt-6.1-terra`](https://developers.openai.com/api/docs/models/gpt-6.1-terra), checked 2026-11-24):
+
+- `gpt-6-luna` calls functions there only with `reasoning_effort: none`. A request with tools is sent `none`
+  whatever `reasoning` or `thinking` asked, and the `Completion` reports what was overridden as a
+  `RequestAdjustment.Adjusted` (`Reasoning`, and `Thinking` unless it was `Off`).
+- `gpt-6.1-terra` calls tools only through the Responses API, which `llm4s-openai` does not use yet: a request with
+  tools is refused with a `ValidationError` before anything is sent. Without tools it works as any reasoning model.
+
 The reasoning tokens a response reports (`completion_tokens_details.reasoning_tokens`) are
 returned as `TokenUsage.thinkingTokens`, for streamed and non-streamed calls. OpenAI counts them
 inside `completion_tokens`; llm4s takes them out, because `completionTokens` never includes
@@ -1383,11 +1393,9 @@ Allow it explicitly, and pin the models and the endpoint:
 import org.llm4s.configpolicy.{ CatalogEnvironment, ConfigPolicy }
 
 val policy = ConfigPolicy.prodSafeDefaults
-  .withAllowedProviders("openai", "anthropic", "azure", "gemini", "deepseek", "openai-compatible")
-  .withAllowedModelPatterns(
-    "^openai/gpt-4o(-mini)?$", // ...and the other preset patterns you still need
-    "^openai-compatible/openai/gpt-oss-120b$"
-  )
+  .withAllowedProviders("openai", "anthropic", "bedrock", "azure", "gemini", "deepseek", "openai-compatible")
+  // the preset's own patterns, plus the endpoint's model
+  .withAllowedModelPatterns((ConfigPolicy.prodModelPatterns :+ "^openai-compatible/openai/gpt-oss-120b$")*)
   .withRequiredBaseUrlPattern(
     CatalogEnvironment.Prod,
     "openai-compatible",
@@ -1397,7 +1405,11 @@ val policy = ConfigPolicy.prodSafeDefaults
 ```
 
 - `withAllowedProviders` and `withAllowedModelPatterns` **replace** the preset's lists; repeat
-  the entries you want to keep.
+  the entries you want to keep. `ConfigPolicy.prodModelPatterns` is the preset's model list: each provider's
+  current model generations (`ConfigPolicy.ModelFamilies`: GPT-5 and GPT-6, Claude 5 and later with Opus and
+  Sonnet from 4.6 and Haiku 4.5, the same Claude families on Bedrock, Gemini 3, DeepSeek's two models, any Azure
+  deployment), so a new release in a current generation passes and a retired generation such as `gpt-4o` does not
+  (see `modules/config-policy/README.md`).
 - The `prod` preset also requires every section whose provider needs a key to set its own
   `apiKey` (rule `ownApiKey`, `withOwnApiKeyRequired`). The generic provider's `apiKey` is
   optional, so it is not checked; the rule is about sections that would otherwise inherit a
@@ -1413,8 +1425,9 @@ val policy = ConfigPolicy.prodSafeDefaults
   `withRequiredBaseUrlPattern(env, pattern)`, is checked against every provider without a pin of
   its own, not only `openai-compatible`; if you use it, name every endpoint in it (for example
   `https://(api\.openai\.com|api\.groq\.com/openai)/v1`).
-- Context caps work the same way. The `prod` preset caps each of its providers at its current
-  models' window (openai and azure 128000, anthropic 200000, gemini 1048576, deepseek 131072) and
+- Context caps work the same way. The `prod` preset caps each of its providers at the largest window among its
+  current models in the bundled model metadata (openai and azure 1050000, anthropic and bedrock 1000000, gemini
+  1048576, deepseek 163840) and
   any other provider, `openai-compatible` included, at an environment-wide 1048576; `dev` caps
   everything at 1048576. So Groq, Together or Fireworks at 131072 and xAI at 500000 pass as they
   are. Set a per-provider cap with `withMaxContextWindow(env, provider, max)`, as above, to hold a

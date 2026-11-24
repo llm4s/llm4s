@@ -146,21 +146,82 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
       ConfigPolicyEngine.check(ollama, policy, CatalogEnvironment.Prod).map(_.rule) should contain("maxContextWindow")
     }
 
-    "accept every model the prod preset allows at its native context window" in {
+    def loaded(section: String) =
+      org.llm4s.config.Llm4sConfig
+        .providerFrom(
+          pureconfig.ConfigSource.string(s"llm4s { defaultProvider = \"main\"\n providers { main { $section } } }")
+        )
+        .value
+
+    "accept the model ids the docs use, at their native context windows (#2885)" in {
       val sections = Seq(
-        """provider = "openai", model = "gpt-4o", apiKey = "k"""",
-        """provider = "anthropic", model = "claude-3-5-sonnet-20241022", apiKey = "k"""",
-        """provider = "gemini", model = "gemini-2.5-pro", apiKey = "k"""",
+        """provider = "openai", model = "gpt-5.6-luna", apiKey = "k"""",
+        """provider = "openai", model = "gpt-5.6-terra", apiKey = "k"""",
+        """provider = "openai", model = "gpt-6-luna", apiKey = "k"""",
+        """provider = "anthropic", model = "claude-sonnet-5-5", apiKey = "k"""",
+        """provider = "anthropic", model = "claude-haiku-5-5", apiKey = "k"""",
+        """provider = "anthropic", model = "claude-opus-4-8", apiKey = "k"""",
+        """provider = "gemini", model = "gemini-3.8-flash", apiKey = "k"""",
+        """provider = "bedrock", model = "us.anthropic.claude-sonnet-5-5", region = "us-east-1"""",
         """provider = "deepseek", model = "deepseek-chat", apiKey = "k""""
       )
       sections.foreach { section =>
-        val cfg = org.llm4s.config.Llm4sConfig
-          .providerFrom(
-            pureconfig.ConfigSource.string(s"llm4s { defaultProvider = \"main\"\n providers { main { $section } } }")
-          )
-          .value
-        withClue(section) {
+        val cfg = loaded(section)
+        withClue(s"$section (contextWindow ${cfg.contextWindow})") {
           ConfigPolicyEngine.check(cfg, ConfigPolicy.prodSafeDefaults, CatalogEnvironment.Prod) shouldBe empty
+        }
+      }
+    }
+
+    "reject retired model generations under the prod preset" in {
+      Seq(
+        """provider = "openai", model = "gpt-4o-mini", apiKey = "k"""",
+        """provider = "openai", model = "gpt-4.1", apiKey = "k"""",
+        """provider = "anthropic", model = "claude-3-5-sonnet-20241022", apiKey = "k"""",
+        """provider = "anthropic", model = "claude-sonnet-4-5", apiKey = "k"""",
+        """provider = "gemini", model = "gemini-2.5-pro", apiKey = "k"""",
+        """provider = "bedrock", model = "anthropic.claude-3-5-sonnet-20241022-v2:0", region = "us-east-1""""
+      ).foreach { section =>
+        withClue(section) {
+          ConfigPolicyEngine
+            .check(loaded(section), ConfigPolicy.prodSafeDefaults, CatalogEnvironment.Prod)
+            .map(_.rule) shouldBe List("allowedModels")
+        }
+      }
+    }
+
+    "match each model family as a whole, not as a prefix" in {
+      val families = ConfigPolicy.ModelFamilies
+      Seq("gpt-5", "gpt-5.6-luna", "gpt-6.1-terra").foreach(_.matches(families.OpenAI) shouldBe true)
+      Seq("gpt-4o", "gpt-50", "xgpt-5").foreach(_.matches(families.OpenAI) shouldBe false)
+      Seq("claude-fable-5", "claude-sonnet-5-5", "claude-sonnet-4-6", "claude-haiku-4-5").foreach(
+        _.matches(families.Anthropic) shouldBe true
+      )
+      Seq("claude-3-5-sonnet-latest", "claude-sonnet-4-5", "claude-opus-4-1").foreach(
+        _.matches(families.Anthropic) shouldBe false
+      )
+      Seq("us.anthropic.claude-sonnet-5-5", "anthropic.claude-opus-4-8-v1:0", "global.anthropic.claude-haiku-5-5")
+        .foreach(_.matches(families.BedrockAnthropic) shouldBe true)
+      Seq("gemini-3.8-flash", "gemini-3-pro-preview").foreach(_.matches(families.Gemini) shouldBe true)
+      Seq("gemini-2.5-pro", "gemini-30").foreach(_.matches(families.Gemini) shouldBe false)
+    }
+
+    "cap each prod provider no lower than its largest current model's window in the bundled metadata" in {
+      val registry = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
+      val caps     = ConfigPolicy.prodSafeDefaults.maxContextWindowByProvider
+      Seq(
+        "openai"    -> "gpt-5.6-luna",
+        "anthropic" -> "claude-sonnet-5-5",
+        "gemini"    -> "gemini-3.8-flash",
+        "deepseek"  -> "deepseek-chat"
+      ).foreach { case (provider, model) =>
+        val window = registry
+          .lookup(org.llm4s.types.ProviderModelTypes.ProviderId(provider), ModelName(model))
+          .toOption
+          .flatMap(_.maxInputTokens)
+          .get
+        withClue(s"$provider/$model") {
+          caps((CatalogEnvironment.Prod, provider)) should be >= window
         }
       }
     }
