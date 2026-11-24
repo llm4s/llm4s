@@ -67,7 +67,7 @@ object BasicLLMCallingWithTrace {
             }
 
           case Left(error) =>
-            tracer.traceError(new RuntimeException(error.formatted))
+            tracer.traceError(error, "completion")
             logger.error("Error: {}", error.formatted)
         }
         tracer.traceEvent("LLM conversation finished")

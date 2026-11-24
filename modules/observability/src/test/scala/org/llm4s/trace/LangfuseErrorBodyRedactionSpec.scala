@@ -39,7 +39,7 @@ class LangfuseErrorBodyRedactionSpec extends AnyFlatSpec with Matchers {
       httpClient = new MockHttpClient(HttpResponse(500, EchoedCredentials.Text)),
       restoreInterrupt = () => ()
     )
-    val (result, lines) = logged(tracing.traceEvent(TraceEvent.AgentInitialized("query", Vector.empty)))
+    val (result, lines) = logged(tracing.traceEvent(TraceEvent.CustomEvent("query", ujson.Obj())))
     result.isLeft shouldBe true
     lines.exists(_.contains("[REDACTED]")) shouldBe true
     lines.flatMap(leaked) shouldBe empty

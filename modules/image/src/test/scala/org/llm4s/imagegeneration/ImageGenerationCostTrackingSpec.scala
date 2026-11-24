@@ -3,6 +3,7 @@ package org.llm4s.imagegeneration
 import org.llm4s.security.Secret
 import org.llm4s.metrics._
 import org.llm4s.trace.{ TraceEvent, Tracing }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import io.prometheus.metrics.model.registry.PrometheusRegistry
 import org.scalatest.flatspec.AnyFlatSpec
@@ -80,7 +81,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
   "TraceEvent.ImageGenerationCompleted" should "serialize to JSON correctly" in {
     val event = TraceEvent.ImageGenerationCompleted(
       model = "dall-e-3",
-      provider = "openai",
+      provider = Some(ProviderId("openai")),
       operation = "generate",
       imageCount = 2,
       size = "1024x1024",
@@ -107,7 +108,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
   it should "omit optional fields when None" in {
     val event = TraceEvent.ImageGenerationCompleted(
       model = "dall-e-3",
-      provider = "openai",
+      provider = Some(ProviderId("openai")),
       operation = "generate",
       imageCount = 1,
       size = "1024x1024",
@@ -123,7 +124,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
   it should "include error message on failure" in {
     val event = TraceEvent.ImageGenerationCompleted(
       model = "dall-e-3",
-      provider = "openai",
+      provider = Some(ProviderId("openai")),
       operation = "generate",
       imageCount = 0,
       size = "1024x1024",
@@ -312,7 +313,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
 
     val event = imageEvents.head
     event.model shouldBe "dall-e-3"
-    event.provider shouldBe "openai"
+    event.provider shouldBe Some(ProviderId("openai"))
     event.operation shouldBe "generate"
     event.imageCount shouldBe 1
     event.success shouldBe true

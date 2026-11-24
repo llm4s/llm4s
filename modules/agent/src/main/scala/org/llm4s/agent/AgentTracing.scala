@@ -4,7 +4,7 @@ import org.llm4s.agent.events.{ AgentEvents, SubagentEvents }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.toolloop.{ LoopKeys, ToolLoop, TurnOutput }
 import org.llm4s.types.Result
-import org.llm4s.error.CancelledError
+import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
 import org.llm4s.trace.{ TraceContext, TraceEvent, TraceSpan, Tracing }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -156,7 +156,7 @@ final private[agent] class AgentTracing(
     val messages = status match
       case Right(_: AgentStatus.Blocked) | Left(_) => Vector.empty
       case Right(_) => state.flatMap(AgentRun.turnMessages(_).toOption).getOrElse(Vector.empty)
-    status.left.foreach(error => if ending == TraceEvent.RunStatus.Failed then traceError(error.message, at))
+    status.left.foreach(error => if ending == TraceEvent.RunStatus.Failed then traceError(error, at))
     trace(
       TraceEvent.AgentRunEnded(
         handle.threadId.value,
@@ -195,17 +195,15 @@ final private[agent] class AgentTracing(
         s"Run ${handle.runId.value} on ${handle.threadId.value} ended without a terminal event${error
             .fold("")(e => s": ${e.message}")}; its trace has no AgentRunEnded"
       )
-      error.foreach(e => traceError(e.message, Instant.now()))
+      error.foreach(e => traceError(e, Instant.now()))
     delivered.complete(()): Unit
 
   /** Traces the run's error at `at`: its terminal event's time, or now for a run that ended without one. */
-  private def traceError(message: String, at: Instant): Unit =
-    val error = TraceEvent.ErrorOccurred(
-      new RuntimeException(message),
-      "agent run",
-      at,
-      Some(under(AgentTraceSpans.error(runSpan), at))
-    )
+  private def traceError(failure: LLMError, at: Instant): Unit =
+    val error = TraceEvent.ErrorOccurred
+      .of(failure, "agent run")
+      .withTimestamp(at)
+      .withSpan(under(AgentTraceSpans.error(runSpan), at))
     Try(tracing.traceEvent(error)).toEither
       .flatMap(_.left.map(e => new RuntimeException(e.message)))
       .left

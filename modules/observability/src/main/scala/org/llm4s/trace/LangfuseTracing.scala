@@ -300,36 +300,11 @@ class LangfuseTracing(
   }
 
   private def traceSingleEvent(event: TraceEvent): Result[Unit] = {
-    val traceId     = uuid
     val now         = nowIso
     val batchEvents = scala.collection.mutable.ArrayBuffer[ujson.Obj]()
 
     // Convert event to Langfuse format
     val langfuseEvent = event match {
-      case e: TraceEvent.AgentInitialized =>
-        ujson.Obj(
-          "id"        -> uuid,
-          "timestamp" -> now,
-          "type"      -> "trace-create",
-          "body" -> ujson.Obj(
-            "id"          -> traceId,
-            "timestamp"   -> now,
-            "environment" -> environment,
-            "release"     -> release,
-            "version"     -> version,
-            "public"      -> publicTraces,
-            "name"        -> "LLM4S Agent Run",
-            "input"       -> e.query,
-            "output"      -> s"Tools: ${e.tools.mkString(", ")}",
-            "sessionId"   -> s"session-${System.currentTimeMillis()}",
-            "metadata" -> ujson.Obj(
-              "framework" -> "llm4s",
-              "tools"     -> e.tools
-            ),
-            "tags" -> ujson.Arr("llm4s", "agent", "initialized")
-          )
-        )
-
       case e: TraceEvent.CompletionReceived =>
         ujson.Obj(
           "id"        -> uuid,
@@ -388,13 +363,13 @@ class LangfuseTracing(
             "timestamp"     -> now,
             "name"          -> "Error",
             "level"         -> "ERROR",
-            "statusMessage" -> e.error.getMessage,
-            "input"         -> ujson.Obj("error" -> e.error.getMessage),
+            "statusMessage" -> e.message,
+            "input"         -> ujson.Obj("error" -> e.message),
             "metadata" -> {
               val metadata = ujson.Obj(
-                "error_type"  -> e.error.getClass.getSimpleName,
+                "error_type"  -> e.errorType,
                 "context"     -> e.context,
-                "stack_trace" -> e.error.getStackTrace.take(5).mkString("\n")
+                "stack_trace" -> e.cause.fold("")(_.getStackTrace.take(5).mkString("\n"))
               )
               // a content-filtered reply's billed tokens (#2676)
               e.usage.foreach { u =>
@@ -576,7 +551,6 @@ class LangfuseTracing(
       case e: TraceEvent.ImageGenerationCompleted =>
         val outputObj = ujson.Obj(
           "model"       -> e.model,
-          "provider"    -> e.provider,
           "operation"   -> e.operation,
           "image_count" -> e.imageCount,
           "size"        -> e.size,
@@ -584,6 +558,7 @@ class LangfuseTracing(
           "duration_ms" -> e.duration.toMillis,
           "success"     -> e.success
         )
+        e.provider.foreach(p => outputObj("provider") = p.asString)
         e.costUsd.foreach(c => outputObj("cost_usd") = c)
         e.errorMessage.foreach(m => outputObj("error_message") = m)
 

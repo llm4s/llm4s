@@ -47,9 +47,8 @@ class LangfuseTracePrivacySpec extends AnyFlatSpec with Matchers {
   )
 
   private val everyTrace: Seq[(String, Option[String] => TraceEvent)] = Seq(
-    "a placed agent run"        -> (user => run(user, placed)),
-    "an unplaced agent run"     -> (user => run(user, None)),
-    "an agent's initialisation" -> (_ => TraceEvent.AgentInitialized("what is my balance?", Vector("lookup")))
+    "a placed agent run"    -> (user => run(user, placed)),
+    "an unplaced agent run" -> (user => run(user, None))
   )
 
   everyTrace.foreach { case (name, event) =>

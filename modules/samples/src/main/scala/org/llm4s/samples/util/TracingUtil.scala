@@ -1,7 +1,6 @@
 package org.llm4s.samples.util
 
 import org.llm4s.agent.{ AgentResult, AgentStatus }
-import org.llm4s.toolapi.ToolFunction
 import org.llm4s.trace.{ Tracing, TraceEvent }
 
 import scala.concurrent.duration.*
@@ -24,15 +23,6 @@ object TracingUtil {
           "demo"      -> demoName,
           "timestamp" -> BenchmarkUtil.currentTimestamp
         )
-      )
-    )
-
-  /** Trace agent initialization */
-  def traceAgentInitialization(tracing: Tracing, query: String, tools: Seq[ToolFunction[_, _]]): Unit =
-    tracing.traceEvent(
-      TraceEvent.AgentInitialized(
-        query = query,
-        tools = tools.map(_.name).toVector
       )
     )
 

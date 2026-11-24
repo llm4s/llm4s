@@ -78,7 +78,7 @@ object EnhancedTracingExample {
 
       case Left(error) =>
         // Trace error and log it
-        tracer.traceError(new RuntimeException(error.formatted))
+        tracer.traceError(error, "completion")
         logger.error("LLM error in EnhancedTracingExample: {}", error.formatted)
     }
 

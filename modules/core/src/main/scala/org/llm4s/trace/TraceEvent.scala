@@ -1,11 +1,13 @@
 package org.llm4s.trace
 
 import org.llm4s.annotation.Stable
+import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.model.{ CompletionOptions, EmbeddingUsage, Message, ServiceTier, TokenUsage, UsageSummary }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import java.time.Instant
 import scala.concurrent.duration.FiniteDuration
+import scala.util.Try
 
 /**
  * Type-safe, sealed hierarchy of trace events emitted during LLM agent execution.
@@ -15,8 +17,20 @@ import scala.concurrent.duration.FiniteDuration
  * etc.).  All subtypes are serialisable to JSON via `toJson`, which produces a
  * flat object containing at minimum `"event_type"` and `"timestamp"` fields.
  *
+ * == Which events are here ==
+ * An event is a case of this hierarchy when a backend gives it a shape of its own - a span kind, the GenAI attributes,
+ * a Langfuse trace - whichever module emits it. The hierarchy is the contract between the code that emits events and
+ * the backends that record them, and both depend only on core: so [[TraceEvent.RAGOperationCompleted]],
+ * [[TraceEvent.ImageGenerationCompleted]] and [[TraceEvent.AgentRunEnded]] are here although `llm4s-rag`,
+ * `llm4s-image` and `llm4s-agent` emit them, and their fields name no type of those modules. Everything else is a
+ * [[TraceEvent.CustomEvent]], which a backend records by its name and data: an application's own events, and an
+ * open set such as an agent run's durable events (`graph.*`, `agent.*`), to which a graph or a middleware adds its
+ * own. The Langfuse and OpenTelemetry backends report two of those, `agent.model_call_completed` and
+ * `agent.tool_executed`, as `chat` and `execute_tool` spans: they recognise the name and read the event's data, a
+ * convention between `llm4s-agent` and those backends that this hierarchy does not type.
+ *
  * == Error truncation ==
- * `ErrorOccurred.toJson` includes only the first 5 frames of the stack trace
+ * `ErrorOccurred.toJson` includes only the first 5 frames of its cause's stack trace
  * to limit payload size.
  *
  * == Timestamp default ==
@@ -28,7 +42,17 @@ import scala.concurrent.duration.FiniteDuration
  * Each event is a `final case class` with a private constructor and `copy`:
  * build one with its companion `apply` and change a field with its `with*`
  * setter (an `Option` field's setter takes the value or an `Option`), so a
- * field can be added later without breaking binary compatibility.
+ * field can be added without breaking the code that builds one. Reading is
+ * growth-safe only by field: match an event by its type
+ * (`case e: TraceEvent.ToolExecuted => e.name`), never by position
+ * (`case TraceEvent.ToolExecuted(name, _, _, _, _, _)`), because a positional
+ * pattern names every field and stops compiling when one is added.
+ *
+ * == Identifiers ==
+ * A provider is a [[org.llm4s.types.ProviderModelTypes.ProviderId ProviderId]] wherever an event names one. A model
+ * is a `String`, as it is on `Completion` and in a provider's configuration; a thread, run or agent id is the
+ * `String` value of a type `llm4s-agent` defines, which core cannot name; and `operation` is an open label the
+ * emitter chooses.
  *
  * @see [[Tracing]] for the interface that consumes these events
  */
@@ -48,33 +72,6 @@ sealed trait TraceEvent {
 }
 
 object TraceEvent {
-
-  final case class AgentInitialized private (
-    query: String,
-    tools: Vector[String],
-    timestamp: Instant
-  ) extends TraceEvent {
-    def withQuery(query: String): AgentInitialized          = copy(query = query)
-    def withTools(tools: Vector[String]): AgentInitialized  = copy(tools = tools)
-    def withTimestamp(timestamp: Instant): AgentInitialized = copy(timestamp = timestamp)
-
-    def eventType: String = "agent_initialized"
-    def toJson: ujson.Value = ujson.Obj(
-      "event_type" -> eventType,
-      "timestamp"  -> timestamp.toString,
-      "query"      -> query,
-      "tools"      -> ujson.Arr(tools.map(ujson.Str(_)): _*)
-    )
-  }
-
-  object AgentInitialized {
-    def apply(
-      query: String,
-      tools: Vector[String],
-      timestamp: Instant = Instant.now()
-    ): AgentInitialized =
-      new AgentInitialized(query, tools, timestamp)
-  }
 
   /**
    * A model returned a completion. A client wrapped in [[TracingLLMClient]] fills in the call's details as well, which
@@ -241,33 +238,44 @@ object TraceEvent {
   }
 
   /**
-   * An error. When it is a failed model call - a [[TracingLLMClient]]'s, or an [[org.llm4s.llmconnect.EmbeddingClient]]'s -
-   * `operation` names the call (`chat`, `embeddings`) and the call's details are set, which a backend that follows the
-   * OpenTelemetry GenAI conventions reports as the call's own span with `error.type` (#2275).
+   * An error: an [[org.llm4s.error.LLMError]], which is not an exception, or a `Throwable` - build one from either
+   * with [[ErrorOccurred.of]]. When it is a failed model call - a [[TracingLLMClient]]'s, or an
+   * [[org.llm4s.llmconnect.EmbeddingClient]]'s - `operation` names the call (`chat`, `embeddings`) and the call's
+   * details are set, which a backend that follows the OpenTelemetry GenAI conventions reports as the call's own span
+   * with `error.type` (#2275).
    *
+   * @param message   what went wrong: the `LLMError`'s message, or the exception's
+   * @param errorType a short, low-cardinality name of the failure: the `LLMError`'s type (`RateLimitError`), or the
+   *                  exception's class
+   * @param context   where it happened, as the emitter describes it
+   * @param cause     the exception behind the error, when there is one: the `Throwable` itself for an error built
+   *                  from one, `None` for an `LLMError` unless the emitter adds it. A backend that records exceptions
+   *                  records this one
    * @param operation the GenAI operation that failed (`chat`, `embeddings`); `None` for any other error
    * @param model     the requested model of the failed call
    * @param provider  the canonical id of the provider called
-   * @param errorType a short, low-cardinality name of the failure (the `LLMError`'s type, e.g. `RateLimitError`);
-   *                  `None` takes the exception's class name
    * @param duration  how long the failed call took; the event's `timestamp` is its end
    * @param usage     the tokens the provider reported, and billed, for the failed call: a content-filtered reply's
    *                  ([[org.llm4s.error.ContentFilteredError]]'s `usage`, #2676); `None` when it reported none
    */
   final case class ErrorOccurred private (
-    error: Throwable,
+    message: String,
+    errorType: String,
     context: String,
+    cause: Option[Throwable],
     timestamp: Instant,
     override val span: Option[TraceSpan],
     operation: Option[String],
     model: Option[String],
     provider: Option[ProviderId],
-    errorType: Option[String],
     duration: Option[FiniteDuration],
     usage: Option[TokenUsage]
   ) extends TraceEvent {
-    def withError(error: Throwable): ErrorOccurred                    = copy(error = error)
+    def withMessage(message: String): ErrorOccurred                   = copy(message = message)
+    def withErrorType(errorType: String): ErrorOccurred               = copy(errorType = errorType)
     def withContext(context: String): ErrorOccurred                   = copy(context = context)
+    def withCause(cause: Throwable): ErrorOccurred                    = copy(cause = Some(cause))
+    def withCause(cause: Option[Throwable]): ErrorOccurred            = copy(cause = cause)
     def withTimestamp(timestamp: Instant): ErrorOccurred              = copy(timestamp = timestamp)
     def withSpan(span: TraceSpan): ErrorOccurred                      = copy(span = Some(span))
     def withSpan(span: Option[TraceSpan]): ErrorOccurred              = copy(span = span)
@@ -277,8 +285,6 @@ object TraceEvent {
     def withModel(model: Option[String]): ErrorOccurred               = copy(model = model)
     def withProvider(provider: ProviderId): ErrorOccurred             = copy(provider = Some(provider))
     def withProvider(provider: Option[ProviderId]): ErrorOccurred     = copy(provider = provider)
-    def withErrorType(errorType: String): ErrorOccurred               = copy(errorType = Some(errorType))
-    def withErrorType(errorType: Option[String]): ErrorOccurred       = copy(errorType = errorType)
     def withDuration(duration: FiniteDuration): ErrorOccurred         = copy(duration = Some(duration))
     def withDuration(duration: Option[FiniteDuration]): ErrorOccurred = copy(duration = duration)
     def withUsage(usage: TokenUsage): ErrorOccurred                   = copy(usage = Some(usage))
@@ -289,10 +295,10 @@ object TraceEvent {
       val json = ujson.Obj(
         "event_type"    -> eventType,
         "timestamp"     -> timestamp.toString,
-        "error_type"    -> errorType.getOrElse(error.getClass.getSimpleName),
-        "error_message" -> error.getMessage,
+        "error_type"    -> errorType,
+        "error_message" -> message,
         "context"       -> context,
-        "stack_trace"   -> error.getStackTrace.take(5).mkString("\n")
+        "stack_trace"   -> cause.fold("")(_.getStackTrace.take(5).mkString("\n"))
       )
       operation.foreach(o => json("operation") = o)
       model.foreach(m => json("model") = m)
@@ -309,18 +315,47 @@ object TraceEvent {
 
   object ErrorOccurred {
     def apply(
-      error: Throwable,
+      message: String,
+      errorType: String,
       context: String,
+      cause: Option[Throwable] = None,
       timestamp: Instant = Instant.now(),
       span: Option[TraceSpan] = None,
       operation: Option[String] = None,
       model: Option[String] = None,
       provider: Option[ProviderId] = None,
-      errorType: Option[String] = None,
       duration: Option[FiniteDuration] = None,
       usage: Option[TokenUsage] = None
     ): ErrorOccurred =
-      new ErrorOccurred(error, context, timestamp, span, operation, model, provider, errorType, duration, usage)
+      new ErrorOccurred(
+        message,
+        errorType,
+        context,
+        cause,
+        timestamp,
+        span,
+        operation,
+        model,
+        provider,
+        duration,
+        usage
+      )
+
+    /** `error` in `context`: its message, and its type as `errorType`. An `LLMError` is not an exception: no cause. */
+    def of(error: LLMError, context: String): ErrorOccurred =
+      apply(error.message, error.getClass.getSimpleName, context)
+
+    /**
+     * The exception `error` in `context`: its message (empty when it has none, or when reading it throws), its class
+     * as `errorType`, and itself as the cause. Nothing else of the exception is read here.
+     */
+    def of(error: Throwable, context: String): ErrorOccurred =
+      apply(
+        Try(error.getMessage).toOption.flatMap(Option(_)).getOrElse(""),
+        error.getClass.getSimpleName,
+        context,
+        Some(error)
+      )
   }
 
   final case class TokenUsageRecorded private (
@@ -776,7 +811,6 @@ object TraceEvent {
    * Tracks completion of an image generation operation.
    *
    * @param model Image generation model name (e.g., "gpt-image-1", "dall-e-3")
-   * @param provider Provider name (e.g., "openai", "stability-ai")
    * @param operation Type of operation: "generate", "edit"
    * @param imageCount Number of images generated
    * @param size Image size descriptor (e.g., "1024x1024")
@@ -785,10 +819,10 @@ object TraceEvent {
    * @param costUsd Estimated cost in USD, if available
    * @param success Whether the operation succeeded
    * @param errorMessage Error message if the operation failed
+   * @param provider the id of the provider called (`openai`, `stability`, ...), when known
    */
   final case class ImageGenerationCompleted private (
     model: String,
-    provider: String,
     operation: String,
     imageCount: Int,
     size: String,
@@ -797,10 +831,10 @@ object TraceEvent {
     costUsd: Option[Double],
     success: Boolean,
     errorMessage: Option[String],
-    timestamp: Instant
+    timestamp: Instant,
+    provider: Option[ProviderId]
   ) extends TraceEvent {
     def withModel(model: String): ImageGenerationCompleted               = copy(model = model)
-    def withProvider(provider: String): ImageGenerationCompleted         = copy(provider = provider)
     def withOperation(operation: String): ImageGenerationCompleted       = copy(operation = operation)
     def withImageCount(imageCount: Int): ImageGenerationCompleted        = copy(imageCount = imageCount)
     def withSize(size: String): ImageGenerationCompleted                 = copy(size = size)
@@ -812,6 +846,8 @@ object TraceEvent {
     def withErrorMessage(errorMessage: String): ImageGenerationCompleted = copy(errorMessage = Some(errorMessage))
     def withErrorMessage(errorMessage: Option[String]): ImageGenerationCompleted = copy(errorMessage = errorMessage)
     def withTimestamp(timestamp: Instant): ImageGenerationCompleted              = copy(timestamp = timestamp)
+    def withProvider(provider: ProviderId): ImageGenerationCompleted             = copy(provider = Some(provider))
+    def withProvider(provider: Option[ProviderId]): ImageGenerationCompleted     = copy(provider = provider)
 
     def eventType: String = "image_generation_completed"
     def toJson: ujson.Value = {
@@ -819,7 +855,6 @@ object TraceEvent {
         "event_type"  -> eventType,
         "timestamp"   -> timestamp.toString,
         "model"       -> model,
-        "provider"    -> provider,
         "operation"   -> operation,
         "image_count" -> imageCount,
         "size"        -> size,
@@ -827,6 +862,7 @@ object TraceEvent {
         "duration_ms" -> duration.toMillis.toDouble,
         "success"     -> success
       )
+      provider.foreach(p => base("provider") = p.asString)
       costUsd.foreach(c => base("cost_usd") = c)
       errorMessage.foreach(m => base("error_message") = m)
       base
@@ -836,7 +872,6 @@ object TraceEvent {
   object ImageGenerationCompleted {
     def apply(
       model: String,
-      provider: String,
       operation: String,
       imageCount: Int,
       size: String,
@@ -845,11 +880,11 @@ object TraceEvent {
       costUsd: Option[Double] = None,
       success: Boolean = true,
       errorMessage: Option[String] = None,
-      timestamp: Instant = Instant.now()
+      timestamp: Instant = Instant.now(),
+      provider: Option[ProviderId] = None
     ): ImageGenerationCompleted =
       new ImageGenerationCompleted(
         model,
-        provider,
         operation,
         imageCount,
         size,
@@ -858,7 +893,8 @@ object TraceEvent {
         costUsd,
         success,
         errorMessage,
-        timestamp
+        timestamp,
+        provider
       )
   }
 

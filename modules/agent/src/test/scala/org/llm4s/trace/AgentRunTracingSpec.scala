@@ -531,7 +531,13 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     ended.size shouldBe 1
     ended.head.status shouldBe TraceEvent.RunStatus.Failed
     ended.head.messages shouldBe empty
-    tracing.all.collect { case e: TraceEvent.ErrorOccurred => e }.size shouldBe 1
+    val errors = tracing.all.collect { case e: TraceEvent.ErrorOccurred => e }
+    errors.size shouldBe 1
+    // the run's error as it is - an LLMError, with its type - not an exception wrapped around its message (#2800)
+    errors.head.errorType should not be "RuntimeException"
+    errors.head.errorType should not be empty
+    errors.head.message should include("down")
+    errors.head.cause shouldBe None
   }
 
   it should "trace a cancelled run as cancelled" in {

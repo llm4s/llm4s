@@ -144,7 +144,7 @@ spans are named after the event: `graph.<event>` for the runtime's events (`grap
 | `chat <model>` | `agent.model_call_completed` | `CLIENT`; `gen_ai.operation.name` = `chat`, `gen_ai.request.model`, `gen_ai.agent.name` (the agent that made the call), `gen_ai.conversation.id`, `gen_ai.provider.name`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `llm4s.model_call.attempt`, `llm4s.model_call.tool_calls`, `cost.usd` | A generation with `model` and `usage` (`input`, `output`, `total`, `unit` = `TOKENS`); metadata is the event's data |
 | `execute_tool <tool>` | `agent.tool_executed` | `INTERNAL`; `gen_ai.operation.name` = `execute_tool`, `gen_ai.tool.name`, `tool.name`, `gen_ai.tool.call.id`, `gen_ai.agent.name`, `gen_ai.conversation.id`, `data` (the event as JSON). Status `ERROR` when the outcome is `Errored` | A span; level `ERROR` when the outcome is `Errored`; metadata is the event's data |
 | `Token Usage - agent_completion` | `TraceEvent.TokenUsageRecorded`, one per model call that reported usage | `INTERNAL`; `gen_ai.request.model`, `operation`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.total_tokens` | An event with the same counts |
-| `Error` | `TraceEvent.ErrorOccurred` with context `agent run`, for a failed run or one that ended without a terminal event | `INTERNAL`; `error.message`, `error.type`, `context`; the exception recorded | An event, level `ERROR` |
+| `Error` | `TraceEvent.ErrorOccurred` with context `agent run`, for a failed run or one that ended without a terminal event | `INTERNAL`; `error.message`, `error.type` (the error's type, such as `NodeFailed`), `context` | An event, level `ERROR` |
 | `graph.*`, `agent.*` (the rest) | the other durable events | `INTERNAL`; `event.type` = `custom`, `data` (the event as JSON) | An event; input is the event's data |
 
 Every event's data holds `threadId`, `runId`, `seq`, `checkpointId`, `taskId` and `nodeId`, and the event's own
@@ -181,7 +181,7 @@ was started on, and `activeAgent` the agent active when the run ended.
 | Where | Content recorded | Setting |
 |---|---|---|
 | Durable events (`chat`, `execute_tool`, `graph.*`, `agent.*` spans) | None of the messages, tool arguments or results. They do carry the run's `tenantId` and `principal` (`graph.run_started`, `graph.run_resumed`, `graph.run_recovered`) and failure messages (`graph.task_failed`, `graph.run_failed`; for a guardrail block `Guardrail '<name>' blocked: <reason>`) | none |
-| OpenTelemetry `invoke_agent` | Message count only | `llm4s.tracing.opentelemetry.captureContent` (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`, default `false`) applies to `TracingLLMClient`'s spans and the `TraceEvent.AgentInitialized` and `TraceEvent.ToolExecuted` events, not to an agent run's spans |
+| OpenTelemetry `invoke_agent` | Message count only | `llm4s.tracing.opentelemetry.captureContent` (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`, default `false`) applies to `TracingLLMClient`'s spans and the `TraceEvent.ToolExecuted` event, not to an agent run's spans |
 | Langfuse | `AgentRunEnded.messages`: the turn's messages from its user message on, as the trace's input and output and one span per message. Empty when blocked, cancelled, timed out or failed | none in the backend; filter them out as below |
 | Console | Metadata only | `llm4s.tracing.console.captureContent` (default `false`) |
 

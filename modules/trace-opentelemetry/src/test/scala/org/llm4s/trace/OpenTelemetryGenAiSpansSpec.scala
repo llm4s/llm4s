@@ -127,7 +127,6 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
     "record no prompt or completion text by default" in withTracing() { (tracing, spans) =>
       TracingLLMClient(new Stub("openai"), tracing).complete(conversation, options)
       TracingLLMClient(new Stub("openai"), tracing).streamComplete(conversation, options, _ => ())
-      tracing.traceEvent(TraceEvent.AgentInitialized(Prompt, Vector("search")))
       tracing.traceEvent(
         TraceEvent.ToolExecuted("search", Prompt, Answer, scala.concurrent.duration.Duration.Zero, true)
       )
@@ -250,13 +249,11 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
         input(2)("parts")(0)("response").str shouldBe "Paris"
     }
 
-    "record an agent's query and tool input and output, redacted" in withTracing(captureContent = true) {
-      (tracing, spans) =>
-        tracing.traceEvent(TraceEvent.AgentInitialized(Prompt, Vector.empty))
-        tracing.traceEvent(TraceEvent.ToolExecuted("t", Prompt, Answer, scala.concurrent.duration.Duration.Zero, true))
-        val texts = recorded(spans())
-        texts.exists(_.contains("capital of France")) shouldBe true
-        texts.filter(_.contains(Secret)) shouldBe empty
+    "record a tool's input and output, redacted" in withTracing(captureContent = true) { (tracing, spans) =>
+      tracing.traceEvent(TraceEvent.ToolExecuted("t", Prompt, Answer, scala.concurrent.duration.Duration.Zero, true))
+      val texts = recorded(spans())
+      texts.exists(_.contains("capital of France")) shouldBe true
+      texts.filter(_.contains(Secret)) shouldBe empty
     }
   }
 

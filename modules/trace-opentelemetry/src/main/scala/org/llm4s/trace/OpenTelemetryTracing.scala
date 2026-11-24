@@ -185,8 +185,9 @@ class OpenTelemetryTracing private[trace] (
   private def annotate(span: Span, spanName: String, event: TraceEvent): Unit = {
     event match {
       case e: TraceEvent.ErrorOccurred if e.operation.isDefined =>
-        span.setStatus(StatusCode.ERROR, Redaction.redact(Option(e.error.getMessage).getOrElse(""))): Unit
-      case e: TraceEvent.ErrorOccurred if spanName == "Error" => span.recordException(e.error): Unit
+        span.setStatus(StatusCode.ERROR, Redaction.redact(e.message)): Unit
+      // an LLMError is no exception: only an error that has one records it
+      case e: TraceEvent.ErrorOccurred if spanName == "Error" => e.cause.foreach(span.recordException)
       case _                                                  =>
     }
     if (failed(event)) span.setStatus(StatusCode.ERROR): Unit
@@ -210,14 +211,6 @@ class OpenTelemetryTracing private[trace] (
 
   private[trace] def mapEventToAttributes(event: TraceEvent): (String, Attributes) = {
     event match {
-      case e: TraceEvent.AgentInitialized =>
-        val builder = Attributes
-          .builder()
-          .put(TraceAttributes.EventType, "trace-create")
-          .put("tools", e.tools.mkString(", "))
-        if (captureContent) builder.put("input", content(e.query))
-        ("LLM4S Agent Run", builder.build())
-
       case e: TraceEvent.CompletionReceived =>
         val builder = Attributes
           .builder()
@@ -265,7 +258,7 @@ class OpenTelemetryTracing private[trace] (
           .builder()
           .put(TraceAttributes.EventType, "event-create")
           .put(TraceAttributes.OperationName, operation)
-          .put(TraceAttributes.ErrorType, e.errorType.getOrElse(e.error.getClass.getName))
+          .put(TraceAttributes.ErrorType, e.errorType)
         if (model.nonEmpty) builder.put(TraceAttributes.RequestModel, model)
         e.provider.foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p.asString)))
         // a content-filtered reply is billed: its tokens are the span's usage, as a success's are (#2676)
@@ -281,8 +274,8 @@ class OpenTelemetryTracing private[trace] (
           Attributes
             .builder()
             .put(TraceAttributes.EventType, "event-create")
-            .put("error.message", e.error.getMessage)
-            .put("error.type", e.error.getClass.getSimpleName)
+            .put("error.message", e.message)
+            .put("error.type", e.errorType)
             .put("context", e.context)
             .build()
         )
@@ -458,13 +451,13 @@ class OpenTelemetryTracing private[trace] (
           .builder()
           .put(TraceAttributes.EventType, "image-generation")
           .put("gen_ai.request.model", e.model)
-          .put("provider", e.provider)
           .put("operation", e.operation)
           .put("image_count", e.imageCount.toLong)
           .put("size", e.size)
           .put("quality", e.quality)
           .put("duration_ms", e.duration.toMillis)
           .put("success", e.success)
+        e.provider.foreach(p => builder.put("provider", p.asString))
         e.costUsd.foreach(c => builder.put("cost.usd", c))
         e.errorMessage.foreach(m => builder.put("error.message", m))
         (

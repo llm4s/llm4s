@@ -16,10 +16,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
     val basicTracer = Tracing.create(baseSettings.withMode(TracingMode.Console))
     basicTracer shouldBe a[Tracing]
 
-    val agentEvent = TraceEvent.AgentInitialized(
-      query = "What's the weather like?",
-      tools = Vector("weather", "calculator")
-    )
+    val agentEvent = TraceEvent.CustomEvent("query_received", ujson.Obj("query" -> "What's the weather like?"))
 
     val result = basicTracer.traceEvent(agentEvent)
     result shouldBe a[Right[_, Unit]]
@@ -32,10 +29,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
 
     composedTracer shouldBe a[Tracing]
 
-    val agentEvent = TraceEvent.AgentInitialized(
-      query = "Test query",
-      tools = Vector("test")
-    )
+    val agentEvent = TraceEvent.CustomEvent("query_received", ujson.Obj("query" -> "Test query"))
 
     val result = composedTracer.traceEvent(agentEvent)
     result shouldBe a[Right[_, Unit]]
@@ -47,15 +41,9 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
       event.isInstanceOf[TraceEvent.ErrorOccurred]
     }
 
-    val agentEvent = TraceEvent.AgentInitialized(
-      query = "This won't be traced",
-      tools = Vector("test")
-    )
+    val agentEvent = TraceEvent.CustomEvent("query_received", ujson.Obj("query" -> "This won't be traced"))
 
-    val errorEvent = TraceEvent.ErrorOccurred(
-      error = new RuntimeException("Test error"),
-      context = "Test context"
-    )
+    val errorEvent = TraceEvent.ErrorOccurred.of(new RuntimeException("Test error"), "Test context")
 
     // Non-error event should not be traced (filtered out)
     val nonErrorResult = errorOnlyTracer.traceEvent(agentEvent)
@@ -164,10 +152,9 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
 
     // Test all event types
     val events = Seq(
-      TraceEvent.AgentInitialized("test", Vector("tool")),
       TraceEvent.CompletionReceived("id", "model", 0, "content"),
       TraceEvent.ToolExecuted("tool", "input", "output", 100.millis, true),
-      TraceEvent.ErrorOccurred(new RuntimeException("error"), "context"),
+      TraceEvent.ErrorOccurred.of(new RuntimeException("error"), "context"),
       TraceEvent.TokenUsageRecorded(TokenUsage(1, 2, 3), "model", "op"),
       TraceEvent.AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary()),
       TraceEvent.CustomEvent("name", ujson.Obj("key" -> "value"))

@@ -130,10 +130,9 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val tracing = new ConsoleTracing()
 
     // Test each event type
-    tracing.traceEvent(TraceEvent.AgentInitialized("query", Vector("tool1"))).isRight shouldBe true
     tracing.traceEvent(TraceEvent.CompletionReceived("id", "model", 0, "content")).isRight shouldBe true
     tracing.traceEvent(TraceEvent.ToolExecuted("tool", "in", "out", 100.millis, true)).isRight shouldBe true
-    tracing.traceEvent(TraceEvent.ErrorOccurred(new Exception("e"), "ctx")).isRight shouldBe true
+    tracing.traceEvent(TraceEvent.ErrorOccurred.of(new Exception("e"), "ctx")).isRight shouldBe true
     tracing.traceEvent(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "m", "o")).isRight shouldBe true
     tracing
       .traceEvent(TraceEvent.AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary()))
@@ -224,7 +223,7 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val filtered = TracingComposer.filter(tracer)(_.eventType == "custom_event")
 
     val customEvent = TraceEvent.CustomEvent("test", ujson.Obj())
-    val agentEvent  = TraceEvent.AgentInitialized("query", Vector.empty)
+    val agentEvent  = TraceEvent.CacheHit(0.9, 0.8)
 
     filtered.traceEvent(customEvent) shouldBe Right(())
     filtered.traceEvent(agentEvent) shouldBe Right(())
