@@ -40,7 +40,7 @@ final class JlamaClient private[provider] (
 
   protected def clientDescription: String = s"Jlama client for model ${config.model}"
   protected def providerName: String      = ProviderName
-  protected def modelName: String         = config.model
+  protected def modelName: String         = config.model.asString
 
   private val lock                        = new ReentrantLock()
   private var engine: Option[JlamaEngine] = None // guarded by lock
@@ -52,8 +52,8 @@ final class JlamaClient private[provider] (
   private lazy val adjustmentLog = new AdjustmentLog(ProviderName)
 
   private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
-    val adjustments = unsentOptions(config.model, options)
-    adjustmentLog.record(config.model, adjustments)
+    val adjustments = unsentOptions(config.model.asString, options)
+    adjustmentLog.record(config.model.asString, adjustments)
     adjustments
   }
 
@@ -135,7 +135,7 @@ final class JlamaClient private[provider] (
           Completion(
             id = UUID.randomUUID().toString,
             created = Instant.now(),
-            model = config.model,
+            model = config.model.asString,
             message = AssistantMessage(generation.text),
             usage = Some(
               TokenUsage(

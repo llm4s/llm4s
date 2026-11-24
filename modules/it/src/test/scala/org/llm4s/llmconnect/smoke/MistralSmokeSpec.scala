@@ -62,11 +62,11 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
   private val NineCharacterId = "[A-Za-z0-9]{9}"
 
-  private def secretCodeTool: ToolFunction[_, _] = {
+  private def secretCodeTool: ToolFunction[_] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Secret code parameters")
       .withProperty(Schema.property("topic", Schema.string("What the code is for")))
-    ToolBuilder[Map[String, Any], String]("get_secret_code", "Looks up the secret code for a topic", schema)
+    ToolBuilder[String]("get_secret_code", "Looks up the secret code for a topic", schema)
       .withHandler(params => params.getString("topic").map(_ => "ZX-4417"))
       .buildSafe()
       .value

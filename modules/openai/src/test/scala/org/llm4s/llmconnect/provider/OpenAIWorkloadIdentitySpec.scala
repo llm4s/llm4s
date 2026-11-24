@@ -1,7 +1,8 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import com.openai.auth.SubjectTokenType
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
 import org.llm4s.llmconnect.auth.IdentitySource
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, OpenAIWorkloadIdentity }
@@ -116,7 +117,7 @@ class OpenAIWorkloadIdentitySpec
       OpenAIClient.registerCredentials(
         OpenAIConfig(
           Secret(""),
-          "gpt-4o-mini",
+          ModelName("gpt-4o-mini"),
           None,
           "https://api.openai.com/v1",
           128000,
@@ -203,7 +204,7 @@ class OpenAIWorkloadIdentitySpec
         val wi = OpenAIWorkloadIdentity(IdentitySource.Literal(Secret("eyJ.svid.sig")), "idp_1", "sa_1")
         val config = OpenAIConfig(
           Secret(""),
-          "gpt-4o-mini",
+          ModelName("gpt-4o-mini"),
           None,
           "https://api.openai.com/v1",
           128000,
@@ -261,7 +262,7 @@ class OpenAIWorkloadIdentitySpec
         // Chat from a config built by hand: the companion apply, LLMConnect and the constructor.
         val byHand = OpenAIConfig(
           Secret(""),
-          "gpt-4o-mini",
+          ModelName("gpt-4o-mini"),
           None,
           baseUrl,
           128000,
@@ -394,7 +395,7 @@ class OpenAIWorkloadIdentitySpec
         withClue(url) {
           OpenAIConfig(
             Secret(""),
-            "gpt-4o-mini",
+            ModelName("gpt-4o-mini"),
             None,
             url,
             8192,
@@ -476,15 +477,15 @@ class OpenAIWorkloadIdentitySpec
     "apply the same rules to the Java and Kotlin path: the short apply and withWorkloadIdentity" in {
       // the short apply with a blank key and no identity would send an empty bearer
       Seq("", "  ").foreach { key =>
-        OpenAIClient(OpenAIConfig(Secret(key), "gpt-4o-mini")).left.value.message should include("apiKey")
+        OpenAIClient(OpenAIConfig(Secret(key), ModelName("gpt-4o-mini"))).left.value.message should include("apiKey")
       }
       // the short apply's default base URL is an OpenAI host, so a keyless config with an identity is valid
-      val federated = OpenAIConfig(Secret(""), "gpt-4o-mini").withWorkloadIdentity(identity)
+      val federated = OpenAIConfig(Secret(""), ModelName("gpt-4o-mini")).withWorkloadIdentity(identity)
       OpenAIConfig.validate(federated) shouldBe Right(federated)
       OpenAIClient(federated).value.close()
       val bad = Seq(
-        OpenAIConfig(Secret("sk-x"), "gpt-4o-mini").withWorkloadIdentity(identity),
-        OpenAIConfig(Secret("sk-x"), "gpt-4o-mini").withWorkloadIdentity(Some(identity)),
+        OpenAIConfig(Secret("sk-x"), ModelName("gpt-4o-mini")).withWorkloadIdentity(identity),
+        OpenAIConfig(Secret("sk-x"), ModelName("gpt-4o-mini")).withWorkloadIdentity(Some(identity)),
         federated.withApiKey(Secret("sk-x")),
         federated.withBaseUrl("https://proxy.example/v1"),
         federated.withExplicitProviderId(org.llm4s.types.ProviderModelTypes.ProviderId("requesty")),

@@ -1,8 +1,8 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.error.ConfigurationError
 import org.scalatest.EitherValues
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -30,7 +30,7 @@ class OllamaConfigSpec extends AnyFunSuite with Matchers with EitherValues {
       )
       .value
 
-    config.model shouldBe "llama3"
+    config.model.asString shouldBe "llama3"
     config.baseUrl shouldBe "http://localhost:11434"
   }
 
@@ -109,7 +109,7 @@ class OllamaConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     cfg.reserveCompletion shouldBe 4096
   }
 
-  private def described = OllamaConfig("llama3", "http://localhost:11434", 8192, 4096)
+  private def described = OllamaConfig(ModelName("llama3"), "http://localhost:11434", 8192, 4096)
 
   test("OllamaConfig describes itself as the ollama provider at its base URL") {
     described.providerId shouldBe ProviderId("ollama")
@@ -117,15 +117,15 @@ class OllamaConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("OllamaConfig.withModel changes only the model") {
-    val renamed = described.withModel("some-other-model")
-    renamed shouldBe OllamaConfig("some-other-model", "http://localhost:11434", 8192, 4096)
+    val renamed = described.withModel(ModelName("some-other-model"))
+    renamed shouldBe OllamaConfig(ModelName("some-other-model"), "http://localhost:11434", 8192, 4096)
   }
 
   // ---- growth-prone construction (#1388) ----
 
   test("OllamaConfig(model, baseUrl) takes the context window from the model name") {
-    OllamaConfig("llama3", "http://localhost:11434") shouldBe described
-    OllamaConfig("codellama", "http://localhost:11434").contextWindow shouldBe 16384
+    OllamaConfig(ModelName("llama3"), "http://localhost:11434") shouldBe described
+    OllamaConfig(ModelName("codellama"), "http://localhost:11434").contextWindow shouldBe 16384
   }
 
   test("OllamaConfig's setters each change one field") {
@@ -133,20 +133,20 @@ class OllamaConfigSpec extends AnyFunSuite with Matchers with EitherValues {
       .withBaseUrl("http://ollama:11434")
       .withContextWindow(32768)
       .withReserveCompletion(2048)
-    adjusted shouldBe OllamaConfig("llama3", "http://ollama:11434", 32768, 2048)
+    adjusted shouldBe OllamaConfig(ModelName("llama3"), "http://ollama:11434", 32768, 2048)
   }
 
   test("OllamaConfig.apply defaults every field after baseUrl and takes timeouts") {
-    val defaults = OllamaConfig("codellama", "http://ollama:11434", contextWindow = 16384)
+    val defaults = OllamaConfig(ModelName("codellama"), "http://ollama:11434", contextWindow = 16384)
     defaults.contextWindow shouldBe 16384
     defaults.reserveCompletion shouldBe OllamaConfig.DEFAULT_RESERVE_COMPLETION
     defaults.timeouts shouldBe ProviderTimeouts.default
 
     val timeouts = ProviderTimeouts(request = Some(30.seconds))
-    val timed    = OllamaConfig("llama3", "http://ollama:11434", timeouts = timeouts)
+    val timed    = OllamaConfig(ModelName("llama3"), "http://ollama:11434", timeouts = timeouts)
     timed.contextWindow shouldBe OllamaConfig.DEFAULT_CONTEXT_WINDOW
     timed.reserveCompletion shouldBe 4096
     timed.timeouts shouldBe timeouts
-    OllamaConfig("llama3", "http://ollama:11434").withTimeouts(timeouts) shouldBe timed
+    OllamaConfig(ModelName("llama3"), "http://ollama:11434").withTimeouts(timeouts) shouldBe timed
   }
 }

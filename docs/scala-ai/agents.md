@@ -45,7 +45,7 @@ import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 
 def weatherAgent(client: LLMClient, question: String): Result[AgentResult] = for {
-  forecast <- ToolBuilder[Map[String, Any], String](
+  forecast <- ToolBuilder[String](
     name = "get_forecast",
     description = "Returns today's forecast for a city",
     schema = Schema

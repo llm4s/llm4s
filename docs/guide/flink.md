@@ -283,5 +283,5 @@ dead-letter> DeadLetter(Ticket(5,What is the meaning of life?),unexpected answer
 ```
 
 Without `--scripted`, the job calls the provider that `resources/application.conf`, bundled in the job's jar, names
-in `llm4s.providers.provider`: a local Ollama (`ollama serve`, `ollama pull llama3`). To call another provider, change
+in `llm4s.defaultProvider`: a local Ollama (`ollama serve`, `ollama pull llama3`). To call another provider, change
 that section and add its module ([configuration](../getting-started/configuration)).

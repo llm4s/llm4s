@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
@@ -20,7 +21,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
 
   private val options = CompletionOptions().withTemperature(0.5).withMaxTokens(64)
 
-  private val addTool: ToolFunction[?, ?] = ToolBuilder[Map[String, Any], String](
+  private val addTool: ToolFunction[?] = ToolBuilder[String](
     "add",
     "Adds two numbers",
     Schema
@@ -179,7 +180,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
 
   // ---- reasoning_effort
 
-  private val gptOss = config.copy(model = "openai/gpt-oss-120b")
+  private val gptOss = config.copy(model = ModelName("openai/gpt-oss-120b"))
 
   private def gptOssBody(opts: CompletionOptions, cfg: org.llm4s.llmconnect.config.WatsonXConfig = gptOss): String =
     new WatsonXClient(cfg, httpClient = routed(_ => Right(iamToken()), _ => Right(chatReply)))
@@ -240,7 +241,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
     ReasoningEffort.values.foreach(effort => body(x, CompletionOptions().withReasoning(effort)) shouldBe body(x))
     ReasoningEffort.values.foreach { effort =>
       WatsonXClient.reasoningAdjustments(
-        WatsonXTestConfig.config.model,
+        WatsonXTestConfig.config.model.asString,
         CompletionOptions().withReasoning(effort)
       ) match
         case List(RequestAdjustment.Dropped(RequestOption.Reasoning, _)) => succeed

@@ -36,7 +36,7 @@ class JlamaClientSpec extends AnyWordSpec with Matchers:
       )
       completion.content shouldBe "Hi!"
       completion.message.content shouldBe "Hi!"
-      completion.model shouldBe config.model
+      completion.model shouldBe config.model.asString
       completion.toolCalls shouldBe empty
       completion.usage.map(u => (u.promptTokens, u.completionTokens, u.totalTokens)) shouldBe Some((11, 3, 14))
     }
@@ -53,7 +53,7 @@ class JlamaClientSpec extends AnyWordSpec with Matchers:
     "refuse tools, tool calls and tool results before loading the model" in {
       val loader = new CountingLoader(Right(new ScriptedEngine()))
       val local  = client(loader)
-      val tool = ToolBuilder[Map[String, Any], String]("echo", "Echoes", Schema.`object`[Map[String, Any]]("args"))
+      val tool = ToolBuilder[String]("echo", "Echoes", Schema.`object`[Map[String, Any]]("args"))
         .withHandler(_ => Right("ok"))
         .buildSafe()
         .fold(e => fail(e.toString), identity)

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ NetworkError, ProcessingError, RateLimitError, ServiceError, TimeoutError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
@@ -22,7 +23,7 @@ import org.llm4s.model.ModelRegistryService
 private[provider] object OllamaRequestBodyTestHelper {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private val testConfig = OllamaConfig(
-    model = "llama3.1",
+    model = ModelName("llama3.1"),
     baseUrl = "http://localhost:11434",
     contextWindow = 4096,
     reserveCompletion = 512
@@ -69,7 +70,7 @@ class OllamaClientSpec extends AnyFunSuite {
 
   test("ollama client accepts custom metrics collector") {
     val config = OllamaConfig(
-      model = "llama3.1",
+      model = ModelName("llama3.1"),
       baseUrl = "http://localhost:11434",
       contextWindow = 4096,
       reserveCompletion = 512
@@ -85,7 +86,7 @@ class OllamaClientSpec extends AnyFunSuite {
 
   test("ollama client uses noop metrics by default") {
     val config = OllamaConfig(
-      model = "llama3.1",
+      model = ModelName("llama3.1"),
       baseUrl = "http://localhost:11434",
       contextWindow = 4096,
       reserveCompletion = 512
@@ -106,7 +107,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val testConfig = OllamaConfig(
-    model = "llama3.1",
+    model = ModelName("llama3.1"),
     baseUrl = "http://localhost:11434",
     contextWindow = 4096,
     reserveCompletion = 512
@@ -618,7 +619,7 @@ class OllamaClientRateLimitSpec extends AnyFunSuite with org.scalatest.BeforeAnd
   private def client: OllamaClient =
     new OllamaClient(
       OllamaConfig(
-        model = "llama3.1",
+        model = ModelName("llama3.1"),
         baseUrl = s"http://localhost:${server.getAddress.getPort}",
         contextWindow = 4096,
         reserveCompletion = 512
@@ -645,7 +646,7 @@ class OllamaClientRateLimitSpec extends AnyFunSuite with org.scalatest.BeforeAnd
     val port = scala.util.Using.resource(new java.net.ServerSocket(0))(_.getLocalPort)
     val unreachable = new OllamaClient(
       OllamaConfig(
-        model = "llama3.1",
+        model = ModelName("llama3.1"),
         baseUrl = s"http://localhost:$port",
         contextWindow = 4096,
         reserveCompletion = 512

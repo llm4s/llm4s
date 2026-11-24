@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.javaapi.usage.ClientBuilderCheck
 import org.llm4s.testkit.LocalProviderTestServer.{ anthropicMessage, openAICompletion, sendJsonResponse, withServer }
@@ -248,7 +249,7 @@ class ClientBuildersSpec extends AnyFlatSpec with Matchers {
   /** The config `application.conf` gives for a section `name` of `hocon`'s `llm4s.providers`. */
   private def fromConfig(hocon: String, name: String): org.llm4s.llmconnect.config.ProviderConfig =
     org.llm4s.config.Llm4sConfig
-      .provider(pureconfig.ConfigSource.string(s"llm4s.providers { $hocon }"), name)
+      .provider(pureconfig.ConfigSource.string(s"llm4s.providers { $hocon }"), ProviderName(name))
       .fold(e => fail(e.message), identity)
 
   private def fromBuilder(

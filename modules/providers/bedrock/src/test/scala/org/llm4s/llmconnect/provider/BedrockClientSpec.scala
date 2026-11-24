@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
+
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ AuthenticationError, NetworkError, RateLimitError, ServiceError, ValidationError }
@@ -153,7 +155,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         body = bodyOf(exchange)
         sendJsonResponse(exchange, 200, converseResponse("The weather is 22C"))
       } { url =>
-        val tool = ToolBuilder[Map[String, Any], String](
+        val tool = ToolBuilder[String](
           "get_weather",
           "Returns current weather for a location",
           Schema
@@ -406,7 +408,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
 
     "build with the default credential chain when the config names no credentials" in {
       BedrockClient(
-        BedrockConfig("us-east-1", Model, 32000, 4096, endpointUrl = Some("http://localhost:1"))
+        BedrockConfig("us-east-1", ModelName(Model), 32000, 4096, endpointUrl = Some(BaseUrl("http://localhost:1")))
       ).isRight shouldBe true
     }
   }

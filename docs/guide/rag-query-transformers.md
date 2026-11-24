@@ -43,11 +43,10 @@ import org.llm4s.types.Result
 
 def search(llmClient: LLMClient, question: String)(using ModelRegistryService): Result[Seq[RAGSearchResult]] =
   for {
-    embeddingPair <- Llm4sConfig.embeddings()
-    (provider, embeddingCfg) = embeddingPair
+    embeddingCfg <- Llm4sConfig.embeddings()
     config = RAG
       .builder()
-      .withEmbeddings(provider, embeddingCfg.model)
+      .withEmbeddings(embeddingCfg.providerId.asString, embeddingCfg.model.asString)
       .withQueryTransformer(LLMQueryRewriter(llmClient))
     rag     <- RAG.build(config, _ => Right(embeddingCfg))
     results <- rag.query(question) // the rewritten query is embedded and searched

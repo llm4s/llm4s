@@ -266,11 +266,11 @@ object PermissionBasedRAGExample extends App {
               val ragResult = for {
                 service       <- Llm4sConfig.modelRegistryService()
                 embeddingPair <- Llm4sConfig.embeddings()
-                (providerName, embeddingCfg) = embeddingPair
+                embeddingCfg = embeddingPair
                 rag <- RAG.build(
                   RAG
                     .builder()
-                    .withEmbeddings(providerName, embeddingCfg.model)
+                    .withEmbeddings(embeddingCfg.providerId.asString, embeddingCfg.model.asString)
                     .withSearchIndex(searchIndex)
                     .withTopK(5),
                   _ => Right(embeddingCfg)

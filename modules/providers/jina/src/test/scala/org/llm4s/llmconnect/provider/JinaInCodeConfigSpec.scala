@@ -1,11 +1,11 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -22,16 +22,17 @@ class JinaInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues:
   private given ModelRegistryService = ModelRegistryService.default().value
 
   private def assertBuildsEmbeddings(provider: String, config: EmbeddingProviderConfig): Unit =
-    EmbeddingClient.from(provider, config).value.providerId shouldBe Some(ProviderId(provider))
+    EmbeddingClient.from(config).value.providerId shouldBe Some(ProviderId(provider))
 
   "llm4s-jina, configured in code" should {
     "build a Jina embedding client from a base URL, model and key" in {
       assertBuildsEmbeddings(
         "jina",
         EmbeddingProviderConfig(
-          baseUrl = "https://api.jina.ai",
-          model = "jina-embeddings-v3",
-          apiKey = Secret("jina-test")
+          providerId = ProviderId("jina"),
+          baseUrl = BaseUrl("https://api.jina.ai"),
+          model = ModelName("jina-embeddings-v3"),
+          apiKey = Some(Secret("jina-test"))
         )
       )
     }

@@ -1,8 +1,8 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -23,7 +23,8 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   private val apiKey  = "sk-test"
   private val baseUrl = "https://api.example.com"
 
-  private val anthropic = AnthropicConfig(Secret("k"), "claude-sonnet-4-5", "https://api.anthropic.com", 200000, 4096)
+  private val anthropic =
+    AnthropicConfig(Secret("k"), ModelName("claude-sonnet-4-5"), "https://api.anthropic.com", 200000, 4096)
 
   // ---- fromValues (from ProviderConfigSpec) ----
 
@@ -36,7 +37,7 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
       )
       .value
 
-    config.model shouldBe "claude-3-sonnet-20240229"
+    config.model.asString shouldBe "claude-3-sonnet-20240229"
     config.apiKey.reveal shouldBe "test-key"
   }
 
@@ -137,9 +138,9 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("AnthropicConfig.withModel changes only the model") {
-    val renamed = anthropic.withModel("some-other-model")
+    val renamed = anthropic.withModel(ModelName("some-other-model"))
 
-    renamed.model shouldBe "some-other-model"
+    renamed.model.asString shouldBe "some-other-model"
     renamed.providerId shouldBe anthropic.providerId
     renamed.getClass shouldBe anthropic.getClass
     renamed.endpointUrl shouldBe anthropic.endpointUrl
@@ -151,10 +152,16 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   // ---- growth-prone construction (#1388) ----
 
   test("AnthropicConfig(apiKey, model) defaults the base URL and takes the context window from the model name") {
-    val config = AnthropicConfig(Secret("k"), "claude-sonnet-4-5")
+    val config = AnthropicConfig(Secret("k"), ModelName("claude-sonnet-4-5"))
 
-    config shouldBe AnthropicConfig(Secret("k"), "claude-sonnet-4-5", AnthropicConfig.DEFAULT_BASE_URL, 200000, 4096)
-    AnthropicConfig(Secret("k"), "claude-instant-1").contextWindow shouldBe 100000
+    config shouldBe AnthropicConfig(
+      Secret("k"),
+      ModelName("claude-sonnet-4-5"),
+      AnthropicConfig.DEFAULT_BASE_URL,
+      200000,
+      4096
+    )
+    AnthropicConfig(Secret("k"), ModelName("claude-instant-1")).contextWindow shouldBe 100000
   }
 
   test("AnthropicConfig's setters each change one field") {
@@ -164,6 +171,12 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
       .withContextWindow(100000)
       .withReserveCompletion(2048)
 
-    adjusted shouldBe AnthropicConfig(Secret("k2"), "claude-sonnet-4-5", "https://proxy.example.com", 100000, 2048)
+    adjusted shouldBe AnthropicConfig(
+      Secret("k2"),
+      ModelName("claude-sonnet-4-5"),
+      "https://proxy.example.com",
+      100000,
+      2048
+    )
   }
 }

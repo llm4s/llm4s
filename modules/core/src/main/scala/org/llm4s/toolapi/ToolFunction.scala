@@ -20,29 +20,27 @@ import upickle.default._
  * @param handler     Business logic; receives a [[SafeParameterExtractor]] and returns `Right(result)`, or
  *                    `Left` of a [[ToolHandlerError]]: a `ToolParameterError` from a getter when an argument is
  *                    at fault, or a message when the tool itself fails
- * @tparam T Phantom type for the parameter schema (unused at runtime)
  * @tparam R Return type, must have a uPickle `ReadWriter`
  */
 @Stable
-final case class ToolFunction[T, R: ReadWriter] private (
+final case class ToolFunction[R: ReadWriter] private (
   name: String,
   description: String,
-  schema: SchemaDefinition[T],
+  schema: SchemaDefinition[_],
   handler: SafeParameterExtractor => Either[ToolHandlerError, R]
 ) {
 
   /** Replace the tool's name. */
-  def withName(name: String): ToolFunction[T, R] = copy(name = name)
+  def withName(name: String): ToolFunction[R] = copy(name = name)
 
   /** Replace the description shown to the LLM. */
-  def withDescription(description: String): ToolFunction[T, R] = copy(description = description)
+  def withDescription(description: String): ToolFunction[R] = copy(description = description)
 
   /** Replace the parameter schema. */
-  def withSchema[U](schema: SchemaDefinition[U]): ToolFunction[U, R] =
-    new ToolFunction[U, R](name, description, schema, handler)
+  def withSchema(schema: SchemaDefinition[_]): ToolFunction[R] = copy(schema = schema)
 
   /** Replace the handler. */
-  def withHandler(handler: SafeParameterExtractor => Either[ToolHandlerError, R]): ToolFunction[T, R] =
+  def withHandler(handler: SafeParameterExtractor => Either[ToolHandlerError, R]): ToolFunction[R] =
     copy(handler = handler)
 
   /**
@@ -111,24 +109,24 @@ object ToolFunction {
    *
    * @param strict as for [[ToolFunction.toolDefinition]]
    */
-  def toolDefinitions(tools: Seq[ToolFunction[_, _]], strict: Boolean): ujson.Arr =
+  def toolDefinitions(tools: Seq[ToolFunction[_]], strict: Boolean): ujson.Arr =
     ujson.Arr.from(tools.map(_.toolDefinition(strict)))
 
   /** Creates a [[ToolFunction]]; [[ToolBuilder]] is the usual way in. */
-  def apply[T, R: ReadWriter](
+  def apply[R: ReadWriter](
     name: String,
     description: String,
-    schema: SchemaDefinition[T],
+    schema: SchemaDefinition[_],
     handler: SafeParameterExtractor => Either[ToolHandlerError, R]
-  ): ToolFunction[T, R] =
-    new ToolFunction[T, R](name, description, schema, handler)
+  ): ToolFunction[R] =
+    new ToolFunction[R](name, description, schema, handler)
 }
 
 /**
  * Builder for [[ToolFunction]] definitions using a fluent API.
  *
  * Obtained via the companion [[ToolBuilder]] object:
- * {{{ToolBuilder[Map[String, Any], MyResult]("my_tool", "Does something", schema)
+ * {{{ToolBuilder[MyResult]("my_tool", "Does something", schema)
  *   .withHandler(extractor => Right(MyResult(...)))
  *   .buildSafe()
  * }}}
@@ -139,10 +137,10 @@ object ToolFunction {
  * @param handler     Optional handler; must be set before calling [[buildSafe]]
  */
 @Stable
-class ToolBuilder[T, R: ReadWriter] private (
+class ToolBuilder[R: ReadWriter] private (
   name: String,
   description: String,
-  schema: SchemaDefinition[T],
+  schema: SchemaDefinition[_],
   handler: Option[SafeParameterExtractor => Either[ToolHandlerError, R]] = None
 ) {
 
@@ -152,7 +150,7 @@ class ToolBuilder[T, R: ReadWriter] private (
    * @param handler Function that extracts parameters and executes the tool's logic
    * @return A new builder with the handler registered
    */
-  def withHandler(handler: SafeParameterExtractor => Either[ToolHandlerError, R]): ToolBuilder[T, R] =
+  def withHandler(handler: SafeParameterExtractor => Either[ToolHandlerError, R]): ToolBuilder[R] =
     new ToolBuilder(name, description, schema, Some(handler))
 
   /**
@@ -160,7 +158,7 @@ class ToolBuilder[T, R: ReadWriter] private (
    *
    * @return Right(ToolFunction) if handler is defined, Left(ValidationError) otherwise
    */
-  def buildSafe(): Result[ToolFunction[T, R]] = handler match {
+  def buildSafe(): Result[ToolFunction[R]] = handler match {
     case Some(h) => Right(ToolFunction(name, description, schema, h))
     case None    => Left(ValidationError("handler", "must be defined before calling buildSafe()"))
   }
@@ -175,6 +173,6 @@ object ToolBuilder {
    * @param description Natural-language description shown to the LLM
    * @param schema      Parameter schema
    */
-  def apply[T, R: ReadWriter](name: String, description: String, schema: SchemaDefinition[T]): ToolBuilder[T, R] =
+  def apply[R: ReadWriter](name: String, description: String, schema: SchemaDefinition[_]): ToolBuilder[R] =
     new ToolBuilder(name, description, schema)
 }

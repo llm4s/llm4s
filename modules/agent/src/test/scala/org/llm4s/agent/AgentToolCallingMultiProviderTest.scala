@@ -18,12 +18,12 @@ class AgentToolCallingMultiProviderTest extends AnyFlatSpec with Matchers {
   case class ToolResult(success: Boolean, message: String, item: String)
   implicit val toolResultRW: ReadWriter[ToolResult] = macroRW[ToolResult]
 
-  def createInventoryTool(): Result[ToolFunction[Map[String, Any], ToolResult]] = {
+  def createInventoryTool(): Result[ToolFunction[ToolResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Add item to inventory")
       .withProperty(Schema.property("item", Schema.string("Item name")))
 
-    ToolBuilder[Map[String, Any], ToolResult]("add_inventory_item", "Add an item to the player's inventory", schema)
+    ToolBuilder[ToolResult]("add_inventory_item", "Add an item to the player's inventory", schema)
       .withHandler { params =>
         val item = params.getString("item").getOrElse("unknown")
         Right(ToolResult(success = true, message = s"Added '$item' to inventory", item = item))

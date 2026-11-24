@@ -8,7 +8,7 @@ import org.llm4s.annotation.Stable
  * These were `ConfigKeys.OPENROUTER_BASE_URL`, `ConfigKeys.DEEPSEEK_*` and `ConfigKeys.MISTRAL_*` in
  * `llm4s-core` until the providers moved to their own module
  * ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]): a key belongs with the
- * code that reads it, so that `ConfigKeys` does not name variables for a
+ * code that reads it, so that `llm4s-core` does not name variables for a
  * provider that may not be on the classpath.
  */
 @Stable

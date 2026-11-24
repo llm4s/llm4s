@@ -2,7 +2,7 @@ package org.llm4s.repl
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.ProviderConfig
@@ -22,7 +22,7 @@ import java.io.{ BufferedReader, PrintStream }
  * {{{
  * import org.llm4s.repl.*
  *
- * given Session = Session.fromConfig()       // the `llm4s.providers.provider` section of application.conf
+ * given Session = Session.fromConfig()       // the `llm4s.defaultProvider` section of application.conf
  * ask("Explain variance in Scala 3 in two sentences")
  * }}}
  *
@@ -119,14 +119,14 @@ object Session {
   val DefaultMaxToolSteps: Int = 8
 
   /**
-   * A session on the default provider: the section that `llm4s.providers.provider` names in `application.conf`, with
+   * A session on the default provider: the section that `llm4s.defaultProvider` names in `application.conf`, with
    * the provider modules on the classpath. A configuration that cannot be loaded gives a session whose helpers
    * print the error ([[Session.failure]]).
    */
   def fromConfig(): Session = fromProvider("default provider", Llm4sConfig.defaultProvider())
 
   /** A session on the named section `llm4s.providers.<name>` of `application.conf`. */
-  def named(name: String): Session = fromProvider(name, Llm4sConfig.provider(name))
+  def named(name: String): Session = fromProvider(name, Llm4sConfig.provider(ProviderName(name)))
 
   /**
    * A session on a local Ollama server at its default address, `http://localhost:11434`, with no `application.conf`

@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.*
@@ -57,7 +58,7 @@ object ParallelNamedProvidersExample:
   ): Future[Result[(org.llm4s.llmconnect.config.ProviderConfig, Completion)]] =
     Future:
       for
-        providerCfg     <- Llm4sConfig.provider(providerName)
+        providerCfg     <- Llm4sConfig.provider(ProviderName(providerName))
         registryService <- Llm4sConfig.modelRegistryService()
         given org.llm4s.model.ModelRegistryService = registryService
         client     <- LLMConnect.getClient(providerCfg)

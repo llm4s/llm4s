@@ -615,8 +615,8 @@ sbt "samples/runMain org.llm4s.samples.toolapi.WeatherToolExample"
 
 **Key code:**
 ```scala
-val toolSafe: Result[ToolFunction[Map[String, Any], WeatherResult]] =
-  ToolBuilder[Map[String, Any], WeatherResult]("get_weather", "Get current weather for a location", schema)
+val toolSafe: Result[ToolFunction[WeatherResult]] =
+  ToolBuilder[WeatherResult]("get_weather", "Get current weather for a location", schema)
     .withHandler(weatherHandler)
     .buildSafe()
 ```
@@ -1429,7 +1429,7 @@ llm4s.providers {
 ```
 
 and select it with `LLM4S_PROVIDER`, which the samples' `application.conf` binds to
-`llm4s.providers.provider`. The section needs no `apiKey`: `llm4s-openai` binds `OPENAI_API_KEY`
+`llm4s.defaultProvider`. The section needs no `apiKey`: `llm4s-openai` binds `OPENAI_API_KEY`
 to OpenAI's shared key.
 
 ```bash

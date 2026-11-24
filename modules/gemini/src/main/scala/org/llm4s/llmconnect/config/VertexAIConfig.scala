@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.http.HttpNetworkSettings
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -39,7 +39,7 @@ import org.llm4s.types.Result
 final case class VertexAIConfig private (
   projectId: String,
   location: String,
-  model: String,
+  model: ModelName,
   credentialFilePath: Option[String],
   contextWindow: Int,
   reserveCompletion: Int,
@@ -49,9 +49,16 @@ final case class VertexAIConfig private (
   override val network: HttpNetworkSettings
 ) extends ProviderConfig:
   override val providerId: ProviderId                                    = ProviderId("vertexai")
-  override def withModel(model: String): VertexAIConfig                  = copy(model = model)
+  override def withModel(model: ModelName): VertexAIConfig               = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): VertexAIConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): VertexAIConfig = copy(network = network)
+
+  /** Always `None`: this provider authenticates without an API key. */
+  override def apiKeyProvider: Option[org.llm4s.llmconnect.auth.ApiKeyProvider] = None
+
+  /** Always a `ConfigurationError`: this provider takes no API key, so there is none to supply per request. */
+  override def withApiKeyProvider(provider: org.llm4s.llmconnect.auth.ApiKeyProvider): Result[Nothing] =
+    ProviderConfig.noApiKeyProvider(providerId)
 
   def withProjectId(projectId: String): VertexAIConfig                  = copy(projectId = projectId)
   def withLocation(location: String): VertexAIConfig                    = copy(location = location)
@@ -68,7 +75,7 @@ final case class VertexAIConfig private (
   /** Base URL derived from the location, e.g. `"https://us-central1-aiplatform.googleapis.com/v1"`. */
   def computedBaseUrl: String = s"https://$location-aiplatform.googleapis.com/v1"
 
-  override def endpointUrl: Option[String] = Some(computedBaseUrl)
+  override def endpointUrl: Option[BaseUrl] = Some(BaseUrl(computedBaseUrl))
 
   override def toString: String =
     s"VertexAIConfig(projectId=$projectId, location=$location, model=$model, " +
@@ -89,8 +96,8 @@ object VertexAIConfig:
   private val DefaultContextWindow     = 1048576
   private val DefaultReserveCompletion = 8192
 
-  private val vertexAiFallback: String => (Int, Int) =
-    _ => (DefaultContextWindow, DefaultReserveCompletion)
+  private val vertexAiFallback: String => ContextLimits =
+    _ => ContextLimits(DefaultContextWindow, DefaultReserveCompletion)
 
   /**
    * Builds a config without validating it; [[fromValues]] validates. `timeouts` defaults to
@@ -99,7 +106,7 @@ object VertexAIConfig:
   def apply(
     projectId: String,
     location: String,
-    model: String,
+    model: ModelName,
     credentialFilePath: Option[String],
     contextWindow: Int,
     reserveCompletion: Int,
@@ -127,8 +134,8 @@ object VertexAIConfig:
    * the context window is 1M tokens with an 8192-token completion reserve; set them, and the rest,
    * with the `with*` setters, or use [[fromValues]] to consult the bundled model catalogue.
    */
-  def apply(projectId: String, model: String): VertexAIConfig = {
-    val (cw, rc) = vertexAiFallback(model)
+  def apply(projectId: String, model: ModelName): VertexAIConfig = {
+    val ContextLimits(cw, rc) = vertexAiFallback(model.asString)
     apply(projectId, DEFAULT_LOCATION, model, None, cw, rc)
   }
 
@@ -151,7 +158,7 @@ object VertexAIConfig:
       _ <- ProviderConfig.nonEmpty("Vertex AI", "projectId", projectId)
       _ <- ProviderConfig.nonEmpty("Vertex AI", "location", location)
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("gemini", "vertexai"),
         modelName = modelName,
         defaultContextWindow = DefaultContextWindow,
@@ -161,7 +168,7 @@ object VertexAIConfig:
       VertexAIConfig(
         projectId = projectId,
         location = location,
-        model = modelName,
+        model = ModelName(modelName),
         credentialFilePath = credentialFilePath,
         contextWindow = cw,
         reserveCompletion = rc

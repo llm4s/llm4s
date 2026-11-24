@@ -84,8 +84,8 @@ object UUIDTool {
   /**
    * The UUID generator tool instance, returning a Result for safe error handling.
    */
-  val toolSafe: Result[ToolFunction[Map[String, Any], UUIDsResult]] =
-    ToolBuilder[Map[String, Any], UUIDsResult](
+  val toolSafe: Result[ToolFunction[UUIDsResult]] =
+    ToolBuilder[UUIDsResult](
       name = "generate_uuid",
       description = "Generate one or more universally unique identifiers (UUIDs). " +
         "Useful for creating unique IDs for transactions, records, or entities.",

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ ProcessingError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
@@ -33,7 +34,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
   import OllamaToolCallingSpec._
 
   private def config(baseUrl: String): OllamaConfig =
-    OllamaConfig(model = "llama3.1", baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512)
+    OllamaConfig(model = ModelName("llama3.1"), baseUrl = baseUrl, contextWindow = 4096, reserveCompletion = 512)
 
   private val bodyBuilder = new OllamaClient(config("http://localhost:11434"))
 
@@ -57,7 +58,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
     }
   }
 
-  private def ask(client: OllamaClient, tools: Seq[ToolFunction[_, _]] = Seq(weatherTool)): Result[Completion] =
+  private def ask(client: OllamaClient, tools: Seq[ToolFunction[_]] = Seq(weatherTool)): Result[Completion] =
     client.complete(
       Conversation(Seq(UserMessage("What is the weather in Paris?"))),
       CompletionOptions().withTools(tools)
@@ -462,7 +463,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
     // What Ollama answers (HTTP 400) when `tools` is sent to a model whose capabilities lack it.
     val unsupported = """{"error":"registry.ollama.ai/library/llama3:latest does not support tools"}"""
 
-    def streamAsk(client: OllamaClient, tools: Seq[ToolFunction[_, _]] = Seq(weatherTool)): Result[Completion] =
+    def streamAsk(client: OllamaClient, tools: Seq[ToolFunction[_]] = Seq(weatherTool)): Result[Completion] =
       client.streamComplete(
         Conversation(Seq(UserMessage("What is the weather in Paris?"))),
         CompletionOptions().withTools(tools)
@@ -824,8 +825,8 @@ private object OllamaToolCallingSpec {
   implicit private val weatherRW: ReadWriter[Weather] = macroRW
 
   /** A tool whose definition the client has to send. */
-  val weatherTool: ToolFunction[Map[String, Any], Weather] =
-    ToolBuilder[Map[String, Any], Weather](
+  val weatherTool: ToolFunction[Weather] =
+    ToolBuilder[Weather](
       "get_weather",
       "Get the current weather in a location",
       Schema

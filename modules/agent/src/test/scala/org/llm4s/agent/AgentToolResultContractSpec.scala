@@ -1,6 +1,7 @@
 package org.llm4s.agent
 
 import org.llm4s.toolapi.IdempotencyKey
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.testutil.TestTimeLimit
 
@@ -119,7 +120,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
       new AnthropicClient(
         AnthropicConfig(
           apiKey = Secret("test-key"),
-          model = model,
+          model = ModelName(model),
           baseUrl = baseUrl,
           contextWindow = 200000,
           reserveCompletion = 4096

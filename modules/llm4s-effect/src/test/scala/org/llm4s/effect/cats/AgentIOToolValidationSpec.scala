@@ -33,7 +33,7 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with TestTimeLimit with Matc
   /** Counts executions that got past argument extraction, i.e. the tool's real body. */
   private val executed = new AtomicInteger(0)
 
-  private val echoTool = ToolBuilder[Map[String, Any], EchoResult](
+  private val echoTool = ToolBuilder[EchoResult](
     "echo",
     "echoes",
     Schema.`object`[Map[String, Any]]("params").withRequiredField("v", Schema.string("value"))

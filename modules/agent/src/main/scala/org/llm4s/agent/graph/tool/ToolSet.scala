@@ -36,16 +36,16 @@ final class ToolSet private (
    * spec's name, description and schema whose handler refuses to run, since `ToolLoop` executes
    * agent tools itself.
    */
-  def toolFunctions: Seq[ToolFunction[?, ?]] = tools.map(ToolSet.toolFunction)
+  def toolFunctions: Seq[ToolFunction[?]] = tools.map(ToolSet.toolFunction)
 
 @Experimental
 object ToolSet:
-  private def toolFunction(tool: AgentTool[?]): ToolFunction[?, ?] = tool match
+  private def toolFunction(tool: AgentTool[?]): ToolFunction[?] = tool match
     case adapted: AgentTool.FromToolFunction => adapted.function
     case other                               => standIn(other.spec)
 
-  private def standIn[A](spec: AgentToolSpec[A]): ToolFunction[A, ujson.Value] =
-    ToolFunction[A, ujson.Value](
+  private def standIn[A](spec: AgentToolSpec[A]): ToolFunction[ujson.Value] =
+    ToolFunction[ujson.Value](
       spec.name,
       spec.description,
       spec.schema,

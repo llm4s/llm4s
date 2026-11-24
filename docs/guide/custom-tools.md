@@ -41,7 +41,7 @@ A tool is a {% include api.html t="org.llm4s.toolapi.ToolFunction" %} with four 
 import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolFunction, ToolHandlerError }
 import org.llm4s.types.Result
 
-def temperatureTool: Result[ToolFunction[Map[String, Any], String]] = {
+def temperatureTool: Result[ToolFunction[String]] = {
   val schema = Schema
     .`object`[Map[String, Any]]("Temperature to convert")
     .withProperty(Schema.property("value", Schema.number("The temperature to convert, in the unit given by `unit`")))
@@ -71,7 +71,7 @@ def temperatureTool: Result[ToolFunction[Map[String, Any], String]] = {
       }
     } yield BigDecimal(converted).setScale(precision.getOrElse(1), BigDecimal.RoundingMode.HALF_UP).toString
 
-  ToolBuilder[Map[String, Any], String](
+  ToolBuilder[String](
     "convert_temperature",
     "Converts a temperature between Celsius and Fahrenheit. Use it whenever the user asks for a temperature " +
       "in the other unit; it does not convert any other quantity.",
@@ -80,8 +80,8 @@ def temperatureTool: Result[ToolFunction[Map[String, Any], String]] = {
 }
 ```
 
-`ToolBuilder[T, R]` takes the schema's type `T` (`Map[String, Any]` for an object whose fields you read one by one)
-and the result type `R`. `R` needs a upickle `ReadWriter`, because the result is written to JSON for the model:
+`ToolBuilder[R]` takes the result type `R`, which needs a upickle `ReadWriter`, because the result is written to
+JSON for the model:
 `String`, numbers and `Seq`s have one, and for your own case class you add `given ReadWriter[Result] = macroRW`.
 `buildSafe()` returns a `Result`, a `Left(ValidationError)` if you forgot `withHandler`, so building a tool never
 throws.
@@ -187,7 +187,7 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
 import org.llm4s.types.Result
 
-def askWithTool(tool: ToolFunction[?, ?], question: String): Result[Option[String]] =
+def askWithTool(tool: ToolFunction[?], question: String): Result[Option[String]] =
   for {
     providerConfig <- Llm4sConfig.defaultProvider()
     registry       <- Llm4sConfig.modelRegistryService()
@@ -206,7 +206,7 @@ receives:
 import org.llm4s.toolapi.{ ToolCallError, ToolCallRequest, ToolFunction, ToolRegistry }
 import org.llm4s.types.Result
 
-def callByName(tool: ToolFunction[?, ?]): Result[Either[ToolCallError, ujson.Value]] = {
+def callByName(tool: ToolFunction[?]): Result[Either[ToolCallError, ujson.Value]] = {
   println(tool.toolDefinition(strict = true).render(indent = 2)) // what the model is told about the tool
   ToolRegistry
     .of(Seq(tool)) // a Left when two tools share a name
@@ -226,7 +226,7 @@ and assert on the `Either`. `MCPEmbeddedServerRoundTripSpec` builds its compact 
 ```scala
 import org.llm4s.toolapi.{ ToolCallError, ToolFunction }
 
-def checkTemperatureTool(tool: ToolFunction[Map[String, Any], String]): Unit = {
+def checkTemperatureTool(tool: ToolFunction[String]): Unit = {
   // the result is the handler's `Right` value, written as JSON
   assert(tool.execute(ujson.Obj("value" -> 100, "unit" -> "celsius")) == Right(ujson.Str("212.0")))
   assert(tool.execute(ujson.Obj("value" -> 100, "unit" -> "celsius", "precision" -> 3)) == Right(ujson.Str("212.000")))
@@ -267,7 +267,7 @@ and when not to, and what each parameter means, including its unit:
 import org.llm4s.toolapi.{ Schema, ToolBuilder }
 
 def vagueTool =
-  ToolBuilder[Map[String, Any], String](
+  ToolBuilder[String](
     "tool1",
     "Does stuff",
     Schema.`object`[Map[String, Any]]("Params").withRequiredField("input", Schema.string("the input"))
@@ -282,7 +282,7 @@ fails in production with `required parameter 'unit' (type: string) is missing`. 
 import org.llm4s.toolapi.{ Schema, ToolBuilder }
 
 def declaredParameters: Either[org.llm4s.error.LLMError, List[String]] =
-  ToolBuilder[Map[String, Any], String](
+  ToolBuilder[String](
     "convert_temperature",
     "Converts a temperature",
     Schema.`object`[Map[String, Any]]("Temperature").withRequiredField("value", Schema.number("The temperature"))

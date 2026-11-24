@@ -90,7 +90,7 @@ The clients are sections of `llm4s.providers` in `application.properties`, in th
 [configuration](../getting-started/configuration):
 
 ```properties
-llm4s.providers.provider=main
+llm4s.default-provider=main
 llm4s.providers.main.provider=ollama
 llm4s.providers.main.model=llama3.2
 ```
@@ -100,7 +100,7 @@ llm4s.providers.main.model=llama3.2
   required, and every other key is the provider's own: `base-url`, `api-key`, `headers.*`, `endpoint` for Azure, ...
   (each provider module's README lists them). `kebab-case` names are read as llm4s's `camelCase` (`api-key` is
   `apiKey`); header names stay as written.
-- **The default.** `llm4s.providers.provider` names the section whose client is the `@Default` bean. Unset, the only
+- **The default.** `llm4s.default-provider` names the section whose client is the `@Default` bean. Unset, the only
   section is the default; with several and none named, each client is reachable by name only.
 - **Keys.** A section with no `api-key` uses the vendor's shared key, `llm4s.credentials.<provider>.api-key`, and then
   the vendor's conventional environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). Keep a real key out of
@@ -117,7 +117,7 @@ llm4s.providers.main.model=llama3.2
 
 The sections are fixed when the application is built: each becomes a bean. The build fails, with a message naming the
 property, when a section has no `provider` or `model`, when a provider is not on the classpath (the message lists those
-that are), when `llm4s.providers.provider` names no section, or when `llm4s.embeddings.model` is not
+that are), when `llm4s.default-provider` names no section, or when `llm4s.embeddings.model` is not
 `provider/model` of an embedding provider on the classpath:
 
 ```text

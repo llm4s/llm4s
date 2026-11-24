@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, PerplexityConfig, ProviderTimeouts }
 import org.llm4s.security.Secret
@@ -19,7 +20,13 @@ class PerplexityConfigSpec extends AnyWordSpec with Matchers:
     contextWindow: Int = 1000,
     reserve: Int = 10
   ) =
-    PerplexityConfig.fromValues(model, Secret(key), baseUrl, contextWindow = contextWindow, reserveCompletion = reserve)
+    PerplexityConfig.fromValues(
+      ModelName(model),
+      Secret(key),
+      baseUrl,
+      contextWindow = contextWindow,
+      reserveCompletion = reserve
+    )
 
   "PerplexityConfig.fromValues" should {
 
@@ -27,7 +34,7 @@ class PerplexityConfigSpec extends AnyWordSpec with Matchers:
       val config =
         build(model = " perplexity/sonar ", key = " k ", baseUrl = "https://api.perplexity.ai//").toOption.get
       config.apiKey.reveal shouldBe "k"
-      config.model shouldBe "perplexity/sonar"
+      config.model.asString shouldBe "perplexity/sonar"
       config.baseUrl shouldBe "https://api.perplexity.ai"
       config.endpointUrl shouldBe Some("https://api.perplexity.ai")
       config.providerId.asString shouldBe "perplexity"
@@ -55,13 +62,13 @@ class PerplexityConfigSpec extends AnyWordSpec with Matchers:
 
     "carry overrides through the with-setters and keep the key out of toString" in {
       val config = build().toOption.get
-        .withModel("openai/gpt-5.6-sol")
+        .withModel(ModelName("openai/gpt-5.6-sol"))
         .withTimeouts(ProviderTimeouts.default.withRequest(3.seconds))
         .withNetwork(org.llm4s.http.HttpNetworkSettings.default)
         .withWebSearch(false)
         .withHeaders(Map("X-A" -> "secret-header-value"))
         .withApiKeyProvider(None)
-      config.model shouldBe "openai/gpt-5.6-sol"
+      config.model.asString shouldBe "openai/gpt-5.6-sol"
       config.timeouts.requestOr(1.second) shouldBe 3.seconds
       config.webSearch shouldBe false
       config.apiKeyProvider shouldBe None

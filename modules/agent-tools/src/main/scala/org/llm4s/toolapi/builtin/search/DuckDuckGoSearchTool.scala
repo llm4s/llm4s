@@ -148,8 +148,8 @@ object DuckDuckGoSearchTool {
     config: DuckDuckGoSearchConfig = DuckDuckGoSearchConfig(),
     httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
     restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
-  ): Result[ToolFunction[Map[String, Any], DuckDuckGoSearchResult]] =
-    ToolBuilder[Map[String, Any], DuckDuckGoSearchResult](
+  ): Result[ToolFunction[DuckDuckGoSearchResult]] =
+    ToolBuilder[DuckDuckGoSearchResult](
       name = "duckduckgo_search",
       description = "Search the web for definitions, facts, and quick answers using DuckDuckGo. " +
         "Best for factual queries and definitions. Does not provide full web search results.",

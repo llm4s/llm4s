@@ -291,7 +291,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
   // ============================================
 
   private def withPingTool: Either[String, CompletionOptions] =
-    ToolBuilder[Map[String, Any], String]("ping", "Answers pong", Schema.`object`[Map[String, Any]]("No parameters"))
+    ToolBuilder[String]("ping", "Answers pong", Schema.`object`[Map[String, Any]]("No parameters"))
       .withHandler(_ => Right("pong"))
       .buildSafe()
       .left

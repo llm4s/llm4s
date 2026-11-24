@@ -99,10 +99,10 @@ class GeminiClient(
 
   protected def clientDescription: String = s"Gemini client for model ${config.model}"
   protected def providerName: String      = "gemini"
-  protected def modelName: String         = config.model
+  protected def modelName: String         = config.model.asString
 
   // thought signatures are replayed only to the provider and model id they were produced by (see ReplayOrigin)
-  private val replayOrigin = ReplayOrigin(providerName, config.model)
+  private val replayOrigin = ReplayOrigin(providerName, config.model.asString)
 
   // the references Gemini takes: web URLs and this provider's uploaded files
   private val fileUri = GeminiParts.geminiFileUri(providerName, config.baseUrl)
@@ -112,7 +112,7 @@ class GeminiClient(
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
 
   // the model's registry capabilities, looked up once: the registry is a static snapshot
-  private lazy val capabilities = registryService.lookup(config.model).toOption.map(_.capabilities)
+  private lazy val capabilities = registryService.lookup(config.model.asString).toOption.map(_.capabilities)
 
   override def complete(
     conversation: Conversation,
@@ -121,7 +121,7 @@ class GeminiClient(
     val startedAt = Instant.now()
     TransformationResult
       .transform(
-        config.model,
+        config.model.asString,
         options,
         conversation.messages,
         org.llm4s.model.RequestTransformer.default(registryService),
@@ -135,11 +135,11 @@ class GeminiClient(
       )
       .flatMap(transformed => requestKey().map(transformed -> _))
       .flatMap { (transformed, key) =>
-        val thinkingPlan = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val thinkingPlan = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
           UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options) ++
           GeminiServiceTier.gemini(transformed.options)._2
-        adjustmentLog.record(config.model, adjustments)
+        adjustmentLog.record(config.model.asString, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
         val requestText = requestBody.render()
@@ -178,7 +178,7 @@ class GeminiClient(
     val startedAt = Instant.now()
     TransformationResult
       .transform(
-        config.model,
+        config.model.asString,
         options,
         conversation.messages,
         org.llm4s.model.RequestTransformer.default(registryService),
@@ -192,11 +192,11 @@ class GeminiClient(
       )
       .flatMap(transformed => requestKey().map(transformed -> _))
       .flatMap { (transformed, key) =>
-        val thinkingPlan = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val thinkingPlan = GeminiThinking.plan(config.model.asString, transformed.options, capabilities)
         val adjustments = transformed.adjustments ++ thinkingPlan.adjustments ++
           UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options) ++
           GeminiServiceTier.gemini(transformed.options)._2
-        adjustmentLog.record(config.model, adjustments)
+        adjustmentLog.record(config.model.asString, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
         val requestText = requestBody.render()
@@ -216,7 +216,7 @@ class GeminiClient(
               handleErrorResponse(response.statusCode, err, response.headers)
             )(Some(err))
           case Right(response) =>
-            val accumulator = StreamingAccumulator(config.model)
+            val accumulator = StreamingAccumulator(config.model.asString)
             val messageId   = UUID.randomUUID().toString
             val rawStream   = StringBuilder()
             val signatures  = scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
@@ -299,7 +299,7 @@ class GeminiClient(
                 )
                 .flatMap(_ =>
                   accumulator.toCompletion.map { c =>
-                    val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+                    val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model.asString, u))
                     // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
                     val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
                     c
@@ -476,7 +476,7 @@ class GeminiClient(
    * Strips OpenAI-specific fields like 'strict' and 'additionalProperties' from the schema
    * to maintain compatibility with the Gemini API.
    */
-  private[provider] def convertToolToGeminiFormat(tool: ToolFunction[_, _]): ujson.Value = {
+  private[provider] def convertToolToGeminiFormat(tool: ToolFunction[_]): ujson.Value = {
     // Generate base JSON schema without strict mode
     val schema = ujson.read(tool.schema.toJsonSchema(false).render())
 
@@ -563,12 +563,12 @@ class GeminiClient(
         )
 
         // Estimate cost using CostEstimator
-        val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
+        val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model.asString, u))
 
         Right(
           Completion(
             id = UUID.randomUUID().toString,
-            model = config.model,
+            model = config.model.asString,
             created = Instant.now(),
             message = message,
             usage = usageOpt,
@@ -642,7 +642,7 @@ class GeminiClient(
         provider = ProviderId(providerName),
         startedAt = startedAt,
         requestBody = requestBody,
-        model = Some(config.model),
+        model = Some(config.model.asString),
         responseBody = responseBody
       ),
       result

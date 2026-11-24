@@ -36,8 +36,8 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
       .withOptionalField("previous", Schema.array("Earlier addresses", address))
       .withOptionalField("nickname", Schema.nullable(Schema.string("A nickname")))
 
-  private def tool(schema: SchemaDefinition[Params]): ToolFunction[Params, String] =
-    ToolBuilder[Params, String]("everything", "Takes every kind of parameter", schema)
+  private def tool(schema: SchemaDefinition[Params]): ToolFunction[String] =
+    ToolBuilder[String]("everything", "Takes every kind of parameter", schema)
       .withHandler(_ => Right("ok"))
       .buildSafe()
       .fold(error => fail(error.formatted), identity)

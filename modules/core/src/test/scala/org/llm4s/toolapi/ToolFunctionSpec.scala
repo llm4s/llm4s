@@ -23,12 +23,12 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
   implicit val emptyResultRW: ReadWriter[EmptyResult] = macroRW
 
   // Helper to create test tools — returns Result, never extracts
-  def createGreetingTool(): Result[ToolFunction[Map[String, Any], GreetingResult]] = {
+  def createGreetingTool(): Result[ToolFunction[GreetingResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Greeting parameters")
       .withProperty(Schema.property("name", Schema.string("Name to greet")))
 
-    ToolBuilder[Map[String, Any], GreetingResult](
+    ToolBuilder[GreetingResult](
       "greet",
       "Creates a greeting message",
       schema
@@ -36,10 +36,10 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
       .buildSafe()
   }
 
-  def createZeroParamTool(): Result[ToolFunction[Map[String, Any], EmptyResult]] = {
+  def createZeroParamTool(): Result[ToolFunction[EmptyResult]] = {
     val schema = Schema.`object`[Map[String, Any]]("No parameters required")
 
-    ToolBuilder[Map[String, Any], EmptyResult](
+    ToolBuilder[EmptyResult](
       "ping",
       "Returns success without parameters",
       schema
@@ -110,7 +110,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
       .`object`[Map[String, Any]]("Params")
       .withProperty(Schema.property("value", Schema.number("A value")))
 
-    ToolBuilder[Map[String, Any], MathResult](
+    ToolBuilder[MathResult](
       "fail_tool",
       "Always fails",
       schema
@@ -166,7 +166,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
   // ============ One handler error type (#2815) ============
 
   private def adder(handler: SafeParameterExtractor => Either[ToolHandlerError, MathResult]) =
-    ToolBuilder[Map[String, Any], MathResult](
+    ToolBuilder[MathResult](
       "add",
       "Adds two numbers",
       Schema
@@ -245,7 +245,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
       .`object`[Map[String, Any]]("Params")
       .withProperty(Schema.property("value", Schema.number("A value")))
 
-    ToolBuilder[Map[String, Any], MathResult](
+    ToolBuilder[MathResult](
       "double",
       "Doubles a number",
       schema
@@ -266,7 +266,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
   it should "return Left when building without handler" in {
     val schema = Schema.`object`[Map[String, Any]]("Params")
 
-    val builder = ToolBuilder[Map[String, Any], EmptyResult](
+    val builder = ToolBuilder[EmptyResult](
       "no_handler",
       "No handler defined",
       schema
@@ -279,7 +279,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
   it should "allow replacing handler with withHandler" in {
     val schema = Schema.`object`[Map[String, Any]]("Params")
 
-    val builder1 = ToolBuilder[Map[String, Any], EmptyResult](
+    val builder1 = ToolBuilder[EmptyResult](
       "test",
       "Test",
       schema

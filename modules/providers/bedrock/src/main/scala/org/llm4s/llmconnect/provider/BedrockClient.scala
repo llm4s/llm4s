@@ -151,7 +151,7 @@ class BedrockClient(
       .builder()
       .region(Region.of(config.region))
       .credentialsProvider(credentialsProvider)
-    config.endpointUrl.foreach(url => builder.endpointOverride(URI.create(url)))
+    config.endpointUrl.foreach(url => builder.endpointOverride(URI.create(url.asUrl)))
     BedrockNetwork.syncHttpClient(config).foreach(builder.httpClientBuilder)
     // Without a configured request timeout the SDK keeps its own defaults.
     requestTimeout.foreach { timeout =>
@@ -168,7 +168,7 @@ class BedrockClient(
       .builder()
       .region(Region.of(config.region))
       .credentialsProvider(credentialsProvider)
-    config.endpointUrl.foreach(url => builder.endpointOverride(URI.create(url)))
+    config.endpointUrl.foreach(url => builder.endpointOverride(URI.create(url.asUrl)))
     BedrockNetwork.asyncHttpClient(config).foreach(builder.httpClientBuilder)
     builder.build()
   }
@@ -177,7 +177,7 @@ class BedrockClient(
 
   protected def clientDescription: String = s"Bedrock client for model ${config.model}"
   protected def providerName: String      = "bedrock"
-  protected def modelName: String         = config.model
+  protected def modelName: String         = config.model.asString
 
   /** How long a `Converse` call may take: the section's `timeouts.request`, else the AWS SDK's default. */
   protected[provider] def requestTimeout: Option[FiniteDuration] = config.timeouts.request
@@ -189,17 +189,17 @@ class BedrockClient(
   protected[provider] def streamTimeout: Option[FiniteDuration] = config.timeouts.stream
 
   // sealed thinking is replayed only to the provider and model id it was produced by (see ReplayOrigin)
-  private val replayOrigin = ReplayOrigin(providerName, config.model)
+  private val replayOrigin = ReplayOrigin(providerName, config.model.asString)
 
   // what the transformer dropped, and a `reasoning` this client does not send (no model-specific reasoning
   // field is mapped yet), goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
 
   // the model's registry entry, for whether it takes cache checkpoints (see BedrockPromptCache)
-  private lazy val capabilities = registryService.lookup(config.model).toOption.map(_.capabilities)
+  private lazy val capabilities = registryService.lookup(config.model.asString).toOption.map(_.capabilities)
 
   private def cachePlan(options: CompletionOptions): BedrockPromptCache.Plan =
-    BedrockPromptCache.plan(config.model, options, capabilities)
+    BedrockPromptCache.plan(config.model.asString, options, capabilities)
 
   // a request that sent a cache checkpoint and neither read nor wrote the cache is reported (RFC 0008, Part 3)
   private def answeredCache(options: CompletionOptions, usage: Option[TokenUsage]): List[RequestAdjustment] =
@@ -214,7 +214,7 @@ class BedrockClient(
       val requestJson = serializeRequestForLogging(conv, opts)
       buildConverseRequest(conv, opts).flatMap { request =>
         adjustmentLog.record(
-          config.model,
+          config.model.asString,
           adjustments
         ) // once the request is built, so a failed build spends no warning
         val outcome = Try(sdkClient.converse(request)).toEither.left.map(mapException)
@@ -246,7 +246,7 @@ class BedrockClient(
       buildConverseStreamRequest(conv, opts)
         .flatMap { request =>
           adjustmentLog.record(
-            config.model,
+            config.model.asString,
             adjustments
           ) // once the request is built, so a failed build spends no warning
           runStream(request, onChunk, raw)
@@ -274,14 +274,14 @@ class BedrockClient(
   ): Result[(Conversation, CompletionOptions, List[RequestAdjustment])] =
     TransformationResult
       .transform(
-        config.model,
+        config.model.asString,
         options,
         conversation.messages,
         RequestTransformer.default(registryService),
         dropUnsupported = true
       )
       .map { t =>
-        val adjustments = t.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, t.options) ++
+        val adjustments = t.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model.asString, t.options) ++
           cachePlan(t.options).adjustments ++ BedrockClient.serviceTier(t.options)._2
         (conversation.withMessages(t.messages), t.options, adjustments)
       }
@@ -347,7 +347,7 @@ class BedrockClient(
     // the visitor; a Finished already queued by the handler makes this one a no-op.
     future.whenComplete((_, error) => if (error != null) queue.put(StreamSignal.Finished(Some(error))))
 
-    val accumulator = StreamingAccumulator(config.model)
+    val accumulator = StreamingAccumulator(config.model.asString)
     val messageId   = java.util.UUID.randomUUID().toString
     val toolIds     = scala.collection.mutable.Map.empty[Int, String]
     // reasoning blocks by content-block index, so each keeps its own text and signature
@@ -443,7 +443,7 @@ class BedrockClient(
                   else c.message.withThinking(reasoning.values.map(_.toBlock).toSeq)
                 c
                   .withMessage(message)
-                  .withEstimatedCost(c.usage.flatMap(u => CostEstimator.estimate(config.model, u)))
+                  .withEstimatedCost(c.usage.flatMap(u => CostEstimator.estimate(config.model.asString, u)))
                   .withServedTier(servedTier)
               }
           }
@@ -516,7 +516,10 @@ class BedrockClient(
     partitionMessages(conversation, options).map { (systemTexts, messages) =>
       val cache = cachePlan(options)
       val builder =
-        ConverseRequest.builder().modelId(config.model).messages(withConversationCheckpoint(messages, cache).asJava)
+        ConverseRequest
+          .builder()
+          .modelId(config.model.asString)
+          .messages(withConversationCheckpoint(messages, cache).asJava)
       if (systemTexts.nonEmpty) builder.system(systemBlocks(systemTexts, cache).asJava)
       builder.inferenceConfig(inferenceConfig(options))
       toolConfig(options, cache).foreach(builder.toolConfig)
@@ -533,7 +536,7 @@ class BedrockClient(
       val builder =
         ConverseStreamRequest
           .builder()
-          .modelId(config.model)
+          .modelId(config.model.asString)
           .messages(withConversationCheckpoint(messages, cache).asJava)
       if (systemTexts.nonEmpty) builder.system(systemBlocks(systemTexts, cache).asJava)
       builder.inferenceConfig(inferenceConfig(options))
@@ -635,7 +638,7 @@ class BedrockClient(
     }
   }
 
-  private def convertTool(toolFunction: ToolFunction[?, ?]): Tool = {
+  private def convertTool(toolFunction: ToolFunction[?]): Tool = {
     val objectSchema = toolFunction.schema.asInstanceOf[ObjectSchema[?]]
     val schemaDoc    = ujsonToDocument(ujson.read(objectSchema.toJsonSchema(false).render()))
     val toolSpec = ToolSpecification
@@ -701,10 +704,10 @@ class BedrockClient(
         Completion(
           id = java.util.UUID.randomUUID().toString,
           created = Instant.now(),
-          model = config.model,
+          model = config.model.asString,
           message = message,
           usage = usage,
-          estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model, u)),
+          estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model.asString, u)),
           finishReason = stopReason.fold(FinishReason.Unknown)(BedrockClient.finishReason),
           servedTier = BedrockClient.servedTier(response.serviceTier())
         )
@@ -715,7 +718,7 @@ class BedrockClient(
   // ---- errors ----
 
   private def endpointLabel: String =
-    config.endpointUrl.getOrElse(s"bedrock-runtime.${config.region}.amazonaws.com")
+    config.endpointUrl.map(_.asUrl).getOrElse(s"bedrock-runtime.${config.region}.amazonaws.com")
 
   /**
    * An AWS exception's message, redacted and capped: the service's message can echo request text, and the SDK
@@ -761,7 +764,7 @@ class BedrockClient(
       case msg: ToolMessage =>
         ujson.Obj("role" -> "tool", "toolCallId" -> msg.toolCallId.asString, "content" -> Message.textWithMedia(msg))
     }
-    val logged = ujson.Obj("modelId" -> config.model, "region" -> config.region)
+    val logged = ujson.Obj("modelId" -> config.model.asString, "region" -> config.region)
     options.temperature.foreach(t => logged("temperature") = t)
     logged("messages") = ujson.Arr(msgs*)
     logged.render()
@@ -791,7 +794,7 @@ class BedrockClient(
         provider = ProviderId(providerName),
         startedAt = startedAt,
         requestBody = requestBody,
-        model = Some(config.model),
+        model = Some(config.model.asString),
         responseBody = responseBody
       ),
       result
@@ -1130,11 +1133,11 @@ private[provider] object BedrockNetwork {
   /** The host the client calls: the endpoint override's, else the regional Bedrock runtime endpoint. */
   def endpointHost(config: BedrockConfig): String =
     config.endpointUrl
-      .flatMap(url => Try(URI.create(url.trim)).toOption.flatMap(u => Option(u.getHost)))
+      .flatMap(url => Try(URI.create(url.asUrl.trim)).toOption.flatMap(u => Option(u.getHost)))
       .getOrElse(s"bedrock-runtime.${config.region}.amazonaws.com")
 
   private def isPlainHttp(config: BedrockConfig): Boolean =
-    config.endpointUrl.exists(_.trim.regionMatches(true, 0, "http://", 0, 7))
+    config.endpointUrl.exists(_.asUrl.trim.regionMatches(true, 0, "http://", 0, 7))
 
   private def tls(config: BedrockConfig): Option[TlsMaterial] =
     HttpNetwork.tlsMaterial(config.network.tls).fold(e => throw new IllegalArgumentException(e.message), identity)

@@ -104,7 +104,7 @@ sbt "samples/runMain org.llm4s.samples.cookbook.StructuredOutputRecipe"         
 sbt "samples/runMain org.llm4s.samples.cookbook.StructuredOutputRecipe --live"   # the provider your configuration names
 ```
 
-The first command needs nothing but sbt. The second uses the section `llm4s.providers.provider` names; see
+The first command needs nothing but sbt. The second uses the section `llm4s.defaultProvider` names; see
 [running the samples](../../getting-started/configuration#running-the-samples). CI runs every recipe against its scripted client, and checks
 that the program on this page is the source file, so what you read here compiles and works.
 

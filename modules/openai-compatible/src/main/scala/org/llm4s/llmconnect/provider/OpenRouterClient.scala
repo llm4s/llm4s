@@ -85,7 +85,7 @@ class OpenRouterClient(
       OpenAICompatibleClient.Settings(
         providerName = "openrouter",
         displayName = "OpenRouter",
-        model = config.model,
+        model = config.model.asString,
         baseUrl = config.baseUrl,
         credential = OpenRouterClient.credential(config),
         contextWindow = config.contextWindow,

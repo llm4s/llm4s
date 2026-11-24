@@ -233,7 +233,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
    *
    * @return the tools the server advertises, or the `Left` that stopped the listing
    */
-  override def getTools(): Result[Seq[ToolFunction[_, _]]] = {
+  override def getTools(): Result[Seq[ToolFunction[_]]] = {
     val result = for {
       _             <- initialize() // Ensure we're initialized
       transportImpl <- transport.toRight(SimpleError(s"No transport available for ${config.name}"): LLMError)
@@ -248,7 +248,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
     result
   }
 
-  def trySendingRequest(transportImpl: MCPTransportImpl): Result[Seq[ToolFunction[_, _]]] = {
+  def trySendingRequest(transportImpl: MCPTransportImpl): Result[Seq[ToolFunction[_]]] = {
     val result = for {
       request    <- MCPClientImpl.listRequest.copy(id = generateId()).asRight[LLMError]
       response   <- transportImpl.sendRequest(request)
@@ -265,7 +265,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
     result
   }
 
-  private def parseTools(value: Value): Result[Seq[ToolFunction[_, _]]] = {
+  private def parseTools(value: Value): Result[Seq[ToolFunction[_]]] = {
     val result = Try {
       // One malformed entry must not hide the tools that are fine: it is skipped and named in the log (its
       // name or position, and the kind of fault: never the payload, which is the server's text).
@@ -316,7 +316,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
   private def generateId(): String = requestId.incrementAndGet().toString
 
   // Converts an MCP tool definition to llm4s ToolFunction format
-  private def convertMCPToolToToolFunction(toolJson: Value): ToolFunction[Value, Value] = {
+  private def convertMCPToolToToolFunction(toolJson: Value): ToolFunction[Value] = {
     val name        = toolJson("name").str
     val description = toolJson("description").str
     val inputSchema = toolJson("inputSchema")
@@ -324,7 +324,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
     // Convert MCP input schema to our ObjectSchema format
     val schema = convertMCPSchemaToObjectSchema(name, inputSchema)
 
-    ToolFunction[Value, Value](
+    ToolFunction[Value](
       name = name,
       description = description,
       schema = schema,

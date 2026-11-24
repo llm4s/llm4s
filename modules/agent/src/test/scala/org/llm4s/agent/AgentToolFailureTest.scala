@@ -19,20 +19,20 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers {
   implicit val toolResultRW: ReadWriter[ToolResult] = macroRW[ToolResult]
 
   /** A tool with optional `item` and `quantity` whose handler fails with `errorMessage`. */
-  def createFailingTool(name: String, errorMessage: String): Result[ToolFunction[Map[String, Any], ToolResult]] = {
+  def createFailingTool(name: String, errorMessage: String): Result[ToolFunction[ToolResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Tool parameters")
       .withProperty(Schema.property("item", Schema.string("Item name")))
       .withProperty(Schema.property("quantity", Schema.number("Quantity")))
 
-    ToolBuilder[Map[String, Any], ToolResult](name, "Test tool that fails", schema)
+    ToolBuilder[ToolResult](name, "Test tool that fails", schema)
       .withHandler(_ => Left(errorMessage))
       .buildSafe()
   }
 
   /** Runs one call of `tool` with `arguments`, then a final answer; returns the turn's result. */
   private def runFailing(
-    tool: ToolFunction[?, ?],
+    tool: ToolFunction[?],
     arguments: ujson.Value,
     callId: String = "call_123"
   ): AgentResult = {
@@ -55,7 +55,7 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers {
   /** Arguments the failing tools' schema accepts, so their handler runs and fails. */
   private val validArgs = ujson.Obj("item" -> "apple", "quantity" -> 1)
 
-  private def failing(name: String, error: String): ToolFunction[Map[String, Any], ToolResult] =
+  private def failing(name: String, error: String): ToolFunction[ToolResult] =
     createFailingTool(name, error).fold(e => fail(s"Setup failed: ${e.formatted}"), identity)
 
   "Agent" should "give a tool called with null arguments a non-empty error result, and complete" in {
@@ -87,7 +87,7 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers {
 
   it should "give a missing required argument an error result naming it, before the handler runs" in {
     val schema = Schema.`object`[Map[String, Any]]("Tool parameters").withRequiredField("query", Schema.string("Query"))
-    val search = ToolBuilder[Map[String, Any], ToolResult]("search_tool", "Search for items", schema)
+    val search = ToolBuilder[ToolResult]("search_tool", "Search for items", schema)
       .withHandler(extractor => extractor.getString("query").map(q => ToolResult(s"Found: $q")))
       .buildSafe()
       .fold(e => fail(e.formatted), identity)

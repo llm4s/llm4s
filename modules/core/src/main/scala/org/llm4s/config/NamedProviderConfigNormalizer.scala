@@ -6,7 +6,7 @@ import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 
 import java.nio.file.Path
 import scala.util.Try

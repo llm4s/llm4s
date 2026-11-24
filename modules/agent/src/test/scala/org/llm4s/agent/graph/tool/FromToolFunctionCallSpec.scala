@@ -10,7 +10,7 @@ import org.scalatest.matchers.should.Matchers
 /** A `ToolFunction` run by an agent sees the call's id and idempotency key (#1740). */
 class FromToolFunctionCallSpec extends AnyFlatSpec with Matchers {
 
-  private val function = ToolBuilder[Map[String, Any], String]("echo", "Echoes the call", Schema.`object`("args"))
+  private val function = ToolBuilder[String]("echo", "Echoes the call", Schema.`object`("args"))
     .withHandler(params => Right(params.call.fold("none")(c => s"${c.toolCallId}|${c.idempotencyKey}")))
     .buildSafe()
     .fold(e => fail(e.formatted), identity)

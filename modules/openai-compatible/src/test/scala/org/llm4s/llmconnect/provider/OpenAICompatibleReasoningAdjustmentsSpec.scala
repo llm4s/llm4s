@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.llmconnect.model._
@@ -47,7 +48,7 @@ class OpenAICompatibleReasoningAdjustmentsSpec extends AnyFlatSpec with Matchers
         sendSseResponse(exchange, openAISseBody(Seq("Hi"), model))
       else sendJsonResponse(exchange, 200, openAICompletion("Hi", model))
     } { baseUrl =>
-      val client = new MistralClient(MistralConfig(Secret("test-key"), model, baseUrl, 128000, 4096))
+      val client = new MistralClient(MistralConfig(Secret("test-key"), ModelName(model), baseUrl, 128000, 4096))
 
       client.complete(hello, reasoning).value.adjustments shouldBe dropped(model)
       client.streamComplete(hello, reasoning)(_ => ()).value.adjustments shouldBe dropped(model)
@@ -63,7 +64,7 @@ class OpenAICompatibleReasoningAdjustmentsSpec extends AnyFlatSpec with Matchers
       request.obj.contains("service_tier") shouldBe false
       sendJsonResponse(exchange, 200, openAICompletion("Hi", model))
     } { baseUrl =>
-      val client = new MistralClient(MistralConfig(Secret("test-key"), model, baseUrl, 128000, 4096))
+      val client = new MistralClient(MistralConfig(Secret("test-key"), ModelName(model), baseUrl, 128000, 4096))
       client.complete(hello, CompletionOptions().withServiceTier(ServiceTier.Flex)).value.adjustments shouldBe List(
         RequestAdjustment.Dropped(RequestOption.ServiceTier, "Mistral has no service tier to choose; Flex is not sent")
       )

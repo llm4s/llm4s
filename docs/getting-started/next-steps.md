@@ -188,9 +188,9 @@ val searchSchema = Schema
   .`object`[Map[String, Any]]("Search parameters")
   .withProperty(Schema.property("query", Schema.string("What to search for")))
 
-val tool = ToolBuilder[Map[String, Any], String]("search", "Search the web", searchSchema)
+val tool = ToolBuilder[String]("search", "Search the web", searchSchema)
   .withHandler(params => params.getString("query").map(search))
-  .buildSafe()   // Result[ToolFunction[Map[String, Any], String]]
+  .buildSafe()   // Result[ToolFunction[String]]
 ```
 
 [Learn more →](/guide/builtin-tools)
@@ -372,7 +372,7 @@ def getCurrentTime(): String =
   java.time.LocalDateTime.now().toString
 
 val result = for {
-  timeTool <- ToolBuilder[Map[String, Any], String](
+  timeTool <- ToolBuilder[String](
                 "get_time",
                 "Get current date and time",
                 Schema.`object`[Map[String, Any]]("No parameters")
@@ -446,7 +446,7 @@ val result = for {
 
 **Problem: Model not found**
 - Verify `model` in the provider section is the provider's own model name (e.g. `gpt-4o-mini`, no `openai/` prefix)
-- Check `llm4s.providers.provider` names the section you meant
+- Check `llm4s.defaultProvider` names the section you meant
 - Check provider supports that model
 - Try a different model
 

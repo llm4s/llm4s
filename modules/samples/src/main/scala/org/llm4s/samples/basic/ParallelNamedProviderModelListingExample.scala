@@ -2,6 +2,7 @@ package org.llm4s.samples.basic
 
 import org.llm4s.config.{ DiscoveredModel, Llm4sConfig }
 import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -58,7 +59,7 @@ object ParallelNamedProviderModelListingExample:
     Future:
       for
         config <- section
-        models <- Llm4sConfig.listModels(providerName)
+        models <- Llm4sConfig.listModels(ProviderName(providerName))
       yield (config, models)
 
   private def formatProviderBlock(

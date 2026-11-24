@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId, ProviderName }
+
 import org.llm4s.security.{ KnownSecrets, Secret }
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.config.Llm4sConfig
@@ -56,7 +58,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
        |""".stripMargin
 
   private def load(hocon: String): Result[ProviderConfig] =
-    Llm4sConfig.provider(ConfigSource.string(hocon), "azure-prod")
+    Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("azure-prod"))
 
   private val missingModule = "org.llm4s::llm4s-azure-identity"
 
@@ -125,7 +127,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi"))
     } { baseUrl =>
       val tokens = new CountingTokens
-      val client = OpenAIClient(AzureConfig.keyless(baseUrl, "my-deploy", tokens)).value
+      val client = OpenAIClient(AzureConfig.keyless(baseUrl, ModelName("my-deploy"), tokens)).value
       client.complete(hello, CompletionOptions()).left.value shouldBe an[AuthenticationError]
       client.complete(hello, CompletionOptions()).value.content shouldBe "hi"
       client.close()
@@ -152,7 +154,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
           s"""{"error":{"message":"request with $token is denied"}}"""
         )
       } { baseUrl =>
-        val client  = OpenAIClient(AzureConfig.keyless(baseUrl, "my-deploy", own)).value
+        val client  = OpenAIClient(AzureConfig.keyless(baseUrl, ModelName("my-deploy"), own)).value
         val message = client.complete(hello, CompletionOptions()).left.value.message
         client.close()
         authorizations.asScala.toList shouldBe List(s"Bearer $token")
@@ -172,7 +174,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       else LocalProviderTestServer.sendSseResponse(exchange, LocalProviderTestServer.openAISseBody(Seq("he", "llo")))
     } { baseUrl =>
       val tokens = new CountingTokens
-      val client = OpenAIClient(AzureConfig.keyless(baseUrl, "my-deploy", tokens)).value
+      val client = OpenAIClient(AzureConfig.keyless(baseUrl, ModelName("my-deploy"), tokens)).value
       client.streamComplete(hello, CompletionOptions())(_ => ()).isLeft shouldBe true
       client.streamComplete(hello, CompletionOptions())(_ => ()).value.content shouldBe "hello"
       client.close()
@@ -191,7 +193,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         def current(): Result[Secret]                   = Left(AuthenticationError("azure", "no managed identity"))
         override def invalidate(rejected: Secret): Unit = ()
       }
-      val client = OpenAIClient(AzureConfig.keyless(baseUrl, "my-deploy", failing)).value
+      val client = OpenAIClient(AzureConfig.keyless(baseUrl, ModelName("my-deploy"), failing)).value
       val error  = client.complete(hello, CompletionOptions()).left.value
       client.close()
       error shouldBe an[AuthenticationError]
@@ -201,23 +203,32 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   "AzureConfig.withTokenProvider" should "clear the API key, and None go back to it" in {
-    val keyed   = AzureConfig("https://r.openai.azure.com", Secret("k"), "gpt-4o")
+    val keyed   = AzureConfig("https://r.openai.azure.com", Secret("k"), ModelName("gpt-4o"))
     val tokens  = new CountingTokens
     val keyless = keyed.withTokenProvider(tokens)
     keyless.apiKey.reveal shouldBe ""
     keyless.tokenProvider shouldBe Some(tokens)
     keyless.withTokenProvider(None).tokenProvider shouldBe None
     keyed.toString should include("apiKey=")
-    AzureConfig("e", Secret("k"), "m", "v", 1000, 100, keyed.timeouts).tokenProvider shouldBe None
-    AzureConfig("e", Secret("k"), "m", "v", 1000, 100, keyed.timeouts, Some(tokens)).apiKey.reveal shouldBe ""
+    AzureConfig("e", Secret("k"), ModelName("m"), "v", 1000, 100, keyed.timeouts).tokenProvider shouldBe None
+    AzureConfig(
+      "e",
+      Secret("k"),
+      ModelName("m"),
+      "v",
+      1000,
+      100,
+      keyed.timeouts,
+      Some(tokens)
+    ).apiKey.reveal shouldBe ""
   }
 
   "AzureConfig.withApiKeyProvider" should "authenticate one way: it clears the token provider, and a token provider clears it" in {
-    val keyed  = AzureConfig("https://r.openai.azure.com", Secret("k"), "gpt-4o")
+    val keyed  = AzureConfig("https://r.openai.azure.com", Secret("k"), ModelName("gpt-4o"))
     val keys   = org.llm4s.llmconnect.auth.ApiKeyProvider.static(org.llm4s.types.ProviderModelTypes.ApiKey("k2"))
     val tokens = new CountingTokens
     keyed.apiKeyProvider shouldBe None
-    val rotating = keyed.withTokenProvider(tokens).withApiKeyProvider(keys)
+    val rotating = keyed.withTokenProvider(tokens).withApiKeyProvider(Some(keys))
     rotating.apiKeyProvider shouldBe Some(keys)
     rotating.tokenProvider shouldBe None
     rotating.toString should include("apiKeyProvider=ApiKeyProvider.static(***)")
@@ -238,8 +249,13 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       if (authorization == "Bearer token-1") LocalProviderTestServer.sendJsonResponse(exchange, 401, "{}")
       else LocalProviderTestServer.sendJsonResponse(exchange, 200, reply)
     } { baseUrl =>
-      val tokens   = new CountingTokens
-      val config   = EmbeddingProviderConfig(s"$baseUrl/openai/v1", "my-embedding-deployment", Secret(""))
+      val tokens = new CountingTokens
+      val config = EmbeddingProviderConfig(
+        ProviderId("openai"),
+        BaseUrl(s"$baseUrl/openai/v1"),
+        ModelName("my-embedding-deployment"),
+        None
+      )
       val provider = OpenAIEmbeddingProvider.fromConfig(config, tokens)
       val request  = EmbeddingRequest(Seq("a"), EmbeddingModelConfig("my-embedding-deployment", 2))
       provider.embed(request).isLeft shouldBe true
@@ -265,7 +281,12 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         s"""{"error":{"message":"request with $token is denied"}}"""
       )
     } { baseUrl =>
-      val config   = EmbeddingProviderConfig(s"$baseUrl/openai/v1", "my-embedding-deployment", Secret(""))
+      val config = EmbeddingProviderConfig(
+        ProviderId("openai"),
+        BaseUrl(s"$baseUrl/openai/v1"),
+        ModelName("my-embedding-deployment"),
+        None
+      )
       val provider = OpenAIEmbeddingProvider.fromConfig(config, own)
       val request  = EmbeddingRequest(Seq("a"), EmbeddingModelConfig("my-embedding-deployment", 2))
       val message  = provider.embed(request).left.value.message

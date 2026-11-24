@@ -957,7 +957,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
   it should "run a core ToolFunction through the same pipeline" in {
     final case class Echoed(message: String) derives ReadWriter
     val schema = Schema.`object`[Map[String, Any]]("Echo").withRequiredField("message", Schema.string("Message"))
-    val function = ToolBuilder[Map[String, Any], Echoed]("say", "Echoes", schema)
+    val function = ToolBuilder[Echoed]("say", "Echoes", schema)
       .withHandler(extractor => extractor.getString("message").map(Echoed(_)))
       .buildSafe()
       .value
@@ -973,7 +973,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
   it should "treat null arguments as {} for a tool that requires nothing, and refuse them otherwise" in {
     val seenByCore   = new CopyOnWriteArrayList[String]()
     val optionalOnly = Schema.`object`[Map[String, Any]]("Opt").withOptionalField("note", Schema.string("Note"))
-    val core = ToolBuilder[Map[String, Any], String]("core_opt", "Optional", optionalOnly)
+    val core = ToolBuilder[String]("core_opt", "Optional", optionalOnly)
       .withHandler { extractor =>
         seenByCore.add(extractor.params.render()); Right("ok")
       }
@@ -1241,7 +1241,7 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val runs     = new AtomicInteger()
     val attempts = new AtomicInteger()
     // a core ToolFunction cancelled mid-call: it sets the flag and returns Left, which fromToolFunction maps to Error
-    val function = ToolBuilder[Map[String, Any], String]("halting", "Halts", Schema.`object`[Map[String, Any]]("Halt"))
+    val function = ToolBuilder[String]("halting", "Halts", Schema.`object`[Map[String, Any]]("Halt"))
       .withHandler { _ =>
         runs.incrementAndGet()
         Thread.currentThread().interrupt()

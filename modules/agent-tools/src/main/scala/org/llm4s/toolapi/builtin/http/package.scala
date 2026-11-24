@@ -53,7 +53,7 @@ package object http {
   /**
    * All HTTP tools with default configuration, returning a Result for safe error handling.
    */
-  val allToolsSafe: org.llm4s.types.Result[Seq[org.llm4s.toolapi.ToolFunction[_, _]]] =
+  val allToolsSafe: org.llm4s.types.Result[Seq[org.llm4s.toolapi.ToolFunction[_]]] =
     HTTPTool.toolSafe.map(Seq(_))
 
 }

@@ -22,7 +22,7 @@ class WatsonXDocumentedShapesSpec extends AnyFunSuite with Matchers with LoneEle
   import StubHttp.*
   import WatsonXTestConfig.config
 
-  private val addTool: ToolFunction[?, ?] = ToolBuilder[Map[String, Any], String](
+  private val addTool: ToolFunction[?] = ToolBuilder[String](
     "add",
     "Adds two numbers",
     Schema

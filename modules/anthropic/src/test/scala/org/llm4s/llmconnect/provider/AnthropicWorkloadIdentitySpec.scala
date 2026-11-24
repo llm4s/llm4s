@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ AnthropicConfig, AnthropicWorkloadIdentity, ContextWindowResolver }
 import org.llm4s.llmconnect.LLMClient
@@ -193,7 +194,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
         // Chat from a config built by hand: the companion apply, LLMConnect and the constructor.
         val byHand = AnthropicConfig(
           Secret(""),
-          "claude-test",
+          ModelName("claude-test"),
           fake.refusedBaseUrl,
           200000,
           4096,
@@ -324,7 +325,14 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
         valid.withBaseUrl("http://api.example"),
         valid.withBaseUrl("https://gateway.example"),
         valid.withApiKey(Secret("sk-ant")),
-        AnthropicConfig(Secret(""), "claude-test", "http://localhost@api.example", 200000, 4096, Some(identity))
+        AnthropicConfig(
+          Secret(""),
+          ModelName("claude-test"),
+          "http://localhost@api.example",
+          200000,
+          4096,
+          Some(identity)
+        )
       )
       for config <- bad do
         AnthropicClient(config).left.value shouldBe a[ConfigurationError]
@@ -365,13 +373,15 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     "apply the same rules to the Java and Kotlin path: the short apply and withWorkloadIdentity" in {
       // the short apply with a blank key and no identity would authenticate as nobody
       for key <- Seq("", "  ") do
-        AnthropicClient(AnthropicConfig(Secret(key), "claude-test")).left.value.message should include("apiKey")
+        AnthropicClient(AnthropicConfig(Secret(key), ModelName("claude-test"))).left.value.message should include(
+          "apiKey"
+        )
       // the short apply's default base URL is api.anthropic.com, so a keyless config with an identity is valid
-      val federated = AnthropicConfig(Secret(""), "claude-test").withWorkloadIdentity(identity)
+      val federated = AnthropicConfig(Secret(""), ModelName("claude-test")).withWorkloadIdentity(identity)
       AnthropicConfig.validate(federated) shouldBe Right(federated)
       val bad = Seq(
-        AnthropicConfig(Secret("sk-ant"), "claude-test").withWorkloadIdentity(identity),
-        AnthropicConfig(Secret("sk-ant"), "claude-test").withWorkloadIdentity(Some(identity)),
+        AnthropicConfig(Secret("sk-ant"), ModelName("claude-test")).withWorkloadIdentity(identity),
+        AnthropicConfig(Secret("sk-ant"), ModelName("claude-test")).withWorkloadIdentity(Some(identity)),
         federated.withApiKey(Secret("sk-ant")),
         federated.withBaseUrl("https://gateway.example"),
         federated.withWorkloadIdentity(identity.withOrganizationId("")),
@@ -385,7 +395,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
     def configFor(file: Path) =
-      AnthropicConfig(Secret(""), "claude-test").withWorkloadIdentity(
+      AnthropicConfig(Secret(""), ModelName("claude-test")).withWorkloadIdentity(
         AnthropicWorkloadIdentity(file, "fdrl_1", "org_1")
       )
 
@@ -415,7 +425,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       AnthropicClient(configFor(file)).value.close()
       val missing = file.resolveSibling(s"not-yet-${System.nanoTime()}.jwt")
       AnthropicClient(configFor(missing)).value.close()
-      AnthropicClient(AnthropicConfig(Secret("sk-ant"), "claude-test")).value.close()
+      AnthropicClient(AnthropicConfig(Secret("sk-ant"), ModelName("claude-test"))).value.close()
     }
 
     "carry a Stable AnthropicWorkloadIdentity (#1818)" in {

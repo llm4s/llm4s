@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.CohereConfig
@@ -21,7 +22,7 @@ class CohereClientClosedStateTest extends AnyFlatSpec with Matchers {
 
   private def createTestConfig: CohereConfig = CohereConfig(
     apiKey = Secret("test-api-key-for-closed-state-testing"),
-    model = "command-r",
+    model = ModelName("command-r"),
     baseUrl = "https://example.invalid",
     contextWindow = 128000,
     reserveCompletion = 4096
@@ -76,7 +77,7 @@ class CohereClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.withModel("command-r-plus")
+    val config = createTestConfig.withModel(ModelName("command-r-plus"))
     val client = new CohereClient(config)
 
     client.close()

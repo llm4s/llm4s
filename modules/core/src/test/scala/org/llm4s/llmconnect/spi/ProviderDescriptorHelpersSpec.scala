@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.spi
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.SharedCredentials
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, IdentitySource }
@@ -52,25 +52,25 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
       case Right(other)                    => fail(s"expected a Left, got Right($other)")
 
   /** An incompatible config type used to exercise expectConfig’s type-mismatch error. */
-  private object ForeignConfig extends ProviderConfig:
-    val providerId: ProviderId                   = ProviderId("other")
-    val model: String                            = "foreign-model"
-    val contextWindow: Int                       = 8192
-    val reserveCompletion: Int                   = 1024
-    val endpointUrl: Option[String]              = None
-    def withModel(model: String): ProviderConfig = this
+  private object ForeignConfig extends org.llm4s.testutil.FixedProviderSettings:
+    val providerId: ProviderId                      = ProviderId("other")
+    val model: ModelName                            = ModelName("foreign-model")
+    val contextWindow: Int                          = 8192
+    val reserveCompletion: Int                      = 1024
+    val endpointUrl: Option[BaseUrl]                = None
+    def withModel(model: ModelName): ProviderConfig = this
 
   // ---------------------------------------------------------------------------------------------
   // ProviderDescriptor.expectConfig
   // ---------------------------------------------------------------------------------------------
 
   "expectConfig" should "return the config unchanged when it matches the expected type" in {
-    val config = FixtureChatConfig(apiKey = "k", model = "m")
+    val config = FixtureChatConfig(apiKey = "k", modelName = "m")
     ProviderDescriptor.expectConfig[FixtureChatConfig](providerId, config) shouldBe Right(config)
   }
 
   it should "fail, naming the provider and actual config type, when the expected type differs" in {
-    val config  = FixtureChatConfig(apiKey = "k", model = "m")
+    val config  = FixtureChatConfig(apiKey = "k", modelName = "m")
     val message = expectMessage(ProviderDescriptor.expectConfig[ForeignConfig.type](providerId, config))
     message shouldBe s"Invalid config type FixtureChatConfig for provider ${providerId.asString}"
   }

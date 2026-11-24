@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.config.JlamaConfig
 import org.scalatest.matchers.should.Matchers
@@ -17,9 +18,9 @@ class JlamaEngineSpec extends AnyWordSpec with Matchers:
 
   private def config(model: String, dir: Path): JlamaConfig =
     JlamaConfig
-      .fromValues("tjake/Llama-3.2-1B-Instruct-JQ4")
+      .fromValues(ModelName("tjake/Llama-3.2-1B-Instruct-JQ4"))
       .fold(e => fail(e.message), identity)
-      .withModel(model)
+      .withModel(ModelName(model))
       .withModelDir(dir)
       .withThreads(1)
 

@@ -26,7 +26,7 @@ Configure LLM4S for multiple providers, environments, and use cases.
 `Llm4sConfig` reads [Typesafe Config](https://github.com/lightbend/config) through PureConfig,
 with this precedence (highest first):
 
-1. **JVM system properties** - `-Dllm4s.providers.provider=claude`
+1. **JVM system properties** - `-Dllm4s.defaultProvider=claude`
 2. **Your `application.conf`** - `src/main/resources/application.conf`, or a file named with
    `-Dconfig.file=/path/to/app.conf` (or `-Dconfig.resource=prod.conf` for another resource)
 3. **`reference.conf`** - the defaults shipped in each llm4s module on the classpath
@@ -53,7 +53,7 @@ model = ${?OPENAI_MODEL}   # used only when OPENAI_MODEL is set
 ## Named provider sections
 
 Chat providers are configured as named sections under `llm4s.providers`. You choose each
-section's name; `provider` inside it says which provider it is, and `llm4s.providers.provider`
+section's name; `provider` inside it says which provider it is, and `llm4s.defaultProvider`
 names the section `Llm4sConfig.defaultProvider()` loads.
 
 **1. Add llm4s and the module for your provider:**
@@ -82,9 +82,8 @@ libraryDependencies ++= Seq(
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
@@ -128,11 +127,11 @@ This exact configuration is exercised by `DocumentedProviderConfigSpec` in `modu
 Other `Llm4sConfig` calls read the same sections:
 
 ```scala
-Llm4sConfig.provider("openai-main")   // any section, by name
-Llm4sConfig.defaultProviderName()     // the value of llm4s.providers.provider
+Llm4sConfig.provider(ProviderName("openai-main"))   // any section, by name
+Llm4sConfig.defaultProviderName()     // the value of llm4s.defaultProvider
 Llm4sConfig.providerConfigs()         // every section by name, each a Right(config) or the Left(error) loading it
 Llm4sConfig.listModels()              // model discovery for the default section
-Llm4sConfig.listModels("openai-main") // ... or for a named one
+Llm4sConfig.listModels(ProviderName("openai-main")) // ... or for a named one
 ```
 
 ### API keys
@@ -260,7 +259,7 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ApiKey
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, ProviderName }
 import org.llm4s.types.Result
 
 import java.time.Instant
@@ -285,12 +284,11 @@ class SecretStoreKey(fetch: () => Result[String], maxAge: FiniteDuration) extend
 val fetchOpenAIKey: () => Result[String] = () => Left(ConfigurationError("connect the secret store"))
 
 val rotating: Result[LLMClient] = for {
-  providerConfig <- Llm4sConfig.provider("openai-main")
+  providerConfig <- Llm4sConfig.provider(ProviderName("openai-main"))
   registry       <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
-  config = providerConfig.withApiKeyProvider(SecretStoreKey(fetchOpenAIKey, 5.minutes))
-  // A provider whose client cannot take one leaves `apiKeyProvider` empty.
-  _      <- Either.cond(config.apiKeyProvider.isDefined, (), ConfigurationError("this provider cannot rotate keys"))
+  // A provider whose client cannot take one (Ollama, Bedrock, Vertex AI) is a ConfigurationError here.
+  config <- providerConfig.withApiKeyProvider(SecretStoreKey(fetchOpenAIKey, 5.minutes))
   client <- LLMConnect.getClient(config)
 } yield client
 ```
@@ -478,9 +476,8 @@ Five things to know:
 
 ```hocon
 llm4s {
+  defaultProvider = "claude"
   providers {
-    provider = "claude"
-
     claude {                              # key from ANTHROPIC_API_KEY
       provider = "anthropic"
       model    = "claude-sonnet-5-5"
@@ -630,22 +627,20 @@ To use an sttp 4 backend you already have, `llm4s-sttp`'s `SttpLlm4sHttpClient(b
 ## Switching providers
 
 Your code calls `Llm4sConfig.defaultProvider()` and does not change. To use a different
-provider, point `llm4s.providers.provider` at another section:
+provider, point `llm4s.defaultProvider` at another section:
 
-- **Edit the file**: `provider = "claude"`.
+- **Edit the file**: `defaultProvider = "claude"`.
 - **Bind it to a variable of your own**:
 
   ```hocon
-  llm4s.providers {
-    provider = "openai-main"
-    provider = ${?LLM4S_PROVIDER}   # your binding; any variable name works
-  }
+  llm4s.defaultProvider = "openai-main"
+  llm4s.defaultProvider = ${?LLM4S_PROVIDER}   # your binding; any variable name works
   ```
 
   then `export LLM4S_PROVIDER=claude`.
-- **Override it for one run**: `sbt -Dllm4s.providers.provider=claude run`, or
-  `java -Dllm4s.providers.provider=claude -jar app.jar`.
-- **Load a section by name** instead of the default: `Llm4sConfig.provider("claude")`. This is
+- **Override it for one run**: `sbt -Dllm4s.defaultProvider=claude run`, or
+  `java -Dllm4s.defaultProvider=claude -jar app.jar`.
+- **Load a section by name** instead of the default: `Llm4sConfig.provider(ProviderName("claude"))`. This is
   how an application uses several providers at once.
 
 For per-environment setups (local Ollama in development, a cloud provider in production), keep
@@ -672,8 +667,8 @@ import org.llm4s.types.Result
 
 // In a Play or Pekko app this is the Config the framework already loaded.
 val appConfig: Config = ConfigFactory.parseString(
-  """llm4s.providers {
-    |  provider = "openai-main"
+  """llm4s.defaultProvider = "openai-main"
+    |llm4s.providers {
     |  openai-main { provider = "openai", model = "gpt-4o-mini" }
     |}""".stripMargin
 )
@@ -712,7 +707,7 @@ defines one section, `ollama-local`, as the default, and binds three variables o
 
 | Variable | Bound by the samples' `application.conf` to |
 |---|---|
-| `LLM4S_PROVIDER` | `llm4s.providers.provider` - which section to use |
+| `LLM4S_PROVIDER` | `llm4s.defaultProvider` - which section to use |
 | `OLLAMA_MODEL` | `llm4s.providers.ollama-local.model` (default `llama3:latest`) |
 | `OLLAMA_BASE_URL` | `llm4s.providers.ollama-local.baseUrl` (default `http://localhost:11434`) |
 
@@ -883,20 +878,16 @@ class RAGService(embeddingService: LLMEmbeddingService) {
 object RAGApplication extends App {
   val startup = for {
     // 1. Load config
-    embeddingConfig <- Llm4sConfig.embeddings()
-    (provider, cfg) = embeddingConfig
-    model    <- Llm4sConfig.textEmbeddingModel()
+    cfg      <- Llm4sConfig.embeddings()
+    model    <- Llm4sConfig.textEmbeddingModel() // the same model, with its dimensions
     registry <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
 
     // 2. Build dependencies
-    client <- EmbeddingClient.from(provider, cfg)
+    client <- EmbeddingClient.from(cfg)
     
     // 3. Create service
-    service = LLMEmbeddingService(
-      client, 
-      EmbeddingModelConfig(model.modelName, model.dimensions)
-    )
+    service = LLMEmbeddingService(client, model)
   } yield new RAGService(service)
 
   startup.fold(
@@ -1159,7 +1150,7 @@ also set in `application.conf` or with `-D`.
 | `HTTPS_PROXY`, `NO_PROXY`, `LLM4S_PROXY_USER`, `LLM4S_PROXY_PASSWORD` | `llm4s.http.proxy.url`, `.nonProxyHosts`, `.username`, `.password` ([Corporate networks](#corporate-networks-a-proxy-and-a-custom-ca)) | `llm4s-core` |
 | `LLM4S_TRUSTSTORE`, `LLM4S_TRUSTSTORE_PASSWORD`, `LLM4S_KEYSTORE`, `LLM4S_KEYSTORE_PASSWORD` | `llm4s.http.tls.trustStore`, `.trustStorePassword`, `.keyStore`, `.keyStorePassword` | `llm4s-core` |
 | `LLM4S_MODEL_REGISTRY_RESOURCE`, `LLM4S_MODEL_REGISTRY_FILE`, `LLM4S_MODEL_REGISTRY_URL` | `llm4s.modelRegistry.*` | `llm4s-core` |
-| `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT` | `llm4s.workspace.*` | `llm4s-core` |
+| `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT` | `llm4s.workspace.*` | `llm4s-workspace-client` |
 | `BRAVE_SEARCH_API_KEY`, `EXA_API_KEY` and the other `BRAVE_*`, `EXA_*` variables, `DUCK_DUCK_GO_SEARCH_API_URL` | `llm4s.tools.*` | `llm4s-agent-tools` |
 | `OPENAI_API_KEY` | `llm4s.credentials.openai.apiKey` (OpenAI chat sections and embeddings) | `llm4s-openai` |
 | `AZURE_OPENAI_API_KEY` | `llm4s.credentials.azure.apiKey` | `llm4s-openai` |
@@ -1221,8 +1212,8 @@ to be set, or you can keep one file per environment:
 ```hocon
 # src/main/resources/application.conf - development
 llm4s {
+  defaultProvider = "ollama-local"
   providers {
-    provider = "ollama-local"
     ollama-local {
       provider = "ollama"
       model    = "llama3.2"
@@ -1239,8 +1230,8 @@ include "application.conf"
 
 llm4s {
   providers = null                     # drop the development sections
+  defaultProvider = "claude"
   providers {
-    provider = "claude"
     claude {
       provider = "anthropic"
       model    = "claude-sonnet-5-5"
@@ -1354,8 +1345,8 @@ ConfigurationError: Provider 'openai-main' (provider = openai) is missing requir
 4. `.env` file not loaded in the shell that starts the JVM
 
 The error names the section it is about, and only a section being loaded is validated. If it
-names a section you did not ask for, check `llm4s.providers.provider` (and any
-`-Dllm4s.providers.provider` override): that is the section `defaultProvider()` loads. The one
+names a section you did not ask for, check `llm4s.defaultProvider` (and any
+`-Dllm4s.defaultProvider` override): that is the section `defaultProvider()` loads. The one
 call that validates every section is `Llm4sConfig.providerConfigs()`, which reports each separately.
 
 **Debug steps:**
@@ -1374,11 +1365,11 @@ grep -n apiKey src/main/resources/application.conf
 ConfigurationError: Configured provider 'openai-main' was not found
 ```
 
-**Fix:** `llm4s.providers.provider` (or the name passed to `Llm4sConfig.provider(...)`) must
+**Fix:** `llm4s.defaultProvider` (or the name passed to `Llm4sConfig.provider(...)`) must
 match a section name exactly. Check for a typo, and for an `LLM4S_PROVIDER`-style override
-selecting a section this file does not define. If `llm4s.providers.provider` is absent
+selecting a section this file does not define. If `llm4s.defaultProvider` is absent
 altogether, `defaultProvider()` fails with "No default provider configured under
-llm4s.providers.provider" - set it, or call `Llm4sConfig.provider("<name>")`.
+llm4s.defaultProvider" - set it, or call `Llm4sConfig.provider(ProviderName("<name>"))`.
 
 ### Problem: "Unknown provider" / provider not registered
 
@@ -1398,8 +1389,8 @@ spelling.
 import com.typesafe.config.ConfigFactory
 
 val config = ConfigFactory.load()
-println(config.hasPath("llm4s.providers.provider"))    // Should be true
-println(config.getString("llm4s.providers.provider"))  // Should name your section
+println(config.hasPath("llm4s.defaultProvider"))    // Should be true
+println(config.getString("llm4s.defaultProvider"))  // Should name your section
 ```
 
 **Common causes:**
@@ -1466,7 +1457,7 @@ openai-main {
 }
 ```
 
-3. **Switch to Ollama for development** - point `llm4s.providers.provider` at an
+3. **Switch to Ollama for development** - point `llm4s.defaultProvider` at an
    `ollama-local` section (see [Switching providers](#switching-providers)); free, no rate limits.
 
 ### Problem: "Slow responses or timeouts"

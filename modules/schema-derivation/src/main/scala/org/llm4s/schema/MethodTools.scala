@@ -24,10 +24,10 @@ private[schema] object MethodTools {
     readers: List[Reader[?]],
     descriptions: List[Option[String]],
     invoke: List[Any] => Either[String, R]
-  )(using ReadWriter[R]): Result[ToolFunction[Any, R]] = {
+  )(using ReadWriter[R]): Result[ToolFunction[R]] = {
     val arguments = SchemaOf.product[Any](name, Some(description), fields, schemas, descriptions, fields.map(_ => None))
     Tool.parametersOf(name, arguments).map { parameters =>
-      ToolFunction[Any, R](
+      ToolFunction[R](
         name,
         description,
         parameters,
@@ -44,8 +44,8 @@ private[schema] object MethodTools {
     result.toEither.left.map(e => Option(e.getMessage).getOrElse(e.getClass.getName))
 
   /** The tools of a service, or the first that could not be built. */
-  def all(tools: List[Result[ToolFunction[?, ?]]]): Result[Seq[ToolFunction[?, ?]]] =
-    tools.foldRight[Result[List[ToolFunction[?, ?]]]](Right(Nil)) { (tool, rest) =>
+  def all(tools: List[Result[ToolFunction[?]]]): Result[Seq[ToolFunction[?]]] =
+    tools.foldRight[Result[List[ToolFunction[?]]]](Right(Nil)) { (tool, rest) =>
       for {
         t  <- tool
         ts <- rest

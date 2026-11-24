@@ -19,8 +19,10 @@ org.llm4s.scalafix.AgentStatusGainsTruncated
 org.llm4s.scalafix.CompressionRuleTransform
 org.llm4s.scalafix.AgentCopyToWithSetters
 org.llm4s.scalafix.ResultSyntaxMoved
+org.llm4s.scalafix.ProviderConfigNewtypes
 org.llm4s.scalafix.SamplingOptionsOptional
 org.llm4s.scalafix.CompletionFromMessage
 org.llm4s.scalafix.MessageAndConversationShapes
 org.llm4s.scalafix.ClientEntryPoints
+org.llm4s.scalafix.ToolFunctionOneTypeParameter
 org.llm4s.scalafix.ToolCallIdTyped

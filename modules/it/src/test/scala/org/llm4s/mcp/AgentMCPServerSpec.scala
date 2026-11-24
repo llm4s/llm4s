@@ -32,7 +32,7 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
       .`object`[Map[String, Any]]("Add parameters")
       .withProperty(Schema.property("a", Schema.integer("First operand")))
       .withProperty(Schema.property("b", Schema.integer("Second operand")))
-    val add = ToolBuilder[Map[String, Any], String]("add", "Returns the sum of two integers", schema)
+    val add = ToolBuilder[String]("add", "Returns the sum of two integers", schema)
       .withHandler(p =>
         for {
           a <- p.getInt("a")
@@ -42,7 +42,7 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
       .buildSafe()
       .fold(e => fail(s"could not build tool: ${e.formatted}"), identity)
 
-    val explode = ToolBuilder[Map[String, Any], String](
+    val explode = ToolBuilder[String](
       "explode",
       "Always fails",
       Schema.`object`[Map[String, Any]]("No parameters")

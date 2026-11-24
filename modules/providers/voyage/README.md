@@ -34,9 +34,16 @@ Voyage's models embed a query and a document differently. The provider maps a re
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
 import org.llm4s.llmconnect.provider.VoyageAIEmbeddingProvider
+import org.llm4s.security.Secret
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 
 val provider = VoyageAIEmbeddingProvider.fromConfig(
-  EmbeddingProviderConfig(baseUrl = "https://api.voyageai.com/v1", model = "voyage-3", apiKey = sys.env("VOYAGE_API_KEY"))
+  EmbeddingProviderConfig(
+    providerId = ProviderId("voyage"),
+    baseUrl = BaseUrl("https://api.voyageai.com/v1"),
+    model = ModelName("voyage-3"),
+    apiKey = Some(Secret(sys.env("VOYAGE_API_KEY")))
+  )
 )
 val model = EmbeddingModelConfig("voyage-3", 1024)
 

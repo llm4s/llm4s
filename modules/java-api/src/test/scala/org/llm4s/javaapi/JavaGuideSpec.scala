@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.testutil.TestTimeLimit
 
@@ -519,15 +520,15 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
     }
 
     "offer the with methods the guide names" in {
-      val openai = OpenAIConfig.apply(Secret("sk-test"), "gpt-4o-mini")
+      val openai = OpenAIConfig.apply(Secret("sk-test"), ModelName("gpt-4o-mini"))
       openai.withContextWindow(1000).contextWindow shouldBe 1000
       openai.withReserveCompletion(10).reserveCompletion shouldBe 10
       openai.withBaseUrl("http://example.test/v1").baseUrl shouldBe "http://example.test/v1"
       openai.withOrganization("org-1").organization shouldBe Some("org-1")
-      AnthropicConfig.apply(Secret("sk-test"), "m").withContextWindow(1000).contextWindow shouldBe 1000
-      AnthropicConfig.apply(Secret("sk-test"), "m").withReserveCompletion(10).reserveCompletion shouldBe 10
-      OllamaConfig.apply("m", "http://h").withContextWindow(1000).contextWindow shouldBe 1000
-      OllamaConfig.apply("m", "http://h").withReserveCompletion(10).reserveCompletion shouldBe 10
+      AnthropicConfig.apply(Secret("sk-test"), ModelName("m")).withContextWindow(1000).contextWindow shouldBe 1000
+      AnthropicConfig.apply(Secret("sk-test"), ModelName("m")).withReserveCompletion(10).reserveCompletion shouldBe 10
+      OllamaConfig.apply(ModelName("m"), "http://h").withContextWindow(1000).contextWindow shouldBe 1000
+      OllamaConfig.apply(ModelName("m"), "http://h").withReserveCompletion(10).reserveCompletion shouldBe 10
     }
 
     "fail, not throw, for a null config" in {

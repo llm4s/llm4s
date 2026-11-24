@@ -24,7 +24,7 @@ class ProviderConfigConstructionTest extends AnyFunSuite with Matchers with Eith
         baseUrl = DEFAULT_OPENAI_BASE_URL
       )
       .value
-    cfg.model shouldBe "gpt-4o"
+    cfg.model.asString shouldBe "gpt-4o"
     cfg.apiKey.reveal shouldBe "sk-test"
     cfg.baseUrl shouldBe DEFAULT_OPENAI_BASE_URL
   }

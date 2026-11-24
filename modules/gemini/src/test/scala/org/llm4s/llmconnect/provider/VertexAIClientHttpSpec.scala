@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.http.{ HttpResponse, StreamingHttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.VertexAIConfig
@@ -28,7 +29,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
   private val testConfig = VertexAIConfig(
     projectId = "my-gcp-project",
     location = "us-central1",
-    model = "gemini-2.0-flash",
+    model = ModelName("gemini-2.0-flash"),
     credentialFilePath = None,
     contextWindow = 1048576,
     reserveCompletion = 8192
@@ -571,7 +572,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       .`object`[Map[String, Any]]("Input")
       .withProperty(Schema.property("q", Schema.string("query")))
 
-    val toolResult = ToolBuilder[Map[String, Any], String]("search", "Search tool", schema)
+    val toolResult = ToolBuilder[String]("search", "Search tool", schema)
       .withHandler(_ => Right("ok"))
       .buildSafe()
 
@@ -601,7 +602,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       .`object`[Map[String, Any]]("Input")
       .withProperty(Schema.property("x", Schema.integer("x")))
 
-    val toolResult = ToolBuilder[Map[String, Any], String]("my_tool", "My tool description", schema)
+    val toolResult = ToolBuilder[String]("my_tool", "My tool description", schema)
       .withHandler(_ => Right("ok"))
       .buildSafe()
 

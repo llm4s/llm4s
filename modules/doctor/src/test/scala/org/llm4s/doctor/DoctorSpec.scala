@@ -47,14 +47,14 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
   private val local = DoctorOptions().withLocal(true)
 
   private val localOllama =
-    """llm4s.providers {
-      |  provider = "local"
+    """llm4s.defaultProvider = "local"
+      |llm4s.providers {
       |  local { provider = "ollama", model = "llama3", baseUrl = "http://localhost:11434" }
       |}""".stripMargin
 
   private def openAi(lines: String*): String =
-    s"""llm4s.providers {
-       |  provider = "main"
+    s"""llm4s.defaultProvider = "main"
+       |llm4s.providers {
        |  main {
        |    provider = "openai"
        |    model = "gpt-4o-mini"
@@ -108,7 +108,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
   "Doctor on the five broken setups of the issue" should {
 
     "report no section at all, and skip what needs one" in {
-      val report = run("""llm4s.providers.provider = "main"""")
+      val report = run("""llm4s.defaultProvider = "main"""")
 
       check(report, "Configuration").status shouldBe CheckStatus.Fail
       check(report, "Configuration").fix.value should include("llm4s.providers")
@@ -128,7 +128,8 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
 
     "report an unknown provider id, naming the ones that are registered" in {
-      val report = run("""llm4s.providers { provider = "main", main { provider = "no-such-vendor", model = "m" } }""")
+      val report =
+        run("""llm4s.defaultProvider = "main", llm4s.providers { main { provider = "no-such-vendor", model = "m" } }""")
 
       check(report, "Provider module").status shouldBe CheckStatus.Fail
       check(report, "Provider module").detail should include("no-such-vendor")
@@ -175,13 +176,13 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
       check(report, "Default provider").status shouldBe CheckStatus.Fail
       check(report, "Default provider").detail should include("main")
-      check(report, "Default provider").fix.value should include("llm4s.providers.provider")
+      check(report, "Default provider").fix.value should include("llm4s.defaultProvider")
     }
 
     "report a default that names a section that does not exist" in {
       val report = run(
-        """llm4s.providers {
-          |  provider = "ghost"
+        """llm4s.defaultProvider = "ghost"
+          |llm4s.providers {
           |  real { provider = "ollama", model = "m", baseUrl = "http://localhost:11434" }
           |}""".stripMargin
       )
@@ -193,7 +194,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
 
     "report a section with no provider key" in {
-      val report = run("""llm4s.providers { provider = "main", main { model = "m" } }""")
+      val report = run("""llm4s.defaultProvider = "main", llm4s.providers { main { model = "m" } }""")
 
       check(report, "Provider module").status shouldBe CheckStatus.Fail
       check(report, "Provider module").detail should include("no provider key")
@@ -260,8 +261,8 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
     "need no key for an Azure section that authenticates with Entra ID (#2274)" in {
       val hocon =
-        """llm4s.providers {
-          |  provider = "az"
+        """llm4s.defaultProvider = "az"
+          |llm4s.providers {
           |  az {
           |    provider = "azure", model = "gpt-4o", endpoint = "https://r.openai.azure.com"
           |    authentication = "entra-id"
@@ -419,11 +420,11 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
   "Doctor printing an error that links its troubleshooting entry" should {
     "keep the link's anchor, and drop the line telling the user to run the doctor" in {
       val message = org.llm4s.error.TroubleshootingLinks.configuration(
-        "No default provider configured under llm4s.providers.provider",
+        "No default provider configured under llm4s.defaultProvider",
         org.llm4s.error.TroubleshootingLinks.Entry.NoDefaultProvider
       )
       val check = DoctorCheck.fail("Default provider", message)
-      check.detail shouldBe "No default provider configured under llm4s.providers.provider\n" +
+      check.detail shouldBe "No default provider configured under llm4s.defaultProvider\n" +
         "See https://llm4s.org/getting-started/troubleshooting#no-default-provider"
     }
   }
@@ -761,7 +762,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
 
     def config(baseUrl: String): String =
-      s"""llm4s.providers { provider = "local", local { provider = "ollama", model = "llama3", baseUrl = "$baseUrl" } }"""
+      s"""llm4s.defaultProvider = "local", llm4s.providers { local { provider = "ollama", model = "llama3", baseUrl = "$baseUrl" } }"""
 
     val systemPorts = DoctorPorts.system.withJavaFeature(() => 21)
 
@@ -785,7 +786,8 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
 
     "check the default local server for a section that sets no baseUrl (#1991)" in {
-      val report = run("""llm4s.providers { provider = "local", local { provider = "ollama", model = "llama3" } }""")
+      val report =
+        run("""llm4s.defaultProvider = "local", llm4s.providers { local { provider = "ollama", model = "llama3" } }""")
 
       check(report, "Local server").status shouldBe CheckStatus.Skipped
       check(report, "Local server").detail should include("localhost:11434")
@@ -899,7 +901,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
     "report a default section that cannot be read, and skip what needs it" in {
       val report = run(
-        """llm4s.providers { provider = "main", main { provider = "ollama", model = "m", headers = "not-a-map" } }"""
+        """llm4s.defaultProvider = "main", llm4s.providers { main { provider = "ollama", model = "m", headers = "not-a-map" } }"""
       )
 
       check(report, "Default provider").status shouldBe CheckStatus.Fail

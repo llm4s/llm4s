@@ -104,7 +104,7 @@ object CancellationSpec extends ZIOSpecDefault {
         val toolStarted  = new CountDownLatch(1)
         val sawInterrupt = new AtomicBoolean(false)
         val block        = new AtomicBoolean(true)
-        val blocking = ToolBuilder[Map[String, Any], String](
+        val blocking = ToolBuilder[String](
           "block",
           "blocks until interrupted",
           Schema.`object`[Map[String, Any]]("params")

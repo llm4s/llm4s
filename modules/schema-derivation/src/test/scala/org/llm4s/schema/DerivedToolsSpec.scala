@@ -12,10 +12,10 @@ class DerivedToolsSpec extends AnyFlatSpec with Matchers {
   private def built[T](tool: org.llm4s.types.Result[T]): T =
     tool.fold(e => sys.error(s"could not build the tool: ${e.formatted}"), identity)
 
-  private lazy val tools: Map[String, ToolFunction[?, ?]] =
+  private lazy val tools: Map[String, ToolFunction[?]] =
     built(Tools.derive[CustomerService](LiveCustomerService)).map(t => t.name -> t).toMap
 
-  private def parameters(tool: ToolFunction[?, ?]): ujson.Value = tool.schema.toJsonSchema(true)
+  private def parameters(tool: ToolFunction[?]): ujson.Value = tool.schema.toJsonSchema(true)
 
   "Tools.derive" should "make one tool per public method, in name order, leaving out @notATool methods" in {
     built(Tools.derive[CustomerService](LiveCustomerService)).map(_.name) shouldBe
@@ -76,7 +76,7 @@ class DerivedToolsSpec extends AnyFlatSpec with Matchers {
   }
 
   "Tool.fromMethod" should "build the tool of one method, typed by its result" in {
-    val cancel: ToolFunction[?, Cancellation] = built(Tool.fromMethod(LiveCustomerService.cancelOrder))
+    val cancel: ToolFunction[Cancellation] = built(Tool.fromMethod(LiveCustomerService.cancelOrder))
     cancel.name shouldBe "cancel"
     cancel.execute(ujson.Obj("orderId" -> "O-2", "reason" -> "late")) shouldBe
       Right(ujson.Obj("orderId" -> "O-2", "refunded" -> true))

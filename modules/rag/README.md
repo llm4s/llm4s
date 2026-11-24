@@ -78,10 +78,9 @@ import org.llm4s.model.ModelRegistryService
 val hits = for {
   service       <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = service
-  embeddingPair <- Llm4sConfig.embeddings()
-  (provider, embeddingConfig) = embeddingPair
+  embeddingConfig <- Llm4sConfig.embeddings()
   rag <- RAG.build(
-    RAGConfig().withEmbeddings(provider, embeddingConfig.model).withTopK(3),
+    RAGConfig().withEmbeddings(embeddingConfig.providerId.asString, embeddingConfig.model.asString).withTopK(3),
     _ => Right(embeddingConfig)
   )
   _       <- rag.ingestText("Scala is a statically typed language for the JVM.", "doc-1")

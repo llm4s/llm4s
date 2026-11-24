@@ -72,7 +72,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     )
   }
 
-  private val weather = ToolBuilder[Map[String, Any], String](
+  private val weather = ToolBuilder[String](
     "weather",
     "Current weather in a city",
     Schema.`object`[Map[String, Any]]("Weather query").withProperty(Schema.property("city", Schema.string("City name")))

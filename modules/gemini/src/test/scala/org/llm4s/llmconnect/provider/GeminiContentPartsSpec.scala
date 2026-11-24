@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.UnsupportedContentPartError
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StubbedHttpCalls }
@@ -40,7 +41,7 @@ class GeminiContentPartsSpec extends AnyFlatSpec with Matchers with EitherValues
   private def client(http: Llm4sHttpClient) = new GeminiClient(
     GeminiConfig(
       apiKey = Secret("k"),
-      model = "gemini-2.0-flash",
+      model = ModelName("gemini-2.0-flash"),
       baseUrl = "https://generativelanguage.googleapis.com/v1beta",
       contextWindow = 1048576,
       reserveCompletion = 8192

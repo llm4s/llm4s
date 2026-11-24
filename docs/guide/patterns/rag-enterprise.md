@@ -37,11 +37,10 @@ import org.llm4s.types.Result
 def companyDocs(client: LLMClient, dbPassword: Secret, tracing: Tracing): Result[RAG] = for {
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
-  selected <- Llm4sConfig.embeddings()               // EMBEDDING_MODEL, e.g. openai/text-embedding-3-small
-  (provider, embeddingConfig) = selected
+  embeddingConfig <- Llm4sConfig.embeddings()               // EMBEDDING_MODEL, e.g. openai/text-embedding-3-small
   rag <- RAG
     .builder()
-    .withEmbeddings(provider)
+    .withEmbeddings(embeddingConfig.providerId.asString)
     .withPgHybrid("jdbc:postgresql://db:5432/rag", "rag", dbPassword) // vectors and keywords both in PostgreSQL
     .withChunking(ChunkerFactory.Strategy.Markdown, 800, 150)          // target size and overlap, in characters
     .withRRF(60)                                                       // fuse vector and keyword results

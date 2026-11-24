@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.spi.fixtures
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
@@ -80,7 +80,7 @@ object FixtureEmbeddings extends EmbeddingProviderDescriptor:
           Right(
             org.llm4s.llmconnect.model.EmbeddingResponse(
               embeddings = Seq(Vector(1.0, 2.0)),
-              metadata = Map("provider" -> "fixtureembed", "baseUrl" -> config.baseUrl)
+              metadata = Map("provider" -> "fixtureembed", "baseUrl" -> config.baseUrl.asUrl)
             )
           )
     )

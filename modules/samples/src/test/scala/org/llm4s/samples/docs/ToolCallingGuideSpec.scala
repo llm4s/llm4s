@@ -41,7 +41,7 @@ class ToolCallingGuideSpec extends AnyFlatSpec with Matchers {
     var capturedCity: Option[String] = None
 
     // A tool that records the arguments it was called with
-    val weatherTool = ToolBuilder[Map[String, Any], String](
+    val weatherTool = ToolBuilder[String](
       "get_weather",
       "Get weather for a city",
       Schema

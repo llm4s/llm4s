@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId, ProviderName }
+
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.{
@@ -49,7 +51,7 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
              |}
              |""".stripMargin
         ),
-        "main"
+        ProviderName("main")
       )
       .value
 
@@ -146,9 +148,10 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
     LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
       val provider = OpenAIEmbeddingProvider.fromConfig(
         EmbeddingProviderConfig(
-          baseUrl = baseUrl,
-          model = "text-embedding-3-small",
-          apiKey = Secret("sk-test"),
+          providerId = ProviderId("openai"),
+          baseUrl = BaseUrl(baseUrl),
+          model = ModelName("text-embedding-3-small"),
+          apiKey = Some(Secret("sk-test")),
           timeouts = ProviderTimeouts(request = Some(300.millis))
         )
       )

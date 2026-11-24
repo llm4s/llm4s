@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
 import com.anthropic.models.messages.MessageCreateParams
@@ -27,7 +28,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   private val testConfig = AnthropicConfig(
     apiKey = Secret("test-key"),
-    model = "claude-sonnet-4-5",
+    model = ModelName("claude-sonnet-4-5"),
     baseUrl = "https://api.anthropic.com",
     contextWindow = 200000,
     reserveCompletion = 4096
@@ -42,14 +43,14 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
   private def requestBody(messages: Message*): ujson.Value = requestBodyWith(CompletionOptions())(messages*)
 
   private def requestBodyWith(options: CompletionOptions)(messages: Message*): ujson.Value = {
-    val builder = MessageCreateParams.builder().model(testConfig.model).maxTokens(4096)
+    val builder = MessageCreateParams.builder().model(testConfig.model.asString).maxTokens(4096)
     new AnthropicClient(testConfig).addMessagesToParams(Conversation(messages), builder, options)
     ujson.read(ObjectMappers.jsonMapper().writeValueAsString(builder.build()._body()))
   }
 
   /** `message` as the client returns it in answer to `history`: its sealed thinking bound to it. */
   private def answering(history: Message*)(message: AssistantMessage): AssistantMessage =
-    ThinkingReplay.bind(ReplayOrigin("anthropic", testConfig.model), message, history, CompletionOptions())
+    ThinkingReplay.bind(ReplayOrigin("anthropic", testConfig.model.asString), message, history, CompletionOptions())
 
   /** A fake `/v1/messages`, answering each request with the next response and recording its body. */
   private def withServer(responses: (String, String)*)(test: (String, () => List[ujson.Value]) => Any): Unit = {
@@ -324,7 +325,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   it should "not go back after the tools changed" in {
     val tool = org.llm4s.toolapi
-      .ToolBuilder[Map[String, Any], String](
+      .ToolBuilder[String](
         "get_weather",
         "Weather for a city",
         org.llm4s.toolapi.Schema
@@ -349,7 +350,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
     val signed = AssistantMessage(None, Seq(call)).withThinking(sealedThinking)
     // a Bedrock signature, or one from another Claude model, is not this client's to replay
     val fromBedrock =
-      ThinkingReplay.bind(ReplayOrigin("bedrock", testConfig.model), signed, Seq(ask), CompletionOptions())
+      ThinkingReplay.bind(ReplayOrigin("bedrock", testConfig.model.asString), signed, Seq(ask), CompletionOptions())
     val fromOther =
       ThinkingReplay.bind(ReplayOrigin("anthropic", "claude-opus-4-1"), signed, Seq(ask), CompletionOptions())
     Seq(fromBedrock, fromOther).foreach { turn =>

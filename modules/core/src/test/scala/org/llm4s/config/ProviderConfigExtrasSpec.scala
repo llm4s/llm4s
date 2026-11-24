@@ -3,7 +3,7 @@ package org.llm4s.config
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.core.read.ListAppender
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.error.ConfigurationError
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.ProviderConfig
@@ -272,7 +272,7 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
     val providers = ProvidersConfigLoader.load(ConfigSource.string(hocon)).fold(e => fail(e.message), identity)
     providers.namedProviders(ProviderName("my-regional")).extras shouldBe Map("region" -> "eu-west-1", "tier" -> "2")
 
-    Llm4sConfig.provider(ConfigSource.string(hocon), "my-regional") match
+    Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("my-regional")) match
       case Right(config: FixtureChatConfig) => config.baseUrl shouldBe "https://eu-west-1.regional.invalid"
       case other                            => fail(s"Expected FixtureChatConfig, got $other")
   }
@@ -283,7 +283,7 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
         |llm4s.providers.my-regional { provider = "regional", model = "m", apiKey = "k" }
         |""".stripMargin
 
-    error(Llm4sConfig.provider(ConfigSource.string(hocon), "my-regional")) should include(
+    error(Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("my-regional"))) should include(
       "- region: the cloud region hosting the model"
     )
   }
@@ -318,8 +318,8 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
   // providers block, each validating it and logging its warnings, so every warning printed twice.
   private def warningHocon: String =
     """
+      |llm4s.defaultProvider = "my-regional"
       |llm4s.providers {
-      |  provider = "my-regional"
       |  my-regional {
       |    provider     = "regional"
       |    model        = "m"

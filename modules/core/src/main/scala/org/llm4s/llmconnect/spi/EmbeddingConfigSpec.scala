@@ -189,10 +189,11 @@ object EmbeddingConfigSpec:
     section: EmbeddingProviderSection,
     modelOverride: Option[String],
     spec: EmbeddingConfigSpec
-  ): Result[String] =
+  ): Result[ModelName] =
     nonEmpty(modelOverride)
       .orElse(nonEmpty(section.model.map(_.asString)))
       .orElse(spec.defaultModel)
+      .map(ModelName(_))
       .toRight {
         val env = spec.modelEnv.fold("")(name => s" or $name")
         ConfigurationError(
@@ -202,9 +203,10 @@ object EmbeddingConfigSpec:
       }
 
   /** Resolves the base URL: the section first, then the spec's default. */
-  def resolveBaseUrl(id: ProviderId, section: EmbeddingProviderSection, spec: EmbeddingConfigSpec): Result[String] =
+  def resolveBaseUrl(id: ProviderId, section: EmbeddingProviderSection, spec: EmbeddingConfigSpec): Result[BaseUrl] =
     nonEmpty(section.baseUrl.map(_.asUrl))
       .orElse(spec.defaultBaseUrl)
+      .map(BaseUrl(_))
       .toRight(
         ConfigurationError(
           s"Missing ${id.asString} embeddings base URL (${fieldPath(id, "baseUrl")})"
@@ -219,19 +221,18 @@ object EmbeddingConfigSpec:
    * configuration is read from here.
    *
    * A provider whose spec neither requires a key nor supplies a default gets
-   * the empty string, which is what a local provider that ignores the field
-   * expects.
+   * `None`: it sends no key.
    */
   def resolveApiKey(
     id: ProviderId,
     section: EmbeddingProviderSection,
     spec: EmbeddingConfigSpec
-  ): Result[Secret] =
+  ): Result[Option[Secret]] =
     nonEmpty(section.apiKey.map(_.reveal))
       .orElse(spec.defaultApiKey)
       .map(Secret(_)) match
-      case Some(key)                    => Right(key)
-      case None if !spec.requiresApiKey => Right(Secret(""))
+      case Some(key)                    => Right(Some(key))
+      case None if !spec.requiresApiKey => Right(None)
       case None =>
         Left(
           ConfigurationError(

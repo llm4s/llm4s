@@ -1,7 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.security.Secret
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
@@ -162,8 +162,8 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
   private val hocon =
     """
       |llm4s {
+      |  defaultProvider = "local-vllm"
       |  providers {
-      |    provider = "local-vllm"
       |    local-vllm {
       |      provider = "openai-compatible"
       |      baseUrl = "http://localhost:8000/v1/"
@@ -244,9 +244,9 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
   "Llm4sConfig" should {
 
     "load an openai-compatible section with no apiKey, with conservative defaults" in {
-      Llm4sConfig.provider(ConfigSource.string(hocon), "local-vllm") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("local-vllm")) match
         case Right(cfg: OpenAICompatibleConfig) =>
-          cfg.model shouldBe "Qwen/Qwen2.5-7B-Instruct"
+          cfg.model.asString shouldBe "Qwen/Qwen2.5-7B-Instruct"
           cfg.baseUrl shouldBe "http://localhost:8000/v1"
           cfg.apiKey shouldBe None
           cfg.contextWindow shouldBe OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW
@@ -258,19 +258,19 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
     }
 
     "turn streamed usage off when a section sets streamUsage = false" in {
-      Llm4sConfig.provider(ConfigSource.string(hocon), "no-usage") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("no-usage")) match
         case Right(cfg: OpenAICompatibleConfig) => cfg.streamUsage shouldBe false
         case other                              => fail(s"Expected OpenAICompatibleConfig, got $other")
     }
 
     "read streamUsage with HOCON's boolean spellings" in {
-      Llm4sConfig.provider(ConfigSource.string(hocon), "off-usage") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("off-usage")) match
         case Right(cfg: OpenAICompatibleConfig) => cfg.streamUsage shouldBe false
         case other                              => fail(s"Expected OpenAICompatibleConfig, got $other")
     }
 
     "reject a streamUsage that is not a boolean, naming the key and the section" in {
-      Llm4sConfig.provider(ConfigSource.string(hocon), "bad-usage") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("bad-usage")) match
         case Left(err) =>
           err.message should include("Configured provider 'bad-usage' has an invalid streamUsage")
           err.message should include("llm4s.providers.bad-usage.streamUsage must be true or false, got 'sometimes'")
@@ -296,9 +296,9 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
     }
 
     "load the key, context window, reserve and headers a section sets" in {
-      Llm4sConfig.provider(ConfigSource.string(hocon), "groq-main") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("groq-main")) match
         case Right(cfg: OpenAICompatibleConfig) =>
-          cfg.model shouldBe "openai/gpt-oss-120b"
+          cfg.model.asString shouldBe "openai/gpt-oss-120b"
           cfg.apiKey shouldBe Some(Secret("gsk-test"))
           cfg.contextWindow shouldBe 131072
           cfg.reserveCompletion shouldBe 8192
@@ -311,7 +311,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
 
     "keep several openai-compatible instances side by side" in {
       val loaded =
-        Seq("local-vllm", "groq-main").map(name => Llm4sConfig.provider(ConfigSource.string(hocon), name))
+        Seq("local-vllm", "groq-main").map(name => Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName(name)))
       loaded.collect { case Right(c: OpenAICompatibleConfig) => c.baseUrl } shouldBe Seq(
         "http://localhost:8000/v1",
         "https://api.groq.com/openai/v1"
@@ -319,7 +319,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
     }
 
     "reject a reserve that leaves no room for a prompt" in {
-      Llm4sConfig.provider(ConfigSource.string(hocon), "bad-window") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("bad-window")) match
         case Left(err) => err.message should include("reserveCompletion must be at least 0 and less than contextWindow")
         case other     => fail(s"Expected a configuration error, got $other")
     }
@@ -327,7 +327,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
     // contextWindow and reserveCompletion are this provider's declared keys since #1133, not
     // fields of NamedProviderConfig: they arrive as strings, so the descriptor parses them.
     "reject a contextWindow that is not a whole number, naming the key and the section" in {
-      Llm4sConfig.provider(ConfigSource.string(hocon), "text-window") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("text-window")) match
         case Left(err) =>
           err.message shouldBe "Configured provider 'text-window' has an invalid contextWindow: " +
             "llm4s.providers.text-window.contextWindow must be a positive whole number, got 'lots'"
@@ -335,13 +335,13 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
     }
 
     "reject a contextWindow of zero" in {
-      Llm4sConfig.provider(ConfigSource.string(hocon), "zero-window") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("zero-window")) match
         case Left(err) => err.message should include("contextWindow must be a positive whole number, got '0'")
         case other     => fail(s"Expected a configuration error, got $other")
     }
 
     "reject a negative reserveCompletion" in {
-      Llm4sConfig.provider(ConfigSource.string(hocon), "negative-reserve") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("negative-reserve")) match
         case Left(err) =>
           err.message should include(
             "llm4s.providers.negative-reserve.reserveCompletion must be a whole number, 0 or more"
@@ -350,7 +350,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
     }
 
     "accept a reserveCompletion of zero" in {
-      Llm4sConfig.provider(ConfigSource.string(hocon), "zero-reserve") match
+      Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("zero-reserve")) match
         case Right(cfg: OpenAICompatibleConfig) =>
           cfg.contextWindow shouldBe 4096
           cfg.reserveCompletion shouldBe 0
@@ -388,7 +388,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
 
     "build an OpenAICompatibleClient for the default provider" in {
       Llm4sConfig
-        .provider(ConfigSource.string(hocon), "local-vllm")
+        .provider(ConfigSource.string(hocon), ProviderName("local-vllm"))
         .flatMap(cfg => LLMConnect.getClient(cfg)) match
         case Right(client) => client.getClass.getSimpleName shouldBe "OpenAICompatibleClient"
         case Left(err)     => fail(s"Expected a client, got error: ${err.message}")
@@ -398,7 +398,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
       val responseBody = """{ "data": [ { "id": "Qwen/Qwen2.5-7B-Instruct", "owned_by": "vllm" } ] }"""
       val httpClient   = new MockHttpClient(HttpResponse(200, responseBody, Map.empty))
 
-      Llm4sConfig.listModels("local-vllm", ConfigSource.string(hocon), httpClient) match
+      Llm4sConfig.listModels(ProviderName("local-vllm"), ConfigSource.string(hocon), httpClient) match
         case Right(models) =>
           models.map(_.name.asString) shouldBe List("Qwen/Qwen2.5-7B-Instruct")
           models.map(_.provider) shouldBe List(OpenAICompatibleProvider.id)

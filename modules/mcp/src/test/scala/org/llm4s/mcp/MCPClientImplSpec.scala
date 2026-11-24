@@ -85,7 +85,7 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
 
     client.transport = Some(mockTransport)
     // Act
-    val result: org.llm4s.types.Result[Seq[ToolFunction[?, ?]]] = client.getTools()
+    val result: org.llm4s.types.Result[Seq[ToolFunction[?]]] = client.getTools()
 
     // Assert
     result.map(_.map(_.name)) shouldBe Right(Seq("test-tool"))
@@ -158,7 +158,7 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
 
   // A property's schema is converted as it is, never to a string it is not (#2814)
 
-  private def toolWithProperties(properties: ujson.Obj, required: Seq[String]): ToolFunction[?, ?] = {
+  private def toolWithProperties(properties: ujson.Obj, required: Seq[String]): ToolFunction[?] = {
     val client        = new MCPClientImpl(config)
     val mockTransport = mock[MCPTransportImpl]
     val initResponse  = JsonRpcResponse("2.0", "1", Some(ujson.Obj("protocolVersion" -> "2025-06-18")))
@@ -194,7 +194,7 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
     client.getTools().toOption.get.head
   }
 
-  private def propertiesOf(tool: ToolFunction[?, ?]): ujson.Value =
+  private def propertiesOf(tool: ToolFunction[?]): ujson.Value =
     tool.schema.toJsonSchema(strict = false)("properties")
 
   "MCPClientImpl" should "describe a nested object property as an object with its own properties" in {

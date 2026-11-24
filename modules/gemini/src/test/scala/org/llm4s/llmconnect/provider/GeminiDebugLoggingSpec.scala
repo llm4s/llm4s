@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import ch.qos.logback.classic.Level
 import org.llm4s.http.{ HttpResponse, StubbedHttpCalls }
 import org.llm4s.llmconnect.ProviderExchangeLogging
@@ -34,7 +35,7 @@ final class GeminiDebugLoggingSpec extends AnyFlatSpec with Matchers with Either
       val client = new GeminiClient(
         GeminiConfig(
           apiKey = Secret("test-key"),
-          model = "gemini-2.0-flash",
+          model = ModelName("gemini-2.0-flash"),
           baseUrl = baseUrl,
           contextWindow = 1048576,
           reserveCompletion = 8192
@@ -62,7 +63,7 @@ final class GeminiDebugLoggingSpec extends AnyFlatSpec with Matchers with Either
     val config = VertexAIConfig(
       projectId = "my-gcp-project",
       location = "us-central1",
-      model = "gemini-2.0-flash",
+      model = ModelName("gemini-2.0-flash"),
       credentialFilePath = None,
       contextWindow = 1048576,
       reserveCompletion = 8192

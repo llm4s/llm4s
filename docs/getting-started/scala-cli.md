@@ -77,14 +77,13 @@ import org.llm4s.model.ModelRegistryService
 }
 ```
 
-`resources/application.conf` names the provider the script uses: the section that `provider` names. The
+`resources/application.conf` names the provider the script uses: the section that `defaultProvider` names. The
 [Configuration guide](configuration#named-provider-sections) covers the other providers:
 
 ```hocon
 llm4s {
+  defaultProvider = "openai-main"
   providers {
-    provider = "openai-main"
-
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
@@ -99,9 +98,8 @@ and `ollama pull llama3`). It is a separate file so that each run reads only its
 
 ```hocon
 llm4s {
+  defaultProvider = "ollama-local"
   providers {
-    provider = "ollama-local"
-
     ollama-local {
       provider = "ollama"
       model    = "llama3"
@@ -152,7 +150,7 @@ The wording depends on the model.
 
 ## What the script does
 
-1. `Llm4sConfig.defaultProvider()` reads the section that `llm4s.providers.provider` names. This is the one place
+1. `Llm4sConfig.defaultProvider()` reads the section that `llm4s.defaultProvider` names. This is the one place
    configuration is read.
 2. `LLMConnect.getClient` builds the client for that provider.
 3. `client.complete` sends the conversation. Every step returns a `Result`, so the `for` stops at the first

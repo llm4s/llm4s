@@ -74,14 +74,14 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  private def toolNamed(client: MCPClient, name: String): ToolFunction[_, _] =
+  private def toolNamed(client: MCPClient, name: String): ToolFunction[_] =
     client
       .getTools()
       .fold(e => fail(s"getTools failed: ${e.formatted}"), identity)
       .find(_.name == name)
       .getOrElse(fail(s"the reference server did not advertise '$name'"))
 
-  private def parameters(tool: ToolFunction[_, _]): ujson.Value =
+  private def parameters(tool: ToolFunction[_]): ujson.Value =
     tool.toolDefinition(strict = false)("function")("parameters")
 
   private def failureText(result: Either[ToolCallError, ujson.Value]): String =

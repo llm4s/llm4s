@@ -194,4 +194,4 @@ output, on Spark 4.0.1:
 4 rows, 1 with an error
 ```
 
-Without `--fake`, the job calls the provider your `application.conf` names in `llm4s.providers.provider`.
+Without `--fake`, the job calls the provider your `application.conf` names in `llm4s.defaultProvider`.

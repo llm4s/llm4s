@@ -1,12 +1,12 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.llmconnect.config.*
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.testkit.ProviderModuleChecks
-import org.llm4s.types.ProviderModelTypes.ApiKey
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -28,12 +28,14 @@ class DialectApiKeyProviderSpec extends AnyFlatSpec with Matchers {
     client: Option[ApiKeyProvider] => Result[LLMClient]
   )
 
-  private def deepSeek(k: Option[ApiKeyProvider]) = DeepSeekConfig(Secret(""), "deepseek-chat").withApiKeyProvider(k)
-  private def zai(k: Option[ApiKeyProvider])      = ZaiConfig(Secret(""), "glm-4.6").withApiKeyProvider(k)
+  private def deepSeek(k: Option[ApiKeyProvider]) =
+    DeepSeekConfig(Secret(""), ModelName("deepseek-chat")).withApiKeyProvider(k)
+  private def zai(k: Option[ApiKeyProvider]) = ZaiConfig(Secret(""), ModelName("glm-4.6")).withApiKeyProvider(k)
   private def mistral(k: Option[ApiKeyProvider]) =
-    MistralConfig(Secret(""), "mistral-small-latest").withApiKeyProvider(k)
-  private def cohere(k: Option[ApiKeyProvider]) = CohereConfig(Secret(""), "command-a-03-2025").withApiKeyProvider(k)
-  private def xai(k: Option[ApiKeyProvider])    = XaiConfig(Secret(""), "grok-4").withApiKeyProvider(k)
+    MistralConfig(Secret(""), ModelName("mistral-small-latest")).withApiKeyProvider(k)
+  private def cohere(k: Option[ApiKeyProvider]) =
+    CohereConfig(Secret(""), ModelName("command-a-03-2025")).withApiKeyProvider(k)
+  private def xai(k: Option[ApiKeyProvider]) = XaiConfig(Secret(""), ModelName("grok-4")).withApiKeyProvider(k)
 
   private val dialects = Seq(
     Dialect("DeepSeek", deepSeek, k => DeepSeekClient(deepSeek(k))),
@@ -58,7 +60,7 @@ class DialectApiKeyProviderSpec extends AnyFlatSpec with Matchers {
 
   it should "take an ApiKeyProvider through the ProviderConfig setter the loader calls for apiKeyFile" in {
     dialects.foreach { d =>
-      withClue(s"${d.name}: ")(d.config(None).withApiKeyProvider(keys).apiKeyProvider shouldBe Some(keys))
+      withClue(s"${d.name}: ")(d.config(None).withApiKeyProvider(keys).map(_.apiKeyProvider) shouldBe Right(Some(keys)))
     }
   }
 }

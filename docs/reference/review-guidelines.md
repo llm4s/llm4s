@@ -1270,7 +1270,7 @@ class ToolBuilder {
     this
   }
 
-  def build(): ToolFunction[_, _] = new ToolFunction(name, description)
+  def build(): ToolFunction[_] = new ToolFunction(name, description)
 }
 
 // GOOD - immutable builder
@@ -1282,7 +1282,7 @@ case class ToolBuilder private(
 
   def withDescription(d: String): ToolBuilder = copy(description = Some(d))
 
-  def build(): Result[ToolFunction[_, _]] =
+  def build(): Result[ToolFunction[_]] =
     (name, description) match {
       case (Some(n), Some(d)) => Right(new ToolFunction(n, d))
       case _ => Left(LLMError.ValidationError("Missing name or description"))

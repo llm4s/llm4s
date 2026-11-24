@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.http.HttpNetworkSettings
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
 
@@ -46,25 +46,32 @@ final case class BedrockCredentials(
  */
 final case class BedrockConfig(
   region: String,
-  model: String,
+  model: ModelName,
   contextWindow: Int,
   reserveCompletion: Int,
   credentials: Option[BedrockCredentials] = None,
   profile: Option[String] = None,
-  endpointUrl: Option[String] = None,
+  endpointUrl: Option[BaseUrl] = None,
   override val timeouts: ProviderTimeouts = ProviderTimeouts.default,
   override val network: HttpNetworkSettings = HttpNetworkSettings.default
 ) extends ProviderConfig:
   override val providerId: ProviderId                                   = ProviderId("bedrock")
-  override def withModel(model: String): BedrockConfig                  = copy(model = model)
+  override def withModel(model: ModelName): BedrockConfig               = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): BedrockConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): BedrockConfig = copy(network = network)
+
+  /** Always `None`: this provider authenticates without an API key. */
+  override def apiKeyProvider: Option[org.llm4s.llmconnect.auth.ApiKeyProvider] = None
+
+  /** Always a `ConfigurationError`: this provider takes no API key, so there is none to supply per request. */
+  override def withApiKeyProvider(provider: org.llm4s.llmconnect.auth.ApiKeyProvider): Result[Nothing] =
+    ProviderConfig.noApiKeyProvider(providerId)
 
   override def toString: String =
     s"BedrockConfig(region=$region, model=$model, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion, " +
       s"credentials=${credentials.map(_.toString).getOrElse("(default chain)")}, " +
-      s"profile=${profile.getOrElse("none")}, endpointUrl=${endpointUrl.getOrElse("default")}, timeouts=$timeouts)"
+      s"profile=${profile.getOrElse("none")}, endpointUrl=${endpointUrl.fold("default")(_.asUrl)}, timeouts=$timeouts)"
 
 object BedrockConfig:
 
@@ -104,19 +111,19 @@ object BedrockConfig:
         ConfigurationError("Bedrock: set either explicit credentials or a profile, not both")
       )
     yield
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("bedrock_converse", "bedrock"),
         modelName = modelName,
         defaultContextWindow = DefaultContextWindow,
         defaultReserve = DefaultReserveCompletion,
-        fallbackResolver = _ => (DefaultContextWindow, DefaultReserveCompletion)
+        fallbackResolver = _ => ContextLimits(DefaultContextWindow, DefaultReserveCompletion)
       )
       BedrockConfig(
         region = region,
-        model = modelName,
+        model = ModelName(modelName),
         contextWindow = cw,
         reserveCompletion = rc,
         credentials = credentials,
         profile = profile,
-        endpointUrl = endpointUrl
+        endpointUrl = endpointUrl.map(BaseUrl(_))
       )

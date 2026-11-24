@@ -20,7 +20,7 @@ class SessionStoreConcurrencySpec extends AnyFunSpec with Matchers with BeforeAn
     ec = ExecutionContext.fromExecutor(executorService)
 
     // Define a simple tool
-    val pingTool = ToolBuilder[Map[String, Any], String]("ping", "Echo", Schema.`object`[Map[String, Any]]("p"))
+    val pingTool = ToolBuilder[String]("ping", "Echo", Schema.`object`[Map[String, Any]]("p"))
       .withHandler(_ => Right("pong"))
       .buildSafe()
 

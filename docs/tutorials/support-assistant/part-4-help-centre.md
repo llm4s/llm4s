@@ -135,7 +135,7 @@ case class HelpQuery(@description("The customer's question, in a few words") que
 
 case class HelpPassage(article: String, text: String) derives ReadWriter
 
-def helpTool(rag: RAG): Result[ToolFunction[HelpQuery, Seq[HelpPassage]]] =
+def helpTool(rag: RAG): Result[ToolFunction[Seq[HelpPassage]]] =
   Tool.of[HelpQuery, Seq[HelpPassage]]("search_help_centre", "Passages of Acme Shop's help-centre articles") {
     query =>
       rag

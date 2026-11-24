@@ -53,7 +53,7 @@ object ContextPipelineExample {
       given org.llm4s.model.ModelRegistryService = registryService
       modelName                                  = providerCfg.model
       client       <- LLMConnect.getClient(providerCfg)
-      tokenCounter <- OpenAITokenizers.counterFor(modelName).orElse(ConversationTokenCounter.cl100k())
+      tokenCounter <- OpenAITokenizers.counterFor(modelName.asString).orElse(ConversationTokenCounter.cl100k())
       contextMgr   <- createContextManager(tokenCounter, client)
       results      <- runPipelineDemo(contextMgr, tokenCounter)
     } yield results

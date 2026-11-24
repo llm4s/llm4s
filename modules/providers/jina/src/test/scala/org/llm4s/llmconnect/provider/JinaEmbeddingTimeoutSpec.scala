@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig, ProviderTimeouts }
@@ -17,9 +18,10 @@ class JinaEmbeddingTimeoutSpec extends AnyFlatSpec with Matchers {
 
   private def config(timeouts: ProviderTimeouts): EmbeddingProviderConfig =
     EmbeddingProviderConfig(
-      baseUrl = "http://localhost:1",
-      model = "jina-embeddings-v3",
-      apiKey = Secret("test-key"),
+      providerId = ProviderId("jina"),
+      baseUrl = BaseUrl("http://localhost:1"),
+      model = ModelName("jina-embeddings-v3"),
+      apiKey = Some(Secret("test-key")),
       timeouts = timeouts
     )
 

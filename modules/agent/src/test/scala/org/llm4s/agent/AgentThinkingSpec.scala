@@ -18,7 +18,7 @@ import org.scalatest.matchers.should.Matchers
  */
 class AgentThinkingSpec extends AnyFlatSpec with Matchers {
 
-  private val weather = ToolBuilder[Map[String, Any], ujson.Value](
+  private val weather = ToolBuilder[ujson.Value](
     "weather",
     "Reports the weather",
     Schema.`object`[Map[String, Any]]("Weather parameters")

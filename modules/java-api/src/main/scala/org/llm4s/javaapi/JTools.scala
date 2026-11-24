@@ -29,7 +29,7 @@ private[javaapi] object JTools {
         .left
         .map(n => ValidationError("param", s"tool '$name' declares parameter '$n' twice"))
       schema <- schemaOf(name, spec)
-      function <- ToolBuilder[Map[String, Any], ujson.Value](name, Option(spec.description).getOrElse(""), schema)
+      function <- ToolBuilder[ujson.Value](name, Option(spec.description).getOrElse(""), schema)
         .withHandler(extractor => call(name, spec.params, handler, extractor.params, extractor.call))
         .buildSafe()
     } yield new JTool(FacadeToken.INSTANCE, function)

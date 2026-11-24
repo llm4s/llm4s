@@ -96,7 +96,7 @@ val weatherSchema = Schema
 
 // Give the agent its tools when you build it
 val result = for {
-  weatherTool <- ToolBuilder[Map[String, Any], String](
+  weatherTool <- ToolBuilder[String](
     "get_weather",
     "Get current weather for a location",
     weatherSchema
@@ -503,7 +503,7 @@ outside an agent, through `ToolRegistry.execute`, which has no call to describe:
 ```scala
 import org.llm4s.toolapi.{ Schema, ToolBuilder }
 
-val charge = ToolBuilder[Map[String, Any], String]("charge", "Charges a card", chargeSchema)
+val charge = ToolBuilder[String]("charge", "Charges a card", chargeSchema)
   .withHandler { params =>
     for
       amount  <- params.getDouble("amount")

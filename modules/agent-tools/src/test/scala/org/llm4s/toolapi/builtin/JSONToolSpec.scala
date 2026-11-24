@@ -18,7 +18,7 @@ import scala.util.Try
  */
 class JSONToolSpec extends AnyFlatSpec with Matchers {
 
-  private val tool: ToolFunction[Map[String, Any], JSONResult] =
+  private val tool: ToolFunction[JSONResult] =
     JSONTool.toolSafe.fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
 
   private def args(operation: String, json: String, path: Option[String] = None): ujson.Obj = {

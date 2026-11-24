@@ -109,7 +109,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
         .completeStructuredOf[(sentiment: Sentiment, confidence: Double, quote: Option[String])](conversation)
         .map(r => s"${r.sentiment} (${r.confidence})")
 
-    val lookup: Result[ToolFunction[(city: String, days: Int), (high: Double, low: Double)]] =
+    val lookup: Result[ToolFunction[(high: Double, low: Double)]] =
       Tool.of[(city: String, days: Int), (high: Double, low: Double)]("forecast", "Daily forecast") { query =>
         Right((high = 20.0 + query.days, low = 12.5))
       }
@@ -136,8 +136,8 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
       case Celsius, Fahrenheit
     }
 
-    val weatherTool: Result[ToolFunction[WeatherQuery, String]] =
-      ToolBuilder[WeatherQuery, String]("get_weather", "Current weather in a city", SchemaOf[WeatherQuery].definition)
+    val weatherTool: Result[ToolFunction[String]] =
+      ToolBuilder[String]("get_weather", "Current weather in a city", SchemaOf[WeatherQuery].definition)
         .withHandler { args =>
           Try(read[WeatherQuery](args.params)).toEither.left.map(_.getMessage).map(query => s"Sunny in ${query.city}")
         }
@@ -161,7 +161,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
     case class Forecast(city: String, days: Int, summary: String) derives ReadWriter
 
-    val forecastTool: Result[ToolFunction[ForecastQuery, Forecast]] =
+    val forecastTool: Result[ToolFunction[Forecast]] =
       Tool.of[ForecastQuery, Forecast]("get_forecast", "Weather forecast for a city") { query =>
         if (query.days < 1 || query.days > 7) Left("days must be between 1 and 7")
         else Right(Forecast(query.city, query.days, "Sunny"))
@@ -191,7 +191,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     trait Customers { def find(id: String): Result[Customer]                                                    }
     trait Payments  { def charge(customer: Customer, amountCents: Long, idempotencyKey: String): Result[String] }
 
-    def chargeTool(customers: Customers, payments: Payments): Result[ToolFunction[Charge, Receipt]] =
+    def chargeTool(customers: Customers, payments: Payments): Result[ToolFunction[Receipt]] =
       Tool.scoped[Charge, Receipt]("charge_card", "Charge a customer's saved card") { c =>
         ensure(c.amountCents > 0, "amountCents must be positive")
         ensure(Set("EUR", "USD")(c.currency), s"unsupported currency ${c.currency}")
@@ -237,7 +237,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     def supportTools(service: CustomerService): Result[ToolRegistry] =
       Tools.derive[CustomerService](service).flatMap(ToolRegistry.of)
 
-    def cancelTool(service: CustomerService): Result[ToolFunction[?, Cancellation]] =
+    def cancelTool(service: CustomerService): Result[ToolFunction[Cancellation]] =
       Tool.fromMethod(service.cancelOrder)
 
     object Live extends CustomerService {

@@ -93,7 +93,7 @@ def chained(): Result[String] =
 
 Loading the configuration, building the client, building the conversation (which validates it) and
 making the call are four steps that can each fail, and you handle them once, at the end.
-`Llm4sConfig.defaultProvider()` reads the section `llm4s.providers.provider` names; see
+`Llm4sConfig.defaultProvider()` reads the section `llm4s.defaultProvider` names; see
 [Configuration](../getting-started/configuration#named-provider-sections).
 
 ## 4. Error types and when each is raised
@@ -306,7 +306,7 @@ To make an error yourself, use the type's smart constructor:
 import org.llm4s.error.{ ConfigurationError, NotFoundError, ValidationError }
 
 ValidationError("model", "must not be empty")
-ConfigurationError("no provider configured", List("llm4s.providers.provider"))
+ConfigurationError("no provider configured", List("llm4s.defaultProvider"))
 NotFoundError("no such key", "model")
 ```
 

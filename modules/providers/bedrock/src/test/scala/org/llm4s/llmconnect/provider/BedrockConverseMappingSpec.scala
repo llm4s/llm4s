@@ -74,7 +74,7 @@ class BedrockConverseMappingSpec extends AnyWordSpec with Matchers {
     }
 
     "map a tool definition's schema, and omit toolConfig when there are no tools" in {
-      val tool = ToolBuilder[Map[String, Any], String](
+      val tool = ToolBuilder[String](
         "get_weather",
         "Returns current weather for a location",
         Schema

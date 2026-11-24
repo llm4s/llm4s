@@ -19,7 +19,7 @@ class MCPToolCallMetaSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
 
   private val call = ToolCallInfo(toolCallId = ToolCallId("call_1"), idempotencyKey = IdempotencyKey("key-1"))
 
-  private val whoami = ToolBuilder[Map[String, Any], String]("whoami", "The call it runs", Schema.`object`("args"))
+  private val whoami = ToolBuilder[String]("whoami", "The call it runs", Schema.`object`("args"))
     .withHandler(params => Right(params.call.fold("none")(c => s"${c.toolCallId}|${c.idempotencyKey}")))
     .buildSafe()
     .fold(e => fail(e.formatted), identity)

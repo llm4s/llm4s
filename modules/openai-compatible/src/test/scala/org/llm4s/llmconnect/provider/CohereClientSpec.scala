@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
@@ -70,7 +71,7 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
   private def config(baseUrl: String): CohereConfig =
     CohereConfig(
       apiKey = Secret("test-key"),
-      model = "command-r",
+      model = ModelName("command-r"),
       baseUrl = baseUrl,
       contextWindow = 128000,
       reserveCompletion = 4096

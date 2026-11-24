@@ -8,7 +8,6 @@ import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -97,12 +96,12 @@ object EmbeddingCacheExample {
       service    <- Llm4sConfig.modelRegistryService()
       report <- {
         given ModelRegistryService = service
-        val (providerName, config) = embeddings
+        val config                 = embeddings
         val registry               = summon[ProviderRegistry]
         for {
-          descriptor <- registry.resolveEmbedding(ProviderId(providerName))
+          descriptor <- registry.resolveEmbedding(config.providerId)
           provider   <- descriptor.build(config, EmbeddingBuildContext())
-          report     <- run(provider, EmbeddingModelConfig(config.model, textModel.dimensions))
+          report     <- run(provider, EmbeddingModelConfig(config.model.asString, textModel.dimensions))
         } yield report
       }
     } yield report

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import com.sun.net.httpserver.HttpServer
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.model.{
@@ -28,7 +29,7 @@ class AnthropicPromptCacheSpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def tool(name: String) =
-    ToolBuilder[Map[String, Any], String](
+    ToolBuilder[String](
       name,
       s"$name tool",
       Schema.`object`[Map[String, Any]]("args").withProperty(Schema.property("city", Schema.string("City")))
@@ -66,7 +67,7 @@ class AnthropicPromptCacheSpec extends AnyFlatSpec with Matchers {
     try {
       val config = AnthropicConfig(
         apiKey = Secret("test-key"),
-        model = "claude-sonnet-4-6",
+        model = ModelName("claude-sonnet-4-6"),
         baseUrl = s"http://localhost:${server.getAddress.getPort}",
         contextWindow = 200000,
         reserveCompletion = 4096

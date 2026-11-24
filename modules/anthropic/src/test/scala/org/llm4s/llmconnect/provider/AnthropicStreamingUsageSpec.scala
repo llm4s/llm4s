@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.llmconnect.config.AnthropicConfig
@@ -25,7 +26,7 @@ class AnthropicStreamingUsageSpec extends AnyFlatSpec with Matchers with EitherV
 
   private val testConfig = AnthropicConfig(
     apiKey = Secret("test-key"),
-    model = "claude-sonnet-4-5",
+    model = ModelName("claude-sonnet-4-5"),
     baseUrl = "https://api.anthropic.com",
     contextWindow = 200000,
     reserveCompletion = 4096
@@ -168,7 +169,7 @@ class AnthropicStreamingUsageSpec extends AnyFlatSpec with Matchers with EitherV
         .streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions())(_ => ())
         .value
       val pricing =
-        summon[ModelRegistryService].lookup(testConfig.model).toOption.value.pricing
+        summon[ModelRegistryService].lookup(testConfig.model.asString).toOption.value.pricing
       val expected = 12 * pricing.inputCostPerToken.value +
         3000 * pricing.cacheReadInputTokenCost.value +
         250 * pricing.cacheCreationInputTokenCost.value +

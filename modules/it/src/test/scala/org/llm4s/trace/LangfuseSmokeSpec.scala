@@ -88,7 +88,7 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
     implicit val rw: ReadWriter[EchoResult] = macroRW
   }
 
-  private def echoTool = ToolBuilder[Map[String, Any], EchoResult](
+  private def echoTool = ToolBuilder[EchoResult](
     "echo",
     "Echoes the supplied message back",
     Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))

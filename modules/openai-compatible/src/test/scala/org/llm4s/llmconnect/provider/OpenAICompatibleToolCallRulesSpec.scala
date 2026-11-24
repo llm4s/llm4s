@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model._
@@ -18,7 +19,7 @@ class OpenAICompatibleToolCallRulesSpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val client = new OpenAICompatibleClient(
-    OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", "http://localhost:1/v1", None)),
+    OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), "http://localhost:1/v1", None)),
     OpenAICompatibleDialect.Standard
   )
 
@@ -59,7 +60,7 @@ class OpenAICompatibleToolCallRulesSpec extends AnyFlatSpec with Matchers {
     val cut = ujson.write(reply(""","arguments":"{\"q\":\"x\"}"""", ""","finish_reason":"length""""))
     withServer("/chat/completions")(sendJsonResponse(_, 200, cut)) { baseUrl =>
       val at = new OpenAICompatibleClient(
-        OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", baseUrl, None)),
+        OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), baseUrl, None)),
         OpenAICompatibleDialect.Standard
       )
       val result = at.complete(Conversation(Seq(UserMessage("Hi"))))

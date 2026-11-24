@@ -416,13 +416,13 @@ object AgentTool:
    * message. It writes no state and never asks. Its name is not checked here; [[ToolSet.of]]
    * refuses an invalid one.
    */
-  def fromToolFunction(tool: ToolFunction[?, ?]): AgentTool[ujson.Value] = new FromToolFunction(tool)
+  def fromToolFunction(tool: ToolFunction[?]): AgentTool[ujson.Value] = new FromToolFunction(tool)
 
   /**
    * As `fromToolFunction(tool)`, with `hints` declared on the spec: for a tool whose hints are known
    * from elsewhere, such as the annotations an MCP server advertises for it (`llm4s-mcp` reads them).
    */
-  def fromToolFunction(tool: ToolFunction[?, ?], hints: ToolHints): AgentTool[ujson.Value] =
+  def fromToolFunction(tool: ToolFunction[?], hints: ToolHints): AgentTool[ujson.Value] =
     new FromToolFunction(tool, hints)
 
   /**
@@ -454,7 +454,7 @@ object AgentTool:
     tool.resumeErased(args, question, answer, context)
 
   /** Keeps the original function, so [[ToolSet.toolFunctions]] hands it back unchanged. */
-  final private[tool] class FromToolFunction(val function: ToolFunction[?, ?], hints: ToolHints = ToolHints.default)
+  final private[tool] class FromToolFunction(val function: ToolFunction[?], hints: ToolHints = ToolHints.default)
       extends AgentTool[ujson.Value]:
     val spec: AgentToolSpec[ujson.Value] = AgentToolSpec
       .unchecked[ujson.Value](

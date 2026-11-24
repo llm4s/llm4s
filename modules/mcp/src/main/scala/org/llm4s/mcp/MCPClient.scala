@@ -19,7 +19,7 @@ trait MCPClient {
    * @return Sequence of tool functions available from this server;
    *         `Left(CancelledError)`, with the thread's interrupt flag still set, if the call was interrupted
    */
-  def getTools(): Result[Seq[ToolFunction[_, _]]]
+  def getTools(): Result[Seq[ToolFunction[_]]]
 
   /**
    * The hints each tool declares through its MCP annotations (`readOnlyHint`, `destructiveHint`,

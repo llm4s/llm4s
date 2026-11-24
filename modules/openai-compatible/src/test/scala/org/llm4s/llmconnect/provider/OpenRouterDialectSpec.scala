@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model._
@@ -21,7 +22,7 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def config(model: String, baseUrl: String = "https://openrouter.ai/api/v1") =
-    OpenAIConfig(Secret("or-key"), model, None, baseUrl, 200000, 4096)
+    OpenAIConfig(Secret("or-key"), ModelName(model), None, baseUrl, 200000, 4096)
 
   private def body(model: String, options: CompletionOptions, messages: Message*) =
     new OpenRouterClient(config(model)).createRequestBody(Conversation(messages.toSeq), options)

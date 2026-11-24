@@ -5,7 +5,7 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -31,7 +31,7 @@ import org.llm4s.types.Result
 @Experimental
 final case class PerplexityConfig private (
   apiKey: Secret,
-  model: String,
+  model: ModelName,
   baseUrl: String,
   webSearch: Boolean,
   contextWindow: Int,
@@ -41,15 +41,17 @@ final case class PerplexityConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                         = ProviderId("perplexity")
-  override def endpointUrl: Option[String]                                    = Some(baseUrl)
-  override def withModel(model: String): PerplexityConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): PerplexityConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): PerplexityConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): PerplexityConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): PerplexityConfig  = copy(apiKeyProvider = provider)
-  def withWebSearch(webSearch: Boolean): PerplexityConfig                     = copy(webSearch = webSearch)
-  def withHeaders(headers: Map[String, String]): PerplexityConfig             = copy(headers = headers)
+  override val providerId: ProviderId                                      = ProviderId("perplexity")
+  override def endpointUrl: Option[BaseUrl]                                = Some(BaseUrl(baseUrl))
+  override def withModel(model: ModelName): PerplexityConfig               = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): PerplexityConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): PerplexityConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[PerplexityConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): PerplexityConfig = copy(apiKeyProvider = provider)
+  def withWebSearch(webSearch: Boolean): PerplexityConfig                    = copy(webSearch = webSearch)
+  def withHeaders(headers: Map[String, String]): PerplexityConfig            = copy(headers = headers)
 
   /** The Agent API endpoint requests are posted to. */
   def agentUrl: String = if baseUrl.endsWith("/v1") then s"$baseUrl/agent" else s"$baseUrl/v1/agent"
@@ -103,7 +105,7 @@ object PerplexityConfig:
    * positive and `reserveCompletion` 0 or more and less than it. Anything else is a `ConfigurationError`.
    */
   def fromValues(
-    model: String,
+    model: ModelName,
     apiKey: Secret,
     baseUrl: String = DEFAULT_BASE_URL,
     webSearch: Boolean = true,
@@ -112,7 +114,7 @@ object PerplexityConfig:
     headers: Map[String, String] = Map.empty
   ): Result[PerplexityConfig] =
     val key  = apiKey.reveal.trim
-    val name = model.trim
+    val name = model.asString.trim
     val base = baseUrl.trim.replaceAll("/+$", "")
     for
       _ <- ProviderConfig.nonEmpty("perplexity", "apiKey", key)
@@ -134,7 +136,7 @@ object PerplexityConfig:
       )
     yield new PerplexityConfig(
       apiKey = Secret(key),
-      model = name,
+      model = ModelName(name),
       baseUrl = base,
       webSearch = webSearch,
       contextWindow = contextWindow,

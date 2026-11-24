@@ -1,8 +1,10 @@
 package org.llm4s.testkit.fixtures
 
-import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.config.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
+import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
+import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
   Completion,
@@ -24,7 +26,7 @@ import org.llm4s.llmconnect.spi.{
   ProviderDescriptor
 }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 import java.time.Instant
 
@@ -44,22 +46,30 @@ object AcmeProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
-    yield AcmeConfig(apiKey.reveal, section.model.asString, baseUrl)
+    yield AcmeConfig(apiKey.reveal, section.model, baseUrl)
 
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
     ProviderDescriptor.expectConfig[AcmeConfig](id, config).map(AcmeClient(_))
 
-final case class AcmeConfig(apiKey: String, model: String, baseUrl: String) extends ProviderConfig:
-  val providerId: ProviderId                   = AcmeProvider.id
-  val contextWindow: Int                       = 8192
-  val reserveCompletion: Int                   = 1024
-  def endpointUrl: Option[String]              = Some(baseUrl)
-  def withModel(model: String): ProviderConfig = copy(model = model)
-  override def toString: String                = s"AcmeConfig($model, $baseUrl)"
+final case class AcmeConfig(apiKey: String, model: ModelName, baseUrl: String) extends ProviderConfig:
+  val providerId: ProviderId                      = AcmeProvider.id
+  val contextWindow: Int                          = 8192
+  val reserveCompletion: Int                      = 1024
+  def endpointUrl: Option[BaseUrl]                = Some(BaseUrl(baseUrl))
+  def withModel(model: ModelName): ProviderConfig = copy(model = model)
+  // An author's minimal config: it takes none of the settings the loader applies, and says so.
+  def timeouts: ProviderTimeouts                                = ProviderTimeouts.default
+  def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig  = this
+  def network: HttpNetworkSettings                              = HttpNetworkSettings.default
+  def withNetwork(network: HttpNetworkSettings): ProviderConfig = this
+  def apiKeyProvider: Option[ApiKeyProvider]                    = None
+  def withApiKeyProvider(provider: ApiKeyProvider): Result[Nothing] =
+    ProviderConfig.noApiKeyProvider(providerId, "reads its key once")
+  override def toString: String = s"AcmeConfig(${model.asString}, $baseUrl)"
 
 final case class AcmeClient(config: AcmeConfig) extends LLMClient:
   def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-    Right(Completion("acme-1", Instant.EPOCH, config.model, AssistantMessage("hi")))
+    Right(Completion("acme-1", Instant.EPOCH, config.model.asString, AssistantMessage("hi")))
 
   def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
@@ -80,7 +90,7 @@ object AcmeEmbeddings extends EmbeddingProviderDescriptor:
   )
 
   def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
-    if config.model == "acme-retired" then Left(ConfigurationError("acme-retired is no longer served"))
+    if config.model.asString == "acme-retired" then Left(ConfigurationError("acme-retired is no longer served"))
     else
       Right(
         new EmbeddingProvider:
@@ -141,7 +151,7 @@ object GreedyProvider extends ProviderDescriptor:
   def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     AcmeProvider.buildConfig(section, context)
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
-    Right(AcmeClient(AcmeConfig("k", config.model, "https://greedy.invalid")))
+    Right(AcmeClient(AcmeConfig("k", ModelName(config.model.asString), "https://greedy.invalid")))
 
 object UnboundProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("unbound")

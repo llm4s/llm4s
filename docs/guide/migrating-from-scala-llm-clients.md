@@ -57,6 +57,7 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.schema.*
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 ```
@@ -209,7 +210,7 @@ runs the loop:
 case class WeatherInput(location: String) derives SchemaOf, ReadWriter
 case class Weather(location: String, report: String) derives ReadWriter
 
-val weatherTool: Result[ToolFunction[WeatherInput, Weather]] =
+val weatherTool: Result[ToolFunction[Weather]] =
   Tool.of[WeatherInput, Weather]("get_weather", "Get the current weather for a location") { input =>
     Right(Weather(input.location, "22°C, sunny"))
   }
@@ -272,9 +273,8 @@ With sttp-ai you choose a client per provider, or point the OpenAI client at an 
 ```hocon
 # src/main/resources/application.conf
 llm4s {
+  defaultProvider = "openai-main"          # the default: the name of a section below
   providers {
-    provider = "openai-main"          # the default: the name of a section below
-
     openai-main {                     # key from OPENAI_API_KEY
       provider = "openai"
       model    = "gpt-4o-mini"
@@ -292,7 +292,7 @@ llm4s {
 
 ```scala
 def connectTo(section: String): Result[LLMClient] = for {
-  providerConfig  <- Llm4sConfig.provider(section)
+  providerConfig  <- Llm4sConfig.provider(ProviderName(section))
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client <- LLMConnect.getClient(providerConfig)
