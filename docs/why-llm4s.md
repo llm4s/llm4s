@@ -3,7 +3,7 @@ layout: landing
 title: Why LLM4S
 nav_order: 1.5
 permalink: /why-llm4s/
-description: "Why build LLM applications in Scala and on the JVM, what LLM4S gives a team, how it compares with Python-first stacks and other JVM libraries, and what adopting it involves."
+description: "Why build LLM applications in Scala on the JVM, what LLM4S gives a team, how it compares with Python-first stacks and JVM libraries, and what adopting it involves."
 ---
 
 <section class="lp-hero lp-hero--page" aria-labelledby="why-hero">

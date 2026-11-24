@@ -6,6 +6,7 @@ search_title: "LLM4S enterprise reference architecture"
 parent: Operations
 nav_order: 702
 grand_parent: User Guide
+cites_closed_issues: [2115, 2273, 2313]
 ---
 
 # Enterprise Reference Architecture

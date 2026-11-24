@@ -46,7 +46,7 @@ val agent = Agent.builder("assistant", client)
   .withMiddleware(new ContextWindowMiddleware(contextConfig))
   .build()
 
-agent.flatMap(_.runMultiTurn("...", Seq(...)))
+agent.flatMap(_.runMultiTurn("What is a monad?", Seq("And a functor?", "How do the two relate?")))
 ```
 
 Two rules hold under every strategy:
@@ -295,9 +295,10 @@ The same numbers from the model registry, for whichever model a section configur
 import org.llm4s.agent.PruningStrategy
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ModelName
 
 def adaptiveFor(registry: ModelRegistryService, model: String): Result[PruningStrategy] =
-  registry.lookup(model).map { metadata =>
+  registry.lookup(ModelName(model)).map { metadata =>
     PruningStrategy.AdaptiveWindowing(
       contextWindowSize = metadata.contextWindow.getOrElse(8192),
       inputCostPerToken = metadata.pricing.inputCostPerToken,
@@ -403,7 +404,7 @@ Derive the budget from the configured model's metadata (`adaptiveFor` from
 changes the budget with it:
 
 ```scala
-val config = adaptiveFor(registry, providerConfig.model).map { strategy =>
+val config = adaptiveFor(registry, providerConfig.model.asString).map { strategy =>
   ContextWindowConfig(pruningStrategy = strategy)
 }
 ```
@@ -420,13 +421,14 @@ import org.llm4s.llmconnect.model.Conversation
 import org.llm4s.llmconnect.provider.OpenAITokenizers
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ModelName
 
 // the input cost of sending `conversation` once, at the registry's price for the model:
 // exact for an OpenAI model (llm4s-openai), the cl100k_base approximation for any other
 def inputCost(registry: ModelRegistryService, model: String, conversation: Conversation): Result[Option[Double]] =
   for {
     counter  <- OpenAITokenizers.counterFor(model).orElse(ConversationTokenCounter.cl100k())
-    metadata <- registry.lookup(model)
+    metadata <- registry.lookup(ModelName(model))
   } yield {
     val tokens = counter.countConversation(conversation)
     metadata.pricing.inputCostPerToken.map(_ * tokens)
@@ -519,6 +521,8 @@ import org.llm4s.agent.graph.middleware.{
   ModelRequest,
   ModelResponse
 }
+import org.llm4s.types.Result
+import org.slf4j.Logger
 
 class LogSentMessages(logger: Logger) extends AgentMiddleware {
   val id = MiddlewareId("log-sent-messages")

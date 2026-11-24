@@ -6,6 +6,7 @@ search_title: "Build AI agents in Scala with LLM4S"
 nav_order: 200
 parent: User Guide
 has_children: true
+cites_closed_issues: [1750]
 ---
 
 # Agent Framework

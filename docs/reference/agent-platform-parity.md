@@ -5,6 +5,8 @@ description: "How the LLM4S agent runtime compares with LangGraph Platform and D
 search_title: "LLM4S vs LangGraph Platform and Deep Agents"
 parent: Reference
 nav_order: 23
+cites_open_issues: [410, 2446, 2447, 2448, 2450, 2451, 2452, 2454]
+cites_closed_issues: [876, 2129, 2449, 2453]
 ---
 
 # Agent platform parity: LangGraph Platform, Deep Agents and llm4s

@@ -6,6 +6,7 @@ search_title: "Test LLM code in Scala with the LLM4S testkit"
 parent: Core
 nav_order: 113
 grand_parent: User Guide
+cites_closed_issues: [1497]
 ---
 
 # Testing with the Testkit
@@ -491,7 +492,7 @@ A reply can report token usage and a model name (`Reply.text("hi").withModel("gp
 - `withContextWindow`, `withReserveCompletion` and `withChunkSize` return a **fresh** client, with the same script and no recorded calls.
 - The kit registers no provider, so it never changes which provider `ProviderRegistry` or `Llm4sConfig` selects. You pass the client to the code under test yourself.
 - It does not contain a fake embedding client or a fake tracer, and it does not record and replay real provider traffic.
-- Its API is Scala. A Java-friendly fake is tracked in [#1497](https://github.com/llm4s/llm4s/issues/1497).
+- Its API is Scala. Java code tests with `FakeLlmClient` from `llm4s-java-api` instead ([A test with FakeLlmClient](java-migration#a-test-with-fakellmclient), [#1497](https://github.com/llm4s/llm4s/issues/1497)).
 - The hand-written mocks in the [Testing Guide](../getting-started/testing-guide) (`MockLLMClient`, `FailingMockClient` and the rest) do the same job with more code, and are still fine for a one-off.
 
 ## See also

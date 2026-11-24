@@ -134,7 +134,9 @@ def tenantKey(tenant: String)(text: String, model: ModelName, purpose: InputPurp
 val cached =
   InMemoryEmbeddingCache.create().map(cache => new CachedEmbeddingClient(base, cache, tenantKey("tenant-a")))
 
-cached.flatMap(_.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536))))
+cached.flatMap(
+  _.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)))
+)
 ```
 
 ### Your own storage

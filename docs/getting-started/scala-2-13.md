@@ -7,6 +7,7 @@ parent: Getting Started
 nav_order: 11
 # Every Scala 2.13 on this page is a Scala 2.13 caller reading the Scala 3 artifacts (scripts/check-doc-support.sh)
 scala_2_13: tasty-reader
+cites_open_issues: [874]
 ---
 
 # Using LLM4S from Scala 2.13

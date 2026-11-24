@@ -5,6 +5,7 @@ description: "Add LLM4S to an sbt build: JDK 21 and Scala 3.7 requirements, the 
 search_title: "Install LLM4S: add the Scala LLM library to sbt"
 parent: Getting Started
 nav_order: 1
+cites_closed_issues: [2274, 2479]
 ---
 
 # Installation

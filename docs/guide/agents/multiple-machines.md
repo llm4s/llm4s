@@ -79,6 +79,8 @@ llm4s.agent.checkpointer {
 ```
 
 ```scala
+import org.llm4s.config.{ CheckpointerConfigLoader, RuntimeConfigLoader }
+
 for
   store    <- CheckpointerConfigLoader.open()           // close it when the process stops
   runtime  <- RuntimeConfigLoader.runtime(store.checkpointer)
@@ -103,6 +105,11 @@ instance that accepted the request, owns the run: it records each attempt's `Run
 thread, so a run is attempted at least once and applied at most once, however many workers try it.
 
 ```scala
+import org.llm4s.agent.{ Agent, AgentId }
+import org.llm4s.agent.graph.ThreadId
+import org.llm4s.agent.service.{ AgentWorker, QueuedAgent, QueuedInput, RunSubmitter }
+import org.llm4s.config.{ RunQueueConfigLoader, WorkerConfigLoader }
+
 // every instance
 for
   agent     <- Agent.builder("assistant", client).withRuntime(runtime).build()
@@ -116,8 +123,9 @@ yield
   submitter
 
 // an endpoint, on any instance
-submitter.submit(ThreadId("t-42"), AgentId("assistant"), QueuedInput.query("Summarise the report"), Some(tenant))
-// -> Ticket(entryId, threadId, position, existing)
+AgentId.of("assistant").flatMap { agentId =>
+  submitter.submit(ThreadId("t-42"), agentId, QueuedInput.query("Summarise the report"), Some(tenant))
+} // -> Right(Ticket(entryId, threadId, position, existing))
 ```
 
 - **Every instance runs the same agents under the same ids.** A worker takes only entries for the agent ids it was
@@ -218,6 +226,10 @@ Give the worker and a `MeteredCheckpointer` the same `MetricsCollector` (`Promet
 `llm4s-observability-prometheus`, or `MicrometerMetrics` from `llm4s-observability-micrometer`):
 
 ```scala
+import org.llm4s.agent.metrics.MeteredCheckpointer
+import org.llm4s.config.RuntimeConfigLoader
+import org.llm4s.metrics.PrometheusMetrics
+
 val metrics      = new PrometheusMetrics(registry)
 val checkpointer = MeteredCheckpointer(store.checkpointer, metrics)   // runs, claims, commits, child tasks
 val runtime      = RuntimeConfigLoader.runtime(checkpointer)

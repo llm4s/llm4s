@@ -5,6 +5,7 @@ description: "The LLM4S threat model: data flow, trust boundaries, what is redac
 search_title: "LLM4S security reference: threat model and mitigations"
 parent: Reference
 nav_order: 16
+cites_closed_issues: [1408, 1715, 1721, 1756, 1761, 1766, 1776, 1790, 1805, 1807, 1845, 2306]
 ---
 
 # Security Reference

@@ -133,13 +133,19 @@ addCommandAlias(
 // docs/ without the tag, or a module with tagged suites is missing here. `sbt test` runs them as before.
 lazy val DocsSpecTag = "org.llm4s.tags.DocsSpec"
 lazy val docsTestProjects = Seq(
+  "agentTools",
   "capabilities",
   "core",
   "examplesHttp",
   "javaApi",
   "javaRag",
+  "jev",
   "llm4sPekko",
+  "llm4sSttp",
+  "memory",
   "observabilityMicrometer",
+  "openaiCompatible",
+  "rag",
   "reactor",
   "samples",
   "schemaDerivation",
@@ -2082,7 +2088,10 @@ lazy val samples = (project in file("modules//samples"))
     configPolicy    % Test,
     providerTestkit % Test,
     // Test scope: docs/getting-started/repl.md's snippets are compiled (#2342).
-    repl % Test
+    repl % Test,
+    // Test scope: docs/guide/agents/durable-checkpointers.md's and multiple-machines.md's Postgres snippets are
+    // compiled (#2833).
+    agentCheckpointPostgres % Test
   )
   .settings(
     name := "llm4s-samples",
@@ -2149,6 +2158,10 @@ lazy val samples = (project in file("modules//samples"))
     }.taskValue,
     // Warnings (unused imports and values, in a snippet written to be read) are not errors in generated sources.
     Test / scalacOptions += "-Wconf:src=.*docsnippets.*:s",
+    // BuiltinToolsGuideAgentSpec checks its copy of docs/guide/builtin-tools.md against the page with core's
+    // GuideMirror (#2833). samples does not depend on core's tests (their fixture providers would join its
+    // classpath), so it compiles that one helper file itself.
+    Test / unmanagedSources += (ThisBuild / baseDirectory).value / "modules/core/src/test/scala/org/llm4s/testutil/GuideMirror.scala",
     docSnippetsReport := println(
       DocSnippets.report(
         (ThisBuild / baseDirectory).value / "docs",

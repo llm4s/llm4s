@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.testutil.GuideMirror
+
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk }
@@ -23,21 +25,34 @@ import scala.util.Try
  * code of one block in the guide; the assertions pin what the surrounding prose claims. Section 1 only
  * shows definitions, and section 10's snippet is the class [[ResultSpec]] below, run as a nested suite.
  */
+@org.llm4s.tags.DocsSpec
 class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
+
+  "docs/guide/error-handling.md" should {
+    "show every block this spec runs, as written" in {
+      GuideMirror.missingFromPage(
+        "docs/guide/error-handling.md",
+        "modules/core/src/test/scala/org/llm4s/error/ErrorHandlingGuideSpec.scala"
+      ) shouldBe empty
+    }
+  }
 
   override def nestedSuites: IndexedSeq[Suite] = Vector(new ResultSpec)
 
   // ---- 2. The basic pattern
 
-  private def basicPattern(result: Result[Completion]): String =
+  // guide-block
+  def basicPattern(result: Result[Completion]): String =
     result match {
       case Right(completion) => s"Response: ${completion.content}"
       case Left(error)       => s"Error: ${error.message}"
     }
+  // end-guide-block
 
   // ---- 3. Chaining with for-comprehensions
 
-  private def chained(): Result[String] =
+  // guide-block
+  def chained(): Result[String] =
     for {
       providerConfig <- Llm4sConfig.defaultProvider()
       registry       <- Llm4sConfig.modelRegistryService()
@@ -46,10 +61,12 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
       conversation <- Conversation.userOnly("What is Scala?")
       completion   <- client.complete(conversation)
     } yield completion.content
+  // end-guide-block
 
   // ---- 5. Handling specific error types
 
-  private def describe(result: Result[String]): String =
+  // guide-block
+  def describe(result: Result[String]): String =
     result match {
       case Right(text)             => s"ok: $text"
       case Left(e: RateLimitError) => s"wait ${e.retryDelay.getOrElse(RateLimitError.DefaultRetryDelay)}, then retry"
@@ -57,6 +74,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
       case Left(e: RecoverableError)    => s"transient, may succeed on retry: ${e.message}"
       case Left(e)                      => s"not retried (permanent, or not marked either way): ${e.message}"
     }
+  // end-guide-block
 
   // ---- 9. Recovering from failures: `client` and `conversation` are "built as in section 3"
 
@@ -91,13 +109,17 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
   // ---- 6. Converting to exceptions
 
-  private def orThrow[A](result: Result[A]): A =
+  // guide-block
+  def orThrow[A](result: Result[A]): A =
     result.fold(error => throw new RuntimeException(error.formatted), identity)
+  // end-guide-block
 
   // ---- 8. Combining many Results
 
-  private def parseAll(inputs: List[String]): Result[List[Int]] =
+  // guide-block
+  def parseAll(inputs: List[String]): Result[List[Int]] =
     Result.traverse(inputs)(s => Try(s.toInt).toResult)
+  // end-guide-block
 
   private val conversation: Conversation = Conversation.userOnly("hi").value
 
@@ -140,7 +162,9 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
     }
 
     "need a catch-all, because LLMError is an open trait (not sealed), and a custom error mixes in a marker" in {
-      final case class VendorError(message: String)      extends LLMError with NonRecoverableError
+      // guide-block
+      final case class VendorError(message: String) extends LLMError with NonRecoverableError
+      // end-guide-block
       final case class FlakyVendorError(message: String) extends LLMError with RecoverableError
       describe(Left(VendorError("custom"))) shouldBe
         "not retried (permanent, or not marked either way): custom"
@@ -361,6 +385,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
 /** Section 10's snippet, as the guide shows it; [[ErrorHandlingGuideSpec]] runs it as a nested suite. */
 private class ResultSpec extends AnyWordSpec with Matchers with EitherValues {
+  // guide-block
   "a Result" should {
     "unwrap with EitherValues, and check the error type" in {
       val ok: Result[String]     = Right("expected")
@@ -372,4 +397,5 @@ private class ResultSpec extends AnyWordSpec with Matchers with EitherValues {
       failed.left.value.message should include("empty")
     }
   }
+  // end-guide-block
 }
