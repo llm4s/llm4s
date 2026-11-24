@@ -79,8 +79,8 @@ llm4s.providers {
   gateway {
     provider         = "openai-compatible"
     baseUrl          = "http://litellm:4000/v1"                    # the gateway's Service, not the vendor
-    model            = "gpt-4o-mini"                               # a model_name in the gateway's config
-    registryProvider = "openai"                                    # the context window of openai/gpt-4o-mini
+    model            = "gpt-5.6-luna"                              # a model_name in the gateway's config
+    registryProvider = "openai"                                    # the context window of openai/gpt-5.6-luna
     apiKeyFile       = "/var/run/secrets/llm4s/gateway-api-key"   # this app's gateway key, re-read when rotated
     headers {
       "X-Tenant-Id"   = "acme-retail"     # sent on every request, for the gateway's audit log and routing
@@ -244,7 +244,7 @@ be a direct provider section):
 llm4s.providers.gateway-dr {
   provider         = "openai-compatible"
   baseUrl          = "https://llm-gateway.eu-west-1.example.internal/v1"
-  model            = "gpt-4o-mini"
+  model            = "gpt-5.6-luna"
   registryProvider = "openai"
   apiKeyFile       = "/var/run/secrets/llm4s/gateway-dr-api-key"
   headers {
@@ -329,9 +329,9 @@ import org.llm4s.types.Result
 val gatewayOnly: ConfigPolicy =
   ConfigPolicy()
     .withAllowedProviders("openai-compatible")
-    .withAllowedModelPatterns("openai-compatible/gpt-4o-mini")
+    .withAllowedModelPatterns("openai-compatible/gpt-5.6-luna")
     .withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "openai-compatible", "http://litellm:4000/v1")
-    .withMaxContextWindow(CatalogEnvironment.Prod, "openai-compatible", 128000)
+    .withMaxContextWindow(CatalogEnvironment.Prod, "openai-compatible", 922000)
     .withOwnApiKeyRequired(CatalogEnvironment.Prod)
 
 // Run at startup, or in a test of the deployment's configuration: empty when the section complies.

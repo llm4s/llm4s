@@ -64,7 +64,7 @@ object Llm4s {
      * ```kotlin
      * val client = Llm4s.openAi {
      *     apiKey = key
-     *     model = "gpt-4o-mini"
+     *     model = "gpt-5.6-luna"
      *     requestTimeout = 30.seconds
      * }
      * ```
