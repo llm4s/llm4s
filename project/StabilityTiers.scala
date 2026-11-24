@@ -67,7 +67,7 @@ object StabilityTiers {
     "((?:(?:override|final|implicit|inline|transparent|lazy|sealed|abstract|open|infix|case|opaque|" +
     "private|protected)(?:\\[\\w+\\])?\\s+)*)" +
     "(def|val|var|given|type|case|class|trait|object|enum)\\b").r
-  private val Hidden = "\\b(?:private|protected)\\b".r
+  private val Hidden        = "\\b(?:private|protected)\\b".r
   private val TopLevelAlias = "^(?:(?:private|protected)(?:\\[\\w+\\])?\\s+)?(?:opaque\\s+)?type\\s+[A-Za-z_]".r
 
   private def sources(dir: File): Seq[File] =
@@ -183,7 +183,7 @@ object StabilityTiers {
     extents.flatMap { case ((start, kind, name), end) =>
       val stable = kind != "type" &&
         NonPublic.findFirstIn(lines(start)).isEmpty && !annotated(lines, start, ExperimentalAnn) &&
-          (annotated(lines, start, StableAnn) || tierless(start) || (kind == "object" && stableT.contains(name)))
+        (annotated(lines, start, StableAnn) || tierless(start) || (kind == "object" && stableT.contains(name)))
       if (!stable) Nil
       else {
         val found      = Seq.newBuilder[Found]
@@ -255,9 +255,11 @@ object StabilityTiers {
     else {
       val names = ("\\b(" + alternatives.mkString("|") + ")\\b").r
       stableMembers(lines).flatMap { member =>
-        member.visible.iterator.flatMap { case (l, t) =>
-          names.findFirstMatchIn(t).map(n => (l, n.group(1).split('.').last))
-        }.take(1)
+        member.visible.iterator
+          .flatMap { case (l, t) =>
+            names.findFirstMatchIn(t).map(n => (l, n.group(1).split('.').last))
+          }
+          .take(1)
       }
     }
   }
