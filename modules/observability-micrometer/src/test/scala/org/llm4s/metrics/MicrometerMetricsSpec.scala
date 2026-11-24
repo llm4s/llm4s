@@ -554,17 +554,15 @@ class MicrometerMetricsSpec extends AnyFlatSpec with Matchers {
   "With ReliableClient and the provider client on one collector" should "count each failed attempt once in llm4s.errors and the final failure once in llm4s.reliability.errors" in {
     val (registry, metrics) = fresh()
     val provider            = new FailingClient(metrics, ServiceError(503, "probe", "unavailable"))
-    val reliable = new ReliableClient(
+    val reliable = ReliableClient(
       provider,
       "probe",
       ReliabilityConfig(
         retryPolicy = RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millisecond),
         circuitBreaker = CircuitBreakerConfig.disabled,
         deadline = None
-      ),
-      Some(metrics),
-      sleep = _ => ()
-    )
+      )
+    ).withMetrics(metrics).withSleep(_ => ())
 
     reliable.complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions()).isLeft shouldBe true
 

@@ -40,7 +40,7 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
     val metrics = new MicrometerMetrics(meterRegistry)
     val client = LLMConnect
       .getClient(providerConfig, metrics)
-      .map(c => new ReliableClient(c, "openai", ReliabilityConfig.default, Some(metrics)))
+      .map(c => ReliableClient(c, "openai", ReliabilityConfig.default).withMetrics(metrics))
     client
   }
 
@@ -48,7 +48,7 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
     "val metrics = new MicrometerMetrics(meterRegistry)",
     "val client = LLMConnect",
     ".getClient(providerConfig, metrics)",
-    """.map(c => new ReliableClient(c, "openai", ReliabilityConfig.default, Some(metrics)))"""
+    """.map(c => ReliableClient(c, "openai", ReliabilityConfig.default).withMetrics(metrics))"""
   )
 
   /** The lines of the quick start as the page shows them; the page must contain each. */

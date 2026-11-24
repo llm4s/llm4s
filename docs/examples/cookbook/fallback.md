@@ -43,8 +43,8 @@ final case class Served(by: String, text: String)
 /** Two providers, each retried on its own, the second asked only when the first still fails. */
 final class FallbackClients(primary: LLMClient, fallback: LLMClient, config: ReliabilityConfig) {
   // Build these once and keep them: each circuit breaker counts failures across calls.
-  private val first  = new ReliableClient(primary, "primary", config)
-  private val second = new ReliableClient(fallback, "fallback", config)
+  private val first  = ReliableClient(primary, "primary", config)
+  private val second = ReliableClient(fallback, "fallback", config)
 
   def ask(question: String): Result[Served] = {
     val conversation = Conversation(Seq(UserMessage(question)))

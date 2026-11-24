@@ -193,11 +193,13 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
 
     "be what ReliableClient and CachingLLMClient forward as their provider" in {
       val stub = new Stub(Right(completion))
-      new org.llm4s.reliability.ReliableClient(
-        stub,
-        "openai",
-        org.llm4s.reliability.ReliabilityConfig.default
-      ).providerId shouldBe Some(
+      org.llm4s.reliability
+        .ReliableClient(
+          stub,
+          "openai",
+          org.llm4s.reliability.ReliabilityConfig.default
+        )
+        .providerId shouldBe Some(
         ProviderId("openai")
       )
       val embeddings = new EmbeddingClient(new EmbeddingProvider {

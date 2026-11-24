@@ -346,7 +346,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
       deadline = None
     )
 
-    def reliable(p: Live): ReliableClient = new ReliableClient(p.client, p.id, reliability, sleep = _ => ())
+    def reliable(p: Live): ReliableClient = ReliableClient(p.client, p.id, reliability).withSleep(_ => ())
 
     "answer from the fallback when the primary still fails after its retries" in
       withThreeProviders() { providers =>

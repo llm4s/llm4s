@@ -146,7 +146,7 @@ def pipe(
   send: TicketPipeline.Send, // producer.produce
   settings: TicketPipeline.Settings
 ): Pipe[IO, CommittableConsumerRecord[IO, String, String], Unit] = {
-  val reliable = new ReliableClient(client, "kafka-ticket-pipeline", settings.reliability)
+  val reliable = ReliableClient(client, "kafka-ticket-pipeline", settings.reliability)
   records =>
     records
       .parEvalMap(settings.concurrency) { committable =>
@@ -349,7 +349,7 @@ producerProps.put(ProducerConfig.ACKS_CONFIG, "all")
 
 val consumer = new KafkaConsumer(consumerProps, new StringDeserializer, new StringDeserializer)
 val producer = new KafkaProducer(producerProps, new StringSerializer, new StringSerializer)
-val reliable = new ReliableClient(client, "kafka-ticket-pipeline", ReliabilityConfig())
+val reliable = ReliableClient(client, "kafka-ticket-pipeline", ReliabilityConfig())
 val pool     = Executors.newFixedThreadPool(8) // at most 8 model calls at once
 
 consumer.subscribe(java.util.List.of("tickets"))

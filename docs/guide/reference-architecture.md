@@ -233,7 +233,7 @@ def reliableClient(section: String): Result[LLMClient] =
     registry <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(config, costs)
-  yield new ReliableClient(client, section, reliability, Some(costs))
+  yield ReliableClient(client, section, reliability).withMetrics(costs)
 ```
 
 For a second region or provider, add a section beside `gateway` (here a gateway in another region; it could as well

@@ -48,7 +48,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     val config = ReliabilityConfig.default
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
       .withRetryPolicy(noRetry)
-    val client = new ReliableClient(underlying, "test-provider", config)
+    val client = ReliableClient(underlying, "test-provider", config)
 
     client.complete(conversation).isRight shouldBe true
     client.complete(conversation).left.toOption.get shouldBe a[RateLimitError]
@@ -62,7 +62,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     val config = ReliabilityConfig.default
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
       .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
-    val client = new ReliableClient(underlying, "test-provider", config)
+    val client = ReliableClient(underlying, "test-provider", config)
 
     client.complete(conversation).isLeft shouldBe true
     underlying.callCount.get() shouldBe 1
@@ -72,7 +72,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     val underlying = new CountingClient(timingOut)
     val config = ReliabilityConfig.default
       .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
-    val client = new ReliableClient(underlying, "test-provider", config)
+    val client = ReliableClient(underlying, "test-provider", config)
 
     client.complete(conversation).isLeft shouldBe true
     underlying.callCount.get() shouldBe 3
@@ -83,7 +83,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     val config = ReliabilityConfig.default
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
       .withRetryPolicy(noRetry)
-    val client = new ReliableClient(underlying, "test-provider", config)
+    val client = ReliableClient(underlying, "test-provider", config)
 
     client.streamComplete(conversation, CompletionOptions(), _ => ()).isRight shouldBe true
     client.streamComplete(conversation, CompletionOptions(), _ => ()).isLeft shouldBe true
@@ -102,7 +102,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     val config = ReliabilityConfig.default
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
       .withRetryPolicy(noRetry)
-    val client = new ReliableClient(new CountingClient(ok), "test-provider", config, Some(metrics))
+    val client = ReliableClient(new CountingClient(ok), "test-provider", config).withMetrics(metrics)
 
     client.complete(conversation)
     client.complete(conversation)
@@ -115,7 +115,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     val config = ReliabilityConfig.default
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
       .withEnabled(false)
-    val client = new ReliableClient(underlying, "test-provider", config)
+    val client = ReliableClient(underlying, "test-provider", config)
 
     (1 to 3).foreach(_ => client.complete(conversation).isRight shouldBe true)
     underlying.callCount.get() shouldBe 3
@@ -127,7 +127,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
       .withRetryPolicy(noRetry)
       .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 2))
-    val client = new ReliableClient(underlying, "test-provider", config)
+    val client = ReliableClient(underlying, "test-provider", config)
 
     client.complete(conversation).isRight shouldBe true
     (1 to 5).foreach(_ => client.complete(conversation).left.toOption.get shouldBe a[RateLimitError])
@@ -144,7 +144,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
       .withRetryPolicy(noRetry)
       .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1, recoveryTimeout = 1.second))
-    val client = new ReliableClient(underlying, "test-provider", config, None, () => Instant.ofEpochMilli(now))
+    val client = ReliableClient(underlying, "test-provider", config).withClock(() => Instant.ofEpochMilli(now))
 
     client.complete(conversation).isLeft shouldBe true
     client.currentCircuitState shouldBe CircuitState.Open
@@ -164,12 +164,13 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
       .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
       .withDeadline(None)
     val waits = scala.collection.mutable.Buffer.empty[Duration]
-    val client = new ReliableClient(
+    val client = ReliableClient(
       underlying,
       "test-provider",
-      config,
-      sleep = delay => { waits += delay; Thread.sleep(delay.toMillis) }
-    )
+      config
+    ).withSleep { delay =>
+      waits += delay; Thread.sleep(delay.toMillis)
+    }
 
     client.complete(conversation).isRight shouldBe true
     // The bucket is now empty: the client waits for the next token (~100ms, rounded up to whole
@@ -186,7 +187,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
       .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
       .withDeadline(None)
-    val client = new ReliableClient(underlying, "test-provider", config)
+    val client = ReliableClient(underlying, "test-provider", config)
 
     client.complete(conversation).isRight shouldBe true
     val start = System.nanoTime()
@@ -203,7 +204,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
       .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
       .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1))
       .withDeadline(200.millis)
-    val client = new ReliableClient(underlying, "test-provider", config)
+    val client = ReliableClient(underlying, "test-provider", config)
 
     client.complete(conversation).isRight shouldBe true
     client.complete(conversation).left.toOption.get shouldBe a[RateLimitError]
@@ -215,12 +216,11 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
   ): (Result[Completion], Boolean, CircuitState) = {
     val underlying = new CountingClient(ok)
     // The wait for the next token is interrupted.
-    val client = new ReliableClient(
+    val client = ReliableClient(
       underlying,
       "test-provider",
-      config,
-      sleep = _ => throw new InterruptedException("cancelled")
-    )
+      config
+    ).withSleep(_ => throw new InterruptedException("cancelled"))
     client.complete(conversation).isRight shouldBe true // spend the only token
 
     val result      = client.complete(conversation)
@@ -234,12 +234,11 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     val config = ReliabilityConfig.default
       .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
       .withDeadline(None)
-    val client = new ReliableClient(
+    val client = ReliableClient(
       underlying,
       "test-provider",
-      config,
-      sleep = _ => throw new InterruptedException("cancelled")
-    )
+      config
+    ).withSleep(_ => throw new InterruptedException("cancelled"))
     val result = client.complete(conversation)
     Thread.interrupted() shouldBe true
     result.left.toOption.get shouldBe a[org.llm4s.error.CancelledError]
@@ -277,7 +276,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     cancelled: Boolean = false
   ) = {
     val underlying = new CountingClient(timingOut)
-    val client     = new ReliableClient(underlying, "test-provider", config, sleep = sleep)
+    val client     = ReliableClient(underlying, "test-provider", config).withSleep(sleep)
     val result     = client.complete(conversation)
     underlying.callCount.get() shouldBe 1
     if (cancelled) result.left.toOption.get shouldBe a[org.llm4s.error.CancelledError]

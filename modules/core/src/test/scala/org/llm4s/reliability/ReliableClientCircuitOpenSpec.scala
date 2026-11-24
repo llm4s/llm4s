@@ -48,7 +48,7 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
   /** A client whose circuit one failure has opened, at time 0 of `now`. */
   private def opened(now: AtomicLong, result: () => Result[Completion]): (ReliableClient, StubClient) = {
     val underlying = new StubClient(result)
-    val client     = new ReliableClient(underlying, "provider-x", breaker, None, () => Instant.ofEpochMilli(now.get()))
+    val client     = ReliableClient(underlying, "provider-x", breaker).withClock(() => Instant.ofEpochMilli(now.get()))
     (client, underlying)
   }
 
@@ -70,12 +70,11 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
     org.llm4s.metrics.ErrorKind.fromLLMError(fastFail) shouldBe org.llm4s.metrics.ErrorKind.ServiceError
 
     val sleeps = mutable.Buffer.empty[FiniteDuration]
-    val outer = new ReliableClient(
+    val outer = ReliableClient(
       client,
       "outer",
-      ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.second)),
-      sleep = sleeps += _
-    )
+      ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.second))
+    ).withSleep(sleeps += _)
     outer.complete(conversation).isLeft shouldBe true
     sleeps shouldBe empty
     underlying.calls.get() shouldBe 1
@@ -94,7 +93,7 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
         ok
       }
     )
-    val client = new ReliableClient(underlying, "provider-x", breaker, None, () => Instant.ofEpochMilli(now.get()))
+    val client = ReliableClient(underlying, "provider-x", breaker).withClock(() => Instant.ofEpochMilli(now.get()))
     client.complete(conversation) shouldBe down
     now.set(31000L)
 
@@ -168,7 +167,7 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
     )
     bad.foreach { case (config, field) =>
       val underlying = new StubClient(() => ok)
-      val client     = new ReliableClient(underlying, "provider-x", config)
+      val client     = ReliableClient(underlying, "provider-x", config)
       val expected   = config.validate.left.toOption.get
       expected.asInstanceOf[ValidationError].field shouldBe field
       client.complete(conversation) shouldBe Left(expected)
@@ -178,7 +177,7 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
     }
     // switched off, the client passes calls through and reads none of it
     val passedThrough = new StubClient(() => ok)
-    val off = new ReliableClient(
+    val off = ReliableClient(
       passedThrough,
       "provider-x",
       ReliabilityConfig.disabled.withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 0))

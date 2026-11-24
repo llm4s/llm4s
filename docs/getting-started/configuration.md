@@ -1450,7 +1450,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
 
 def reliable(client: LLMClient): LLMClient =
-  new ReliableClient(
+  ReliableClient(
     client,
     "openai-main",
     ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 4, baseDelay = 2.seconds))

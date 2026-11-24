@@ -131,7 +131,7 @@ exhausted. Pass the same collector to both layers:
 val metrics = new MicrometerMetrics(meterRegistry)
 val client = LLMConnect
   .getClient(providerConfig, metrics)
-  .map(c => new ReliableClient(c, "openai", ReliabilityConfig.default, Some(metrics)))
+  .map(c => ReliableClient(c, "openai", ReliabilityConfig.default).withMetrics(metrics))
 ```
 
 and a call that fails on all three attempts records three `llm4s.errors` (one per attempt), one

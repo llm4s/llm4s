@@ -46,28 +46,26 @@ class ReliableClientStreamReplaySpec extends AnyFlatSpec with Matchers {
   }
 
   private def reliable(inner: LLMClient, deadline: Option[FiniteDuration]) =
-    new ReliableClient(
+    ReliableClient(
       inner,
       "test",
       ReliabilityConfig(
         retryPolicy = RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis),
         circuitBreaker = CircuitBreakerConfig.disabled,
         deadline = deadline
-      ),
-      None
+      )
     )
 
   /** A client whose circuit breaker opens on the first failure and stays open for the test. */
   private def breaking(inner: LLMClient, deadline: Option[FiniteDuration]) =
-    new ReliableClient(
+    ReliableClient(
       inner,
       "test",
       ReliabilityConfig(
         retryPolicy = RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis),
         circuitBreaker = CircuitBreakerConfig(failureThreshold = 1, recoveryTimeout = 1.hour, successThreshold = 1),
         deadline = deadline
-      ),
-      None
+      )
     )
 
   for (deadline <- List(None, Some(30.seconds))) {

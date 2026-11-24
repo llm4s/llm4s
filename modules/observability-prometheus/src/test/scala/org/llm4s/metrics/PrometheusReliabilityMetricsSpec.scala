@@ -59,7 +59,7 @@ class PrometheusReliabilityMetricsSpec extends AnyFlatSpec with Matchers {
       deadline = None
     )
 
-    new ReliableClient(client(failures = 2), "acme", config, Some(metrics)).complete(conversation) shouldBe
+    ReliableClient(client(failures = 2), "acme", config).withMetrics(metrics).complete(conversation) shouldBe
       Right(completion)
 
     scrape(metrics) should contain("llm4s_retries_total{provider=\"acme\"} 2.0")
@@ -74,7 +74,10 @@ class PrometheusReliabilityMetricsSpec extends AnyFlatSpec with Matchers {
       deadline = None
     )
 
-    new ReliableClient(client(failures = 2), "acme", config, Some(metrics)).complete(conversation).isLeft shouldBe true
+    ReliableClient(client(failures = 2), "acme", config)
+      .withMetrics(metrics)
+      .complete(conversation)
+      .isLeft shouldBe true
 
     val lines = scrape(metrics)
     lines should contain("llm4s_circuit_breaker_transitions_total{provider=\"acme\",state=\"open\"} 1.0")
