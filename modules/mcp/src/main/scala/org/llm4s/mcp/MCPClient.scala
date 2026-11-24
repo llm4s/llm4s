@@ -4,11 +4,18 @@ import org.llm4s.toolapi._
 import org.llm4s.types.Result
 
 /**
- * MCP clients handle the communication with MCP servers to:
- * - Establish protocol handshake and negotiate capabilities
- * - Retrieve available tools from remote servers
- * - Execute tools remotely and return results
- * - Manage connection lifecycle
+ * A connection to one Model Context Protocol (MCP) server, which turns the tools the server advertises
+ * into llm4s `ToolFunction`s that call back through it.
+ *
+ * Most applications never hold one directly: an [[MCPToolRegistry]] built from `MCPServerConfig`s creates
+ * an `MCPClient` per server on first use, merges the servers' tools with local ones, and can be passed to
+ * `Agent.builder(...).withTools(registry)` like any `ToolRegistry`. To use one on its own, construct
+ * [[MCPClientImpl]] with an `MCPServerConfig` (stdio or HTTP transport), call [[initialize]] for the
+ * protocol handshake, then [[getTools]]; each returned tool runs on the server when executed. Call
+ * [[close]] when done, which closes the transport.
+ *
+ * Every operation that talks to the server returns a `Result`: an unreachable server is a `Left`, distinct
+ * from a server with no tools (`Right(Seq.empty)`).
  */
 trait MCPClient {
 
