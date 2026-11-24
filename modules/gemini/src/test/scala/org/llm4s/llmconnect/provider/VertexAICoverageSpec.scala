@@ -362,7 +362,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     val client       = captureBodyClient(capturedBody = _)
     val schema       = Schema.`object`[Map[String, Any]]("In").withProperty(Schema.property("q", Schema.string("q")))
 
-    ToolBuilder[Map[String, Any], String]("search", "Search tool", schema)
+    ToolBuilder[String]("search", "Search tool", schema)
       .withHandler(_ => Right("ok"))
       .buildSafe() match {
       case Right(tool) =>

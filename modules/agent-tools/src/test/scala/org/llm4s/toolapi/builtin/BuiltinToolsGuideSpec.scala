@@ -29,12 +29,12 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   private def isWindows: Boolean = System.getProperty("os.name").toLowerCase.contains("win")
 
-  private def names(tools: Result[Seq[ToolFunction[_, _]]]): Set[String] = tools.value.map(_.name).toSet
+  private def names(tools: Result[Seq[ToolFunction[_]]]): Set[String] = tools.value.map(_.name).toSet
 
-  private def call(tools: Seq[ToolFunction[_, _]], tool: String, arguments: ujson.Obj) =
+  private def call(tools: Seq[ToolFunction[_]], tool: String, arguments: ujson.Obj) =
     ToolRegistry.of(tools).toOption.get.execute(ToolCallRequest(tool, arguments))
 
-  private def parameterNames(tool: ToolFunction[_, _]): Set[String] =
+  private def parameterNames(tool: ToolFunction[_]): Set[String] =
     tool.toolDefinition(strict = false)("function")("parameters")("properties").obj.keys.toSet
 
   private def tempDir(): Path = Files.createTempDirectory("builtin-tools-guide")
@@ -90,7 +90,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   // ---- the parameter table
 
-  private def searchTools: Seq[ToolFunction[_, _]] = Seq(
+  private def searchTools: Seq[ToolFunction[_]] = Seq(
     DuckDuckGoSearchTool.create(DuckDuckGoSearchToolConfig("https://api.duckduckgo.com/")).value,
     BraveSearchTool
       .create[BraveWebSearchResult](

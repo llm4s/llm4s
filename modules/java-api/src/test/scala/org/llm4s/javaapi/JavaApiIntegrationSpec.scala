@@ -55,7 +55,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     val schema = Schema
       .`object`[Map[String, Any]]("Echo parameters")
       .withProperty(Schema.property("input", Schema.string("The input to echo")))
-    val tool = ToolBuilder[Map[String, Any], EchoResult]("echo_tool", "Echoes the input", schema)
+    val tool = ToolBuilder[EchoResult]("echo_tool", "Echoes the input", schema)
       .withHandler(ext => ext.getString("input").map(s => EchoResult(s"echoed: $s")))
       .buildSafe()
     tool match {

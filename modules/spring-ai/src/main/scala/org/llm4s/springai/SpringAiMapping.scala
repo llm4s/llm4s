@@ -146,7 +146,7 @@ private[springai] object SpringAiMapping {
             case tools: ToolCallingChatOptions =>
               val callbacks = Option(tools.getToolCallbacks).map(_.asScala.toSeq).getOrElse(Nil)
               callbacks
-                .foldLeft[Result[Vector[ToolFunction[?, ?]]]](Right(Vector.empty)) { (acc, cb) =>
+                .foldLeft[Result[Vector[ToolFunction[?]]]](Right(Vector.empty)) { (acc, cb) =>
                   acc.flatMap(fs => toolFunction(cb).map(fs :+ _))
                 }
                 .map(fs => if (fs.isEmpty) freq else freq.withTools(fs))
@@ -156,12 +156,12 @@ private[springai] object SpringAiMapping {
     }
 
   /** A Spring AI tool as an llm4s tool definition: its name, description and input schema; calling it calls the tool. */
-  private def toolFunction(callback: ToolCallback): Result[ToolFunction[ujson.Value, String]] = {
+  private def toolFunction(callback: ToolCallback): Result[ToolFunction[String]] = {
     val definition = callback.getToolDefinition
     Try(ujson.read(definition.inputSchema)).toResult.left
       .map(_ => ValidationError("inputSchema", s"the input schema of tool '${definition.name}' is not JSON"))
       .map { schema =>
-        ToolFunction[ujson.Value, String](
+        ToolFunction[String](
           name = definition.name,
           description = Option(definition.description).getOrElse(""),
           schema = objectSchema(definition.name, schema),
@@ -330,7 +330,7 @@ private[springai] object SpringAiMapping {
   }
 
   /** An llm4s tool as a Spring AI tool: its definition, and a call that runs it. */
-  private def springTool(tool: ToolFunction[?, ?]): ToolCallback = new ToolCallback {
+  private def springTool(tool: ToolFunction[?]): ToolCallback = new ToolCallback {
     private val definition = ToolDefinition
       .builder()
       .name(tool.name)

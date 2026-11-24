@@ -184,7 +184,7 @@ LangChain reads the tool's schema from the function's signature and docstring. I
 import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolFunction, ToolHandlerError }
 import org.llm4s.types.Result
 
-def searchDatabase: Result[ToolFunction[Map[String, Any], String]] = {
+def searchDatabase: Result[ToolFunction[String]] = {
   val schema = Schema
     .`object`[Map[String, Any]]("A search of the customer database")
     .withRequiredField("query", Schema.string("What to search for"))
@@ -196,7 +196,7 @@ def searchDatabase: Result[ToolFunction[Map[String, Any], String]] = {
       limit <- params.getOptionalInt("limit")
     } yield s"Found ${limit.getOrElse(10)} results for '$query'"
 
-  ToolBuilder[Map[String, Any], String](
+  ToolBuilder[String](
     "search_database",
     "Search the customer database for records matching the query.",
     schema

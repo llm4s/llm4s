@@ -107,14 +107,14 @@ object DateTimeTool {
   /**
    * The date/time tool instance, returning a Result for safe error handling.
    */
-  val toolSafe: Result[ToolFunction[Map[String, Any], DateTimeResult]] = toolSafe(Clock.systemUTC())
+  val toolSafe: Result[ToolFunction[DateTimeResult]] = toolSafe(Clock.systemUTC())
 
   /**
    * The tool reading the time from `clock`, so tests can pin the instant (a daylight-saving transition, a year end).
    * Only the clock's instant is used; its zone is ignored, the `timezone` parameter decides that.
    */
-  private[core] def toolSafe(clock: Clock): Result[ToolFunction[Map[String, Any], DateTimeResult]] =
-    ToolBuilder[Map[String, Any], DateTimeResult](
+  private[core] def toolSafe(clock: Clock): Result[ToolFunction[DateTimeResult]] =
+    ToolBuilder[DateTimeResult](
       name = "get_current_datetime",
       description = "Get the current date and time, optionally in a specific timezone. " +
         "Returns the datetime in ISO-8601 format, Unix timestamp, and broken down components.",

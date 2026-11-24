@@ -73,8 +73,8 @@ object GraphQueryTool {
     llmClient: LLMClient,
     graphStore: GraphStore,
     config: GraphQAConfig = GraphQAConfig()
-  ): Result[ToolFunction[Map[String, Any], GraphQueryToolResult]] =
-    ToolBuilder[Map[String, Any], GraphQueryToolResult](
+  ): Result[ToolFunction[GraphQueryToolResult]] =
+    ToolBuilder[GraphQueryToolResult](
       name = "graph_query",
       description = "Query a knowledge graph using natural language. " +
         "Finds entities, traverses relationships, and generates answers with citations. " +

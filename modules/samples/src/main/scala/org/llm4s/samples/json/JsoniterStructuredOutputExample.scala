@@ -75,7 +75,7 @@ object JsoniterStructuredOutputExample extends App {
     .withRequiredField("a", Schema.integer("The first"))
     .withRequiredField("b", Schema.integer("The second"))
 
-  private val addTool = ToolBuilder[Map[String, Any], AddResult]("add", "Adds two integers", addSchema)
+  private val addTool = ToolBuilder[AddResult]("add", "Adds two integers", addSchema)
     .withHandler { extractor =>
       Try(readJsoniter[AddArgs](extractor.params)).toEither
         .map(args => AddResult(args.a.toLong + args.b))

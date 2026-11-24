@@ -64,13 +64,13 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   private object EchoResult:
     given ReadWriter[EchoResult] = macroRW
 
-  private def echoTool = ToolBuilder[Map[String, Any], EchoResult](
+  private def echoTool = ToolBuilder[EchoResult](
     "echo",
     "Echoes the supplied message back",
     Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))
   ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe().fold(e => fail(e.formatted), identity)
 
-  private def agentWith(client: LLMClient, tools: org.llm4s.toolapi.ToolFunction[?, ?]*): AgentBuilder =
+  private def agentWith(client: LLMClient, tools: org.llm4s.toolapi.ToolFunction[?]*): AgentBuilder =
     Agent.builder("assistant", client).withTools(ToolRegistry.of(tools).toOption.get)
 
   final private class Gathered(runs: Int):

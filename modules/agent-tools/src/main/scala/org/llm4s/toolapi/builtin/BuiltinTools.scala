@@ -48,7 +48,7 @@ object BuiltinTools {
    * - UUIDTool: Generate UUIDs
    * - JSONTool: Parse/format/query JSON
    */
-  def coreSafe: Result[Seq[ToolFunction[_, _]]] = for {
+  def coreSafe: Result[Seq[ToolFunction[_]]] = for {
     dateTime   <- DateTimeTool.toolSafe
     calculator <- CalculatorTool.toolSafe
     uuid       <- UUIDTool.toolSafe
@@ -67,7 +67,7 @@ object BuiltinTools {
    * - Shell access
    * - Web search (configure separately at application edge)
    */
-  def withHttpSafe(httpConfig: HttpConfig = HttpConfig.readOnly()): Result[Seq[ToolFunction[_, _]]] = for {
+  def withHttpSafe(httpConfig: HttpConfig = HttpConfig.readOnly()): Result[Seq[ToolFunction[_]]] = for {
     coreTools <- coreSafe
     httpTool  <- HTTPTool.createSafe(httpConfig)
   } yield coreTools :+ httpTool
@@ -87,7 +87,7 @@ object BuiltinTools {
   def withFilesSafe(
     fileConfig: FileConfig = FileConfig(),
     httpConfig: HttpConfig = HttpConfig.readOnly()
-  ): Result[Seq[ToolFunction[_, _]]] = for {
+  ): Result[Seq[ToolFunction[_]]] = for {
     safeTools <- withHttpSafe(httpConfig)
     readFile  <- ReadFileTool.createSafe(fileConfig)
     listDir   <- ListDirectoryTool.createSafe(fileConfig)
@@ -113,7 +113,7 @@ object BuiltinTools {
   def developmentSafe(
     workingDirectory: Option[String] = None,
     fileAllowedPaths: Seq[String] = Seq("/tmp")
-  ): Result[Seq[ToolFunction[_, _]]] = {
+  ): Result[Seq[ToolFunction[_]]] = {
     val fileConfig = FileConfig(
       allowedPaths = workingDirectory.map(Seq(_))
     )
@@ -148,10 +148,10 @@ object BuiltinTools {
     writeConfig: Option[WriteConfig] = None,
     httpConfig: Option[HttpConfig] = None,
     shellConfig: Option[ShellConfig] = None
-  ): Result[Seq[ToolFunction[_, _]]] = {
+  ): Result[Seq[ToolFunction[_]]] = {
     def optionalTool[T](
       config: Option[T]
-    )(build: T => Result[ToolFunction[_, _]]): Result[Seq[ToolFunction[_, _]]] =
+    )(build: T => Result[ToolFunction[_]]): Result[Seq[ToolFunction[_]]] =
       config match {
         case Some(cfg) => build(cfg).map(Seq(_))
         case None      => Right(Seq.empty)
@@ -159,7 +159,7 @@ object BuiltinTools {
 
     def optionalTools[T](
       config: Option[T]
-    )(build: T => Result[Seq[ToolFunction[_, _]]]): Result[Seq[ToolFunction[_, _]]] =
+    )(build: T => Result[Seq[ToolFunction[_]]]): Result[Seq[ToolFunction[_]]] =
       config match {
         case Some(cfg) => build(cfg)
         case None      => Right(Seq.empty)

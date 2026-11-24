@@ -449,7 +449,7 @@ class VertexAIClient(
     request
   }
 
-  private[provider] def convertToolToVertexFormat(tool: ToolFunction[_, _]): ujson.Value = {
+  private[provider] def convertToolToVertexFormat(tool: ToolFunction[_]): ujson.Value = {
     val schema = ujson.read(tool.schema.toJsonSchema(false).render())
     schema.obj.remove("strict")
     schema.obj.remove("additionalProperties")

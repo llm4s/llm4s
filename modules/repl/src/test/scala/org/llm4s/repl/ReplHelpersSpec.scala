@@ -33,7 +33,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
   }
 
   private val weather =
-    ToolBuilder[Map[String, Any], ujson.Value](
+    ToolBuilder[ujson.Value](
       "get_weather",
       "The weather in a city",
       Schema.`object`[Map[String, Any]]("Arguments").withProperty(Schema.property("city", Schema.string("The city")))

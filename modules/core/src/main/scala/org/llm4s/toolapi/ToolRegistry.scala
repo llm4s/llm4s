@@ -57,10 +57,10 @@ object ToolCallRequest {
 trait ToolRegistry {
 
   /** All tools in this registry; no two share a name. */
-  def tools: Seq[ToolFunction[_, _]]
+  def tools: Seq[ToolFunction[_]]
 
   /** The tool called `name`, if this registry has one. */
-  def tool(name: String): Option[ToolFunction[_, _]] = tools.find(_.name == name)
+  def tool(name: String): Option[ToolFunction[_]] = tools.find(_.name == name)
 
   /**
    * Executes a tool call synchronously, on the calling thread.
@@ -83,7 +83,7 @@ object ToolRegistry {
    *
    * @return `Left(ValidationError)` naming every tool name that appears more than once
    */
-  def of(tools: Seq[ToolFunction[_, _]]): Result[ToolRegistry] = {
+  def of(tools: Seq[ToolFunction[_]]): Result[ToolRegistry] = {
     val names      = tools.map(_.name)
     val duplicated = names.diff(names.distinct).distinct
     if (duplicated.isEmpty) Right(new Fixed(tools.toVector))
@@ -110,7 +110,7 @@ object ToolRegistry {
    * `Try` rather than `org.llm4s.error.Safety.safely`: the throwable is kept as it was thrown, so that
    * retry logic can treat for example an `IOException` as retryable.
    */
-  private[llm4s] def run(tool: ToolFunction[_, _], request: ToolCallRequest): Either[ToolCallError, ujson.Value] =
+  private[llm4s] def run(tool: ToolFunction[_], request: ToolCallRequest): Either[ToolCallError, ujson.Value] =
     CancelledError.catchInterrupt(scala.util.Try(tool.execute(request.arguments))) match {
       case Left(_) =>
         // The throw cleared the flag; restore it so the caller still sees the cancellation.
@@ -127,7 +127,7 @@ object ToolRegistry {
       case Right(scala.util.Failure(t)) => Left(ToolCallError.ExecutionError(request.functionName, t))
     }
 
-  final private class Fixed(val tools: Vector[ToolFunction[_, _]]) extends ToolRegistry {
+  final private class Fixed(val tools: Vector[ToolFunction[_]]) extends ToolRegistry {
     def execute(request: ToolCallRequest): Either[ToolCallError, ujson.Value] =
       tool(request.functionName) match {
         case Some(found) => ToolRegistry.run(found, request)

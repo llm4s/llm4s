@@ -89,7 +89,7 @@ object Capable {
     /** `client.complete` with `tools` offered to the model, added to any tools `options` already has. */
     def completeWithTools(
       conversation: Conversation,
-      tools: Seq[ToolFunction[?, ?]],
+      tools: Seq[ToolFunction[?]],
       options: CompletionOptions = CompletionOptions()
     ): Result[Completion] =
       capable.client.complete(conversation, options.withTools(options.tools ++ tools))

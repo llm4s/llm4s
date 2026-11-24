@@ -19,3 +19,4 @@ org.llm4s.scalafix.AgentStatusGainsTruncated
 org.llm4s.scalafix.CompressionRuleTransform
 org.llm4s.scalafix.AgentCopyToWithSetters
 org.llm4s.scalafix.ResultSyntaxMoved
+org.llm4s.scalafix.ToolFunctionOneTypeParameter

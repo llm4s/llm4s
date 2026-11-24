@@ -324,7 +324,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   it should "not go back after the tools changed" in {
     val tool = org.llm4s.toolapi
-      .ToolBuilder[Map[String, Any], String](
+      .ToolBuilder[String](
         "get_weather",
         "Weather for a city",
         org.llm4s.toolapi.Schema

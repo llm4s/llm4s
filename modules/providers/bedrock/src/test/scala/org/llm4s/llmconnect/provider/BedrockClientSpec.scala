@@ -152,7 +152,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         body = bodyOf(exchange)
         sendJsonResponse(exchange, 200, converseResponse("The weather is 22C"))
       } { url =>
-        val tool = ToolBuilder[Map[String, Any], String](
+        val tool = ToolBuilder[String](
           "get_weather",
           "Returns current weather for a location",
           Schema

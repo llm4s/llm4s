@@ -71,14 +71,14 @@ object EndpointTools {
     baseUri: Uri,
     backend: SttpBackend[Identity, Any],
     tool: EndpointTool
-  ): Either[List[String], ToolFunction[ujson.Value, ujson.Value]] = {
+  ): Either[List[String], ToolFunction[ujson.Value]] = {
     val nameError =
       if (ToolName.matches(tool.name)) Nil else List(s"the name must match [a-zA-Z0-9_-]{1,64}")
     Inputs.plan(tool) match {
       case Right(steps) if nameError.isEmpty =>
         val schema = ObjectSchema[ujson.Value](description(tool), steps.collect(Inputs.paramOf).map(_.property))
         val call   = new Call(tool, steps, baseUri, backend)
-        Right(ToolFunction[ujson.Value, ujson.Value](tool.name, description(tool), schema, args => call(args.params)))
+        Right(ToolFunction[ujson.Value](tool.name, description(tool), schema, args => call(args.params)))
       case Right(_)      => Left(nameError.map(e => s"${tool.name}: $e"))
       case Left(reasons) => Left((nameError ++ reasons).map(e => s"${tool.name}: $e"))
     }

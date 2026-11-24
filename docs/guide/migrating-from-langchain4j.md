@@ -151,7 +151,7 @@ private val forecastSchema = Schema
   .`object`[Map[String, Any]]("Forecast parameters")
   .withProperty(Schema.property("city", Schema.string("The city to look up")))
 
-val forecastTool = ToolBuilder[Map[String, Any], Forecast](
+val forecastTool = ToolBuilder[Forecast](
   name = "get_forecast",
   description = "Returns the forecast for a city",
   schema = forecastSchema

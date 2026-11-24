@@ -46,7 +46,7 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
     RequestTransformer.withOverrides(Map("narrow" -> constrained), service)
 
   private def withPingTool(options: CompletionOptions): CompletionOptions =
-    ToolBuilder[Map[String, Any], String]("ping", "Answers pong", Schema.`object`[Map[String, Any]]("No parameters"))
+    ToolBuilder[String]("ping", "Answers pong", Schema.`object`[Map[String, Any]]("No parameters"))
       .withHandler(_ => Right("pong"))
       .buildSafe()
       .fold(e => fail(e.message), tool => options.withTools(Seq(tool)))

@@ -109,8 +109,8 @@ private object OllamaToolCallingIntegrationSpec {
   final case class Weather(forecast: String)
   implicit private val weatherRW: ReadWriter[Weather] = macroRW
 
-  val weatherTool: ToolFunction[Map[String, Any], Weather] =
-    ToolBuilder[Map[String, Any], Weather](
+  val weatherTool: ToolFunction[Weather] =
+    ToolBuilder[Weather](
       "get_weather",
       "Get the current weather in a location",
       Schema

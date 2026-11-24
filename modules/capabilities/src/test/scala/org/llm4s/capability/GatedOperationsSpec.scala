@@ -19,8 +19,8 @@ class GatedOperationsSpec extends AnyFlatSpec with Matchers with EitherValues wi
   private val image =
     ContentPart.image(MediaSource.Url(URI.create("https://example.com/cat.png")), MediaType.Png).value
 
-  private def tool(name: String): ToolFunction[?, ?] =
-    ToolBuilder[Map[String, Any], String](name, s"The $name tool", Schema.`object`[Map[String, Any]]("No parameters"))
+  private def tool(name: String): ToolFunction[?] =
+    ToolBuilder[String](name, s"The $name tool", Schema.`object`[Map[String, Any]]("No parameters"))
       .withHandler(_ => Right(name))
       .buildSafe()
       .value

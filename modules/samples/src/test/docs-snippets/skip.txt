@@ -160,7 +160,7 @@ guide/agents/index.md | 32e48b77f6 | skip | sbt build definition, not Scala sour
 guide/agents/middleware.md | 7316ca7315 | skip | sbt build definition, not Scala source
 guide/agents/index.md | 8f4ed128d4 | with | import org.llm4s.agent.Agent; import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService
 guide/agents/index.md | 03517fa0d9 | skip | chargeSpec and payments stand for the reader's own tool spec and payment client
-guide/agents/index.md | d1fef074f9 | skip | chargeSchema and payments stand for the reader's own schema and payment client
+guide/agents/index.md | 6066fbfb68 | skip | chargeSchema and payments stand for the reader's own schema and payment client
 guide/agents/index.md | 6774605f9e | skip | appendSpec, read and writeIfUnchanged stand for the reader's own tool spec and file access
 guide/agents/index.md | b76f20c767 | skip | dir, image and port stand for the workspace directory, runner image and port the reader starts
 guide/agents/index.md | 15ca9efc01 | skip | baseSpec and workspaceId stand for the reader's own tool spec and workspace
@@ -198,7 +198,7 @@ tutorials/support-assistant/part-1-first-call.md | f191562fc0 | with | import or
 tutorials/support-assistant/part-1-first-call.md | 243847ae3c | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result
 tutorials/support-assistant/part-2-typed-answers.md | 8e136f7a09 | with | import org.llm4s.schema.*; import org.llm4s.samples.tutorial.supportassistant.Part2TypedAnswers.Ticket
 tutorials/support-assistant/part-2-typed-answers.md | 5af41b0c73 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part2TypedAnswers.{ Ticket, classify }
-tutorials/support-assistant/part-3-tools.md | 3e96213cf7 | with | import org.llm4s.schema.*; import org.llm4s.toolapi.ToolFunction; import org.llm4s.types.Result; import upickle.default.ReadWriter
+tutorials/support-assistant/part-3-tools.md | c74d0037c2 | with | import org.llm4s.schema.*; import org.llm4s.toolapi.ToolFunction; import org.llm4s.types.Result; import upickle.default.ReadWriter
 tutorials/support-assistant/part-3-tools.md | e9be0f0903 | with | import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools.{ orderTool, policyTool }
 guide/for-python-developers.md | 37ce026ffe | with | import org.llm4s.samples.guides.PythonDevelopersGuide.FirstCall.ask
 guide/rag-evaluation.md | 10931d5ebd | skip | API reference: the class's signature and members without their bodies
@@ -209,7 +209,7 @@ guide/rag-evaluation.md | bf46734ded | skip | API reference: the class's signatu
 guide/rag-evaluation.md | f2b322db11 | skip | API reference: the object's members without their bodies
 tutorials/support-assistant/part-4-help-centre.md | 95b1c19f04 | with | import org.llm4s.samples.tutorial.supportassistant.Part4HelpCentre.articles
 tutorials/support-assistant/part-4-help-centre.md | ce8185ac81 | with | import org.llm4s.rag.RAG; import org.llm4s.types.Result
-tutorials/support-assistant/part-4-help-centre.md | 5dd3497e8c | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.rag.RAG; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools
+tutorials/support-assistant/part-4-help-centre.md | 2c732129e1 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.rag.RAG; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools
 tutorials/support-assistant/part-5-safety-memory.md | 8eaffdfd48 | with | import org.llm4s.samples.tutorial.supportassistant.Part3Tools
 tutorials/support-assistant/part-5-safety-memory.md | 0a03fc5f05 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part5SafetyMemory.{ reply, safeAgent }
 guide/agents/guardrails.md | 8ad9467374 | skip | continues the imports block above with `judge`, the reader's own client: RagGuardrailsGuideSpec runs this code

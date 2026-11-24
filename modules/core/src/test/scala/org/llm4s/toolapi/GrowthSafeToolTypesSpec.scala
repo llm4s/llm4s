@@ -184,7 +184,7 @@ class GrowthSafeToolTypesSpec extends AnyFlatSpec with Matchers {
 
   "ToolFunction" should "change each field through its setter" in {
     val schema = Schema.`object`[Map[String, Any]]("p").withProperty(Schema.property("x", Schema.string("x")))
-    val tool   = ToolFunction[Map[String, Any], String]("t", "desc", schema, _ => Right("one"))
+    val tool   = ToolFunction[String]("t", "desc", schema, _ => Right("one"))
 
     val changed = tool.withName("u").withDescription("other").withHandler(_ => Right("two"))
     changed.name shouldBe "u"
@@ -192,18 +192,18 @@ class GrowthSafeToolTypesSpec extends AnyFlatSpec with Matchers {
     changed.schema shouldBe schema
     changed.execute(ujson.Obj("x" -> "v")) shouldBe Right(ujson.Str("two"))
 
-    val retyped: ToolFunction[Boolean, String] = changed.withSchema(Schema.boolean("b"))
+    val retyped: ToolFunction[String] = changed.withSchema(Schema.boolean("b"))
     retyped.schema shouldBe Schema.boolean("b")
     retyped.name shouldBe "u"
     retyped.execute(ujson.Obj()) shouldBe Right(ujson.Str("two"))
   }
 
   it should "have no public constructor and no public copy" in {
-    val tool = ToolFunction[Boolean, String]("t", "d", Schema.boolean("b"), _ => Right("x"))
+    val tool = ToolFunction[String]("t", "d", Schema.boolean("b"), _ => Right("x"))
     assert(tool.name == "t")
     inaccessible(
       scala.compiletime.testing.typeCheckErrors(
-        """new ToolFunction[Boolean, String]("t", "d", Schema.boolean("b"), _ => Right("x"))"""
+        """new ToolFunction[String]("t", "d", Schema.boolean("b"), _ => Right("x"))"""
       )
     )
     inaccessible(scala.compiletime.testing.typeCheckErrors("""tool.copy(name = "u")"""))

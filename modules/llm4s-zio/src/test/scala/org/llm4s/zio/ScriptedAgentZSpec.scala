@@ -25,8 +25,8 @@ object ScriptedAgentZSpec extends ZIOSpecDefault {
 
   final case class Temperature(city: String, celsius: Double) derives ReadWriter
 
-  val temperatureTool: Result[ToolFunction[Map[String, Any], Temperature]] =
-    ToolBuilder[Map[String, Any], Temperature](
+  val temperatureTool: Result[ToolFunction[Temperature]] =
+    ToolBuilder[Temperature](
       "get_temperature",
       "Current temperature in a city, in Celsius.",
       Schema

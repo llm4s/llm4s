@@ -58,7 +58,7 @@ class NamedTupleUseSpec extends AnyFlatSpec with Matchers {
   private def sentSchema(client: Scripted): Option[ujson.Value] =
     client.asked.asScala.headOption.flatMap(_.responseFormat).collect { case ResponseFormat.JsonSchema(s, _, _) => s }
 
-  private def built[A, R](tool: Result[ToolFunction[A, R]]): ToolFunction[A, R] =
+  private def built[R](tool: Result[ToolFunction[R]]): ToolFunction[R] =
     tool.fold(e => fail(e.formatted), identity)
 
   private val forecast = built(

@@ -770,7 +770,7 @@ curl https://api.anthropic.com/v1/messages \
    * Strips OpenAI-specific fields like 'strict' and 'additionalProperties' from the schema
    * to maintain compatibility with the Anthropic API.
    */
-  private[provider] def convertToolToAnthropicTool(toolFunction: ToolFunction[_, _]): Tool = {
+  private[provider] def convertToolToAnthropicTool(toolFunction: ToolFunction[_]): Tool = {
     val objectSchema = toolFunction.schema.asInstanceOf[ObjectSchema[_]]
     // Generate raw schema without 'strict' mode
     val jsonSchemaStr = objectSchema.toJsonSchema(false).render()

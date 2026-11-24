@@ -177,7 +177,7 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     .`object`[Map[String, Any]]("Forecast parameters")
     .withProperty(Schema.property("city", Schema.string("The city to look up")))
 
-  lazy val forecastTool = ToolBuilder[Map[String, Any], Forecast](
+  lazy val forecastTool = ToolBuilder[Forecast](
     name = "get_forecast",
     description = "Returns the forecast for a city",
     schema = forecastSchema

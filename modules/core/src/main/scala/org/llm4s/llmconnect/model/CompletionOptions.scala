@@ -52,7 +52,7 @@ final case class CompletionOptions private (
   maxTokens: Option[Int],
   presencePenalty: Double,
   frequencyPenalty: Double,
-  tools: Seq[ToolFunction[_, _]],
+  tools: Seq[ToolFunction[_]],
   reasoning: Option[ReasoningEffort],
   thinking: Option[Thinking],
   responseFormat: Option[ResponseFormat],
@@ -118,7 +118,7 @@ final case class CompletionOptions private (
    * @param tools the tools to offer; an empty sequence offers none (the default)
    * @return new CompletionOptions with tools set
    */
-  def withTools(tools: Seq[ToolFunction[_, _]]): CompletionOptions = copy(tools = tools)
+  def withTools(tools: Seq[ToolFunction[_]]): CompletionOptions = copy(tools = tools)
 
   /**
    * Sets or clears the reasoning effort level for models that support extended thinking (o1/o3, Claude).
@@ -255,7 +255,7 @@ object CompletionOptions {
     maxTokens: Option[Int] = None,
     presencePenalty: Double = 0.0,
     frequencyPenalty: Double = 0.0,
-    tools: Seq[ToolFunction[_, _]] = Seq.empty,
+    tools: Seq[ToolFunction[_]] = Seq.empty,
     reasoning: Option[ReasoningEffort] = None,
     thinking: Option[Thinking] = None,
     responseFormat: Option[ResponseFormat] = None,

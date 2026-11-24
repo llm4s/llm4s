@@ -54,7 +54,7 @@ class MistralDialectSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "send tools and a JSON-schema response format in the standard shape" in {
-    val tool = ToolBuilder[Map[String, Any], String](
+    val tool = ToolBuilder[String](
       "get_weather",
       "Weather for a city",
       Schema.`object`[Map[String, Any]]("args").withProperty(Schema.property("city", Schema.string("City")))

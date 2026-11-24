@@ -36,7 +36,7 @@ class ListDirectoryToolSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
       Using.resource(Files.walk(root))(_.iterator().asScala.toList.reverse.foreach(p => Files.deleteIfExists(p)))
 
   // Blocked paths are emptied so the test does not depend on where the platform puts its temporary directory
-  private def tool: ToolFunction[Map[String, Any], ListDirectoryResult] =
+  private def tool: ToolFunction[ListDirectoryResult] =
     ListDirectoryTool
       .createSafe(FileConfig(allowedPaths = Some(Seq(tempDir.toString)), blockedPaths = Seq.empty))
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)

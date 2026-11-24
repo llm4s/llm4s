@@ -38,7 +38,7 @@ class AgentConversationSpec extends AnyFlatSpec with TestTimeLimit with Matchers
   }
 
   it should "refuse a Suspended result with the runtime's PendingInterrupts, without a new turn" in {
-    val tool = ToolBuilder[Map[String, Any], ujson.Value](
+    val tool = ToolBuilder[ujson.Value](
       "deploy",
       "Deploys",
       Schema.`object`[Map[String, Any]]("Deploy parameters")

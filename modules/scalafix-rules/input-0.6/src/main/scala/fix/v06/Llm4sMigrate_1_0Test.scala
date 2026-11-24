@@ -15,4 +15,6 @@ object Llm4sMigrate_1_0Test {
 
   def logStop(client: LLMClient, conversation: Conversation) =
     client.streamComplete(conversation, options, chunk => if (chunk.finishReason.contains("stop")) println("done"))
+
+  def toolNames(tools: Seq[org.llm4s.toolapi.ToolFunction[_, _]]): Seq[String] = tools.map(_.name)
 }

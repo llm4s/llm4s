@@ -217,7 +217,7 @@ object StreamingBridgeContract {
   /** An agent with one tool, `get_temperature`, which records the thread it runs on in `seen`. */
   def agentOf(client: LLMClient, seen: AtomicReference[Option[Thread]] = new AtomicReference(None)): Agent = {
     val built = for {
-      tool <- ToolBuilder[Map[String, Any], Double](
+      tool <- ToolBuilder[Double](
         "get_temperature",
         "Current temperature in a city, in Celsius.",
         Schema

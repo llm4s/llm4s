@@ -201,11 +201,11 @@ object SmokeChecks {
   /** The properties the contract's tool declares; its object schema allows no others (`additionalProperties`). */
   private val ToolProperties = Set("topic")
 
-  private def secretCodeTool: Either[String, ToolFunction[_, _]] = {
+  private def secretCodeTool: Either[String, ToolFunction[_]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Secret code parameters")
       .withProperty(Schema.property("topic", Schema.string("What the code is for")))
-    ToolBuilder[Map[String, Any], String](ToolName, "Looks up the secret code for a topic", schema)
+    ToolBuilder[String](ToolName, "Looks up the secret code for a topic", schema)
       .withHandler(params => params.getString("topic").map(_ => SecretCode))
       .buildSafe()
       .left
@@ -218,7 +218,7 @@ object SmokeChecks {
    * validate the schema, and the handler would ignore an extra one), which the handler then accepts. Returns the
    * call and what the tool returns for it.
    */
-  private def calledTool(tool: ToolFunction[_, _], completion: Completion): Either[String, (ToolCall, String)] =
+  private def calledTool(tool: ToolFunction[_], completion: Completion): Either[String, (ToolCall, String)] =
     for {
       call <- completion.toolCalls.headOption.toRight(
         s"the model did not call the tool; it said ${snippet(completion.content)}"
@@ -239,7 +239,7 @@ object SmokeChecks {
       result <- value.strOpt.toRight(s"the tool returned something other than a string: $value")
     } yield (call, result)
 
-  private def toolOptions(tool: ToolFunction[_, _]): CompletionOptions =
+  private def toolOptions(tool: ToolFunction[_]): CompletionOptions =
     CompletionOptions(temperature = 0.0, maxTokens = Some(64)).withTools(Seq(tool))
 
   /**

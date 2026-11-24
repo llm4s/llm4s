@@ -70,8 +70,8 @@ object FileInfoTool {
   /**
    * Create a file info tool with the given configuration, returning a Result for safe error handling.
    */
-  def createSafe(config: FileConfig = FileConfig()): Result[ToolFunction[Map[String, Any], FileInfoResult]] =
-    ToolBuilder[Map[String, Any], FileInfoResult](
+  def createSafe(config: FileConfig = FileConfig()): Result[ToolFunction[FileInfoResult]] =
+    ToolBuilder[FileInfoResult](
       name = "file_info",
       description = "Get detailed information about a file or directory including size, " +
         "timestamps, type, and permissions. " +
@@ -88,7 +88,7 @@ object FileInfoTool {
   /**
    * Default file info tool instance, returning a Result for safe error handling.
    */
-  val toolSafe: Result[ToolFunction[Map[String, Any], FileInfoResult]] = createSafe()
+  val toolSafe: Result[ToolFunction[FileInfoResult]] = createSafe()
 
   private def getFileInfo(
     pathStr: String,

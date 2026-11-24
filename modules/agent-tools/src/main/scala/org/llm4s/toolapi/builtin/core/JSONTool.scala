@@ -76,8 +76,8 @@ object JSONTool {
   /**
    * The JSON tool instance, returning a Result for safe error handling.
    */
-  val toolSafe: Result[ToolFunction[Map[String, Any], JSONResult]] =
-    ToolBuilder[Map[String, Any], JSONResult](
+  val toolSafe: Result[ToolFunction[JSONResult]] =
+    ToolBuilder[JSONResult](
       name = "json_tool",
       description = "Parse, format, query, or validate JSON data. " +
         "Use 'parse' to convert JSON string to structured data, " +

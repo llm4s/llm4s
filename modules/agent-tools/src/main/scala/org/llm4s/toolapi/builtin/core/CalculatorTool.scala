@@ -68,8 +68,8 @@ object CalculatorTool {
   /**
    * The calculator tool instance, returning a Result for safe error handling.
    */
-  val toolSafe: Result[ToolFunction[Map[String, Any], CalculatorResult]] =
-    ToolBuilder[Map[String, Any], CalculatorResult](
+  val toolSafe: Result[ToolFunction[CalculatorResult]] =
+    ToolBuilder[CalculatorResult](
       name = "calculator",
       description = "Perform mathematical calculations. Supports: add, subtract, multiply, divide, " +
         "power (a^b), sqrt (square root of a), percentage (a% of b), abs (absolute value of a), " +

@@ -103,7 +103,7 @@ trait SchemaOf[A] {
   /**
    * The schema of `A` as core's schema model, described by the type's [[description]] or name: what
    * `completeStructuredOf` sends, and what a tool takes as its parameters
-   * (`ToolBuilder[A, R](name, text, SchemaOf[A].definition)`).
+   * (`ToolBuilder[R](name, text, SchemaOf[A].definition)`).
    *
    * @throws java.lang.IllegalStateException as [[schema]] does
    */

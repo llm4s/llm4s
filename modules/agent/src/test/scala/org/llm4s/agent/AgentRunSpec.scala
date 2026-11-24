@@ -18,8 +18,8 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
   final case class Echoed(text: String) derives ReadWriter
 
   /** A tool that echoes its `text` argument, as `{"text": ...}`. */
-  private def echoTool(name: String = "echo"): ToolFunction[Map[String, Any], Echoed] =
-    ToolBuilder[Map[String, Any], Echoed](
+  private def echoTool(name: String = "echo"): ToolFunction[Echoed] =
+    ToolBuilder[Echoed](
       name,
       "Echoes its text",
       Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("text", Schema.string("Text to echo"))
@@ -227,7 +227,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
     // ToolRegistry.of refuses the pair itself (#2816); a registry of another kind may still hold one
     ToolRegistry.of(Seq(echoTool(), echoTool())).left.map(_.message).left.toOption.get should include("echo")
     val twice = new ToolRegistry {
-      def tools: Seq[org.llm4s.toolapi.ToolFunction[?, ?]] = Seq(echoTool(), echoTool())
+      def tools: Seq[org.llm4s.toolapi.ToolFunction[?]] = Seq(echoTool(), echoTool())
       def execute(request: org.llm4s.toolapi.ToolCallRequest): Either[org.llm4s.toolapi.ToolCallError, ujson.Value] =
         Left(org.llm4s.toolapi.ToolCallError.UnknownFunction(request.functionName))
     }

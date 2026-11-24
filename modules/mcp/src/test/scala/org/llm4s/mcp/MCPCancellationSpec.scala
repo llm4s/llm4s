@@ -29,7 +29,7 @@ class MCPCancellationSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
 
   override def beforeAll(): Unit = {
     val noArgs = Schema.`object`[Map[String, Any]]("No parameters")
-    val hang = ToolBuilder[Map[String, Any], String]("hang", "Never returns until released", noArgs)
+    val hang = ToolBuilder[String]("hang", "Never returns until released", noArgs)
       .withHandler { _ =>
         hangStarted.countDown()
         release.await(60, TimeUnit.SECONDS): Unit
