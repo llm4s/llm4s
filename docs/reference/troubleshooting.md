@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Troubleshooting / FAQ
-description: "Fix common LLM4S errors: configuration and authentication errors, Scala version issues, agent, tool and streaming problems, and vector store errors."
+description: "Fix common LLM4S problems beyond the first run: Scala version issues, agent, tool and streaming problems, RAG, tracing, memory and MCP."
 search_title: "LLM4S troubleshooting and FAQ"
 parent: Reference
 nav_order: 11
@@ -9,70 +9,44 @@ nav_order: 11
 
 # Troubleshooting / FAQ
 
-This guide addresses common errors and issues you might encounter when building with the LLM4S framework.
+Common problems met once a program runs, and what to do about them. A program that fails on its **first run** - a
+missing API key, no default provider, a provider module that is not on the classpath, a 401, 404 or 429, a timeout, a
+proxy - is covered in [First-Run Troubleshooting](../getting-started/troubleshooting), which has the symptom, cause and
+fix of each.
 
-## Configuration Errors {#configuration-errors}
+## Configuration and authentication errors {#configuration-errors}
 
 A configuration error, and a provider's 401, 403, 404 or 429, ends with a link to its entry in
-[First-Run Troubleshooting](/getting-started/troubleshooting), which has the symptom, cause and fix of each.
-
-**Q: Something is wrong with my setup and I do not know which part**
-A: Run the [doctor](doctor). It checks the JDK, your `application.conf`, the default provider, its module, its API key, the other provider sections and (with `--local`, for a server on this machine) whether the server is running and has your model, and prints a fix for each step that fails: `sbt "Test/runMain org.llm4s.doctor.DoctorCli --local"` from your project, with `llm4s-doctor` as a test dependency (Maven, Gradle and Coursier commands are on its page). It contacts nothing unless you pass `--local` or `--live`, and does not print a key's value itself.
-
-**Q: I get a "ConfigurationError" about the provider on startup ("not found", "missing required fields", no default selected)**
-A: LLM4S does not read `LLM_MODEL`. Define a named provider section in your `application.conf` and select it as the default; its key comes from the vendor's variable, which the provider module binds:
-
-```hocon
-llm4s {
-  providers {
-    provider = "openai-main"
-    openai-main {
-      provider = "openai"
-      model    = "gpt-4o-mini"
-    }
-  }
-}
-```
-
-Then `export OPENAI_API_KEY=sk-...` and call `Llm4sConfig.defaultProvider()`. A "missing required fields ... apiKey" error means neither the vendor's variable (`OPENAI_API_KEY`) nor the section's own `apiKey` is set - or the provider module that binds the variable is missing; only the section being loaded is validated, so check the error names the section you meant. See [Configuration](../getting-started/configuration#named-provider-sections).
-
-**Q: My application configuration isn't overriding the defaults**
-A: LLM4S uses PureConfig. Ensure your `application.conf` is in the `src/main/resources` directory (or point at it with `-Dconfig.file=...`), and load providers with `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider("<section name>")` - the name of a section under `llm4s.providers`, not the provider type. `-D` system properties override `application.conf`.
-
-## Authentication Errors {#authentication-errors}
-
-**Q: I get "AuthenticationError: 401 Unauthorized"**
-A: Check your API key is correct. OpenAI keys start with `sk-`, Anthropic with `sk-ant-...`. Ensure the environment variable you set is the one the section's `apiKey = ${?VAR}` binding names, and that the section's `provider` matches the key's vendor.
+[First-Run Troubleshooting](../getting-started/troubleshooting). When you do not know which part of the setup is
+wrong, run the [doctor](doctor): it checks the JDK, your `application.conf`, the default provider, its module, its API
+key and the other provider sections, and prints a fix for each step that fails.
 
 ## Scala Version Issues
 
 **Q: I get a binary incompatibility error when adding llm4s to my project**
-A: LLM4S is published for Scala 3 only, as `_3` artifacts; there is no Scala 2.13 build. SBT usually handles this if you use `%%`, e.g., `"org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"`.
+A: LLM4S is published for Scala 3 only, as `_3` artifacts; there is no Scala 2.13 build (calling it from 2.13 through the TASTy reader is best effort: [the TASTy reader guide](../getting-started/scala-2-13)). sbt picks the `_3` artifact when you use `%%`, e.g., `"org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"`.
 
 ## Agent & Tool Errors
 
-**Q: My agent runs forever and never completes**
-A: Set a clear termination condition in your system prompt or set `maxSteps` on `Agent.run` to prevent infinite tool-calling loops. Example: `agent.run(prompt, maxSteps = 10)`.
+**Q: My agent keeps calling tools and never answers**
+A: Give it a clear stopping condition in its system prompt, and bound the turn with `Agent.builder(id, client).withMaxSteps(10)`: a turn that uses its model calls without a final answer ends `AgentStatus.StepLimitReached`. `RunBudgets` (`withTimeout`, `withMaxTokens`), passed in a `RunConfig` with `withBudgets`, bound a run's time and tokens.
 
 **Q: Tool call returns "is not a recognized tool"**
 A: Ensure you have registered the tool in your `ToolRegistry` and that the LLM is calling the exact case-sensitive tool name. Inspect `ToolParameterError` if the name matches but arguments fail validation.
 
 **Q: Agent exceeds context window limits**
-A: Use the `ContextManager` with a `HistoryCompressor` or `LLMCompressor` to automatically manage and shrink conversation history before it exceeds token limits.
+A: Add `ContextWindowMiddleware` with a `ContextWindowConfig` to the agent: it prunes what is sent to the model, never what the thread stores. Outside an agent, `ContextManager` (`org.llm4s.context`), with `HistoryCompressor` or `LLMCompressor`, shrinks a conversation before it exceeds the model's limit.
 
 **Q: Complex nested JSON parameters in tools failing to parse**
-A: Ensure your JSON schema strictly matches the types provided in your Scala `ToolFunction`. Use `SafeParameterExtractor` to debug exactly where parsing fails.
+A: Ensure your JSON schema strictly matches the types provided in your Scala `ToolFunction`. Use `SafeParameterExtractor` to see exactly where parsing fails.
 
-**Q: Tool outputs are too large and crash the context window**
-A: Wrap your tool with a `ToolOutputCompressor` to summarize or truncate large responses (like full webpage text) before adding them to the agent's memory.
+**Q: Tool outputs are too large for the context window**
+A: `ToolOutputCompressor` (`org.llm4s.context`) compresses large tool outputs in a conversation, such as a full web page, before they are sent back to the model.
 
 ## Streaming Issues
 
-**Q: streamComplete returns immediately with an empty result**
-A: Check if the provider requires `stream: true` in your `CompletionOptions` or if you are discarding the initial `TokenReceived` events. Use `StreamingAccumulator` to accumulate the chunks passed to your `onChunk` callback.
-
-**Q: streaming chunks arrive out of order**
-A: Ensure you are using `StreamingAccumulator` which correctly buffers and assembles `SSE` streams in sequence automatically.
+**Q: streamComplete returns a result but my callback sees nothing**
+A: `client.streamComplete(conversation, options, onChunk)` calls `onChunk` with each `StreamedChunk` as it arrives and returns the accumulated `Completion` when the stream ends. Read the text from each chunk's `content` in the callback; the returned `Completion` already holds the whole reply. A stream that ends without the provider's end marker is a `Left`, not a short `Completion`.
 
 ## Provider-Specific Issues
 
@@ -80,26 +54,20 @@ A: Ensure you are using `StreamingAccumulator` which correctly buffers and assem
 A: Check the `endpoint` of your `provider = "azure"` section (the deployment endpoint in your Azure OpenAI resource, e.g. `endpoint = ${?AZURE_API_BASE}`) and its `model`. Nothing reads `AZURE_API_BASE` or a deployment-name variable unless your section binds it.
 
 **Q: Ollama returns connection refused**
-A: Ensure your local Ollama daemon is running (`ollama serve`) and the `baseUrl` of your `provider = "ollama"` section is correct - usually `http://localhost:11434`. A section without `baseUrl` uses that default; bind it with `baseUrl = ${?OLLAMA_BASE_URL}` if you want to set it from the environment.
-
-**Q: Getting "Unsupported modality" error for image requests**
-A: Not all models support image generation or vision. Ensure you are using an image-capable model configuration (e.g., `dall-e-3` or `gpt-4o`) via `ImageGenerationClient`.
+A: See [Ollama is not running](../getting-started/troubleshooting#ollama-not-running).
 
 ## Vector Store & RAG Issues
 
-**Q: I get "No vector store configured" error**
-A: Ensure you have added the correct vector store dependency (e.g., `"org.llm4s" %% "llm4s-knowledgegraph-neo4j"`) and defined the configuration in your `application.conf` or environment variables for the specific backend.
-
-**Q: PostgreSQL vector store crashes on initialization**
-A: The Postgres store requires `pgvector`. Install the extension on your DB server and run `CREATE EXTENSION IF NOT EXISTS vector;` before initializing the vector store in LLM4S.
+**Q: PostgreSQL vector store fails on initialization**
+A: The Postgres store requires `pgvector`. Install the extension on your database server and run `CREATE EXTENSION IF NOT EXISTS vector;` before initializing the vector store in LLM4S.
 
 ## Observability & Tracing
 
 **Q: Traces are not showing up in Langfuse**
-A: Verify you have set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_URL`. Crucially, ensure you invoke `Tracing.shutdown()` before your application exits to avoid dropping pending trace batches.
+A: Verify you have set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_URL`, and that `llm4s-observability` is on the classpath with `TRACING_MODE=langfuse`. Call `tracing.close()` before your application exits so pending trace batches are sent.
 
 **Q: Getting RateLimitError: 429 Too Many Requests frequently**
-A: Use `LLMClientRetry` or the `ReliabilityConfig` to automatically handle 429s with exponential backoff. Example: `ReliabilityConfig.default.withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3))`.
+A: Wrap the client in `ReliableClient` (`org.llm4s.reliability`), which retries a 429 with backoff and honours the provider's `Retry-After`; set its policy with `ReliabilityConfig.default.withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3))`. See also [Rate limited (429)](../getting-started/troubleshooting#rate-limited).
 
 ## Memory & MCP Workspaces
 
@@ -107,7 +75,7 @@ A: Use `LLMClientRetry` or the `ReliabilityConfig` to automatically handle 429s 
 A: SQLite may lock the database file if accessed concurrently from multiple threads. Try using `PostgresMemoryStore` for multi-threaded applications, or wrap your accesses in a synchronization block.
 
 **Q: ContainerisedWorkspace fails with Docker socket not found**
-A: The workspace requires access to the Docker daemon. If running on Linux, ensure your user is in the `docker` group, or provide the explicit socket path to the `WorkspaceSandboxConfig`.
+A: The workspace requires access to the Docker daemon. If running on Linux, ensure your user is in the `docker` group. See [Workspace Sandbox](workspace-sandbox).
 
 **Q: Cannot connect to stdio MCP server**
 A: Build the server config with `MCPServerConfig.stdio`, which requires the exact command that starts the server, then pass it to `new MCPClientImpl(config)`. Make sure the executable is in your PATH or provide the absolute path. Example: `val config = MCPServerConfig.stdio("sqlite", Seq("npx", "-y", "@modelcontextprotocol/server-sqlite")); val client = new MCPClientImpl(config)`.

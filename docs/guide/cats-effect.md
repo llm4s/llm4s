@@ -18,7 +18,7 @@ dedicated blocking pool.
 
 ```scala
 // build.sbt
-libraryDependencies += "org.llm4s" %% "llm4s-effect" % "<version>"
+libraryDependencies += "org.llm4s" %% "llm4s-effect" % "{{ site.data.project.latest_release }}"
 ```
 
 ## LLMClientIO
@@ -27,8 +27,8 @@ libraryDependencies += "org.llm4s" %% "llm4s-effect" % "<version>"
 
 ### Acquire from the environment
 
-Use `LLMClientIO.resource[F]` to load provider config from the environment,
-build the client, and release it on scope exit:
+Use `LLMClientIO.resource[F]` to load the default provider section of your `application.conf` (the one
+`llm4s.providers.provider` names), build the client, and release it on scope exit:
 
 ```scala
 import cats.effect.{IO, IOApp}
@@ -93,6 +93,14 @@ for {
 } yield s2
 ```
 
+## Streaming a run
+
+`agentIO.stream(threadId, query)` runs one turn on a named thread and returns a `Stream[F, AgentStreamItem]`: every
+event of the turn, then `Done(result)`. `streamResume(threadId, answers)` and `streamRecover(threadId)` are `resume` and
+`recover` as streams. A refused start or a failed turn raises `LLMException`. A slow consumer loses live events and
+receives a `StreamEvent.LiveGap` instead; it does not cancel the run. Interrupting the stream cancels the turn and returns
+once it has ended, leaving the thread for `recover`.
+
 ## Cancellation
 
 Cancellation is by thread interrupt, matching the llm4s core contract. `LLMClientIO.complete`, `AgentIO` and the streaming
@@ -127,10 +135,11 @@ The variables llm4s reads, such as `OPENAI_API_KEY`, are listed in
 The provider and model are chosen by a named section in `application.conf`; see
 [Named provider sections](../getting-started/configuration#named-provider-sections).
 
-### Differences from `Agent`
+## Differences from `Agent`
 
 `AgentIO` is a deliberately thin wrapper over `Agent.start` and `AgentRun.await`. It exposes `run`,
-`continueConversation`, `recover` and `resume`, each taking a `RunConfig` and returning an `F[AgentResult]`.
+`continueConversation`, `recover` and `resume`, each taking a `RunConfig` and returning an `F[AgentResult]`, `abandon`,
+and the streaming methods above.
 It does not expose a named `ThreadId` on `run` (each `run` starts a new thread, and
 `continueConversation` continues the thread of a previous result) or `history`; for those, build the
 `Agent` yourself and call `agent.start(...)` inside `IO.blocking`.

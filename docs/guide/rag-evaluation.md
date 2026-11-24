@@ -28,6 +28,12 @@ Building a RAG (Retrieval-Augmented Generation) system is just the beginning. Th
 1. **RAGAS Evaluator** - Measure retrieval and generation quality with industry-standard metrics
 2. **Benchmarking Harness** - Systematically compare different RAG configurations
 
+Both are in `llm4s-rag` (`org.llm4s.rag.evaluation` and `org.llm4s.rag.benchmark`):
+
+```sbt
+libraryDependencies += "org.llm4s" %% "llm4s-rag" % "{{ site.data.project.latest_release }}"
+```
+
 **Key Benefits:**
 - Data-driven optimization of chunking strategies
 - Objective comparison of fusion methods (RRF vs weighted vs vector-only)
@@ -448,7 +454,8 @@ When comparing configurations:
 
 ## Benchmark Results Reference
 
-Based on actual benchmarks with RAGBench dataset:
+Measured with the RAGBench dataset; [Benchmark Results](../reference/rag-benchmark-results) says when and how, and
+your own data can rank the configurations differently:
 
 ### Fusion Strategy Results
 
@@ -643,5 +650,5 @@ object BenchmarkReport {
 ## Next Steps
 
 - **[Vector Store Guide](vector-store)** - Configure vector backends
-- **[Benchmark Results](../rag-benchmark-results.md)** - Detailed benchmark data
+- **[Benchmark Results](../reference/rag-benchmark-results)** - Detailed benchmark data, with when it was measured
 - **[Examples Gallery](/examples/)** - RAG implementation examples

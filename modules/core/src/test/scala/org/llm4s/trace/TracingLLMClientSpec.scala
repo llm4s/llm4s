@@ -22,12 +22,8 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
   private given ModelRegistryService = ModelRegistryTestSupport.defaultService()
 
   private class Recording extends Tracing {
-    val events                                                                       = ArrayBuffer.empty[TraceEvent]
-    def traceEvent(event: TraceEvent): Result[Unit]                                  = { events += event; Right(()) }
-    def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())
-    def traceError(error: Throwable, context: String): Result[Unit]                  = Right(())
-    def traceCompletion(completion: Completion, model: String): Result[Unit]         = Right(())
-    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
+    val events                                      = ArrayBuffer.empty[TraceEvent]
+    def traceEvent(event: TraceEvent): Result[Unit] = { events += event; Right(()) }
   }
 
   private val completion = Completion(

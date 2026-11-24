@@ -85,14 +85,13 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
       error.message should include(CohereEmbeddingConfigKeys.COHERE_API_KEY)
     }
 
-    "honour COHERE_EMBEDDING_BASE_URL and COHERE_EMBEDDING_MODEL" in {
+    "honour COHERE_EMBEDDING_BASE_URL" in {
       val (_, config) = ProviderTestConfig
         .loadEmbeddings(
-          """llm4s.embeddings.provider = "cohere"""",
+          """llm4s.embeddings.model = "cohere/embed-multilingual-v3.0"""",
           Map(
             "COHERE_API_KEY"            -> "k",
-            "COHERE_EMBEDDING_BASE_URL" -> "http://proxy.local",
-            "COHERE_EMBEDDING_MODEL"    -> "embed-multilingual-v3.0"
+            "COHERE_EMBEDDING_BASE_URL" -> "http://proxy.local"
           )
         )
         .fold(error => fail(error.message), identity)

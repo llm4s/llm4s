@@ -68,7 +68,7 @@ libraryDependencies ++= Seq(
       <li class="lp-card">
         <p class="lp-card__glyph">SPI</p>
         <h3>One API, many providers</h3>
-        <p>Sixteen chat providers, from OpenAI, Anthropic, Gemini and Bedrock to local Ollama, behind one small provider SPI. Adding a provider is adding a dependency; switching is a config change.</p>
+        <p>Eighteen chat providers, from OpenAI, Anthropic, Gemini and Bedrock to local Ollama and in-JVM Jlama, behind one small provider SPI. Adding a provider is adding a dependency; switching is a config change.</p>
         <a href="{{ '/guide/providers' | relative_url }}">Providers</a>
       </li>
       <li class="lp-card">
@@ -98,7 +98,7 @@ libraryDependencies ++= Seq(
     <div class="lp-split__text">
       <p class="lp-eyebrow">Your types are the contract</p>
       <h2 id="code-heading">From a case class to a checked model answer</h2>
-      <p>Write the type once. LLM4S derives the JSON schema the provider enforces, sends it, and reads the answer back into your type, all inside one <code>Result</code>.</p>
+      <p>Write the type once. LLM4S derives the JSON schema the provider enforces, sends it, and reads the answer back into your type, all inside one <code>Result</code>. The derivation is the <code>llm4s-schema-derivation</code> module (Experimental), added next to the ones above.</p>
       <ul class="lp-checks">
         <li>Provider and model come from <code>application.conf</code>, keys from the environment</li>
         <li>No exceptions to catch: a missing key, a refused request or an unreadable answer is a <code>Left</code></li>
@@ -148,7 +148,7 @@ val ticket: Result[Ticket] = for {
     <div class="lp-chips-block">
       <h3>Model providers</h3>
       <ul class="lp-chips">
-        <li>OpenAI</li><li>Anthropic</li><li>Azure OpenAI</li><li>Google Gemini</li><li>Vertex AI</li><li>Amazon Bedrock</li><li>IBM watsonx.ai</li><li>Mistral</li><li>Cohere</li><li>DeepSeek</li><li>xAI</li><li>Z.ai</li><li>OpenRouter</li><li>Requesty</li><li>Ollama</li><li>Any OpenAI-compatible endpoint</li>
+        <li>OpenAI</li><li>Azure OpenAI</li><li>Requesty</li><li>Anthropic</li><li>Google Gemini</li><li>Vertex AI</li><li>Amazon Bedrock</li><li>IBM watsonx.ai</li><li>Mistral</li><li>Cohere</li><li>DeepSeek</li><li>xAI</li><li>Z.ai</li><li>OpenRouter</li><li>Perplexity</li><li>Ollama</li><li>Jlama (in your JVM)</li><li>Any OpenAI-compatible endpoint</li>
       </ul>
       <h3>Languages, frameworks and runtimes</h3>
       <ul class="lp-chips lp-chips--alt">

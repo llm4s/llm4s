@@ -1084,6 +1084,20 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     LinearTime.timed("a megabyte of single-quoted fields", LinearTime.MegabyteHangGuard)(Redaction.redact(input))
   }
 
+  it should "redact a run of JWT prefixes in time linear in its length (#2824)" taggedAs PerformanceTest in {
+    Seq("eyJ", "eyJa.", "eyJa.eyJ", "a-").foreach { unit =>
+      LinearTime.assertLinear(s"a run of '$unit'", unit * (20000 / unit.length), unit * (80000 / unit.length))(
+        Redaction.redact(_)
+      )
+    }
+  }
+
+  it should "redact a megabyte of JWT prefixes well inside the hang guard, and a JWT at the end of a long run (#2824)" in {
+    LinearTime.timed("a megabyte of JWT prefixes", LinearTime.MegabyteHangGuard)(Redaction.redact("eyJ" * 350000))
+    val jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"
+    Redaction.redact(("a-" * 500000) + jwt + " done") shouldBe ("a-" * 500000) + "[REDACTED] done"
+  }
+
   // ---------------------------------------------------------------------------------------------
   // Idempotence, and what is left alone
   // ---------------------------------------------------------------------------------------------

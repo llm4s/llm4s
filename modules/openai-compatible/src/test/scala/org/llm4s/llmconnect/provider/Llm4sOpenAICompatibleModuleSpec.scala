@@ -208,6 +208,61 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
     }
   }
 
+  "validate() on a client built by each openai-compatible descriptor" should {
+
+    /** The path, after the base URL, of each descriptor's validation request; `None` for one with no such request. */
+    val validation: Map[ProviderDescriptor, Option[String]] = Map(
+      OpenAICompatibleProvider -> Some("/models"),
+      DeepSeekProvider         -> Some("/models"),
+      XaiProvider              -> Some("/models"),
+      MistralProvider          -> Some("/models"),
+      OpenRouterProvider       -> Some("/key"), // its /models answers without a key
+      ZaiProvider              -> None,
+      CohereProvider           -> None
+    )
+
+    "check the endpoint and the key with one request, or say that it cannot (#2830)" in {
+      validation.keySet shouldBe expectations.map(_._1).toSet
+      validation.foreach { (descriptor, path) =>
+        withClue(s"${descriptor.id.asString}: ") {
+          def client(baseUrl: String) =
+            assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))))
+          path match
+            case None => assertValidationUnsupported(client("http://localhost:1"))
+            case Some(_) =>
+              assertValidates(
+                sendJsonResponse(_, 200, """{"object":"list","data":[]}"""),
+                (exchange, status, message) =>
+                  sendJsonResponse(exchange, status, ujson.Obj("error" -> ujson.Obj("message" -> message)).render())
+              )(client)
+        }
+      }
+    }
+
+    "send a GET to the dialect's path, carrying the key a completion carries" in {
+      validation.collect { case (descriptor, Some(path)) => descriptor -> path }.foreach { (descriptor, path) =>
+        withClue(s"${descriptor.id.asString}: ") {
+          val seen = new java.util.concurrent.ConcurrentLinkedQueue[(String, String, String)]()
+          withServer("/") { exchange =>
+            seen.add(
+              (
+                exchange.getRequestMethod,
+                exchange.getRequestURI.getPath,
+                Option(exchange.getRequestHeaders.getFirst("Authorization")).getOrElse("")
+              )
+            )
+            sendJsonResponse(exchange, 200, """{"data":[]}""")
+          } { baseUrl =>
+            val client = assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(s"$baseUrl/v1"))))
+            client.validate() shouldBe Right(())
+            client.close()
+          }
+          seen.toArray.toSeq shouldBe Seq(("GET", s"/v1$path", "Bearer test-key"))
+        }
+      }
+    }
+  }
+
   "a client built by each openai-compatible descriptor, against a server that stalls" should {
 
     "return CancelledError when a call is interrupted" in {

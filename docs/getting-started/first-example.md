@@ -192,7 +192,8 @@ class ConversationExample(client: LLMClient) {
 
 ### Message Types
 
-LLM4S provides three message types:
+The three message types you write yourself (a `ToolMessage` carries a tool's result back to the model, and an agent
+adds those for you):
 
 | Type | Purpose | Example |
 |------|---------|---------|
@@ -344,7 +345,7 @@ openai-main {
 ```
 
 ```scala
-client.complete(conversation, CompletionOptions(temperature = 0.7, maxTokens = Some(1000)))
+client.complete(conversation, CompletionOptions().withTemperature(0.7).withMaxTokens(1000))
 ```
 
 ---
@@ -643,7 +644,7 @@ Great job! You've written your first LLM4S programs. Now explore:
 1. **[Configuration →](configuration)** - Learn about advanced configuration
 2. **[Agent Framework →](/examples/#agent-examples)** - Build sophisticated agents
 3. **[Tool Calling →](/examples/#tool-examples)** - Create custom tools
-4. **[Examples →](/examples/)** - Browse 69 working examples
+4. **[Examples →](/examples/)** - Browse the working examples
 
 ---
 

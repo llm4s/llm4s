@@ -51,8 +51,8 @@ llm4s.providers.vertexai-main {
 }
 ```
 
-The earlier keys `endpoint` and `organization` are still read as deprecated aliases of `project` and
-`location`, with a warning; use the new names.
+The earlier keys `endpoint` and `organization` are no longer read: rename them to `project` and
+`location`.
 
 Either section accepts `googleSearch = true` to ground answers in Google Search; the sources then arrive on
 `Completion.citations` (see

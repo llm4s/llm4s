@@ -59,6 +59,14 @@ trait OpenAICompatibleDialect:
   def headers: Seq[(String, String)] = Seq.empty
 
   /**
+   * The path, under the client's base URL, that `LLMClient.validate()` sends a `GET` to with the headers of a
+   * completion request (#2830). It must be a request the provider refuses without the credential a completion
+   * needs, or `validate()` would pass with a wrong key. Standard: `Some("/models")`, the model listing.
+   * `None` for a provider with no such request: its `validate()` is `Left(ValidationUnsupportedError)`.
+   */
+  def validationPath: Option[String] = Some("/models")
+
+  /**
    * The role a [[org.llm4s.llmconnect.model.SystemMessage]] is sent under. Standard:
    * `"system"`. Cohere's Compatibility API documents system instructions under `"developer"`.
    */

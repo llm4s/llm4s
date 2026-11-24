@@ -2,7 +2,6 @@ package org.llm4s.agent.graph
 
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.UnknownError
-import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.trace.{ TraceEvent, Tracing }
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
@@ -20,10 +19,6 @@ class TracingSubscriberSpec extends AnyFlatSpec with Matchers with EitherValues 
       events.put(event)
       if failing then Left(UnknownError("tracing down", new RuntimeException("x"))) else Right(())
     }
-    def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
-    def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
-    def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
-    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
 
     def take(count: Int): Vector[TraceEvent.CustomEvent] =
       Vector

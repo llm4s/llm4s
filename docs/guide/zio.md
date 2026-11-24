@@ -17,7 +17,7 @@ thread pool and surfacing `LLMError` directly in the ZIO error channel.
 
 ```scala
 // build.sbt
-libraryDependencies += "org.llm4s" %% "llm4s-zio" % "<version>"
+libraryDependencies += "org.llm4s" %% "llm4s-zio" % "{{ site.data.project.latest_release }}"
 ```
 
 ## LLMClientZ
@@ -26,8 +26,8 @@ libraryDependencies += "org.llm4s" %% "llm4s-zio" % "<version>"
 
 ### Acquire via ZLayer
 
-Use `LLMClientZ.layer` to load provider config from the environment, build the
-client, and release it on scope exit:
+Use `LLMClientZ.layer` to load the default provider section of your `application.conf` (the one
+`llm4s.providers.provider` names), build the client, and release it on scope exit:
 
 ```scala
 import org.llm4s.llmconnect.model.{Conversation, UserMessage}
@@ -91,6 +91,15 @@ for {
 } yield s2
 ```
 
+## Streaming a run
+
+`agentZ.stream(threadId, query)` runs one turn on a named thread and returns a
+`ZStream[Any, LLMError, AgentStreamItem]`: every event of the turn, then `Done(result)`. `streamResume(threadId, answers)`
+and `streamRecover(threadId)` are `resume` and `recover` as streams. A refused start or a failed turn fails the stream
+with the `LLMError`. A slow consumer loses live events and receives a `StreamEvent.LiveGap` instead; it does not cancel
+the run. Interrupting the stream, or stopping it early with `take`, cancels the turn and returns once it has ended, leaving
+the thread for `recover`.
+
 ## Cancellation
 
 Cancellation is by thread interrupt, matching the llm4s core contract. `LLMClientZ.complete`, `AgentZ` and the streaming
@@ -121,11 +130,11 @@ The variables llm4s reads, such as `OPENAI_API_KEY`, are listed in
 The provider and model are chosen by a named section in `application.conf`; see
 [Named provider sections](../getting-started/configuration#named-provider-sections).
 
-### Differences from `Agent`
+## Differences from `Agent`
 
 `AgentZ` is a deliberately thin wrapper over `Agent.start` and `AgentRun.await`. It exposes `run`,
 `continueConversation`, `recover` and `resume`, each taking a `RunConfig` and returning
-`ZIO[Any, LLMError, AgentResult]`. It does not expose a named `ThreadId` on `run` (each `run` starts a
+`ZIO[Any, LLMError, AgentResult]`, `abandon`, and the streaming methods below. It does not expose a named `ThreadId` on `run` (each `run` starts a
 new thread, and `continueConversation` continues the thread of a previous result) or `history`; for
 those, build the `Agent` yourself and call `agent.start(...)` inside `ZIO.attemptBlocking`.
 

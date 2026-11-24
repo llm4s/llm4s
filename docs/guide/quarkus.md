@@ -26,8 +26,8 @@ extension over the [Java API](java). Every snippet on this page is a file of the
 [`modules/samples/quarkus-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/quarkus-java), which CI
 builds and tests against the extension on every pull request.
 
-**Status.** The extension is new ([#2280](https://github.com/llm4s/llm4s/issues/2280)) and **not yet published**: build
-it from this repository as below. It is built and tested against **Quarkus 3.40.1**, in JVM mode only. Dev Services,
+**Status.** The extension is new ([#2280](https://github.com/llm4s/llm4s/issues/2280)) and **not published**: it is outside the 1.0 scope
+(publishing it with each release comes after 1.0), so build it from this repository as below. It is built and tested against **Quarkus 3.40.1**, in JVM mode only. Dev Services,
 metrics, a Dev UI card and native images are not there yet ([What is not supported](#what-is-not-supported)).
 
 ## Run the sample

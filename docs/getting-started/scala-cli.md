@@ -52,11 +52,9 @@ hello-llm4s/
 //> using scala 3.7.1
 //> using jvm 21
 //> using dep org.llm4s::llm4s-core:{{ site.data.project.latest_release }}
-{%- unless site.data.project.latest_release contains "0.4." %}
 //> using dep org.llm4s::llm4s-openai:{{ site.data.project.latest_release }}
 //> using dep org.llm4s::llm4s-ollama:{{ site.data.project.latest_release }}
 //> using dep ch.qos.logback:logback-classic:1.5.34
-{%- endunless %}
 //> using resourceDir resources
 //> using javaOpt -Dlogback.configurationFile=logback.xml
 
@@ -184,9 +182,6 @@ line is a Java dependency (a single colon, unlike the `::` Scala form); without 
 
 The `apiKey = ${?OPENAI_API_KEY}` line in the section is optional: `llm4s-openai` binds `OPENAI_API_KEY` itself,
 and a section's own `apiKey` takes precedence over it.
-
-Up to 0.4.x, `llm4s-core` included the provider clients and a logging backend, so a script for 0.4.x needs only the
-`llm4s-core` line, and the `apiKey` line in the section.
 
 ## Next steps
 

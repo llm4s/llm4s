@@ -1,8 +1,8 @@
 package org.llm4s.agent.guardrails.builtin
 
 import org.llm4s.agent.guardrails.GuardrailAction
-import org.llm4s.util.SecretPatterns
-import org.llm4s.util.SecretPatterns.SecretType
+import org.llm4s.agent.guardrails.patterns.SecretPatterns
+import org.llm4s.agent.guardrails.patterns.SecretPatterns.SecretType
 import org.scalatest.EitherValues
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -194,20 +194,84 @@ class SecretLeakGuardrailSpec extends AnyFunSpec with Matchers with EitherValues
         result should include("[REDACTED_PRIVATE_KEY]")
         (result should not).include(pemHeader)
       }
-    }
 
-    describe("redactAllWithPlaceholder()") {
-      it("replaces every secret with the supplied uniform placeholder") {
-        val placeholder = "[REDACTED]"
-        val text        = s"openai=$openAiKey aws= $awsAccessKey"
-        val result      = SecretPatterns.redactAllWithPlaceholder(text, placeholder)
-        result should include(placeholder)
-        (result should not).include(openAiKey)
-        (result should not).include(awsAccessKey)
+      it("redacts a PEM private key whole: header, body and footer (#2824)") {
+        val body =
+          "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\nVJTUt9Us8cKjMzEfYyjiWA4R4/M2bS1GB4t7NXp98C3SC6dV\n"
+        Seq("", "RSA ", "EC ", "DSA ", "OPENSSH ", "ENCRYPTED ").foreach { kind =>
+          val pem    = s"-----BEGIN ${kind}PRIVATE KEY-----\n$body-----END ${kind}PRIVATE KEY-----"
+          val result = SecretPatterns.redactAll(s"key:\n$pem\ndone", SecretType.all)
+          withClue(s"$kind: ")(result shouldBe "key:\n[REDACTED_PRIVATE_KEY]\ndone")
+          SecretType.PrivateKeyPem.findAll(s"key:\n$pem\ndone").map(_.value) shouldBe Seq(pem)
+        }
       }
 
-      it("leaves safe text unchanged") {
-        SecretPatterns.redactAllWithPlaceholder(safeText, "[REDACTED]") shouldBe safeText
+      it("redacts a PEM private key with RFC 1421 headers, and one written with escaped newlines (#2824)") {
+        val encrypted = "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,0A1B2C\n\n" +
+          "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END RSA PRIVATE KEY-----"
+        SecretPatterns.redactAll(encrypted, SecretType.all) shouldBe "[REDACTED_PRIVATE_KEY]"
+        val json =
+          """{"private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----\n"}"""
+        SecretPatterns.redactAll(json, SecretType.all) shouldBe """{"private_key": "[REDACTED_PRIVATE_KEY]\n"}"""
+      }
+
+      it("redacts each of two PEM private keys and keeps the text between them (#2824)") {
+        val pem    = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----"
+        val result = SecretPatterns.redactAll(s"$pem\nbetween\n$pem", SecretType.all)
+        result shouldBe "[REDACTED_PRIVATE_KEY]\nbetween\n[REDACTED_PRIVATE_KEY]"
+      }
+
+      it("redacts the body of a PEM private key cut off before its footer (#2824)") {
+        val cut = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nVJTUt9Us8cKj"
+        SecretPatterns.redactAll(cut, SecretType.all) shouldBe "[REDACTED_PRIVATE_KEY]"
+      }
+
+      it("redacts an OpenAI project, service-account or admin key whole, with its - and _ (#2824)") {
+        Seq("proj", "svcacct", "admin").foreach { kind =>
+          val key = s"sk-$kind-Ab3_dE-fGh1jKlMn0pQrStUvWxYz_T3BlbkFJ-aBcDeFgHiJkLmNoP_qRsT"
+          SecretPatterns.redactAll(s"key=$key done") shouldBe "key=[REDACTED_OPENAI_KEY] done"
+          SecretType.OpenAIKey.findAll(s"key=$key done").map(_.value) shouldBe Seq(key)
+        }
+      }
+
+      it("still reads an Anthropic key as an Anthropic key only") {
+        SecretPatterns.detect("key=sk-ant-api03-Ab3_dE-fGh1jKlMn0pQrStUvWxYz").map(_.secretType) shouldBe Seq(
+          SecretType.AnthropicKey
+        )
+      }
+
+      it("redacts a JWT that follows other token characters, and only the JWT (#2824)") {
+        SecretPatterns.redactAll(s"sess_$jwtToken done") shouldBe "sess_[REDACTED_JWT] done"
+        val found = SecretType.JwtToken.findAll(s"sess_$jwtToken done")
+        found.map(_.value) shouldBe Seq(jwtToken)
+        found.map(_.startIndex) shouldBe Seq(5)
+      }
+    }
+
+    describe("a SecretType of the application's own") {
+      val acme = new SecretType("Acme token", """acme_[A-Za-z0-9]{12}""".r, "[REDACTED_ACME_TOKEN]")
+      val text = s"acme=acme_abcdef123456 openai=$openAiKey"
+
+      it("is detected and redacted beside the built-in types (#2824)") {
+        val types = SecretType.default :+ acme
+        SecretPatterns.detect(text, types).map(_.secretType) shouldBe Seq(SecretType.OpenAIKey, acme)
+        SecretPatterns.redactAll(text, types) shouldBe "acme=[REDACTED_ACME_TOKEN] openai=[REDACTED_OPENAI_KEY]"
+        SecretLeakGuardrail(types).validate(text).isLeft shouldBe true
+        SecretLeakGuardrail(types, GuardrailAction.Fix).validate("acme_abcdef123456") shouldBe Right(
+          "[REDACTED_ACME_TOKEN]"
+        )
+      }
+
+      it("redacts group 1 of a pattern that has one, and keeps the rest of the match (#2824)") {
+        val keyed = new SecretType("Keyed", """password=(\w+)""".r, "[REDACTED_PASSWORD]")
+        keyed.findAll("password=hunter2 x").map(m => (m.value, m.startIndex, m.endIndex)) shouldBe Seq(
+          ("hunter2", 9, 16)
+        )
+        keyed.redact("password=hunter2 x") shouldBe "password=[REDACTED_PASSWORD] x"
+      }
+
+      it("writes a placeholder holding $ or a backslash literally") {
+        new SecretType("Odd", "secret".r, "$0\\1").redact("a secret b") shouldBe "a $0\\1 b"
       }
     }
 

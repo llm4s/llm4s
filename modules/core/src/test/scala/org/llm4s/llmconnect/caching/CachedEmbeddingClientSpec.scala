@@ -6,14 +6,17 @@ import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalamock.scalatest.MockFactory
+import org.scalatest.EitherValues
+import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.types.Result
 
-class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFactory {
+class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFactory with EitherValues {
 
   val testModel = EmbeddingModelConfig("test-model", 1536)
 
   "CachedEmbeddingClient" should "only call the base client for cache misses" in {
     val baseClient   = mock[EmbeddingClient]
-    val cache        = new InMemoryEmbeddingCache[Seq[Double]]()
+    val cache        = InMemoryEmbeddingCache.create().value
     val cachedClient = new CachedEmbeddingClient(baseClient, cache)
 
     val request      = EmbeddingRequest(Seq("hello"), testModel)
@@ -34,7 +37,7 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
 
   it should "process batch requests by hitting cache for existing strings" in {
     val baseClient   = mock[EmbeddingClient]
-    val cache        = new InMemoryEmbeddingCache[Seq[Double]]()
+    val cache        = InMemoryEmbeddingCache.create().value
     val cachedClient = new CachedEmbeddingClient(baseClient, cache)
 
     // Pre-seed the cache for "text1"
@@ -56,7 +59,7 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
 
   it should "not cache base client errors, allowing the next call to retry" in {
     val baseClient   = mock[EmbeddingClient]
-    val cache        = new InMemoryEmbeddingCache[Seq[Double]]()
+    val cache        = InMemoryEmbeddingCache.create().value
     val cachedClient = new CachedEmbeddingClient(baseClient, cache)
 
     val request   = EmbeddingRequest(Seq("hello"), testModel)
@@ -87,7 +90,7 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
 
   it should "deduplicate identical texts within the same batch before calling the base client" in {
     val baseClient   = mock[EmbeddingClient]
-    val cache        = new InMemoryEmbeddingCache[Seq[Double]]()
+    val cache        = InMemoryEmbeddingCache.create().value
     val cachedClient = new CachedEmbeddingClient(baseClient, cache)
 
     // Request with duplicated inputs
@@ -109,5 +112,56 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
     val expectedFinalVectors = Seq(Seq(1.1, 1.1), Seq(2.2, 2.2), Seq(1.1, 1.1))
 
     result.map(_.embeddings) shouldBe Right(expectedFinalVectors)
+  }
+
+  it should "be an EmbeddingProvider, so an EmbeddingClient can wrap it" in {
+    val base                          = mock[EmbeddingClient]
+    val cached                        = new CachedEmbeddingClient(base, InMemoryEmbeddingCache.create().value)
+    val asProvider: EmbeddingProvider = cached
+    asProvider shouldBe cached
+  }
+
+  it should "keep the base response's usage, metadata and dim when it called the base client" in {
+    val baseClient   = mock[EmbeddingClient]
+    val cachedClient = new CachedEmbeddingClient(baseClient, InMemoryEmbeddingCache.create().value)
+    val request      = EmbeddingRequest(Seq("a", "b"), testModel)
+    val usage        = EmbeddingUsage(promptTokens = 7, totalTokens = 7)
+    val fresh = EmbeddingResponse(
+      Seq(Seq(1.0, 0.0), Seq(0.0, 1.0)),
+      metadata = Map("provider" -> "test"),
+      dim = Some(2),
+      usage = Some(usage)
+    )
+    (baseClient.embed _).expects(request).returning(Right(fresh)).once()
+
+    val response = cachedClient.embed(request).value
+    response.embeddings shouldBe fresh.embeddings
+    response.usage shouldBe Some(usage)
+    response.metadata shouldBe Map("provider" -> "test")
+    response.dim shouldBe Some(2)
+
+    // Served wholly from the cache: no tokens were spent, and the dimension is the vectors'
+    val cachedResponse = cachedClient.embed(request).value
+    cachedResponse.embeddings shouldBe fresh.embeddings
+    cachedResponse.usage shouldBe None
+    cachedResponse.dim shouldBe Some(2)
+  }
+
+  it should "treat a failing cache as a miss, and still answer when storing fails" in {
+    val failing = new EmbeddingCache {
+      private val boom                                           = org.llm4s.error.ProcessingError("cache", "down")
+      override def get(key: String): Result[Option[Seq[Double]]] = Left(boom)
+      override def put(key: String, embedding: Seq[Double]): Result[Unit] = Left(boom)
+      override def clear(): Result[Unit]                                  = Left(boom)
+    }
+    val baseClient   = mock[EmbeddingClient]
+    val cachedClient = new CachedEmbeddingClient(baseClient, failing)
+    val request      = EmbeddingRequest(Seq("hello"), testModel)
+    (baseClient.embed _).expects(request).returning(Right(EmbeddingResponse(Seq(Seq(0.5))))).twice()
+
+    cachedClient.embed(request).value.embeddings shouldBe Seq(Seq(0.5))
+    cachedClient.embed(request).value.embeddings shouldBe Seq(Seq(0.5))
+    cachedClient.cacheStats shouldBe None
+    cachedClient.clearCache().isLeft shouldBe true
   }
 }

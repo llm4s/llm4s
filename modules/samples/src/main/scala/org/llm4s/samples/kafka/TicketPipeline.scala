@@ -12,7 +12,7 @@ import fs2.kafka.{
   ProducerRecords,
   ProducerResult
 }
-import org.llm4s.error.LLMError
+import org.llm4s.error.{ CircuitOpenError, LLMError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
@@ -153,7 +153,9 @@ object TicketPipeline {
         IO.interruptible(client.completeStructuredOf[TicketLabels](conversation(ticket), Options)).flatMap {
           case Right(labels) =>
             IO.pure(Outcome.Enriched(EnrichedTicket(ticket.id, ticket.text, labels)))
-          case Left(error) if retryPolicy.isRetryable(error) =>
+          // An open circuit is not retried at once (it is not `isRetryable`), but the record is not at fault
+          // either: it is redelivered like any transient failure, not dead-lettered.
+          case Left(error) if retryPolicy.isRetryable(error) || error.isInstanceOf[CircuitOpenError] =>
             IO.raiseError(new TransientFailure(error, record.topic, record.partition, record.offset))
           case Left(error) =>
             IO.pure(deadLetter("llm", s"${error.getClass.getSimpleName}: ${error.message}"))

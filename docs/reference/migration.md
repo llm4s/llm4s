@@ -8,6 +8,8 @@ nav_order: 2
 
 # Migration Guide
 
+This page is the canonical record of every breaking change since 0.4.1. To find the notes that apply to the release
+you are on, start from [Migrating from 0.x to 1.0](../migrations/0x-to-1x), which has an entry point per release.
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
 by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the source breaks are
 [Multimodal content parts](#multimodal-content-parts-1913) and
@@ -50,6 +52,8 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
 [`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
+[the legacy embedding provider selector is removed](#the-legacy-embedding-provider-selector-is-removed),
+[Vertex AI no longer reads `endpoint` and `organization`](#vertex-ai-no-longer-reads-endpoint-and-organization),
 [`ProviderRegistry` lookups accept aliases](#providerregistry-lookups-accept-aliases-2812),
 [`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
 [context trimming fails when nothing fits, and externalizes only into a store](#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817),
@@ -409,6 +413,53 @@ Behaviour changes:
   and recorded in `report.failures`. The module's other descriptors are kept.
 - **`discover()` scans core's own class loader as well as the context loader.** A module both loaders see counts once.
   `discover(loader)` scans only the loaders you pass.
+
+## The legacy embedding provider selector is removed
+
+Embeddings are selected by `EMBEDDING_MODEL` (`llm4s.embeddings.model`) alone, as `provider/model`. The older form,
+`EMBEDDING_PROVIDER` (`llm4s.embeddings.provider`) naming only the provider, is no longer bound or read:
+
+```bash
+# before
+EMBEDDING_PROVIDER=openai
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+
+# after
+EMBEDDING_MODEL=openai/text-embedding-3-small
+```
+
+In HOCON, replace `llm4s.embeddings.provider = "openai"` with
+`llm4s.embeddings.model = "openai/text-embedding-3-small"`. A configuration that still sets
+`llm4s.embeddings.provider` and no model fails to load with
+`llm4s.embeddings.provider ('openai') is no longer read: set EMBEDDING_MODEL (llm4s.embeddings.model) to provider/model, e.g. openai/<model>, and remove llm4s.embeddings.provider`;
+one that sets only the `EMBEDDING_PROVIDER` variable gets `Missing embedding config: set EMBEDDING_MODEL ...`.
+`ConfigKeys.EMBEDDING_PROVIDER` is removed. The model now always comes from `EMBEDDING_MODEL`: a block's own
+`llm4s.embeddings.<id>.model` (and the `<PROVIDER>_EMBEDDING_MODEL` variable bound to it), and a provider's default
+model, applied only to the provider-only form, so move a model set there into `EMBEDDING_MODEL`.
+
+## Vertex AI no longer reads `endpoint` and `organization`
+
+Vertex AI's `endpoint` and `organization` keys, renamed to `project` and `location` in 0.5.0
+([the note](#vertex-ai-endpoint-becomes-project-organization-becomes-location)), are no longer accepted as aliases.
+Rename them:
+
+```hocon
+vertex-main {
+  provider = "vertexai"
+  model    = "gemini-2.0-flash"
+  project  = "my-gcp-project"    # was endpoint
+  location = "europe-west4"      # was organization; optional, default us-central1
+}
+```
+
+They are now unknown keys: logged with a warning that names them and lists the keys Vertex AI accepts, and ignored.
+A section that sets `endpoint` and no `project` fails with
+`- project: the GCP project ID that owns your Vertex AI resources (set it in application.conf under llm4s.providers.<name>.project)`;
+one that sets `organization` and no `location` uses `us-central1`, so check the warning.
+
+For provider authors, the alias mechanism goes with them: `ProviderConfigKey` loses `deprecatedAliases` and
+`withDeprecatedAliases`, and `ProviderConfigSpec.BuiltinAliasKeys` is removed. Before 1.0 a key is renamed outright,
+with a migration note ([compatibility policy](compatibility-policy)).
 
 ## `llm4s-agent` types are tiered and growth-safe (#2778)
 
@@ -897,7 +948,8 @@ The `PositionalPatternsGainFields` Scalafix rule adds these binders ([Scalafix](
 
 ## Changes since 0.5.1 that no rule automates
 
-The Scalafix rule `Llm4sMigrate_1_0` ([Scalafix](scalafix#migration-rules)) rewrites the mechanical source breaks
+The Scalafix rule `Llm4sMigrate_1_0` ([Scalafix](scalafix#migration-rules); published at 1.0; before that only as
+source in this repository) rewrites the mechanical source breaks
 below: `.copy` on the newly growth-safe types, `String` API keys of the provider configs, the `fromValues` argument
 order, `Completion.created`, positional patterns on types that gained fields, the `ServiceErrorOps` import and
 `loadTextEmbeddingModel`, and since 0.6.0 `ReasoningEffort.None` and the string comparisons of
@@ -1304,14 +1356,14 @@ In a checkout of this repository `sbt "configPolicy/runMain org.llm4s.configpoli
 Nothing to change: `llm4s-secrets-vault` is a new, experimental module over `llm4s-core` alone, and no other module
 depends on it. To read a provider's API key from HashiCorp Vault without Vault Agent or a CSI driver, add it and set
 `VaultApiKeyProvider(VaultSettings(...))` with `withApiKeyProvider`; see
-[Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation). `apiKeyFile` is unchanged.
+[Secrets and key rotation](../guide/production-deployment#secrets-and-key-rotation). `apiKeyFile` is unchanged.
 
 ## `llm4s-secrets-aws`, a new module (#2479)
 
 Nothing to change: `llm4s-secrets-aws` is a new, experimental module over `llm4s-core` alone, and no other module
 depends on it. To read a provider's API key from AWS Secrets Manager without the Secrets Store CSI driver or External
 Secrets Operator, add it and set `AwsSecretsManagerApiKeyProvider(AwsSecretsManagerSettings(...))` with
-`withApiKeyProvider`; see [Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation). `apiKeyFile`
+`withApiKeyProvider`; see [Secrets and key rotation](../guide/production-deployment#secrets-and-key-rotation). `apiKeyFile`
 is unchanged.
 
 ## `llm4s-repl`, a new module (#2342)
@@ -3970,8 +4022,8 @@ vertex-main {
 }
 ```
 
-The old spellings still work for now, as deprecated aliases: each one logs a warning naming the
-section and the key to rename it to, and will stop working in a later release. Setting both
+The old spellings were kept as deprecated aliases until 0.7.0, which removed them
+([note](#vertex-ai-no-longer-reads-endpoint-and-organization)). Setting both
 `project` and a *different* `endpoint` (or `location` and a different `organization`) is an
 error rather than a guess. A missing project is now reported as
 `- project: the GCP project ID that owns your Vertex AI resources (set it in application.conf under llm4s.providers.<name>.project)`.

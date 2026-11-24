@@ -102,13 +102,4 @@ class RedactionSpec extends AnyFlatSpec with Matchers {
     (redacted should not).include("sk-proj")
     redacted should include("truncated")
   }
-
-  "Redaction.safe" should "handle strings" in {
-    val result = Redaction.safe("Key: sk-proj-abc123def456ghi789jkl012mno345")
-    result should include("[REDACTED]")
-  }
-
-  it should "handle null" in {
-    Redaction.safe(null) shouldBe "null"
-  }
 }

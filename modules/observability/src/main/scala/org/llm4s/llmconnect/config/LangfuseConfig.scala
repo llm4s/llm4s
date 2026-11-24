@@ -24,6 +24,8 @@ import org.llm4s.trace.TracingMode
  * @param env       deployment environment tag attached to every trace; defaults to `"production"`
  * @param release   application release identifier forwarded to Langfuse; defaults to `"1.0.0"`
  * @param version   SDK/integration version forwarded to Langfuse; defaults to `"1.0.0"`
+ * @param publicTraces whether traces are sent `public`, which lets anyone holding a trace's URL read it without
+ *                  signing in to Langfuse; `llm4s.tracing.langfuse.public`, false unless that is `true` (#2828)
  */
 case class LangfuseConfig(
   url: String = LangfuseConfig.DEFAULT_URL,
@@ -31,11 +33,12 @@ case class LangfuseConfig(
   secretKey: Option[Secret] = None,
   env: String = LangfuseConfig.DEFAULT_ENV,
   release: String = LangfuseConfig.DEFAULT_RELEASE,
-  version: String = LangfuseConfig.DEFAULT_VERSION
+  version: String = LangfuseConfig.DEFAULT_VERSION,
+  publicTraces: Boolean = false
 ) {
   override def toString: String =
     s"LangfuseConfig(url=$url, publicKey=$publicKey, secretKey=$secretKey, " +
-      s"env=$env, release=$release, version=$version)"
+      s"env=$env, release=$release, version=$version, publicTraces=$publicTraces)"
 }
 
 object LangfuseConfig {
@@ -61,6 +64,7 @@ object LangfuseConfig {
    *
    * Values are trimmed, and a blank one counts as unset, so that an empty
    * `LANGFUSE_PUBLIC_KEY=` does not pass for a key. Unset values take the defaults above.
+   * `public` is read as true only when it is `true` (in any case): any other value leaves traces private.
    */
   def fromExtras(extras: Map[String, String]): LangfuseConfig = {
     def value(key: String): Option[String] = extras.get(key).map(_.trim).filter(_.nonEmpty)
@@ -70,7 +74,8 @@ object LangfuseConfig {
       secretKey = value("secretKey").map(Secret(_)),
       env = value("env").getOrElse(DEFAULT_ENV),
       release = value("release").getOrElse(DEFAULT_RELEASE),
-      version = value("version").getOrElse(DEFAULT_VERSION)
+      version = value("version").getOrElse(DEFAULT_VERSION),
+      publicTraces = value("public").exists(_.equalsIgnoreCase("true"))
     )
   }
 }

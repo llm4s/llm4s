@@ -64,17 +64,6 @@ class VoyageEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       cfg.baseUrl shouldBe "https://api.voyageai.com/v1"
     }
 
-    "successfully load Voyage embeddings via legacy provider setting" in {
-      val (provider, cfg) =
-        load(
-          """llm4s { embeddings { provider = "voyage", voyage { apiKey = "vk-legacy", model = "voyage-2" } } }"""
-        ).value
-
-      provider shouldBe "voyage"
-      cfg.model shouldBe "voyage-2"
-      cfg.apiKey.reveal shouldBe "vk-legacy"
-    }
-
     "fail with clear error when Voyage API key is missing" in {
       val error = load(
         """llm4s { embeddings { model = "voyage/voyage-3", voyage { baseUrl = "https://api.voyageai.com/v1" } } }"""
@@ -84,31 +73,14 @@ class VoyageEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         .next() shouldBe s"Missing voyage embeddings apiKey: set ${VoyageConfigKeys.VOYAGE_API_KEY}, or set " +
         "apiKey under llm4s.embeddings.voyage in application.conf"
     }
-
-    "fail with clear error when Voyage model is missing in legacy mode" in {
-      val error = load("""llm4s { embeddings { provider = "voyage", voyage { apiKey = "vk-test" } } }""").left.value
-
-      error.message should include("Missing voyage embeddings model")
-      error.message should include(VoyageConfigKeys.VOYAGE_EMBEDDING_MODEL)
-    }
-
-    "prefer unified model format over legacy provider when both are set" in {
-      val (provider, cfg) = load(
-        """llm4s { embeddings { model = "voyage/voyage-3-large", provider = "openai", voyage { apiKey = "vk-unified" } } }"""
-      ).value
-
-      provider shouldBe "voyage"
-      cfg.model shouldBe "voyage-3-large"
-    }
   }
 
   "Llm4sConfig.embeddings" should {
 
     "load VoyageAI embeddings config via llm4s.*" in {
       val props = Map(
-        "llm4s.embeddings.provider"       -> "voyage",
+        "llm4s.embeddings.model"          -> "voyage/voyage-3-large",
         "llm4s.embeddings.voyage.baseUrl" -> "https://api.voyage.ai",
-        "llm4s.embeddings.voyage.model"   -> "voyage-3-large",
         "llm4s.embeddings.voyage.apiKey"  -> "vk-test"
       )
       withProps(props) {

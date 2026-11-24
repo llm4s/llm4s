@@ -1,6 +1,5 @@
 package org.llm4s.trace
 
-import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.trace.model._
 import org.llm4s.trace.store.TraceStore
 import org.llm4s.types.{ Result, TraceId }
@@ -64,68 +63,6 @@ class TraceCollectorTracing[F[_]](
       }
     }
   }
-
-  override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] =
-    lift(
-      store.saveSpan(
-        Span
-          .start(traceId, s"tool:$toolName", SpanKind.ToolCall)
-          .withAttribute("tool_name", SpanValue.StringValue(toolName))
-          .withAttribute("input", SpanValue.StringValue(input))
-          .withAttribute("output", SpanValue.StringValue(output))
-          .end()
-          .withStatus(SpanStatus.Ok)
-      )
-    )
-
-  override def traceError(error: Throwable, context: String): Result[Unit] = {
-    val errorMessage = Option(error.getMessage).getOrElse("")
-    lift(
-      store.saveSpan(
-        Span
-          .start(traceId, "error", SpanKind.Internal)
-          .withAttribute("error_type", SpanValue.StringValue(error.getClass.getSimpleName))
-          .withAttribute("error_message", SpanValue.StringValue(errorMessage))
-          .withAttribute("context", SpanValue.StringValue(context))
-          .end()
-          .withStatus(SpanStatus.Error(s"${error.getClass.getSimpleName}: $errorMessage"))
-      )
-    )
-  }
-
-  override def traceCompletion(completion: Completion, model: String): Result[Unit] =
-    lift(
-      store.saveSpan(
-        completion.servedTier
-          .foldLeft(
-            Span
-              .start(traceId, s"llm:$model", SpanKind.LlmCall)
-              .withAttribute("model", SpanValue.StringValue(model))
-              .withAttribute("completion_id", SpanValue.StringValue(completion.id))
-              .withAttribute("tool_calls_count", SpanValue.LongValue(completion.message.toolCalls.length.toLong))
-              .withAttribute("content_length", SpanValue.LongValue(completion.message.content.length.toLong))
-          )((span, tier) => span.withAttribute("service_tier", SpanValue.StringValue(TraceEvent.serviceTierName(tier))))
-          .end()
-          .withStatus(SpanStatus.Ok)
-      )
-    )
-
-  override def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
-    lift(
-      store.saveSpan(
-        Span
-          .start(traceId, s"tokens:$operation", SpanKind.Internal)
-          .withAttribute("model", SpanValue.StringValue(model))
-          .withAttribute("operation", SpanValue.StringValue(operation))
-          .withAttribute("prompt_tokens", SpanValue.LongValue(usage.promptTokens.toLong))
-          .withAttribute("completion_tokens", SpanValue.LongValue(usage.completionTokens.toLong))
-          .withAttribute("thinking_tokens", SpanValue.LongValue(usage.thinkingTokens.getOrElse(0).toLong))
-          .withAttribute("output_tokens", SpanValue.LongValue(usage.totalOutputTokens.toLong))
-          .withAttribute("total_tokens", SpanValue.LongValue(usage.totalTokens.toLong))
-          .end()
-          .withStatus(SpanStatus.Ok)
-      )
-    )
 
   /**
    * The span an event becomes. An event placed in a trace (design 4.58) keeps its placement: its own trace and span
@@ -249,38 +186,28 @@ class TraceCollectorTracing[F[_]](
           )
         )
 
-      case TraceEvent.AgentRunEnded(
-            threadId,
-            runId,
-            agent,
-            status,
-            messages,
-            usage,
-            ts,
-            parentThread,
-            parentRun,
-            _,
-            _
-          ) =>
+      // by field, never by position: the event grows
+      case run: TraceEvent.AgentRunEnded =>
         Span(
           spanId = spanId,
           traceId = traceId,
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.AgentCall,
-          startTime = ts,
-          endTime = Some(ts),
+          startTime = run.timestamp,
+          endTime = Some(run.timestamp),
           status = SpanStatus.Ok,
           attributes = Map(
-            "thread_id"     -> SpanValue.StringValue(threadId),
-            "run_id"        -> SpanValue.StringValue(runId),
-            "agent"         -> SpanValue.StringValue(agent),
-            "status"        -> SpanValue.StringValue(status),
-            "message_count" -> SpanValue.LongValue(messages.size.toLong),
-            "input_tokens"  -> SpanValue.LongValue(usage.inputTokens),
-            "output_tokens" -> SpanValue.LongValue(usage.outputTokens)
-          ) ++ parentThread.map(id => "parent_thread_id" -> SpanValue.StringValue(id)) ++
-            parentRun.map(id => "parent_run_id" -> SpanValue.StringValue(id))
+            "thread_id"     -> SpanValue.StringValue(run.threadId),
+            "run_id"        -> SpanValue.StringValue(run.runId),
+            "agent"         -> SpanValue.StringValue(run.agent),
+            "status"        -> SpanValue.StringValue(run.status),
+            "message_count" -> SpanValue.LongValue(run.messages.size.toLong),
+            "input_tokens"  -> SpanValue.LongValue(run.usage.inputTokens),
+            "output_tokens" -> SpanValue.LongValue(run.usage.outputTokens)
+          ) ++ run.parentThreadId.map(id => "parent_thread_id" -> SpanValue.StringValue(id)) ++
+            run.parentRunId.map(id => "parent_run_id" -> SpanValue.StringValue(id)) ++
+            run.userId.map(id => "user_id" -> SpanValue.StringValue(id))
         )
 
       case TraceEvent.CustomEvent(name, data, ts, _) =>

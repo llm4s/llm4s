@@ -115,9 +115,17 @@ class Llm4sSettingsSpec extends AnyWordSpec with Matchers with EitherValues:
     "keep every module's reference.conf beneath the given config" in {
       val s = settings("")
       s.tracing().value.mode shouldBe TracingMode.Console
-      s.modelRegistryConfig().value.resourcePath shouldBe defined
+      s.modelRegistryConfig().value shouldBe org.llm4s.model.ModelRegistryConfig.default
       s.httpNetwork().isRight shouldBe true
       s.exchangeLogging().isRight shouldBe true
+    }
+
+    "read one model registry source, and refuse two" in {
+      settings("""llm4s.modelRegistry.filePath = "/tmp/models.json"""").modelRegistryConfig().value.source shouldBe
+        org.llm4s.model.ModelRegistrySource.File("/tmp/models.json")
+      settings(
+        """llm4s.modelRegistry { filePath = "/tmp/models.json", url = "https://example.invalid/m.json" }"""
+      ).modelRegistryConfig().isLeft shouldBe true
     }
 
     "read the tracing block of the given config" in {

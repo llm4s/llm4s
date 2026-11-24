@@ -10,9 +10,9 @@ getting-started/first-example.md | 9beb2bb95c | skip | sbt build definition, not
 getting-started/first-example.md | a984c0ef30 | skip | three lines of a for-comprehension shown on their own: they are the generators of the full example above
 getting-started/configuration.md | c54b304c14 | with | import org.llm4s.config.Llm4sConfig
 getting-started/configuration.md | 7b6f72222c | with | import org.llm4s.llmconnect.model._
-getting-started/configuration.md | 85fecd44b4 | with | import org.llm4s.llmconnect.model._
+getting-started/configuration.md | 04567a0cb2 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 89f9b90d1e | with | import org.llm4s.types.Result
-getting-started/first-example.md | 6cfa524a1f | with | import org.llm4s.llmconnect.model._
+getting-started/first-example.md | 5845843420 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | f69eeea180 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 755ae2a95f | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 943f967995 | with | import org.llm4s.agent.Agent; import org.llm4s.toolapi.ToolRegistry
@@ -20,7 +20,7 @@ getting-started/first-example.md | 14b2aad038 | with | import org.llm4s.llmconne
 getting-started/first-example.md | 3efbf67f4d | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService
 getting-started/first-example.md | 7cb679647e | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 5a602dab3e | with | import org.llm4s.llmconnect.model._
-getting-started/ollama-quickstart.md | 36e396831d | with | import org.llm4s.llmconnect.model.CompletionOptions
+getting-started/ollama-quickstart.md | 4e9c8e6279 | with | import org.llm4s.llmconnect.model.CompletionOptions
 getting-started/testing-guide.md | 2da8240d29 | skip | conceptual pseudocode by its own comment: InMemoryVectorStore, embedder and RAGPipeline are stand-ins, not llm4s classes
 getting-started/first-example.md | dc23df3294 | with | import org.llm4s.llmconnect.model._
 getting-started/testing-guide.md | 76552d46c3 | skip | sbt build definition, not Scala source
@@ -59,7 +59,7 @@ getting-started/installation.md | 26688d4223 | skip | sbt build definition, not 
 getting-started/installation.md | 975cc0444f | skip | sbt build definition, not Scala source
 getting-started/installation.md | 5c8e7dda9b | skip | sbt build definition, not Scala source
 getting-started/installation.md | 18f032097a | skip | sbt build definition, not Scala source
-getting-started/installation.md | 6daa317308 | skip | Scala CLI directives with Liquid template lines, not Scala source
+getting-started/installation.md | 19c4eb54a5 | skip | Scala CLI directives (the version is a template variable), not Scala source
 guide/providers.md | e116ab7e84 | skip | sbt build definition, not Scala source
 guide/providers.md | 42d96ef6be | skip | sbt build definition, not Scala source
 guide/providers.md | eefc81026e | skip | sbt build definition, not Scala source
@@ -77,7 +77,6 @@ guide/basic-usage.md | 29d02e8f18 | with | import org.llm4s.llmconnect.model._; 
 guide/basic-usage.md | 9eb86e6783 | with | import org.llm4s.llmconnect.model._; import org.llm4s.types.Result
 guide/basic-usage.md | deca383ea9 | with | import org.llm4s.llmconnect.model._; import org.llm4s.types.Result
 guide/basic-usage.md | ed6fda0f98 | with | import org.llm4s.llmconnect.model._; import org.llm4s.types.Result
-guide/basic-usage.md | dd07d6089e | with | import org.llm4s.llmconnect.model._; import org.llm4s.types.Result
 guide/basic-usage.md | 90dff515d7 | with | import org.llm4s.llmconnect.model._; import org.llm4s.types.Result
 guide/basic-usage.md | 3924ea54e4 | with | import org.llm4s.error.LLMError
 guide/error-handling.md | 3924ea54e4 | with | import org.llm4s.error.LLMError
@@ -99,34 +98,33 @@ guide/vector-store.md | dd3f42e9a1 | with | import org.llm4s.vectorstore.Metadat
 guide/vector-store.md | 15dd88908d | with | import org.llm4s.vectorstore.MetadataFilter._
 guide/vector-store.md | 7cfa35e8f5 | with | import org.llm4s.vectorstore._
 guide/vector-store.md | e3b73b6495 | with | import org.llm4s.vectorstore._; import org.llm4s.vectorstore.MetadataFilter._
-guide/vector-store.md | df1066d8ee | with | import org.llm4s.types.Result; import org.llm4s.vectorstore._
-reliability-guide.md | eba4e8740f | skip | the constructor's signature, with parameter types in place of arguments; the call is in the next block
-reliability-guide.md | 59c7ab6934 | skip | API reference: the class's signature and members without their bodies
-reliability-guide.md | f4a41421d1 | with | import org.llm4s.reliability._
-reliability-guide.md | 3cb4356d69 | with | import org.llm4s.reliability._
-reliability-guide.md | fd2c3a178c | with | import org.llm4s.reliability._
-reliability-guide.md | a48b40ce3c | with | import org.llm4s.reliability._; import scala.concurrent.duration._; import org.llm4s.error._
-reliability-guide.md | b30e8f450e | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-reliability-guide.md | c7ecba27e8 | with | import org.llm4s.reliability._
-reliability-guide.md | b52cbbfd39 | with | import org.llm4s.reliability._
-reliability-guide.md | 86288480cb | with | import org.llm4s.reliability._
-reliability-guide.md | 37f427ee8d | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-reliability-guide.md | d58076267d | with | import org.llm4s.reliability._
-reliability-guide.md | 9d9432e21d | with | import org.llm4s.reliability._
-reliability-guide.md | 2c0d6d235a | with | import org.llm4s.reliability._
-reliability-guide.md | c727d02cbc | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-reliability-guide.md | 73e2ef368d | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-reliability-guide.md | 94a0e049b6 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-reliability-guide.md | 25116bcad0 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-reliability-guide.md | f07b226a63 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-reliability-guide.md | fd762bb41c | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-reliability-guide.md | 72f66091ea | with | import org.llm4s.reliability._
-reliability-guide.md | 96df290f68 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService
-reliability-guide.md | 7d18961271 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService; import org.llm4s.reliability._
-reliability-guide.md | 3e60aa3697 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
-reliability-guide.md | ea2b58a14f | with | import org.llm4s.error.LLMError; import scala.concurrent.duration.FiniteDuration
-reliability-guide.md | b36aaef65f | with | import scala.concurrent.duration._
-reliability-guide.md | fa35020d32 | with | import scala.concurrent.duration._
+guide/vector-store.md | 50faf924a4 | with | import org.llm4s.types.Result; import org.llm4s.vectorstore._
+guide/reliability.md | eba4e8740f | skip | the constructor's signature, with parameter types in place of arguments; the call is in the next block
+guide/reliability.md | 98d892e5ec | skip | API reference: the class's signature and members without their bodies
+guide/reliability.md | f4a41421d1 | with | import org.llm4s.reliability._
+guide/reliability.md | 3cb4356d69 | with | import org.llm4s.reliability._
+guide/reliability.md | fd2c3a178c | with | import org.llm4s.reliability._
+guide/reliability.md | a48b40ce3c | with | import org.llm4s.reliability._; import scala.concurrent.duration._; import org.llm4s.error._
+guide/reliability.md | b30e8f450e | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+guide/reliability.md | c7ecba27e8 | with | import org.llm4s.reliability._
+guide/reliability.md | 86288480cb | with | import org.llm4s.reliability._
+guide/reliability.md | 37f427ee8d | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+guide/reliability.md | d58076267d | with | import org.llm4s.reliability._
+guide/reliability.md | 9d9432e21d | with | import org.llm4s.reliability._
+guide/reliability.md | 2c0d6d235a | with | import org.llm4s.reliability._
+guide/reliability.md | c727d02cbc | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+guide/reliability.md | 73e2ef368d | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+guide/reliability.md | 94a0e049b6 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+guide/reliability.md | f07b226a63 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+guide/reliability.md | fd762bb41c | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+guide/reliability.md | 72f66091ea | with | import org.llm4s.reliability._
+guide/reliability.md | 96df290f68 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService
+guide/reliability.md | 7d18961271 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService; import org.llm4s.reliability._
+guide/reliability.md | f2ecd432aa | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+guide/reliability.md | 3693c9098a | with | import scala.concurrent.duration._
+guide/reliability.md | 04c0cd961c | with | import scala.concurrent.duration._
+guide/reliability.md | 708c0ce1fc | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+guide/reliability.md | 5b1796e84b | with | import org.llm4s.error.LLMError; import scala.concurrent.duration.FiniteDuration
 guide/agents/handoffs.md | a9aa90095d | skip | specialistBuilder stands for the reader's specialist AgentBuilder; the Quick Start above shows a full one
 guide/agents/handoffs.md | 8797be310f | with | import org.llm4s.agent.Agent; import org.llm4s.agent.Handoff
 guide/agents/handoffs.md | 66c968311e | skip | specialistBuilder stands for the reader's specialist AgentBuilder; the Quick Start above shows a full one
@@ -141,10 +139,47 @@ guide/agents/handoffs.md | 7fdebf1862 | with | import org.llm4s.agent.Handoff
 guide/agents/handoffs.md | 325a7ae427 | skip | agent stands for the specialist builder being described
 guide/agents/handoffs.md | 60975716bb | with | import org.llm4s.agent.Agent
 guide/agents/handoffs.md | 91dac2740e | skip | the withHandoffs calls shown on their own, without the builder they continue
+guide/agents/guardrails.md | 0df3101aca | skip | the guardrail lists are elided as Seq(...): the examples below fill them
+guide/agents/guardrails.md | eb8470f1ea | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware; import org.llm4s.agent.guardrails.builtin._
+guide/agents/guardrails.md | 4ee06b2969 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware; import org.llm4s.agent.guardrails.builtin._
+guide/agents/guardrails.md | 08e4fe2099 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+guide/agents/guardrails.md | fc33f402f3 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+guide/agents/guardrails.md | e8538190fc | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+guide/agents/guardrails.md | 939f90bd20 | with | import org.llm4s.agent.guardrails.builtin._
+guide/agents/guardrails.md | 77f3561d4b | with | import org.llm4s.agent.guardrails.CompositeGuardrail; import org.llm4s.agent.guardrails.builtin._
+guide/agents/guardrails.md | 24520c02b0 | with | import org.llm4s.agent.guardrails.CompositeGuardrail; import org.llm4s.agent.guardrails.builtin._
+guide/agents/guardrails.md | 77af0c08bc | skip | continues the sequential composite above: sequentialValidation is defined there
+guide/agents/guardrails.md | d4507032db | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+guide/agents/guardrails.md | 39226cc197 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+guide/agents/guardrails.md | 7a8b5260c3 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+guide/agents/guardrails.md | f7bcfba7cd | with | import org.llm4s.agent.AgentStatus
+guide/agents/guardrails.md | 72d9e65543 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.graph.middleware.GuardrailMiddleware; import org.llm4s.agent.guardrails.builtin._
+guide/agents/guardrails.md | 71e923b933 | with | import org.llm4s.agent.guardrails.builtin._
+guide/agents/human-review.md | 25590550c3 | skip | runtime, graph and input stand for the reader's own GraphRuntime, compiled graph and input
+guide/agents/index.md | 32e48b77f6 | skip | sbt build definition, not Scala source
+guide/agents/index.md | 8f4ed128d4 | with | import org.llm4s.agent.Agent; import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService
+guide/agents/index.md | 03517fa0d9 | skip | chargeSpec and payments stand for the reader's own tool spec and payment client
+guide/agents/index.md | d1fef074f9 | skip | chargeSchema and payments stand for the reader's own schema and payment client
+guide/agents/index.md | 6774605f9e | skip | appendSpec, read and writeIfUnchanged stand for the reader's own tool spec and file access
+guide/agents/index.md | b76f20c767 | skip | dir, image and port stand for the workspace directory, runner image and port the reader starts
+guide/agents/index.md | 15ca9efc01 | skip | baseSpec and workspaceId stand for the reader's own tool spec and workspace
+guide/agents/index.md | ce76667140 | with | import org.llm4s.agent.Agent
+guide/agents/index.md | 74711366e8 | with | import org.llm4s.agent.Agent
+guide/agents/index.md | 17c3af78c5 | with | import org.llm4s.agent.Agent
+guide/agents/index.md | 4a8092bb7b | with | import org.llm4s.agent.Agent
+guide/agents/index.md | c58e4d4ee0 | with | import org.llm4s.agent.Agent
+guide/agents/index.md | d7fa46f052 | with | import org.llm4s.agent.Agent
+guide/agents/index.md | 337a71a9d6 | with | import org.llm4s.agent.Agent
+guide/agents/index.md | 36fb50d046 | with | import org.llm4s.agent.Agent
+guide/agents/index.md | 4f67dff48d | with | import org.llm4s.agent.Agent
+guide/agents/index.md | b7deab0a7d | with | import org.llm4s.agent.Agent
+guide/agents/index.md | 3a0a1f8daa | with | import org.llm4s.agent.Agent
+guide/agents/index.md | 53294b2a27 | with | import org.llm4s.agent.Agent
+guide/agents/index.md | be4f20b575 | with | import org.llm4s.agent.Agent
 getting-started/installation.md | 631ae22c61 | skip | sbt build definition, not Scala source
 getting-started/installation.md | fcc67c6b63 | skip | sbt build definition, not Scala source
 reference/doctor.md | ac763e3c9e | skip | sbt build definition, not Scala source
-guide/direct-style.md | 0b61c4d844 | skip | sbt build definition, not Scala source
+guide/direct-style.md | 702ec90779 | skip | sbt build definition, not Scala source
 scala-ai/agents.md | 825dc005dd | skip | sbt build definition, not Scala source
 scala-ai/llm-framework.md | f41ac720c4 | skip | sbt build definition, not Scala source
 scala-ai/providers.md | 6bfa1a8590 | skip | sbt build definition, not Scala source
@@ -153,7 +188,7 @@ getting-started/installation.md | 2d79f3f834 | skip | sbt build definition, not 
 getting-started/installation.md | 21b6f45251 | skip | sbt build definition, not Scala source
 guide/prompts.md | 2d79f3f834 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 79c0e24407 | skip | sbt build definition, not Scala source
-guide/tapir-tools.md | 79c0e24407 | skip | sbt build definition, not Scala source
+guide/tapir-tools.md | eebc6138ab | skip | sbt build definition, not Scala source
 getting-started/installation.md | 0d09a75d93 | skip | sbt build definition, not Scala source
 guide/http-transport.md | 0d09a75d93 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 5668a267bd | skip | sbt build definition, not Scala source
@@ -176,3 +211,7 @@ tutorials/support-assistant/part-4-help-centre.md | ce8185ac81 | with | import o
 tutorials/support-assistant/part-4-help-centre.md | 5b9ef47be8 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.rag.RAG; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools
 tutorials/support-assistant/part-5-safety-memory.md | fdc857af96 | with | import org.llm4s.samples.tutorial.supportassistant.Part3Tools
 tutorials/support-assistant/part-5-safety-memory.md | 0a03fc5f05 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part5SafetyMemory.{ reply, safeAgent }
+guide/agents/guardrails.md | 8ad9467374 | skip | continues the imports block above with `judge`, the reader's own client: RagGuardrailsGuideSpec runs this code
+guide/agents/guardrails.md | d9a4eb6ffe | skip | uses `judge` and the reader's own search_docs tool: RagGuardrailsGuideSpec runs this code
+guide/agents/guardrails.md | f6ace44ef4 | skip | uses `judge`, the reader's own client: RagGuardrailsGuideSpec runs this code
+guide/agents/guardrails.md | ed67fab4bd | skip | uses `judge`, the reader's own client: RagGuardrailsGuideSpec runs this code

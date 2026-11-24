@@ -31,7 +31,9 @@ Guardrails are validation functions that run before (input) and after (output) a
 - **Compliance** - Meet business requirements
 - **Security** - Detect prompt injection and PII
 
-Guardrails belong to the agent, not to a run: give them to the builder in a `GuardrailMiddleware`.
+Guardrails belong to the agent, not to a run: give them to the builder in a `GuardrailMiddleware`. The examples on
+this page assume an `LLMClient` named `client`, a `ToolRegistry` named `tools`, and the user's text as `userInput` or
+`query`; the shorter ones also assume the imports of the examples before them.
 
 ```scala
 import org.llm4s.agent.Agent
@@ -62,6 +64,12 @@ Underneath, a block is the graph runtime's *Block*: the run ends as a finished f
 `recover` has nothing to continue and `start` accepts like a completed thread. A `Left` from another
 middleware's `beforeAgent` or `afterAgent` blocks the same way, but is returned as that `Left`.
 
+The `reason` is for the caller. The run's durable events and its trace name the guardrail only (the
+error's message is `Guardrail '<name>' blocked`; its `reason` field holds the rest), because a reason
+may quote the text it refused. It is stored in one place, the blocked run's closing checkpoint
+(`RunOutcome.Blocked`), from which the turn's status is rebuilt; see
+[Durable vs live](streaming#durable-vs-live-and-the-content-rule) and its limits.
+
 A list of guardrails runs completely: each guardrail, in order, on the value the previous one
 returned, **even after one has failed**. That is why the block carries every failure's error, and why a
 guardrail that costs a call - an LLM judge - runs on every turn that reaches its list. To stop at the first
@@ -89,16 +97,20 @@ every final answer, whichever agent is active after a handoff. See
 
 These guardrails run locally without LLM calls:
 
-| Guardrail | Purpose | Example |
-|-----------|---------|---------|
-| `LengthCheck` | Enforce min/max length | `new LengthCheck(1, 10000)` |
-| `ProfanityFilter` | Block profane content | `new ProfanityFilter()` |
-| `JSONValidator` | Ensure valid JSON output | `new JSONValidator()` |
-| `RegexValidator` | Pattern matching | `new RegexValidator("\\d{3}-\\d{4}")` |
-| `ToneValidator` | Simple tone detection | `new ToneValidator(Tone.Professional)` |
-| `PIIDetector` | Detect PII (email, SSN, etc.) | `new PIIDetector()` |
-| `PIIMasker` | Mask detected PII | `new PIIMasker()` |
-| `PromptInjectionDetector` | Detect injection attempts | `new PromptInjectionDetector()` |
+| Guardrail | Purpose | Use as | Example |
+|-----------|---------|--------|---------|
+| `LengthCheck` | Enforce min/max length | input or output | `new LengthCheck(1, 10000)` |
+| `ProfanityFilter` | Block profane content | input | `new ProfanityFilter()` |
+| `JSONValidator` | Ensure valid JSON output | output | `new JSONValidator()` |
+| `RegexValidator` | Pattern matching | input or output | `RegexValidator("\\d{3}-\\d{4}")` |
+| `ToneValidator` | Simple tone detection | output | `new ToneValidator(Set(Tone.Professional))` |
+| `PIIDetector` | Detect PII (email, SSN, etc.) | input | `new PIIDetector()` |
+| `PIIMasker` | Mask detected PII | input or output | `new PIIMasker()` |
+| `PromptInjectionDetector` | Detect injection attempts | input | `new PromptInjectionDetector()` |
+
+`GuardrailMiddleware` takes `Seq[InputGuardrail]` for `input` and `Seq[OutputGuardrail]` for `output`, so a guardrail
+in the wrong list does not compile. `RegexValidator` takes its pattern as a `String` through its companion
+(`RegexValidator("...")`), or as a `Regex` through its constructor (`new RegexValidator("...".r)`).
 
 ### LLM-as-Judge Guardrails
 
@@ -107,9 +119,9 @@ These use an LLM to evaluate subjective qualities:
 | Guardrail | Purpose | Example |
 |-----------|---------|---------|
 | `LLMSafetyGuardrail` | Content safety check | `new LLMSafetyGuardrail(client)` |
-| `LLMFactualityGuardrail` | Verify factual accuracy | `new LLMFactualityGuardrail(client)` |
-| `LLMQualityGuardrail` | Assess response quality | `new LLMQualityGuardrail(client)` |
-| `LLMToneGuardrail` | Validate tone compliance | `new LLMToneGuardrail(client, "professional")` |
+| `LLMFactualityGuardrail` | Verify factual accuracy against a reference text | `new LLMFactualityGuardrail(client, referenceContext)` |
+| `LLMQualityGuardrail` | Assess how well a response answers a query | `new LLMQualityGuardrail(client, originalQuery)` |
+| `LLMToneGuardrail` | Validate tone compliance | `new LLMToneGuardrail(client, Set("professional"))` |
 
 Each judge scores the content and passes it when the score reaches its `threshold`. The threshold must be between 0.0 and 1.0: for any other value, or NaN, `validate` returns a `ValidationError` on the field `threshold` without calling the judge.
 
@@ -118,12 +130,15 @@ Each judge scores the content and passes it when the score reaches its `threshol
 For retrieval-augmented generation (experimental). The first three check an answer against the context retrieved for
 it, and do nothing until they are given that context: see [RAG Guardrails](#rag-guardrails).
 
-| Guardrail | Purpose |
-|-----------|---------|
-| `GroundingGuardrail` | Verify answers are grounded in retrieved context |
-| `ContextRelevanceGuardrail` | Check context relevance to query |
-| `SourceAttributionGuardrail` | Ensure sources are cited |
-| `TopicBoundaryGuardrail` | Prevent off-topic responses |
+| Guardrail | Purpose | Checks |
+|-----------|---------|--------|
+| `GroundingGuardrail` | Verify answers are grounded in retrieved context | an answer, with `validateWithContext` |
+| `ContextRelevanceGuardrail` | Check context relevance to query | an answer, with `validateWithContext` |
+| `SourceAttributionGuardrail` | Ensure sources are cited | an answer, with `validateWithContext` |
+| `TopicBoundaryGuardrail` | Prevent off-topic queries | a query: an `InputGuardrail` |
+
+The first three need the retrieved chunks, which an agent's guardrail middleware does not have: see
+[RAG Guardrails](#rag-guardrails) before you add one to an agent.
 
 ---
 
@@ -276,8 +291,8 @@ val strictValidation = CompositeGuardrail.all(Seq(
 
 ```scala
 val flexibleValidation = CompositeGuardrail.any(Seq(
-  new RegexValidator("^[A-Z].*"),  // Starts with capital
-  new RegexValidator("^\\d.*")     // Starts with digit
+  RegexValidator("^[A-Z].*"),  // Starts with capital
+  RegexValidator("^\\d.*")     // Starts with digit
 ))
 
 // At least one guardrail must pass
@@ -649,22 +664,30 @@ agent.run(query) match {
 }
 ```
 
-### Validation Mode
+### What a Failing Check Does: `GuardrailAction`
 
-Control how guardrail results are handled:
+A guardrail that takes an `onFail` parameter - `PIIDetector`, `PromptInjectionDetector`, `SecretLeakGuardrail` and the
+RAG guardrails - decides with it what a failed check does:
+
+| `GuardrailAction` | On a failed check |
+|-------------------|-------------------|
+| `Block` (the default) | `validate` returns a `Left`: in an agent, the turn ends `AgentStatus.Blocked` |
+| `Fix` | the guardrail repairs the value where it can (`PIIDetector` masks the PII) and passes it on; where it cannot, it falls back to blocking (`PromptInjectionDetector`) or to warning (the RAG guardrails) |
+| `Warn` | the guardrail logs a warning and passes the value unchanged |
 
 ```scala
-import org.llm4s.agent.guardrails.ValidationMode
+import org.llm4s.agent.guardrails.GuardrailAction
+import org.llm4s.agent.guardrails.builtin.{ PIIDetector, PromptInjectionDetector }
 
-// Block on failure (default)
-val blocking = ValidationMode.Block
-
-// Warn only, continue processing
-val warn = ValidationMode.Warn
-
-// Log and continue
-val log = ValidationMode.Log
+val maskInput       = new PIIDetector(onFail = GuardrailAction.Fix)            // mask PII in the query, never block
+val watchInjections = new PromptInjectionDetector(onFail = GuardrailAction.Warn) // log suspected injections only
 ```
+
+The other built-in guardrails always block on a failed check; wrap one in your own guardrail to change that.
+
+`ValidationMode` is something else: the mode of a `CompositeGuardrail` - `All` (every guardrail must pass) and `Any`
+(one must), which `CompositeGuardrail.all` and `.any` choose for you, or `First` (only the first guardrail runs). See
+[Composite Guardrails](#composite-guardrails).
 
 ---
 
@@ -698,7 +721,7 @@ val agent = Agent.builder("assistant", client)
 |----------|------------------------|
 | Customer support | `ProfanityFilter`, `ToneValidator`, `LLMSafetyGuardrail` |
 | Code generation | `LengthCheck`, `JSONValidator` (for structured output) |
-| RAG application | `GroundingGuardrail`, `SourceAttributionGuardrail` |
+| RAG application | `TopicBoundaryGuardrail` on input; `GroundingGuardrail`, `SourceAttributionGuardrail` through `validateWithContext` ([RAG Guardrails](#rag-guardrails)) |
 | Content moderation | `PIIDetector`, `ProfanityFilter`, `LLMSafetyGuardrail` |
 | Form processing | `RegexValidator`, `LengthCheck` |
 
@@ -711,7 +734,7 @@ import org.scalatest.matchers.should.Matchers
 class GuardrailSpec extends AnyFlatSpec with Matchers {
   "LengthCheck" should "reject empty input" in {
     val guardrail = new LengthCheck(min = 1, max = 100)
-    guardrail.validate("") shouldBe a[Left[_, _]]
+    guardrail.validate("") shouldBe a[Left[?, ?]]
   }
 
   it should "accept valid input" in {

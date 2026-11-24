@@ -495,6 +495,79 @@ trait ProviderModuleChecks extends Assertions:
     }
     succeed
 
+  // ---- validate() ----
+
+  /**
+   * `client.validate()` checks the provider and reports what it finds (#2830). Against a
+   * [[LocalProviderTestServer]]:
+   *
+   *  - when the server accepts the request (`accept`), `validate()` is `Right(())` and the server received a
+   *    request: success is never reported without one having been sent;
+   *  - when the server answers 401 (`reject(exchange, 401, message)`, an error body in the provider's format),
+   *    `validate()` is `Left(AuthenticationError)`;
+   *  - when nothing listens at the base URL, `validate()` is a `Left` other than `ValidationUnsupportedError`.
+   *
+   * It sends no completion: a request whose body holds a `messages` or `contents` field fails the check.
+   *
+   * @param accept answers the validation request as the provider does when it accepts it
+   * @param reject answers a request with an error response of the given status and message
+   * @param path   the path the server answers on; `/` answers every path
+   * @param client builds the client for the server's base URL (`http://localhost:<port>`)
+   */
+  def assertValidates(
+    accept: HttpExchange => Unit,
+    reject: (HttpExchange, Int, String) => Unit,
+    path: String = "/"
+  )(client: String => LLMClient)(using pos: Position): Assertion =
+    def validated(baseUrl: String): Result[Unit] =
+      val built  = client(baseUrl)
+      val result = scala.util.Try(built.validate())
+      scala.util.Try(built.close()): Unit
+      result.fold(thrown => failAt(s"validate() threw $thrown"), identity)
+
+    val bodies   = new ConcurrentLinkedQueue[String]()
+    var accepted = Option.empty[Result[Unit]]
+    LocalProviderTestServer.withServer(path) { exchange =>
+      bodies.add(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8))
+      accept(exchange)
+    }(baseUrl => accepted = Some(validated(baseUrl)))
+    accepted match
+      case Some(Right(())) => ()
+      case other           => failAt(s"validate() against a server that accepts the request returned $other")
+    if bodies.isEmpty then failAt("validate() returned Right(()) without sending a request")
+    bodies.asScala.find(body => body.contains("\"messages\"") || body.contains("\"contents\"")).foreach { body =>
+      failAt(s"validate() sent a completion request, which uses tokens: ${body.take(200)}")
+    }
+
+    var rejected = Option.empty[Result[Unit]]
+    LocalProviderTestServer.withServer(path)(exchange => reject(exchange, 401, "llm4s-contract-bad-key")) { baseUrl =>
+      rejected = Some(validated(baseUrl))
+    }
+    rejected match
+      case Some(Left(_: org.llm4s.error.AuthenticationError)) => ()
+      case other => failAt(s"validate() against a server answering 401 returned $other, not an AuthenticationError")
+
+    // a port nothing listens on: bound, read, and closed again
+    val unused = new java.net.ServerSocket(0)
+    val port   = unused.getLocalPort
+    unused.close()
+    validated(s"http://localhost:$port") match
+      case Left(_: org.llm4s.error.ValidationUnsupportedError) =>
+        failAt("validate() with nothing listening returned ValidationUnsupportedError: it sent no request")
+      case Left(_)   => succeed
+      case Right(()) => failAt("validate() with nothing listening at the base URL returned Right(())")
+
+  /**
+   * `client.validate()` is `Left(ValidationUnsupportedError)`, for a provider with no cheap authenticated request:
+   * it says that nothing was checked, where `Right(())` would claim a check that never ran (#2830).
+   */
+  def assertValidationUnsupported(client: LLMClient)(using pos: Position): Assertion =
+    val result = scala.util.Try(client.validate())
+    scala.util.Try(client.close()): Unit
+    result.fold(thrown => failAt(s"validate() threw $thrown"), identity) match
+      case Left(_: org.llm4s.error.ValidationUnsupportedError) => succeed
+      case other => failAt(s"expected Left(ValidationUnsupportedError) from validate(), got $other")
+
   /**
    * `client` sends the content parts its provider takes and refuses every other before sending
    * anything - the [[ContentPartContract]]. Each [[ContentPartCase]] is sent with `complete` to a

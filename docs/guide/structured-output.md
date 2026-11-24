@@ -258,17 +258,19 @@ taken from its code:
 |---|---|---|
 | OpenAI, Azure OpenAI | `response_format` of type `json_schema`, with your `name` and `strict` | Yes: the provider constrains generation to the schema |
 | Requesty | The same OpenAI `json_schema` shape, with your `name` and `strict` | Depends on the routed model: Requesty is a multi-provider router, so enforcement is up to the backend model or fallback it selects |
-| openai-compatible: generic, DeepSeek, Z.ai, OpenRouter, Mistral | The same OpenAI `json_schema` shape, with your `name` and `strict` | The server decides: a server that ignores `response_format` returns unconstrained text |
+| openai-compatible: generic, DeepSeek, Z.ai, OpenRouter, Mistral, xAI | The same OpenAI `json_schema` shape, with your `name` and `strict` | The server decides: a server that ignores `response_format` returns unconstrained text |
 | Cohere (through its OpenAI-compatibility API) | `response_format` of type `json_object` carrying the `schema`; `name` and `strict` are not sent | Cohere's own mechanism |
 | Gemini, Vertex AI | `responseMimeType: application/json` and `responseSchema` set to the schema | Yes, by Gemini |
 | Ollama | The schema as the top-level `format` field of `/api/chat` | Yes, on Ollama 0.5 or later; an older server rejects or ignores it. `name` and `strict` are ignored |
 | Anthropic | **Nothing is enforced.** The schema is appended to the system prompt as an instruction to answer with JSON only | **No**: best effort. Expect section 7 errors more often |
-| watsonx (Beta) | `response_format` of type `json_schema`, with your `name` and `strict` (`ResponseFormat.Json` as `json_object`) | Depends on the model; not yet confirmed against the live service ([#1314](https://github.com/llm4s/llm4s/issues/1314)) |
+| watsonx (Beta) | `response_format` of type `json_schema`, with your `name` and `strict` (`ResponseFormat.Json` as `json_object`) | Depends on the model; not confirmed against the live service (see [watsonx.ai](providers#ibm-watsonxai)) |
+| Perplexity | `response_format` of type `json_schema`, with your `name` and `strict`; `ResponseFormat.Json` is refused with a `ValidationError` | The routed model decides |
+| Jlama | **Nothing.** `responseFormat` is reported `Dropped` in `Completion.adjustments` | **No** |
 | AWS Bedrock | **Nothing.** This client does not read `responseFormat` | **No**: the model sees only your conversation |
 
-For the last row, `completeStructured` still parses whatever comes back, so a model that happens to answer
+For Jlama and Bedrock, `completeStructured` still parses whatever comes back, so a model that happens to answer
 in JSON works and one that does not gives a `ValidationError`. Ask for JSON in the prompt yourself when you
-use that provider.
+use them.
 
 ## 9. Limits and gotchas
 

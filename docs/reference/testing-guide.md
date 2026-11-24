@@ -1,12 +1,14 @@
 ---
 layout: page
-title: Testing Guide
+title: Contributor Testing Guide
 description: "How contributors write, run and reason about tests in LLM4S: unit, integration and end-to-end tests, directory structure and effective test design."
 nav_order: 8
 parent: Reference
 ---
 
-# Testing Guide (Contributor-Focused)
+# Contributor Testing Guide
+
+For testing an application built on LLM4S, see the [Testing Guide](../getting-started/testing-guide) in Getting Started.
 
 This guide explains **how contributors should write, run, and reason about tests in LLM4S**. It is intended for contributors adding new features, fixing bugs, or refactoring existing code.
 

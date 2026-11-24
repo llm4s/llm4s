@@ -44,7 +44,9 @@ Each row is something a module does only when you use it. "Configured by" is whe
 
 | Module | What leaves the process | Destination | Configured by | Persisted by llm4s |
 |---|---|---|---|---|
-| Chat providers (`llm4s-openai`, `-anthropic`, `-gemini`, `-ollama`, `-openai-compatible`, `-bedrock`, `-watsonx`, `-jev`) | The conversation: system prompt, messages, tool definitions, tool calls and results, attached images and documents | The provider's API | `llm4s.providers.<name>` (`baseUrl`, provider extras such as `endpoint`, `location`, `region`) | No |
+| Chat providers (`llm4s-openai`, `-anthropic`, `-gemini`, `-ollama`, `-openai-compatible`, `-bedrock`, `-watsonx`, `-perplexity`) | The conversation: system prompt, messages, tool definitions, tool calls and results, attached images and documents | The provider's API | `llm4s.providers.<name>` (`baseUrl`, provider extras such as `endpoint`, `location`, `region`) | No |
+| Jev decision client (`llm4s-jev`) | The question and the context you ask about | TypeSafe's Jev API | `llm4s.jev` | No |
+| Jlama (`llm4s-jlama`) | No conversation: the model runs inside the JVM. Its weights are downloaded once from Hugging Face | `huggingface.co` | `llm4s.providers.<name>` (`model`, `modelDir`) | The weights, in `modelDir` (`~/.cache/llm4s/jlama` by default) |
 | Embeddings (`llm4s-openai`, `-ollama`, `-voyage`, `-jina`, `-cohere`) | The text being embedded: documents at indexing, queries at search | The embedding provider's API | `llm4s.embeddings.<id>` | No |
 | Reranking (`llm4s-rag`) | The query and candidate passages | Cohere's rerank API (`CohereReranker`), or your chat provider (`LLMReranker`) | `llm4s.rerank.cohere`, or the client you pass | No |
 | Image generation and vision (`llm4s-image`) | Prompts and images | OpenAI, Stability AI, Hugging Face, a Stable Diffusion server you run; OpenAI, Anthropic or Gemini for vision | The client config you build | No |
@@ -52,7 +54,7 @@ Each row is something a module does only when you use it. "Configured by" is whe
 | Web search tools (`llm4s-agent-tools`) | The search query the model wrote, which can quote the user | Brave, Exa or DuckDuckGo | `llm4s.tools.*` | No |
 | HTTP tool (`llm4s-agent-tools`) | Whatever request the model builds | The URLs the tool's config allows | `HttpConfig` (private and cloud-metadata addresses are refused by default) | No |
 | MCP client (`llm4s-mcp`) | Tool arguments the model wrote | The MCP servers you register | Your `MCPServerConfig`s | No |
-| Workspace (`llm4s-workspace`) | Commands and files the agent works on | A container you run | `llm4s.workspace.*` | In the container's file system |
+| Workspace (`llm4s-workspace-client`) | Commands and files the agent works on | A container you run | `llm4s.workspace.*` | In the container's file system |
 | Agent runtime (`llm4s-agent`) | Nothing on its own | - | - | Thread history, events and usage in the `Checkpointer`: in memory by default, SQLite (`llm4s-agent-checkpoint-sqlite`) or PostgreSQL (`llm4s-agent-checkpoint-postgres`) when configured |
 | Memory (`llm4s-memory`, `-memory-postgres`) | Memory text to the embedding provider, when the store embeds | Your embedding provider | The store you build | Memories: in memory, SQLite or PostgreSQL |
 | RAG and vector stores (`llm4s-rag`, `-vectorstore-elasticsearch`, `-vectorstore-redis`) | Chunks, embeddings and metadata | pgvector, Qdrant, SQLite, Elasticsearch/OpenSearch or Redis | The store you build | Yes, in that store |
@@ -68,7 +70,7 @@ Each row is something a module does only when you use it. "Configured by" is whe
 |---|---|---|
 | `console` tracing | On (`llm4s.tracing.mode = "console"`) | None unless `llm4s.tracing.console.captureContent = true`; then the query, model output (truncated to 200 characters), tool input and output (100 each), custom event data and error messages |
 | `noop` tracing | Off | None |
-| `langfuse` tracing | Off | The agent's query, completion content, tool input and output, and a finished run's messages |
+| `langfuse` tracing | Off | The agent's query, completion content, tool input and output, and a finished run's messages; the run's `RunConfig.principal` as the trace's `userId`, when the run has one. Traces are sent `public: false` - readable only by members of your Langfuse project - unless `llm4s.tracing.langfuse.public = true`, which lets anyone holding a trace's URL read it without signing in |
 | `opentelemetry` tracing | Off | None unless `llm4s.tracing.opentelemetry.captureContent = true` (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`); then the query, prompts and completions (`gen_ai.input.messages` / `gen_ai.output.messages`) and tool input and output, secrets redacted and each truncated to 1000 characters. Custom event data is always recorded (an agent's carries no content) |
 | Provider exchange logging | Off | Request and response bodies. The file sink redacts credentials by pattern, not personal data; a sink you write gets the bodies untouched. See [Provider Exchange Logging](observability/provider-exchange-logging) |
 | SLF4J logs from the OpenAI-compatible, Gemini and Vertex AI clients | At `DEBUG` only | Request and response bodies, truncated, with credentials redacted by pattern |
@@ -106,7 +108,9 @@ Allow only what your configuration uses. The defaults below are what a section g
 | Vertex AI | `<location>-aiplatform.googleapis.com`, plus `oauth2.googleapis.com` or the GCE metadata server for tokens | `provider = "vertexai"` |
 | AWS Bedrock | `bedrock-runtime.<region>.amazonaws.com` | `provider = "bedrock"` |
 | IBM watsonx.ai | `us-south.ml.cloud.ibm.com` and `iam.cloud.ibm.com` | `provider = "watsonx"` |
-| DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, Requesty | `api.deepseek.com`, `api.z.ai`, `openrouter.ai`, `api.mistral.ai`, `api.cohere.ai`, `router.requesty.ai` | The matching provider |
+| DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, xAI, Requesty | `api.deepseek.com`, `api.z.ai`, `openrouter.ai`, `api.mistral.ai`, `api.cohere.ai`, `api.x.ai`, `router.requesty.ai` | The matching provider |
+| Perplexity | `api.perplexity.ai` | `provider = "perplexity"` |
+| Hugging Face model downloads | `huggingface.co` | `provider = "jlama"`, the first time a model is used |
 | Jev (TypeSafe) | `api.typesafe.ai` | `llm4s-jev` |
 | Voyage, Jina, Cohere embeddings and rerank | `api.voyageai.com`, `api.jina.ai`, `api.cohere.com` | The matching embedding provider or `CohereReranker` |
 | Ollama, generic `openai-compatible` | The `baseUrl` you set (Ollama: `localhost:11434`) | The matching provider |

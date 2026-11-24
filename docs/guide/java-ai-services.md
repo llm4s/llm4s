@@ -6,7 +6,8 @@ search_title: "Declarative AI services for Java with LLM4S"
 parent: User Guide
 nav_order: 51
 # Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one of them closes.
-cites_open_issues: [1474, 2277]
+cites_open_issues: [1474]
+cites_closed_issues: [2277]
 ---
 
 # AI services from Java
@@ -222,9 +223,8 @@ An enum answer is the object `{"value": "<CONSTANT>"}`, since structured output 
 
 ## Not here yet
 
-- Spring Boot: the starter does not yet discover AI-service interfaces and register them as beans
-  ([#2277](https://github.com/llm4s/llm4s/issues/2277)); declare a `@Bean` that calls
-  `Llm4s.aiService(...).client(client).build()` with the starter's `JLlmClient`.
+- Spring Boot: the starter does not discover AI-service interfaces or register them as beans. Declare a `@Bean` that
+  calls `Llm4s.aiService(...).client(client).build()` with the starter's `JLlmClient`.
 - GraalVM native image needs proxy metadata for each AI-service interface (`proxy-config.json`).
 - A Scala equivalent is the subject of the [typed facade RFC](https://github.com/llm4s/llm4s/issues/1474).
 

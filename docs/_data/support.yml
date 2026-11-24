@@ -2,7 +2,7 @@
 # Updated by hand in the release process (docs/reference/release.md, step "Update the support table"), newest first.
 # scripts/check-support-table.sh checks it in CI and against the release tag.
 # status: latest | superseded (not patched; upgrade to the latest) | security-only | eol
-# Until the compatibility baseline is set (#1281) every line before it is "pre-baseline: latest only".
+# Until the compatibility baseline is set (#1281) every line before 1.0 is "latest only".
 lines:
   - version: "0.6.0"
     released: "2026-11-21"

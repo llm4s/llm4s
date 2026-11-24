@@ -1,6 +1,7 @@
 package org.llm4s.metrics
 
 import io.micrometer.core.instrument.{ Counter, Gauge, MeterRegistry, Tag, Tags, Timer }
+import org.llm4s.reliability.ReliabilityMetrics
 import org.slf4j.LoggerFactory
 
 import java.time.Duration
@@ -39,14 +40,14 @@ import scala.util.{ Failure, Success, Try }
  *    provider and model tag values admitted under the caps above, which are concurrent sets guarded for the
  *    check-then-add.
  *
- * Differences from `PrometheusMetrics`: this class also implements `recordRetryAttempt`,
- * `recordCircuitBreakerTransition` and `recordError`, which the Prometheus collector leaves as no-ops, and it
- * ignores negative or non-finite amounts instead of passing them to the registry. `recordError` goes to its own
- * meter, [[MicrometerMetrics.Names.ReliabilityErrors]], never to `llm4s.errors`: `ReliableClient` reports each
- * failed attempt through the provider client's `observeRequest` and then the final failure through `recordError`,
- * so sharing one counter would count the same failure twice when both report to this collector. `llm4s.errors`
- * therefore means exactly what `llm4s_errors_total` means in the Prometheus module: failed requests and failed
- * image generations.
+ * Difference from `PrometheusMetrics`: it ignores negative or non-finite amounts instead of passing them to the
+ * registry. `ReliableClient`'s retries, circuit-breaker transitions and errors are generic metrics
+ * (`org.llm4s.reliability.ReliabilityMetrics`), recorded through [[increment]] here as in every backend. Its errors
+ * go to their own meter, [[MicrometerMetrics.Names.ReliabilityErrors]], never to `llm4s.errors`: `ReliableClient`
+ * reports each failed attempt through the provider client's `observeRequest` and then the final failure as that
+ * metric, so sharing one counter would count the same failure twice when both report to this collector.
+ * `llm4s.errors` therefore means exactly what `llm4s_errors_total` means in the Prometheus module: failed requests
+ * and failed image generations.
  *
  * This module is Beta: the meter names are intended to be stable, but they are not covered by the 1.x
  * compatibility promise.
@@ -106,31 +107,6 @@ final class MicrometerMetrics(registry: MeterRegistry) extends MetricsCollector 
           Tags.of(ProviderTag, providerLabel(provider), ModelTag, modelLabel(model))
         )
           .increment(costUsd)
-    }
-
-  override def recordRetryAttempt(provider: String, attemptNumber: Int): Unit =
-    safely("retry") {
-      counter(Names.Retries, "Total number of retry attempts", Tags.of(ProviderTag, providerLabel(provider)))
-        .increment()
-    }
-
-  override def recordCircuitBreakerTransition(provider: String, newState: String): Unit =
-    safely("circuit breaker") {
-      counter(
-        Names.CircuitBreakerTransitions,
-        "Total number of circuit breaker state transitions",
-        Tags.of(ProviderTag, providerLabel(provider), StateTag, circuitState(newState))
-      ).increment()
-    }
-
-  override def recordError(errorKind: ErrorKind, provider: String): Unit =
-    safely("error") {
-      counter(
-        Names.ReliabilityErrors,
-        "Total number of errors reported outside a timed request (by ReliableClient: local throttle, open circuit, " +
-          "deadline, final failure)",
-        Tags.of(ProviderTag, providerLabel(provider), ErrorTypeTag, errorLabel(errorKind))
-      ).increment()
     }
 
   override def observeImageGeneration(
@@ -283,28 +259,27 @@ object MicrometerMetrics {
 
     /**
      * Counter of failed requests and failed image generations, as `llm4s_errors_total` in the Prometheus module.
-     * Tags: `provider`, `error_type` (see [[ErrorKind]], in snake case). `recordError` calls are not counted here;
-     * see [[ReliabilityErrors]].
+     * Tags: `provider`, `error_type` (see [[ErrorKind]], in snake case). `ReliableClient`'s own errors are not counted
+     * here; see [[ReliabilityErrors]].
      */
     final val Errors = "llm4s.errors"
 
     /**
-     * Counter of `recordError` calls (not in the Prometheus module): errors reported outside a timed request. In
-     * llm4s the caller is `ReliableClient`, which reports a call rejected by its local rate limit or its open
-     * circuit, a deadline exceeded, and the final failure once retries are exhausted. Kept apart from [[Errors]],
-     * which already counts each failed attempt the provider client observed, so neither counts a failure twice.
-     * Tags: `provider`, `error_type`.
+     * `ReliabilityMetrics.Errors`: errors `ReliableClient` reports outside a timed request - a call rejected by its
+     * local rate limit or its open circuit, a deadline exceeded, and the final failure once retries are exhausted.
+     * Kept apart from [[Errors]], which already counts each failed attempt the provider client observed, so neither
+     * counts a failure twice. Tags: `provider`, `error_type`.
      */
-    final val ReliabilityErrors = "llm4s.reliability.errors"
+    val ReliabilityErrors: String = ReliabilityMetrics.Errors.name
 
-    /** Counter of retry attempts (not in the Prometheus module). Tags: `provider`. */
-    final val Retries = "llm4s.retries"
+    /** `ReliabilityMetrics.Retries`: counter of retry attempts. Tags: `provider`. */
+    val Retries: String = ReliabilityMetrics.Retries.name
 
     /**
-     * Counter of circuit-breaker transitions (not in the Prometheus module). Tags: `provider`, `state`
-     * (`open`, `closed`, `half-open` or `other`).
+     * `ReliabilityMetrics.CircuitBreakerTransitions`: counter of circuit-breaker transitions. Tags: `provider`,
+     * `state` (`open`, `closed` or `half-open`).
      */
-    final val CircuitBreakerTransitions = "llm4s.circuit.breaker.transitions"
+    val CircuitBreakerTransitions: String = ReliabilityMetrics.CircuitBreakerTransitions.name
 
     /** Counter. Tags: `provider`, `model`, `operation` (`generate`, `edit` or `other`), `status`. */
     final val ImageGenerations = "llm4s.image.generations"
@@ -328,7 +303,6 @@ object MicrometerMetrics {
   private val TypeTag      = "type"
   private val ErrorTypeTag = "error_type"
   private val OperationTag = "operation"
-  private val StateTag     = "state"
 
   private val Unknown = "unknown"
   private val Other   = "other"
@@ -403,16 +377,6 @@ object MicrometerMetrics {
         case "generate" => "generate"
         case "edit"     => "edit"
         case _          => Other
-      }
-
-  private def circuitState(state: String): String =
-    if (state == null) Other
-    else
-      state.trim.toLowerCase(java.util.Locale.ROOT) match {
-        case "open"      => "open"
-        case "closed"    => "closed"
-        case "half-open" => "half-open"
-        case _           => Other
       }
 
   /** A counter may only grow: a negative, NaN or infinite amount is dropped. */

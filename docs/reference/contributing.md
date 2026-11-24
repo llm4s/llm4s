@@ -4,6 +4,9 @@ title: Contributing Guide
 description: "How to open your first pull request to LLM4S: picking an issue, the contribution ladder, PR requirements and what gets a PR closed."
 nav_order: 1
 parent: Reference
+redirect_from:
+  - /reference/contribution-guidelines
+  - /reference/contribution-guidelines.html
 ---
 
 # Contributing to LLM4S
@@ -233,7 +236,7 @@ git checkout -b fix/short-description    # Use a descriptive branch name
 sbt scalafmtAll           # Format
 sbt test                  # Test the current Scala 3.7.1 build
 git add <specific-files>  # Stage only your changes
-git commit -m "Fix: short description of what and why"
+git commit -s -m "Fix: short description of what and why"   # -s adds the DCO sign-off CI checks
 git push origin fix/short-description
 ```
 

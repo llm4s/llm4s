@@ -1,191 +1,75 @@
 ---
 layout: page
 title: API Reference
-description: "API reference for LLM4S: where to find the Scaladoc, the API specifications and the design principles behind the Result-based, type-safe API."
+description: "API reference for LLM4S: the Scaladoc, the main entry points with their signatures, and where stability, compatibility and upgrade notes are."
 search_title: "LLM4S API reference and Scaladoc for Scala"
 nav_order: 6
-has_children: true
 ---
 
 # API Reference
 
-Complete API documentation for LLM4S.
+Where to find the LLM4S API, and the handful of entry points most programs start from.
+{: .fs-6 .fw-300 }
 
-## Primary API Documentation
+## Scaladoc
 
-### Scaladoc
+The **[Scaladoc](/scaladoc/)** documents every public type of every published module, generated from the release the
+site shows (v{{ site.data.project.latest_release }}). It is the reference for signatures; this page only points into it.
 
-The **[Scaladoc](/scaladoc/)** provides comprehensive, auto-generated API documentation for all LLM4S classes and methods.
+## Entry points
 
-### API Specifications
+Every call that can fail returns `org.llm4s.types.Result[A]`, which is `Either[LLMError, A]`: errors are values, not
+exceptions.
 
-| Document | Description |
-|----------|-------------|
-| [LLM4S API Spec](../llm4s-api-spec) | Complete API specification |
-| [Tool Calling API Design](../tool-calling-api-design) | Tool calling interface design |
-| [Workspace Agent Protocol](../workspace-agent-protocol) | Standardized interface for LLM workspace interaction |
+| What | Entry point | Module |
+|---|---|---|
+| Load a provider section from `application.conf` | `Llm4sConfig.defaultProvider(): Result[ProviderConfig]`, `Llm4sConfig.provider(name): Result[ProviderConfig]` | `llm4s-core` |
+| Model metadata the clients need | `Llm4sConfig.modelRegistryService(): Result[ModelRegistryService]` | `llm4s-core` |
+| Build a client | `LLMConnect.getClient(config: ProviderConfig)(using ModelRegistryService, ProviderRegistry): Result[LLMClient]` | `llm4s-core`, plus the provider's module |
+| One completion | `LLMClient.complete(conversation: Conversation, options: CompletionOptions = CompletionOptions()): Result[Completion]` | `llm4s-core` |
+| A streamed completion | `LLMClient.streamComplete(conversation, options, onChunk: StreamedChunk => Unit): Result[Completion]` | `llm4s-core` |
+| An agent with tools | `Agent.builder(id, client)` ... `.build()`, then `agent.run(query): Result[AgentResult]` | `llm4s-agent` |
 
-## API Design Principles
-
-LLM4S follows these design principles:
-
-### 1. Result-Based Error Handling
-
-**Never use exceptions** for expected errors. Use `Result[A]` instead:
-
-```scala
-type Result[+A] = Either[error.LLMError, A]
-
-// Example
-def complete(messages: List[Message]): Result[CompletionResponse]
-```
-
-### 2. Type Safety
-
-Use **newtype wrappers** to prevent type confusion:
-
-```scala
-case class ModelName(value: String) extends AnyVal
-case class ApiKey(private val value: String) extends AnyVal
-
-// ✅ Type-safe
-def setModel(model: ModelName): Unit
-
-// ❌ Stringly-typed
-def setModel(model: String): Unit
-```
-
-### 3. Immutability
-
-All data structures are **immutable**:
-
-```scala
-// A result is an immutable value
-val result2 = agent.continueConversation(result1, "Next question")
-// result1 is unchanged; result2 is a new instance from the next turn on the same thread
-```
-
-### 4. Explicit Configuration
-
-Use **Llm4sConfig** instead of raw environment access:
+`ProviderRegistry` has a default given that finds the provider modules on the classpath, so a program brings only a
+`ModelRegistryService` into scope:
 
 ```scala
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
+import org.llm4s.model.ModelRegistryService
 
-// ✅ Type-safe configuration: the default section under llm4s.providers
-val config = Llm4sConfig.defaultProvider()
-// ...or any section by name
-val claude = Llm4sConfig.provider("claude")
-
-// ❌ Raw access
-val apiKey = sys.env("OPENAI_API_KEY")
-```
-
-The API key reaches `Llm4sConfig` through configuration: `llm4s-openai` binds `OPENAI_API_KEY` to
-`llm4s.credentials.openai.apiKey`, which a named provider section without its own `apiKey` uses -
-see [API keys](../getting-started/configuration#api-keys).
-
-### 5. Provider Abstraction
-
-Single interface works across **all providers**:
-
-```scala
-val client: LLMClient = ??? // OpenAI, Anthropic, Azure, or Ollama
-// Same API regardless of provider
-```
-
-## Common Patterns
-
-### Pattern 1: Result Chaining
-
-```scala
-import org.llm4s.config.Llm4sConfig
-
-val result = for {
+val answer = for {
   providerConfig <- Llm4sConfig.defaultProvider()
-  registry <- Llm4sConfig.modelRegistryService()
+  registry       <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
-  client <- LLMConnect.getClient(providerConfig)
-  response <- client.complete(messages, None)
-  parsed <- parseResponse(response)
-} yield parsed
+  client         <- LLMConnect.getClient(providerConfig)
+  completion     <- client.complete(Conversation(Seq(UserMessage("What is Scala?"))))
+} yield completion.content
 ```
 
-### Pattern 2: Fold for Error Handling
+The [First Example](../getting-started/first-example) walks through this, and the [User Guide](../guide/) covers agents,
+tools, RAG and the rest.
 
-```scala
-result.fold(
-  error => println(s"Error: $error"),
-  success => println(s"Success: $success")
-)
-```
+## Stability and upgrades
 
-### Pattern 3: Map and FlatMap
+| Question | Page |
+|---|---|
+| Which packages and modules are Frozen, Beta or Experimental | [1.0 Scope](../reference/v1-scope) |
+| What an upgrade may break, before and after 1.0 | [Compatibility and Deprecation Policy](../reference/compatibility-policy) |
+| How binary compatibility is checked | [API Stability](../reference/api-stability) |
+| What changed in each release | [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md) |
+| How to move from one release to the next | [Migrating from 0.x to 1.0](../migrations/0x-to-1x) and the [Migration Guide](../reference/migration) |
+| Which providers support what | [Compatibility Matrix](../reference/compatibility-matrix) |
 
-```scala
-val content: Result[String] = response.map(_.content)
-val upper: Result[String] = content.map(_.toUpperCase)
-```
+## Design principles
 
-## Core Module Structure
-
-The main `core` module contains:
-
-```
-org.llm4s/
-├── types/              # Result, ModelName, etc.
-├── config/             # Llm4sConfig + typed loaders
-├── llmconnect/         # LLMClient, providers
-├── agent/              # Agent framework
-├── toolapi/            # Tool calling
-├── trace/              # Tracing
-├── context/            # Context management
-└── error/              # Error types
-```
-
-## Error Hierarchy
-
-```scala
-sealed trait LLMError
-case class NetworkError(message: String) extends LLMError
-case class AuthenticationError(message: String) extends LLMError
-case class ValidationError(message: String) extends LLMError
-case class ConfigurationError(message: String) extends LLMError
-// ... and more
-```
-
-## Versioning
-
-LLM4S follows semantic versioning:
-
-- **MAJOR**: Breaking API changes
-- **MINOR**: New features, backwards compatible
-- **PATCH**: Bug fixes
-
-Currently documented release: `0.3.2` (pre-1.0, API stabilizing)
-
-## Scala Version Compatibility
-
-LLM4S supports:
-- **Scala 3.7.1**
-
-The current build is Scala 3.7.1 only. Older design notes may mention historical cross-building, but that is not part of the current supported build matrix.
-
-## Migration Guides
-
-When APIs change, consult:
-- **[Migration Guide](/reference/migration)** - Upgrade instructions
-- **[Changelog](https://github.com/llm4s/llm4s/releases)** - Release notes
-
-## Getting Help
-
-- **[User Guide](/guide/)** - Learn how to use the APIs
-- **[Examples](/examples/)** - See APIs in action (69 working examples)
-- **[Discord](https://discord.gg/4uvTPn6qww)** - Ask questions
-- **[GitHub Issues](https://github.com/llm4s/llm4s/issues)** - Report bugs
-
----
-
-**Explore the APIs:**
-- [Scaladoc](/scaladoc/) - Complete API reference
-- [Examples](/examples/) - See APIs in action
+- **Errors are values.** `Result[A]`, never an exception for an expected failure.
+- **Configuration at the edge.** `Llm4sConfig` reads the application's `application.conf`; library code takes typed
+  settings and reads no environment variable itself ([Configuration](../getting-started/configuration)).
+- **Typed values.** `ModelName`, `ApiKey` (a `Secret`, which never prints its value) and the other newtypes in
+  `org.llm4s.types` keep strings of different meaning apart.
+- **One client interface.** `LLMClient` is the same for every provider; a provider is a module found on the
+  classpath ([Writing a provider](../guide/writing-a-provider)).
+- **Growth-safe data types.** Options and results such as `CompletionOptions` and `Completion` are built with
+  `apply` and changed with `with*` setters, so a new field does not break your code.

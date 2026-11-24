@@ -96,7 +96,13 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val events2  = mutable.Buffer.empty[TraceEvent]
     val combined = TracingComposer.combine(new RecordingTracing(events1), new RecordingTracing(events2))
 
-    combined.traceToolCall("calculator", """{"a":1}""", "42") shouldBe Right(())
+    combined.traceToolCall(
+      "calculator",
+      """{"a":1}""",
+      "42",
+      scala.concurrent.duration.Duration.Zero,
+      success = true
+    ) shouldBe Right(())
 
     events1 should have size 1
     events2 should have size 1
@@ -139,14 +145,14 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     events1.head shouldBe a[TraceEvent.TokenUsageRecorded]
   }
 
-  it should "call shutdown on all tracers" in {
+  it should "close all tracers" in {
     var shut1    = false
     var shut2    = false
-    val t1       = new RecordingTracing(mutable.Buffer.empty) { override def shutdown(): Unit = shut1 = true }
-    val t2       = new RecordingTracing(mutable.Buffer.empty) { override def shutdown(): Unit = shut2 = true }
+    val t1       = new RecordingTracing(mutable.Buffer.empty) { override def close(): Unit = shut1 = true }
+    val t2       = new RecordingTracing(mutable.Buffer.empty) { override def close(): Unit = shut2 = true }
     val combined = TracingComposer.combine(t1, t2)
 
-    combined.shutdown()
+    combined.close()
 
     shut1 shouldBe true
     shut2 shouldBe true
@@ -183,12 +189,12 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     events should have size 1
   }
 
-  it should "delegate shutdown to underlying" in {
+  it should "delegate close to underlying" in {
     var shut     = false
-    val tracer   = new RecordingTracing(mutable.Buffer.empty) { override def shutdown(): Unit = shut = true }
+    val tracer   = new RecordingTracing(mutable.Buffer.empty) { override def close(): Unit = shut = true }
     val filtered = TracingComposer.filter(tracer)(_ => true)
 
-    filtered.shutdown()
+    filtered.close()
     shut shouldBe true
   }
 
@@ -214,7 +220,13 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracer      = new RecordingTracing(events)
     val transformed = TracingComposer.transform(tracer)(identity)
 
-    transformed.traceToolCall("tool", "in", "out") shouldBe Right(())
+    transformed.traceToolCall(
+      "tool",
+      "in",
+      "out",
+      scala.concurrent.duration.Duration.Zero,
+      success = true
+    ) shouldBe Right(())
     events should have size 1
   }
 
@@ -245,22 +257,22 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     events should have size 1
   }
 
-  it should "delegate shutdown to underlying" in {
+  it should "delegate close to underlying" in {
     var shut        = false
-    val tracer      = new RecordingTracing(mutable.Buffer.empty) { override def shutdown(): Unit = shut = true }
+    val tracer      = new RecordingTracing(mutable.Buffer.empty) { override def close(): Unit = shut = true }
     val transformed = TracingComposer.transform(tracer)(identity)
 
-    transformed.shutdown()
+    transformed.close()
     shut shouldBe true
   }
 
   // =========================================================================
-  // NoOpTracing.shutdown
+  // NoOpTracing.close
   // =========================================================================
 
-  "NoOpTracing" should "support shutdown without error" in {
+  "NoOpTracing" should "support close without error" in {
     val noop = new NoOpTracing()
-    noException should be thrownBy noop.shutdown()
+    noException should be thrownBy noop.close()
   }
 
   // =========================================================================
@@ -317,26 +329,5 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   /** Recording tracer for test assertions */
   private class RecordingTracing(events: mutable.Buffer[TraceEvent]) extends Tracing {
     def traceEvent(event: TraceEvent): Result[Unit] = { events += event; Right(()) }
-    def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
-      events += TraceEvent.ToolExecuted(toolName, input, output, 0.millis, true)
-      Right(())
-    }
-    def traceError(error: Throwable, context: String): Result[Unit] = {
-      events += TraceEvent.ErrorOccurred(error, context)
-      Right(())
-    }
-    def traceCompletion(completion: Completion, model: String): Result[Unit] = {
-      events += TraceEvent.CompletionReceived(
-        completion.id,
-        model,
-        completion.message.toolCalls.size,
-        completion.message.content
-      )
-      Right(())
-    }
-    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = {
-      events += TraceEvent.TokenUsageRecorded(usage, model, operation)
-      Right(())
-    }
   }
 }

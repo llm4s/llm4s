@@ -8,26 +8,19 @@ grand_parent: User Guide
 nav_order: 3
 ---
 
-# Enhanced Tracing: New Use Cases
+# Enhanced Tracing: Use Cases
 
-This document lists the concrete use cases unlocked by the `add-enhanced-tracing` implementation
-(`TraceCollectorTracing`, `InMemoryTraceStore`, `TraceStore`, `TraceModel`). All of these were
-impossible before — the previous tracing infrastructure (`ConsoleTracing`, `LangfuseTracing`,
-`NoOpTracing`) was write-only: events were emitted outward with no return path.
+`TraceCollectorTracing` records trace events into a `TraceStore` that the application can read back: look a trace
+up, query spans, assert on them in a test, or export them. The other tracers (`ConsoleTracing`, `LangfuseTracing`,
+the OpenTelemetry backend, `NoOpTracing`) only send events out. `TraceCollectorTracing` is a `Tracing` like them, so
+it combines with any of them through `TracingComposer.combine()`.
 
-## Background
+`TraceCollectorTracing`, `InMemoryTraceStore`, `TraceStore` and the span model (`TraceModel`) are in
+`llm4s-observability`, with Langfuse; the `Tracing` contract, `ConsoleTracing` and `NoOpTracing` are in `llm4s-core`:
 
-The existing `Tracing` trait and its implementations are pure fire-and-forget sinks. Once a
-`TraceEvent` is emitted, the data is gone from the process. There was no way to read back, query,
-or act on trace data within the JVM.
-
-The new `TraceCollectorTracing` + `TraceStore` layer adds structured, queryable, in-process
-trace storage as a standard `Tracing` implementation — composable with any existing backend via
-`TracingComposer.combine()`.
-
-These types ship in `llm4s-observability` (`"org.llm4s" %% "llm4s-observability"`), with
-Langfuse; the `Tracing` contract, `ConsoleTracing` and `NoOpTracing` stay in `llm4s-core`.
-Package names are unchanged. On `0.4.1` and earlier they are part of `llm4s-core`.
+```sbt
+libraryDependencies += "org.llm4s" %% "llm4s-observability" % "{{ site.data.project.latest_release }}"
+```
 
 ---
 
@@ -144,11 +137,12 @@ val totalPromptTokens = store.getSpans(traceId)
 
 ### 10. Pluggable Storage Backend
 
-`TraceStore` is a trait. Implement it backed by PostgreSQL, Redis, DynamoDB, or any store
+`TraceStore[F[_]]` is a trait over an effect type; `InMemoryTraceStore` is a `TraceStore[cats.Id]`, whose methods
+return plain values. Implement it backed by PostgreSQL, Redis, DynamoDB, or any store
 without modifying any tracing code. `InMemoryTraceStore` is the reference implementation.
 
 ```scala
-class PostgresTraceStore(ds: DataSource) extends TraceStore {
+class PostgresTraceStore(ds: DataSource) extends TraceStore[cats.Id] {
   override def saveTrace(trace: Trace): Unit = // ...
   override def queryTraces(query: TraceQuery): TracePage = // ...
   // ...
@@ -157,7 +151,7 @@ class PostgresTraceStore(ds: DataSource) extends TraceStore {
 
 ### 11. Span and Trace JSON Round-Trip
 
-`TraceModelJson` provides both serialization and deserialization for the first time. Enables
+`TraceModelJson` serialises and parses spans and traces, for
 writing spans to disk and reloading them, or forwarding structured span data to a custom HTTP
 backend.
 
@@ -168,7 +162,7 @@ val parsed = TraceModelJson.parseSpan(json)   // Result[Span]
 // Handle the result
 parsed match {
   case Right(s)    => println(s.name)
-  case Left(error) => println(s"Parse error: ${error.field} — ${error.reason}")
+  case Left(error) => println(s"Parse error: ${error.formatted}")
 }
 ```
 
@@ -184,8 +178,7 @@ override def afterEach(): Unit = store.clear()
 ### 13. Dataset Construction for LLM Evaluation
 
 Query `LlmCall` spans filtered by metadata tag to collect structured `(input, output, model,
-token count)` records. This is a direct prerequisite for the datasets and evaluators planned in
-later phases of the Observability & Evaluation initiative.
+token count)` records, for example to build an evaluation dataset.
 
 ```scala
 store.searchByMetadata("dataset", "eval-set-v1")

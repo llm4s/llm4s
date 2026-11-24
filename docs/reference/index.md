@@ -16,38 +16,54 @@ Start here if you want to contribute to the project.
 
 - **[Contributing Guide](contributing)** - How to submit your first PR (read this first)
 - **[Code Review Guidelines](review-guidelines)** - Coding standards and patterns expected in PRs
-- **[Testing Guide](testing-guide)** - How to write tests (contributor-focused)
+- **[Contributor Testing Guide](testing-guide)** - How to write and run tests in this repository
+- **[Test Coverage](test-coverage)** - Coverage tooling and thresholds
+- **[Configuration Boundary](configuration-boundary)** - How configuration is isolated from core code
+- **[Scalafix Rules](scalafix)** - Linting rules, and the migration rules that rewrite user code
+- **[Protecting main (merge queue)](merge-queue)** - Why two green PRs can break `main` together, and how maintainers enable the merge queue that prevents it
 - **[RFCs](../rfcs/)** - How to propose a change to a Frozen module's public API, and the log of decisions
 - **[Code of Conduct](https://github.com/llm4s/llm4s/blob/main/CODE_OF_CONDUCT.md)** - Community guidelines
 
-## Project Documentation
+## Releases, stability and upgrades
 
-- **[Configuration Boundary](configuration-boundary)** - How configuration is isolated from core code
-- **[Scalafix Rules](scalafix)** - Linting rules and code quality
-- **[Migration Guide](migration)** - Upgrade between versions
-- **[Test Coverage](test-coverage)** - Coverage tooling and thresholds
-- **[Release Process](release)** - How releases are created
-- **[Protecting main (merge queue)](merge-queue)** - Why two green PRs can break `main` together, and how maintainers enable the merge queue that prevents it
-- **[Postgres Memory Store](postgres-memory-store)** - PostgreSQL-backed agent memory persistence
-- **[Security Reference](security)** - Threat model, trust boundaries, known risks and mitigations
+- **[1.0 Scope](v1-scope)** - Which packages are Frozen, Beta or Experimental, and what is outside 1.0
+- **[Compatibility and Deprecation Policy](compatibility-policy)** - What you can rely on when you upgrade, before and after 1.0
+- **[API Stability](api-stability)** - How binary compatibility is checked with MiMa, which modules are covered, and how to add a filter
+- **[Support Policy](support-policy)** - Which releases get fixes, the supported platforms and end of support
+- **[Migration Guide](migration)** - The note for every breaking change since 0.4.1; start from [Migrating from 0.x to 1.0](../migrations/0x-to-1x)
+- **[Release Process](release)** - How releases are cut, and the checklist for each
 - **[Verifying Releases](verifying-releases)** - Checking a jar's PGP signature and the build provenance of the jars, SBOMs and container image
-- **[Workspace Sandbox](workspace-sandbox)** - Configuring the containerised workspace's limits
-- **[Performance Benchmarks](benchmarks)** - Baseline JMH results for the hot paths
-- **[Troubleshooting / FAQ](troubleshooting)** - Common errors and solutions
-- **[Glossary](glossary)** - Definitions of the terms LLM4S uses, each with a link to its guide or type
+- **[Compatibility Matrix](compatibility-matrix)** - What each provider supports with LLM4S, and the versions of the stack around it LLM4S is tested with, generated from the code
+
+## Using LLM4S
+
+- **[Troubleshooting / FAQ](troubleshooting)** - Common problems beyond the first run
 - **[Doctor](doctor)** - One command that checks your JDK, configuration, API key, provider module and local model server, and says what to fix
+- **[Glossary](glossary)** - Definitions of the terms LLM4S uses, each with a link to its guide or type
+- **[Model Metadata](model-metadata)** - The model registry: context windows, prices and capabilities, and how they are looked up
 - **[Dependency Conflicts](dependency-conflicts)** - Gradle and sbt dependency conflicts and how to resolve them
+- **[Postgres Memory Store](postgres-memory-store)** - PostgreSQL-backed agent memory persistence
+- **[Workspace Sandbox](workspace-sandbox)** - Configuring the containerised workspace's limits
+
+## Security, licences and evaluation
+
+- **[Security Reference](security)** - Threat model, trust boundaries, known risks and mitigations
+- **[SBOM](sbom)** - The CycloneDX SBOM of each published module, and how dependencies are scanned
+- **[Licences](licences)** - The licences of LLM4S's dependencies and the policy for new ones
+- **[Legal and IP FAQ](legal-faq)** - Licence, copyright, DCO, patents and third-party terms
+- **[Enterprise Evaluation](enterprise-evaluation)** - Answers to an open-source intake questionnaire (licence, governance, support, security, supply chain, data protection), each linked to its evidence, with the known gaps
+- **[OpenSSF Best Practices](best-practices)** - Each passing criterion of the OpenSSF Best Practices badge, marked Met, Unmet or N/A with its evidence, and the follow-ups
+
+## Performance
+
+- **[Running the JMH Benchmarks](benchmarks)** - How to run the hot-path JMH benchmarks and how regression detection works
+- **[Comparative Benchmarks](comparative-benchmarks)** - llm4s, LangChain4j and Spring AI against one local mock server
+- **[RAG Benchmark Results](rag-benchmark-results)** - The RAG benchmarking harness and the results it produced
 
 ## Roadmap & Planning
 
 - **[Project Roadmap](roadmap)** - Development roadmap, production readiness, and future plans (single source of truth)
 - **[Agent Platform Parity](agent-platform-parity)** - The agent runtime against LangGraph Platform and Deep Agents, capability by capability, and where each gap went
-- **[1.0 Scope](v1-scope)** - Which packages are Frozen, Beta, or Experimental ahead of the 1.0 modularisation
-- **[API Stability](api-stability)** - How binary compatibility is checked with MiMa, which modules are covered, and how to add a filter
-- **[Compatibility and Deprecation Policy](compatibility-policy)** - What you can rely on when you upgrade, and how an API is deprecated and removed
-- **[Enterprise Evaluation](enterprise-evaluation)** - Answers to an open-source intake questionnaire (licence, governance, support, security, supply chain, data protection), each linked to its evidence, with the known gaps
-- **[OpenSSF Best Practices](best-practices)** - Each passing criterion of the OpenSSF Best Practices badge, marked Met, Unmet or N/A with its evidence, and the follow-ups
-- **[Compatibility Matrix](compatibility-matrix)** - What each provider supports with LLM4S, and the versions of the stack around it LLM4S is tested with, generated from the code
 - **[Design Documents](https://github.com/llm4s/llm4s/tree/main/docs/design)** - Detailed architecture docs
 
 ## External Resources
@@ -58,7 +74,9 @@ Start here if you want to contribute to the project.
 
 ## Design Documents
 
-Detailed design documents for agent framework phases:
+Design documents for the agent framework phases. They describe the agent API before the typed graph runtime
+(#1328), which `Agent` now runs on; the [Typed Agent Runtime Design](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime-design.md)
+describes the current one.
 
 | Document | Description |
 |----------|-------------|
@@ -75,10 +93,9 @@ Detailed design documents for agent framework phases:
 
 ## API Specifications
 
-- [Tool Calling API Design](https://github.com/llm4s/llm4s/blob/main/docs/tool-calling-api-design.md)
-- [Workspace Protocol](https://github.com/llm4s/llm4s/blob/main/docs/workspace-agent-protocol.md)
-- [Langfuse Workflow Patterns](https://github.com/llm4s/llm4s/blob/main/docs/langfuse-workflow-patterns.md)
-- [Reliability Guide](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md) - Retry, circuit breaker, and deadline enforcement
+- [Reliable LLM Calling](../guide/reliability) - Retry, circuit breaker, and deadline enforcement
+- [Tool Calling API Design](https://github.com/llm4s/llm4s/blob/main/docs/design/tool-calling-api-design.md)
+- [Workspace Agent Protocol](https://github.com/llm4s/llm4s/blob/main/docs/design/workspace-agent-protocol.md)
 
 ## Community Resources
 

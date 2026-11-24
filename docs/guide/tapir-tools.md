@@ -22,7 +22,7 @@ the tool cannot drift from the API it calls. The module is Experimental.
 ## Installation
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-tapir" % llm4sVersion // same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-tapir" % "{{ site.data.project.latest_release }}"
 ```
 
 It depends on `llm4s-core`, `tapir-core` 1.11 and sttp client 3, not on the agent runtime: the tools are plain

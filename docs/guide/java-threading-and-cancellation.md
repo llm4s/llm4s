@@ -176,15 +176,18 @@ thread included - by `AgentKtStreamTest`, `AgentKtPendingTest` and `AgentKtTest`
 
 ## Timeouts
 
-A call that gets no answer ends with a `TimeoutError`. The limit is set by each provider client: two minutes for a
-non-streaming call in the Ollama
+A call that gets no answer ends with a `TimeoutError`. Each provider client has a default limit, and you can set your own.
+The defaults are two minutes for a non-streaming call in the Ollama
 ([`OllamaClient.scala`](https://github.com/llm4s/llm4s/blob/main/modules/ollama/src/main/scala/org/llm4s/llmconnect/provider/OllamaClient.scala)),
 Gemini and Vertex AI clients and in the OpenAI-compatible clients, which allow five minutes for a streaming call
 ([`OpenAICompatibleClient.scala`](https://github.com/llm4s/llm4s/blob/main/modules/openai-compatible/src/main/scala/org/llm4s/llmconnect/provider/OpenAICompatibleClient.scala)).
 Against a server that never answered, the Ollama client returned `TimeoutError: request timed out after 120
-seconds`. That run took two minutes, so no test pins it. The OpenAI and Anthropic limits come from their SDKs and
-were not checked. The limit cannot be configured in this release; [#712](https://github.com/llm4s/llm4s/issues/712)
-tracks making it configurable.
+seconds`. That run took two minutes, so no test pins it. The OpenAI and Anthropic defaults come from their SDKs and
+were not checked.
+
+To change the limit, call `requestTimeout` and `streamTimeout` on a client builder (see
+[Configure in code](java#configure-in-code)), or set the `timeouts` key of a provider section
+(see [Timeouts](../getting-started/configuration#timeouts)).
 
 ## Shutting down
 

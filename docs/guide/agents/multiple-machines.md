@@ -195,7 +195,8 @@ identity, so two machines name the same spans without coordinating.
 
 Spans are emitted by the agent's tracing: build the agent `withTracing(tracing)` with a backend from
 `llm4s-observability-otel` (`TRACING_MODE=opentelemetry`) or `llm4s-observability` (Langfuse). Delegated child runs
-sit under the tool call that started them. No message content goes into a span attribute.
+sit under the tool call that started them. No message content goes into a span attribute, and no guardrail reason:
+a blocked run's failure names only the guardrail. Any other failure's error message is recorded as it is.
 
 ## Metrics
 
@@ -276,8 +277,7 @@ Whether instances can be replaced one at a time depends on what the release chan
   `GraphError.UnsupportedStoreSchema` and writes nothing, so a mixed fleet fails safe rather than corrupting threads.
 
 The release notes and the [migration guide](../../reference/migration) say when a release changes either.
-Expand-then-contract migrations, which would let schema changes roll too, are planned with the 1.0 compatibility
-baseline.
+A store schema change does not roll: there are no expand-then-contract migrations, so every one is a full stop.
 
 ## Limits
 
@@ -295,4 +295,5 @@ baseline.
   thread registry.
 - [Streaming events](streaming): the event log a follower reads.
 - [Agent platform parity](../../reference/agent-platform-parity): llm4s against LangGraph Platform and Deep Agents.
-- `docs/design/typed-agent-runtime/` 4.50-4.61: the Stage 5 design records.
+- The design records of the multi-machine kernel, §4.50 to §4.61, in
+  [`docs/design/typed-agent-runtime`](https://github.com/llm4s/llm4s/tree/main/docs/design/typed-agent-runtime).

@@ -73,9 +73,10 @@ libraryDependencies ++= Seq(
 | `gemini`, `vertexai` | `llm4s-gemini` |
 | `ollama` | `llm4s-ollama` |
 | `bedrock` | `llm4s-bedrock` |
+| `watsonx` | `llm4s-watsonx` |
+| `perplexity` | `llm4s-perplexity` |
+| `jlama` | `llm4s-jlama` (a model run inside your JVM; see [First answer, no key, no server](local-jlama)) |
 | `deepseek`, `zai`, `openrouter`, `mistral`, `cohere`, `xai`, `openai-compatible` | `llm4s-openai-compatible` |
-
-Before 0.5.0, every provider shipped inside `llm4s-core`, so the `llm4s-core` dependency alone was enough.
 
 **2. Add a section to `src/main/resources/application.conf`:**
 
@@ -163,12 +164,13 @@ the value.
 | `mistral` | `MISTRAL_API_KEY` | `llm4s-openai-compatible` |
 | `xai` | `XAI_API_KEY` | `llm4s-openai-compatible` |
 | `perplexity` | `PERPLEXITY_API_KEY` | `llm4s-perplexity` |
+| `watsonx` | `WATSONX_API_KEY` | `llm4s-watsonx` |
 | `cohere` | `COHERE_API_KEY` (chat, reranker and embeddings) | `llm4s-openai-compatible`, `llm4s-rag`, `llm4s-cohere` |
 | `voyage` | `VOYAGE_API_KEY` | `llm4s-voyage` |
 | `jina` | `JINA_API_KEY` | `llm4s-jina` |
 | `typesafe` | `TYPESAFE_API_KEY` (the Jev decision client; not a chat or embeddings provider) | `llm4s-jev` |
 
-`ollama` takes no key, the generic `openai-compatible` provider has no vendor, `vertexai`
+`ollama` and `jlama` take no key, the generic `openai-compatible` provider has no vendor, `vertexai`
 authenticates with OAuth2 (Application Default Credentials, or a service-account file named by
 its `apiKey`), and `bedrock` authenticates with AWS credentials (the AWS default credential chain,
 a `profile`, or explicit keys), so none of them has a shared key.
@@ -194,7 +196,7 @@ The same form reads a variable of your own choosing - `apiKey = ${?MY_TEAM_OPENA
 if `OPENAI_BATCH_API_KEY` is unset, `openai-batch` falls back to the shared `OPENAI_API_KEY`
 and bills the default account. In production, give every section its own `apiKey`; the
 config-policy `prod` preset flags any section that does not (see
-[Production deployment](../PRODUCTION_DEPLOYMENT)).
+[Production deployment](../guide/production-deployment)).
 
 ### Rotating keys: apiKeyFile and ApiKeyProvider
 
@@ -406,6 +408,7 @@ section with an `apiKey`.
 | `endpoint`, `apiVersion` | Azure OpenAI: the resource endpoint (required) and API version |
 | `project`, `location` | Vertex AI: the GCP project id (required) and region (default `us-central1`) |
 | `region`, `profile`, `accessKeyId`, `secretAccessKey`, `sessionToken` | AWS Bedrock: the AWS region (required, never defaulted); a shared-config profile; or explicit credentials, with a session token for temporary ones. With none of the credential keys the AWS default credential chain is used. `baseUrl` overrides the endpoint |
+| `projectId`, `spaceId` | IBM watsonx.ai: the project (required unless `spaceId` names a deployment space instead) |
 | `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` | Generic `openai-compatible` endpoints ([details](../guide/providers#openai-compatible-endpoints)) |
 
 The first seven keys are shared by every provider (`apiKeyFile` by every one that takes an API key). The rest belong to the providers named, which
@@ -512,7 +515,7 @@ With the example above and `ANTHROPIC_API_KEY` alone set, `defaultProvider()` lo
 while `provider("gemini-main")` fails with a `ConfigurationError` naming `GOOGLE_API_KEY`,
 `GEMINI_API_KEY` and `gemini-main`'s `apiKey`. The exception is `Llm4sConfig.providers()`, which returns every section and so
 validates them all; `Llm4sConfig.providerConfigs()` instead reports each section's error
-separately. (Up to 0.4.1 every section was validated on every load.)
+separately.
 
 ---
 
@@ -786,8 +789,7 @@ llm4s.embeddings.openai.apiKey = ${?OPENAI_EMBEDDINGS_API_KEY}
 ```
 
 Each embedding provider comes from its module: `openai` from `llm4s-openai`, `voyage` from
-`llm4s-voyage`, `jina` from `llm4s-jina`, `cohere` from `llm4s-cohere` and `ollama` from `llm4s-ollama` (in `0.4.1` and earlier, `openai` and `voyage` are
-inside `llm4s-core`). Without the module, the provider id fails with an error naming the
+`llm4s-voyage`, `jina` from `llm4s-jina`, `cohere` from `llm4s-cohere` and `ollama` from `llm4s-ollama`. Without the module, the provider id fails with an error naming the
 registered embedding providers.
 
 Default base URLs are used automatically:
@@ -856,28 +858,10 @@ size.
 ollama pull nomic-embed-text
 ```
 
-### Legacy Format (Still Supported)
-
-The legacy format using `EMBEDDING_PROVIDER` is still supported for backward compatibility:
-
-```bash
-# OpenAI
-EMBEDDING_PROVIDER=openai
-OPENAI_EMBEDDING_BASE_URL=https://api.openai.com/v1
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-OPENAI_API_KEY=sk-...
-
-# Voyage AI
-EMBEDDING_PROVIDER=voyage
-VOYAGE_EMBEDDING_BASE_URL=https://api.voyageai.com/v1
-VOYAGE_EMBEDDING_MODEL=voyage-3
-VOYAGE_API_KEY=pa-...
-
-# Ollama
-EMBEDDING_PROVIDER=ollama
-OLLAMA_EMBEDDING_BASE_URL=http://localhost:11434
-OLLAMA_EMBEDDING_MODEL=nomic-embed-text
-```
+`EMBEDDING_MODEL` is the only selector. The older `EMBEDDING_PROVIDER` variable (`llm4s.embeddings.provider`)
+was removed in 0.7.0: a configuration that still sets `llm4s.embeddings.provider` and no model fails to load,
+asking for `EMBEDDING_MODEL=provider/model` (see the
+[migration note](../reference/migration#the-legacy-embedding-provider-selector-is-removed)).
 
 ### Using Embeddings in Code
 
@@ -949,9 +933,6 @@ question they answer as a query. Code that does not say keeps embedding document
 - **An explicit setting wins.** A Jina task or a Cohere input type passed to the provider's `fromConfig` is
   sent for every request, whatever its purpose, because it can be one the purpose cannot express
   (`text-matching`, `classification`, `clustering`).
-- **Voyage now sends `input_type`.** Before, it sent none, which Voyage treats as a plain embedding. Documents
-  indexed before this change were embedded that way; they still work against queries, and re-indexing makes
-  the two sides match exactly.
 - **Caching keeps the two apart.** `CachedEmbeddingClient`'s key includes the request's purpose, so a
   query and a document with the same text never share an entry (see the [caching guide](../guide/caching)).
 
@@ -960,13 +941,7 @@ question they answer as a query. Code that does not say keeps embedding document
 When running via sbt, use system properties for reliable configuration:
 
 ```bash
-# Using unified format (recommended)
 sbt -Dllm4s.embeddings.model=ollama/nomic-embed-text \
-    "run"
-
-# Or with legacy format
-sbt -Dllm4s.embeddings.provider=ollama \
-    -Dllm4s.embeddings.ollama.model=nomic-embed-text \
     "run"
 ```
 
@@ -1012,6 +987,10 @@ required: without one, `Tracing.fromSettings` returns a `ConfigurationError` nam
 `Tracing.create` logs it and traces nothing. Without the module, `TRACING_MODE=langfuse` gives
 an error naming the `llm4s-observability` artifact.
 
+Traces are private to your Langfuse project. `llm4s.tracing.langfuse.public = true` (no variable
+is bound to it) sends them public instead: readable, messages included, by anyone holding a
+trace's URL.
+
 Get keys from [Langfuse](https://langfuse.com):
 
 1. Sign up at langfuse.com
@@ -1034,7 +1013,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
 OpenTelemetry tracing needs the `llm4s-observability-otel` module on the classpath.
 
-**Settings** (bound in core's `reference.conf`):
+**Settings** (`llm4s.tracing.mode` is bound in core's `reference.conf`, the rest in `llm4s-observability-otel`'s):
 
 | Config key | Variable | Default | Description |
 |----------|----------|---------|-------------|
@@ -1069,29 +1048,30 @@ OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector.example.com:4317
 OTEL_AUTH_HEADER="Bearer sk-otel-token"   # bound by the headers block above
 ```
 
-**Spans Generated:**
+**Spans Generated** (names and attributes follow the OpenTelemetry GenAI semantic conventions; an excerpt):
 
 ```
-Span: LLM Completion
+Span: chat gpt-4o
+  ├─ gen_ai.operation.name: chat
+  ├─ gen_ai.provider.name: openai
   ├─ gen_ai.request.model: gpt-4o
   ├─ gen_ai.usage.input_tokens: 150
   └─ gen_ai.usage.output_tokens: 50
 
-Span: Tool Execution: web_search
-  ├─ tool.name: web_search
-  ├─ tool.input: "Scala 3 features"
-  └─ duration_ms: 1234
+Span: execute_tool web_search
+  ├─ gen_ai.tool.name: web_search
+  ├─ duration_ms: 1234
+  └─ success: true
 
-Span: Token Usage - completion
-  ├─ operation: completion
-  ├─ gen_ai.usage.total_tokens: 200
-  └─ cost.usd: 0.0042
-
-Span: Agent State Updated
-  ├─ status: RUNNING
+Span: invoke_agent assistant
+  ├─ gen_ai.operation.name: invoke_agent
+  ├─ status: completed
   ├─ message_count: 5
-  └─ log_count: 12
+  ├─ gen_ai.usage.input_tokens: 420
+  └─ gen_ai.usage.output_tokens: 96
 ```
+
+Prompts, completions and tool arguments are recorded only with `captureContent` (below).
 
 **Setting Up Jaeger (Local Development):**
 
@@ -1129,7 +1109,7 @@ val result = for {
   tracer   <- Tracing.fromSettings(settings)
   _        <- tracer.traceEvent(TraceEvent.AgentInitialized("query", Vector("tool1")))
   _        <- tracer.traceTokenUsage(usage, "gpt-4o", "completion")
-  _         = tracer.shutdown() // always shut down to flush pending spans
+  _         = tracer.close() // always shut down to flush pending spans
 } yield ()
 ```
 
@@ -1173,14 +1153,14 @@ also set in `application.conf` or with `-D`.
 | `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION` | `llm4s.tracing.langfuse.*` | `llm4s-observability` |
 | `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `llm4s.tracing.opentelemetry.serviceName`, `.endpoint` | `llm4s-observability-otel` |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | `llm4s.tracing.opentelemetry.captureContent` (`false` by default: spans carry no prompt or completion content) | `llm4s-observability-otel` |
-| `EMBEDDING_MODEL` (or legacy `EMBEDDING_PROVIDER`) | `llm4s.embeddings.model` (`.provider`) | `llm4s-core` |
+| `EMBEDDING_MODEL` | `llm4s.embeddings.model` | `llm4s-core` |
 | `LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT` | `llm4s.tracing.console.captureContent` (`false` by default: console tracing prints no prompt or completion content) | `llm4s-core` |
 | `LLM4S_EXCHANGE_LOGGING_ENABLED`, `LLM4S_EXCHANGE_LOGGING_DIR` | `llm4s.exchangeLogging.*` | `llm4s-core` |
 | `HTTPS_PROXY`, `NO_PROXY`, `LLM4S_PROXY_USER`, `LLM4S_PROXY_PASSWORD` | `llm4s.http.proxy.url`, `.nonProxyHosts`, `.username`, `.password` ([Corporate networks](#corporate-networks-a-proxy-and-a-custom-ca)) | `llm4s-core` |
 | `LLM4S_TRUSTSTORE`, `LLM4S_TRUSTSTORE_PASSWORD`, `LLM4S_KEYSTORE`, `LLM4S_KEYSTORE_PASSWORD` | `llm4s.http.tls.trustStore`, `.trustStorePassword`, `.keyStore`, `.keyStorePassword` | `llm4s-core` |
 | `LLM4S_MODEL_REGISTRY_RESOURCE`, `LLM4S_MODEL_REGISTRY_FILE`, `LLM4S_MODEL_REGISTRY_URL` | `llm4s.modelRegistry.*` | `llm4s-core` |
 | `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT` | `llm4s.workspace.*` | `llm4s-core` |
-| `BRAVE_SEARCH_API_KEY`, `EXA_API_KEY` and the other `BRAVE_*`, `EXA_*` variables, `DUCK_DUCK_GO_SEARCH_API_URL` | `llm4s.tools.*` | `llm4s-core` |
+| `BRAVE_SEARCH_API_KEY`, `EXA_API_KEY` and the other `BRAVE_*`, `EXA_*` variables, `DUCK_DUCK_GO_SEARCH_API_URL` | `llm4s.tools.*` | `llm4s-agent-tools` |
 | `OPENAI_API_KEY` | `llm4s.credentials.openai.apiKey` (OpenAI chat sections and embeddings) | `llm4s-openai` |
 | `AZURE_OPENAI_API_KEY` | `llm4s.credentials.azure.apiKey` | `llm4s-openai` |
 | `REQUESTY_API_KEY` | `llm4s.credentials.requesty.apiKey` | `llm4s-openai` |
@@ -1191,6 +1171,9 @@ also set in `application.conf` or with `-D`.
 | `VOYAGE_API_KEY` | `llm4s.credentials.voyage.apiKey` | `llm4s-voyage` |
 | `JINA_API_KEY` | `llm4s.credentials.jina.apiKey` | `llm4s-jina` |
 | `PERPLEXITY_API_KEY` | `llm4s.credentials.perplexity.apiKey` | `llm4s-perplexity` |
+| `WATSONX_API_KEY` | `llm4s.credentials.watsonx.apiKey` | `llm4s-watsonx` |
+| `SPEECH_TTS_MODEL`, `SPEECH_TTS_VOICE`, `SPEECH_STT_MODEL` | `llm4s.speech.tts.model`, `.tts.voice`, `.stt.model` (`provider/model`, for example `openai/tts-1`) | `llm4s-speech` |
+| `OPENAI_API_KEY`, `OPENAI_SPEECH_BASE_URL`; `ELEVENLABS_API_KEY`, `ELEVENLABS_BASE_URL`, `ELEVENLABS_MODEL_ID`; `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`, `AZURE_SPEECH_TTS_BASE_URL`, `AZURE_SPEECH_STT_BASE_URL` | `llm4s.speech.openai.*`, `llm4s.speech.elevenlabs.*`, `llm4s.speech.azure.*` | `llm4s-speech` |
 | `TYPESAFE_API_KEY` | `llm4s.credentials.typesafe.apiKey` (the Jev decision client) | `llm4s-jev` |
 | `TYPESAFE_BASE_URL`, `TYPESAFE_DEFAULT_MODEL` | `llm4s.jev.baseUrl`, `llm4s.jev.model` | `llm4s-jev` |
 | `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` | `llm4s.embeddings.openai.*` | `llm4s-openai` |
@@ -1458,25 +1441,22 @@ Left(RateLimitError("Rate limit exceeded"))
 
 **Solutions:**
 
-1. **Add retry logic:**
+1. **Retry with backoff:** wrap the client in `ReliableClient`, which retries a recoverable error such as a
+   `RateLimitError` (honouring the provider's `Retry-After`), and adds a circuit breaker and a deadline. Build it
+   once and keep it, as every `LLMClient`:
 ```scala
 import scala.concurrent.duration._
-import org.llm4s.error.RateLimitError
-import org.llm4s.types.Result
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
 
-// Note: This example uses Thread.sleep for simplicity.
-// In production, prefer scala.concurrent or cats-effect for non-blocking delays.
-def retryWithBackoff[A](op: => Result[A], maxRetries: Int = 3): Result[A] = {
-  (1 to maxRetries).foldLeft(op) { (result, attempt) =>
-    result match {
-      case Left(_: RateLimitError) if attempt < maxRetries =>
-        Thread.sleep(Math.pow(2, attempt).toLong * 1000)  // Exponential backoff
-        op
-      case other => other
-    }
-  }
-}
+def reliable(client: LLMClient): LLMClient =
+  new ReliableClient(
+    client,
+    "openai-main",
+    ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 4, baseDelay = 2.seconds))
+  )
 ```
+   See the [fallback recipe](/examples/cookbook/fallback) for a second provider when the first still fails.
 
 2. **Use a cheaper model for testing** - change the section's `model`:
 ```hocon
@@ -1515,7 +1495,7 @@ client.streamComplete(
 ```scala
 client.complete(
   Conversation(Seq(UserMessage("Your query"))),
-  CompletionOptions(maxTokens = Some(500))  // Limit response length
+  CompletionOptions().withMaxTokens(500)  // Limit response length
 )
 ```
 
@@ -1568,9 +1548,9 @@ Configuration complete! Now you can:
 
 ## Additional Resources
 
-- **[Llm4sConfig API](/api/#4-explicit-configuration)** - Detailed API documentation
+- **[Llm4sConfig API](/api/#entry-points)** - Detailed API documentation
 - **[Environment variables llm4s reads](#environment-variables-llm4s-reads)** - Complete list
-- **[Production Guide](../PRODUCTION_DEPLOYMENT)** - Production best practices
+- **[Production Guide](../guide/production-deployment)** - Production best practices
 - **[Discord Community](https://discord.gg/4uvTPn6qww)** - Get help with configuration
 
 ---
