@@ -169,14 +169,14 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
 
     (mockHttp.onPost _).when(*, *, *, *).returns(Right(httpOk(body)))
 
-    val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
+    val client = mkClient(mockHttp, ProviderExchangeLogging.Enabled(sink))
     val result = client.complete(conversation("Hello"), CompletionOptions())
 
     assert(result.isRight)
     assert(recorded.size == 1)
 
     val exchange = recorded.head
-    assert(exchange.provider == "ollama")
+    assert(exchange.provider.asString == "ollama")
     assert(exchange.model.contains("llama3.1"))
     assert(exchange.requestBody.contains("\"model\":\"llama3.1\""))
     assert(exchange.requestBody.contains("\"stream\":false"))
@@ -241,7 +241,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val failure = NetworkError("connection reset", None, "http://localhost:11434/api/chat")
     (mockHttp.onPost _).when(*, *, *, *).returns(Left(failure))
 
-    val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
+    val client = mkClient(mockHttp, ProviderExchangeLogging.Enabled(sink))
     val result = client.complete(conversation("Hello"), CompletionOptions())
 
     assert(result == Left(failure))
@@ -476,14 +476,14 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
 
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
-    val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
+    val client = mkClient(mockHttp, ProviderExchangeLogging.Enabled(sink))
     val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
 
     assert(result.isRight)
     assert(recorded.size == 1)
 
     val exchange = recorded.head
-    assert(exchange.provider == "ollama")
+    assert(exchange.provider.asString == "ollama")
     assert(exchange.model.contains("llama3.1"))
     assert(exchange.requestBody.contains("\"stream\":true"))
     assert(exchange.responseBody.exists(_.contains(""""done":true""")))
@@ -514,7 +514,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val failure = NetworkError("connection reset", None, "http://localhost:11434/api/chat")
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Left(failure))
 
-    val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
+    val client = mkClient(mockHttp, ProviderExchangeLogging.Enabled(sink))
     val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
 
     assert(result == Left(failure))
@@ -581,7 +581,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       new ByteArrayInputStream("{\"message\":{\"content\":\"a\"}}\nnot-json\n".getBytes(StandardCharsets.UTF_8))
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, body)))
 
-    val result = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
+    val result = mkClient(mockHttp, ProviderExchangeLogging.Enabled(sink))
       .streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
 
     assert(result.isLeft)

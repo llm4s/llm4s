@@ -33,7 +33,7 @@ object OllamaStreamingExample {
       given org.llm4s.model.ModelRegistryService = registryService
       sink <- ProviderExchangeSink.createRunScopedJsonl(Paths.get(logDir))
       options = LlmClientOptions(
-        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
       _ = logger.info("Provider exchange logs: {}", sink.path.toAbsolutePath.normalize())
       client <- LLMConnect.getClient(providerCfg, options)

@@ -350,7 +350,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
     result.isRight shouldBe true
     exchanges should have size 1
-    exchanges.head.provider shouldBe "vertexai"
+    exchanges.head.provider.asString shouldBe "vertexai"
     exchanges.head.model shouldBe Some("gemini-2.0-flash")
     exchanges.head.requestBody should include("Hi")
     exchanges.head.responseBody.value should include("Hello!")

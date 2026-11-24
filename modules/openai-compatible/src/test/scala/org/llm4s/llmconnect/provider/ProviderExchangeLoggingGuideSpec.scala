@@ -68,7 +68,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
   // ---- "From code": a JSONL file for this run
 
   def jsonlLogging(dir: Path): Result[ProviderExchangeLogging] =
-    ProviderExchangeSink.createRunScopedJsonl(dir).map(ProviderExchangeLogging.enabled)
+    ProviderExchangeSink.createRunScopedJsonl(dir).map(ProviderExchangeLogging.Enabled(_))
 
   // ---- "Writing your own sink"
 
@@ -91,7 +91,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
 
   private def clientWith(baseUrl: String, sink: ProviderExchangeSink): LLMClient =
     LLMConnect
-      .getClient(config(baseUrl), LlmClientOptions(exchangeLogging = ProviderExchangeLogging.enabled(sink)))
+      .getClient(config(baseUrl), LlmClientOptions(exchangeLogging = ProviderExchangeLogging.Enabled(sink)))
       .getOrElse(fail("could not build the client"))
 
   private def freeLoopbackUrl(): String = {
@@ -118,7 +118,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
         recorded should have size 1
         val exchange = recorded.head
         noException should be thrownBy UUID.fromString(exchange.exchangeId)
-        exchange.provider shouldBe "deepseek"
+        exchange.provider.asString shouldBe "deepseek"
         exchange.model shouldBe Some("deepseek-chat")
         exchange.requestId shouldBe None
         exchange.correlationId shouldBe None

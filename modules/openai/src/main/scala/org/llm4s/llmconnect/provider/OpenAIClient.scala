@@ -941,13 +941,15 @@ class OpenAIClient private[provider] (
     result: Result[Completion]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(model),
-      startedAt = startedAt,
-      requestBody = requestBody.getOrElse(""),
-      responseBody = responseBody,
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody.getOrElse(""),
+        model = Some(model),
+        responseBody = responseBody
+      ),
+      result
     )
 
   private def known[T](field: JsonField[T]): Option[T] = field.asKnown().toScala

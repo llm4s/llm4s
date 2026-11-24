@@ -183,7 +183,7 @@ class WatsonXErrorSpec extends AnyFunSuite with Matchers:
       _ => Right(HttpResponse(200, s"""{"access_token":"$BearerToken","expires_in":3600}""")),
       _ => Right(chatReply)
     )
-    val c = new WatsonXClient(config, exchangeLogging = ProviderExchangeLogging.enabled(sink), httpClient = http)
+    val c = new WatsonXClient(config, exchangeLogging = ProviderExchangeLogging.Enabled(sink), httpClient = http)
     c.complete(hi, CompletionOptions()).isRight shouldBe true
     c.streamComplete(hi, CompletionOptions(), _ => ()).isLeft shouldBe true // no stream scripted: still no secrets
     val all = seen.asScala.toSeq

@@ -37,7 +37,7 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
   )(call: (String, ProviderExchangeLogging) => A): (A, Int, Seq[ProviderExchange]) = {
     val hits     = new AtomicInteger
     val recorded = ListBuffer.empty[ProviderExchange]
-    val logging = ProviderExchangeLogging.enabled(
+    val logging = ProviderExchangeLogging.Enabled(
       new ProviderExchangeSink:
         override def record(exchange: ProviderExchange): Unit = recorded += exchange
     )

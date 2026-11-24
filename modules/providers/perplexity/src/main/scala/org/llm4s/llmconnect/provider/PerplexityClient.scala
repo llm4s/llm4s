@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, ProcessingError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
@@ -352,13 +353,15 @@ class PerplexityClient(
     result: Result[Completion]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(config.model),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = Option(responseBody).filter(_.nonEmpty),
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(config.model),
+        responseBody = Option(responseBody).filter(_.nonEmpty)
+      ),
+      result
     )
 
   override def getContextWindow(): Int     = config.contextWindow

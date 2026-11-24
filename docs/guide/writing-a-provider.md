@@ -392,13 +392,15 @@ once per request:
 
 ```scala
 ProviderExchangeRecorder.record(
-  exchangeLogging = options.exchangeLogging,
-  provider        = providerName,
-  model           = Some(config.model),
-  startedAt       = startedAt,           // java.time.Instant taken before the call
-  requestBody     = requestText,
-  responseBody    = Some(responseText),
-  result          = result               // the Result you are about to return
+  options.exchangeLogging,
+  ProviderExchangeCall(
+    provider     = ProviderId(providerName),
+    startedAt    = startedAt,            // java.time.Instant taken before the call
+    requestBody  = requestText,
+    model        = Some(config.model),
+    responseBody = Some(responseText)
+  ),
+  result                                 // the Result you are about to return
 )
 ```
 
@@ -702,8 +704,15 @@ final class AcmeClient(
       else Left(HttpErrorMapper.toError(r.statusCode, r.body, providerName, r.headers))
     }
     ProviderExchangeRecorder.record(
-      clientOptions.exchangeLogging, providerName, Some(config.model), startedAt,
-      requestText, response.toOption.map(_.body), result
+      clientOptions.exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestText,
+        model = Some(config.model),
+        responseBody = response.toOption.map(_.body)
+      ),
+      result
     )
     result
 

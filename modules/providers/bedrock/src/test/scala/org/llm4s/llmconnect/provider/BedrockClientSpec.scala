@@ -200,7 +200,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
       }
 
       exchanges should have size 1
-      exchanges.head.provider shouldBe "bedrock"
+      exchanges.head.provider.asString shouldBe "bedrock"
       exchanges.head.model shouldBe Some(Model)
       exchanges.head.requestBody should include("Hello")
       exchanges.head.responseBody.value should include("Logged response")

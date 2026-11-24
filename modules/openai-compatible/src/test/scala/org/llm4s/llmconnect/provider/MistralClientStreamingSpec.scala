@@ -127,14 +127,14 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
       sendJsonResponse(exchange, 429, """{"message":"Requests rate limit exceeded"}""")
     } { baseUrl =>
       var chunks = 0
-      val result = new MistralClient(config(baseUrl), exchangeLogging = ProviderExchangeLogging.enabled(sink))
+      val result = new MistralClient(config(baseUrl), exchangeLogging = ProviderExchangeLogging.Enabled(sink))
         .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => chunks += 1)
 
       result.left.value shouldBe a[RateLimitError]
       chunks shouldBe 0
     }
     recorded should have size 1
-    recorded.head.provider shouldBe "mistral"
+    recorded.head.provider.asString shouldBe "mistral"
     recorded.head.responseBody shouldBe Some("""{"message":"Requests rate limit exceeded"}""")
   }
 

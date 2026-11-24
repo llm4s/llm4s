@@ -108,7 +108,7 @@ first call.
 
 ### From code
 
-`ProviderExchangeSink.createRunScopedJsonl` creates the file sink; `ProviderExchangeLogging.enabled` wraps
+`ProviderExchangeSink.createRunScopedJsonl` creates the file sink; `ProviderExchangeLogging.Enabled` wraps
 a sink in the setting:
 
 ```scala
@@ -117,10 +117,10 @@ import org.llm4s.llmconnect.{ ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.types.Result
 
 def jsonlLogging(dir: Path): Result[ProviderExchangeLogging] =
-  ProviderExchangeSink.createRunScopedJsonl(dir).map(ProviderExchangeLogging.enabled)
+  ProviderExchangeSink.createRunScopedJsonl(dir).map(ProviderExchangeLogging.Enabled(_))
 ```
 
-Any sink works the same way: wrap it in `ProviderExchangeLogging.enabled` and give it to the client in
+Any sink works the same way: wrap it in `ProviderExchangeLogging.Enabled` and give it to the client in
 `LlmClientOptions`:
 
 ```scala
@@ -132,7 +132,7 @@ import org.llm4s.types.Result
 def clientFor(providerConfig: ProviderConfig, sink: ProviderExchangeSink)(using
   ModelRegistryService
 ): Result[LLMClient] =
-  LLMConnect.getClient(providerConfig, LlmClientOptions(exchangeLogging = ProviderExchangeLogging.enabled(sink)))
+  LLMConnect.getClient(providerConfig, LlmClientOptions(exchangeLogging = ProviderExchangeLogging.Enabled(sink)))
 ```
 
 ## The JSON Lines file

@@ -44,7 +44,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
     val recorded = ListBuffer.empty[ProviderExchange]
     val sink = new ProviderExchangeSink:
       override def record(exchange: ProviderExchange): Unit = recorded += exchange
-    (recorded, ProviderExchangeLogging.enabled(sink))
+    (recorded, ProviderExchangeLogging.Enabled(sink))
   }
 
   /** A port nothing listens on, so a request to it fails in transport. */
@@ -226,7 +226,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
       ]
     }
     recorded should have size 1
-    recorded.head.provider shouldBe "openai-compatible"
+    recorded.head.provider.asString shouldBe "openai-compatible"
     recorded.head.responseBody shouldBe Some("""{"error":"nope"}""")
   }
 

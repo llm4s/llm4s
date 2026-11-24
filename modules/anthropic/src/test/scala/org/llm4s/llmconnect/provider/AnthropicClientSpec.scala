@@ -108,7 +108,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
 
       assert(result.isRight)
       exchanges should have size 1
-      exchanges.head.provider shouldBe "anthropic"
+      exchanges.head.provider.asString shouldBe "anthropic"
       exchanges.head.model shouldBe Some("claude-3-5-sonnet-latest")
       exchanges.head.requestBody should include("hello")
       exchanges.head.responseBody.value should include("Logged response")

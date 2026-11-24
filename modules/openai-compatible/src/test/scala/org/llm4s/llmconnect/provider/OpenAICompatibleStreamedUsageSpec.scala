@@ -122,7 +122,7 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
     withServer("/chat/completions")(exchange => sendSseResponse(exchange, openAISseBody(Seq("a", "b")))) { baseUrl =>
       val c = OpenAICompatibleClient(
         OpenAICompatibleConfig("m", baseUrl, None),
-        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       ).value
       c.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ()).value.usage shouldBe Some(
         TokenUsage(10, 5, 15)

@@ -101,13 +101,13 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVal
       var chunks = 0
       val result = new CohereClient(
         config(s"$root/compatibility/v1"),
-        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       ).streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => chunks += 1)
 
       result.left.value shouldBe an[AuthenticationError]
       chunks shouldBe 0
     }
     recorded should have size 1
-    recorded.head.provider shouldBe "cohere"
+    recorded.head.provider.asString shouldBe "cohere"
   }
 }

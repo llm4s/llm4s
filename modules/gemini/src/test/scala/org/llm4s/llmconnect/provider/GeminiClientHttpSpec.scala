@@ -347,7 +347,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
     result.isRight shouldBe true
     exchanges should have size 1
-    exchanges.head.provider shouldBe "gemini"
+    exchanges.head.provider.asString shouldBe "gemini"
     exchanges.head.model shouldBe Some("gemini-2.0-flash")
     exchanges.head.requestBody should include("Hi")
     exchanges.head.responseBody.value should include("Hello!")
@@ -617,14 +617,14 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     val client = new GeminiClient(
       testConfig,
       org.llm4s.metrics.MetricsCollector.noop,
-      ProviderExchangeLogging.enabled(sink),
+      ProviderExchangeLogging.Enabled(sink),
       mockHttp
     )
     val result = client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
 
     result.isRight shouldBe true
     exchanges should have size 1
-    exchanges.head.provider shouldBe "gemini"
+    exchanges.head.provider.asString shouldBe "gemini"
     exchanges.head.requestBody should include("Hi")
     exchanges.head.responseBody.value should include("data:")
     exchanges.head.responseBody.value should include("Hello")

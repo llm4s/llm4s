@@ -160,7 +160,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
     val client = new OpenRouterClient(
       localConfig(baseUrl),
-      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
     val result = client.complete(conversation, CompletionOptions())
@@ -169,7 +169,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     recorded should have size 1
 
     val exchange = recorded.head
-    exchange.provider shouldBe "openrouter"
+    exchange.provider.asString shouldBe "openrouter"
     exchange.model shouldBe Some("anthropic/claude-3.5-sonnet")
     exchange.requestBody should include("\"messages\"")
     exchange.requestBody should include("hello")
@@ -281,14 +281,14 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
     val client = new OpenRouterClient(
       localConfig(baseUrl),
-      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
     val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
 
     result.isRight shouldBe true
     recorded should have size 1
-    recorded.head.provider shouldBe "openrouter"
+    recorded.head.provider.asString shouldBe "openrouter"
     recorded.head.requestBody should include("\"stream\":true")
     recorded.head.responseBody.value should include("data:")
     recorded.head.responseBody.value should include("Hello")

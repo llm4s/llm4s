@@ -345,7 +345,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       exchange.getRequestBody.readAllBytes()
       LocalProviderTestServer.sendJsonResponse(exchange, 401, unauthorized)
     } { baseUrl =>
-      val client = build(baseUrl, LlmClientOptions(metrics, ProviderExchangeLogging.enabled(sink)))
+      val client = build(baseUrl, LlmClientOptions(metrics, ProviderExchangeLogging.Enabled(sink)))
       error.set(client.complete(hello, CompletionOptions()).left.value)
       client.close()
     }

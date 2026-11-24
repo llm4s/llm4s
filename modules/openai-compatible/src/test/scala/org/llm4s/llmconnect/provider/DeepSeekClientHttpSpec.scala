@@ -68,7 +68,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
 
       val client = new DeepSeekClient(
         localConfig(baseUrl),
-        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
       val result = client.complete(conversation, CompletionOptions())
 
@@ -76,7 +76,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
       recorded should have size 1
 
       val exchange = recorded.head
-      exchange.provider shouldBe "deepseek"
+      exchange.provider.asString shouldBe "deepseek"
       exchange.model shouldBe Some("deepseek-chat")
       exchange.requestBody should include("\"messages\"")
       exchange.requestBody should include("hello")
@@ -187,13 +187,13 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
 
       val client = new DeepSeekClient(
         localConfig(baseUrl),
-        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
       val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
 
       result.isRight shouldBe true
       recorded should have size 1
-      recorded.head.provider shouldBe "deepseek"
+      recorded.head.provider.asString shouldBe "deepseek"
       recorded.head.requestBody should include("\"stream\":true")
       recorded.head.responseBody.value should include("data:")
       recorded.head.responseBody.value should include("Hello")
