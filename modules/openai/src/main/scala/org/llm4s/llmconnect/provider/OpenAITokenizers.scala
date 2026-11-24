@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.context.ConversationTokenCounter
 import org.llm4s.context.tokens.TokenizerId
 import org.llm4s.error.TokenizerError
@@ -23,6 +24,7 @@ import java.util.Locale
  * `ConversationTokenCounter.cl100k()`, an approximation that can be 20-30% off, or with your own
  * `StringTokenizer` through `ConversationTokenCounter.of`.
  */
+@Stable
 object OpenAITokenizers {
 
   /**
