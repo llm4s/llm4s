@@ -169,7 +169,7 @@ class AgentKtPendingTest {
         )
         val tools = ToolSet.of(seq<AgentTool<*>>(deploy, confirm, whoami)).toOption().get() as ToolSet
         val builder = Agent.builder("test", Scripted(replies.toList(), completion("done")))
-            .withTools(tools)
+            .withToolSet(tools)
             .withMiddleware(seq(approval))
         return (runtime?.let { builder.withRuntime(it) } ?: builder).build().toOption().get() as Agent
     }

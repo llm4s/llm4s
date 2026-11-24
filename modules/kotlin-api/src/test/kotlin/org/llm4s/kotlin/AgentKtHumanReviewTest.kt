@@ -121,7 +121,7 @@ class AgentKtHumanReviewTest {
         val builder = Agent.builder(
             "test",
             Scripted(listOf(completion("", listOf(call("c1", "one"), call("c2", "two")))), completion("done")),
-        ).withTools(tools)
+        ).withToolSet(tools)
         return Llm4s.wrapAgent(configure(builder).build().toOption().get() as Agent)
     }
 
