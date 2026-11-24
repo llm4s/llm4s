@@ -6,6 +6,7 @@ search_title: "Call LLMs from Java with LLM4S"
 parent: Java and Kotlin
 nav_order: 401
 grand_parent: User Guide
+cites_closed_issues: [1495, 1496, 1740, 1850, 2476, 2534]
 ---
 
 # Using LLM4S from Java

@@ -5,6 +5,7 @@ description: "RFC 0009: the model call contract every LLM4S provider meets - req
 parent: RFCs
 grand_parent: Reference
 nav_order: 9
+cites_issues: all
 ---
 
 # RFC 0009: The model call contract

@@ -6,6 +6,7 @@ search_title: "Durable agent checkpointers in Scala: recover and fork runs"
 nav_order: 6
 parent: Agents
 grand_parent: User Guide
+cites_closed_issues: [1739, 1919]
 ---
 
 # Durable Checkpointers

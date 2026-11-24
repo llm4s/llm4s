@@ -4,6 +4,7 @@ title: People
 nav_order: 12
 description: "The people who build, maintain and grow LLM4S: its maintainers, its contributors and the wider community around it."
 permalink: /people/
+cites_issues: [1117]
 ---
 
 # LLM4S People

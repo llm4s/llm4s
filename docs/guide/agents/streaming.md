@@ -6,6 +6,7 @@ search_title: "Stream agent events in Scala: tokens and tool calls"
 nav_order: 5
 parent: Agents
 grand_parent: User Guide
+cites_closed_issues: [1920]
 ---
 
 # Streaming Events

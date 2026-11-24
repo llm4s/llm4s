@@ -5,6 +5,7 @@ description: "RFC 0008: typed generation controls in CompletionOptions and the a
 parent: RFCs
 grand_parent: Reference
 nav_order: 8
+cites_issues: all
 ---
 
 # RFC 0008: Generation controls and reported adjustments

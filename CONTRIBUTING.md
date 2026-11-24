@@ -460,6 +460,16 @@ sbt scalafmtAll       # Format code
   breakage is listed in `scripts/docs-link-baseline.txt`; when you fix a listed link the check asks you to delete
   its line, and a new broken link is never added to that file (a `.md` link fails even if it is listed there).
   `scripts/check-docs-site-links.sh --print` shows what is broken now.
+- **Before pushing a docs change**, run `scripts/check-docs.sh`: it runs every documentation check of CI's Quick
+  Checks that needs no sbt (links, `llms.txt`, search titles and descriptions, `nav_order`, versions, the support
+  table, cited issues, ...) and lists the ones that failed. `--model FILE` adds the checks that read the build model
+  (`sbt "dumpBuildModel FILE"`), `--online` the state of each cited issue. The code blocks need sbt:
+  `sbt samples/Test/compile testDocs`.
+- **Issue links:** a page that links an llm4s issue says in its front matter how it cites it:
+  `cites_open_issues` ("tracked in", "not yet"), `cites_closed_issues` ("added in") or `cites_issues` (a pointer
+  whose state the text does not rely on; `cites_issues: all` for a release post, a migration guide or an RFC).
+  `scripts/check-cited-issues.sh` fails an undeclared link, and weekly CI fails a page whose open issue has closed.
+- **Description:** every page has a `description` of 50 to 170 characters (`scripts/check-doc-seo.sh`).
 
 ### Checked code blocks
 

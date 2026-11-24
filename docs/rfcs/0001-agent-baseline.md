@@ -5,6 +5,7 @@ description: "RFC 0001, rejected: when llm4s-agent takes its MiMa binary-compati
 parent: RFCs
 grand_parent: Reference
 nav_order: 1
+cites_issues: all
 ---
 
 # RFC 0001: When `llm4s-agent` gets its MiMa baseline

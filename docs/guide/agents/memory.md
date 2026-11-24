@@ -6,6 +6,7 @@ search_title: "Agent memory in Scala: persistent context across turns"
 nav_order: 3
 parent: Agents
 grand_parent: User Guide
+cites_closed_issues: [1579, 1594]
 ---
 
 # Memory System

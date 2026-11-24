@@ -6,6 +6,7 @@ search_title: "Call LLMs from Spark and Databricks with LLM4S"
 parent: RAG and Data
 nav_order: 308
 grand_parent: User Guide
+cites_closed_issues: [1354]
 ---
 
 # Using LLM4S from Spark and Databricks

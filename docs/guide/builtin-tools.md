@@ -6,6 +6,7 @@ search_title: "Built-in agent tools in LLM4S: files, HTTP, web search"
 parent: Agents
 nav_order: 212
 grand_parent: User Guide
+cites_closed_issues: [1723, 1734, 1766, 1807]
 ---
 
 # Built-in Tools

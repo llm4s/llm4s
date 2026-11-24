@@ -5,6 +5,7 @@ description: "The upgrade path to LLM4S 1.0 from any 0.x release: which migratio
 search_title: "Migrate LLM4S from 0.x to 1.0"
 parent: Migrations
 nav_order: 10
+cites_issues: all
 ---
 
 # Migrating from 0.x to 1.0

@@ -6,6 +6,7 @@ parent: Reference
 nav_order: 7
 has_children: true
 permalink: /rfcs/
+cites_issues: all
 ---
 
 # RFCs: proposing a change to the public API

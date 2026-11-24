@@ -4,6 +4,7 @@ title: Checked Code Blocks
 description: "Which LLM4S documentation pages have their Scala code blocks compiled on every build, how a block is skipped, and the pages still to convert."
 parent: Contribute
 nav_order: 8
+cites_closed_issues: [1477]
 ---
 
 # Checked code blocks

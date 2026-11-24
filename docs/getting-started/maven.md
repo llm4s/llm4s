@@ -6,6 +6,7 @@ search_title: "Call an LLM from Java with Maven and LLM4S"
 parent: Build Tools and Playgrounds
 nav_order: 2
 grand_parent: Getting Started
+cites_closed_issues: [1496]
 ---
 
 # Maven Quick Start
