@@ -1,5 +1,6 @@
 package org.llm4s.rag.evaluation
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
@@ -17,7 +18,7 @@ class RAGASEvaluatorSpec extends AnyFlatSpec with Matchers {
   private def mockCompletion(content: String): Completion = Completion(
     id = "test-id",
     created = Instant.now(),
-    model = "test-model",
+    model = ModelName("test-model"),
     message = AssistantMessage(content)
   )
 
@@ -54,7 +55,7 @@ class RAGASEvaluatorSpec extends AnyFlatSpec with Matchers {
   def createMockEmbeddingClient(): EmbeddingClient =
     EmbeddingClient(new MockEmbeddingProvider())
 
-  private val testEmbeddingConfig = EmbeddingModelConfig("test-model", 3)
+  private val testEmbeddingConfig = EmbeddingModelConfig(ModelName("test-model"), 3)
 
   "RAGASEvaluator" should "evaluate a sample with all metrics" in {
     // Sequential responses for each LLM call:

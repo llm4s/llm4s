@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -31,7 +32,9 @@ class AnthropicInCodeConfigSpec extends AnyWordSpec with Matchers with EitherVal
   "llm4s-anthropic, configured in code" should {
     "build an Anthropic client from a model, key and base URL" in {
       assertBuilds(
-        AnthropicConfig.fromValues("claude-sonnet-4-5", Secret("sk-ant-test"), AnthropicConfig.DEFAULT_BASE_URL).value,
+        AnthropicConfig
+          .fromValues(ModelName("claude-sonnet-4-5"), Secret("sk-ant-test"), AnthropicConfig.DEFAULT_BASE_URL)
+          .value,
         "anthropic"
       )
     }

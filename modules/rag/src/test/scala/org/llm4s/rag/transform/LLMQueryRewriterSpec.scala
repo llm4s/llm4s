@@ -1,5 +1,6 @@
 package org.llm4s.rag.transform
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ ServiceError, ProcessingError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -33,7 +34,7 @@ class LLMQueryRewriterSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = s"mock-${System.currentTimeMillis()}",
           created = Instant.now(),
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = AssistantMessage(text = Some(response)),
           usage = Some(TokenUsage(promptTokens = 50, completionTokens = 20, totalTokens = 70))
         )

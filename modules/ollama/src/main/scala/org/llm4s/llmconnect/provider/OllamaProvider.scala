@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 import org.llm4s.config.NamedProviderConfig
 import org.llm4s.config.{ OllamaConfigKeys, OllamaModelLister, ProviderModelLister }
@@ -36,7 +37,7 @@ object OllamaProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("ollama")
 
   /** Where `ollama serve` listens by default; used when a section sets no `baseUrl`. */
-  private[llm4s] val DefaultBaseUrl: String = "http://localhost:11434"
+  private[llm4s] val DefaultBaseUrl: BaseUrl = BaseUrl("http://localhost:11434")
 
   val configSpec: ProviderConfigSpec = ProviderConfigSpec(
     defaultBaseUrl = Some(DefaultBaseUrl),
@@ -49,7 +50,7 @@ object OllamaProvider extends ProviderDescriptor:
     given ContextWindowResolver = context.contextWindows
     ProviderDescriptor
       .resolveBaseUrl(context.providerName, section, configSpec)
-      .flatMap(baseUrl => OllamaConfig.fromValues(section.model.asString, baseUrl))
+      .flatMap(baseUrl => OllamaConfig.fromValues(section.model, baseUrl))
 
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
     given ModelRegistryService = context.modelRegistry

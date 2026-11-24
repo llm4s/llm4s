@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.guardrails.GuardrailAction
 import org.llm4s.agent.guardrails.builtin.{ InjectionSensitivity, PIIDetector, PIIMasker, PromptInjectionDetector }
 import org.llm4s.agent.guardrails.patterns.PIIPatterns.PIIType
@@ -29,7 +30,7 @@ class RAGGuardrailsPresetsSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test-id",
           created = Instant.now(),
-          model = "test-model",
+          model = ModelName("test-model"),
           message = AssistantMessage(response),
           usage = Some(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150))
         )

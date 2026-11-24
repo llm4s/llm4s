@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.{ Credential, Settings }
@@ -11,7 +13,7 @@ import scala.concurrent.duration.*
 /** `OpenAICompatibleClient.Settings` is growth-safe (#2379): built by `apply`, changed by `with*` setters. */
 class OpenAICompatibleSettingsSpec extends AnyFlatSpec with Matchers {
 
-  private val base = Settings("p", "P", "m", "https://h/v1", Credential.Anonymous, 8192, 1024)
+  private val base = Settings("p", "P", ModelName("m"), BaseUrl("https://h/v1"), Credential.Anonymous, 8192, 1024)
 
   "Settings.apply" should "default the timeouts" in {
     base.timeouts shouldBe ProviderTimeouts.default
@@ -22,13 +24,22 @@ class OpenAICompatibleSettingsSpec extends AnyFlatSpec with Matchers {
     val changed = base
       .withProviderName("q")
       .withDisplayName("Q")
-      .withModel("n")
-      .withBaseUrl("https://g/v1")
+      .withModel(ModelName("n"))
+      .withBaseUrl(BaseUrl("https://g/v1"))
       .withCredential(Credential.Static(Secret("k")))
       .withContextWindow(4096)
       .withReserveCompletion(512)
       .withTimeouts(timeouts)
-    changed shouldBe Settings("q", "Q", "n", "https://g/v1", Credential.Static(Secret("k")), 4096, 512, timeouts)
+    changed shouldBe Settings(
+      "q",
+      "Q",
+      ModelName("n"),
+      BaseUrl("https://g/v1"),
+      Credential.Static(Secret("k")),
+      4096,
+      512,
+      timeouts
+    )
   }
 
   "Settings.toString" should "not reveal a static key" in {

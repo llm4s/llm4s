@@ -34,7 +34,7 @@ object ZaiProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
-      config  <- ZaiConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      config  <- ZaiConfig.fromValues(section.model, apiKey, baseUrl)
     yield config
 
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =

@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.LoneElement
@@ -183,7 +184,9 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers with LoneElement {
 
   it should "send traceTokenUsage as an event" in {
     val mockClient = new MockHttpClient(HttpResponse(200, ""))
-    makeTracing(mockClient).traceTokenUsage(TokenUsage(100, 50, 150), "gpt-4o", "completion") shouldBe Right(())
+    makeTracing(mockClient).traceTokenUsage(TokenUsage(100, 50, 150), ModelName("gpt-4o"), "completion") shouldBe Right(
+      ()
+    )
     val span = sent(mockClient).loneElement
     span.kind shouldBe "event"
     span.name should include("Token Usage")

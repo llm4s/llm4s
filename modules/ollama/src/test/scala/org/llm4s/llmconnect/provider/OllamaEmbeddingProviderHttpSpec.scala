@@ -18,7 +18,7 @@ import org.llm4s.testutil.EchoedCredentials
 /** `OllamaEmbeddingProvider` against a local server: the requests it sends and every way the reply can go. */
 class OllamaEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
 
-  private val request = EmbeddingRequest(Seq("first", "second"), EmbeddingModelConfig("nomic-embed-text", 2))
+  private val request = EmbeddingRequest(Seq("first", "second"), EmbeddingModelConfig(ModelName("nomic-embed-text"), 2))
 
   private def provider(baseUrl: String, apiKey: String = "not-required") =
     OllamaEmbeddingProvider.fromConfig(

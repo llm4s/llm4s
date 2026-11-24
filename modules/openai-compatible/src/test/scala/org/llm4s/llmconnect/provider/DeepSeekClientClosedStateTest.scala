@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
@@ -23,7 +24,7 @@ class DeepSeekClientClosedStateTest extends AnyFlatSpec with Matchers {
   private def createTestConfig: DeepSeekConfig = DeepSeekConfig(
     apiKey = Secret("test-api-key-for-closed-state-testing"),
     model = ModelName("deepseek-chat"),
-    baseUrl = "https://example.invalid/v1",
+    baseUrl = BaseUrl("https://example.invalid/v1"),
     contextWindow = 65536,
     reserveCompletion = 4096
   )

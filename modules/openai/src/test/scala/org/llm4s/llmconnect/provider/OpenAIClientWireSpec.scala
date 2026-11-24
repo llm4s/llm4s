@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import com.openai.azure.AzureUrlPathMode
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.AuthenticationError
@@ -77,14 +79,14 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi", "gpt-4o"))
     } { baseUrl =>
       val config =
-        OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), s"$baseUrl/v1", Some("org-123")).value
+        OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl(s"$baseUrl/v1"), Some("org-123")).value
       val client = OpenAIClient(config).value
       val result = client.complete(hello, CompletionOptions(maxTokens = Some(64)))
       client.close()
 
       val completion = result.value
       completion.content shouldBe "hi"
-      completion.model shouldBe "gpt-4o"
+      completion.model shouldBe ModelName("gpt-4o")
       completion.usage.map(_.totalTokens) shouldBe Some(15)
       completion.created shouldBe Instant.ofEpochSecond(1700000000L) // the wire's epoch seconds
 
@@ -118,7 +120,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
         (events.map(e => s"data: $e") :+ "data: [DONE]").mkString("", "\n\n", "\n\n")
       )
     } { baseUrl =>
-      val config = OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl).value
+      val config = OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl(baseUrl)).value
       val client = OpenAIClient(config).value
       val result = client.streamComplete(hello, CompletionOptions())(_ => ())
       client.close()
@@ -148,7 +150,8 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
         (events.map(e => s"data: $e") :+ "data: [DONE]").mkString("", "\n\n", "\n\n")
       )
     } { baseUrl =>
-      val client = OpenAIClient(OpenAIConfig.fromValues("gpt-5-mini", Secret("sk-test"), baseUrl).value).value
+      val client =
+        OpenAIClient(OpenAIConfig.fromValues(ModelName("gpt-5-mini"), Secret("sk-test"), BaseUrl(baseUrl)).value).value
       val result = client.streamComplete(hello, CompletionOptions().withReasoning(ReasoningEffort.Medium))(_ => ())
       client.close()
 
@@ -170,7 +173,8 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       capture(seen, exchange)
       LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi", "o4-mini"))
     } { baseUrl =>
-      val client = OpenAIClient(OpenAIConfig.fromValues("o4-mini", Secret("sk-test"), baseUrl).value).value
+      val client =
+        OpenAIClient(OpenAIConfig.fromValues(ModelName("o4-mini"), Secret("sk-test"), BaseUrl(baseUrl)).value).value
       client.complete(hello, CompletionOptions(maxTokens = Some(256)).withReasoning(ReasoningEffort.High)).value
       client.close()
 
@@ -192,7 +196,8 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
         """{"error":{"message":"Incorrect API key provided","type":"invalid_request_error","code":"invalid_api_key"}}"""
       )
     } { baseUrl =>
-      val client = OpenAIClient(OpenAIConfig.fromValues("gpt-4o", Secret("sk-bad"), baseUrl).value).value
+      val client =
+        OpenAIClient(OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("sk-bad"), BaseUrl(baseUrl)).value).value
       val result = client.complete(hello, CompletionOptions())
       client.close()
 
@@ -213,7 +218,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
           s""""code":"invalid_api_key"},"access_token":"opaque-access-tok-2"}"""
       )
     } { baseUrl =>
-      val client = OpenAIClient(OpenAIConfig.fromValues("gpt-4o", Secret(key), baseUrl).value).value
+      val client = OpenAIClient(OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret(key), BaseUrl(baseUrl)).value).value
       val result = client.complete(hello, CompletionOptions())
       client.close()
 
@@ -233,7 +238,9 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       // A localhost endpoint: not an *.openai.azure.com host, so this also proves the client
       // treats a custom-domain endpoint as Azure, as the Azure SDK did.
       val config =
-        AzureConfig.fromValues("my-deploy", Secret("azure-key"), baseUrl, AzureConfig.DEFAULT_API_VERSION).value
+        AzureConfig
+          .fromValues(ModelName("my-deploy"), Secret("azure-key"), BaseUrl(baseUrl), AzureConfig.DEFAULT_API_VERSION)
+          .value
       val client = OpenAIClient(config).value
       val result = client.complete(hello, CompletionOptions())
       client.close()
@@ -262,7 +269,14 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
     } { baseUrl =>
       // "team-reasoner" names no model, so asking for reasoning is what makes the client send it.
       val config =
-        AzureConfig.fromValues("team-reasoner", Secret("azure-key"), baseUrl, AzureConfig.DEFAULT_API_VERSION).value
+        AzureConfig
+          .fromValues(
+            ModelName("team-reasoner"),
+            Secret("azure-key"),
+            BaseUrl(baseUrl),
+            AzureConfig.DEFAULT_API_VERSION
+          )
+          .value
       val client = OpenAIClient(config).value
       val result = client.streamComplete(hello, CompletionOptions().withReasoning(ReasoningEffort.Low))(_ => ())
       client.close()
@@ -281,7 +295,8 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       capture(seen, exchange)
       LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi"))
     } { baseUrl =>
-      val config = AzureConfig.fromValues("my-deploy", Secret("azure-key"), s"$baseUrl/", "2024-10-21").value
+      val config =
+        AzureConfig.fromValues(ModelName("my-deploy"), Secret("azure-key"), BaseUrl(s"$baseUrl/"), "2024-10-21").value
       val client = OpenAIClient(config).value
       client.complete(hello, CompletionOptions()).isRight shouldBe true
       client.close()
@@ -299,7 +314,12 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
     } { baseUrl =>
       val config =
         AzureConfig
-          .fromValues("my-deploy", Secret("azure-key"), s"$baseUrl/openai/v1", AzureConfig.DEFAULT_API_VERSION)
+          .fromValues(
+            ModelName("my-deploy"),
+            Secret("azure-key"),
+            BaseUrl(s"$baseUrl/openai/v1"),
+            AzureConfig.DEFAULT_API_VERSION
+          )
           .value
       val client = OpenAIClient(config).value
       client.complete(hello, CompletionOptions()).isRight shouldBe true
@@ -364,7 +384,9 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
   "OpenAIClient's provider label" should "be azure for an Azure client, in errors, metrics and the exchange log" in {
     val reported = failOnce { (baseUrl, options) =>
       val config =
-        AzureConfig.fromValues("my-deploy", Secret("azure-key"), baseUrl, AzureConfig.DEFAULT_API_VERSION).value
+        AzureConfig
+          .fromValues(ModelName("my-deploy"), Secret("azure-key"), BaseUrl(baseUrl), AzureConfig.DEFAULT_API_VERSION)
+          .value
       AzureProvider.build(config, ProviderBuildContext.of(options)).value
     }
     assertLabelled("azure", reported)
@@ -372,7 +394,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
 
   it should "be requesty for a Requesty client built by its descriptor" in {
     val reported = failOnce { (baseUrl, options) =>
-      val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", Secret("rq-key"), baseUrl).value
+      val config = OpenAIConfig.fromValues(ModelName("openai/gpt-4o-mini"), Secret("rq-key"), BaseUrl(baseUrl)).value
       RequestyProvider.build(config, ProviderBuildContext.of(options)).value
     }
     assertLabelled("requesty", reported)
@@ -380,7 +402,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
 
   it should "stay openai for an OpenAI client" in {
     val reported = failOnce { (baseUrl, options) =>
-      val config = OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl).value
+      val config = OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl(baseUrl)).value
       OpenAIProvider.build(config, ProviderBuildContext.of(options)).value
     }
     assertLabelled("openai", reported)
@@ -398,7 +420,9 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
   }
 
   "OpenAIClient's provider label" should "name the provider in the already-closed error" in {
-    val azure  = AzureConfig.fromValues("my-deploy", Secret("k"), "https://r.openai.azure.com", "2024-10-21").value
+    val azure = AzureConfig
+      .fromValues(ModelName("my-deploy"), Secret("k"), BaseUrl("https://r.openai.azure.com"), "2024-10-21")
+      .value
     val client = OpenAIClient(azure).value
     client.close()
     client.complete(hello, CompletionOptions()).left.value.message should include(

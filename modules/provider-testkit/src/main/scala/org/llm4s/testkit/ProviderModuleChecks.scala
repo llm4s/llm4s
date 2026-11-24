@@ -337,7 +337,7 @@ trait ProviderModuleChecks extends Assertions:
    */
   def assertEmbeddingCancelsWhenInterrupted(provider: EmbeddingProvider)(using pos: Position): Assertion =
     assertCallCancelsWhenInterrupted("embed")(
-      provider.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig("test-model", 8)))
+      provider.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig(ModelName("test-model"), 8)))
     )
 
   /**
@@ -684,7 +684,7 @@ trait ProviderModuleChecks extends Assertions:
   )(using pos: Position): Assertion =
     val http     = new ProviderModuleChecks.RecordingHttpClient
     val provider = assertBuildsEmbeddingProvider(descriptor, config, EmbeddingClientOptions().withHttpClient(http))
-    provider.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig(config.model.asString, 8)))
+    provider.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig(config.model, 8)))
     if http.requests.isEmpty then
       failAt(s"${descriptor.id.asString}: embed sent no request through the supplied HTTP client")
     if http.closed then failAt(s"${descriptor.id.asString} closed the HTTP client its caller supplied")
@@ -727,7 +727,7 @@ trait ProviderModuleChecks extends Assertions:
   )(using pos: Position): Assertion =
     assertSendsRotatedKey(respond, path, "embed") { (baseUrl, keys) =>
       val built = provider(baseUrl, keys)
-      (() => built.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig("test-model", 8))), () => ())
+      (() => built.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig(ModelName("test-model"), 8))), () => ())
     }
 
   /** Two calls through what `open` builds, the key rotated between them; each must carry the key then held. */

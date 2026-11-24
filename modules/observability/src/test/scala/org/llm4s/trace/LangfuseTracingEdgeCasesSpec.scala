@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.LangfuseConfig
@@ -38,7 +39,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers with LoneEl
   private def spanOf(event: TraceEvent): SentSpan = spansOf(event).loneElement
 
   "LangfuseTracing" should "send CompletionReceived as a generation with its model" in {
-    val span = spanOf(TraceEvent.CompletionReceived("comp-1", "gpt-4", 2, "Hello world"))
+    val span = spanOf(TraceEvent.CompletionReceived("comp-1", ModelName("gpt-4"), 2, "Hello world"))
     span.kind shouldBe "generation"
     span.name shouldBe "LLM Completion"
     span.model shouldBe Some("gpt-4")
@@ -54,7 +55,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers with LoneEl
     val span = spanOf(
       TraceEvent.CompletionReceived(
         "c",
-        "m",
+        ModelName("m"),
         0,
         "x",
         timestamp = at,
@@ -74,11 +75,11 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers with LoneEl
       SentSpan.all(mock.lastBody.get).loneElement.meta("service_tier").str
     }
     tierOf(
-      _.traceEvent(TraceEvent.CompletionReceived("c", "m", 0, "x", servedTier = Some(ServiceTier.Priority)))
+      _.traceEvent(TraceEvent.CompletionReceived("c", ModelName("m"), 0, "x", servedTier = Some(ServiceTier.Priority)))
     ) shouldBe "priority"
     val completion =
-      Completion("c", Instant.EPOCH, "m", AssistantMessage("x")).withServedTier(ServiceTier.Other("scale"))
-    tierOf(_.traceCompletion(completion, "m")) shouldBe "scale"
+      Completion("c", Instant.EPOCH, ModelName("m"), AssistantMessage("x")).withServedTier(ServiceTier.Other("scale"))
+    tierOf(_.traceCompletion(completion, ModelName("m"))) shouldBe "scale"
   }
 
   it should "send ErrorOccurred as an ERROR event" in {
@@ -108,7 +109,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers with LoneEl
   }
 
   it should "send TokenUsageRecorded as an event with the counts" in {
-    val span = spanOf(TraceEvent.TokenUsageRecorded(TokenUsage(100, 50, 150), "gpt-4", "completion"))
+    val span = spanOf(TraceEvent.TokenUsageRecorded(TokenUsage(100, 50, 150), ModelName("gpt-4"), "completion"))
     span.kind shouldBe "event"
     span.name should include("Token Usage")
     span.meta("model").str shouldBe "gpt-4"
@@ -130,7 +131,9 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers with LoneEl
   }
 
   it should "carry the run's usage in the trace's metadata" in {
-    val usage = UsageSummary().add("m", TokenUsage(10, 5, 15), Some(0.5)).add("m", TokenUsage(2, 1, 3), None)
+    val usage = UsageSummary()
+      .add(ModelName("m"), TokenUsage(10, 5, 15), Some(0.5))
+      .add(ModelName("m"), TokenUsage(2, 1, 3), None)
     val event = TraceEvent.AgentRunEnded(
       "thread-1",
       "run-1",
@@ -155,7 +158,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers with LoneEl
 
   it should "send EmbeddingUsageRecorded as an event" in {
     val span = spanOf(
-      TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(500, 500), "text-embedding-3-small", "indexing", 10)
+      TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(500, 500), ModelName("text-embedding-3-small"), "indexing", 10)
     )
     span.kind shouldBe "event"
     span.name should include("Embedding Usage")
@@ -166,7 +169,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers with LoneEl
   }
 
   it should "send CostRecorded as an event" in {
-    val span = spanOf(TraceEvent.CostRecorded(0.005, "gpt-4", "completion", 1000, "total"))
+    val span = spanOf(TraceEvent.CostRecorded(0.005, ModelName("gpt-4"), "completion", 1000, "total"))
     span.kind shouldBe "event"
     span.name should include("Cost")
     span.level shouldBe Some("DEFAULT")
@@ -192,7 +195,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers with LoneEl
   it should "send ImageGenerationCompleted as a span, ERROR when it failed" in {
     val ok = spanOf(
       TraceEvent.ImageGenerationCompleted(
-        "dall-e-3",
+        ModelName("dall-e-3"),
         "generate",
         1,
         "1024x1024",
@@ -211,7 +214,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers with LoneEl
     java.time.Duration.between(ok.startTime, ok.endTime).toSeconds shouldBe 3
 
     val failed = spanOf(
-      TraceEvent.ImageGenerationCompleted("m", "generate", 0, "s", "q", 1.second, None, false, Some("quota"))
+      TraceEvent.ImageGenerationCompleted(ModelName("m"), "generate", 0, "s", "q", 1.second, None, false, Some("quota"))
     )
     failed.level shouldBe Some("ERROR")
     failed.statusMessage shouldBe Some("quota")
@@ -322,11 +325,11 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers with LoneEl
     val completion = Completion(
       id = "comp-tools",
       created = Instant.EPOCH,
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message =
         AssistantMessage(Some("Let me calculate"), Seq(ToolCall(ToolCallId("call-1"), "calculator", ujson.Obj())))
     )
-    makeTracing(mock).traceCompletion(completion, "gpt-4") shouldBe Right(())
+    makeTracing(mock).traceCompletion(completion, ModelName("gpt-4")) shouldBe Right(())
     val span = SentSpan.all(mock.lastBody.get).loneElement
     span.kind shouldBe "generation"
     span.model shouldBe Some("gpt-4")

@@ -1,5 +1,6 @@
 package org.llm4s.metrics
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -50,10 +51,10 @@ class CostTrackerSpec extends AnyFlatSpec with Matchers {
 
     val models = tracker.byModel
     models should have size 2
-    models("gpt-4o").requestCount shouldBe 1L
-    models("gpt-4o").inputTokens shouldBe 100L
-    models("claude-sonnet").requestCount shouldBe 1L
-    models("claude-sonnet").inputTokens shouldBe 200L
+    models(ModelName("gpt-4o")).requestCount shouldBe 1L
+    models(ModelName("gpt-4o")).inputTokens shouldBe 100L
+    models(ModelName("claude-sonnet")).requestCount shouldBe 1L
+    models(ModelName("claude-sonnet")).inputTokens shouldBe 200L
   }
 
   it should "maintain BigDecimal precision over many small additions" in {

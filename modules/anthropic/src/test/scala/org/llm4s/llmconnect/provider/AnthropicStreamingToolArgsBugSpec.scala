@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -41,7 +42,7 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
     )
 
   "StreamingAccumulator" should "assemble tool-call arguments from fragments" in {
-    val acc = StreamingAccumulator("test-model")
+    val acc = StreamingAccumulator(ModelName("test-model"))
     acc.addChunk(toolStartChunk("msg_1", "toolu_01A", "get_weather"))
     acc.addChunk(argFragmentChunk("msg_1", "toolu_01A", "{\"location\""))
     acc.addChunk(argFragmentChunk("msg_1", "toolu_01A", ": \"Paris\"}"))
@@ -54,7 +55,7 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "handle multiple tool calls with separate argument streams" in {
-    val acc = StreamingAccumulator("test-model")
+    val acc = StreamingAccumulator(ModelName("test-model"))
     acc.addChunk(toolStartChunk("msg_1", "toolu_01A", "get_weather"))
     acc.addChunk(argFragmentChunk("msg_1", "toolu_01A", "{\"city\":\"London\"}"))
     acc.addChunk(toolStartChunk("msg_1", "toolu_01B", "get_time"))
@@ -69,7 +70,7 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "handle many small argument fragments" in {
-    val acc = StreamingAccumulator("test-model")
+    val acc = StreamingAccumulator(ModelName("test-model"))
     acc.addChunk(toolStartChunk("msg_1", "toolu_01A", "search"))
     // Simulate character-level streaming
     val fullJson = "{\"query\":\"hello world\"}"
@@ -82,7 +83,7 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return empty arguments when no fragments are provided" in {
-    val acc = StreamingAccumulator("test-model")
+    val acc = StreamingAccumulator(ModelName("test-model"))
     acc.addChunk(toolStartChunk("msg_1", "toolu_01A", "no_args_tool"))
     acc.addChunk(stopChunk("msg_1"))
 
@@ -92,7 +93,7 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "preserve tool call alongside text content" in {
-    val acc = StreamingAccumulator("test-model")
+    val acc = StreamingAccumulator(ModelName("test-model"))
     // Text content first
     acc.addChunk(StreamedChunk("msg_1", content = Some("Let me check "), toolCall = None, finishReason = None))
     acc.addChunk(StreamedChunk("msg_1", content = Some("the weather."), toolCall = None, finishReason = None))

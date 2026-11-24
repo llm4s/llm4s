@@ -262,7 +262,7 @@ class LangfuseTracing(
           output = ujson.Obj("role" -> "assistant", "content" -> e.content),
           metadata = metadata,
           duration = e.duration,
-          model = Some(e.model),
+          model = Some(e.model.asString),
           usage = e.usage.map(LangfuseTracing.usageDetails)
         )
 
@@ -297,9 +297,9 @@ class LangfuseTracing(
         obs(
           s"Token Usage - ${e.operation}",
           ObservationType.Event,
-          input = ujson.Obj("model" -> e.model, "operation" -> e.operation),
+          input = ujson.Obj("model" -> e.model.asString, "operation" -> e.operation),
           output = LangfuseTracing.usageCounts(e.usage),
-          metadata = ujson.Obj("model" -> e.model, "operation" -> e.operation, "token_type" -> "usage")
+          metadata = ujson.Obj("model" -> e.model.asString, "operation" -> e.operation, "token_type" -> "usage")
         )
 
       // `observations` sends an ended run through `runObservations`; this keeps the match exhaustive
@@ -313,10 +313,10 @@ class LangfuseTracing(
         obs(
           s"Embedding Usage - ${e.operation}",
           ObservationType.Event,
-          input = ujson.Obj("model" -> e.model, "operation" -> e.operation, "input_count" -> e.inputCount),
+          input = ujson.Obj("model" -> e.model.asString, "operation" -> e.operation, "input_count" -> e.inputCount),
           output = ujson.Obj("prompt_tokens" -> e.usage.promptTokens, "total_tokens" -> e.usage.totalTokens),
           metadata = ujson.Obj(
-            "model"       -> e.model,
+            "model"       -> e.model.asString,
             "operation"   -> e.operation,
             "input_count" -> e.inputCount,
             "token_type"  -> "embedding_usage"
@@ -328,14 +328,14 @@ class LangfuseTracing(
           s"Cost - ${e.operation}",
           ObservationType.Event,
           input = ujson.Obj(
-            "model"       -> e.model,
+            "model"       -> e.model.asString,
             "operation"   -> e.operation,
             "token_count" -> e.tokenCount,
             "cost_type"   -> e.costType
           ),
           output = ujson.Obj("cost_usd" -> e.costUsd),
           metadata = ujson.Obj(
-            "model"       -> e.model,
+            "model"       -> e.model.asString,
             "operation"   -> e.operation,
             "token_count" -> e.tokenCount,
             "cost_type"   -> e.costType,
@@ -366,7 +366,7 @@ class LangfuseTracing(
 
       case e: TraceEvent.ImageGenerationCompleted =>
         val outputObj = ujson.Obj(
-          "model"       -> e.model,
+          "model"       -> e.model.asString,
           "operation"   -> e.operation,
           "image_count" -> e.imageCount,
           "size"        -> e.size,
@@ -380,7 +380,8 @@ class LangfuseTracing(
         obs(
           "Image Generation",
           ObservationType.Span,
-          input = ujson.Obj("model" -> e.model, "operation" -> e.operation, "size" -> e.size, "quality" -> e.quality),
+          input = ujson
+            .Obj("model" -> e.model.asString, "operation" -> e.operation, "size" -> e.size, "quality" -> e.quality),
           output = outputObj,
           metadata = outputObj,
           duration = Some(e.duration),

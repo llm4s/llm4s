@@ -1,5 +1,7 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.ReasoningEffort
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -19,8 +21,8 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
     pricing: ModelPricing = ModelPricing(),
     deprecationDate: Option[LocalDate] = None
   ): ModelMetadata = ModelMetadata(
-    modelId = modelId,
-    provider = provider,
+    modelId = ModelName(modelId),
+    provider = ProviderId(provider),
     mode = mode,
     maxInputTokens = maxInputTokens,
     maxOutputTokens = maxOutputTokens,
@@ -33,12 +35,12 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
   private val baseCapabilities = ModelCapabilities()
 
   "ModelMetadata setters" should "set modelId without changing other fields" in {
-    baseMetadata.withModelId("replacement-model") shouldBe metadata(modelId = "replacement-model")
+    baseMetadata.withModelId(ModelName("replacement-model")) shouldBe metadata(modelId = "replacement-model")
     baseMetadata shouldBe metadata()
   }
 
   it should "set provider without changing other fields" in {
-    baseMetadata.withProvider("replacement-provider") shouldBe metadata(provider = "replacement-provider")
+    baseMetadata.withProvider(ProviderId("replacement-provider")) shouldBe metadata(provider = "replacement-provider")
     baseMetadata shouldBe metadata()
   }
 
@@ -118,8 +120,8 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
       pricing = ModelPricing(outputCostPerToken = Some(0.003))
     )
 
-    original.withProvider("replacement-provider").withMaxOutputTokens(1024) shouldBe expected
-    original.withMaxOutputTokens(Some(1024)).withProvider("replacement-provider") shouldBe expected
+    original.withProvider(ProviderId("replacement-provider")).withMaxOutputTokens(1024) shouldBe expected
+    original.withMaxOutputTokens(Some(1024)).withProvider(ProviderId("replacement-provider")) shouldBe expected
     original shouldBe metadata(
       maxInputTokens = Some(4096),
       capabilities = ModelCapabilities(supportsVision = Some(false)),

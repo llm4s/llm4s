@@ -1,4 +1,5 @@
 package org.llm4s.rag.embed
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.error.EmbeddingError
@@ -95,7 +96,7 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   test("Non-text: image/audio/video → 501 by default (stubs disabled)") {
     if (experimentalOn) cancel("ENABLE_EXPERIMENTAL_STUBS=true in env; skipping default-501 test.")
 
-    val dummyModel    = org.llm4s.llmconnect.config.EmbeddingModelConfig("dummy-text", 128)
+    val dummyModel    = org.llm4s.llmconnect.config.EmbeddingModelConfig(ModelName("dummy-text"), 128)
     val dummyChunking = TextChunkingConfig(false, 0, 0)
     val localModels =
       LocalEmbeddingModels(
@@ -163,7 +164,7 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   test("Experimental stubs: image/audio/video produce vectors and experimental=true") {
     if (!experimentalOn) cancel("ENABLE_EXPERIMENTAL_STUBS!=true; set it to run this test.")
 
-    val dummyModel    = org.llm4s.llmconnect.config.EmbeddingModelConfig("dummy-text", 128)
+    val dummyModel    = org.llm4s.llmconnect.config.EmbeddingModelConfig(ModelName("dummy-text"), 128)
     val dummyChunking = TextChunkingConfig(false, 0, 0)
     val localModels =
       LocalEmbeddingModels(
@@ -239,13 +240,13 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
     val vidModel = ModelSelector.selectModel(Modality.Video, localModels).fold(err => fail(err.formatted), identity)
 
     imgModel.dimensions shouldBe LocalEmbeddingModels
-      .dimension(imgModel.name)
+      .dimension(imgModel.name.asString)
       .fold(err => fail(err.formatted), identity)
     audModel.dimensions shouldBe LocalEmbeddingModels
-      .dimension(audModel.name)
+      .dimension(audModel.name.asString)
       .fold(err => fail(err.formatted), identity)
     vidModel.dimensions shouldBe LocalEmbeddingModels
-      .dimension(vidModel.name)
+      .dimension(vidModel.name.asString)
       .fold(err => fail(err.formatted), identity)
   }
 }

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
@@ -112,15 +114,15 @@ class OpenAICompatibleClient(
   // specs can substitute one
   protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.resolve(suppliedHttpClient, settings.network)
   private val logger                                  = org.slf4j.LoggerFactory.getLogger(getClass)
-  private val endpoint                                = s"${settings.baseUrl}/chat/completions"
+  private val endpoint                                = s"${settings.baseUrl.asUrl}/chat/completions"
 
   protected def clientDescription: String = s"${settings.displayName} client for model ${settings.model}"
   protected def providerName: String      = settings.providerName
-  protected def modelName: String         = settings.model
+  protected def modelName: ModelName      = settings.model
 
   // sealed thinking is replayed only to the provider and model that produced it (see ReplayOrigin);
   // this is the origin a request is about to be sent to
-  private val replayOrigin = ReplayOrigin(settings.providerName, settings.model)
+  private val replayOrigin = ReplayOrigin(settings.providerName, settings.model.asString)
 
   // what the dialect could not send goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(settings.providerName)
@@ -297,7 +299,7 @@ class OpenAICompatibleClient(
         val message =
           if (opaqueThinking.isEmpty) c.message else c.message.withThinking(c.message.thinking ++ opaqueThinking)
         c.withMessage(message)
-          .withModel(servedModel.getOrElse(settings.model))
+          .withModel(servedModel.map(ModelName(_)).getOrElse(settings.model))
           .withUsage(finalUsage)
           .withEstimatedCost(finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u)))
       }
@@ -380,7 +382,7 @@ class OpenAICompatibleClient(
         }.toResult
       }
       .tapRight { (requestText, adjustments) =>
-        adjustmentLog.record(settings.model, adjustments)
+        adjustmentLog.record(settings.model.asString, adjustments)
         logger.debug(s"Sending request to ${settings.displayName} API at $endpoint")
         if (logger.isDebugEnabled) logger.debug(s"Request body: ${Redaction.redactForLogging(requestText)}")
       }
@@ -548,7 +550,7 @@ class OpenAICompatibleClient(
     }
 
     val body = ujson.Obj(
-      "model"    -> settings.model,
+      "model"    -> settings.model.asString,
       "messages" -> ujson.Arr.from(messages)
     )
 
@@ -563,7 +565,10 @@ class OpenAICompatibleClient(
       dialect.encodeResponseFormat(fmt).foreach(rf => body("response_format") = rf)
     }
     val adjustments =
-      dialect.addReasoning(body, settings.model, options) ++ UnmappedOptions.promptCache(settings.model, options) ++
+      dialect.addReasoning(body, settings.model, options) ++ UnmappedOptions.promptCache(
+        settings.model.asString,
+        options
+      ) ++
         UnmappedOptions.serviceTier(settings.displayName, options)
     (body, adjustments)
   }
@@ -623,7 +628,7 @@ class OpenAICompatibleClient(
         .flatMap(_.numOpt)
         .flatMap(s => Try(Instant.ofEpochSecond(s.toLong)).toOption)
         .getOrElse(Instant.EPOCH),
-      model = json.obj.get("model").flatMap(_.strOpt).getOrElse(settings.model),
+      model = json.obj.get("model").flatMap(_.strOpt).map(ModelName(_)).getOrElse(settings.model),
       message = AssistantMessage(text = content, toolCalls = toolCalls.toList, thinking = thinking),
       usage = usage,
       estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u)),
@@ -882,7 +887,7 @@ object OpenAICompatibleClient {
    * host) and no blank identity token, `tokenUrl`, `clientId`, `scope` or `audience`.
    */
   private[provider] def insecureDynamicCredential(settings: Settings): Option[String] = {
-    val baseUrl = TokenExchange.requireSecureUrl(settings.baseUrl, "baseUrl", "the exchanged token")
+    val baseUrl = TokenExchange.requireSecureUrl(settings.baseUrl.asUrl, "baseUrl", "the exchanged token")
     val checks = settings.credential match {
       case Credential.Dynamic(_)       => List(baseUrl)
       case Credential.Exchange(config) => List(TokenExchangeConfig.validate(config).map(_ => ()), baseUrl)
@@ -1006,8 +1011,8 @@ object OpenAICompatibleClient {
   final case class Settings private (
     providerName: String,
     displayName: String,
-    model: String,
-    baseUrl: String,
+    model: ModelName,
+    baseUrl: BaseUrl,
     credential: Credential,
     contextWindow: Int,
     reserveCompletion: Int,
@@ -1016,8 +1021,8 @@ object OpenAICompatibleClient {
   ) {
     def withProviderName(providerName: String): Settings        = copy(providerName = providerName)
     def withDisplayName(displayName: String): Settings          = copy(displayName = displayName)
-    def withModel(model: String): Settings                      = copy(model = model)
-    def withBaseUrl(baseUrl: String): Settings                  = copy(baseUrl = baseUrl)
+    def withModel(model: ModelName): Settings                   = copy(model = model)
+    def withBaseUrl(baseUrl: BaseUrl): Settings                 = copy(baseUrl = baseUrl)
     def withCredential(credential: Credential): Settings        = copy(credential = credential)
     def withContextWindow(contextWindow: Int): Settings         = copy(contextWindow = contextWindow)
     def withReserveCompletion(reserveCompletion: Int): Settings = copy(reserveCompletion = reserveCompletion)
@@ -1035,8 +1040,8 @@ object OpenAICompatibleClient {
     def apply(
       providerName: String,
       displayName: String,
-      model: String,
-      baseUrl: String,
+      model: ModelName,
+      baseUrl: BaseUrl,
       credential: Credential,
       contextWindow: Int,
       reserveCompletion: Int,
@@ -1062,7 +1067,7 @@ object OpenAICompatibleClient {
     Settings(
       providerName = OpenAICompatibleConfig.ProviderIdName,
       displayName = "OpenAI-compatible",
-      model = config.model.asString,
+      model = config.model,
       baseUrl = config.baseUrl,
       credential = config.tokenExchange match {
         case Some(exchange) => Credential.Exchange(exchange)

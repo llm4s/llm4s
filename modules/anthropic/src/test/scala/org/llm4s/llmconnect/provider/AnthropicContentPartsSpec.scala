@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
@@ -25,7 +26,7 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
     AnthropicConfig(
       apiKey = Secret("test-key"),
       model = ModelName("claude-3-5-sonnet-latest"),
-      baseUrl = "http://localhost:1",
+      baseUrl = BaseUrl("http://localhost:1"),
       contextWindow = 200000,
       reserveCompletion = 4096
     )

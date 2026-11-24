@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ ContentFilteredError, NetworkError, RateLimitError, ServiceError }
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
@@ -28,7 +30,11 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
 
   private def configFor(model: String) =
     OpenAIConfig
-      .fromValues(modelName = model, apiKey = Secret("test-api-key"), baseUrl = "https://example.invalid/v1")
+      .fromValues(
+        modelName = ModelName(model),
+        apiKey = Secret("test-api-key"),
+        baseUrl = BaseUrl("https://example.invalid/v1")
+      )
       .value
 
   private def reply(finish: String) = completionOf(
@@ -134,7 +140,10 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
     org.llm4s.testkit.LocalProviderTestServer.withServer("/")(
       org.llm4s.testkit.LocalProviderTestServer.sendSseResponse(_, body)
     ) { baseUrl =>
-      val client = OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl, None).flatMap(OpenAIClient(_)).value
+      val client = OpenAIConfig
+        .fromValues(ModelName("gpt-4o"), Secret("sk-test"), BaseUrl(baseUrl), None)
+        .flatMap(OpenAIClient(_))
+        .value
       result = Some(client.streamComplete(hi, CompletionOptions())(chunks += _))
       client.close()
     }

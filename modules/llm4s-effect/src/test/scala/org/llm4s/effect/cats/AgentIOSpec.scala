@@ -1,5 +1,6 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import cats.effect.IO
@@ -19,7 +20,7 @@ class AgentIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def completion(text: String) = Completion(
     id = "test-id",
     created = Instant.EPOCH,
-    model = "test-model",
+    model = ModelName("test-model"),
     message = AssistantMessage(text = Some(text))
   )
 

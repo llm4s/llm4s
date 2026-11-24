@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.scalatest.matchers.should.Matchers
@@ -14,8 +15,9 @@ import org.scalatest.wordspec.AnyWordSpec
  */
 class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
 
-  private val openai = OpenAIConfig(Secret("k"), ModelName("gpt-4o"), None, "https://api.openai.com/v1", 128000, 4096)
-  private val zai    = ZaiConfig(Secret("k"), ModelName("GLM-4.7"), ZaiConfig.DEFAULT_BASE_URL, 200000, 4096)
+  private val openai =
+    OpenAIConfig(Secret("k"), ModelName("gpt-4o"), None, BaseUrl("https://api.openai.com/v1"), 128000, 4096)
+  private val zai = ZaiConfig(Secret("k"), ModelName("GLM-4.7"), ZaiConfig.DEFAULT_BASE_URL, 200000, 4096)
   private val deepseek =
     DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
   private val mistral =
@@ -24,7 +26,7 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
   private val generic =
     OpenAICompatibleConfig(
       ModelName("m"),
-      "http://localhost:8000/v1",
+      BaseUrl("http://localhost:8000/v1"),
       Some(Secret("k")),
       32768,
       4096,
@@ -36,7 +38,7 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
   "ProviderConfig.providerId" should {
     "name each provider in its canonical spelling" in {
       openai.providerId shouldBe ProviderId("openai")
-      openai.withBaseUrl("https://openrouter.ai/api/v1").providerId shouldBe ProviderId("openrouter")
+      openai.withBaseUrl(BaseUrl("https://openrouter.ai/api/v1")).providerId shouldBe ProviderId("openrouter")
       zai.providerId shouldBe ProviderId("zai")
       deepseek.providerId shouldBe ProviderId("deepseek")
       mistral.providerId shouldBe ProviderId("mistral")
@@ -92,16 +94,16 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
 
   "OpenAICompatibleConfig's two-argument apply and setters" should {
     "build the same config as the defaulted apply, for Java and Kotlin callers" in {
-      val built = OpenAICompatibleConfig(ModelName("m"), "http://localhost:8000/v1")
+      val built = OpenAICompatibleConfig(ModelName("m"), BaseUrl("http://localhost:8000/v1"))
         .withApiKey(Secret("k"))
         .withContextWindow(32768)
         .withReserveCompletion(4096)
         .withHeader("X-Team", "search")
       built shouldBe generic
-      OpenAICompatibleConfig(ModelName("m"), "http://localhost:8000/v1") shouldBe
-        OpenAICompatibleConfig(ModelName("m"), "http://localhost:8000/v1", apiKey = None)
+      OpenAICompatibleConfig(ModelName("m"), BaseUrl("http://localhost:8000/v1")) shouldBe
+        OpenAICompatibleConfig(ModelName("m"), BaseUrl("http://localhost:8000/v1"), apiKey = None)
       built.withStreamUsage(false).streamUsage shouldBe false
       built.withApiKey(None).apiKey shouldBe None
-      built.withBaseUrl("http://other/v1").baseUrl shouldBe "http://other/v1"
+      built.withBaseUrl(BaseUrl("http://other/v1")).baseUrl shouldBe BaseUrl("http://other/v1")
     }
   }

@@ -1,5 +1,6 @@
 package org.llm4s.samples.dashboard.providersetup
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId, ProviderName }
 import org.llm4s.security.Secret
 import org.llm4s.config.DiscoveredModel
@@ -206,7 +207,7 @@ private[providersetup] object ProviderSetupRuntime:
             input,
             "Session override for the default provider needs `set base-url <url>`."
           )
-          config <- OllamaConfig.fromValues(model, baseUrl).left.map(_.message)
+          config <- OllamaConfig.fromValues(ModelName(model), BaseUrl(baseUrl)).left.map(_.message)
         yield activeSession(
           providerId = "ollama",
           model = model,
@@ -219,9 +220,9 @@ private[providersetup] object ProviderSetupRuntime:
           apiKey <- requiredApiKey(input, "Session override for OpenAI needs `set api-key <key>`.")
           config <- OpenAIConfig
             .fromValues(
-              model,
+              ModelName(model),
               apiKey,
-              input.baseUrl.getOrElse(OpenAIProvider.DEFAULT_BASE_URL),
+              input.baseUrl.map(BaseUrl(_)).getOrElse(OpenAIProvider.DEFAULT_BASE_URL),
               input.organization
             )
             .left
@@ -239,9 +240,9 @@ private[providersetup] object ProviderSetupRuntime:
           apiKey   <- requiredApiKey(input, "Session override for Azure OpenAI needs `set api-key <key>`.")
           config <- AzureConfig
             .fromValues(
-              model,
+              ModelName(model),
               apiKey,
-              endpoint,
+              BaseUrl(endpoint),
               input.apiVersion.getOrElse(AzureConfig.DEFAULT_API_VERSION)
             )
             .left
@@ -257,7 +258,11 @@ private[providersetup] object ProviderSetupRuntime:
           model  <- requiredModel(input, "Session override for Anthropic needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Anthropic needs `set api-key <key>`.")
           config <- AnthropicConfig
-            .fromValues(model, apiKey, input.baseUrl.getOrElse(AnthropicConfig.DEFAULT_BASE_URL))
+            .fromValues(
+              ModelName(model),
+              apiKey,
+              input.baseUrl.map(BaseUrl(_)).getOrElse(AnthropicConfig.DEFAULT_BASE_URL)
+            )
             .left
             .map(_.message)
         yield activeSession(
@@ -271,7 +276,11 @@ private[providersetup] object ProviderSetupRuntime:
           model  <- requiredModel(input, "Session override for Gemini needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Gemini needs `set api-key <key>`.")
           config <- GeminiConfig
-            .fromValues(model, apiKey, input.baseUrl.getOrElse(GeminiConfig.DEFAULT_BASE_URL))
+            .fromValues(
+              ModelName(model),
+              apiKey,
+              input.baseUrl.map(BaseUrl(_)).getOrElse(GeminiConfig.DEFAULT_BASE_URL)
+            )
             .left
             .map(_.message)
         yield activeSession(
@@ -285,7 +294,11 @@ private[providersetup] object ProviderSetupRuntime:
           model  <- requiredModel(input, "Session override for DeepSeek needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for DeepSeek needs `set api-key <key>`.")
           config <- DeepSeekConfig
-            .fromValues(model, apiKey, input.baseUrl.getOrElse(DeepSeekConfig.DEFAULT_BASE_URL))
+            .fromValues(
+              ModelName(model),
+              apiKey,
+              input.baseUrl.map(BaseUrl(_)).getOrElse(DeepSeekConfig.DEFAULT_BASE_URL)
+            )
             .left
             .map(_.message)
         yield activeSession(
@@ -299,7 +312,11 @@ private[providersetup] object ProviderSetupRuntime:
           model  <- requiredModel(input, "Session override for Cohere needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Cohere needs `set api-key <key>`.")
           config <- CohereConfig
-            .fromValues(model, apiKey, input.baseUrl.getOrElse(CohereConfig.DEFAULT_BASE_URL))
+            .fromValues(
+              ModelName(model),
+              apiKey,
+              input.baseUrl.map(BaseUrl(_)).getOrElse(CohereConfig.DEFAULT_BASE_URL)
+            )
             .left
             .map(_.message)
         yield activeSession(
@@ -313,7 +330,11 @@ private[providersetup] object ProviderSetupRuntime:
           model  <- requiredModel(input, "Session override for Mistral needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Mistral needs `set api-key <key>`.")
           config <- MistralConfig
-            .fromValues(model, apiKey, input.baseUrl.getOrElse(MistralConfig.DEFAULT_BASE_URL))
+            .fromValues(
+              ModelName(model),
+              apiKey,
+              input.baseUrl.map(BaseUrl(_)).getOrElse(MistralConfig.DEFAULT_BASE_URL)
+            )
             .left
             .map(_.message)
         yield activeSession(
@@ -327,7 +348,7 @@ private[providersetup] object ProviderSetupRuntime:
           model  <- requiredModel(input, "Session override for Z.ai needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Z.ai needs `set api-key <key>`.")
           config <- ZaiConfig
-            .fromValues(model, apiKey, input.baseUrl.getOrElse(ZaiConfig.DEFAULT_BASE_URL))
+            .fromValues(ModelName(model), apiKey, input.baseUrl.map(BaseUrl(_)).getOrElse(ZaiConfig.DEFAULT_BASE_URL))
             .left
             .map(_.message)
         yield activeSession(
@@ -378,47 +399,47 @@ private[providersetup] object ProviderSetupRuntime:
           .withModel(input.flatMap(_.model).map(ModelName(_)).getOrElse(cfg.model))
           .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
           .withOrganization(input.flatMap(_.organization).orElse(cfg.organization))
-          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
+          .withBaseUrl(input.flatMap(_.baseUrl).map(BaseUrl(_)).getOrElse(cfg.baseUrl))
       case cfg: AzureConfig =>
         cfg
           .withModel(input.flatMap(_.model).map(ModelName(_)).getOrElse(cfg.model))
-          .withEndpoint(input.flatMap(_.endpoint).getOrElse(cfg.endpoint))
+          .withEndpoint(input.flatMap(_.endpoint).map(BaseUrl(_)).getOrElse(cfg.endpoint))
           .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
           .withApiVersion(input.flatMap(_.apiVersion).getOrElse(cfg.apiVersion))
       case cfg: AnthropicConfig =>
         cfg
           .withModel(input.flatMap(_.model).map(ModelName(_)).getOrElse(cfg.model))
           .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
-          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
+          .withBaseUrl(input.flatMap(_.baseUrl).map(BaseUrl(_)).getOrElse(cfg.baseUrl))
       case cfg: OllamaConfig =>
         cfg
           .withModel(input.flatMap(_.model).map(ModelName(_)).getOrElse(cfg.model))
-          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
+          .withBaseUrl(input.flatMap(_.baseUrl).map(BaseUrl(_)).getOrElse(cfg.baseUrl))
       case cfg: GeminiConfig =>
         cfg
           .withModel(input.flatMap(_.model).map(ModelName(_)).getOrElse(cfg.model))
           .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
-          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
+          .withBaseUrl(input.flatMap(_.baseUrl).map(BaseUrl(_)).getOrElse(cfg.baseUrl))
       case cfg: DeepSeekConfig =>
         cfg
           .withModel(input.flatMap(_.model).map(ModelName(_)).getOrElse(cfg.model))
           .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
-          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
+          .withBaseUrl(input.flatMap(_.baseUrl).map(BaseUrl(_)).getOrElse(cfg.baseUrl))
       case cfg: CohereConfig =>
         cfg
           .withModel(input.flatMap(_.model).map(ModelName(_)).getOrElse(cfg.model))
           .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
-          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
+          .withBaseUrl(input.flatMap(_.baseUrl).map(BaseUrl(_)).getOrElse(cfg.baseUrl))
       case cfg: MistralConfig =>
         cfg
           .withModel(input.flatMap(_.model).map(ModelName(_)).getOrElse(cfg.model))
           .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
-          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
+          .withBaseUrl(input.flatMap(_.baseUrl).map(BaseUrl(_)).getOrElse(cfg.baseUrl))
       case cfg: ZaiConfig =>
         cfg
           .withModel(input.flatMap(_.model).map(ModelName(_)).getOrElse(cfg.model))
           .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
-          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
+          .withBaseUrl(input.flatMap(_.baseUrl).map(BaseUrl(_)).getOrElse(cfg.baseUrl))
       case cfg: VertexAIConfig =>
         cfg
           .withModel(input.flatMap(_.model).map(ModelName(_)).getOrElse(cfg.model))

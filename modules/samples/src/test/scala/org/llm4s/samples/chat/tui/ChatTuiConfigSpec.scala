@@ -1,5 +1,6 @@
 package org.llm4s.samples.chat.tui
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, DeepSeekConfig, OpenAICompatibleConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.security.Secret
@@ -30,7 +31,7 @@ class ChatTuiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
     cfg.providerId shouldBe ProviderId("openai-compatible")
     cfg.model.asString shouldBe "llama3.2"
     val generic = cfg.asInstanceOf[OpenAICompatibleConfig]
-    generic.baseUrl shouldBe "http://localhost:8000/v1"
+    generic.baseUrl shouldBe BaseUrl("http://localhost:8000/v1")
     generic.apiKey shouldBe Some(Secret("sk-local"))
   }
 

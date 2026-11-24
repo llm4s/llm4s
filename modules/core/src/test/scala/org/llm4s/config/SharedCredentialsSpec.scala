@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.security.Secret
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
@@ -41,7 +42,10 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
     val PrimaryEnv                    = "KEYED_API_KEY"
     val SecondaryEnv                  = "KEYED_ALT_API_KEY"
     val configSpec: ProviderConfigSpec =
-      ProviderConfigSpec.apiKeyAndDefaultBaseUrl(FixtureChatProvider.DefaultBaseUrl, Seq(PrimaryEnv, SecondaryEnv))
+      ProviderConfigSpec.apiKeyAndDefaultBaseUrl(
+        BaseUrl(FixtureChatProvider.DefaultBaseUrl),
+        Seq(PrimaryEnv, SecondaryEnv)
+      )
 
     def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
       ProviderDescriptor

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.llmconnect.config.{
   CohereConfig,
@@ -40,44 +41,54 @@ class OpenAICompatibleInCodeConfigSpec extends AnyWordSpec with Matchers with Ei
   "llm4s-openai-compatible, configured in code" should {
     "build a generic OpenAI-compatible client from a model and base URL, with no key" in {
       assertBuilds(
-        OpenAICompatibleConfig.fromValues(ModelName("qwen2.5"), "http://localhost:8000/v1").value,
+        OpenAICompatibleConfig.fromValues(ModelName("qwen2.5"), BaseUrl("http://localhost:8000/v1")).value,
         "openai-compatible"
       )
     }
 
     "build a DeepSeek client from a model, key and base URL" in {
       assertBuilds(
-        DeepSeekConfig.fromValues("deepseek-chat", Secret("ds-test"), DeepSeekConfig.DEFAULT_BASE_URL).value,
+        DeepSeekConfig.fromValues(ModelName("deepseek-chat"), Secret("ds-test"), DeepSeekConfig.DEFAULT_BASE_URL).value,
         "deepseek"
       )
     }
 
     "build a Z.ai client from a model, key and base URL" in {
-      assertBuilds(ZaiConfig.fromValues("GLM-4.7", Secret("zai-test"), ZaiConfig.DEFAULT_BASE_URL).value, "zai")
+      assertBuilds(
+        ZaiConfig.fromValues(ModelName("GLM-4.7"), Secret("zai-test"), ZaiConfig.DEFAULT_BASE_URL).value,
+        "zai"
+      )
     }
 
     "build an OpenRouter client from an OpenAI config with an OpenRouter base URL" in {
       assertBuilds(
-        OpenAIConfig.fromValues("openai/gpt-4o-mini", Secret("or-test"), OpenRouterProvider.DEFAULT_BASE_URL).value,
+        OpenAIConfig
+          .fromValues(ModelName("openai/gpt-4o-mini"), Secret("or-test"), OpenRouterProvider.DEFAULT_BASE_URL)
+          .value,
         "openrouter"
       )
     }
 
     "build a Mistral client from a model, key and base URL" in {
       assertBuilds(
-        MistralConfig.fromValues("mistral-large-latest", Secret("mi-test"), MistralConfig.DEFAULT_BASE_URL).value,
+        MistralConfig
+          .fromValues(ModelName("mistral-large-latest"), Secret("mi-test"), MistralConfig.DEFAULT_BASE_URL)
+          .value,
         "mistral"
       )
     }
 
     "build a Cohere chat client from a model, key and base URL" in {
       assertBuilds(
-        CohereConfig.fromValues("command-a-03-2025", Secret("co-test"), CohereConfig.DEFAULT_BASE_URL).value,
+        CohereConfig.fromValues(ModelName("command-a-03-2025"), Secret("co-test"), CohereConfig.DEFAULT_BASE_URL).value,
         "cohere"
       )
     }
 
     "build an xAI client from a model, key and base URL" in {
-      assertBuilds(XaiConfig.fromValues("grok-4", Secret("xai-test"), XaiConfig.DEFAULT_BASE_URL).value, "xai")
+      assertBuilds(
+        XaiConfig.fromValues(ModelName("grok-4"), Secret("xai-test"), XaiConfig.DEFAULT_BASE_URL).value,
+        "xai"
+      )
     }
   }

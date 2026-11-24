@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{
@@ -51,7 +52,7 @@ sealed trait RequestTransformer {
    * @return Transformed options or validation error
    */
   def transformOptions(
-    modelId: String,
+    modelId: ModelName,
     options: CompletionOptions,
     dropUnsupported: Boolean
   ): Result[CompletionOptions]
@@ -63,7 +64,7 @@ sealed trait RequestTransformer {
    * calls it.
    */
   private[llm4s] def adjustOptions(
-    modelId: String,
+    modelId: ModelName,
     options: CompletionOptions
   ): Result[(CompletionOptions, List[RequestAdjustment])]
 
@@ -78,7 +79,7 @@ sealed trait RequestTransformer {
    * @return Transformed messages
    */
   def transformMessages(
-    modelId: String,
+    modelId: ModelName,
     messages: Seq[Message]
   ): Seq[Message]
 
@@ -91,7 +92,7 @@ sealed trait RequestTransformer {
    * @param modelId The model identifier
    * @return true if the model requires fake streaming
    */
-  def requiresFakeStreaming(modelId: String): Boolean
+  def requiresFakeStreaming(modelId: ModelName): Boolean
 }
 
 object RequestTransformer {
@@ -104,7 +105,7 @@ object RequestTransformer {
 
   /** A transformer whose capabilities for the ids in `overrides` replace the registry's; llm4s's own tests use it. */
   private[llm4s] def withOverrides(
-    overrides: Map[String, ModelCapabilities],
+    overrides: Map[ModelName, ModelCapabilities],
     service: ModelRegistryService
   ): RequestTransformer =
     new DefaultRequestTransformer(overrides, service, (_, capabilities) => capabilities)
@@ -118,7 +119,7 @@ object RequestTransformer {
    * @param adjust given the model id and the registry's capabilities for it, the capabilities to use
    */
   def adjusted(service: ModelRegistryService)(
-    adjust: (String, ModelCapabilities) => ModelCapabilities
+    adjust: (ModelName, ModelCapabilities) => ModelCapabilities
   ): RequestTransformer =
     new DefaultRequestTransformer(Map.empty, service, adjust)
 }
@@ -130,15 +131,15 @@ object RequestTransformer {
  * @param adjust    applied to the capabilities found, whatever their source
  */
 final private[model] class DefaultRequestTransformer(
-  overrides: Map[String, ModelCapabilities],
+  overrides: Map[ModelName, ModelCapabilities],
   service: ModelRegistryService,
-  adjust: (String, ModelCapabilities) => ModelCapabilities
+  adjust: (ModelName, ModelCapabilities) => ModelCapabilities
 ) extends RequestTransformer {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
   override def transformOptions(
-    modelId: String,
+    modelId: ModelName,
     options: CompletionOptions,
     dropUnsupported: Boolean
   ): Result[CompletionOptions] =
@@ -156,7 +157,7 @@ final private[model] class DefaultRequestTransformer(
 
   // Pure: the client that sends the request logs what was adjusted (AdjustmentLog), once.
   override private[llm4s] def adjustOptions(
-    modelId: String,
+    modelId: ModelName,
     options: CompletionOptions
   ): Result[(CompletionOptions, List[RequestAdjustment])] = {
     val found = violations(modelId, options, getCapabilities(modelId))
@@ -179,7 +180,7 @@ final private[model] class DefaultRequestTransformer(
 
   /** The options `capabilities` rule out, in the order their errors are reported. */
   private def violations(
-    modelId: String,
+    modelId: ModelName,
     options: CompletionOptions,
     capabilities: ModelCapabilities
   ): List[Violation] = {
@@ -256,7 +257,7 @@ final private[model] class DefaultRequestTransformer(
   }
 
   override def transformMessages(
-    modelId: String,
+    modelId: ModelName,
     messages: Seq[Message]
   ): Seq[Message] = {
     val capabilities = getCapabilities(modelId)
@@ -273,13 +274,13 @@ final private[model] class DefaultRequestTransformer(
     }
   }
 
-  override def requiresFakeStreaming(modelId: String): Boolean = {
+  override def requiresFakeStreaming(modelId: ModelName): Boolean = {
     val capabilities = getCapabilities(modelId)
     !capabilities.supportsNativeStreaming.getOrElse(true)
   }
 
   /** Capabilities for a model: overrides first, then the registry, then none; then `adjust`. */
-  private def getCapabilities(modelId: String): ModelCapabilities =
+  private def getCapabilities(modelId: ModelName): ModelCapabilities =
     adjust(
       modelId,
       overrides
@@ -336,7 +337,7 @@ object TransformationResult {
    * changed is in [[TransformationResult.adjustments]]; without it, an unsupported option fails.
    */
   def transform(
-    modelId: String,
+    modelId: ModelName,
     options: CompletionOptions,
     messages: Seq[Message],
     transformer: RequestTransformer,

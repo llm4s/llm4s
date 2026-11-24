@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ read, write }
@@ -10,7 +11,7 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     val s0 = UsageSummary()
 
     val s1 = s0.add(
-      model = "openai/gpt-4o",
+      model = ModelName("openai/gpt-4o"),
       usage = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15),
       cost = Some(0.01)
     )
@@ -22,7 +23,7 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     s1.thinkingTokens shouldBe 0L
     s1.totalCost shouldBe BigDecimal("0.01")
 
-    val mu = s1.byModel("openai/gpt-4o")
+    val mu = s1.byModel(ModelName("openai/gpt-4o"))
     mu.requestCount shouldBe 1L
     mu.inputTokens shouldBe 10L
     mu.outputTokens shouldBe 5L
@@ -34,44 +35,44 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     val s0 = UsageSummary()
 
     val s1 = s0.add(
-      model = "openai/gpt-4o",
+      model = ModelName("openai/gpt-4o"),
       usage = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15),
       cost = None
     )
 
     s1.totalCost shouldBe BigDecimal(0)
-    s1.byModel("openai/gpt-4o").totalCost shouldBe BigDecimal(0)
+    s1.byModel(ModelName("openai/gpt-4o")).totalCost shouldBe BigDecimal(0)
   }
 
   it should "accumulate thinking tokens" in {
     val s0 = UsageSummary()
 
     val s1 = s0.add(
-      model = "anthropic/claude",
+      model = ModelName("anthropic/claude"),
       usage = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 23, thinkingTokens = Some(8)),
       cost = Some(0.02)
     )
 
     s1.thinkingTokens shouldBe 8L
-    s1.byModel("anthropic/claude").thinkingTokens shouldBe 8L
+    s1.byModel(ModelName("anthropic/claude")).thinkingTokens shouldBe 8L
   }
 
   "UsageSummary.merge" should "sum totals and merge byModel" in {
     val left = UsageSummary()
       .add(
-        model = "openai/gpt-4o",
+        model = ModelName("openai/gpt-4o"),
         usage = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15),
         cost = Some(0.01)
       )
 
     val right = UsageSummary()
       .add(
-        model = "openai/gpt-4o",
+        model = ModelName("openai/gpt-4o"),
         usage = TokenUsage(promptTokens = 3, completionTokens = 7, totalTokens = 10),
         cost = None
       )
       .add(
-        model = "gemini/gemini-2.0-flash",
+        model = ModelName("gemini/gemini-2.0-flash"),
         usage = TokenUsage(promptTokens = 1, completionTokens = 2, totalTokens = 3),
         cost = Some(0.005)
       )
@@ -83,15 +84,15 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     merged.outputTokens shouldBe 14L
     merged.totalCost shouldBe BigDecimal("0.015")
 
-    merged.byModel.keySet shouldBe Set("openai/gpt-4o", "gemini/gemini-2.0-flash")
+    merged.byModel.keySet shouldBe Set(ModelName("openai/gpt-4o"), ModelName("gemini/gemini-2.0-flash"))
 
-    val openAi = merged.byModel("openai/gpt-4o")
+    val openAi = merged.byModel(ModelName("openai/gpt-4o"))
     openAi.requestCount shouldBe 2L
     openAi.inputTokens shouldBe 13L
     openAi.outputTokens shouldBe 12L
     openAi.totalCost shouldBe BigDecimal("0.01")
 
-    val gemini = merged.byModel("gemini/gemini-2.0-flash")
+    val gemini = merged.byModel(ModelName("gemini/gemini-2.0-flash"))
     gemini.requestCount shouldBe 1L
     gemini.inputTokens shouldBe 1L
     gemini.outputTokens shouldBe 2L
@@ -103,24 +104,31 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     val cached = TokenUsage(100, 10, 110, cachedTokens = Some(60), cacheCreationTokens = Some(30))
     val plain  = TokenUsage(40, 5, 45)
 
-    val summary = UsageSummary().add("m1", cached, None).add("m1", cached, None).add("m2", plain, None)
+    val summary = UsageSummary()
+      .add(ModelName("m1"), cached, None)
+      .add(ModelName("m1"), cached, None)
+      .add(ModelName("m2"), plain, None)
 
     summary.cachedTokens shouldBe 120L
     summary.cacheCreationTokens shouldBe 60L
-    summary.byModel("m1").cachedTokens shouldBe 120L
-    summary.byModel("m1").cacheCreationTokens shouldBe 60L
-    summary.byModel("m2").cachedTokens shouldBe 0L
-    summary.byModel("m2").cacheCreationTokens shouldBe 0L
+    summary.byModel(ModelName("m1")).cachedTokens shouldBe 120L
+    summary.byModel(ModelName("m1")).cacheCreationTokens shouldBe 60L
+    summary.byModel(ModelName("m2")).cachedTokens shouldBe 0L
+    summary.byModel(ModelName("m2")).cacheCreationTokens shouldBe 0L
   }
 
   "UsageSummary.merge" should "sum the cache counters" in {
     val one =
-      UsageSummary().add("m", TokenUsage(10, 1, 11, cachedTokens = Some(4), cacheCreationTokens = Some(2)), None)
-    val two = UsageSummary().add("m", TokenUsage(10, 1, 11, cachedTokens = Some(3)), None)
+      UsageSummary().add(
+        ModelName("m"),
+        TokenUsage(10, 1, 11, cachedTokens = Some(4), cacheCreationTokens = Some(2)),
+        None
+      )
+    val two = UsageSummary().add(ModelName("m"), TokenUsage(10, 1, 11, cachedTokens = Some(3)), None)
 
     val merged = one.merge(two)
     (merged.cachedTokens, merged.cacheCreationTokens) shouldBe (7L, 2L)
-    (merged.byModel("m").cachedTokens, merged.byModel("m").cacheCreationTokens) shouldBe (7L, 2L)
+    (merged.byModel(ModelName("m")).cachedTokens, merged.byModel(ModelName("m")).cacheCreationTokens) shouldBe (7L, 2L)
   }
 
   "UsageSummary JSON" should "read a document written before the cache counters existed" in {
@@ -134,13 +142,16 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     decoded.requestCount shouldBe 2L
     decoded.totalCost shouldBe BigDecimal("0.1234")
     (decoded.cachedTokens, decoded.cacheCreationTokens) shouldBe (0L, 0L)
-    decoded.byModel("test-model").inputTokens shouldBe 100L
-    (decoded.byModel("test-model").cachedTokens, decoded.byModel("test-model").cacheCreationTokens) shouldBe (0L, 0L)
+    decoded.byModel(ModelName("test-model")).inputTokens shouldBe 100L
+    (
+      decoded.byModel(ModelName("test-model")).cachedTokens,
+      decoded.byModel(ModelName("test-model")).cacheCreationTokens
+    ) shouldBe (0L, 0L)
   }
 
   it should "round-trip the cache counters" in {
     val original = UsageSummary().add(
-      "m",
+      ModelName("m"),
       TokenUsage(10, 1, 11, cachedTokens = Some(4), cacheCreationTokens = Some(2)),
       Some(BigDecimal("0.000001"))
     )
@@ -156,7 +167,7 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
         thinkingTokens = 10,
         totalCost = BigDecimal("0.1234"),
         byModel = Map(
-          "test-model" ->
+          ModelName("test-model") ->
             ModelUsage(
               requestCount = 2,
               inputTokens = 100,

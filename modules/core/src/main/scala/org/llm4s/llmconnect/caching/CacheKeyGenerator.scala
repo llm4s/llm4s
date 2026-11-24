@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.InputPurpose
 
@@ -24,8 +25,8 @@ object CacheKeyGenerator {
    * @param purpose Whether the text is embedded as a document or as a query
    * @return A 64-character hex string representing the hash
    */
-  def embeddingKey(text: String, model: String, purpose: InputPurpose): String =
-    sha256(text, model, purposeTag(purpose))
+  def embeddingKey(text: String, model: ModelName, purpose: InputPurpose): String =
+    sha256(text, model.asString, purposeTag(purpose))
 
   /**
    * The SHA-256 of the given parts, each prefixed with its length and a colon (`5:hello`), so the

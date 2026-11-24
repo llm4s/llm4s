@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.model.{ ModelMetadata, ModelRegistryService }
@@ -41,7 +42,7 @@ object CostEstimator {
    * @param usage Token usage statistics from the completion
    * @return Estimated cost in USD, or None if pricing is unavailable
    */
-  def estimate(model: String, usage: TokenUsage)(using service: ModelRegistryService): Option[BigDecimal] =
+  def estimate(model: ModelName, usage: TokenUsage)(using service: ModelRegistryService): Option[BigDecimal] =
     estimateFromMetadata(service.lookup(model).toOption, usage)
 
   /**

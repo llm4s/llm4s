@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 
 import java.time.Instant
@@ -40,7 +41,7 @@ import java.time.Instant
 final case class Completion private (
   id: String,
   created: Instant,
-  model: String,
+  model: ModelName,
   message: AssistantMessage,
   usage: Option[TokenUsage],
   estimatedCost: Option[BigDecimal],
@@ -51,7 +52,7 @@ final case class Completion private (
 ) {
   def withId(id: String): Completion                                    = copy(id = id)
   def withCreated(created: Instant): Completion                         = copy(created = created)
-  def withModel(model: String): Completion                              = copy(model = model)
+  def withModel(model: ModelName): Completion                           = copy(model = model)
   def withMessage(message: AssistantMessage): Completion                = copy(message = message)
   def withUsage(usage: TokenUsage): Completion                          = copy(usage = Some(usage))
   def withUsage(usage: Option[TokenUsage]): Completion                  = copy(usage = usage)
@@ -110,7 +111,7 @@ object Completion {
   def apply(
     id: String,
     created: Instant,
-    model: String,
+    model: ModelName,
     message: AssistantMessage,
     usage: Option[TokenUsage] = None,
     estimatedCost: Option[BigDecimal] = None,

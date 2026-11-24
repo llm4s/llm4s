@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
@@ -18,7 +19,7 @@ class AnthropicStructuredOutputSpec extends AnyFlatSpec with Matchers {
   private val testConfig = AnthropicConfig(
     apiKey = Secret("sk-ant-dummy"),
     model = ModelName("claude-3-5-sonnet-20241022"),
-    baseUrl = "https://api.anthropic.com",
+    baseUrl = BaseUrl("https://api.anthropic.com"),
     contextWindow = 200000,
     reserveCompletion = 4096
   )

@@ -1,5 +1,6 @@
 package org.llm4s.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ CancelledError, SimpleError }
 import org.llm4s.http.Llm4sHttpClient
@@ -84,7 +85,7 @@ class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModu
     intercept[TestFailedException](check).getMessage
 
   private def completion =
-    Completion("c", Instant.EPOCH, "m", AssistantMessage("late"))
+    Completion("c", Instant.EPOCH, ModelName("m"), AssistantMessage("late"))
 
   "assertCancelsWhenInterrupted" should "say so when a client clears the interrupt flag" in {
     failureOf(assertCancelsWhenInterrupted(Misbehaving(() => Left(CancelledError("stub"))))) should include(

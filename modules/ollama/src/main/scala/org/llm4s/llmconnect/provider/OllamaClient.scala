@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ LLMError, NetworkError, ServiceError, TroubleshootingLinks, ValidationError }
@@ -95,7 +96,7 @@ class OllamaClient(
 
   protected def clientDescription: String = s"Ollama client for model ${config.model}"
   protected def providerName: String      = "ollama"
-  protected def modelName: String         = config.model.asString
+  protected def modelName: ModelName      = config.model
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else [[OllamaClient.DefaultRequestTimeout]]. */
   protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(OllamaClient.DefaultRequestTimeout)
@@ -232,7 +233,7 @@ class OllamaClient(
         provider = ProviderId(providerName),
         startedAt = startedAt,
         requestBody = requestBody,
-        model = Some(config.model.asString),
+        model = Some(config.model),
         responseBody = Option(responseBody).filter(_.nonEmpty)
       ),
       result
@@ -282,7 +283,7 @@ class OllamaClient(
           mapError(response.statusCode, err, response.headers, options)
         )
       case Right(response) =>
-        val accumulator = StreamingAccumulator(config.model.asString)
+        val accumulator = StreamingAccumulator(config.model)
         val ids         = new OllamaClient.CallIds
         var failure     = Option.empty[org.llm4s.error.LLMError]
         var sawCalls    = false
@@ -359,7 +360,7 @@ class OllamaClient(
           .flatMap(_ => accumulator.toCompletion)
           .map { c =>
             // the accumulator reports streamed calls on the message only
-            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model.asString, u))
+            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
             c.withEstimatedCost(cost)
           }
 
@@ -460,14 +461,14 @@ class OllamaClient(
     } yield TokenUsage(prompt, comp, prompt + comp)
 
     // Estimate cost using CostEstimator
-    val cost = usage.flatMap(u => CostEstimator.estimate(config.model.asString, u))
+    val cost = usage.flatMap(u => CostEstimator.estimate(config.model, u))
 
     OllamaClient.parseToolCalls(json.obj.get("message"), new OllamaClient.CallIds).map { calls =>
       Completion(
         id = id,
         created = created,
         usage = usage,
-        model = config.model.asString,
+        model = config.model,
         message = (if (calls.isEmpty) AssistantMessage(content)
                    else AssistantMessage(Some(content).filter(_.nonEmpty), calls))
           .withThinking(OllamaClient.thinking(json.obj.get("message")).getOrElse("")),

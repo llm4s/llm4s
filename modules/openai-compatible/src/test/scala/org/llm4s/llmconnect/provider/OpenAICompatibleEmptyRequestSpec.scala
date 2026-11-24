@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.error.ValidationError
@@ -52,7 +53,7 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
 
   private def mistral(baseUrl: String, logging: ProviderExchangeLogging): LLMClient =
     new MistralClient(
-      MistralConfig(Secret("k"), ModelName("mistral-small-latest"), baseUrl, 128000, 4096),
+      MistralConfig(Secret("k"), ModelName("mistral-small-latest"), BaseUrl(baseUrl), 128000, 4096),
       exchangeLogging = logging
     )
 
@@ -102,16 +103,19 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
     val clients: Seq[(String, (String, ProviderExchangeLogging) => LLMClient)] = Seq(
       "deepseek" -> ((url, logging) =>
         new DeepSeekClient(
-          DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), url, 128000, 8192),
+          DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), BaseUrl(url), 128000, 8192),
           exchangeLogging = logging
         )
       ),
       "zai" -> ((url, logging) =>
-        new ZaiClient(ZaiConfig(Secret("k"), ModelName("GLM-4.7"), url, 128000, 4096), exchangeLogging = logging)
+        new ZaiClient(
+          ZaiConfig(Secret("k"), ModelName("GLM-4.7"), BaseUrl(url), 128000, 4096),
+          exchangeLogging = logging
+        )
       ),
       "openrouter" -> ((url, logging) =>
         new OpenRouterClient(
-          OpenAIConfig(Secret("k"), ModelName("openai/gpt-4o-mini"), None, url, 128000, 4096),
+          OpenAIConfig(Secret("k"), ModelName("openai/gpt-4o-mini"), None, BaseUrl(url), 128000, 4096),
           exchangeLogging = logging
         )
       )
@@ -133,7 +137,7 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
       against("/chat/completions", sendJsonResponse(_, 200, openAICompletion("never"))) { (url, logging) =>
         val c =
           new DeepSeekClient(
-            DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), url, 128000, 8192),
+            DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), BaseUrl(url), 128000, 8192),
             exchangeLogging = logging
           )
         (

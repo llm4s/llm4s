@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model._
 import org.llm4s.testutil.SmallStack
 import org.llm4s.toolapi.{ ObjectSchema, Schema }
@@ -24,7 +25,7 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "test-id",
       created = Instant.EPOCH,
-      model = "test-model",
+      model = ModelName("test-model"),
       message = AssistantMessage(Some(content))
     )
 

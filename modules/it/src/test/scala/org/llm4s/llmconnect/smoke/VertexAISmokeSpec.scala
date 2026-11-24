@@ -56,7 +56,7 @@ class VertexAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
   private val credentials: Option[String] = project.filter(_ => hasCredentials)
 
   private def config(projectId: String, credentialFile: Option[String] = None): VertexAIConfig =
-    VertexAIConfig.fromValues(model, projectId, location, credentialFile).value
+    VertexAIConfig.fromValues(ModelName(model), projectId, location, credentialFile).value
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 

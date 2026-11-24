@@ -1,5 +1,6 @@
 package org.llm4s.context
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -26,7 +27,7 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion-id",
           created = Instant.now(),
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = AssistantMessage(compressed),
           usage = Some(TokenUsage(10, 5, 15))
         )
@@ -41,7 +42,7 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-completion-id",
           created = Instant.now(),
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = AssistantMessage("Compressed."),
           usage = Some(TokenUsage(10, 5, 15))
         )

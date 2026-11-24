@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.TroubleshootingLinks.Entry
 import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, ServiceError, TroubleshootingLinks }
@@ -41,7 +42,9 @@ final class OpenAICompatibleTroubleshootingLinksSpec extends AnyWordSpec with Ma
 
   private def call(baseUrl: String): Result[org.llm4s.llmconnect.model.Completion] =
     new OpenAICompatibleClient(
-      OpenAICompatibleClient.settings(OpenAICompatibleConfig(model = ModelName("local-model"), baseUrl = baseUrl)),
+      OpenAICompatibleClient.settings(
+        OpenAICompatibleConfig(model = ModelName("local-model"), baseUrl = BaseUrl(baseUrl))
+      ),
       OpenAICompatibleDialect.standard(Nil, false)
     ).complete(hello, CompletionOptions())
 

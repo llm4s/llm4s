@@ -69,7 +69,7 @@ object AnthropicProvider extends ProviderDescriptor:
       search  <- AnthropicWebSearch.webSearch(context.providerName, section)
       // `fromValues` holds the rules (an https baseUrl with workload identity, ...); a refusal names the section key.
       config <- AnthropicConfig
-        .fromValues(section.model.asString, apiKey, baseUrl, workloadIdentity)
+        .fromValues(section.model, apiKey, baseUrl, workloadIdentity)
         .left
         .map(ProviderConfig.inSection(context.providerName, AuthSectionKeys))
     yield config.withWebSearch(search)

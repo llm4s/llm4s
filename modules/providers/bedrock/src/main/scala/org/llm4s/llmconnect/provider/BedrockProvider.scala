@@ -68,7 +68,7 @@ object BedrockProvider extends ProviderDescriptor:
       region      <- ProviderDescriptor.requireExtra(context.providerName, section, REGION_KEY)
       credentials <- credentialsOf(context.providerName, section)
       config <- BedrockConfig.fromValues(
-        modelName = section.model.asString,
+        modelName = section.model,
         region = region,
         credentials = credentials,
         profile = section.extra(PROFILE_KEY),

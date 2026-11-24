@@ -36,7 +36,7 @@ final private[repl] class RecordingClient(underlying: LLMClient, session: Sessio
     val result = call
     val took   = math.max(0L, session.nanoTime() - start).nanos
     result.foreach(completion =>
-      session.record(new CallStats(completion.model, completion.usage, took, completion.estimatedCost))
+      session.record(new CallStats(completion.model.asString, completion.usage, took, completion.estimatedCost))
     )
     result
   }

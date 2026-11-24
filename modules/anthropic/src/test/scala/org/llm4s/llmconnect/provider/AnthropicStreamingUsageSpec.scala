@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
@@ -27,7 +28,7 @@ class AnthropicStreamingUsageSpec extends AnyFlatSpec with Matchers with EitherV
   private val testConfig = AnthropicConfig(
     apiKey = Secret("test-key"),
     model = ModelName("claude-sonnet-4-5"),
-    baseUrl = "https://api.anthropic.com",
+    baseUrl = BaseUrl("https://api.anthropic.com"),
     contextWindow = 200000,
     reserveCompletion = 4096
   )
@@ -72,7 +73,7 @@ class AnthropicStreamingUsageSpec extends AnyFlatSpec with Matchers with EitherV
   private val messageStop = "message_stop" -> """{"type":"message_stop"}"""
 
   private def streamedUsage(baseUrl: String): TokenUsage =
-    new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+    new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
       .streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions())(_ => ())
       .value
       .usage
@@ -165,11 +166,11 @@ class AnthropicStreamingUsageSpec extends AnyFlatSpec with Matchers with EitherV
       )
     ) ++ text ++ Seq(messageDelta("""{"output_tokens":40}"""), messageStop)
     withStream(events*) { baseUrl =>
-      val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+      val completion = new AnthropicClient(testConfig.withBaseUrl(BaseUrl(baseUrl)))
         .streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions())(_ => ())
         .value
       val pricing =
-        summon[ModelRegistryService].lookup(testConfig.model.asString).toOption.value.pricing
+        summon[ModelRegistryService].lookup(testConfig.model).toOption.value.pricing
       val expected = 12 * pricing.inputCostPerToken.value +
         3000 * pricing.cacheReadInputTokenCost.value +
         250 * pricing.cacheCreationInputTokenCost.value +

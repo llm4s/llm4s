@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.model.{ AssistantMessage, UsageSummary, UserMessage }
@@ -250,7 +251,7 @@ class LangfuseSpanTreeSpec extends AnyFlatSpec with Matchers with OptionValues w
     tracing.traceEvent(
       TraceEvent.TokenUsageRecorded(
         org.llm4s.llmconnect.model.TokenUsage(1, 1, 2),
-        "m",
+        ModelName("m"),
         "agent_completion",
         t0.plusSeconds(7),
         Some(TraceSpan(parentRun.spanFor("u"), Some(parentRun), t0.plusSeconds(7)))

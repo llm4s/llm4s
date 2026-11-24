@@ -1,5 +1,7 @@
 package org.llm4s.testutil
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -51,14 +53,14 @@ object FixtureEmbeddingProvider extends EmbeddingProviderDescriptor:
 
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some(DefaultBaseUrl),
+    defaultBaseUrl = Some(BaseUrl(DefaultBaseUrl)),
     apiKeyEnv = Seq(ApiKeyEnv),
     modelEnv = Some(ModelEnv)
   )
 
-  override val modelDimensions: Map[String, Int] = Map(
-    "fixture-embed-small" -> 256,
-    "fixture-embed-large" -> 1024
+  override val modelDimensions: Map[ModelName, Int] = Map(
+    ModelName("fixture-embed-small") -> 256,
+    ModelName("fixture-embed-large") -> 1024
   )
 
   def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.NamedProviderConfig
@@ -39,7 +40,7 @@ object OpenRouterProvider extends ProviderDescriptor:
    * This was `DefaultConfig.DEFAULT_OPENROUTER_BASE_URL` in `llm4s-core` until the
    * provider moved to `llm4s-openai-compatible` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
    */
-  val DEFAULT_BASE_URL: String = "https://openrouter.ai/api/v1"
+  val DEFAULT_BASE_URL: BaseUrl = BaseUrl("https://openrouter.ai/api/v1")
 
   /** Accepts `organization`, which it passes on in its `OpenAIConfig` as OpenAI and Requesty do. */
   val configSpec: ProviderConfigSpec =
@@ -55,7 +56,7 @@ object OpenRouterProvider extends ProviderDescriptor:
       apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
       config <- OpenAIConfig.fromValues(
-        section.model.asString,
+        section.model,
         apiKey,
         baseUrl,
         section.extra(OpenAIConfig.OrganizationKey),

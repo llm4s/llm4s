@@ -61,14 +61,14 @@ class NamedProviderConfigSpec extends AnyFlatSpec with Matchers {
     var evaluated = false
     val result = base.withBaseUrl(BaseUrl("https://configured")).baseUrlOrDefault {
       evaluated = true
-      "https://default"
+      BaseUrl("https://default")
     }
     result shouldBe BaseUrl("https://configured")
     evaluated shouldBe false
   }
 
   it should "use the fallback when no URL is configured" in {
-    base.baseUrlOrDefault("https://default") shouldBe BaseUrl("https://default")
+    base.baseUrlOrDefault(BaseUrl("https://default")) shouldBe BaseUrl("https://default")
   }
 
   "extra" should "return a configured value and None for an absent key" in {

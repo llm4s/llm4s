@@ -1,5 +1,6 @@
 package org.llm4s.reliability
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ CircuitOpenError, LLMError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -19,7 +20,7 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
   private val conversation = Conversation(List(UserMessage("hello")))
 
   private val ok: Result[Completion] = Right(
-    Completion("id", Instant.EPOCH, "model", AssistantMessage("content"))
+    Completion("id", Instant.EPOCH, ModelName("model"), AssistantMessage("content"))
   )
   private val down: Result[Completion] = Left(ServiceError(503, "provider-x", "down"))
 

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
@@ -23,10 +25,10 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
 
     val config = OpenAIConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret("test-api-key"),
         organization = None,
-        baseUrl = "https://example.invalid/v1"
+        baseUrl = BaseUrl("https://example.invalid/v1")
       )
       .value
 
@@ -60,7 +62,7 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
 
     val completion = result.toOption.get
     completion.id shouldBe "chatcmpl-1"
-    completion.model shouldBe model
+    completion.model.asString shouldBe model
     completion.content shouldBe "Hi"
     completion.usage.map(_.promptTokens) shouldBe Some(10)
     completion.usage.map(_.completionTokens) shouldBe Some(5)
@@ -75,10 +77,10 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
     val model = "gpt-4"
     val config = OpenAIConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret("test-api-key"),
         organization = None,
-        baseUrl = "https://example.invalid/v1"
+        baseUrl = BaseUrl("https://example.invalid/v1")
       )
       .value
     val contentChunk = chunk(
@@ -124,10 +126,10 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
     val model = "gpt-4"
     val config = OpenAIConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret("test-api-key"),
         organization = None,
-        baseUrl = "https://example.invalid/v1"
+        baseUrl = BaseUrl("https://example.invalid/v1")
       )
       .value
     val recorded = ListBuffer.empty[ProviderExchange]

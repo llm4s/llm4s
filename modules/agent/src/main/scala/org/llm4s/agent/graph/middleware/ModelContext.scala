@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.events
 import org.llm4s.agent.events.AgentEvents
@@ -42,7 +43,7 @@ trait UsageAccounting:
   def accounted(client: LLMClient): LLMClient
 
   /** Records usage that arrived without a client call, as one request to `model`. */
-  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[BigDecimal] = None): Unit
+  def recordUsage(model: ModelName, usage: TokenUsage, estimatedCost: Option[BigDecimal] = None): Unit
 
 /**
  * What a middleware's `beforeAgent`, `wrapModelCall`, `promptSections` and `afterAgent` hooks see: the task's
@@ -73,7 +74,7 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
   def accounted(client: LLMClient): LLMClient = new ModelContext.Accounted(client, this)
 
   /** Records usage that arrived without a client call, as one request to `model`. */
-  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[BigDecimal]): Unit =
+  def recordUsage(model: ModelName, usage: TokenUsage, estimatedCost: Option[BigDecimal]): Unit =
     record(ModelContext.recordedUsage(agent, model, usage, estimatedCost))
 
   /**
@@ -133,7 +134,7 @@ object ModelContext:
 
   /** A model call as it is counted: the usage charged for it, and the durable event that announces it. */
   final private[agent] case class Recorded(
-    model: String,
+    model: ModelName,
     charged: TokenUsage,
     cost: Option[BigDecimal],
     event: events.ModelCallCompleted
@@ -175,7 +176,7 @@ object ModelContext:
   /** Usage that arrived without a client call, counted as one request of `agent`'s to `model`. */
   private[agent] def recordedUsage(
     agent: AgentId,
-    model: String,
+    model: ModelName,
     usage: TokenUsage,
     cost: Option[BigDecimal]
   ): Recorded =

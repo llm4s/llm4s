@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.trace.{ NoOpTracing, Tracing, TracingComposer, TraceEvent, TracingMode }
@@ -86,7 +87,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
     val completion = org.llm4s.llmconnect.model.Completion(
       id = "test-id",
       created = Instant.now(),
-      model = "tracing",
+      model = ModelName("tracing"),
       message = org.llm4s.llmconnect.model.AssistantMessage(
         content = "Test response",
         toolCalls = Vector.empty
@@ -94,7 +95,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
       usage = Some(TokenUsage(10, 20, 30))
     )
 
-    val result = tracer.traceCompletion(completion, "test-model")
+    val result = tracer.traceCompletion(completion, ModelName("test-model"))
     result shouldBe a[Right[_, Unit]]
   }
 
@@ -129,7 +130,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
         case e: TraceEvent.TokenUsageRecorded =>
           TraceEvent.TokenUsageRecorded(
             usage = e.usage,
-            model = s"[COST] ${e.model}",
+            model = ModelName(s"[COST] ${e.model}"),
             operation = e.operation
           )
         case other => other
@@ -138,7 +139,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
 
     val tokenEvent = TraceEvent.TokenUsageRecorded(
       usage = TokenUsage(10, 20, 30),
-      model = "gpt-5.6-terra",
+      model = ModelName("gpt-5.6-terra"),
       operation = "completion"
     )
 
@@ -151,10 +152,10 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
 
     // Test all event types
     val events = Seq(
-      TraceEvent.CompletionReceived("id", "model", 0, "content"),
+      TraceEvent.CompletionReceived("id", ModelName("model"), 0, "content"),
       TraceEvent.ToolExecuted("tool", ToolCallId("input").asString, "output", 100.millis, true),
       TraceEvent.ErrorOccurred.of(new RuntimeException("error"), "context"),
-      TraceEvent.TokenUsageRecorded(TokenUsage(1, 2, 3), "model", "op"),
+      TraceEvent.TokenUsageRecorded(TokenUsage(1, 2, 3), ModelName("model"), "op"),
       TraceEvent.AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary()),
       TraceEvent.CustomEvent("name", ujson.Obj("key" -> "value"))
     )

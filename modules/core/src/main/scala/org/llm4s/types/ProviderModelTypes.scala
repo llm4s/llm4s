@@ -32,6 +32,12 @@ object ProviderModelTypes:
     /** Wraps a raw string as a [[ModelName]]. */
     def apply(value: String): ModelName = value
 
+    /** Writes a [[ModelName]] as its JSON string and reads one back, so a stored model id is a plain string. */
+    given upickle.default.ReadWriter[ModelName] = IdCodecs.modelName
+
+    /** Orders model names as their strings do. */
+    given Ordering[ModelName] = Ordering.String
+
   /** Companion for the [[BaseUrl]] opaque type. */
   object BaseUrl:
     /** Wraps a raw string as a [[BaseUrl]]. */
@@ -94,5 +100,34 @@ object ProviderModelTypes:
      */
     def apply(raw: String): ProviderId = raw.trim.toLowerCase(Locale.ROOT)
 
+    /**
+     * Writes a [[ProviderId]] as its JSON string, and reads one back canonicalised, as [[apply]] does: a stored
+     * provider is a plain string.
+     */
+    given upickle.default.ReadWriter[ProviderId] = IdCodecs.providerId
+
+    /** Orders provider ids as their strings do. */
+    given Ordering[ProviderId] = Ordering.String
+
     /** Returns the canonical provider identifier string, e.g. `"openai"`. */
     extension (id: ProviderId) def asString: String = id
+
+/**
+ * The ids' JSON codecs, built where the opaque types are opaque: inside [[ProviderModelTypes]] a `ModelName` is a
+ * `String`, so `readwriter[String]` there would find the id's own codec and loop.
+ *
+ * An id is written as the JSON string it wraps, and is a JSON object key in a map keyed by it, as a `String` key is:
+ * a `Map[ModelName, V]` writes as `{"gpt-4o": ...}`, never as an array of pairs.
+ */
+private[types] object IdCodecs:
+  import ProviderModelTypes.*
+
+  private def stringId[T](wrap: String => T, unwrap: T => String): upickle.default.ReadWriter[T] =
+    val base = upickle.default.readwriter[String].bimap[T](unwrap, wrap)
+    new upickle.default.ReadWriter.Delegate[T](base):
+      def write0[V](out: upickle.core.Visitor[?, V], v: T): V = base.write0(out, v)
+      override def isJsonDictKey: Boolean                     = true
+
+  val modelName: upickle.default.ReadWriter[ModelName] = stringId(ModelName(_), _.asString)
+
+  val providerId: upickle.default.ReadWriter[ProviderId] = stringId(ProviderId(_), _.asString)
