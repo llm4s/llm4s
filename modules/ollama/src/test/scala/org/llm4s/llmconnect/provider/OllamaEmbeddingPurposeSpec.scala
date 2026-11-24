@@ -27,7 +27,7 @@ class OllamaEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
       sendJsonResponse(ex, 200, """{"embedding":[1.0, 2.0]}""")
     } { baseUrl =>
       val provider =
-        OllamaEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, model.name, Secret("not-required")))
+        OllamaEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, model.name, Some(Secret("not-required"))))
       provider.embed(EmbeddingRequest(Seq("first", "second"), model, purpose)).isRight shouldBe true
     }
     seen.asScala.toList

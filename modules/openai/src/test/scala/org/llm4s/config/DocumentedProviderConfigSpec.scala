@@ -183,7 +183,7 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
         case Right((provider, cfg)) =>
           provider shouldBe "openai"
           cfg.model shouldBe "text-embedding-3-small"
-          cfg.apiKey.reveal shouldBe "sk-from-env"
+          cfg.apiKey.map(_.reveal) shouldBe Some("sk-from-env")
         case other =>
           fail(s"Expected an openai embedding config, got $other")
     }
@@ -191,6 +191,8 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
     "take an embeddings-only key over OPENAI_API_KEY when the block sets one" in {
       val hocon = embeddings + "\nllm4s.embeddings.openai.apiKey = ${?OPENAI_EMBEDDINGS_API_KEY}"
       val env   = Map("OPENAI_API_KEY" -> "sk-chat", "OPENAI_EMBEDDINGS_API_KEY" -> "sk-embeddings")
-      EmbeddingsConfigLoader.loadProvider(withEnv(hocon, env)).map(_._2.apiKey.reveal) shouldBe Right("sk-embeddings")
+      EmbeddingsConfigLoader.loadProvider(withEnv(hocon, env)).map(_._2.apiKey.map(_.reveal)) shouldBe Right(
+        Some("sk-embeddings")
+      )
     }
   }

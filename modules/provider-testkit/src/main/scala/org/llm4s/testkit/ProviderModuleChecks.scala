@@ -1,5 +1,7 @@
 package org.llm4s.testkit
 
+import org.llm4s.llmconnect.config.ProviderTimeouts
+import org.llm4s.http.HttpNetworkSettings
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ CancelledError, UnsupportedContentPartError }
 import org.llm4s.http.{ HttpRequest, HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
@@ -852,9 +854,17 @@ object ProviderModuleChecks extends ProviderModuleChecks:
 
   /** A config no real provider builds, to prove a descriptor refuses what is not its own. */
   private object ForeignConfig extends ProviderConfig:
-    val providerId: ProviderId                   = ProviderId("provider-testkit-foreign")
-    val model: String                            = "foreign-model"
-    val contextWindow: Int                       = 8192
-    val reserveCompletion: Int                   = 1024
-    val endpointUrl: Option[String]              = None
-    def withModel(model: String): ProviderConfig = this
+    val providerId: ProviderId                                    = ProviderId("provider-testkit-foreign")
+    val model: String                                             = "foreign-model"
+    val contextWindow: Int                                        = 8192
+    val reserveCompletion: Int                                    = 1024
+    val endpointUrl: Option[String]                               = None
+    def withModel(model: String): ProviderConfig                  = this
+    val timeouts: ProviderTimeouts                                = ProviderTimeouts.default
+    def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig  = this
+    val network: HttpNetworkSettings                              = HttpNetworkSettings.default
+    def withNetwork(network: HttpNetworkSettings): ProviderConfig = this
+    val apiKeyProvider: Option[ApiKeyProvider]                    = None
+    def withApiKeyProvider(p: ApiKeyProvider): Result[ProviderConfig] = Left(
+      ProviderConfig.apiKeyProviderUnsupported("foreign")
+    )

@@ -235,6 +235,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [migration](docs/reference/migration.md#the-legacy-embedding-provider-selector-is-removed).
 - Vertex AI no longer reads `endpoint` and `organization` (use `project` and `location`), and `ProviderConfigKey`'s
   `deprecatedAliases` mechanism is removed; [migration](docs/reference/migration.md#vertex-ai-no-longer-reads-endpoint-and-organization).
+- `ProviderConfig`'s `timeouts`/`network`/`apiKeyProvider` members and setters are abstract and `withApiKeyProvider` returns `Result`; `EmbeddingProviderConfig.apiKey` is `Option[Secret]`; `TextEmbeddingModelSettings` is top-level with a `ProviderId`; `ContextWindowResolver.resolve` returns `ContextLimits`; `LocalEmbeddingModels` moved to `llm4s-rag`
+  ([migration](docs/reference/migration.md#providerconfig-implements-every-setter-and-the-embedding-key-is-optional-2805)) [#2805](https://github.com/llm4s/llm4s/issues/2805).
 
 ### Providers
 
@@ -341,6 +343,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** `MessageRole` is a Scala 3 `enum`. The derived JSON of `FinishReason`, `ServiceTier`, `RequestOption` and `RequestAdjustment`, which durable agent events store, is pinned by tests. [#2809](https://github.com/llm4s/llm4s/issues/2809)
 - **Changed** `LLMConnect.getClient(config, options = LlmClientOptions.default)` and `getClient(provider, config, options)` are the only entry points. **Removed** `LLMConnect.fromConfig`, `fromProvider` and the `MetricsCollector` overloads. [#2810](https://github.com/llm4s/llm4s/issues/2810)
 - **Changed** `LLMClient.streamComplete(conversation, options)(onChunk)`: the callback has its own parameter list, so the default options are reachable without named arguments. `MetricsRecording.withMetrics` has no defaulted parameters. [#2810](https://github.com/llm4s/llm4s/issues/2810)
+- **Changed** `ProviderConfig` no longer has setters that silently do nothing: `withTimeouts`, `withNetwork` and `withApiKeyProvider` (now `Result`) are abstract, and a keyless embedding config holds `apiKey = None`, not `Secret("")`; `ContextWindowResolver` returns a growth-safe `ContextLimits`
+  ([migration](docs/reference/migration.md#providerconfig-implements-every-setter-and-the-embedding-key-is-optional-2805)) [#2805](https://github.com/llm4s/llm4s/issues/2805).
 - **Changed** The context compression pipeline (`ContextManager`, `ContextConfig`, `ContextStep`,
   `ManagedConversation`, `TokenWindow`, `DeterministicCompressor`, `ToolOutputCompressor`, `LLMCompressor`,
   `HistoryCompressor`, `SemanticBlocks`, `ArtifactStore`) is `@Experimental`; token counting stays `@Stable`.

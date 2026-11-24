@@ -101,7 +101,7 @@ class OllamaEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         cfg.baseUrl shouldBe "http://localhost:11434"
         cfg.model shouldBe "nomic-embed-text"
         // Ollama doesn't require API key, defaults to "not-required"
-        cfg.apiKey.reveal shouldBe "not-required"
+        cfg.apiKey.map(_.reveal) shouldBe Some("not-required")
       }
     }
 
@@ -115,7 +115,7 @@ class OllamaEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         // Default baseUrl when not specified
         cfg.baseUrl shouldBe "http://localhost:11434"
         cfg.model shouldBe "mxbai-embed-large"
-        cfg.apiKey.reveal shouldBe "not-required"
+        cfg.apiKey.map(_.reveal) shouldBe Some("not-required")
       }
     }
 
@@ -132,7 +132,7 @@ class OllamaEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         provider shouldBe "ollama"
         cfg.model shouldBe "mxbai-embed-large"
         cfg.baseUrl shouldBe "http://localhost:11434" // Default base URL
-        cfg.apiKey.reveal shouldBe "not-required"
+        cfg.apiKey.map(_.reveal) shouldBe Some("not-required")
       }
     }
   }
@@ -155,7 +155,7 @@ class OllamaEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       val (_, config) = load("""llm4s { embeddings { model = "ollama/nomic-embed-text" } }""").value
 
       config.baseUrl shouldBe "http://localhost:11434"
-      config.apiKey.reveal shouldBe "not-required"
+      config.apiKey.map(_.reveal) shouldBe Some("not-required")
     }
 
     "still let a section override them" in {
@@ -198,7 +198,7 @@ class OllamaEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       val cfg = EmbeddingProviderConfig(
         baseUrl = "http://localhost:11434",
         model = "nomic-embed-text",
-        apiKey = Secret("not-required")
+        apiKey = Some(Secret("not-required"))
       )
       val res = EmbeddingClient.from("ollama", cfg)
       res.isRight shouldBe true
@@ -208,7 +208,7 @@ class OllamaEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       val cfg = EmbeddingProviderConfig(
         baseUrl = "http://localhost:11434",
         model = "mxbai-embed-large",
-        apiKey = Secret("")
+        apiKey = None
       )
       val res = EmbeddingClient.from("ollama", cfg)
       res.isRight shouldBe true
@@ -246,9 +246,9 @@ class OllamaEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       withProps(Map("llm4s.embeddings.model" -> "ollama/nomic-embed-text")) {
         val settings = Llm4sConfig.textEmbeddingModel().value
 
-        settings.provider shouldBe "ollama"
-        settings.modelName shouldBe "nomic-embed-text"
-        settings.dimensions shouldBe 768
+        settings.provider.asString shouldBe "ollama"
+        settings.model.name shouldBe "nomic-embed-text"
+        settings.model.dimensions shouldBe 768
       }
     }
   }

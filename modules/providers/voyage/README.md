@@ -36,7 +36,7 @@ import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
 import org.llm4s.llmconnect.provider.VoyageAIEmbeddingProvider
 
 val provider = VoyageAIEmbeddingProvider.fromConfig(
-  EmbeddingProviderConfig(baseUrl = "https://api.voyageai.com/v1", model = "voyage-3", apiKey = sys.env("VOYAGE_API_KEY"))
+  EmbeddingProviderConfig(baseUrl = "https://api.voyageai.com/v1", model = "voyage-3", apiKey = Some(Secret(sys.env("VOYAGE_API_KEY"))))
 )
 val model = EmbeddingModelConfig("voyage-3", 1024)
 

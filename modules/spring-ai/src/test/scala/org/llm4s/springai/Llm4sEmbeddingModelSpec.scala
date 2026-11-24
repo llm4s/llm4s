@@ -23,7 +23,11 @@ class Llm4sEmbeddingModelSpec extends AnyFlatSpec with Matchers {
   private val fixture: EmbeddingProvider =
     FixtureEmbeddingProvider
       .build(
-        EmbeddingProviderConfig(FixtureEmbeddingProvider.DefaultBaseUrl, "fixture-embed-small", Secret("sk-fixture")),
+        EmbeddingProviderConfig(
+          FixtureEmbeddingProvider.DefaultBaseUrl,
+          "fixture-embed-small",
+          Some(Secret("sk-fixture"))
+        ),
         EmbeddingBuildContext()
       )
       .toOption

@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -52,6 +53,11 @@ final case class VertexAIConfig private (
   override def withModel(model: String): VertexAIConfig                  = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): VertexAIConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): VertexAIConfig = copy(network = network)
+
+  /** No `ApiKeyProvider`: Vertex AI takes no API key, so this is a `ConfigurationError` rather than a silent no-op. */
+  override def apiKeyProvider: Option[ApiKeyProvider] = None
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[VertexAIConfig] =
+    Left(ProviderConfig.apiKeyProviderUnsupported("Vertex AI"))
 
   def withProjectId(projectId: String): VertexAIConfig                  = copy(projectId = projectId)
   def withLocation(location: String): VertexAIConfig                    = copy(location = location)
@@ -151,12 +157,12 @@ object VertexAIConfig:
       _ <- ProviderConfig.nonEmpty("Vertex AI", "projectId", projectId)
       _ <- ProviderConfig.nonEmpty("Vertex AI", "location", location)
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("gemini", "vertexai"),
         modelName = modelName,
         defaultContextWindow = DefaultContextWindow,
         defaultReserve = DefaultReserveCompletion,
-        fallbackResolver = vertexAiFallback
+        fallbackResolver = name => { val (w, r) = vertexAiFallback(name); ContextLimits(w, r) }
       )
       VertexAIConfig(
         projectId = projectId,

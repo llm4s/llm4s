@@ -36,7 +36,7 @@ import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
 import org.llm4s.llmconnect.provider.JinaEmbeddingProvider
 
 val provider = JinaEmbeddingProvider.fromConfig(
-  EmbeddingProviderConfig(baseUrl = "https://api.jina.ai/v1", model = "jina-embeddings-v3", apiKey = sys.env("JINA_API_KEY"))
+  EmbeddingProviderConfig(baseUrl = "https://api.jina.ai/v1", model = "jina-embeddings-v3", apiKey = Some(Secret(sys.env("JINA_API_KEY"))))
 )
 val model = EmbeddingModelConfig("jina-embeddings-v3", 1024)
 

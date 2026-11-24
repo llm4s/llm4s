@@ -331,6 +331,14 @@ final case class AcmeConfig(
   val providerId: ProviderId                    = ProviderId("acme")
   def endpointUrl: Option[String]               = Some(baseUrl)
   def withModel(model: String): AcmeConfig      = copy(model = model)
+  // Every config implements these six (#2805); the sections below show how to carry each.
+  def timeouts: ProviderTimeouts                                        = ProviderTimeouts.default
+  def withTimeouts(timeouts: ProviderTimeouts): AcmeConfig              = this
+  def network: HttpNetworkSettings                                      = HttpNetworkSettings.default
+  def withNetwork(network: HttpNetworkSettings): AcmeConfig             = this
+  def apiKeyProvider: Option[ApiKeyProvider]                            = None
+  def withApiKeyProvider(provider: ApiKeyProvider): Result[AcmeConfig] =
+    Left(ProviderConfig.apiKeyProviderUnsupported("Acme"))
   override def toString: String                 = s"AcmeConfig(***, $model, $baseUrl, $region)"
 
 object AcmeConfig:
@@ -339,14 +347,14 @@ object AcmeConfig:
   ): Result[AcmeConfig] =
     if apiKey.trim.isEmpty then Left(ConfigurationError("Acme apiKey must be non-empty", List("apiKey")))
     else
-      val (window, reserve) = resolver.resolve(
+      val limits = resolver.resolve(
         lookupProviders      = Seq("acme"),
         modelName            = model,
         defaultContextWindow = 128000,
         defaultReserve       = 4096,
-        fallbackResolver     = _ => (128000, 4096) // when the registry does not know the model
+        fallbackResolver     = _ => ContextLimits(128000, 4096) // when the registry does not know the model
       )
-      Right(AcmeConfig(apiKey, model, baseUrl, region, window, reserve))
+      Right(AcmeConfig(apiKey, model, baseUrl, region, limits.contextWindow, limits.reserveCompletion))
 ```
 
 ## What the user writes
@@ -493,12 +501,11 @@ httpClient.post(url, headers, body, timeout = config.timeouts.requestOr(2.minute
 httpClient.postStream(url, headers, body, timeout = config.timeouts.streamOr(10.minutes))
 ```
 
-A config that does not override `withTimeouts` ignores the block, since the default returns `this`; a
-provider with no timeouts to offer needs to do nothing. An embedding provider reads
+`timeouts`, `withTimeouts`, `network`, `withNetwork`, `apiKeyProvider` and `withApiKeyProvider` are abstract
+(#2805): they used to default to `this`, so a config that forgot them silently dropped a configured proxy. A
+provider that makes no HTTP call, such as an in-process model, returns `this` from `withTimeouts` and
+`withNetwork` and says so in its Scaladoc. An embedding provider reads
 `EmbeddingProviderConfig.timeouts.requestOr(...)`, and only `request` has a meaning there.
-
-Methods added to the trait after 1.0 will have default implementations, so a test double that
-implements it keeps compiling.
 
 ### Honouring `apiKeyFile` (key rotation)
 
@@ -515,19 +522,20 @@ final case class AcmeConfig(
   override val apiKeyProvider: Option[ApiKeyProvider] = None
 ) extends ProviderConfig:
   // ... providerId, contextWindow and the rest ...
-  override def withApiKeyProvider(provider: ApiKeyProvider): AcmeConfig = copy(apiKeyProvider = Some(provider))
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[AcmeConfig] =
+    Right(copy(apiKeyProvider = Some(provider)))
 
 // in the client, per request
 val key: Result[String] = config.apiKeyProvider.fold[Result[String]](Right(config.apiKey))(_.current().map(_.asKey))
 ```
 
-A config that does not override `withApiKeyProvider` keeps returning `this`: its client gets the key the file
-held when the section was loaded, and a rotated key only after a reload. A provider whose spec does not require
-an API key refuses `apiKeyFile`. Prove support with `assertHonoursApiKeyProvider`.
+A config that cannot take a provider returns `Left(ProviderConfig.apiKeyProviderUnsupported(name))`: for a
+provider whose spec requires an API key, its client gets the key the file held when the section was loaded, and a
+rotated key only after a reload; a provider whose spec does not require an API key refuses `apiKeyFile`. Prove support with `assertHonoursApiKeyProvider`.
 
 An embedding provider gets the same from its block's `apiKeyFile` (or the vendor's shared one) through
 `EmbeddingProviderConfig.apiKeyProvider`: read the key per request with `cfg.currentApiKey()`, which falls back
-to `cfg.apiKey`, rather than `cfg.apiKey` itself. Prove it with `assertEmbeddingHonoursApiKeyProvider`.
+to `cfg.apiKey` (an `Option[Secret]`, `None` for a provider that takes no key), rather than `cfg.apiKey` itself. Prove it with `assertEmbeddingHonoursApiKeyProvider`.
 
 ### `HttpErrorMapper`
 

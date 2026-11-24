@@ -318,7 +318,7 @@ for
               .withNamespace("admin")              // Vault Enterprise / HCP only
               .withRefreshInterval(1.minute)
           )
-  config <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+  config <- Llm4sConfig.provider("openai-main").flatMap(_.withApiKeyProvider(keys))
   client <- LLMConnect.getClient(config)
 yield client
 ```
@@ -344,7 +344,7 @@ for
               .withField("apiKey")                 // a key/value secret; omit for a plain SecretString
               .withRefreshInterval(1.minute)
           )
-  config <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+  config <- Llm4sConfig.provider("openai-main").flatMap(_.withApiKeyProvider(keys))
   client <- LLMConnect.getClient(config)
 yield client
 ```

@@ -41,13 +41,15 @@ final case class DeepSeekConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                       = ProviderId("deepseek")
-  override def endpointUrl: Option[String]                                  = Some(baseUrl)
-  override def withModel(model: String): DeepSeekConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): DeepSeekConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): DeepSeekConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): DeepSeekConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): DeepSeekConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                    = ProviderId("deepseek")
+  override def endpointUrl: Option[String]                               = Some(baseUrl)
+  override def withModel(model: String): DeepSeekConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): DeepSeekConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): DeepSeekConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[DeepSeekConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): DeepSeekConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): DeepSeekConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): DeepSeekConfig                  = copy(baseUrl = baseUrl)
@@ -137,12 +139,12 @@ object DeepSeekConfig {
       _ <- ProviderConfig.nonEmpty("DeepSeek", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("DeepSeek", "baseUrl", baseUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("deepseek"),
         modelName = modelName,
         defaultContextWindow = 64000,
         defaultReserve = standardReserve,
-        fallbackResolver = deepSeekFallback
+        fallbackResolver = name => { val (w, r) = deepSeekFallback(name); ContextLimits(w, r) }
       )
       DeepSeekConfig(
         apiKey = apiKey,

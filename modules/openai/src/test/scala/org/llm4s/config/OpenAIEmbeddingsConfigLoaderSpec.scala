@@ -38,7 +38,7 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
       val (provider, cfg) = result.value
       provider shouldBe "openai"
       cfg.model shouldBe "text-embedding-3-small"
-      cfg.apiKey.reveal shouldBe "sk-test-embedding"
+      cfg.apiKey.map(_.reveal) shouldBe Some("sk-test-embedding")
       cfg.baseUrl shouldBe "https://api.openai.com/v1"
     }
 

@@ -68,59 +68,53 @@ trait ProviderConfig {
   /**
    * How long this provider's HTTP calls may take: the `timeouts` block of its section.
    *
-   * The default is [[ProviderTimeouts.default]], which leaves every client on its own default, so a
-   * config that predates the block, or a provider supplied by another module that does not read it,
-   * behaves as before. A config that carries the setting overrides this and its client reads it with
+   * [[ProviderTimeouts.default]] leaves the client on its own default. The client reads it with
    * [[ProviderTimeouts.requestOr]] / [[ProviderTimeouts.streamOr]].
    */
-  def timeouts: ProviderTimeouts = ProviderTimeouts.default
+  def timeouts: ProviderTimeouts
 
   /**
    * The same config with the given timeouts.
    *
-   * The loader calls this on every config a descriptor builds, passing the section's `timeouts`
-   * block, so a descriptor does not read the block itself. The default returns `this`: a config that
-   * does not carry timeouts, such as one supplied by another module, ignores them. A config that does
-   * overrides this with its own return type.
+   * The loader calls this on every config a descriptor builds, passing the section's `timeouts` block, so a
+   * descriptor does not read the block itself. Every config implements it (#2805): one whose client makes no HTTP
+   * call, such as an in-process model, says so in its own documentation rather than inheriting a silent no-op.
+   * Implementations override it with their own return type.
    */
-  def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig = this
+  def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig
 
   /**
    * The proxy and TLS settings this provider's HTTP calls use: `llm4s.http`, overridden key by key by the
-   * section's own `http` block.
-   *
-   * The default is [[org.llm4s.http.HttpNetworkSettings.default]] - no proxy, no extra TLS material - so a
-   * config that does not carry the setting, such as one supplied by another module, behaves as before.
+   * section's own `http` block. [[org.llm4s.http.HttpNetworkSettings.default]] is no proxy and no extra TLS
+   * material.
    */
-  def network: HttpNetworkSettings = HttpNetworkSettings.default
+  def network: HttpNetworkSettings
 
   /**
    * The same config with the given proxy and TLS settings.
    *
-   * The loader calls this on every config a descriptor builds, as it does [[withTimeouts]], so a descriptor
-   * does not read the `http` block itself. The default returns `this`: a config that does not carry the
-   * setting ignores it. A config that does overrides this with its own return type.
+   * The loader calls this on every config a descriptor builds, as it does [[withTimeouts]], so a descriptor does
+   * not read the `http` block itself. Every config implements it (#2805), so a configured proxy is never dropped
+   * by a config that forgot to carry it. Implementations override it with their own return type.
    */
-  def withNetwork(network: HttpNetworkSettings): ProviderConfig = this
+  def withNetwork(network: HttpNetworkSettings): ProviderConfig
 
   /**
    * Where the client gets the API key it sends with each request, when not from the key this config holds:
-   * a section's `apiKeyFile`, or a provider set with [[withApiKeyProvider]] (#2313).
-   *
-   * The default is `None`, and so is the value of a config that does not support a provider.
+   * a section's `apiKeyFile`, or a provider set with [[withApiKeyProvider]] (#2313). `None` when none is set, and
+   * always for a config that cannot take one.
    */
-  def apiKeyProvider: Option[ApiKeyProvider] = None
+  def apiKeyProvider: Option[ApiKeyProvider]
 
   /**
    * The same config, its client asking `provider` for the key on each request, so a rotated key is used
    * without rebuilding the client.
    *
-   * The loader calls this for a section that sets `apiKeyFile`. The default returns `this`: a config whose
-   * client cannot take a provider ignores it, and its [[apiKeyProvider]] stays `None` - which the loader
-   * reports as an error for `apiKeyFile` and code setting a provider should check. A config that supports
-   * it overrides this with its own return type.
+   * A config whose client cannot take a provider - one that sends no API key, such as Ollama's or Bedrock's -
+   * returns a [[org.llm4s.error.ConfigurationError]] rather than ignoring it (#2805). The loader calls this for a
+   * section that sets `apiKeyFile`. A config that supports it overrides this with its own return type.
    */
-  def withApiKeyProvider(provider: ApiKeyProvider): ProviderConfig = this
+  def withApiKeyProvider(provider: ApiKeyProvider): Result[ProviderConfig]
 }
 
 object ProviderConfig {
@@ -135,6 +129,15 @@ object ProviderConfig {
    * @param provider the provider's display name, e.g. `"OpenAI"`.
    * @param field    the parameter name, e.g. `"apiKey"`; also reported as the missing key.
    */
+  /**
+   * The refusal of a config whose client cannot take an [[org.llm4s.llmconnect.auth.ApiKeyProvider]]: what its
+   * [[ProviderConfig.withApiKeyProvider]] returns.
+   *
+   * @param provider the provider's display name, e.g. `"Ollama"`.
+   */
+  def apiKeyProviderUnsupported(provider: String): ConfigurationError =
+    ConfigurationError(s"$provider takes no API key, so it cannot take an ApiKeyProvider", List("apiKeyProvider"))
+
   private[llm4s] def nonEmpty(provider: String, field: String, value: String): Result[Unit] =
     Either.cond(
       value.trim.nonEmpty,

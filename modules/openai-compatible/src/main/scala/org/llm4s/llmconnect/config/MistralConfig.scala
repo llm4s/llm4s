@@ -43,13 +43,15 @@ final case class MistralConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                      = ProviderId("mistral")
-  override def endpointUrl: Option[String]                                 = Some(baseUrl)
-  override def withModel(model: String): MistralConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): MistralConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): MistralConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): MistralConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                   = ProviderId("mistral")
+  override def endpointUrl: Option[String]                              = Some(baseUrl)
+  override def withModel(model: String): MistralConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): MistralConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[MistralConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): MistralConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): MistralConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): MistralConfig                  = copy(baseUrl = baseUrl)
@@ -133,12 +135,12 @@ object MistralConfig:
       _ <- ProviderConfig.nonEmpty("Mistral", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("Mistral", "baseUrl", baseUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("mistral"),
         modelName = modelName,
         defaultContextWindow = DEFAULT_CONTEXT_WINDOW,
         defaultReserve = DEFAULT_RESERVE_COMPLETION,
-        fallbackResolver = mistralFallback
+        fallbackResolver = name => { val (w, r) = mistralFallback(name); ContextLimits(w, r) }
       )
       MistralConfig(
         apiKey = apiKey,

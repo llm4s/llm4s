@@ -2,6 +2,8 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ConfigurationError
+import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -33,6 +35,27 @@ final case class JlamaConfig private (
   def withModelDir(modelDir: Path): JlamaConfig      = copy(modelDir = modelDir)
   def withThreads(threads: Int): JlamaConfig         = copy(threads = Some(threads))
   def withThreads(threads: Option[Int]): JlamaConfig = copy(threads = threads)
+
+  // Jlama runs the model in-process: its client makes no HTTP call and sends no API key (#2805).
+
+  /** Always [[ProviderTimeouts.default]]: an in-process model has no HTTP call to time out. */
+  override def timeouts: ProviderTimeouts = ProviderTimeouts.default
+
+  /** `this`: an in-process model has no HTTP call to time out, so the section's `timeouts` block has no meaning. */
+  override def withTimeouts(timeouts: ProviderTimeouts): JlamaConfig = this
+
+  /** Always [[org.llm4s.http.HttpNetworkSettings.default]]: an in-process model makes no HTTP call. */
+  override def network: HttpNetworkSettings = HttpNetworkSettings.default
+
+  /** `this`: an in-process model makes no HTTP call, so proxy and TLS settings have no meaning. */
+  override def withNetwork(network: HttpNetworkSettings): JlamaConfig = this
+
+  /** Always `None`: Jlama takes no API key. */
+  override def apiKeyProvider: Option[ApiKeyProvider] = None
+
+  /** A `ConfigurationError`: Jlama takes no API key. */
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[JlamaConfig] =
+    Left(ProviderConfig.apiKeyProviderUnsupported("Jlama"))
 
 @Experimental
 object JlamaConfig:

@@ -27,7 +27,7 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
   private val cfg = EmbeddingProviderConfig(
     baseUrl = "http://voyage-test",
     model = "voyage-3",
-    apiKey = Secret("test-key")
+    apiKey = Some(Secret("test-key"))
   )
   private val modelCfg = EmbeddingModelConfig("voyage-3", 1024)
   private val req      = EmbeddingRequest(Seq("hello", "world"), modelCfg)

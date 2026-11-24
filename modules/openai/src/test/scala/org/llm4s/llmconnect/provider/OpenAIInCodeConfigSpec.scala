@@ -64,7 +64,7 @@ class OpenAIInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
         EmbeddingProviderConfig(
           baseUrl = OpenAIConfig.DEFAULT_BASE_URL,
           model = "text-embedding-3-small",
-          apiKey = Secret("sk-test")
+          apiKey = Some(Secret("sk-test"))
         )
       )
     }

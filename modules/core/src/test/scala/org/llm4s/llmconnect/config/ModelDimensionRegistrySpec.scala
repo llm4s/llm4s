@@ -39,26 +39,23 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
       ModelDimensionRegistry.getDimension("FixtureEmbedding", "fixture-embed-small").value shouldBe 256
     }
 
-    "answer the local non-text encoders without a registered provider" in {
+    "not answer the local non-text encoders, whose table is in llm4s-rag (#2805)" in {
       given ProviderRegistry = ProviderRegistry.ofEmbeddings()
 
-      ModelDimensionRegistry.getDimension("local", "openclip-vit-b32").value shouldBe 512
-      ModelDimensionRegistry.localDimension("wav2vec2-base").value shouldBe 768
-      ModelDimensionRegistry.localDimension("no-such-encoder").left.value.formatted should include(
-        "Unknown model 'no-such-encoder' for provider 'local'"
-      )
+      ModelDimensionRegistry.getDimension("local", "openclip-vit-b32").isLeft shouldBe true
+      assertDoesNotCompile("""ModelDimensionRegistry.localDimension("wav2vec2-base")""")
     }
 
-    "prefer a registered provider called local over the built-in encoder table" in {
+    "answer a registered provider called local from its descriptor" in {
       // An application may register a real embedding provider under the id `local`;
       // `EmbeddingClient.from("local", ...)` resolves it, so its dimensions must too.
       given ProviderRegistry = ProviderRegistry.ofEmbeddings(RegisteredLocalEmbeddings)
 
       // A model only the registered provider knows.
       ModelDimensionRegistry.getDimension("local", "my-local-embedder").value shouldBe 384
-      // A name that collides with the built-in table: the provider's answer wins.
+      // A local encoder name: the provider answers, not the encoder table.
       ModelDimensionRegistry.getDimension("local", "openclip-vit-b32").value shouldBe 1024
-      // And the table is not consulted as a fallback for the provider's own gaps.
+      // And nothing fills the provider's own gaps.
       ModelDimensionRegistry.getDimension("local", "wav2vec2-base").left.value.formatted should include(
         "Unknown model 'wav2vec2-base' for provider 'local'"
       )

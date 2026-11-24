@@ -7,6 +7,7 @@ import org.llm4s.http.{ HttpClientOptions, HttpNetworkSettings, Llm4sHttpClient 
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{
   ContextWindowResolver,
+  EmbeddingModelConfig,
   EmbeddingProviderConfig,
   ModelDimensionRegistry,
   ProviderConfig,
@@ -346,11 +347,14 @@ final class Llm4sSettings private[llm4s] (source: ConfigSource) {
    * @return the resolved settings, or a [[org.llm4s.error.ConfigurationError]]
    *         when `EMBEDDING_MODEL` is absent or unrecognised.
    */
-  def textEmbeddingModel()(using ProviderRegistry): Result[Llm4sConfig.TextEmbeddingModelSettings] =
+  def textEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings] =
     embeddings().flatMap { case (provider, cfg) =>
       val p = provider.toLowerCase(java.util.Locale.ROOT)
       ModelDimensionRegistry.getDimension(p, cfg.model).map { dims =>
-        Llm4sConfig.TextEmbeddingModelSettings(provider = p, modelName = cfg.model, dimensions = dims)
+        TextEmbeddingModelSettings(
+          summon[ProviderRegistry].canonicalEmbeddingId(p),
+          EmbeddingModelConfig(cfg.model, dims)
+        )
       }
     }
 }

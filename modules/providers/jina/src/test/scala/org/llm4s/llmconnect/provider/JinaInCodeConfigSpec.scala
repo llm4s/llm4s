@@ -31,7 +31,7 @@ class JinaInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues:
         EmbeddingProviderConfig(
           baseUrl = "https://api.jina.ai",
           model = "jina-embeddings-v3",
-          apiKey = Secret("jina-test")
+          apiKey = Some(Secret("jina-test"))
         )
       )
     }

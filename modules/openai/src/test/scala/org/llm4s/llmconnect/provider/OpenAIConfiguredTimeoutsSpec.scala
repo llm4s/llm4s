@@ -148,7 +148,7 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
         EmbeddingProviderConfig(
           baseUrl = baseUrl,
           model = "text-embedding-3-small",
-          apiKey = Secret("sk-test"),
+          apiKey = Some(Secret("sk-test")),
           timeouts = ProviderTimeouts(request = Some(300.millis))
         )
       )

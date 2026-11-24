@@ -418,7 +418,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
       resolveEmbeddingProvider = _ =>
         Right(
           EmbeddingProviderConfig(
-            apiKey = Secret("test-key"),
+            apiKey = Some(Secret("test-key")),
             baseUrl = "http://localhost",
             model = "test-model"
           )
@@ -435,7 +435,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
       resolveEmbeddingProvider = _ =>
         Right(
           EmbeddingProviderConfig(
-            apiKey = Secret("test-key"),
+            apiKey = Some(Secret("test-key")),
             baseUrl = "http://localhost",
             model = "test-model"
           )

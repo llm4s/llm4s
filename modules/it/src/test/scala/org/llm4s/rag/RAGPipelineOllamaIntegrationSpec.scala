@@ -75,7 +75,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
   private lazy val embeddingClient: EmbeddingClient =
     EmbeddingClient(
       OllamaEmbeddingProvider.fromConfig(
-        EmbeddingProviderConfig(baseUrl = ollamaBaseUrl, model = embeddingModel, apiKey = Secret("not-required"))
+        EmbeddingProviderConfig(baseUrl = ollamaBaseUrl, model = embeddingModel, apiKey = Some(Secret("not-required")))
       )
     )
 

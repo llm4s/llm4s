@@ -20,7 +20,7 @@ class OllamaEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
   private val request = EmbeddingRequest(Seq("first", "second"), EmbeddingModelConfig("nomic-embed-text", 2))
 
   private def provider(baseUrl: String, apiKey: String = "not-required") =
-    OllamaEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, "nomic-embed-text", Secret(apiKey)))
+    OllamaEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, "nomic-embed-text", Some(Secret(apiKey))))
 
   /** A local port nothing is listening on, so connecting is refused at once. */
   private def closedPort(): Int = {

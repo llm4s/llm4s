@@ -90,7 +90,8 @@ class GeminiApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues:
         seen.add(exchange.getRequestURI.toString)
         sendJsonResponse(exchange, 200, reply)
       } { baseUrl =>
-        val config = GeminiConfig(Secret(""), "gemini-2.5-flash").withBaseUrl(baseUrl).withApiKeyProvider(throwing)
+        val config =
+          GeminiConfig(Secret(""), "gemini-2.5-flash").withBaseUrl(baseUrl).withApiKeyProvider(Some(throwing))
         config.toString should include("apiKeyProvider=")
         config.withApiKeyProvider(None).apiKeyProvider shouldBe None
         val client = GeminiClient(config).value

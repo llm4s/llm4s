@@ -80,8 +80,8 @@ final case class FixtureChatConfig(
   override def withModel(model: String): FixtureChatConfig                  = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): FixtureChatConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): FixtureChatConfig = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): FixtureChatConfig =
-    copy(apiKeyProvider = Some(provider))
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[FixtureChatConfig] =
+    Right(copy(apiKeyProvider = Some(provider)))
 
 object FixtureChatConfig:
 

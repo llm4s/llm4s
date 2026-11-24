@@ -11,7 +11,7 @@ import org.scalatest.matchers.should.Matchers
 class JinaEmbeddingProviderRegressionSpec extends AnyFlatSpec with Matchers {
 
   private val modelCfg = EmbeddingModelConfig("jina-embeddings-v3", 1024)
-  private val cfg      = EmbeddingProviderConfig("http://jina-test", "jina-embeddings-v3", Secret("k"))
+  private val cfg      = EmbeddingProviderConfig("http://jina-test", "jina-embeddings-v3", Some(Secret("k")))
 
   private def run(body: String, n: Int) =
     JinaEmbeddingProvider

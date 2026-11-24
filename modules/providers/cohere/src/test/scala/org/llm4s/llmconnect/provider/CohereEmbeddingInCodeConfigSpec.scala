@@ -31,7 +31,7 @@ class CohereEmbeddingInCodeConfigSpec extends AnyWordSpec with Matchers with Eit
         EmbeddingProviderConfig(
           baseUrl = "https://api.cohere.com",
           model = "embed-english-v3.0",
-          apiKey = Secret("co-test")
+          apiKey = Some(Secret("co-test"))
         )
       )
     }

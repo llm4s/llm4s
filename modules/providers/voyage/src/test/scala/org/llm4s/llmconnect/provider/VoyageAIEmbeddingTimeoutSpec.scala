@@ -19,7 +19,7 @@ class VoyageAIEmbeddingTimeoutSpec extends AnyFlatSpec with Matchers {
     EmbeddingProviderConfig(
       baseUrl = "http://localhost:1",
       model = "voyage-3",
-      apiKey = Secret("test-key"),
+      apiKey = Some(Secret("test-key")),
       timeouts = timeouts
     )
 

@@ -30,7 +30,7 @@ import scala.util.Try
  *               AwsSecretsManagerSettings("eu-west-1", AwsCredentials(accessKeyId, Secret(secretAccessKey)), "llm4s/openai")
  *                 .withField("apiKey")
  *             )
- *   config <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+ *   config <- Llm4sConfig.provider("openai-main").flatMap(_.withApiKeyProvider(keys))
  *   client <- LLMConnect.getClient(config)
  * yield client
  * }}}

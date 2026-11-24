@@ -121,7 +121,7 @@ class SharedApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues w
     "read its own apiKeyFile at load, and give the config a provider that re-reads it" in {
       val file   = keyFile("sk-embed-file-0001\n")
       val config = loadEmbeddings(s"llm4s.embeddings.fixtureembedding.apiKeyFile = ${quoted(file)}\n").value
-      config.apiKey.reveal shouldBe "sk-embed-file-0001"
+      config.apiKey.map(_.reveal) shouldBe Some("sk-embed-file-0001")
       config.currentApiKey().value.reveal shouldBe "sk-embed-file-0001"
       Files.writeString(file, "sk-embed-file-rotated")
       config.currentApiKey().value.reveal shouldBe "sk-embed-file-rotated"
@@ -134,13 +134,13 @@ class SharedApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues w
       val hocon =
         "llm4s.credentials.fixtureembedding.apiKey = \"sk-shared-0001\"\n" +
           s"llm4s.embeddings.fixtureembedding.apiKeyFile = ${quoted(file)}\n"
-      loadEmbeddings(hocon).value.apiKey.reveal shouldBe "sk-embed-file-0001"
+      loadEmbeddings(hocon).value.apiKey.map(_.reveal) shouldBe Some("sk-embed-file-0001")
     }
 
     "fall back to the vendor's shared apiKeyFile" in {
       val file   = keyFile("sk-shared-file-0001")
       val config = loadEmbeddings(credentialsFile("fixtureembedding", file)).value
-      config.apiKey.reveal shouldBe "sk-shared-file-0001"
+      config.apiKey.map(_.reveal) shouldBe Some("sk-shared-file-0001")
       Files.writeString(file, "sk-shared-file-rotated")
       config.currentApiKey().value.reveal shouldBe "sk-shared-file-rotated"
     }
@@ -176,7 +176,7 @@ class SharedApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues w
     "report a provider's failure as a Left" in {
       val failing = new ApiKeyProvider:
         def current(): Result[ApiKey] = Left(ConfigurationError("API key file /x is empty"))
-      val config = EmbeddingProviderConfig("https://e.invalid", "m", Secret("k")).withApiKeyProvider(failing)
+      val config = EmbeddingProviderConfig("https://e.invalid", "m", Some(Secret("k"))).withApiKeyProvider(failing)
       config.currentApiKey().left.value.message should include("is empty")
       config.withApiKeyProvider(None).currentApiKey().value.reveal shouldBe "k"
     }
@@ -184,7 +184,7 @@ class SharedApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues w
     "turn a provider that throws into a Left naming the exception's class, not an exception" in {
       val throwing = new ApiKeyProvider:
         def current(): Result[ApiKey] = throw new IllegalStateException("vault unreachable")
-      val config = EmbeddingProviderConfig("https://e.invalid", "m", Secret("k")).withApiKeyProvider(throwing)
+      val config = EmbeddingProviderConfig("https://e.invalid", "m", Some(Secret("k"))).withApiKeyProvider(throwing)
       val error  = config.currentApiKey().left.value
       error shouldBe a[org.llm4s.error.AuthenticationError]
       error.message should include("IllegalStateException")

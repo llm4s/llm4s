@@ -29,7 +29,7 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFacto
   private val cfg = EmbeddingProviderConfig(
     baseUrl = "http://jina-test",
     model = "jina-embeddings-v3",
-    apiKey = Secret("jina-test-key")
+    apiKey = Some(Secret("jina-test-key"))
   )
 
   private val modelCfg = EmbeddingModelConfig("jina-embeddings-v3", 1024)

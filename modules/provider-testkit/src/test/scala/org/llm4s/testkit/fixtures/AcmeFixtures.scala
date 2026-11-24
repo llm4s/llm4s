@@ -1,5 +1,8 @@
 package org.llm4s.testkit.fixtures
 
+import org.llm4s.llmconnect.config.ProviderTimeouts
+import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
@@ -50,12 +53,20 @@ object AcmeProvider extends ProviderDescriptor:
     ProviderDescriptor.expectConfig[AcmeConfig](id, config).map(AcmeClient(_))
 
 final case class AcmeConfig(apiKey: String, model: String, baseUrl: String) extends ProviderConfig:
-  val providerId: ProviderId                   = AcmeProvider.id
-  val contextWindow: Int                       = 8192
-  val reserveCompletion: Int                   = 1024
-  def endpointUrl: Option[String]              = Some(baseUrl)
-  def withModel(model: String): ProviderConfig = copy(model = model)
-  override def toString: String                = s"AcmeConfig($model, $baseUrl)"
+  val providerId: ProviderId                                    = AcmeProvider.id
+  val contextWindow: Int                                        = 8192
+  val reserveCompletion: Int                                    = 1024
+  def endpointUrl: Option[String]                               = Some(baseUrl)
+  def withModel(model: String): ProviderConfig                  = copy(model = model)
+  val timeouts: ProviderTimeouts                                = ProviderTimeouts.default
+  def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig  = this
+  val network: HttpNetworkSettings                              = HttpNetworkSettings.default
+  def withNetwork(network: HttpNetworkSettings): ProviderConfig = this
+  val apiKeyProvider: Option[ApiKeyProvider]                    = None
+  def withApiKeyProvider(p: ApiKeyProvider): Result[ProviderConfig] = Left(
+    ProviderConfig.apiKeyProviderUnsupported("Acme")
+  )
+  override def toString: String = s"AcmeConfig($model, $baseUrl)"
 
 final case class AcmeClient(config: AcmeConfig) extends LLMClient:
   def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =

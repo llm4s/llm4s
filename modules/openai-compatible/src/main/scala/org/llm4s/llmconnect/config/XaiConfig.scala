@@ -41,13 +41,15 @@ final case class XaiConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                  = ProviderId("xai")
-  override def endpointUrl: Option[String]                             = Some(baseUrl)
-  override def withModel(model: String): XaiConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): XaiConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): XaiConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): XaiConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): XaiConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                               = ProviderId("xai")
+  override def endpointUrl: Option[String]                          = Some(baseUrl)
+  override def withModel(model: String): XaiConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): XaiConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): XaiConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[XaiConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): XaiConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): XaiConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): XaiConfig                  = copy(baseUrl = baseUrl)
@@ -134,12 +136,12 @@ object XaiConfig {
       _ <- ProviderConfig.nonEmpty("xAI", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("xAI", "baseUrl", baseUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("xai"),
         modelName = modelName,
         defaultContextWindow = 131072,
         defaultReserve = standardReserve,
-        fallbackResolver = xaiFallback
+        fallbackResolver = name => { val (w, r) = xaiFallback(name); ContextLimits(w, r) }
       )
       XaiConfig(
         apiKey = apiKey,

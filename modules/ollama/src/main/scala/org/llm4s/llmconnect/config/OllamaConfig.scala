@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -38,6 +39,11 @@ final case class OllamaConfig private (
   override def withModel(model: String): OllamaConfig                  = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): OllamaConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): OllamaConfig = copy(network = network)
+
+  /** No `ApiKeyProvider`: Ollama takes no API key, so this is a `ConfigurationError` rather than a silent no-op. */
+  override def apiKeyProvider: Option[ApiKeyProvider] = None
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[OllamaConfig] =
+    Left(ProviderConfig.apiKeyProviderUnsupported("Ollama"))
 
   def withBaseUrl(baseUrl: String): OllamaConfig                  = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): OllamaConfig         = copy(contextWindow = contextWindow)
@@ -106,12 +112,12 @@ object OllamaConfig {
     baseUrl: String
   )(using resolver: ContextWindowResolver): Result[OllamaConfig] =
     ProviderConfig.nonEmpty("Ollama", "baseUrl", baseUrl).map { _ =>
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("ollama"),
         modelName = modelName,
         defaultContextWindow = 8192,
         defaultReserve = standardReserve,
-        fallbackResolver = ollamaFallback
+        fallbackResolver = name => { val (w, r) = ollamaFallback(name); ContextLimits(w, r) }
       )
       OllamaConfig(
         model = modelName,

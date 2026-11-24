@@ -26,7 +26,8 @@ class OpenAIEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
       seen.add(ujson.read(new String(ex.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)))
       sendJsonResponse(ex, 200, """{"data":[{"embedding":[0.1,0.2]},{"embedding":[0.3,0.4]}]}""")
     } { baseUrl =>
-      val provider = OpenAIEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, model.name, Secret("key")))
+      val provider =
+        OpenAIEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, model.name, Some(Secret("key"))))
       provider.embed(EmbeddingRequest(Seq("a", "b"), model, purpose)).isRight shouldBe true
     }
     seen.asScala.toList

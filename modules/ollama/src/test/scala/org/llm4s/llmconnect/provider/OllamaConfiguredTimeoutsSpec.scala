@@ -115,7 +115,7 @@ final class OllamaConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
         EmbeddingProviderConfig(
           baseUrl = baseUrl,
           model = "nomic-embed-text",
-          apiKey = Secret("ollama"),
+          apiKey = Some(Secret("ollama")),
           timeouts = ProviderTimeouts(request = Some(300.millis))
         )
       )

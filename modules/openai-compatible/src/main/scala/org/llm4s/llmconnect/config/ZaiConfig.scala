@@ -39,13 +39,15 @@ final case class ZaiConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                  = ProviderId("zai")
-  override def endpointUrl: Option[String]                             = Some(baseUrl)
-  override def withModel(model: String): ZaiConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): ZaiConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): ZaiConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): ZaiConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): ZaiConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                               = ProviderId("zai")
+  override def endpointUrl: Option[String]                          = Some(baseUrl)
+  override def withModel(model: String): ZaiConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): ZaiConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): ZaiConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[ZaiConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): ZaiConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): ZaiConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): ZaiConfig                  = copy(baseUrl = baseUrl)
@@ -122,12 +124,12 @@ object ZaiConfig {
       _ <- ProviderConfig.nonEmpty("Zai", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("Zai", "baseUrl", baseUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("zai"),
         modelName = modelName,
         defaultContextWindow = 128000,
         defaultReserve = standardReserve,
-        fallbackResolver = zaiFallback
+        fallbackResolver = name => { val (w, r) = zaiFallback(name); ContextLimits(w, r) }
       )
       ZaiConfig(
         apiKey = apiKey,

@@ -288,9 +288,8 @@ val rotating: Result[LLMClient] = for {
   providerConfig <- Llm4sConfig.provider("openai-main")
   registry       <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
-  config = providerConfig.withApiKeyProvider(SecretStoreKey(fetchOpenAIKey, 5.minutes))
-  // A provider whose client cannot take one leaves `apiKeyProvider` empty.
-  _      <- Either.cond(config.apiKeyProvider.isDefined, (), ConfigurationError("this provider cannot rotate keys"))
+  // A provider whose client cannot take one is a ConfigurationError, not a silent no-op.
+  config <- providerConfig.withApiKeyProvider(SecretStoreKey(fetchOpenAIKey, 5.minutes))
   client <- LLMConnect.getClient(config)
 } yield client
 ```
@@ -895,7 +894,7 @@ object RAGApplication extends App {
     // 3. Create service
     service = LLMEmbeddingService(
       client, 
-      EmbeddingModelConfig(model.modelName, model.dimensions)
+      model.model
     )
   } yield new RAGService(service)
 

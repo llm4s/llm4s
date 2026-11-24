@@ -147,7 +147,7 @@ class Llm4sPerplexityModuleSpec extends AnyWordSpec with Matchers with ProviderM
 
     "send the key its ApiKeyProvider holds at each request" in {
       assertHonoursApiKeyProvider(sendJsonResponse(_, 200, response(s"[${textMessage("ok")}]"))) { (baseUrl, keys) =>
-        new PerplexityClient(config(baseUrl = baseUrl).withApiKeyProvider(keys))
+        new PerplexityClient(config(baseUrl = baseUrl).withApiKeyProvider(Some(keys)))
       }
     }
 

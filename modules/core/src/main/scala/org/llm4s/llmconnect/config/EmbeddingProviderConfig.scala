@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.error.ConfigurationError
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.{ ApiKeyProvider, CachingAccessTokenProvider }
 import org.llm4s.security.Secret
@@ -11,7 +12,9 @@ import org.llm4s.types.Result
  *
  * @param baseUrl base URL of the embedding service (e.g. `https://api.openai.com/v1`)
  * @param model   name of the embedding model to use
- * @param apiKey  authentication key for the provider; redacted in `toString`
+ * @param apiKey  authentication key for the provider, `None` for one that takes none, such as a local Ollama
+ *                (#2805: it was a mandatory `Secret`, so a keyless provider passed `Secret("")`); redacted in
+ *                `toString`
  * @param timeouts how long an embedding request may take: the section's `timeouts.request`. Absent
  *                 means the provider's own default (two minutes). `timeouts.stream` has no meaning for
  *                 an embedding call.
@@ -34,7 +37,7 @@ import org.llm4s.types.Result
 final case class EmbeddingProviderConfig private (
   baseUrl: String,
   model: String,
-  apiKey: Secret,
+  apiKey: Option[Secret],
   timeouts: ProviderTimeouts,
   network: HttpNetworkSettings,
   apiKeyProvider: Option[ApiKeyProvider],
@@ -54,7 +57,10 @@ final case class EmbeddingProviderConfig private (
   def withModel(model: String): EmbeddingProviderConfig = copy(model = model)
 
   /** Sets the authentication key. */
-  def withApiKey(apiKey: Secret): EmbeddingProviderConfig = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): EmbeddingProviderConfig = copy(apiKey = Some(apiKey))
+
+  /** Sets the authentication key, or clears it with `None` for a provider that takes none. */
+  def withApiKey(apiKey: Option[Secret]): EmbeddingProviderConfig = copy(apiKey = apiKey)
 
   /** Sets how long an embedding request may take. */
   def withTimeouts(timeouts: ProviderTimeouts): EmbeddingProviderConfig = copy(timeouts = timeouts)
@@ -70,16 +76,17 @@ final case class EmbeddingProviderConfig private (
 
   /**
    * The key to send with the next request: [[apiKeyProvider]]'s current key when one is set, otherwise `apiKey`.
-   * A key file that has become unreadable or empty is a `Left` naming its path, and a provider that throws is an
+   * Neither set is a [[org.llm4s.error.ConfigurationError]] naming `apiKey`: a provider that takes no key reads
+   * `apiKey` itself rather than calling this. A key file that has become unreadable or empty is a `Left` naming its path, and a provider that throws is an
    * `AuthenticationError` naming the exception's class, as it is for a chat client.
    */
   def currentApiKey(): Result[Secret] =
-    apiKeyProvider.fold[Result[Secret]](Right(apiKey))(keys =>
-      CachingAccessTokenProvider.guarded(keys.current()).map(key => Secret(key.asKey))
-    )
+    apiKeyProvider.fold[Result[Secret]](
+      apiKey.toRight(ConfigurationError(s"Embedding model '$model' has no apiKey set", List("apiKey")))
+    )(keys => CachingAccessTokenProvider.guarded(keys.current()).map(key => Secret(key.asKey)))
 
   override def toString: String =
-    s"EmbeddingProviderConfig(baseUrl=$baseUrl, model=$model, apiKey=$apiKey" +
+    s"EmbeddingProviderConfig(baseUrl=$baseUrl, model=$model, apiKey=${apiKey.fold("none")(_.toString)}" +
       apiKeyProvider.fold("")(p => s", apiKeyProvider=$p") +
       (if (extras.isEmpty) "" else extras.keys.toSeq.sorted.map(k => s"$k=***").mkString(", extras=[", ", ", "]")) +
       ")"
@@ -95,7 +102,7 @@ object EmbeddingProviderConfig {
   def apply(
     baseUrl: String,
     model: String,
-    apiKey: Secret,
+    apiKey: Option[Secret],
     timeouts: ProviderTimeouts = ProviderTimeouts.default,
     network: HttpNetworkSettings = HttpNetworkSettings.default,
     apiKeyProvider: Option[ApiKeyProvider] = None,

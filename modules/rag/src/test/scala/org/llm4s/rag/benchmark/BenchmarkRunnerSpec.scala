@@ -102,7 +102,7 @@ class BenchmarkRunnerSpec extends AnyFlatSpec with Matchers {
 
   /** Resolves any provider name to a dummy config — tests never hit real endpoints. */
   private val dummyResolve: String => Result[EmbeddingProviderConfig] = _ =>
-    Right(EmbeddingProviderConfig(apiKey = Secret("key"), baseUrl = "http://localhost", model = "test"))
+    Right(EmbeddingProviderConfig(apiKey = Some(Secret("key")), baseUrl = "http://localhost", model = "test"))
 
   private def goodEmbed: EmbeddingClient = EmbeddingClient(new MockEmbeddingProvider())
   private def badEmbed: EmbeddingClient  = EmbeddingClient(new FailingEmbeddingProvider())

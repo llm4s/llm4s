@@ -122,17 +122,19 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
 
     "prefer the section's key to the default, trimmed" in {
       val section = EmbeddingProviderSection(apiKey = Some(Secret("  section-acme-key ")))
-      EmbeddingConfigSpec.resolveApiKey(id, section, withDefault).value.reveal shouldBe "section-acme-key"
+      EmbeddingConfigSpec.resolveApiKey(id, section, withDefault).value.map(_.reveal) shouldBe Some("section-acme-key")
     }
 
     "fall through a blank section key to the default" in {
       val blank = EmbeddingProviderSection(apiKey = Some(Secret("   ")))
-      EmbeddingConfigSpec.resolveApiKey(id, blank, withDefault).value.reveal shouldBe "default-acme-key"
-      EmbeddingConfigSpec.resolveApiKey(id, noSection, withDefault).value.reveal shouldBe "default-acme-key"
+      EmbeddingConfigSpec.resolveApiKey(id, blank, withDefault).value.map(_.reveal) shouldBe Some("default-acme-key")
+      EmbeddingConfigSpec.resolveApiKey(id, noSection, withDefault).value.map(_.reveal) shouldBe Some(
+        "default-acme-key"
+      )
     }
 
-    "give an empty key when there is none and none is required" in {
-      EmbeddingConfigSpec.resolveApiKey(id, noSection, EmbeddingConfigSpec()).value.reveal shouldBe ""
+    "give no key when there is none and none is required (#2805: it was an empty Secret)" in {
+      EmbeddingConfigSpec.resolveApiKey(id, noSection, EmbeddingConfigSpec()).value shouldBe None
     }
 
     "name the declared variable when a required key is missing" in {

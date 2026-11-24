@@ -16,7 +16,7 @@ import ujson.read
 class JinaEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
 
   private val cfg =
-    EmbeddingProviderConfig(baseUrl = "http://jina-test", model = "jina-embeddings-v3", apiKey = Secret("k"))
+    EmbeddingProviderConfig(baseUrl = "http://jina-test", model = "jina-embeddings-v3", apiKey = Some(Secret("k")))
   private val ok = HttpResponse(200, """{"data":[{"embedding":[0.1]}]}""", Map.empty)
 
   private def request(purpose: InputPurpose, model: String = "jina-embeddings-v3") =

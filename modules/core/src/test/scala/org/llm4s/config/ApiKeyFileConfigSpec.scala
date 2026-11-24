@@ -1,5 +1,8 @@
 package org.llm4s.config
 
+import org.llm4s.llmconnect.config.ProviderTimeouts
+import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.ProviderConfig
@@ -27,11 +30,19 @@ class ApiKeyFileConfigSpec extends AnyWordSpec with Matchers with EitherValues w
 
   /** A config that cannot take an `ApiKeyProvider` (the trait's default `withApiKeyProvider`), holding its key. */
   final private case class StaticKeyConfig(key: String, providerId: ProviderId) extends ProviderConfig:
-    val model: String                            = "m"
-    val contextWindow: Int                       = 8192
-    val reserveCompletion: Int                   = 1024
-    val endpointUrl: Option[String]              = None
-    def withModel(model: String): ProviderConfig = this
+    val model: String                                             = "m"
+    val contextWindow: Int                                        = 8192
+    val reserveCompletion: Int                                    = 1024
+    val endpointUrl: Option[String]                               = None
+    def withModel(model: String): ProviderConfig                  = this
+    val timeouts: ProviderTimeouts                                = ProviderTimeouts.default
+    def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig  = this
+    val network: HttpNetworkSettings                              = HttpNetworkSettings.default
+    def withNetwork(network: HttpNetworkSettings): ProviderConfig = this
+    val apiKeyProvider: Option[ApiKeyProvider]                    = None
+    def withApiKeyProvider(p: ApiKeyProvider): Result[ProviderConfig] = Left(
+      ProviderConfig.apiKeyProviderUnsupported("static")
+    )
 
   /** A provider whose key is read when its config is built, not per request. */
   private object NoRotation extends ProviderDescriptor:

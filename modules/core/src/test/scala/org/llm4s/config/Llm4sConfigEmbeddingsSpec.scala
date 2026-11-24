@@ -43,7 +43,7 @@ class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
         provider shouldBe "fixtureembedding"
         cfg.baseUrl shouldBe "https://embeddings.example.test"
         cfg.model shouldBe "fixture-embed-large"
-        cfg.apiKey.reveal shouldBe "vk-test"
+        cfg.apiKey.map(_.reveal) shouldBe Some("vk-test")
       }
     }
 
@@ -62,7 +62,7 @@ class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
         provider shouldBe "fixtureembedding"
         cfg.model shouldBe "fixture-embed-small"
         cfg.baseUrl shouldBe "https://fixtureembedding.invalid/v1" // Default base URL
-        cfg.apiKey.reveal shouldBe "vk-test"
+        cfg.apiKey.map(_.reveal) shouldBe Some("vk-test")
       }
     }
 

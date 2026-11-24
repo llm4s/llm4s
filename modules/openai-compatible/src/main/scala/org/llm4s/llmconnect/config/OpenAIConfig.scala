@@ -77,12 +77,14 @@ final case class OpenAIConfig private (
       if baseUrl.contains("openrouter.ai") then ProviderId("openrouter") else ProviderId("openai")
     )
 
-  override def endpointUrl: Option[String]                                = Some(baseUrl)
-  override def withModel(model: String): OpenAIConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): OpenAIConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): OpenAIConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): OpenAIConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): OpenAIConfig  = copy(apiKeyProvider = provider)
+  override def endpointUrl: Option[String]                             = Some(baseUrl)
+  override def withModel(model: String): OpenAIConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): OpenAIConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): OpenAIConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[OpenAIConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): OpenAIConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): OpenAIConfig                     = copy(apiKey = apiKey)
   def withOrganization(organization: String): OpenAIConfig         = copy(organization = Some(organization))
@@ -267,12 +269,12 @@ object OpenAIConfig {
       _ <- if (workloadIdentity.isDefined) Right(()) else ProviderConfig.nonEmpty("OpenAI", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("OpenAI", "baseUrl", baseUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("openai"),
         modelName = modelName,
         defaultContextWindow = 8192,
         defaultReserve = standardReserve,
-        fallbackResolver = openAIFallback
+        fallbackResolver = name => { val (w, r) = openAIFallback(name); ContextLimits(w, r) }
       )
       OpenAIConfig(
         apiKey = apiKey,

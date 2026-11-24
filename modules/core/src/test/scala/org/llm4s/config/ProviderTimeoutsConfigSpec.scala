@@ -219,15 +219,17 @@ class ProviderTimeoutsConfigSpec extends AnyWordSpec with Matchers:
         case other => fail(s"expected a FixtureChatConfig, got $other")
     }
 
-    "leave a config that does not carry timeouts as the descriptor built it" in {
-      val config = new org.llm4s.llmconnect.config.ProviderConfig:
-        def providerId               = org.llm4s.types.ProviderModelTypes.ProviderId("x")
-        def model                    = "m"
-        def contextWindow            = 1
-        def reserveCompletion        = 1
-        def endpointUrl              = None
-        def withModel(model: String) = this
-      config.withTimeouts(ProviderTimeouts(Some(1.second), None)) shouldBe config
-      config.timeouts shouldBe ProviderTimeouts.default
+    "not compile a config that leaves timeouts, network or the key provider unimplemented (#2805)" in {
+      // These used to default to `this`, so a config that forgot them silently dropped a configured proxy.
+      assertDoesNotCompile(
+        """new org.llm4s.llmconnect.config.ProviderConfig:
+          |  def providerId               = org.llm4s.types.ProviderModelTypes.ProviderId("x")
+          |  def model                    = "m"
+          |  def contextWindow            = 1
+          |  def reserveCompletion        = 1
+          |  def endpointUrl              = None
+          |  def withModel(model: String) = this
+          |""".stripMargin
+      )
     }
   }

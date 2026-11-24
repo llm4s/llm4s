@@ -14,7 +14,7 @@ final class OllamaEmbeddingCredentialEchoSpec extends AnyFlatSpec with Matchers 
 
   "OllamaEmbeddingProvider" should "keep an echoed key out of the error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
-      val config = EmbeddingProviderConfig(baseUrl, "nomic-embed-text", Secret(echoKey))
+      val config = EmbeddingProviderConfig(baseUrl, "nomic-embed-text", Some(Secret(echoKey)))
       OllamaEmbeddingProvider
         .fromConfig(config)
         .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("nomic-embed-text", 8)))

@@ -47,10 +47,7 @@ object EmbeddingExample {
       }
       runtime <- EmbeddingRuntimeSettings()
       textCfg <- Llm4sConfig.textEmbeddingModel()
-      textModel = org.llm4s.llmconnect.config.EmbeddingModelConfig(
-        name = textCfg.modelName,
-        dimensions = textCfg.dimensions
-      )
+      textModel = textCfg.model
       chunkingCfg = TextChunkingConfig(
         enabled = runtime.chunkingEnabled,
         size = runtime.chunkSize,

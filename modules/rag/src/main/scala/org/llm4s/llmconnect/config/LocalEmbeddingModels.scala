@@ -1,6 +1,8 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.error.ConfigurationError
+import org.llm4s.types.Result
 
 /**
  * Configuration specifying local model names for non-text modality embedding.
@@ -12,6 +14,8 @@ import org.llm4s.annotation.Stable
  * @param imageModel Local model name for image embeddings (e.g. "openclip-vit-b32").
  * @param audioModel Local model name for audio embeddings (e.g. "wav2vec2-base").
  * @param videoModel Local model name for video embeddings (e.g. "timesformer-base").
+ *
+ * In `llm4s-rag`, its only user (`ModelSelector`), since #2805; it was in `llm4s-core`.
  *
  * Build one with [[LocalEmbeddingModels.apply]] and change it with the `with*` setters; the constructor and `copy`
  * are private, so a new modality never breaks callers.
@@ -38,4 +42,25 @@ object LocalEmbeddingModels {
   /** Creates a [[LocalEmbeddingModels]] from the image, audio and video model names. */
   def apply(imageModel: String, audioModel: String, videoModel: String): LocalEmbeddingModels =
     new LocalEmbeddingModels(imageModel, audioModel, videoModel)
+
+  /** The provider name under which the local non-text encoders are known, as in errors. */
+  val Provider: String = "local"
+
+  private val dimensions: Map[String, Int] = Map(
+    "openclip-vit-b32" -> 512,
+    "wav2vec2-base"    -> 768,
+    "timesformer-base" -> 768
+  )
+
+  /**
+   * The vector dimensions of one of the local non-text encoders, without any provider discovery: these are not
+   * embedding providers, so nothing in a `ProviderRegistry` answers for them (#2805; this was
+   * `ModelDimensionRegistry.localDimension` in `llm4s-core`).
+   *
+   * @return `Left` with a [[org.llm4s.error.ConfigurationError]] for a model that is not a local encoder.
+   */
+  def dimensionsOf(model: String): Result[Int] =
+    dimensions
+      .get(model)
+      .toRight(ConfigurationError(s"[LocalEmbeddingModels] Unknown model '$model' for provider '$Provider'"))
 }

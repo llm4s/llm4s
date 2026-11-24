@@ -191,7 +191,8 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
                 section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))),
                 ProviderConfigContext.of("rotation")
               )
-              .flatMap(config => descriptor.build(config.withApiKeyProvider(keys), ProviderBuildContext.of()))
+              .flatMap(_.withApiKeyProvider(keys))
+              .flatMap(config => descriptor.build(config, ProviderBuildContext.of()))
               .fold(error => fail(error.message), identity)
           }
         }
@@ -207,7 +208,8 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
             azure.withExtras(azure.extras.updated(AzureProvider.EndpointKey, baseUrl)),
             ProviderConfigContext.of("rotation")
           )
-          .flatMap(config => AzureProvider.build(config.withApiKeyProvider(keys), ProviderBuildContext.of()))
+          .flatMap(_.withApiKeyProvider(keys))
+          .flatMap(config => AzureProvider.build(config, ProviderBuildContext.of()))
           .fold(error => fail(error.message), identity)
       }
     }
@@ -402,7 +404,11 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
         val config =
-          EmbeddingProviderConfig(baseUrl = baseUrl, model = "text-embedding-3-small", apiKey = Secret("test-key"))
+          EmbeddingProviderConfig(
+            baseUrl = baseUrl,
+            model = "text-embedding-3-small",
+            apiKey = Some(Secret("test-key"))
+          )
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(OpenAIEmbeddingProvider, config))
       }
     }
@@ -410,7 +416,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
       assertEmbeddingUsesSuppliedHttpClient(
         OpenAIEmbeddingProvider,
-        EmbeddingProviderConfig(baseUrl = "http://localhost:1", model = "test-model", apiKey = Secret("test-key"))
+        EmbeddingProviderConfig(baseUrl = "http://localhost:1", model = "test-model", apiKey = Some(Secret("test-key")))
       )
     }
 
@@ -423,7 +429,11 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
         )
       ) { (baseUrl, keys) =>
         val config =
-          EmbeddingProviderConfig(baseUrl = baseUrl, model = "text-embedding-3-small", apiKey = Secret("test-key"))
+          EmbeddingProviderConfig(
+            baseUrl = baseUrl,
+            model = "text-embedding-3-small",
+            apiKey = Some(Secret("test-key"))
+          )
         assertBuildsEmbeddingProvider(OpenAIEmbeddingProvider, config.withApiKeyProvider(keys))
       }
     }

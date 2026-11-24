@@ -18,7 +18,7 @@ class ConfigRedactionSpec extends AnyFlatSpec with Matchers {
     val cfg = EmbeddingProviderConfig(
       baseUrl = "https://example.invalid",
       model = "text-embedding-3-large",
-      apiKey = Secret(secret)
+      apiKey = Some(Secret(secret))
     )
 
     (cfg.toString should not).include(secret)

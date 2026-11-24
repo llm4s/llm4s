@@ -60,7 +60,7 @@ class VoyageEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
 
       provider shouldBe "voyage"
       cfg.model shouldBe "voyage-3-large"
-      cfg.apiKey.reveal shouldBe "vk-test-key"
+      cfg.apiKey.map(_.reveal) shouldBe Some("vk-test-key")
       cfg.baseUrl shouldBe "https://api.voyageai.com/v1"
     }
 
@@ -89,7 +89,7 @@ class VoyageEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         provider shouldBe "voyage"
         cfg.baseUrl shouldBe "https://api.voyage.ai"
         cfg.model shouldBe "voyage-3-large"
-        cfg.apiKey.reveal shouldBe "vk-test"
+        cfg.apiKey.map(_.reveal) shouldBe Some("vk-test")
       }
     }
 
@@ -104,16 +104,16 @@ class VoyageEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         provider shouldBe "voyage"
         cfg.model shouldBe "voyage-3"
         cfg.baseUrl shouldBe "https://api.voyageai.com/v1"
-        cfg.apiKey.reveal shouldBe "vk-test"
+        cfg.apiKey.map(_.reveal) shouldBe Some("vk-test")
       }
     }
 
     "report the dimensions of the configured Voyage model" in {
       withProps(Map("llm4s.embeddings.model" -> "voyage/voyage-3-lite", "llm4s.embeddings.voyage.apiKey" -> "vk")) {
         val settings = Llm4sConfig.textEmbeddingModel().value
-        settings.provider shouldBe "voyage"
-        settings.modelName shouldBe "voyage-3-lite"
-        settings.dimensions shouldBe 512
+        settings.provider.asString shouldBe "voyage"
+        settings.model.name shouldBe "voyage-3-lite"
+        settings.model.dimensions shouldBe 512
       }
     }
   }
@@ -122,13 +122,13 @@ class VoyageEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
 
     "build a Voyage client without a network call" in {
       val cfg =
-        EmbeddingProviderConfig(baseUrl = "https://api.voyage.ai", model = "voyage-3", apiKey = Secret("vk-test"))
+        EmbeddingProviderConfig(baseUrl = "https://api.voyage.ai", model = "voyage-3", apiKey = Some(Secret("vk-test")))
       EmbeddingClient.from("voyage", cfg).isRight shouldBe true
     }
 
     "fold the voyageai alias onto voyage" in {
       val cfg =
-        EmbeddingProviderConfig(baseUrl = "https://api.voyage.ai", model = "voyage-3", apiKey = Secret("vk-test"))
+        EmbeddingProviderConfig(baseUrl = "https://api.voyage.ai", model = "voyage-3", apiKey = Some(Secret("vk-test")))
       EmbeddingClient.from("voyageai", cfg).isRight shouldBe true
     }
   }

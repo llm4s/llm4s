@@ -91,7 +91,7 @@ def vaultClient(vaultToken: String): Result[LLMClient] =
       VaultSettings("https://vault.internal:8200", Secret(vaultToken), "llm4s/openai", "apiKey")
         .withRefreshInterval(1.minute)
     )
-    config   <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+    config   <- Llm4sConfig.provider("openai-main").flatMap(_.withApiKeyProvider(keys))
     registry <- Llm4sConfig.modelRegistryService()
     client <- {
       given ModelRegistryService = registry
@@ -158,7 +158,7 @@ def awsClient(): Result[LLMClient] =
     .withRefreshInterval(1.minute)
   for
     keys     <- AwsSecretsManagerApiKeyProvider(settings)
-    config   <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+    config   <- Llm4sConfig.provider("openai-main").flatMap(_.withApiKeyProvider(keys))
     registry <- Llm4sConfig.modelRegistryService()
     client <- {
       given ModelRegistryService = registry

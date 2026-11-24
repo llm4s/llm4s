@@ -121,9 +121,11 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
         // A cancellation (design section 4.4), a network failure and a timeout pass through as they are; any other
         // failure is an EmbeddingError.
         val respEither: Result[org.llm4s.http.HttpResponse] =
-          cfg.currentApiKey().flatMap { key =>
+          // Ollama takes no key unless a proxy in front of it asks for one: none set is no header (#2805).
+          (if (cfg.apiKey.isEmpty && cfg.apiKeyProvider.isEmpty) Right("")
+           else cfg.currentApiKey().map(_.reveal)).flatMap { key =>
             httpClient
-              .post(url, headers(key.reveal), payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
+              .post(url, headers(key), payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
               .left
               .map {
                 // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)

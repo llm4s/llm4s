@@ -19,7 +19,7 @@ class JinaEmbeddingTimeoutSpec extends AnyFlatSpec with Matchers {
     EmbeddingProviderConfig(
       baseUrl = "http://localhost:1",
       model = "jina-embeddings-v3",
-      apiKey = Secret("test-key"),
+      apiKey = Some(Secret("test-key")),
       timeouts = timeouts
     )
 

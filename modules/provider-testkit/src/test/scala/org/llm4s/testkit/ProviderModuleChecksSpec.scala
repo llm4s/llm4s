@@ -100,7 +100,7 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
     "return the provider the descriptor builds" in {
       val provider = assertBuildsEmbeddingProvider(
         AcmeEmbeddings,
-        EmbeddingProviderConfig(AcmeProvider.DefaultBaseUrl, "acme-small", Secret("k"))
+        EmbeddingProviderConfig(AcmeProvider.DefaultBaseUrl, "acme-small", Some(Secret("k")))
       )
       provider.embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig("acme-small", 2))).isRight shouldBe true
     }
@@ -109,7 +109,7 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
       failureOf(
         assertBuildsEmbeddingProvider(
           AcmeEmbeddings,
-          EmbeddingProviderConfig(AcmeProvider.DefaultBaseUrl, "acme-retired", Secret("k"))
+          EmbeddingProviderConfig(AcmeProvider.DefaultBaseUrl, "acme-retired", Some(Secret("k")))
         )
       ) should include("no longer served")
     }

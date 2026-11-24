@@ -12,8 +12,8 @@ class ContextWindowResolverSpec extends AnyFlatSpec with Matchers:
     ContextWindowResolver(service)
 
   "ContextWindowResolver.resolve" should "use fallback when model not in registry" in {
-    val fallback = (_: String) => (9999, 8888)
-    val (cw, rc) = resolver(defaultService).resolve(
+    val fallback = (_: String) => ContextLimits(9999, 8888)
+    val ContextLimits(cw, rc) = resolver(defaultService).resolve(
       lookupProviders = Seq("openai"),
       modelName = "nonexistent-model-xyz-12345",
       defaultContextWindow = 8192,
@@ -25,8 +25,8 @@ class ContextWindowResolverSpec extends AnyFlatSpec with Matchers:
   }
 
   it should "use fallback with multiple lookup providers when model not in registry" in {
-    val fallback = (_: String) => (50000, 2000)
-    val (cw, rc) = resolver(defaultService).resolve(
+    val fallback = (_: String) => ContextLimits(50000, 2000)
+    val ContextLimits(cw, rc) = resolver(defaultService).resolve(
       lookupProviders = Seq("azure", "openai"),
       modelName = "another-unknown-model-999",
       defaultContextWindow = 8192,
@@ -38,8 +38,8 @@ class ContextWindowResolverSpec extends AnyFlatSpec with Matchers:
   }
 
   it should "use fallback when lookupProviders is empty and model not in registry" in {
-    val fallback = (_: String) => (1000, 500)
-    val (cw, rc) = resolver(defaultService).resolve(
+    val fallback = (_: String) => ContextLimits(1000, 500)
+    val ContextLimits(cw, rc) = resolver(defaultService).resolve(
       lookupProviders = Seq.empty,
       modelName = "nonexistent-model-xyz-12345",
       defaultContextWindow = 8192,
@@ -63,8 +63,8 @@ class ContextWindowResolverSpec extends AnyFlatSpec with Matchers:
     )
     val service = ModelRegistryService.fromModels(List(testModel))
 
-    val fallback = (_: String) => (9999, 9999)
-    val (cw, rc) = resolver(service).resolve(
+    val fallback = (_: String) => ContextLimits(9999, 9999)
+    val ContextLimits(cw, rc) = resolver(service).resolve(
       lookupProviders = Seq("test-provider"),
       modelName = "test-resolver-model",
       defaultContextWindow = 8192,
@@ -88,8 +88,8 @@ class ContextWindowResolverSpec extends AnyFlatSpec with Matchers:
     )
     val service = ModelRegistryService.fromModels(List(testModel))
 
-    val fallback = (_: String) => (9999, 9999)
-    val (cw, rc) = resolver(service).resolve(
+    val fallback = (_: String) => ContextLimits(9999, 9999)
+    val ContextLimits(cw, rc) = resolver(service).resolve(
       lookupProviders = Seq("test-provider"),
       modelName = "test-no-tokens-model",
       defaultContextWindow = 12345,
@@ -98,6 +98,25 @@ class ContextWindowResolverSpec extends AnyFlatSpec with Matchers:
     )
     cw shouldBe 12345
     rc shouldBe 6789
+  }
+
+  it should "be a final class returning ContextLimits, with no logPrefix parameter (#2805)" in {
+    assertDoesNotCompile("class Sub(s: ModelRegistryService) extends ContextWindowResolver(s)")
+    assertDoesNotCompile(
+      """resolver(defaultService).resolve(Seq("openai"), "m", 1, 1, _ => ContextLimits(1, 1), logPrefix = "x")"""
+    )
+    val limits: ContextLimits =
+      resolver(defaultService).resolve(Seq("openai"), "nonexistent-model-xyz", 1, 1, _ => ContextLimits(7, 3))
+    limits.contextWindow shouldBe 7
+    limits.reserveCompletion shouldBe 3
+  }
+
+  "ContextLimits" should "set each field and keep its constructor and copy private" in {
+    val limits = ContextLimits(8192, 1024)
+    limits.withContextWindow(4096) shouldBe ContextLimits(4096, 1024)
+    limits.withReserveCompletion(512) shouldBe ContextLimits(8192, 512)
+    assertDoesNotCompile("new ContextLimits(1, 2)")
+    assertDoesNotCompile("ContextLimits(1, 2).copy(contextWindow = 3)")
   }
 
   // ---------------------------------------------------------------------------------------------

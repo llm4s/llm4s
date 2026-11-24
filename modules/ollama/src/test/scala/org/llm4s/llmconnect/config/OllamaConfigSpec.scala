@@ -149,4 +149,11 @@ class OllamaConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     timed.timeouts shouldBe timeouts
     OllamaConfig("llama3", "http://ollama:11434").withTimeouts(timeouts) shouldBe timed
   }
+
+  test("OllamaConfig refuses an ApiKeyProvider rather than ignoring it (#2805)") {
+    val keys   = org.llm4s.llmconnect.auth.ApiKeyProvider.static(org.llm4s.types.ProviderModelTypes.ApiKey("k"))
+    val config = OllamaConfig("llama3", "http://ollama:11434")
+    config.withApiKeyProvider(keys).left.value.message should include("Ollama takes no API key")
+    config.apiKeyProvider shouldBe None
+  }
 }

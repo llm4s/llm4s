@@ -6,10 +6,11 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.duration._
 
-/** `EmbeddingProviderConfig`, `EmbeddingModelConfig` and `LocalEmbeddingModels` as growth-prone types (#2346). */
+/** `EmbeddingProviderConfig` and `EmbeddingModelConfig` as growth-prone types (#2346). */
 class GrowthSafeEmbeddingConfigsSpec extends AnyFunSuite with Matchers {
 
-  private val provider = EmbeddingProviderConfig("https://api.example.invalid/v1", "embed-small", Secret("sk-secret"))
+  private val provider =
+    EmbeddingProviderConfig("https://api.example.invalid/v1", "embed-small", Some(Secret("sk-secret")))
 
   test("EmbeddingProviderConfig(...) defaults timeouts") {
     provider.timeouts shouldBe ProviderTimeouts.default
@@ -23,7 +24,12 @@ class GrowthSafeEmbeddingConfigsSpec extends AnyFunSuite with Matchers {
       .withApiKey(Secret("sk-other"))
       .withTimeouts(timeouts)
 
-    adjusted shouldBe EmbeddingProviderConfig("https://other.invalid/v2", "embed-large", Secret("sk-other"), timeouts)
+    adjusted shouldBe EmbeddingProviderConfig(
+      "https://other.invalid/v2",
+      "embed-large",
+      Some(Secret("sk-other")),
+      timeouts
+    )
   }
 
   test("EmbeddingProviderConfig still redacts the API key") {
@@ -31,7 +37,7 @@ class GrowthSafeEmbeddingConfigsSpec extends AnyFunSuite with Matchers {
   }
 
   test("EmbeddingProviderConfig keeps its constructor and copy private") {
-    assertTypeError("""new EmbeddingProviderConfig("u", "m", "k", ProviderTimeouts.default)""")
+    assertTypeError("""new EmbeddingProviderConfig("u", "m", Some("k"), ProviderTimeouts.default)""")
     assertTypeError("""provider.copy(model = "m")""")
   }
 
@@ -45,18 +51,5 @@ class GrowthSafeEmbeddingConfigsSpec extends AnyFunSuite with Matchers {
   test("EmbeddingModelConfig keeps its constructor and copy private") {
     assertTypeError("""new EmbeddingModelConfig("m", 1)""")
     assertTypeError("""EmbeddingModelConfig("m", 1).copy(dimensions = 2)""")
-  }
-
-  test("LocalEmbeddingModels' setters each change one field") {
-    val models = LocalEmbeddingModels("openclip-vit-b32", "wav2vec2-base", "timesformer-base")
-
-    models.withImageModel("clip") shouldBe LocalEmbeddingModels("clip", "wav2vec2-base", "timesformer-base")
-    models.withAudioModel("whisper") shouldBe LocalEmbeddingModels("openclip-vit-b32", "whisper", "timesformer-base")
-    models.withVideoModel("vivit") shouldBe LocalEmbeddingModels("openclip-vit-b32", "wav2vec2-base", "vivit")
-  }
-
-  test("LocalEmbeddingModels keeps its constructor and copy private") {
-    assertTypeError("""new LocalEmbeddingModels("i", "a", "v")""")
-    assertTypeError("""LocalEmbeddingModels("i", "a", "v").copy(imageModel = "x")""")
   }
 }

@@ -44,13 +44,15 @@ final case class WatsonXConfig(
   override val network: HttpNetworkSettings = HttpNetworkSettings.default,
   override val apiKeyProvider: Option[ApiKeyProvider] = None
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                      = ProviderId("watsonx")
-  override def endpointUrl: Option[String]                                 = Some(baseUrl)
-  override def withModel(model: String): WatsonXConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): WatsonXConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): WatsonXConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): WatsonXConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): WatsonXConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                   = ProviderId("watsonx")
+  override def endpointUrl: Option[String]                              = Some(baseUrl)
+  override def withModel(model: String): WatsonXConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): WatsonXConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): WatsonXConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[WatsonXConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): WatsonXConfig = copy(apiKeyProvider = provider)
   override def toString: String =
     s"WatsonXConfig(apiKey=$apiKey, projectId=$projectId, spaceId=$spaceId, model=$model, " +
       s"baseUrl=$baseUrl, apiVersion=$apiVersion, iamUrl=$iamUrl, contextWindow=$contextWindow, " +
@@ -136,12 +138,12 @@ object WatsonXConfig:
         ConfigurationError("watsonx needs a projectId or a spaceId", List("projectId", "spaceId"))
       )
     yield
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("watsonx"),
         modelName = modelName,
         defaultContextWindow = DefaultContextWindow,
         defaultReserve = DefaultReserveCompletion,
-        fallbackResolver = watsonxFallback
+        fallbackResolver = name => { val (w, r) = watsonxFallback(name); ContextLimits(w, r) }
       )
       WatsonXConfig(
         apiKey = Secret(key),

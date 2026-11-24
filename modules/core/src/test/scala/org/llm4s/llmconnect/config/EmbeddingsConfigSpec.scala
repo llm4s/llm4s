@@ -39,7 +39,7 @@ class EmbeddingsConfigSpec extends AnyWordSpec with Matchers {
         provider shouldBe "fixtureembedding"
         cfg.baseUrl shouldBe "https://embeddings.example.test"
         cfg.model shouldBe "fixture-embed-large"
-        cfg.apiKey.reveal shouldBe "vk-test"
+        cfg.apiKey.map(_.reveal) shouldBe Some("vk-test")
       }
     }
   }

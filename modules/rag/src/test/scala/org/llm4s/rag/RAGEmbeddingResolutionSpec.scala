@@ -49,7 +49,7 @@ class RAGEmbeddingResolutionSpec extends AnyFlatSpec with Matchers with EitherVa
       )
 
   private def resolver(model: String = ""): String => Result[EmbeddingProviderConfig] =
-    _ => Right(EmbeddingProviderConfig(baseUrl = "http://fake", model = model, apiKey = Secret("k")))
+    _ => Right(EmbeddingProviderConfig(baseUrl = "http://fake", model = model, apiKey = Some(Secret("k"))))
 
   private def ingestOnce(rag: RAG): Unit =
     rag.ingestText("Some text worth embedding.", "doc-1").isRight shouldBe true

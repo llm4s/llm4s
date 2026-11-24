@@ -65,7 +65,9 @@ final case class AzureConfig private (
    * Sends the key `provider` holds at each request in the `api-key` header, instead of `apiKey`, so a rotated key
    * is used without rebuilding the client (#2477). A config authenticates one way: this clears `tokenProvider`.
    */
-  override def withApiKeyProvider(provider: ApiKeyProvider): AzureConfig = withApiKeyProvider(Some(provider))
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[AzureConfig] = Right(
+    withApiKeyProvider(Some(provider))
+  )
 
   /** `Some` as [[withApiKeyProvider(provider:* withApiKeyProvider]]; `None` goes back to `apiKey`. */
   def withApiKeyProvider(provider: Option[ApiKeyProvider]): AzureConfig =
@@ -207,13 +209,12 @@ object AzureConfig {
       _ <- ProviderConfig.nonEmpty("Azure", "endpoint", endpoint)
       _ <- ProviderConfig.nonEmptyIfSet("Azure", "apiKey", apiKey.map(_.reveal))
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("azure", "openai"),
         modelName = modelName,
         defaultContextWindow = 8192,
         defaultReserve = standardReserve,
-        fallbackResolver = azureFallback,
-        logPrefix = "Azure "
+        fallbackResolver = name => { val (w, r) = azureFallback(name); ContextLimits(w, r) }
       )
       AzureConfig(
         endpoint = endpoint,

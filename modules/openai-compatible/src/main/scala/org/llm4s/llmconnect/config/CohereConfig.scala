@@ -50,13 +50,15 @@ final case class CohereConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                     = ProviderId("cohere")
-  override def endpointUrl: Option[String]                                = Some(baseUrl)
-  override def withModel(model: String): CohereConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): CohereConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): CohereConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): CohereConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): CohereConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                  = ProviderId("cohere")
+  override def endpointUrl: Option[String]                             = Some(baseUrl)
+  override def withModel(model: String): CohereConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): CohereConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): CohereConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[CohereConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): CohereConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): CohereConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): CohereConfig                  = copy(baseUrl = baseUrl)
@@ -151,12 +153,12 @@ object CohereConfig {
       _ <- ProviderConfig.nonEmpty("Cohere", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("Cohere", "baseUrl", baseUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("cohere"),
         modelName = modelName,
         defaultContextWindow = DEFAULT_CONTEXT_WINDOW,
         defaultReserve = DEFAULT_RESERVE_COMPLETION,
-        fallbackResolver = cohereFallback
+        fallbackResolver = name => { val (w, r) = cohereFallback(name); ContextLimits(w, r) }
       )
       val endpoint = compatibilityBaseUrl(baseUrl)
       if (endpoint != baseUrl.trim.stripSuffix("/"))

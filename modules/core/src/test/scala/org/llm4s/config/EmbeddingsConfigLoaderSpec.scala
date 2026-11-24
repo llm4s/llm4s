@@ -43,7 +43,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       val (provider, cfg) = result.value
       provider shouldBe "fixtureembedding"
       cfg.model shouldBe "fixture-embed-large"
-      cfg.apiKey.reveal shouldBe "vk-test-key"
+      cfg.apiKey.map(_.reveal) shouldBe Some("vk-test-key")
       cfg.baseUrl shouldBe "https://fixtureembedding.invalid/v1"
     }
 
@@ -321,7 +321,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
       result.isRight shouldBe true
-      result.value._2.apiKey.reveal shouldBe "vk-trimmed"
+      result.value._2.apiKey.map(_.reveal) shouldBe Some("vk-trimmed")
     }
 
     "treat empty model string as missing" in {
@@ -354,7 +354,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
         Llm4sConfig.embeddingsFor(ConfigSource.string(keyOnly), "fixtureembedding/fixture-embed-large").value
       provider shouldBe "fixtureembedding"
       cfg.model shouldBe "fixture-embed-large"
-      cfg.apiKey.reveal shouldBe "vk-test-key"
+      cfg.apiKey.map(_.reveal) shouldBe Some("vk-test-key")
       cfg.baseUrl shouldBe "https://fixtureembedding.invalid/v1"
     }
 

@@ -149,7 +149,8 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
                 section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))),
                 ProviderConfigContext.of("rotation")
               )
-              .flatMap(config => descriptor.build(config.withApiKeyProvider(keys), ProviderBuildContext.of()))
+              .flatMap(_.withApiKeyProvider(keys))
+              .flatMap(config => descriptor.build(config, ProviderBuildContext.of()))
               .fold(error => fail(error.message), identity)
           }
         }

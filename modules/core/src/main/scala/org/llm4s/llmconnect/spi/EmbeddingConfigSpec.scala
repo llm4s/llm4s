@@ -219,19 +219,18 @@ object EmbeddingConfigSpec:
    * configuration is read from here.
    *
    * A provider whose spec neither requires a key nor supplies a default gets
-   * the empty string, which is what a local provider that ignores the field
-   * expects.
+   * `None` (#2805: it was the empty string).
    */
   def resolveApiKey(
     id: ProviderId,
     section: EmbeddingProviderSection,
     spec: EmbeddingConfigSpec
-  ): Result[Secret] =
+  ): Result[Option[Secret]] =
     nonEmpty(section.apiKey.map(_.reveal))
       .orElse(spec.defaultApiKey)
       .map(Secret(_)) match
-      case Some(key)                    => Right(key)
-      case None if !spec.requiresApiKey => Right(Secret(""))
+      case Some(key)                    => Right(Some(key))
+      case None if !spec.requiresApiKey => Right(None)
       case None =>
         Left(
           ConfigurationError(

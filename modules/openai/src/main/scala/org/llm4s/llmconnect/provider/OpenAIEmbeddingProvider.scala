@@ -80,7 +80,9 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
   def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
-    requireApiKey(config.apiKey).map(_ => provider(config, apiKeyOf(config), _ => (), context.httpClient))
+    ProviderConfig
+      .nonEmpty("OpenAI embeddings", "apiKey", config.apiKey.fold("")(_.reveal))
+      .map(_ => provider(config, apiKeyOf(config), _ => (), context.httpClient))
 
   /** A blank `apiKey` would be sent as an empty bearer token: a `ConfigurationError` instead. */
   private def requireApiKey(key: Secret): Result[Unit] =

@@ -58,7 +58,7 @@ class DialectApiKeyProviderSpec extends AnyFlatSpec with Matchers {
 
   it should "take an ApiKeyProvider through the ProviderConfig setter the loader calls for apiKeyFile" in {
     dialects.foreach { d =>
-      withClue(s"${d.name}: ")(d.config(None).withApiKeyProvider(keys).apiKeyProvider shouldBe Some(keys))
+      withClue(s"${d.name}: ")(d.config(None).withApiKeyProvider(keys).map(_.apiKeyProvider) shouldBe Right(Some(keys)))
     }
   }
 }

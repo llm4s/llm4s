@@ -14,7 +14,8 @@ final class CohereEmbeddingCredentialEchoSpec extends AnyFlatSpec with Matchers 
 
   "CohereEmbeddingProvider" should "keep an echoed key out of the error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
-      val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "embed-english-v3.0", apiKey = Secret(echoKey))
+      val config =
+        EmbeddingProviderConfig(baseUrl = baseUrl, model = "embed-english-v3.0", apiKey = Some(Secret(echoKey)))
       CohereEmbeddingProvider
         .fromConfig(config)
         .embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("embed-english-v3.0", 8)))

@@ -62,7 +62,7 @@ import org.llm4s.types.Result
 def clientWithKeysFrom(keys: ApiKeyProvider): Result[LLMClient] = for {
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
-  config <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+  config <- Llm4sConfig.provider("openai-main").flatMap(_.withApiKeyProvider(keys))
   client <- LLMConnect.getClient(config)
 } yield client
 ```

@@ -217,7 +217,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
     val keys   = org.llm4s.llmconnect.auth.ApiKeyProvider.static(org.llm4s.types.ProviderModelTypes.ApiKey("k2"))
     val tokens = new CountingTokens
     keyed.apiKeyProvider shouldBe None
-    val rotating = keyed.withTokenProvider(tokens).withApiKeyProvider(keys)
+    val rotating = keyed.withTokenProvider(tokens).withApiKeyProvider(Some(keys))
     rotating.apiKeyProvider shouldBe Some(keys)
     rotating.tokenProvider shouldBe None
     rotating.toString should include("apiKeyProvider=ApiKeyProvider.static(***)")
@@ -239,7 +239,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       else LocalProviderTestServer.sendJsonResponse(exchange, 200, reply)
     } { baseUrl =>
       val tokens   = new CountingTokens
-      val config   = EmbeddingProviderConfig(s"$baseUrl/openai/v1", "my-embedding-deployment", Secret(""))
+      val config   = EmbeddingProviderConfig(s"$baseUrl/openai/v1", "my-embedding-deployment", None)
       val provider = OpenAIEmbeddingProvider.fromConfig(config, tokens)
       val request  = EmbeddingRequest(Seq("a"), EmbeddingModelConfig("my-embedding-deployment", 2))
       provider.embed(request).isLeft shouldBe true
@@ -265,7 +265,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         s"""{"error":{"message":"request with $token is denied"}}"""
       )
     } { baseUrl =>
-      val config   = EmbeddingProviderConfig(s"$baseUrl/openai/v1", "my-embedding-deployment", Secret(""))
+      val config   = EmbeddingProviderConfig(s"$baseUrl/openai/v1", "my-embedding-deployment", None)
       val provider = OpenAIEmbeddingProvider.fromConfig(config, own)
       val request  = EmbeddingRequest(Seq("a"), EmbeddingModelConfig("my-embedding-deployment", 2))
       val message  = provider.embed(request).left.value.message

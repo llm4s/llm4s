@@ -51,13 +51,15 @@ final case class AnthropicConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                        = ProviderId("anthropic")
-  override def endpointUrl: Option[String]                                   = Some(baseUrl)
-  override def withModel(model: String): AnthropicConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): AnthropicConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): AnthropicConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): AnthropicConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                     = ProviderId("anthropic")
+  override def endpointUrl: Option[String]                                = Some(baseUrl)
+  override def withModel(model: String): AnthropicConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): AnthropicConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[AnthropicConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): AnthropicConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): AnthropicConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): AnthropicConfig                  = copy(baseUrl = baseUrl)
@@ -200,12 +202,12 @@ object AnthropicConfig {
       _ <- if (workloadIdentity.isDefined) Right(()) else ProviderConfig.nonEmpty("Anthropic", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("Anthropic", "baseUrl", baseUrl)
     } yield {
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("anthropic"),
         modelName = modelName,
         defaultContextWindow = 200000,
         defaultReserve = standardReserve,
-        fallbackResolver = anthropicFallback
+        fallbackResolver = name => { val (w, r) = anthropicFallback(name); ContextLimits(w, r) }
       )
       AnthropicConfig(
         apiKey = apiKey,

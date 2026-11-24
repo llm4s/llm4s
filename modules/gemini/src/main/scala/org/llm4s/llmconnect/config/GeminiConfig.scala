@@ -42,13 +42,15 @@ final case class GeminiConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                     = ProviderId("gemini")
-  override def endpointUrl: Option[String]                                = Some(baseUrl)
-  override def withModel(model: String): GeminiConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): GeminiConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): GeminiConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): GeminiConfig  = copy(apiKeyProvider = provider)
+  override val providerId: ProviderId                                  = ProviderId("gemini")
+  override def endpointUrl: Option[String]                             = Some(baseUrl)
+  override def withModel(model: String): GeminiConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): GeminiConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[GeminiConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): GeminiConfig = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): GeminiConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): GeminiConfig                  = copy(baseUrl = baseUrl)
@@ -138,12 +140,12 @@ object GeminiConfig {
       _ <- ProviderConfig.nonEmpty("Gemini", "baseUrl", baseUrl)
     } yield {
       val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("gemini", "google"),
         modelName = modelName,
         defaultContextWindow = 1048576,
         defaultReserve = standardReserve,
-        fallbackResolver = geminiFallback
+        fallbackResolver = name => { val (w, r) = geminiFallback(name); ContextLimits(w, r) }
       )
       GeminiConfig(
         apiKey = apiKey,

@@ -164,7 +164,7 @@ val embedder: Result[EmbeddingClient] = for {
   given ModelRegistryService = registry
   client <- EmbeddingClient.from(
     "voyage",
-    EmbeddingProviderConfig(baseUrl = "https://api.voyageai.com", model = "voyage-3", apiKey = Secret("pa-..."))
+    EmbeddingProviderConfig(baseUrl = "https://api.voyageai.com", model = "voyage-3", apiKey = Some(Secret("pa-...")))
   )
 } yield client
 ```

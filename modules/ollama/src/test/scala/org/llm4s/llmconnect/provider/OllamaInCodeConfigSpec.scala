@@ -4,7 +4,6 @@ import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, OllamaConfig, Prov
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -39,7 +38,7 @@ class OllamaInCodeConfigSpec extends AnyWordSpec with Matchers with EitherValues
     "build an Ollama embedding client from a base URL and model" in {
       assertBuildsEmbeddings(
         "ollama",
-        EmbeddingProviderConfig(baseUrl = "http://localhost:11434", model = "nomic-embed-text", apiKey = Secret(""))
+        EmbeddingProviderConfig(baseUrl = "http://localhost:11434", model = "nomic-embed-text", apiKey = None)
       )
     }
   }

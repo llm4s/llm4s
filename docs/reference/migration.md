@@ -90,7 +90,65 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`ReliableClient`'s private constructor](#reliableclient-has-a-private-constructor-2797),
 [tracing backend aliases and the removal of `Tracing.create`](#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799),
 [image metrics as `ImageMetrics` in `llm4s-image`](#image-metrics-are-imagemetrics-in-llm4s-image-2801)
-and [which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824).
+[which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824)
+and [`ProviderConfig`'s abstract setters and the optional embedding key](#providerconfig-implements-every-setter-and-the-embedding-key-is-optional-2805).
+
+## `ProviderConfig` implements every setter, and the embedding key is optional (#2805)
+
+Part of the 1.0 API review (#1281).
+
+- **`ProviderConfig`'s `timeouts`, `withTimeouts`, `network`, `withNetwork`, `apiKeyProvider` and
+  `withApiKeyProvider` are abstract.** They defaulted to `this`, so a config supplied by another module silently
+  ignored a configured proxy or `timeouts` block. Every config implements them; one whose client makes no HTTP call
+  returns `this` and says so. **`withApiKeyProvider` returns `Result`**: a config whose client takes no API key
+  returns `Left(ProviderConfig.apiKeyProviderUnsupported(name))` instead of ignoring the provider.
+
+  | Before | After |
+  |---|---|
+  | `Llm4sConfig.provider("main").map(_.withApiKeyProvider(keys))` | `Llm4sConfig.provider("main").flatMap(_.withApiKeyProvider(keys))` |
+  | `openAIConfig.withApiKeyProvider(keys)` (an `OpenAIConfig`) | `openAIConfig.withApiKeyProvider(Some(keys))`, or `.withApiKeyProvider(keys)` for a `Result[OpenAIConfig]` |
+  | `override def withApiKeyProvider(p: ApiKeyProvider): MyConfig = copy(...)` | `override def withApiKeyProvider(p: ApiKeyProvider): Result[MyConfig] = Right(copy(...))` |
+  | a config that left the six members to their defaults | implement them: carry the value, or return `this` / `None` / `Left(ProviderConfig.apiKeyProviderUnsupported(name))` |
+
+- **`EmbeddingProviderConfig.apiKey` is `Option[Secret]`.** A provider that takes no key (Ollama) gets `None`
+  where it got `Secret("")`. `EmbeddingConfigSpec.resolveApiKey` returns `Result[Option[Secret]]`, and
+  `currentApiKey()` is a `ConfigurationError` when neither a key nor an `apiKeyProvider` is set.
+
+  | Before | After |
+  |---|---|
+  | `EmbeddingProviderConfig(url, model, Secret(key))` | `EmbeddingProviderConfig(url, model, Some(Secret(key)))` |
+  | `EmbeddingProviderConfig(url, model, Secret(""))` | `EmbeddingProviderConfig(url, model, None)` |
+  | `config.apiKey.reveal` | `config.apiKey.map(_.reveal)`, or `config.currentApiKey()` per request |
+
+- **`Llm4sConfig.TextEmbeddingModelSettings` is the top-level `org.llm4s.config.TextEmbeddingModelSettings`**,
+  holding a `ProviderId` and an `EmbeddingModelConfig` instead of repeating the latter's fields beside a `String`.
+
+  | Before | After |
+  |---|---|
+  | `settings.provider` (a `String`) | `settings.provider` (a `ProviderId`; `.asString` for the text) |
+  | `settings.modelName`, `settings.dimensions` | `settings.model.name`, `settings.model.dimensions` |
+  | `TextEmbeddingModelSettings("openai", "m", 1536)` | `TextEmbeddingModelSettings(ProviderId("openai"), EmbeddingModelConfig("m", 1536))` |
+  | `withModelName(n)`, `withDimensions(d)` | `withModel(settings.model.withName(n))`, `withModel(settings.model.withDimensions(d))` |
+
+- **`ContextWindowResolver` is final, and `resolve` returns `ContextLimits`.** `fallbackResolver` returns a
+  `ContextLimits` too, and the `logPrefix` parameter is removed.
+
+  | Before | After |
+  |---|---|
+  | `val (window, reserve) = resolver.resolve(..., fallbackResolver = _ => (128000, 4096))` | `val limits = resolver.resolve(..., fallbackResolver = _ => ContextLimits(128000, 4096))`; read `limits.contextWindow`, `limits.reserveCompletion` |
+  | `resolver.resolve(..., logPrefix = "Azure ")` | drop `logPrefix` |
+  | `class MyResolver(s) extends ContextWindowResolver(s)` | wrap one instead |
+
+- **`LocalEmbeddingModels` and the local encoders' dimensions are in `llm4s-rag`**, their only user, under the same
+  package. `ModelDimensionRegistry.getDimension("local", ...)` no longer answers them unless a provider called
+  `local` is registered, and `ModelDimensionRegistry.localDimension` and `LocalProvider` are removed.
+
+  | Before | After |
+  |---|---|
+  | `ModelDimensionRegistry.localDimension(model)` | `LocalEmbeddingModels.dimensionsOf(model)` (`llm4s-rag`) |
+  | `ModelDimensionRegistry.getDimension("local", model)` | `LocalEmbeddingModels.dimensionsOf(model)` (`llm4s-rag`) |
+  | `ModelDimensionRegistry.LocalProvider` | `LocalEmbeddingModels.Provider` (`llm4s-rag`) |
+  | `LocalEmbeddingModels` from `llm4s-core` | add `llm4s-rag`; the import is unchanged |
 
 ## `ReliableClient` has a private constructor (#2797)
 

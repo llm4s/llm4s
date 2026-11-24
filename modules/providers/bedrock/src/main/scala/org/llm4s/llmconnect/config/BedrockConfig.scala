@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
@@ -60,6 +61,11 @@ final case class BedrockConfig(
   override def withTimeouts(timeouts: ProviderTimeouts): BedrockConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): BedrockConfig = copy(network = network)
 
+  /** No `ApiKeyProvider`: Bedrock takes no API key, so this is a `ConfigurationError` rather than a silent no-op. */
+  override def apiKeyProvider: Option[ApiKeyProvider] = None
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[BedrockConfig] =
+    Left(ProviderConfig.apiKeyProviderUnsupported("Bedrock"))
+
   override def toString: String =
     s"BedrockConfig(region=$region, model=$model, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion, " +
@@ -104,12 +110,12 @@ object BedrockConfig:
         ConfigurationError("Bedrock: set either explicit credentials or a profile, not both")
       )
     yield
-      val (cw, rc) = resolver.resolve(
+      val ContextLimits(cw, rc) = resolver.resolve(
         lookupProviders = Seq("bedrock_converse", "bedrock"),
         modelName = modelName,
         defaultContextWindow = DefaultContextWindow,
         defaultReserve = DefaultReserveCompletion,
-        fallbackResolver = _ => (DefaultContextWindow, DefaultReserveCompletion)
+        fallbackResolver = _ => ContextLimits(DefaultContextWindow, DefaultReserveCompletion)
       )
       BedrockConfig(
         region = region,

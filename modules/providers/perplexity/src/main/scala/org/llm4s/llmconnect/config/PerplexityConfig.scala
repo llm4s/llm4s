@@ -41,15 +41,17 @@ final case class PerplexityConfig private (
   override val network: HttpNetworkSettings,
   override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                         = ProviderId("perplexity")
-  override def endpointUrl: Option[String]                                    = Some(baseUrl)
-  override def withModel(model: String): PerplexityConfig                     = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): PerplexityConfig     = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): PerplexityConfig    = copy(network = network)
-  override def withApiKeyProvider(provider: ApiKeyProvider): PerplexityConfig = copy(apiKeyProvider = Some(provider))
-  def withApiKeyProvider(provider: Option[ApiKeyProvider]): PerplexityConfig  = copy(apiKeyProvider = provider)
-  def withWebSearch(webSearch: Boolean): PerplexityConfig                     = copy(webSearch = webSearch)
-  def withHeaders(headers: Map[String, String]): PerplexityConfig             = copy(headers = headers)
+  override val providerId: ProviderId                                      = ProviderId("perplexity")
+  override def endpointUrl: Option[String]                                 = Some(baseUrl)
+  override def withModel(model: String): PerplexityConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): PerplexityConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): PerplexityConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): Result[PerplexityConfig] = Right(
+    copy(apiKeyProvider = Some(provider))
+  )
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): PerplexityConfig = copy(apiKeyProvider = provider)
+  def withWebSearch(webSearch: Boolean): PerplexityConfig                    = copy(webSearch = webSearch)
+  def withHeaders(headers: Map[String, String]): PerplexityConfig            = copy(headers = headers)
 
   /** The Agent API endpoint requests are posted to. */
   def agentUrl: String = if baseUrl.endsWith("/v1") then s"$baseUrl/agent" else s"$baseUrl/v1/agent"

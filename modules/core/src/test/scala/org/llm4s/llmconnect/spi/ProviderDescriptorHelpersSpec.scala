@@ -1,5 +1,8 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.llmconnect.config.ProviderTimeouts
+import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.SharedCredentials
 import org.llm4s.error.ConfigurationError
@@ -53,12 +56,20 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
 
   /** An incompatible config type used to exercise expectConfig’s type-mismatch error. */
   private object ForeignConfig extends ProviderConfig:
-    val providerId: ProviderId                   = ProviderId("other")
-    val model: String                            = "foreign-model"
-    val contextWindow: Int                       = 8192
-    val reserveCompletion: Int                   = 1024
-    val endpointUrl: Option[String]              = None
-    def withModel(model: String): ProviderConfig = this
+    val providerId: ProviderId                                    = ProviderId("other")
+    val model: String                                             = "foreign-model"
+    val contextWindow: Int                                        = 8192
+    val reserveCompletion: Int                                    = 1024
+    val endpointUrl: Option[String]                               = None
+    def withModel(model: String): ProviderConfig                  = this
+    val timeouts: ProviderTimeouts                                = ProviderTimeouts.default
+    def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig  = this
+    val network: HttpNetworkSettings                              = HttpNetworkSettings.default
+    def withNetwork(network: HttpNetworkSettings): ProviderConfig = this
+    val apiKeyProvider: Option[ApiKeyProvider]                    = None
+    def withApiKeyProvider(p: ApiKeyProvider): Result[ProviderConfig] = Left(
+      ProviderConfig.apiKeyProviderUnsupported("foreign")
+    )
 
   // ---------------------------------------------------------------------------------------------
   // ProviderDescriptor.expectConfig

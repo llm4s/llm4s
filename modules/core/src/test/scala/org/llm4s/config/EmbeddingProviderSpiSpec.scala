@@ -87,7 +87,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       config shouldBe EmbeddingProviderConfig(
         baseUrl = "https://tenant.fixture.example/v1",
         model = "fixture-large",
-        apiKey = Secret("fk-test")
+        apiKey = Some(Secret("fk-test"))
       )
     }
 
@@ -169,7 +169,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       config shouldBe EmbeddingProviderConfig(
         baseUrl = "https://fixture.example/v1",
         model = "m",
-        apiKey = Secret("fk-direct")
+        apiKey = Some(Secret("fk-direct"))
       )
     }
   }
@@ -208,7 +208,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
         .value
 
       provider shouldBe "acme.embeddings"
-      config.apiKey.reveal shouldBe "ak"
+      config.apiKey.map(_.reveal) shouldBe Some("ak")
       config.baseUrl shouldBe "https://tenant.acme.example/v1"
     }
 
@@ -252,7 +252,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       val (_, config) = load("""llm4s { embeddings { model = "keylessfixture/fixture-small" } }""").value
 
       config.baseUrl shouldBe "http://localhost:9999"
-      config.apiKey.reveal shouldBe "fixture-not-required"
+      config.apiKey.map(_.reveal) shouldBe Some("fixture-not-required")
     }
 
     "still let a section override them" in {

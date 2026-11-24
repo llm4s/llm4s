@@ -16,7 +16,7 @@ import ujson.read
 class CohereEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
 
   private val cfg =
-    EmbeddingProviderConfig(baseUrl = "http://cohere-test", model = "embed-english-v3.0", apiKey = Secret("k"))
+    EmbeddingProviderConfig(baseUrl = "http://cohere-test", model = "embed-english-v3.0", apiKey = Some(Secret("k")))
   private val ok = HttpResponse(200, """{"embeddings":{"float":[[0.1,0.2]]}}""", Map.empty)
 
   private def request(purpose: InputPurpose) =

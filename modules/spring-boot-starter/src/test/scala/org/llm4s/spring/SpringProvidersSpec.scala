@@ -652,6 +652,13 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       def reserveCompletion                = 0
       def endpointUrl: Option[String]      = None
       def withModel(m: String): SomeConfig = copy(model = m)
+      def timeouts                         = org.llm4s.llmconnect.config.ProviderTimeouts.default
+      def withTimeouts(t: org.llm4s.llmconnect.config.ProviderTimeouts) = this
+      def network                                                       = org.llm4s.http.HttpNetworkSettings.default
+      def withNetwork(n: org.llm4s.http.HttpNetworkSettings)            = this
+      def apiKeyProvider                                                = None
+      def withApiKeyProvider(p: org.llm4s.llmconnect.auth.ApiKeyProvider) =
+        Left(org.llm4s.llmconnect.config.ProviderConfig.apiKeyProviderUnsupported("x"))
     }
     SpringProviderSource.configSecrets(SomeConfig("k1", Some("t1"), "gpt", 3)) shouldBe Seq("k1", "t1")
     SpringProviderSource.configSecrets(SomeConfig(" ", None, "gpt", 3)) shouldBe Nil
@@ -672,6 +679,13 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       def reserveCompletion            = 0
       def endpointUrl: Option[String]  = None
       def withModel(m: String): Nested = copy(model = m)
+      def timeouts                     = org.llm4s.llmconnect.config.ProviderTimeouts.default
+      def withTimeouts(t: org.llm4s.llmconnect.config.ProviderTimeouts) = this
+      def network                                                       = org.llm4s.http.HttpNetworkSettings.default
+      def withNetwork(n: org.llm4s.http.HttpNetworkSettings)            = this
+      def apiKeyProvider                                                = None
+      def withApiKeyProvider(p: org.llm4s.llmconnect.auth.ApiKeyProvider) =
+        Left(org.llm4s.llmconnect.config.ProviderConfig.apiKeyProviderUnsupported("x"))
     }
     SpringProviderSource.configSecrets(
       Nested(
@@ -719,6 +733,13 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       def reserveCompletion           = 0
       def endpointUrl: Option[String] = None
       def withModel(m: String): Odd   = copy(model = m)
+      def timeouts                    = org.llm4s.llmconnect.config.ProviderTimeouts.default
+      def withTimeouts(t: org.llm4s.llmconnect.config.ProviderTimeouts) = this
+      def network                                                       = org.llm4s.http.HttpNetworkSettings.default
+      def withNetwork(n: org.llm4s.http.HttpNetworkSettings)            = this
+      def apiKeyProvider                                                = None
+      def withApiKeyProvider(p: org.llm4s.llmconnect.auth.ApiKeyProvider) =
+        Left(org.llm4s.llmconnect.config.ProviderConfig.apiKeyProviderUnsupported("x"))
     }
     SpringProviderSource.configSecrets(Odd("gpt", new Exploding, new Loop, new ExplodingSeq, "k1")) shouldBe Seq("k1")
   }
@@ -774,7 +795,14 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       def reserveCompletion                 = 0
       def endpointUrl: Option[String]       = None
       def withModel(m: String): PlainConfig = this
-      val apiKey                            = "not-read"
+      def timeouts                          = org.llm4s.llmconnect.config.ProviderTimeouts.default
+      def withTimeouts(t: org.llm4s.llmconnect.config.ProviderTimeouts) = this
+      def network                                                       = org.llm4s.http.HttpNetworkSettings.default
+      def withNetwork(n: org.llm4s.http.HttpNetworkSettings)            = this
+      def apiKeyProvider                                                = None
+      def withApiKeyProvider(p: org.llm4s.llmconnect.auth.ApiKeyProvider) =
+        Left(org.llm4s.llmconnect.config.ProviderConfig.apiKeyProviderUnsupported("x"))
+      val apiKey = "not-read"
     }
     SpringProviderSource.configSecrets(new PlainConfig) shouldBe Nil
   }

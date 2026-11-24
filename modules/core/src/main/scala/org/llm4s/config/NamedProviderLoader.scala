@@ -83,7 +83,7 @@ private[config] object NamedProviderLoader:
       .flatMap(descriptor =>
         descriptor
           .buildConfig(section, ProviderConfigContext.of(providerName))
-          // The timeouts block is read once, for every provider; a config that carries it takes it here.
+          // The timeouts block is read once, for every provider, and every config takes it (#2805).
           .map(_.withTimeouts(section.timeouts))
           .flatMap(withKeyFile(providerName, section, descriptor.configSpec.requiresApiKey, _))
       )
@@ -104,19 +104,19 @@ private[config] object NamedProviderLoader:
     section.apiKeyFile match
       case None => Right(config)
       case Some(file) =>
-        val withFile = config.withApiKeyProvider(ApiKeyProvider.file(file))
-        if withFile.apiKeyProvider.isDefined then Right(withFile)
-        else if takesApiKey then
-          logger.info(
-            s"llm4s.providers.$providerName: provider '${section.provider.asString}' reads the key from $file once, " +
-              "when the section is loaded; a rotated key is used after the section is loaded again"
-          )
-          Right(config)
-        else
-          Left(
-            ConfigurationError(
-              s"llm4s.providers.$providerName.apiKeyFile: provider '${section.provider.asString}' takes no API key, " +
-                "so it cannot read one from apiKeyFile - remove it",
-              List("apiKeyFile")
+        config.withApiKeyProvider(ApiKeyProvider.file(file)) match
+          case Right(withFile) => Right(withFile)
+          case Left(_) if takesApiKey =>
+            logger.info(
+              s"llm4s.providers.$providerName: provider '${section.provider.asString}' reads the key from $file once, " +
+                "when the section is loaded; a rotated key is used after the section is loaded again"
             )
-          )
+            Right(config)
+          case Left(_) =>
+            Left(
+              ConfigurationError(
+                s"llm4s.providers.$providerName.apiKeyFile: provider '${section.provider.asString}' takes no API key, " +
+                  "so it cannot read one from apiKeyFile - remove it",
+                List("apiKeyFile")
+              )
+            )

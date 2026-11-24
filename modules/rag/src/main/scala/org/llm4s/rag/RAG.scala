@@ -1993,7 +1993,7 @@ object RAG {
     build(
       config,
       Some(embeddingClient),
-      _ => Right(EmbeddingProviderConfig("", "", Secret(""))),
+      _ => Right(EmbeddingProviderConfig("", "", None)),
       resolveRerankerConfig,
       hybridSearcher
     )

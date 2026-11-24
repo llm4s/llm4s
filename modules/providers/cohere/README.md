@@ -36,7 +36,7 @@ import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
 import org.llm4s.llmconnect.provider.CohereEmbeddingProvider
 
 val provider = CohereEmbeddingProvider.fromConfig(
-  EmbeddingProviderConfig(baseUrl = "https://api.cohere.com", model = "embed-english-v3.0", apiKey = sys.env("COHERE_API_KEY"))
+  EmbeddingProviderConfig(baseUrl = "https://api.cohere.com", model = "embed-english-v3.0", apiKey = Some(Secret(sys.env("COHERE_API_KEY"))))
 )
 val model = EmbeddingModelConfig("embed-english-v3.0", 1024)
 

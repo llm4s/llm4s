@@ -143,7 +143,7 @@ class Llm4sSettingsSpec extends AnyWordSpec with Matchers with EitherValues:
       val (provider, cfg) = s.embeddings().value
       provider shouldBe "fixtureembedding"
       cfg.model shouldBe "fixture-embed-small"
-      s.textEmbeddingModel().value.modelName shouldBe "fixture-embed-small"
+      s.textEmbeddingModel().value.model.name shouldBe "fixture-embed-small"
     }
 
     "report a section that is not there as Llm4sConfig does" in {

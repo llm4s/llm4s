@@ -95,7 +95,7 @@ object SemanticCachingSample extends App {
     val embeddingConfig = EmbeddingProviderConfig(
       baseUrl = "https://api.openai.com",
       model = "text-embedding-3-small",
-      apiKey = Secret(apiKey)
+      apiKey = Some(Secret(apiKey))
     )
     EmbeddingClient.from("openai", embeddingConfig)
   }

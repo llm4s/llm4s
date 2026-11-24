@@ -70,7 +70,7 @@ class JavaGuideConfigSpec extends AnyWordSpec with Matchers {
         case Right((provider, config)) =>
           provider shouldBe "openai"
           config.model shouldBe "text-embedding-3-small"
-          config.apiKey.reveal shouldBe "sk-openai-env"
+          config.apiKey.map(_.reveal) shouldBe Some("sk-openai-env")
         case Left(error) => fail(s"Expected the OpenAI embedding config, got $error")
       }
     }
