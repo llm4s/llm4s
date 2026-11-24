@@ -177,7 +177,7 @@ final class ScriptedLLMClient private (
   private def chunksOf(index: Int, completion: Completion): List[StreamedChunk] = {
     val id    = s"scripted-${index + 1}"
     val text  = completion.content.grouped(chunkSize).toList.map(piece => StreamedChunk(id, Some(piece)))
-    val tools = completion.toolCalls.map(call => StreamedChunk(id, None, toolCall = Some(call)))
+    val tools = completion.toolCalls.map(call => StreamedChunk(id, None, toolCallDelta = Some(call)))
     val last = StreamedChunk(
       id,
       None,

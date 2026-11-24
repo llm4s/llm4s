@@ -159,7 +159,7 @@ class VaultApiKeyProviderSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     clock.advance(10.seconds)
     val error = p.current().left.toOption.get
     error shouldBe a[ServiceError]
-    error.asInstanceOf[ServiceError].httpStatus shouldBe 503
+    error.asInstanceOf[ServiceError].status shouldBe 503
     error.message should include("Vault is sealed")
     assertNoSecrets(error, "sk-before-outage")
 

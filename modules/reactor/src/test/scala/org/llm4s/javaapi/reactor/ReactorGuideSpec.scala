@@ -34,7 +34,7 @@ class ReactorGuideSpec extends AnyWordSpec with Matchers {
   private def streaming(pieces: String*): JLlmClient =
     Llm4s.wrapClient(
       new Scripted(
-        onChunk => { pieces.foreach(p => onChunk(StreamedChunk(id = "c", content = Some(p)))); Right(completion("")) },
+        onChunk => { pieces.foreach(p => onChunk(StreamedChunk(id = "c", contentDelta = Some(p)))); Right(completion("")) },
         () => Right(completion(""))
       )
     )
@@ -81,7 +81,7 @@ class ReactorGuideSpec extends AnyWordSpec with Matchers {
           onChunk => {
             var i = 0
             while (!Thread.currentThread().isInterrupted && i < 1_000_000) {
-              onChunk(StreamedChunk(id = "c", content = Some(s"$i"))); i += 1
+              onChunk(StreamedChunk(id = "c", contentDelta = Some(s"$i"))); i += 1
             }
             Left(CancelledError("test"))
           },
@@ -94,7 +94,7 @@ class ReactorGuideSpec extends AnyWordSpec with Matchers {
     "stream a RAG answer: its sources, then its text, returning the answer" in {
       val model = new Scripted(
         onChunk => {
-          Seq("Within ", "14 days.").foreach(p => onChunk(StreamedChunk(id = "c", content = Some(p))))
+          Seq("Within ", "14 days.").foreach(p => onChunk(StreamedChunk(id = "c", contentDelta = Some(p))))
           Right(completion("Within 14 days."))
         },
         () => Right(completion("Within 14 days."))

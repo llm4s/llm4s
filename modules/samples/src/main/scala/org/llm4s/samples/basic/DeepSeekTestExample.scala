@@ -99,7 +99,7 @@ object DeepSeekTestExample {
       CompletionOptions()
     ) { chunk =>
       chunkCount += 1
-      chunk.content.foreach(c => fullContent.append(c))
+      chunk.contentDelta.foreach(c => fullContent.append(c))
     }
 
     result match {

@@ -62,7 +62,9 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
     now.set(10000L)
     val fastFail = failFast(client)
     fastFail shouldBe CircuitOpenError.open("provider-x", 20.seconds)
-    LLMError.isRecoverable(fastFail) shouldBe true
+    fastFail.isRetryable shouldBe false
+    fastFail.retryAfter shouldBe None // no server asked for the wait: it is the breaker's own
+    fastFail.asInstanceOf[CircuitOpenError].remaining shouldBe 20.seconds
     fastFail.message should include("Circuit breaker is open for provider-x")
     fastFail.message should include("Retry after 20s")
     RetryPolicy.exponentialBackoff().isRetryable(fastFail) shouldBe false
@@ -124,7 +126,7 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
     val (probed, refused) = results.asScala.toList.partition(_.isRight)
     probed should have size 1
     refused.map(_.left.toOption.get).distinct shouldBe List(CircuitOpenError.probing("provider-x"))
-    CircuitOpenError.probing("provider-x").retryAfter shouldBe Duration.Zero
+    CircuitOpenError.probing("provider-x").remaining shouldBe Duration.Zero
     RetryPolicy.exponentialBackoff().isRetryable(CircuitOpenError.probing("provider-x")) shouldBe false
   }
 

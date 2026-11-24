@@ -657,7 +657,7 @@ class AgentStreamingSpec extends AnyFlatSpec with Matchers:
       streamed.incrementAndGet()
       thinking.foreach(t => onChunk(StreamedChunk("c", None, thinkingDelta = Some(t))))
       chunks.foreach(c => onChunk(StreamedChunk("c", Some(c))))
-      toolCalls.foreach(tc => onChunk(StreamedChunk("c", None, toolCall = Some(tc))))
+      toolCalls.foreach(tc => onChunk(StreamedChunk("c", None, toolCallDelta = Some(tc))))
       Right(completion)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 1024
@@ -744,7 +744,7 @@ class AgentStreamingSpec extends AnyFlatSpec with Matchers:
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Left(NetworkError("unused", None, "t"))
       override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
         if n.getAndIncrement() == 0 then
-          f(StreamedChunk("c", None, toolCall = Some(call)))
+          f(StreamedChunk("c", None, toolCallDelta = Some(call)))
           Right(Completion("c", 0L, "", "m", AssistantMessage(None, Seq(call)), List(call), usage))
         else
           f(StreamedChunk("c", Some("done")))

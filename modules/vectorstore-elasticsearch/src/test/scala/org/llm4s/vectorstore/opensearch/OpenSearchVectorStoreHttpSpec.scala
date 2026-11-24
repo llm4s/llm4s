@@ -402,7 +402,7 @@ class OpenSearchVectorStoreHttpSpec extends AnyFlatSpec with Matchers with Eithe
     failing(429) shouldBe a[RateLimitError]
     val error = failing(500)
     error shouldBe a[ServiceError]
-    error.asInstanceOf[ServiceError].httpStatus shouldBe 500
+    error.asInstanceOf[ServiceError].status shouldBe 500
     error.message should include("OpenSearch get failed")
   }
 

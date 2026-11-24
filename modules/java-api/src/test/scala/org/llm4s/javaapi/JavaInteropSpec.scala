@@ -65,7 +65,7 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   "a streamed agent turn" should "compile from Java, with a lambda listener, and run end to end" in {
     val streaming = StreamFixtures.Scripted(
       onChunk => {
-        onChunk(StreamedChunk(id = "c", content = Some("4")))
+        onChunk(StreamedChunk(id = "c", contentDelta = Some("4")))
         Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("4")))
       },
       () => Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("4")))
@@ -235,7 +235,7 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def boundary: Map[String, String] = Map(
     "org.llm4s.error.LLMError" ->
       ("LlmException.error(): the error taxonomy, matched with instanceof for detail; its Java view is LlmException's " +
-        "getKind(), isRecoverable(), getRetryAfter() and getStatusCode() (#1487)"),
+        "getKind(), isRetryable(), getRetryAfter() and getStatusCode() (#1487)"),
     "org.llm4s.llmconnect.model.Conversation" ->
       "ConversationBuilder.build(): handed back to JLlmClient.complete, not read",
     "org.llm4s.agent.graph.StreamEvent" ->
@@ -299,7 +299,7 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     classOf[JLlmClient].getMethods.count(m => m.getName == "completion" && m.getParameterCount == 2) shouldBe 1
 
     returns(classOf[LlmException].getMethod("getKind")) shouldBe List(classOf[LlmErrorKind])
-    returns(classOf[LlmException].getMethod("isRecoverable")) shouldBe List(java.lang.Boolean.TYPE)
+    returns(classOf[LlmException].getMethod("isRetryable")) shouldBe List(java.lang.Boolean.TYPE)
     returns(classOf[LlmException].getMethod("getRetryAfter")) shouldBe
       List(classOf[java.util.Optional[_]], classOf[java.time.Duration])
     returns(classOf[LlmException].getMethod("getStatusCode")) shouldBe List(classOf[java.util.OptionalInt])

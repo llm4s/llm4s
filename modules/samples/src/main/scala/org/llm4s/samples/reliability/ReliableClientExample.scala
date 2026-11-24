@@ -140,7 +140,7 @@ object ReliableClientExample {
     // Set up a mock client that always fails with a 503 Service Unavailable error
     val mockBaseClient = new MockClient(() => {
       logger.info("Base Client: Executing call (and returning 503)")
-      Left(ServiceError(httpStatus = 503, provider = "mock-provider", details = "Service is down"))
+      Left(ServiceError(status = 503, provider = "mock-provider", details = "Service is down"))
     })
 
     val reliableClient = ReliableClient(mockBaseClient, "broken-provider", circuitConfig)

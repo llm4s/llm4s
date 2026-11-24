@@ -1,6 +1,6 @@
 package org.llm4s.speech
 
-import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
+import org.llm4s.error.LLMError
 import org.llm4s.speech.io.{ AudioIO, WavFileGenerator }
 import org.llm4s.speech.stt.STTError
 import org.llm4s.speech.tts.TTSError
@@ -9,8 +9,7 @@ import org.scalatest.matchers.should.Matchers
 
 /**
  * Pins the `llm4s-speech` rows of the "errors defined by other modules" tables in
- * `docs/guide/error-handling.md`: which speech errors are recoverable, which are not, and which carry no marker
- * (and so are reported as not recoverable by the total `LLMError.isRecoverable`).
+ * `docs/guide/error-handling.md`: which speech errors are retryable (`LLMError.isRetryable`) and which are not.
  */
 class SpeechErrorMarkersSpec extends AnyFlatSpec with Matchers {
 
@@ -32,43 +31,27 @@ class SpeechErrorMarkersSpec extends AnyFlatSpec with Matchers {
     TTSError.SynthesisFailed("empty body")
   )
 
-  "Speech errors marked recoverable" should "be RecoverableErrors that isRecoverable accepts" in {
-    recoverable.foreach { e =>
-      withClue(e.toString) {
-        e shouldBe a[RecoverableError]
-        LLMError.isRecoverable(e) shouldBe true
-      }
-    }
+  "An unavailable speech engine" should "be retryable" in {
+    recoverable.foreach(e => withClue(e.toString)(e.isRetryable shouldBe true))
   }
 
-  "Speech errors marked non-recoverable" should "be NonRecoverableErrors that isRecoverable rejects" in {
-    nonRecoverable.foreach { e =>
-      withClue(e.toString) {
-        e shouldBe a[NonRecoverableError]
-        LLMError.isRecoverable(e) shouldBe false
-      }
-    }
+  "A speech error the caller must fix" should "not be retryable" in {
+    nonRecoverable.foreach(e => withClue(e.toString)(e.isRetryable shouldBe false))
   }
 
-  "Unmarked speech errors" should "carry neither marker and be reported as not recoverable" in {
-    unmarked.foreach { e =>
-      withClue(e.toString) {
-        e should not be a[RecoverableError]
-        e should not be a[NonRecoverableError]
-        LLMError.isRecoverable(e) shouldBe false
-      }
-    }
+  "A failed transcription or synthesis" should "not be retryable, whatever its own retryable flag says" in {
+    unmarked.foreach(e => withClue(e.toString)(e.isRetryable shouldBe false))
   }
 
-  "An STTError's retryable flag" should "agree with its marker wherever it has one" in {
+  "An STTError's retryable flag" should "agree with isRetryable for the engine and input errors" in {
     (recoverable ++ nonRecoverable).collect { case e: STTError => e }.foreach { e =>
-      withClue(e.toString)(e.retryable shouldBe LLMError.isRecoverable(e))
+      withClue(e.toString)(e.retryable shouldBe e.isRetryable)
     }
   }
 
-  "recoverableErrors and nonRecoverableErrors" should "partition speech errors without throwing" in {
+  "isRetryable" should "partition speech errors" in {
     val all = recoverable ++ nonRecoverable ++ unmarked
-    LLMError.recoverableErrors(all) shouldBe recoverable
-    LLMError.nonRecoverableErrors(all) shouldBe nonRecoverable ++ unmarked
+    all.filter(_.isRetryable) shouldBe recoverable
+    all.filterNot(_.isRetryable) shouldBe nonRecoverable ++ unmarked
   }
 }

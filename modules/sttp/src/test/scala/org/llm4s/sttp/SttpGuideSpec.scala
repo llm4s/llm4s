@@ -96,7 +96,7 @@ class SttpGuideSpec extends AnyFlatSpec with Matchers {
     } yield completion.content
 
     streamed shouldBe Right("A JVM language.")
-    chunks.flatMap(_.content).mkString shouldBe "A JVM language."
+    chunks.flatMap(_.contentDelta).mkString shouldBe "A JVM language."
     backend.allInteractions should have size 1
     val body = ujson.read(backend.allInteractions.head._1.forceBodyAsString)
     body("stream").bool shouldBe true

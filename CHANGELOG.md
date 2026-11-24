@@ -12,6 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `LLMError.isRetryable` is the one retry rule: `RecoverableError`, `NonRecoverableError`, `LLMError.isRecoverable`, `recoverableErrors`, `nonRecoverableErrors` and `ServiceError.isRecoverableStatus` are removed, and a `ServiceError` with a 404 is no longer "recoverable"
+  ([migration](docs/reference/migration.md#one-retry-rule-llmerrorisretryable-replaces-the-recoverable-markers-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
+- Every `LLMError` has `httpStatus`, `retryAfter` (only a delay the server gave) and `requestId`: `ServiceError.httpStatus` is `status`, `CircuitOpenError.retryAfter` is `remaining`, `retryDelay` and the errors' `DefaultRetryDelay` are removed (`RetryPolicy.DefaultRateLimitDelay`), and a 400 mapped from a response carries its status
+  ([migration](docs/reference/migration.md#every-llmerror-reports-httpstatus-retryafter-and-requestid-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
+- A request too long for the model is a `ContextLengthError` and an unknown model a `ModelNotFoundError`, where they were a `ValidationError` or a `ServiceError`
+  ([migration](docs/reference/migration.md#a-context-length-overflow-and-an-unknown-model-are-typed-errors-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
+- `AgentBuilder.withTools` and `withToolSet` add to the agent's tools instead of replacing them; `build()` refuses a tool name defined twice
+  ([migration](docs/reference/migration.md#agentbuilder-tools-are-additive-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
+- `StreamedChunk.content` is `contentDelta` and `toolCall` is `toolCallDelta`, with `withContentDelta` and `withToolCallDelta`
+  ([migration](docs/reference/migration.md#streamedchunk-names-its-deltas-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
+- Java: `LlmException.isRecoverable()` is `isRetryable()`, and `LlmErrorKind` gains `CONTENT_FILTER`, `CONTEXT_LENGTH` and `MODEL_NOT_FOUND`, which an exhaustive `switch` or Kotlin `when` must handle
+  ([migration](docs/reference/migration.md#llmexceptionisretryable-and-three-new-llmerrorkinds-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
 - `UserMessage.parts` and `ToolMessage.parts` are `Seq[ContentPart]`, and `Completion.citations`, the `RequestAdjustment` lists (`Completion`, `TransformationResult`, `OpenAICompatibleDialect.addReasoning`, `ModelCallCompleted`) are `Seq`s; stored JSON is unchanged
   ([migration](docs/reference/migration.md#message-parts-citations-and-adjustments-are-seqs-2809)) [#2809](https://github.com/llm4s/llm4s/issues/2809).
 - The `@Experimental` overloads of Stable methods are renamed, so MiMa checks the Stable ones: `AgentBuilder.withTools(toolSet)` is `withToolSet`, `Guardrail.validate(value, context)` is `validateIn`; the Java facade's guardrails sit innermost, as the Scala builder's do
@@ -261,6 +273,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Changed** `MistralModelLister` is `@Experimental`, as the Mistral dialect it lists for is [#2916](https://github.com/llm4s/llm4s/issues/2916).
 - **Fixed** `HuggingFaceClient` posted to `api-inference.huggingface.co`, which Hugging Face retired: it calls
   `router.huggingface.co/hf-inference` in the documented text-to-image format, defaults to a model `hf-inference` serves
   and checks health through the Hub API ([migration](docs/reference/migration.md#the-hugging-face-image-client-calls-inference-providers-2832)) [#2832](https://github.com/llm4s/llm4s/issues/2832).
@@ -358,6 +371,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Java & Kotlin APIs
 
+- **Changed** `LlmException.isRecoverable()` is `isRetryable()`, backed by `LLMError.isRetryable`; `getStatusCode()` and `getRetryAfter()` answer for every error that carries the fact, and `getRequestId()` is new. **Added** `LlmErrorKind.CONTENT_FILTER` (was `VALIDATION`), `CONTEXT_LENGTH` and `MODEL_NOT_FOUND` ([migration](docs/reference/migration.md#llmexceptionisretryable-and-three-new-llmerrorkinds-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
 - **Changed** the Java facade's `inputGuardrails` and `outputGuardrails` sit innermost in the agent's middleware, where the Scala builder's `withInputGuardrails` and `withOutputGuardrails` put them, not first: an output guardrail checks the answer before any other middleware's `afterAgent` ([migration](docs/reference/migration.md#withtoolset-and-validatein-and-the-java-facades-guardrails-sit-innermost-2835)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
 - **Changed** `JCompletionOptions.temperature()`, `topP()`, `presencePenalty()` and `frequencyPenalty()` return `OptionalDouble`, empty when unset. [#2807](https://github.com/llm4s/llm4s/issues/2807)
 - **Added** `JUsageSummary.cachedTokens()`, `cacheCreationTokens()` and the same on `JModelUsage`. [#2807](https://github.com/llm4s/llm4s/issues/2807)
@@ -370,6 +384,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
+- **Changed** One error model: `LLMError.isRetryable` is the single retry rule (replacing the `RecoverableError`/`NonRecoverableError` markers, `LLMError.isRecoverable` and `ServiceError.isRecoverableStatus`), and every error reports `httpStatus`, `retryAfter` and `requestId`, which `HttpErrorMapper` and the OpenAI and Anthropic clients fill in; Scalafix's `ErrorIsRetryable` migrates call sites ([migration](docs/reference/migration.md#one-retry-rule-llmerrorisretryable-replaces-the-recoverable-markers-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
+- **Added** `ContextLengthError` (with `limit` and `requestedTokens`) and `ModelNotFoundError`, mapped by OpenAI, Anthropic, Gemini, Vertex AI, Ollama, Bedrock and the OpenAI-compatible client; `RetryPolicy.DefaultRateLimitDelay`, the wait for a rate limit whose provider gave no `Retry-After` ([migration](docs/reference/migration.md#a-context-length-overflow-and-an-unknown-model-are-typed-errors-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
+- **Changed** `StreamedChunk.content` is `contentDelta` and `toolCall` is `toolCallDelta`; Scalafix's `StreamedChunkDeltaNames` migrates call sites ([migration](docs/reference/migration.md#streamedchunk-names-its-deltas-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
+- **Changed** An `EmbeddingError` whose `code` is the status 408, 429 or 5xx is retryable, as a `ServiceError` with it is [#2916](https://github.com/llm4s/llm4s/issues/2916).
 - **Changed** the model's public collections are `Seq`s: message parts (were `Vector`), `Completion.citations` and the request adjustments (were `List`); `MessagePartsWireFormatSpec` pins the stored JSON, which is unchanged [#2809](https://github.com/llm4s/llm4s/issues/2809).
 - **Changed** a tool call's id is a `ToolCallId` (`ToolCall.id`, `ToolMessage.toolCallId`, `ToolCallInfo.toolCallId`, the agent's events) and `ToolCallInfo.idempotencyKey` an `IdempotencyKey`, opaque types in core that the agent now shares; stored JSON is unchanged, and Scalafix's `ToolCallIdTyped` migrates call sites ([migration](docs/reference/migration.md#a-tool-calls-id-is-a-toolcallid-and-its-idempotency-key-an-idempotencykey-2815)) [#2815](https://github.com/llm4s/llm4s/issues/2815)
 - **Changed** Model ids are `ModelName` and provider configs' base URLs `BaseUrl` across the public API, from `Completion` and `UsageSummary` to the registry, embeddings, trace events, the provider SPI and every `fromValues`; the scalafix rule `ModelIdNewtypes` wraps the common call sites ([migration](docs/reference/migration.md#model-ids-are-modelname-and-provider-configs-base-urls-are-baseurl-2822)) [#2822](https://github.com/llm4s/llm4s/issues/2822).
@@ -483,6 +501,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
+- **Changed** `AgentBuilder.withTools` and `withToolSet` add to the agent's tools, as the middleware, handoff and guardrail setters do, and `build()` returns a `Left` naming a tool defined twice ([migration](docs/reference/migration.md#agentbuilder-tools-are-additive-2916)) [#2916](https://github.com/llm4s/llm4s/issues/2916).
 - **Changed** `AgentBuilder.withTools(ToolSet)` is `withToolSet` and `Guardrail.validate(value, context)` is `validateIn`, so no `@Experimental` method shares a name with a `@Stable` one, which MiMa would skip with it ([What MiMa Covers](docs/reference/api-stability.md#what-mima-covers)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
 - **Changed** `ToolArgumentValidator.default` supports `anyOf` and accepts `null` for a property that is not required,
   which is how a model sent a strict tool definition leaves one out [#2814](https://github.com/llm4s/llm4s/issues/2814).

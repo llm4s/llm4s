@@ -31,13 +31,13 @@ class PekkoGuideSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   def printAnswer(client: LLMClientPekko)(using system: ActorSystem) =
     client
       .streamComplete(Conversation(Seq(UserMessage("Explain monads in one sentence."))))
-      .runForeach(chunk => print(chunk.content.getOrElse("")))
+      .runForeach(chunk => print(chunk.contentDelta.getOrElse("")))
 
   def cancellable(client: LLMClientPekko, conversation: Conversation)(using system: ActorSystem) =
     client
       .streamComplete(conversation)
       .viaMat(KillSwitches.single[StreamedChunk])(Keep.right)
-      .toMat(Sink.foreach(chunk => print(chunk.content.getOrElse(""))))(Keep.both)
+      .toMat(Sink.foreach(chunk => print(chunk.contentDelta.getOrElse(""))))(Keep.both)
       .run()
 
   def complete(client: LLMClientPekko, conversation: Conversation)(using ec: ExecutionContext): Future[Completion] =
@@ -70,7 +70,7 @@ class PekkoGuideSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     client
       .streamComplete(conversation)
       .runWith(Sink.seq)
-      .map(chunks => chunks.flatMap(_.content).mkString)
+      .map(chunks => chunks.flatMap(_.contentDelta).mkString)
       .recover { case e: LLMException => s"failed: ${e.error.message}" }
 
   /** The lines of the snippets as the page shows them; the page must contain each. */

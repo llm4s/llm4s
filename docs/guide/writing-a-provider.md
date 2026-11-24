@@ -544,12 +544,17 @@ HttpErrorMapper.toError(
 ```
 
 Maps a non-2xx response to the standard error types - 401/403 `AuthenticationError`, 429
-`RateLimitError`, 400 `ValidationError`, anything else `ServiceError` - pulling a message out of
-common JSON error shapes, redacted and truncated. Retry and fallback logic keys off these types,
-so use it rather than inventing your own. Pass the response's `headers`: a `Retry-After`
+`RateLimitError`, a body that says the request does not fit the model's context window
+`ContextLengthError`, one that says the model is unknown `ModelNotFoundError`, any other 400
+`ValidationError`, anything else `ServiceError` - pulling a message out of
+common JSON error shapes, redacted and truncated. Retry and fallback logic keys off these types and their
+`isRetryable`, so use it rather than inventing your own. Every error it returns carries the response's facts:
+`httpStatus`, the `requestId` its headers name, and `retryAfter`. Pass the response's `headers`: a `Retry-After`
 (delta-seconds or an HTTP-date) becomes the error's `retryAfter`, a `FiniteDuration` - on a 429's
 `RateLimitError`, or a 503's (any other status's) `ServiceError` - so retries wait as long as the
 provider asked rather than a guessed backoff. It returns the error itself: your client wraps it in a `Left`.
+A client that maps errors another way sets the facts with the errors' `withHttpStatus`, `withRequestId` and
+`withRetryAfter`, and leaves `retryAfter` unset when the server gave no delay.
 
 `HttpErrorMapper.mapStreamError(status, message, provider)` is the same mapping for a failure a provider
 reports inside a stream, after the 200 status: give it the status the event states, or 502 when it states

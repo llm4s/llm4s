@@ -74,7 +74,7 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
       case _: ValidationError     => "the request is wrong: fix it, retrying will not help"
       case _: AuthenticationError => "the key was rejected"
       case rate: RateLimitError   => s"rate limited, retry after ${rate.retryAfter.getOrElse(30.seconds)}"
-      case svc: ServiceError      => s"TypeSafe failed with ${svc.httpStatus}"
+      case svc: ServiceError      => s"TypeSafe failed with ${svc.status}"
       case _: TimeoutError        => "no answer in time"
       case _: NetworkError        => "could not reach TypeSafe"
       case _: CancelledError      => "the calling thread was interrupted"

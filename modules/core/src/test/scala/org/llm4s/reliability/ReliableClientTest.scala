@@ -689,7 +689,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    // A rate limit without a retryAfter hint waits RateLimitError.DefaultRetryDelay (30 s); record the
+    // A rate limit without a retryAfter hint waits RetryPolicy.DefaultRateLimitDelay (30 s); record the
     // waits rather than sleeping through them.
     val waits   = scala.collection.mutable.ArrayBuffer.empty[FiniteDuration]
     val metrics = new TestMetricsCollector()
@@ -701,7 +701,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     result shouldBe Left(localRejection)
     mockClient.callCount.get() shouldBe 3
     metrics.recordedErrors shouldBe empty
-    waits.toList shouldBe List(RateLimitError.DefaultRetryDelay, RateLimitError.DefaultRetryDelay)
+    waits.toList shouldBe List(RetryPolicy.DefaultRateLimitDelay, RetryPolicy.DefaultRateLimitDelay)
   }
 
   test("ReliableClient still records a genuine upstream RateLimitError once, on the terminal attempt") {
@@ -727,7 +727,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     result shouldBe Left(upstreamRejection)
     mockClient.callCount.get() shouldBe 2
     metrics.recordedErrors.toList shouldBe List(ErrorKind.RateLimit)
-    waits.toList shouldBe List(RateLimitError.DefaultRetryDelay)
+    waits.toList shouldBe List(RetryPolicy.DefaultRateLimitDelay)
   }
 
   test("ReliableClient.resetCircuitBreaker resets state correctly") {

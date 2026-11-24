@@ -241,7 +241,7 @@ class LLMClientIOConcurrencySpec extends AnyFlatSpec with TestTimeLimit with Mat
       }
       def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] = {
         val key = c.messages.head.content
-        (0 until perStream).foreach(i => onChunk(StreamedChunk(id = s"$key-$i", content = Some(key))))
+        (0 until perStream).foreach(i => onChunk(StreamedChunk(id = s"$key-$i", contentDelta = Some(key))))
         Right(completion)
       }
       def getContextWindow(): Int     = 4096

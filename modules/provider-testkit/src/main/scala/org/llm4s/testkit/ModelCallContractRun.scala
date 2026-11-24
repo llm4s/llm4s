@@ -35,7 +35,7 @@ private[testkit] object ModelCallContractRun:
       case (ContractCase.ContentFiltered, other) => fail(s"expected Left(ContentFilteredError), got ${show(other)}")
       // RFC 0009 rule 1: a retryable NetworkError, or the ServiceError(502) watsonx and Perplexity already return
       case (ContractCase.StreamEndsEarly, Left(_: NetworkError))                                => ()
-      case (ContractCase.StreamEndsEarly, Left(error: ServiceError)) if error.httpStatus == 502 => ()
+      case (ContractCase.StreamEndsEarly, Left(error: ServiceError)) if error.status == 502 => ()
       case (ContractCase.StreamEndsEarly, other) =>
         fail(s"expected Left(NetworkError) or Left(ServiceError) with status 502, got ${show(other)}")
       // RFC 0009 rule 2: the Left carries the provider's error
@@ -71,13 +71,13 @@ private[testkit] object ModelCallContractRun:
   /** Fails unless the chunks a successful stream delivered add up to the `Completion` it returned. */
   def delivered(c: ContractCase, chunks: List[StreamedChunk], completion: Completion)(using Position): Unit =
     def fail(detail: String): Nothing = ProviderModuleChecks.failAt(s"$c, streamComplete: $detail")
-    val text                          = chunks.flatMap(_.content).mkString
+    val text                          = chunks.flatMap(_.contentDelta).mkString
     if text != completion.content then
       fail(s"the chunks delivered ${text.length} characters of text, the Completion has ${completion.content.length}")
     val lastReason = chunks.flatMap(_.finishReason).lastOption
     if !lastReason.contains(completion.finishReason) then
       fail(s"the last finish reason a chunk carried is $lastReason, the Completion's is ${completion.finishReason}")
-    val streamedIds  = chunks.flatMap(_.toolCall).map(_.id).filter(_.asString.nonEmpty).distinct
+    val streamedIds  = chunks.flatMap(_.toolCallDelta).map(_.id).filter(_.asString.nonEmpty).distinct
     val completedIds = calls(completion).map(_.id).filter(_.asString.nonEmpty)
     if streamedIds.toSet != completedIds.toSet then
       fail(s"the chunks name tool calls $streamedIds, the Completion has $completedIds")

@@ -44,7 +44,7 @@ class StreamFlowSpec extends AnyFlatSpec with Matchers with TimeLimitedTests {
   it should "interrupt the provider call when the consumer stops early, and leave no thread running" in {
     given BufferCapacity = BufferCapacity(1)
     val recording        = new Recording(ScriptedLLMClient.sequence(Reply.text("x" * 5000)).withChunkSize(1))
-    recording.streamFlow(conversation).take(2).runToList().flatMap(_.content) shouldBe List("x", "x")
+    recording.streamFlow(conversation).take(2).runToList().flatMap(_.contentDelta) shouldBe List("x", "x")
     recording.outcome.get() match {
       case Some(Left(_: CancelledError)) => succeed
       case other                         => fail(s"the provider call was not cancelled: $other")
@@ -70,7 +70,7 @@ class StreamFlowSpec extends AnyFlatSpec with Matchers with TimeLimitedTests {
   it should "refuse every later chunk at once when the provider ignores the interrupt" in {
     given BufferCapacity = BufferCapacity(1)
     val deaf             = new Deaf(total = 10000)
-    deaf.streamFlow(conversation).take(1).runToList().flatMap(_.content) shouldBe List("x")
+    deaf.streamFlow(conversation).take(1).runToList().flatMap(_.contentDelta) shouldBe List("x")
     deaf.offered.get() shouldBe 10000
     deaf.delivered.get() should be < 10
   }

@@ -158,7 +158,7 @@ class ScalaClientMigrationGuideSpec extends AnyFlatSpec with Matchers with Eithe
     val shown = new StringBuilder
     val streamed: Result[String] = for {
       conversation <- Conversation.fromPrompts("You answer in one sentence.", "What is Scala?")
-      completion   <- client.streamComplete(conversation, CompletionOptions())(_.content.foreach(shown.append))
+      completion   <- client.streamComplete(conversation, CompletionOptions())(_.contentDelta.foreach(shown.append))
     } yield completion.content
     // end snippet
 
@@ -173,7 +173,7 @@ class ScalaClientMigrationGuideSpec extends AnyFlatSpec with Matchers with Eithe
 
     // snippet: stream-fs2
     val text: IO[String] =
-      LLMClientIO[IO](client).streamComplete(conversation).map(_.content.getOrElse("")).compile.string
+      LLMClientIO[IO](client).streamComplete(conversation).map(_.contentDelta.getOrElse("")).compile.string
     // end snippet
 
     text.unsafeRunSync() shouldBe "Scala is a JVM language."

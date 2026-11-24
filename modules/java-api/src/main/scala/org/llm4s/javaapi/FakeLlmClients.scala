@@ -5,7 +5,10 @@ import org.llm4s.error.{
   AuthenticationError,
   CancelledError,
   ConfigurationError,
+  ContentFilteredError,
+  ContextLengthError,
   LLMError,
+  ModelNotFoundError,
   NetworkError,
   ProcessingError,
   RateLimitError,
@@ -70,7 +73,7 @@ private[javaapi] object FakeLlmClients {
         onChunk(
           StreamedChunk(
             id = completion.id,
-            content = Some(completion.content),
+            contentDelta = Some(completion.content),
             finishReason = Some(completion.finishReason)
           )
         )
@@ -91,6 +94,9 @@ private[javaapi] object FakeLlmClients {
     case LlmErrorKind.NETWORK        => NetworkError(message, None, "fake")
     case LlmErrorKind.SERVICE        => ServiceError(500, "fake", message)
     case LlmErrorKind.VALIDATION     => ValidationError("fake", message)
+    case LlmErrorKind.CONTENT_FILTER  => ContentFilteredError.prompt("fake", message)
+    case LlmErrorKind.CONTEXT_LENGTH  => ContextLengthError("fake", message)
+    case LlmErrorKind.MODEL_NOT_FOUND => ModelNotFoundError("fake", message)
     case LlmErrorKind.CONFIGURATION  => ConfigurationError(message)
     case LlmErrorKind.CANCELLED      => CancelledError("FakeLlmClient")
     case LlmErrorKind.OTHER          => ProcessingError("FakeLlmClient", message)

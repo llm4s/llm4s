@@ -111,7 +111,7 @@ class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
         case other => fail(s"expected a ContentFilteredError, got $other")
       }
     }
-    chunks.flatMap(_.content).mkString shouldBe "Hel"
+    chunks.flatMap(_.contentDelta).mkString shouldBe "Hel"
     chunks.flatMap(_.finishReason) shouldBe empty
   }
 
@@ -133,7 +133,7 @@ class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
             case other                 => fail(s"expected a NetworkError, got $other")
           }
         }
-        chunks.flatMap(_.content).mkString shouldBe "Hel"
+        chunks.flatMap(_.contentDelta).mkString shouldBe "Hel"
       }
     }
   }
@@ -143,12 +143,12 @@ class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
     withServer("/v1/messages")(sendSseResponse(_, streamUpTo(3, errorEvent("overloaded_error")))) { baseUrl =>
       clientAt(baseUrl).streamComplete(hi)(chunks += _) match {
         case Left(e: ServiceError) =>
-          e.httpStatus shouldBe 529
+          e.status shouldBe 529
           e.message should include("Overloaded")
         case other => fail(s"expected a ServiceError, got $other")
       }
     }
-    chunks.flatMap(_.content).mkString shouldBe "Hel"
+    chunks.flatMap(_.contentDelta).mkString shouldBe "Hel"
     withServer("/v1/messages")(sendSseResponse(_, streamUpTo(1, errorEvent("rate_limit_error")))) { baseUrl =>
       clientAt(baseUrl).streamComplete(hi)(_ => ()) match {
         case Left(e: RateLimitError) => e.message should include("Overloaded") // the provider's message, kept
@@ -157,7 +157,7 @@ class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
     }
     withServer("/v1/messages")(sendSseResponse(_, streamUpTo(1, errorEvent("brand_new_error")))) { baseUrl =>
       clientAt(baseUrl).streamComplete(hi)(_ => ()) match {
-        case Left(e: ServiceError) => e.httpStatus shouldBe 502
+        case Left(e: ServiceError) => e.status shouldBe 502
         case other                 => fail(s"expected a ServiceError, got $other")
       }
     }

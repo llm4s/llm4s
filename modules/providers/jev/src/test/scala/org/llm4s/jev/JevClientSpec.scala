@@ -343,7 +343,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
 
         withClue(s"$status ") {
           error shouldBe a[ServiceError]
-          error.asInstanceOf[ServiceError].httpStatus shouldBe status
+          error.asInstanceOf[ServiceError].status shouldBe status
         }
       }
     }
@@ -396,7 +396,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
       val error = rig.client.evaluate(request).left.value
 
       error shouldBe a[ServiceError]
-      error.asInstanceOf[ServiceError].httpStatus shouldBe 503
+      error.asInstanceOf[ServiceError].status shouldBe 503
       seen().size shouldBe 3
     }
   }
@@ -566,7 +566,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
 
       val error = result.left.value
       error shouldBe a[ServiceError]
-      error.asInstanceOf[ServiceError].httpStatus shouldBe 500
+      error.asInstanceOf[ServiceError].status shouldBe 500
       (error.message should not).include(key)
       (error.formatted should not).include(key)
     }
@@ -581,7 +581,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
 
       val error = result.left.value
       error shouldBe a[ServiceError]
-      error.asInstanceOf[ServiceError].httpStatus shouldBe 500
+      error.asInstanceOf[ServiceError].status shouldBe 500
       (error.message should not).include(secret)
       (error.formatted should not).include(secret)
     }

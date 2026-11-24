@@ -70,7 +70,7 @@ def plainProgram(client: LLMClient, timeout: FiniteDuration): String = {
   def program: Result[String] = {
     val reply = new StringBuilder
     for {
-      _      <- client.streamComplete(greeting, CompletionOptions())(_.content.foreach(reply.append))
+      _      <- client.streamComplete(greeting, CompletionOptions())(_.contentDelta.foreach(reply.append))
       tool   <- temperature
       tools  <- ToolRegistry.of(Seq(tool))
       agent  <- Agent.builder("assistant", client).withTools(tools).build()

@@ -77,7 +77,7 @@ extension (client: LLMClient) {
       val text                      = new StringBuilder
       var last: Option[partial.Out] = None
       def onChunk(chunk: StreamedChunk): Unit =
-        chunk.content.filter(_.nonEmpty).foreach { delta =>
+        chunk.contentDelta.filter(_.nonEmpty).foreach { delta =>
           text.append(delta)
           StructuredOutput.partialValue(partial, text).filterNot(last.contains).foreach { value =>
             last = Some(value)

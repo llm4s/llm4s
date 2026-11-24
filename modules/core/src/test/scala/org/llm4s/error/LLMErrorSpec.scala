@@ -75,14 +75,14 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
       val validationError = ValidationError("field", "invalid")
 
       // Type-level assertions
-      authError shouldBe a[NonRecoverableError]
-      rateError shouldBe a[RecoverableError]
-      validationError shouldBe a[NonRecoverableError]
+      authError.isRetryable shouldBe false
+      rateError.isRetryable shouldBe true
+      validationError.isRetryable shouldBe false
 
       // Runtime checks for backward compatibility
-      LLMError.isRecoverable(authError) shouldBe false
-      LLMError.isRecoverable(rateError) shouldBe true
-      LLMError.isRecoverable(validationError) shouldBe false
+      authError.isRetryable shouldBe false
+      rateError.isRetryable shouldBe true
+      validationError.isRetryable shouldBe false
     }
 
     "use improved context map construction patterns" in {
@@ -112,8 +112,8 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
         NetworkError("timeout", None, "https://api.example.com")
       )
 
-      val recoverable    = LLMError.recoverableErrors(errors)
-      val nonRecoverable = LLMError.nonRecoverableErrors(errors)
+      val recoverable    = errors.filter(_.isRetryable)
+      val nonRecoverable = errors.filterNot(_.isRetryable)
 
       recoverable should have size 2    // RateLimitError, NetworkError
       nonRecoverable should have size 2 // AuthenticationError, ValidationError
@@ -143,12 +143,12 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
       val rateError = RateLimitError("openai")
 
       // Type-level checks
-      authError shouldBe a[NonRecoverableError]
-      rateError shouldBe a[RecoverableError]
+      authError.isRetryable shouldBe false
+      rateError.isRetryable shouldBe true
 
       // Runtime checks (for backward compatibility)
-      LLMError.isRecoverable(authError) shouldBe false
-      LLMError.isRecoverable(rateError) shouldBe true
+      authError.isRetryable shouldBe false
+      rateError.isRetryable shouldBe true
     }
 
     "construct context maps correctly per PR review" in {
@@ -179,8 +179,8 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
         ValidationError("field", "invalid")
       )
 
-      val recoverable    = LLMError.recoverableErrors(errors)
-      val nonRecoverable = LLMError.nonRecoverableErrors(errors)
+      val recoverable    = errors.filter(_.isRetryable)
+      val nonRecoverable = errors.filterNot(_.isRetryable)
 
       recoverable should have size 1
       nonRecoverable should have size 2

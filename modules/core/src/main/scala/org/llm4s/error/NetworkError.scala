@@ -5,7 +5,7 @@ import org.llm4s.annotation.Stable
 /**
  * Raised when a network-level failure occurs during communication with the LLM provider.
  *
- * This is a [[RecoverableError]]: it indicates transient failures such as connection
+ * It is [[LLMError.isRetryable retryable]]: it indicates transient failures such as connection
  * drops, DNS resolution failures, or temporary unreachability. Retrying the operation
  * may succeed.
  *
@@ -18,8 +18,9 @@ final case class NetworkError private (
   override val message: String,
   cause: Option[Throwable],
   endpoint: String
-) extends LLMError
-    with RecoverableError {
+) extends LLMError {
+
+  override def isRetryable: Boolean = true
 
   /** This error with `sentence` and a troubleshooting link appended to its message (#2285). */
   private[llm4s] def withHint(sentence: String, entry: TroubleshootingLinks.Entry): NetworkError =

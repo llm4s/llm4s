@@ -102,7 +102,7 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
     val result = OpenAIClient
       .forTest("gpt-4o", transport(streaming = _ => stream(events*)), configFor("gpt-4o"))
       .streamComplete(hi, CompletionOptions())(chunks += _)
-    chunks.flatMap(_.content).mkString shouldBe "Hel"
+    chunks.flatMap(_.contentDelta).mkString shouldBe "Hel"
     chunks.flatMap(_.finishReason) shouldBe empty
     result.left.value match {
       case filtered: ContentFilteredError =>
@@ -156,7 +156,7 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
       val (result, chunks) = streamAt(body)
       result.left.value shouldBe a[NetworkError]
       result.left.value.message should include("finish_reason")
-      chunks.flatMap(_.content).mkString shouldBe "Hel"
+      chunks.flatMap(_.contentDelta).mkString shouldBe "Hel"
     }
   }
 
@@ -165,11 +165,11 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
       streamAt(s"""$textEvent\n\ndata: {"error":{"message":"The server had an error","type":"server_error"}}\n\n""")
     result.left.value match {
       case e: ServiceError =>
-        e.httpStatus shouldBe 502
+        e.status shouldBe 502
         e.message should include("The server had an error")
       case other => fail(s"expected a ServiceError, got $other")
     }
-    chunks.flatMap(_.content).mkString shouldBe "Hel"
+    chunks.flatMap(_.contentDelta).mkString shouldBe "Hel"
     // an HTTP failure status the error states keeps its meaning
     val limited = streamAt(s"""data: {"error":{"message":"slow down","code":429}}\n\n""")._1.left.value
     limited shouldBe a[RateLimitError]

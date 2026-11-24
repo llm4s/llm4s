@@ -108,9 +108,9 @@ object ToolCallRules {
    * `Stop`. The caller's `onChunk` still gets the chunk unchanged.
    */
   def wholeCall(chunk: StreamedChunk): StreamedChunk =
-    chunk.toolCall match {
+    chunk.toolCallDelta match {
       case Some(call) if call.arguments.objOpt.isDefined =>
-        chunk.withToolCall(ToolCall(call.id, call.name, ujson.Str(call.arguments.render())))
+        chunk.withToolCallDelta(ToolCall(call.id, call.name, ujson.Str(call.arguments.render())))
       case _ => chunk
     }
 

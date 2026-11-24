@@ -36,7 +36,7 @@ class HttpErrorsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fall back to RateLimitError's default delay when the provider gave none" in {
-    HttpErrors.of(RateLimitError("fake")).retryAfterSeconds shouldBe Some(RateLimitError.DefaultRetryDelay.toSeconds)
+    HttpErrors.of(RateLimitError("fake")).retryAfterSeconds shouldBe Some(org.llm4s.reliability.RetryPolicy.DefaultRateLimitDelay.toSeconds)
   }
 
   it should "answer 504 for a timeout, 502 for refused credentials and 500 for a misconfigured server" in {
@@ -45,7 +45,7 @@ class HttpErrorsSpec extends AnyFlatSpec with Matchers {
     HttpErrors.of(ConfigurationError("no provider")).status shouldBe 500
   }
 
-  it should "answer 503 for any other recoverable error and 502 for any other error" in {
+  it should "answer 503 for any other retryable error and 502 for any other error" in {
     HttpErrors.of(NetworkError("down", None, "http://x")).status shouldBe 503
     HttpErrors.of(ServiceError(500, "fake", "oops")).status shouldBe 503
     HttpErrors.of(ProcessingError("parse", "bad answer")).status shouldBe 502
@@ -71,6 +71,6 @@ class HttpErrorsSpec extends AnyFlatSpec with Matchers {
     val body = HttpErrors.of(NetworkError("down", None, "http://x")).body
     body("error")("type").str shouldBe "NetworkError"
     body("error")("message").str should include("down")
-    body("error")("recoverable").bool shouldBe true
+    body("error")("retryable").bool shouldBe true
   }
 }

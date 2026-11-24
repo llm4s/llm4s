@@ -74,8 +74,8 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
         }
         chunks.filter(deliver).foreach(onChunk)
         completion(
-          chunks.flatMap(_.content).mkString,
-          chunks.flatMap(_.toolCall),
+          chunks.flatMap(_.contentDelta).mkString,
+          chunks.flatMap(_.toolCallDelta),
           chunks.flatMap(_.finishReason).lastOption.getOrElse(FinishReason.Unknown)
         )
 
@@ -226,7 +226,7 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
   }
 
   it should "fail a stream whose chunks do not add up to the Completion it returned" in {
-    val dropsText = (chunk: StreamedChunk) => !chunk.content.contains("there")
+    val dropsText = (chunk: StreamedChunk) => !chunk.contentDelta.contains("there")
     failure(assertModelCallContract(cases)(new Reference(_, deliver = dropsText))) should include(
       "CleanText, streamComplete: the chunks delivered"
     )
@@ -234,7 +234,7 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
 
   it should "fail a stream that delivers no finish reason" in {
     // the chunk that carries only the reason is never delivered
-    val noReason = (chunk: StreamedChunk) => chunk.finishReason.isEmpty || chunk.content.nonEmpty
+    val noReason = (chunk: StreamedChunk) => chunk.finishReason.isEmpty || chunk.contentDelta.nonEmpty
     failure(assertModelCallContract(cases)(new Reference(_, deliver = noReason))) should include(
       "the last finish reason a chunk carried is None"
     )

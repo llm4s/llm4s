@@ -347,7 +347,7 @@ import org.llm4s.types.Result
 def streamAnswer(client: LLMClient, question: String, onText: String => Unit): Result[String] =
   for {
     conversation <- Conversation.fromPrompts("You answer in one sentence.", question)
-    completion   <- client.streamComplete(conversation, CompletionOptions())(chunk => chunk.content.foreach(onText))
+    completion   <- client.streamComplete(conversation, CompletionOptions())(chunk => chunk.contentDelta.foreach(onText))
   } yield completion.content
 ```
 

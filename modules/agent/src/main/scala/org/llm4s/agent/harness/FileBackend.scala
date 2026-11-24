@@ -3,7 +3,7 @@ package org.llm4s.agent.harness
 import org.llm4s.agent.graph.{ EffectKey, GraphError, RunContext, StateKey, StateUpdate, ThreadState }
 import org.llm4s.agent.graph.tool.{ Glob, LockKey, ToolContext, ToolOutcome }
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ LLMError, NonRecoverableError }
+import org.llm4s.error.LLMError
 import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
@@ -259,8 +259,7 @@ final case class BackendRefused(
   reason: String,
   kind: BackendRefused.Kind = BackendRefused.Kind.Refused,
   path: Option[VPath] = None
-) extends LLMError
-    with NonRecoverableError:
+) extends LLMError:
   override val message: String = s"$operation $target: $reason"
 
 @Experimental

@@ -82,7 +82,7 @@ public final class HelloLLM4S {
                     + usage.promptTokens() + " + " + usage.completionTokens() + " tokens)"));
             })
             .ifFailure(error -> System.err.println("The call failed (" + error.getKind() + ", "
-                + (error.isRecoverable() ? "worth retrying" : "not worth retrying") + "): " + error.getMessage()));
+                + (error.isRetryable() ? "worth retrying" : "not worth retrying") + "): " + error.getMessage()));
         return answer.isSuccess();
     }
 

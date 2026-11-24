@@ -58,7 +58,7 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVal
 
       completion.content shouldBe "Recursive loops"
       completion.usage shouldBe Some(TokenUsage(8, 3, 11))
-      chunks.flatMap(_.content).mkString shouldBe "Recursive loops"
+      chunks.flatMap(_.contentDelta).mkString shouldBe "Recursive loops"
     }
     ujson.read(requestBody)("stream").bool shouldBe true
   }

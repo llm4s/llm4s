@@ -4,23 +4,23 @@ import scala.meta._
 import scalafix.v1._
 
 /**
- * `error.isRecoverable` becomes `LLMError.isRecoverable(error)`.
+ * `error.isRecoverable` becomes `error.isRetryable`.
  *
- * 0.5.0 removed the member: the total `LLMError.isRecoverable` decides recoverability for every error, including a
- * custom one, which is recoverable only if it mixes in `RecoverableError`.
+ * 0.5.0 removed the member for the total `LLMError.isRecoverable(error)`, which gave way in turn to the member
+ * `isRetryable` (#2916): the one answer to "is the same request worth sending again", `false` for an error that
+ * does not override it. It is narrower than `isRecoverable` was: a `ServiceError` with a client-error status is not
+ * retryable.
  */
 class IsRecoverableToTotal extends SemanticRule("IsRecoverableToTotal") {
 
   override def description: String =
-    "Rewrites error.isRecoverable to the total LLMError.isRecoverable(error)"
+    "Rewrites error.isRecoverable to error.isRetryable"
 
-  override def fix(implicit doc: SemanticDocument): Patch = {
-    val patch = doc.tree.collect {
-      case s @ Term.Select(error, name @ Term.Name("isRecoverable")) if isMember(name) =>
-        Patch.replaceTree(s, s"LLMError.isRecoverable(${error.pos.text})")
+  override def fix(implicit doc: SemanticDocument): Patch =
+    doc.tree.collect {
+      case Term.Select(_, member @ Term.Name("isRecoverable")) if isMember(member) =>
+        Patch.replaceTree(member, "isRetryable")
     }.asPatch
-    if (patch.isEmpty) patch else patch + Migration.importOnce("org.llm4s.error", "LLMError")
-  }
 
   /** The 0.4.1 member on `LLMError` or one of its subtypes, not the companion's total function. */
   private def isMember(name: Term.Name)(implicit doc: SemanticDocument): Boolean =

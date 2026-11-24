@@ -299,7 +299,7 @@ class SmokeContractOfflineSpec
   it should "fail a streamed tool call whose chunk arrives without its call's id" in {
     val client = stub(onStream = (_, _, onChunk) => {
       onChunk(
-        StreamedChunk(id = "s", content = None, toolCall = Some(ToolCall(ToolCallId(""), "get_secret_code", vaultCall)))
+        StreamedChunk(id = "s", contentDelta = None, toolCallDelta = Some(ToolCall(ToolCallId(""), "get_secret_code", vaultCall)))
       )
       Right(completion("", List(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))))
     })
@@ -313,8 +313,8 @@ class SmokeContractOfflineSpec
       onChunk(
         StreamedChunk(
           id = "s",
-          content = None,
-          toolCall = Some(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))
+          contentDelta = None,
+          toolCallDelta = Some(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))
         )
       )
       Right(completion("", List(ToolCall(ToolCallId("call_1"), "get_secret_code", vaultCall))))
@@ -331,8 +331,8 @@ class SmokeContractOfflineSpec
         onChunk(
           StreamedChunk(
             id = "s",
-            content = None,
-            toolCall = Some(ToolCall(ToolCallId("call_1"), "get_secret_code", fragment))
+            contentDelta = None,
+            toolCallDelta = Some(ToolCall(ToolCallId("call_1"), "get_secret_code", fragment))
           )
         )
       }
@@ -350,8 +350,8 @@ class SmokeContractOfflineSpec
         onChunk(
           StreamedChunk(
             id = "s",
-            content = None,
-            toolCall = Some(ToolCall(ToolCallId("call_1"), "get_secret_code", ujson.Str(fragment)))
+            contentDelta = None,
+            toolCallDelta = Some(ToolCall(ToolCallId("call_1"), "get_secret_code", ujson.Str(fragment)))
           )
         )
       }

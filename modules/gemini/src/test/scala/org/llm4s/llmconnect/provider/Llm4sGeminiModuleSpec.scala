@@ -235,7 +235,7 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
       } { baseUrl =>
         val client = geminiClientAt(baseUrl)
         client.validate() should matchPattern {
-          case Left(error: org.llm4s.error.ServiceError) if error.httpStatus == 404 =>
+          case Left(error: org.llm4s.error.ServiceError) if error.status == 404 =>
         }
         client.close()
       }

@@ -41,7 +41,7 @@ object OllamaStreamingExample {
         conversation,
         CompletionOptions()
       )(chunk =>
-        chunk.content.foreach { text =>
+        chunk.contentDelta.foreach { text =>
           // Print incremental content as it arrives
           print(text)
           buffer.append(text)

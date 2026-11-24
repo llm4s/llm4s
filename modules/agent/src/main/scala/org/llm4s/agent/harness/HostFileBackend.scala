@@ -3,7 +3,7 @@ package org.llm4s.agent.harness
 import org.llm4s.agent.graph.{ GraphError, ReplayGuard, ReplaySupport, StateCheck, StateKey, StateUpdate }
 import org.llm4s.agent.graph.tool.LockKey
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ CancelledError, LLMError, NonRecoverableError, ProcessingError, ValidationError }
+import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
 
@@ -740,8 +740,7 @@ final class HostFileBackend private (
  */
 @Experimental
 final case class HostRootInUse(root: Path, conflict: HostRootInUse.Conflict, detail: String)
-    extends LLMError
-    with NonRecoverableError:
+    extends LLMError:
   override val message: String = s"$root cannot be opened: $detail"
 
 @Experimental

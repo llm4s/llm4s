@@ -6,7 +6,7 @@ import org.llm4s.annotation.Stable
  * Error indicating a required configuration or environment value was not found.
  *
  * Use this error when a required configuration key, environment variable, or
- * resource is missing. As a [[NonRecoverableError]], the operation cannot proceed
+ * resource is missing. It is not [[LLMError.isRetryable retryable]]: the operation cannot proceed
  * without providing the missing value.
  *
  * @param message Human-readable error description
@@ -22,8 +22,7 @@ import org.llm4s.annotation.Stable
 final case class NotFoundError private (
   override val message: String,
   key: String
-) extends LLMError
-    with NonRecoverableError {
+) extends LLMError {
   override val context: Map[String, String] = Map("key" -> key)
 }
 

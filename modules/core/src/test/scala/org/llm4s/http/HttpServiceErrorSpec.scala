@@ -60,11 +60,10 @@ class HttpServiceErrorSpec extends AnyFlatSpec with Matchers {
     val response = HttpResponse(503, "overloaded", Map("x-request-id" -> Seq("req-9"), "retry-after" -> Seq("7")))
     val err      = serviceError(response.ensureSuccess("p"))
 
-    err.httpStatus shouldBe 503
+    err.status shouldBe 503
     err.provider shouldBe "p"
     err.requestId shouldBe Some("req-9")
     err.retryAfter shouldBe Some(7.seconds)
-    err.retryDelay shouldBe Some(7.seconds)
     err.message should include("overloaded")
     err.message should include("req-9")
   }
@@ -78,7 +77,6 @@ class HttpServiceErrorSpec extends AnyFlatSpec with Matchers {
     val bare = serviceError(HttpResponse(500, "boom").ensureSuccess("p"))
     bare.requestId shouldBe None
     bare.retryAfter shouldBe None
-    bare.retryDelay shouldBe Some(ServiceError.DefaultRetryDelay)
 
     serviceError(HttpResponse(502, "x", Map("Retry-After" -> Seq("later"))).ensureSuccess("p")).retryAfter shouldBe None
   }
@@ -92,7 +90,7 @@ class HttpServiceErrorSpec extends AnyFlatSpec with Matchers {
     val original = ServiceError(503, "inner", "down", "req-1").withRetryAfter(9.seconds)
     val err      = serviceError((Left(original): Result[Int]).mapServiceError("outer", "Failed to discover models"))
 
-    err.httpStatus shouldBe 503
+    err.status shouldBe 503
     err.provider shouldBe "outer"
     err.requestId shouldBe Some("req-1")
     err.retryAfter shouldBe Some(9.seconds)

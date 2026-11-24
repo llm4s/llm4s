@@ -264,7 +264,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
       .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(chunk => chunks += chunk)
       .value
 
-    chunks.result().map(c => (c.content, c.finishReason)) shouldBe Vector(
+    chunks.result().map(c => (c.contentDelta, c.finishReason)) shouldBe Vector(
       (Some("Hel"), None),
       (Some("lo"), Some(FinishReason.Other("STOP"))) // Spring AI's reason as the model sent it
     )
@@ -289,7 +289,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
       .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(chunk => chunks += chunk)
       .value
 
-    chunks.result().flatMap(_.toolCall) shouldBe Vector(
+    chunks.result().flatMap(_.toolCallDelta) shouldBe Vector(
       ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris"))
     )
     done.toolCalls shouldBe List(ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris")))
@@ -345,7 +345,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
 
     val chunks = Vector.newBuilder[String]
     client
-      .streamComplete(conversation, CompletionOptions())(c => c.content.foreach(chunks += _))
+      .streamComplete(conversation, CompletionOptions())(c => c.contentDelta.foreach(chunks += _))
       .value
       .content shouldBe "streamed"
     chunks.result().mkString shouldBe "streamed"

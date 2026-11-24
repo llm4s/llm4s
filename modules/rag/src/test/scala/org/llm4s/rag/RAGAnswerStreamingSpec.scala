@@ -45,7 +45,7 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] = {
       this.options += options
       events += "model"
-      Seq("4", "2").foreach(t => onChunk(StreamedChunk(id = "answer", content = Some(t))))
+      Seq("4", "2").foreach(t => onChunk(StreamedChunk(id = "answer", contentDelta = Some(t))))
       Right(completion("42"))
     }
     override def getContextWindow(): Int     = 4096

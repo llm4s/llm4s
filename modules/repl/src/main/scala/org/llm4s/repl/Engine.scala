@@ -34,7 +34,7 @@ private[repl] object Engine {
           Conversation(prior ++ turn),
           options
         )(chunk =>
-          chunk.content.filter(_.nonEmpty).foreach { text =>
+          chunk.contentDelta.filter(_.nonEmpty).foreach { text =>
             out.print(text)
             out.flush()
             printed.set(true)

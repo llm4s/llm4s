@@ -208,7 +208,7 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
 
     result match
       case Left(err: ServiceError) =>
-        err.httpStatus shouldBe 404
+        err.status shouldBe 404
         err.provider shouldBe "test-provider"
       case Left(err) =>
         fail(s"Expected ServiceError, got: ${err.message}")
@@ -680,7 +680,7 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
       case e: org.llm4s.error.NetworkError =>
         e.message should include("Connection reset")
         (e.message should not).include("secret")
-        org.llm4s.error.LLMError.isRecoverable(e) shouldBe true
+        e.isRetryable shouldBe true
       case other => fail(s"expected NetworkError, got $other")
     }
     HttpFailures.streamReadError(new java.net.SocketTimeoutException("read timed out"), url, 3.seconds) shouldBe a[

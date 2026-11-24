@@ -576,7 +576,7 @@ class RunClaimSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
   }
 
   "ThreadBusy" should "be recoverable, so generic retry code retries it" in {
-    org.llm4s.error.LLMError.isRecoverable(GraphError.ThreadBusy("t", None)) shouldBe true
+    org.llm4s.error.GraphError.ThreadBusy("t", None).isRetryable shouldBe true
   }
 
   "GraphRuntime.inMemory" should "judge retention by the clock it was given, which stamps the checkpoints too" in {

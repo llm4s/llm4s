@@ -66,9 +66,9 @@ final class JlamaClient private[provider] (
   ): Result[Completion] =
     completeWithMetrics {
       val id = UUID.randomUUID().toString
-      run(conversation, options, token => onChunk(StreamedChunk(id = id, content = Some(token)))).map {
+      run(conversation, options, token => onChunk(StreamedChunk(id = id, contentDelta = Some(token)))).map {
         (completion, finish) =>
-          onChunk(StreamedChunk(id = id, content = None, finishReason = Some(finishReason(finish))))
+          onChunk(StreamedChunk(id = id, contentDelta = None, finishReason = Some(finishReason(finish))))
           completion.withId(id).withAdjustments(unsent(options))
       }
     }

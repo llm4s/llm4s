@@ -32,7 +32,7 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
     )
   private val fullUsage = tokenUsage()
   private val fullChunk = chunk()
-  private val bareChunk = StreamedChunk(id = "s-1", content = None)
+  private val bareChunk = StreamedChunk(id = "s-1", contentDelta = None)
 
   // ================================= COMPLETION =================================
 
@@ -198,8 +198,8 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
   ): StreamedChunk =
     StreamedChunk(
       id = id,
-      content = content,
-      toolCall = toolCall,
+      contentDelta = content,
+      toolCallDelta = toolCall,
       finishReason = finishReason,
       thinkingDelta = thinkingDelta
     )
@@ -209,23 +209,23 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "set and clear the content, with both overloads" in {
-    fullChunk.withContent("other") shouldBe chunk(content = Some("other"))
-    fullChunk.withContent(Some("other")) shouldBe chunk(content = Some("other"))
-    fullChunk.withContent(None) shouldBe chunk(content = None)
+    fullChunk.withContentDelta("other") shouldBe chunk(content = Some("other"))
+    fullChunk.withContentDelta(Some("other")) shouldBe chunk(content = Some("other"))
+    fullChunk.withContentDelta(None) shouldBe chunk(content = None)
 
-    bareChunk.withContent("x").content shouldBe Some("x")
-    bareChunk.withContent("x").withContent(None) shouldBe bareChunk
+    bareChunk.withContentDelta("x").contentDelta shouldBe Some("x")
+    bareChunk.withContentDelta("x").withContentDelta(None) shouldBe bareChunk
   }
 
   it should "set and clear the tool call, with both overloads" in {
     val other = ToolCall(ToolCallId("call-2"), "fetch", ujson.Obj())
 
-    fullChunk.withToolCall(other) shouldBe chunk(toolCall = Some(other))
-    fullChunk.withToolCall(Some(other)) shouldBe chunk(toolCall = Some(other))
-    fullChunk.withToolCall(None) shouldBe chunk(toolCall = None)
+    fullChunk.withToolCallDelta(other) shouldBe chunk(toolCall = Some(other))
+    fullChunk.withToolCallDelta(Some(other)) shouldBe chunk(toolCall = Some(other))
+    fullChunk.withToolCallDelta(None) shouldBe chunk(toolCall = None)
 
-    bareChunk.withToolCall(other).toolCall shouldBe Some(other)
-    bareChunk.withToolCall(other).withToolCall(None) shouldBe bareChunk
+    bareChunk.withToolCallDelta(other).toolCallDelta shouldBe Some(other)
+    bareChunk.withToolCallDelta(other).withToolCallDelta(None) shouldBe bareChunk
   }
 
   it should "set and clear the finish reason, with both overloads" in {

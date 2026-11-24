@@ -64,8 +64,8 @@ object LLMClientZSpec extends ZIOSpecDefault {
       },
       test("streamComplete emits all chunks") {
         val chunks = Seq(
-          StreamedChunk(id = "c1", content = Some("hi")),
-          StreamedChunk(id = "c2", content = Some(" there"))
+          StreamedChunk(id = "c1", contentDelta = Some("hi")),
+          StreamedChunk(id = "c2", contentDelta = Some(" there"))
         )
         for {
           emitted <- LLMClientZ(mockClient(testCompletion, chunks))
@@ -87,10 +87,10 @@ object LLMClientZSpec extends ZIOSpecDefault {
           def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = {
-            onChunk(StreamedChunk(id = "c1", content = Some("a")))
+            onChunk(StreamedChunk(id = "c1", contentDelta = Some("a")))
             // Only returns normally if the consumer observed c1 while this call is still running.
             if (released.await(Fixtures.DeadlineSeconds, java.util.concurrent.TimeUnit.SECONDS)) {
-              onChunk(StreamedChunk(id = "c2", content = Some("b")))
+              onChunk(StreamedChunk(id = "c2", contentDelta = Some("b")))
               Right(testCompletion)
             } else Left(SimpleError("first chunk was not delivered incrementally"))
           }
@@ -109,8 +109,8 @@ object LLMClientZSpec extends ZIOSpecDefault {
           def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = {
-            onChunk(StreamedChunk(id = "c1", content = Some("a")))
-            onChunk(StreamedChunk(id = "c2", content = Some("b")))
+            onChunk(StreamedChunk(id = "c1", contentDelta = Some("a")))
+            onChunk(StreamedChunk(id = "c2", contentDelta = Some("b")))
             Left(SimpleError("mid-stream"))
           }
           def getContextWindow(): Int     = 4096
@@ -136,7 +136,7 @@ object LLMClientZSpec extends ZIOSpecDefault {
           ): Result[Completion] = {
             // A cancellation that lands while `onChunk` waits for the chunk to be taken is thrown from
             // it as InterruptedException; one that lands later sets the flag, ending the park.
-            val delivered = CancelledError.catchInterrupt(onChunk(StreamedChunk(id = "c1", content = Some("a"))))
+            val delivered = CancelledError.catchInterrupt(onChunk(StreamedChunk(id = "c1", contentDelta = Some("a"))))
             // The call may only end because it was interrupted, never because the park ran out.
             sawInterrupt.set(delivered.isLeft || Fixtures.parkUntilInterrupted())
             interrupted.countDown()

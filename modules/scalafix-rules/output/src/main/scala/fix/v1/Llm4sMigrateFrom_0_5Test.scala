@@ -24,7 +24,7 @@ object Llm4sMigrateFrom_0_5Test {
     case _                                                  => ""
   }
 
-  def retryable(error: ServiceError): Boolean = error.isRecoverableStatus
+  def retryable(error: ServiceError): Boolean = error.isRetryable
 
   def unbounded(config: ToolExecutionConfig): ToolExecutionConfig = config.withTimeout(None)
 

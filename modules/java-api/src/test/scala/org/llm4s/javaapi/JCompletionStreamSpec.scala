@@ -29,7 +29,7 @@ class JCompletionStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers
 
   private def emitting(pieces: Seq[String], end: => org.llm4s.types.Result[org.llm4s.llmconnect.model.Completion]) =
     new Scripted(
-      onChunk => { pieces.foreach(p => onChunk(StreamedChunk(id = "c", content = Some(p)))); end },
+      onChunk => { pieces.foreach(p => onChunk(StreamedChunk(id = "c", contentDelta = Some(p)))); end },
       () => end
     )
 
@@ -45,7 +45,7 @@ class JCompletionStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers
   it should "skip a chunk with no text" in {
     val client = new Scripted(
       onChunk => {
-        onChunk(StreamedChunk(id = "c", content = None)); onChunk(StreamedChunk(id = "c", content = Some("a")));
+        onChunk(StreamedChunk(id = "c", contentDelta = None)); onChunk(StreamedChunk(id = "c", contentDelta = Some("a")));
         Right(completion("a"))
       },
       () => Right(completion("a"))
@@ -108,7 +108,7 @@ class JCompletionStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val client = new Scripted(
       onChunk => {
         gate.await(DeadlineSeconds, TimeUnit.SECONDS)
-        val callback = Thread.ofVirtual().start(() => onChunk(StreamedChunk(id = "c", content = Some("x"))))
+        val callback = Thread.ofVirtual().start(() => onChunk(StreamedChunk(id = "c", contentDelta = Some("x"))))
         callback.join()
         Right(completion("x"))
       },
@@ -256,7 +256,7 @@ class JCompletionStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers
       onChunk => {
         thread.set(Thread.currentThread())
         (1 to n).foreach { i =>
-          produced.incrementAndGet(); onChunk(StreamedChunk(id = "c", content = Some(s"$i")))
+          produced.incrementAndGet(); onChunk(StreamedChunk(id = "c", contentDelta = Some(s"$i")))
         }
         Left(NetworkError("down", None, "http://x"))
       },
@@ -280,7 +280,7 @@ class JCompletionStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val calls = new AtomicInteger(0)
     val client = new Scripted(
       onChunk => {
-        calls.incrementAndGet(); (1 to 200).foreach(i => onChunk(StreamedChunk(id = "c", content = Some(s"$i"))));
+        calls.incrementAndGet(); (1 to 200).foreach(i => onChunk(StreamedChunk(id = "c", contentDelta = Some(s"$i"))));
         Right(completion("all"))
       },
       () => Right(completion("all"))
@@ -391,7 +391,7 @@ class JCompletionStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers
       onChunk => {
         var i = 0
         while (!Thread.currentThread().isInterrupted && i < 1_000_000) {
-          onChunk(StreamedChunk(id = "c", content = Some("x"))); i += 1
+          onChunk(StreamedChunk(id = "c", contentDelta = Some("x"))); i += 1
         }
         if (Thread.currentThread().isInterrupted) interrupted.countDown()
         Left(org.llm4s.error.CancelledError("test"))

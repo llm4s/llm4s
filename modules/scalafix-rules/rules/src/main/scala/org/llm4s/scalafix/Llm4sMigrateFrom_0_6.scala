@@ -35,7 +35,9 @@ class Llm4sMigrateFrom_0_6 extends SemanticRule("Llm4sMigrateFrom_0_6") {
     new MessageAndConversationShapes,
     new ClientEntryPoints,
     new ToolFunctionOneTypeParameter,
-    new ToolCallIdTyped
+    new ToolCallIdTyped,
+    new ErrorIsRetryable,
+    new StreamedChunkDeltaNames
   )
 
   override def fix(implicit doc: SemanticDocument): Patch = rules.map(_.fix).asPatch

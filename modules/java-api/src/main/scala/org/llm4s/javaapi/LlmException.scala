@@ -13,15 +13,17 @@ import scala.jdk.DurationConverters.*
  * If the wrapped error carries an underlying `Throwable` (for example a
  * `cause: Option[Throwable]` field), it is exposed through `getCause`.
  *
- * The failure can be read without Scala types: [[getKind]] is a Java enum to `switch` on, [[isRecoverable]] says
- * whether trying again may help, and [[getRetryAfter]] and [[getStatusCode]] report what the provider said.
+ * The failure can be read without Scala types: [[getKind]] is a Java enum to `switch` on, [[isRetryable]] says
+ * whether sending the same request again may succeed, and [[getRetryAfter]], [[getStatusCode]] and [[getRequestId]]
+ * report what the provider said.
  *
  * {{{
  * LlmException e = result.getError();
  * switch (e.getKind()) {
  *     case RATE_LIMIT -> wait(e.getRetryAfter().orElse(Duration.ofSeconds(30)));
  *     case AUTHENTICATION, CONFIGURATION -> alertOperator(e.getMessage());
- *     default -> { if (e.isRecoverable()) retry(); else report(e); }
+ *     case CONTEXT_LENGTH -> shortenAndRetry();
+ *     default -> { if (e.isRetryable()) retry(); else report(e); }
  * }
  * }}}
  */
@@ -31,26 +33,33 @@ final class LlmException(val error: LLMError) extends RuntimeException(error.mes
   def getKind: LlmErrorKind = LlmErrorKinds.of(error)
 
   /**
-   * Whether the call may succeed if tried again, perhaps after the caller does something first (waits, re-reads,
-   * corrects the request): core's `LLMError.isRecoverable`, which is `true` exactly for a `RecoverableError`. It is
-   * wider than what is worth retrying unchanged: a provider's answer with a client-error status, such as `400`, is
-   * recoverable but needs a corrected request.
+   * Whether sending the same request again may succeed: core's `LLMError.isRetryable`, the one rule the library's
+   * own retries apply. `true` for a rate limit, a timeout, a network failure and a provider's answer with status 408,
+   * 429 or 5xx; `false` for a request the provider refused as wrong (such as a `400` or a `404`), a rejected
+   * credential and a cancellation.
    */
-  def isRecoverable: Boolean = LLMError.isRecoverable(error)
+  def isRetryable: Boolean = error.isRetryable
 
   /**
    * How long the provider asked the caller to wait before trying again - its `Retry-After` header - or empty when it
-   * did not say. Only a rate limit (`RATE_LIMIT`) or a provider's error response (`SERVICE`) carries one.
+   * did not say. It is never a delay the library made up. Usually on a rate limit (`RATE_LIMIT`) or a provider's
+   * error response (`SERVICE`).
    */
-  def getRetryAfter: Optional[Duration] = LlmErrorKinds.retryAfter(error).fold(Optional.empty[Duration]())(Optional.of)
+  def getRetryAfter: Optional[Duration] =
+    error.retryAfter.fold(Optional.empty[Duration]())(delay => Optional.of(delay.toJava))
 
   /**
-   * The HTTP status of the provider's error response, or empty when the error carries none. Present for a provider's
-   * error response that kept its status (a `ServiceError`, or an embedding provider's
-   * `EmbeddingError` whose code is a status), whose kind is `SERVICE` - or, for `400`, `401`, `403` and `429`, the kind
-   * that status means (see [[getKind]]).
+   * The HTTP status of the provider's error response (core's `LLMError.httpStatus`), or empty when the error is not
+   * a provider's response: `401` for a rejected key, `429` for a rate limit, `400` for a refused request, and
+   * whatever a `SERVICE` error answered with.
    */
-  def getStatusCode: OptionalInt = LlmErrorKinds.statusCode(error).fold(OptionalInt.empty())(OptionalInt.of)
+  def getStatusCode: OptionalInt = error.httpStatus.fold(OptionalInt.empty())(OptionalInt.of)
+
+  /**
+   * The provider's id for the failed request (core's `LLMError.requestId`), from the response's headers, or empty
+   * when it sent none: what a support ticket to the provider quotes.
+   */
+  def getRequestId: Optional[String] = error.requestId.fold(Optional.empty[String]())(Optional.of)
 }
 
 object LlmException {
@@ -64,7 +73,7 @@ object LlmException {
 }
 
 /**
- * How [[LlmException]] reads an [[org.llm4s.error.LLMError LLMError]]: its kind, its retry delay and its HTTP status.
+ * How [[LlmException]] reads an [[org.llm4s.error.LLMError LLMError]]: its kind.
  *
  * Every concrete error class in `org.llm4s.error` has an entry in [[byClass]], and `LlmErrorKindSpec` scans that
  * package and fails when one has not, so a new error class is given a kind on purpose rather than falling to
@@ -84,7 +93,9 @@ private[javaapi] object LlmErrorKinds {
     classOf[ValidationError]             -> LlmErrorKind.VALIDATION,
     classOf[InvalidInputError]           -> LlmErrorKind.VALIDATION,
     classOf[UnsupportedContentPartError] -> LlmErrorKind.VALIDATION,
-    classOf[ContentFilteredError]        -> LlmErrorKind.VALIDATION,
+    classOf[ContentFilteredError]        -> LlmErrorKind.CONTENT_FILTER,
+    classOf[ContextLengthError]          -> LlmErrorKind.CONTEXT_LENGTH,
+    classOf[ModelNotFoundError]          -> LlmErrorKind.MODEL_NOT_FOUND,
     classOf[ConfigurationError]          -> LlmErrorKind.CONFIGURATION,
     classOf[CancelledError]              -> LlmErrorKind.CANCELLED,
     classOf[ContextError]                -> LlmErrorKind.OTHER,
@@ -108,8 +119,10 @@ private[javaapi] object LlmErrorKinds {
     // an embedding provider's error response, which the embedding clients report as an `EmbeddingError` carrying the
     // status as its code, reads as a chat provider's `ServiceError` with that status does; one with no status (a
     // request that never reached the provider, a reply that could not be parsed) is `OTHER`
-    case e: EmbeddingError => statusCode(e).fold(LlmErrorKind.OTHER)(s => byStatus(s).getOrElse(LlmErrorKind.SERVICE))
-    case _ => statusCode(error).flatMap(byStatus).getOrElse(byClass.getOrElse(error.getClass, LlmErrorKind.OTHER))
+    case e: EmbeddingError =>
+      e.httpStatus.fold(LlmErrorKind.OTHER)(s => byStatus(s).getOrElse(LlmErrorKind.SERVICE))
+    case e: ServiceError => byStatus(e.status).getOrElse(LlmErrorKind.SERVICE)
+    case _               => byClass.getOrElse(error.getClass, LlmErrorKind.OTHER)
   }
 
   private def byStatus(status: Int): Option[LlmErrorKind] = status match {
@@ -117,19 +130,5 @@ private[javaapi] object LlmErrorKinds {
     case 429       => Some(LlmErrorKind.RATE_LIMIT)
     case 400       => Some(LlmErrorKind.VALIDATION)
     case _         => None
-  }
-
-  /** The HTTP status of a provider's error response. */
-  def statusCode(error: LLMError): Option[Int] = error match {
-    case e: ServiceError   => Some(e.httpStatus)
-    case e: EmbeddingError => e.code.flatMap(_.trim.toIntOption).filter(s => s >= 100 && s <= 599)
-    case _                 => None
-  }
-
-  /** The delay the provider asked for, not the library's default backoff. */
-  def retryAfter(error: LLMError): Option[Duration] = error match {
-    case e: RateLimitError => e.retryAfter.map(_.toJava)
-    case e: ServiceError   => e.retryAfter.map(_.toJava)
-    case _                 => None
   }
 }

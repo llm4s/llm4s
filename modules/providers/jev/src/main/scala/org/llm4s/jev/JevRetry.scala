@@ -1,7 +1,6 @@
 package org.llm4s.jev
 
 import org.llm4s.error.{ CancelledError, LLMError, RateLimitError, ServiceError }
-import org.llm4s.reliability.RetryPolicy
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -11,7 +10,7 @@ import scala.concurrent.duration.*
 /**
  * Runs an operation under a [[JevRetryPolicy]].
  *
- * Whether a failure is retried is [[org.llm4s.reliability.RetryPolicy.isTransient]], LLM4S's one rule. The wait
+ * Whether a failure is retried is [[org.llm4s.error.LLMError.isRetryable]], LLM4S's one rule. The wait
  * before a retry is the delay the server asked for when it asked for one (the error's `retryAfter`), else the
  * policy's exponential backoff with jitter. The whole call is bounded by the policy's budget: each attempt is handed
  * what is left of it, so it can cap its own timeout there, and when the wait before a retry would reach what is left,
@@ -61,7 +60,7 @@ final private[jev] class JevRetry(
       CancelledError.attempt("jev")(operation(left)) match {
         case success @ Right(_) => success
         case failure @ Left(error) =>
-          if (number > policy.maxRetries || !RetryPolicy.isTransient(error)) failure
+          if (number > policy.maxRetries || !error.isRetryable) failure
           else {
             val delay = serverHint(error).getOrElse(backoff(number))
             // compared with what is left rather than added to what has passed: a server's delay can be close to the

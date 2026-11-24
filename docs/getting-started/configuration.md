@@ -1479,7 +1479,7 @@ openai-main {
 client.complete(Conversation(Seq(UserMessage("Your query"))))
 
 // Streaming: get tokens as they arrive
-client.streamComplete(Conversation(Seq(UserMessage("Your query"))))(chunk => chunk.content.foreach(print))
+client.streamComplete(Conversation(Seq(UserMessage("Your query"))))(chunk => chunk.contentDelta.foreach(print))
 ```
 
 3. **Reduce response length:**

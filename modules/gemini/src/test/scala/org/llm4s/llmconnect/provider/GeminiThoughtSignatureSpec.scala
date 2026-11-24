@@ -536,7 +536,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       val completion = client.streamComplete(firstTurn, CompletionOptions())(chunks += _).value
 
       completion.toolCalls.map(_.arguments("city").str) shouldBe Seq("Paris", "Rome")
-      chunks.flatMap(_.toolCall).map(_.id).distinct should have size 2
+      chunks.flatMap(_.toolCallDelta).map(_.id).distinct should have size 2
 
       wire.body = response(text("Both sunny."))
       client.complete(continuation(completion.message), CompletionOptions()).value
@@ -662,8 +662,8 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
     val chunks = GeminiThoughtSignatures.chunks(parsed, "m", Some(FinishReason.ToolCalls))
 
-    chunks.map(_.toolCall.map(_.id)) shouldBe Seq(Some("a"), Some("b"))
-    chunks.map(_.content) shouldBe Seq(Some("hi"), None)
+    chunks.map(_.toolCallDelta.map(_.id)) shouldBe Seq(Some("a"), Some("b"))
+    chunks.map(_.contentDelta) shouldBe Seq(Some("hi"), None)
     chunks.map(_.thinkingDelta) shouldBe Seq(Some("hmm"), None)
     chunks.map(_.finishReason) shouldBe Seq(None, Some(FinishReason.ToolCalls))
   }
@@ -674,7 +674,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     val chunks = GeminiThoughtSignatures.chunks(parsed, "m", Some(FinishReason.Stop))
 
     chunks should have size 1
-    chunks.head.content shouldBe None
+    chunks.head.contentDelta shouldBe None
     chunks.head.finishReason shouldBe Some(FinishReason.Stop)
   }
 

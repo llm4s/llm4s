@@ -3,7 +3,15 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.TroubleshootingLinks.Entry
-import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, ServiceError, TroubleshootingLinks }
+import org.llm4s.error.{
+  AuthenticationError,
+  ContextLengthError,
+  LLMError,
+  ModelNotFoundError,
+  RateLimitError,
+  ServiceError,
+  TroubleshootingLinks
+}
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
@@ -67,8 +75,30 @@ final class OpenAICompatibleTroubleshootingLinksSpec extends AnyWordSpec with Ma
   "An OpenAI-compatible server replying 404" should {
     "say to check the model and list the provider's models, and link #model-not-found" in {
       val error = failure(404, """{"error":{"message":"model local-nope not found","type":"not_found"}}""")
+      error shouldBe a[ModelNotFoundError]
+      error.httpStatus shouldBe Some(404)
+      error.isRetryable shouldBe false
+      assertLinked(error, TroubleshootingLinks.ModelNotFoundAction, Entry.ModelNotFound)
+    }
+
+    "stay a ServiceError when the body does not say the model is unknown, as a wrong baseUrl answers" in {
+      val error = failure(404, "<html>Not Found</html>")
       error shouldBe a[ServiceError]
       assertLinked(error, TroubleshootingLinks.ModelNotFoundAction, Entry.ModelNotFound)
+    }
+  }
+
+  "An OpenAI-compatible server refusing a request as too long" should {
+    "return a ContextLengthError with the tokens its message states" in {
+      val body =
+        """{"error":{"message":"This model's maximum context length is 8192 tokens. However, your messages resulted in 9431 tokens.","type":"invalid_request_error","code":"context_length_exceeded"}}"""
+      failure(400, body) match {
+        case e: ContextLengthError =>
+          (e.limit, e.requestedTokens) shouldBe (Some(8192), Some(9431))
+          e.httpStatus shouldBe Some(400)
+          e.isRetryable shouldBe false
+        case other => fail(s"expected a ContextLengthError, got $other")
+      }
     }
   }
 }

@@ -297,7 +297,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
           val error = p.client.complete(hello).left.value
           withClue(s"${p.id}: $error") {
             error shouldBe a[ServiceError]
-            error.asInstanceOf[ServiceError].httpStatus shouldBe 500
+            error.asInstanceOf[ServiceError].status shouldBe 500
             retryable(error) shouldBe true
           }
         }

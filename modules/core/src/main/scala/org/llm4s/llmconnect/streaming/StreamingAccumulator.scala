@@ -51,13 +51,13 @@ final class StreamingAccumulator private (model: ModelName) {
     }
 
     // Accumulate main content
-    chunk.content.foreach(contentBuilder.append)
+    chunk.contentDelta.foreach(contentBuilder.append)
 
     // Accumulate thinking content
     chunk.thinkingDelta.foreach(thinkingBuilder.append)
 
     // Handle tool calls
-    chunk.toolCall.foreach { toolCall =>
+    chunk.toolCallDelta.foreach { toolCall =>
       if (toolCall.id.asString.nonEmpty) {
         // New tool call or update to existing
         val partial = partialToolCalls.getOrElseUpdate(

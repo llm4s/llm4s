@@ -1,6 +1,6 @@
 package org.llm4s.speech.stt
 
-import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
+import org.llm4s.error.LLMError
 import org.llm4s.types.Result
 import org.llm4s.speech.{ AudioInput, AudioMeta }
 
@@ -346,9 +346,8 @@ final case class Transcription(
 /**
  * Errors that can occur during speech-to-text processing.
  *
- * `EngineNotAvailable` is a [[org.llm4s.error.RecoverableError RecoverableError]]; `UnsupportedFormat` and `InvalidInput` are
- * [[org.llm4s.error.NonRecoverableError NonRecoverableError]]s. `ProcessingFailed` carries no marker, so `LLMError.isRecoverable` and the library's
- * automatic retries treat it as not recoverable: the clients raise it for an empty transcription, audio with no
+ * `EngineNotAvailable` is [[org.llm4s.error.LLMError.isRetryable retryable]]; `UnsupportedFormat`, `InvalidInput` and
+ * `ProcessingFailed` are not, so the library's automatic retries leave them alone. For `ProcessingFailed`, the clients raise it for an empty transcription, audio with no
  * recognisable speech and an unparseable response, which sending the same audio again does not fix. Its
  * `retryable` flag still says `true`, for a caller that wants to offer the user a retry.
  */
@@ -363,9 +362,9 @@ object STTError {
   final case class EngineNotAvailable(
     message: String,
     override val context: Map[String, String] = Map.empty
-  ) extends STTError
-      with RecoverableError {
-    override val retryable: Boolean = true
+  ) extends STTError {
+    override def isRetryable: Boolean = true
+    override val retryable: Boolean   = true
     override def userFriendly       = "Speech recognition service is temporarily unavailable. Please try again."
   }
 
@@ -375,8 +374,7 @@ object STTError {
     format: String,
     supported: List[String],
     override val context: Map[String, String] = Map.empty
-  ) extends STTError
-      with NonRecoverableError {
+  ) extends STTError {
     override def userFriendly = s"Audio format '$format' not supported. Supported: ${supported.mkString(", ")}"
   }
 
@@ -394,8 +392,7 @@ object STTError {
   final case class InvalidInput(
     message: String,
     override val context: Map[String, String] = Map.empty
-  ) extends STTError
-      with NonRecoverableError {
+  ) extends STTError {
     override def userFriendly = "Invalid audio or configuration provided."
   }
 }

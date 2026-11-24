@@ -86,7 +86,7 @@ class TapirChatRoutesSpec extends AnyFlatSpec with Matchers {
       withClue(s"${error.getClass.getSimpleName}: ")(response.status shouldBe status)
       val body = json(response)("error")
       body("type").str shouldBe error.getClass.getSimpleName
-      body("recoverable").bool shouldBe LLMError.isRecoverable(error)
+      body("retryable").bool shouldBe error.isRetryable
     }
   }
 

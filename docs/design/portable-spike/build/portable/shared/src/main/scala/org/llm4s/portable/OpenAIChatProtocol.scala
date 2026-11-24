@@ -190,12 +190,12 @@ object OpenAIChatProtocol {
           val name = fn.flatMap(_.obj.get("name")).flatMap(_.strOpt).filter(_.nonEmpty).getOrElse(knownName)
           args.append(fragment)
           calls(index) = (callId, name, args)
-          StreamedChunk(id = id, content = None, toolCall = Some(ToolCall(callId, name, ujson.Str(fragment))))
+          StreamedChunk(id = id, contentDelta = None, toolCallDelta = Some(ToolCall(callId, name, ujson.Str(fragment))))
       }
-      val textChunk = content.map(t => StreamedChunk(id = id, content = Some(t))).toVector
+      val textChunk = content.map(t => StreamedChunk(id = id, contentDelta = Some(t))).toVector
       val finishChunk =
         if (finish.nonEmpty && textChunk.isEmpty && toolChunks.isEmpty)
-          Vector(StreamedChunk(id = id, content = None, finishReason = finish))
+          Vector(StreamedChunk(id = id, contentDelta = None, finishReason = finish))
         else Vector.empty
       (textChunk ++ toolChunks).map(_.withFinishReason(finish)) ++ finishChunk
     }

@@ -104,7 +104,7 @@ class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
         case other => fail(s"expected a ContentFilteredError, got $other")
       }
     }
-    chunks.flatMap(_.content).mkString shouldBe "Here"
+    chunks.flatMap(_.contentDelta).mkString shouldBe "Here"
     chunks.flatMap(_.finishReason) shouldBe empty
   }
 }

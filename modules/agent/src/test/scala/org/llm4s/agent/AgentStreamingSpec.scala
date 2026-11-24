@@ -47,7 +47,7 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
       streamed.incrementAndGet()
       thinking.foreach(t => onChunk(StreamedChunk("c", None, thinkingDelta = Some(t))))
       chunks.foreach(c => onChunk(StreamedChunk("c", Some(c))))
-      toolCalls.foreach(tc => onChunk(StreamedChunk("c", None, toolCall = Some(tc))))
+      toolCalls.foreach(tc => onChunk(StreamedChunk("c", None, toolCallDelta = Some(tc))))
       Right(completion)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 1024
@@ -137,7 +137,7 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
         Right(answer(n.getAndIncrement()))
       override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         val i = n.getAndIncrement()
-        if i == 0 then f(StreamedChunk("c", None, toolCall = Some(call)))
+        if i == 0 then f(StreamedChunk("c", None, toolCallDelta = Some(call)))
         else f(StreamedChunk("c", Some("done")))
         Right(answer(i))
       override def getContextWindow(): Int     = 4096

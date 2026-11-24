@@ -7,7 +7,7 @@ import org.llm4s.annotation.Stable
  *
  * Represents errors from command or process execution that may be transient,
  * such as temporary resource unavailability or intermittent failures.
- * As a [[RecoverableError]], retry strategies can be applied.
+ * It is [[LLMError.isRetryable retryable]]: retry strategies can be applied.
  *
  * @param message Human-readable error description
  * @param operation The operation that failed (e.g., "bash-script", "api-call")
@@ -28,8 +28,9 @@ final case class ExecutionError private (
   exitCode: Option[Int],
   cause: Option[Throwable],
   override val context: Map[String, String]
-) extends LLMError
-    with RecoverableError {
+) extends LLMError {
+
+  override def isRetryable: Boolean = true
 
   /** Adds a single key-value pair to the error context. */
   def withContext(key: String, value: String): ExecutionError =

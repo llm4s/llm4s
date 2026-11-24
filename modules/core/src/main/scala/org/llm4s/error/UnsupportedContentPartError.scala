@@ -6,7 +6,7 @@ import org.llm4s.annotation.Stable
  * A message carries a content part the provider cannot send: an image or a document its API does
  * not take, from a source it cannot read, in a role it cannot carry it in, or a file uploaded to
  * another provider. The request fails before anything is sent, rather than have the part dropped
- * or sent as text. As a [[NonRecoverableError]], the conversation must change before a retry.
+ * or sent as text. It is not [[LLMError.isRetryable retryable]]: the conversation must change before a retry.
  *
  * @param provider the client's provider id, e.g. `ollama`
  * @param part     the part's kind, e.g. `image (url, image/png)` (see `ContentPart.kind`)
@@ -18,8 +18,7 @@ final case class UnsupportedContentPartError private (
   provider: String,
   part: String,
   role: String
-) extends LLMError
-    with NonRecoverableError {
+) extends LLMError {
   override val context: Map[String, String] = Map("provider" -> provider, "part" -> part, "role" -> role)
 }
 

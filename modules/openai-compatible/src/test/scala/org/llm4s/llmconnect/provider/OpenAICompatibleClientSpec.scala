@@ -115,7 +115,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
       val result = client(config(baseUrl)).streamComplete(conversation, CompletionOptions())(chunks += _)
       result.value.content shouldBe "Hello local"
       result.value.model shouldBe ModelName("local-model")
-      chunks.flatMap(_.content).mkString shouldBe "Hello local"
+      chunks.flatMap(_.contentDelta).mkString shouldBe "Hello local"
     }
 
   it should "report the configured context window and reserve" in {

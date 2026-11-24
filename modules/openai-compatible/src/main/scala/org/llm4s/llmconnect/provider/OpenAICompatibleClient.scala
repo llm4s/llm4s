@@ -261,7 +261,7 @@ class OpenAICompatibleClient(
               ChatCompletionsFinishReason.filtered(
                 providerName,
                 chunks.flatMap(_.finishReason).headOption,
-                textLength + chunks.flatMap(_.content).map(_.length).sum,
+                textLength + chunks.flatMap(_.contentDelta).map(_.length).sum,
                 None
               ) match {
                 case Some(stopped) =>
@@ -274,7 +274,7 @@ class OpenAICompatibleClient(
                       if (reason == FinishReason.Other("error"))
                         failure = Some(ServiceError(502, providerName, "the stream ended with finish_reason 'error'"))
                     }
-                    textLength += chunk.content.map(_.length).getOrElse(0)
+                    textLength += chunk.contentDelta.map(_.length).getOrElse(0)
                     accumulator.addChunk(chunk)
                     onChunk(chunk)
                   }
@@ -782,10 +782,13 @@ class OpenAICompatibleClient(
             providerName,
             HttpErrorMapper.extractErrorDetails(scrubbed, statusCode, providerName),
             statusCode.toString
-          )
+          ).withHttpStatus(statusCode)
         )
       )
-    else Left(HttpErrorMapper.toError(statusCode, scrubbed, providerName, headers))
+    else
+      Left(
+        HttpErrorMapper.naming(HttpErrorMapper.toError(statusCode, scrubbed, providerName, headers), settings.model.asString)
+      )
   }
 
   /**

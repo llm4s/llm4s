@@ -7,7 +7,7 @@ import org.llm4s.types.{ SessionId, FilePath }
  * The errors of the interactive assistant (`org.llm4s.assistant`): console I/O, session files and commands.
  *
  * An `AssistantError` is an [[LLMError]], so an assistant operation's `Either[AssistantError, A]` is a
- * `Result[A]`. None is retried by the library: each is a [[NonRecoverableError]].
+ * `Result[A]`. None is retried by the library: none is [[LLMError.isRetryable retryable]].
  *
  * == Growth safety ==
  * Each case is a `final case class` with a private constructor and `copy`:
@@ -18,7 +18,7 @@ import org.llm4s.types.{ SessionId, FilePath }
  * constructor order.
  */
 @Experimental
-sealed abstract class AssistantError extends LLMError with NonRecoverableError
+sealed abstract class AssistantError extends LLMError
 
 @Experimental
 object AssistantError {

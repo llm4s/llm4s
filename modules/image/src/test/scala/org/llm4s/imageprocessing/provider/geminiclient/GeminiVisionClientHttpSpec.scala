@@ -431,7 +431,7 @@ class GeminiVisionClientHttpSpec extends AnyFlatSpec with Matchers with BeforeAn
       e shouldBe a[ServiceError]
       val api = e.asInstanceOf[ServiceError]
       api.provider shouldBe "Gemini"
-      api.httpStatus shouldBe code
+      api.status shouldBe code
       e.message should include(s"msg for $code")
       e.message should include(st)
       (errString(e) should not).include(Key)
@@ -442,7 +442,7 @@ class GeminiVisionClientHttpSpec extends AnyFlatSpec with Matchers with BeforeAn
     reply = Reply(502, "<html>Bad Gateway</html>")
     val p = image(".png", "png")
     val e = new GeminiVisionClient(cfg()).analyzeImage(p.toString).left.toOption.get
-    e.asInstanceOf[ServiceError].httpStatus shouldBe 502
+    e.asInstanceOf[ServiceError].status shouldBe 502
     e.message should include("Bad Gateway")
   }
 

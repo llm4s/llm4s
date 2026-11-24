@@ -236,7 +236,7 @@ class AwsSecretsManagerApiKeyProviderSpec extends AnyFlatSpec with Matchers with
     clock.advance(10.seconds)
     val e = error(p)
     e shouldBe a[ServiceError]
-    e.asInstanceOf[ServiceError].httpStatus shouldBe 500
+    e.asInstanceOf[ServiceError].status shouldBe 500
     e.message should include("InternalServiceError")
     e.message should include("An error occurred on the server side.")
     assertNoSecrets(e, "sk-before-outage")

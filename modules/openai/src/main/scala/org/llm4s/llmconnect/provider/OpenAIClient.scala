@@ -497,10 +497,10 @@ class OpenAIClient private[provider] (
       onChunk(chunk)
     }
 
-    emit(StreamedChunk(id = chunkId, content = contentOpt, toolCall = toolCalls.headOption, finishReason))
+    emit(StreamedChunk(id = chunkId, contentDelta = contentOpt, toolCallDelta = toolCalls.headOption, finishReason))
     toolCalls
       .drop(1)
-      .foreach(tc => emit(StreamedChunk(id = chunkId, content = None, toolCall = Some(tc), finishReason = None)))
+      .foreach(tc => emit(StreamedChunk(id = chunkId, contentDelta = None, toolCallDelta = Some(tc), finishReason = None)))
   }
 
   /**
@@ -515,13 +515,13 @@ class OpenAIClient private[provider] (
     onChunk(
       StreamedChunk(
         id = completion.id,
-        content = contentOpt,
-        toolCall = completion.toolCalls.headOption,
+        contentDelta = contentOpt,
+        toolCallDelta = completion.toolCalls.headOption,
         finishReason = Some(completion.finishReason) // the reply's own reason, not a made-up "stop"
       )
     )
     completion.toolCalls.drop(1).foreach { tc =>
-      onChunk(StreamedChunk(id = completion.id, content = None, toolCall = Some(tc), finishReason = None))
+      onChunk(StreamedChunk(id = completion.id, contentDelta = None, toolCallDelta = Some(tc), finishReason = None))
     }
   }
 

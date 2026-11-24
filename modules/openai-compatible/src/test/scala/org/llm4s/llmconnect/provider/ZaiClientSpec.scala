@@ -470,8 +470,8 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     chunks should have size 1
     val chunk = chunks(0)
     chunk.id shouldBe "chunk-1"
-    chunk.content shouldBe Some("Hello")
-    chunk.toolCall shouldBe None
+    chunk.contentDelta shouldBe Some("Hello")
+    chunk.toolCallDelta shouldBe None
   }
 
   it should "parse text content in array format" in {
@@ -492,7 +492,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val chunks = helper.testParseStreamingChunks(json)
 
     chunks should have size 1
-    chunks(0).content shouldBe Some("Array text")
+    chunks(0).contentDelta shouldBe Some("Array text")
   }
 
   it should "parse finish reason" in {
@@ -555,9 +555,9 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val chunks = helper.testParseStreamingChunks(json)
 
     chunks should have size 1
-    chunks(0).toolCall shouldBe defined
-    chunks(0).toolCall.map(_.id) shouldBe Some("tool-call-1")
-    chunks(0).toolCall.map(_.name) shouldBe Some("test_func")
+    chunks(0).toolCallDelta shouldBe defined
+    chunks(0).toolCallDelta.map(_.id) shouldBe Some("tool-call-1")
+    chunks(0).toolCallDelta.map(_.name) shouldBe Some("test_func")
   }
 
   it should "return empty sequence for empty choices" in {
@@ -689,8 +689,8 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
         Seq(
           StreamedChunk(
             id = chunkId,
-            content = content,
-            toolCall = None,
+            contentDelta = content,
+            toolCallDelta = None,
             finishReason = finishReason,
             thinkingDelta = None
           )
@@ -698,16 +698,16 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
       } else {
         val first = StreamedChunk(
           id = chunkId,
-          content = content,
-          toolCall = toolCalls.headOption,
+          contentDelta = content,
+          toolCallDelta = toolCalls.headOption,
           finishReason = finishReason,
           thinkingDelta = None
         )
         val rest = toolCalls.drop(1).map { tc =>
           StreamedChunk(
             id = chunkId,
-            content = None,
-            toolCall = Some(tc),
+            contentDelta = None,
+            toolCallDelta = Some(tc),
             finishReason = None,
             thinkingDelta = None
           )

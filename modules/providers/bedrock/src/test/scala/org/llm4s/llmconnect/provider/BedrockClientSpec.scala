@@ -240,7 +240,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
     }
 
     "map InternalServerException (500) to ServiceError carrying the status" in {
-      failWith(500, "InternalServerException") should matchPattern { case e: ServiceError if e.httpStatus == 500 => }
+      failWith(500, "InternalServerException") should matchPattern { case e: ServiceError if e.status == 500 => }
     }
 
     "map a failure to reach Bedrock at all to NetworkError, not UnknownError" in {
@@ -258,7 +258,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
       } { url =>
         val (result, chunks) = collect(new BedrockClient(config(url)))
 
-        chunks.flatMap(_.content) shouldBe List("Hel", "lo!")
+        chunks.flatMap(_.contentDelta) shouldBe List("Hel", "lo!")
         val completion = result.toOption.value
         completion.content shouldBe "Hello!"
         completion.model.asString shouldBe Model
@@ -335,7 +335,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
       val frames = Seq(textDelta("partial"), exceptionFrame("throttlingException", "slow down"))
       withServer("/")(sendEventStream(_, frames)) { url =>
         val (result, chunks) = collect(new BedrockClient(config(url)))
-        chunks.flatMap(_.content) shouldBe List("partial")
+        chunks.flatMap(_.contentDelta) shouldBe List("partial")
         result.left.toOption.value shouldBe a[RateLimitError]
       }
     }

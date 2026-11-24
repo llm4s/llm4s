@@ -164,7 +164,7 @@ class AnthropicWebSearchSpec extends AnyFlatSpec with Matchers {
       completion.citations shouldBe expected
       completion.content shouldBe "Scala 3.8 is out."
       completion.toolCalls shouldBe empty
-      chunks.result().flatMap(_.toolCall) shouldBe empty
+      chunks.result().flatMap(_.toolCallDelta) shouldBe empty
     }
   }
 

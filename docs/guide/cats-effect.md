@@ -68,7 +68,7 @@ are emitted first and the stream then fails with `LLMException`:
 ```scala
 client
   .streamComplete(conversation)
-  .evalMap(chunk => IO.print(chunk.content.getOrElse("")))
+  .evalMap(chunk => IO.print(chunk.contentDelta.getOrElse("")))
   .compile
   .drain
 ```

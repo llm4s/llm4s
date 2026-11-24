@@ -10,6 +10,9 @@ import org.llm4s.annotation.Stable
  *             it is [[LLMError.code]]. `None` for an error that is not an HTTP reply.
  * @param message Human-readable error message from the provider or client.
  * @param provider Source component ("openai", "voyage", "encoder", "extractor", etc.)
+ *
+ * [[httpStatus]] is `code` when it is an HTTP status. An embedding error is [[LLMError.isRetryable retryable]]
+ * when that status is 408, 429 or 5xx, as a [[ServiceError]] with it would be; one with no status is not.
  */
 @Stable
 final case class EmbeddingError private (
@@ -18,6 +21,10 @@ final case class EmbeddingError private (
   provider: String
 ) extends LLMError {
   override val context: Map[String, String] = Map("provider" -> provider)
+
+  override def httpStatus: Option[Int] = code.flatMap(_.toIntOption).filter(s => s >= 100 && s <= 599)
+
+  override def isRetryable: Boolean = httpStatus.exists(ServiceError.isRetryableStatus)
 }
 
 object EmbeddingError {

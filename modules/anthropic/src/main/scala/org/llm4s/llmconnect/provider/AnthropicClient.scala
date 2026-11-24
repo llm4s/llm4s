@@ -429,8 +429,8 @@ curl https://api.anthropic.com/v1/messages \
                       textLength += text.length
                       val chunk = StreamedChunk(
                         id = currentMessageId.getOrElse(""),
-                        content = Some(text),
-                        toolCall = None,
+                        contentDelta = Some(text),
+                        toolCallDelta = None,
                         finishReason = None
                       )
                       accumulator.addChunk(chunk)
@@ -451,8 +451,8 @@ curl https://api.anthropic.com/v1/messages \
                         .append(thinkingText)
                       val chunk = StreamedChunk(
                         id = currentMessageId.getOrElse(""),
-                        content = None,
-                        toolCall = None,
+                        contentDelta = None,
+                        toolCallDelta = None,
                         finishReason = None,
                         thinkingDelta = Some(thinkingText)
                       )
@@ -491,8 +491,8 @@ curl https://api.anthropic.com/v1/messages \
                     if (fragment != null && fragment.nonEmpty && toolCallId.nonEmpty) {
                       val chunk = StreamedChunk(
                         id = currentMessageId.getOrElse(""),
-                        content = None,
-                        toolCall =
+                        contentDelta = None,
+                        toolCallDelta =
                           Some(ToolCall(id = ToolCallId(toolCallId), name = "", arguments = ujson.Str(fragment))),
                         finishReason = None
                       )
@@ -518,8 +518,8 @@ curl https://api.anthropic.com/v1/messages \
                   blockIndexToToolId(contentStart.index()) = toolUse.id()
                   val chunk = StreamedChunk(
                     id = currentMessageId.getOrElse(""),
-                    content = None,
-                    toolCall =
+                    contentDelta = None,
+                    toolCallDelta =
                       Some(ToolCall(id = ToolCallId(toolUse.id()), name = toolUse.name(), arguments = ujson.Obj())),
                     finishReason = None
                   )
@@ -539,8 +539,8 @@ curl https://api.anthropic.com/v1/messages \
               if (messageStopOpt != null && messageStopOpt.isPresent && !stopReason.contains(AnthropicClient.Refusal)) {
                 val chunk = StreamedChunk(
                   id = currentMessageId.getOrElse(""),
-                  content = None,
-                  toolCall = None,
+                  contentDelta = None,
+                  toolCallDelta = None,
                   finishReason = Some(stopReason.fold(FinishReason.Unknown)(AnthropicClient.finishReason))
                 )
                 accumulator.addChunk(chunk)
@@ -1297,10 +1297,28 @@ object AnthropicClient {
         TroubleshootingLinks.annotate(mapSdkError(e))
       )
 
-  private def mapSdkError(e: Throwable): LLMError = {
+  private def mapSdkError(e: Throwable): LLMError = e match {
+    // a reply from the service: the error its type maps to, carrying the reply's status and request id
+    case service: com.anthropic.errors.AnthropicServiceException
+        if !service.isInstanceOf[com.anthropic.errors.SseException] =>
+      HttpErrorMapper.withRequestId(
+        mapException(service),
+        Try(headerMap(service.headers())).toOption.flatMap(org.llm4s.http.HttpHeaders.requestId)
+      )
+    case other => mapException(other)
+  }
+
+  /** The machine-readable codes of a service reply's body (`not_found_error`, `invalid_request_error`). */
+  private def errorCodes(e: com.anthropic.errors.AnthropicServiceException): Set[String] =
+    Try(ObjectMappers.jsonMapper().writeValueAsString(e.body())).toOption
+      .map(HttpErrorMapper.errorCodes)
+      .getOrElse(Set.empty)
+
+  private def mapException(e: Throwable): LLMError = {
     def safe(message: String): String = Redaction.remoteBody(Option(message).getOrElse(""))
     e match {
-      case e: com.anthropic.errors.UnauthorizedException => AuthenticationError("anthropic", safe(e.getMessage))
+      case e: com.anthropic.errors.UnauthorizedException =>
+        AuthenticationError("anthropic", safe(e.getMessage)).withHttpStatus(401)
       // the service's Retry-After, as HttpErrorMapper reads it for the other providers, so ReliableClient waits that long
       case e: com.anthropic.errors.RateLimitException =>
         Left(
@@ -1311,14 +1329,25 @@ object AnthropicClient {
       case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", safe(e.getMessage))
       // the service refused the request - a vendor limit (an image count, a request size) among others: typed, with
       // its message, as HttpErrorMapper maps the other providers' responses
-      case e: com.anthropic.errors.BadRequestException => ValidationError("request", safe(e.getMessage))
+      // except "prompt is too long", which is the typed context-length error a caller reacts to
+      case e: com.anthropic.errors.BadRequestException =>
+        HttpErrorMapper
+          .typed(400, errorCodes(e), safe(e.getMessage), "anthropic")
+          .getOrElse(ValidationError("request", safe(e.getMessage)).withHttpStatus(400))
       // an `error` event in a stream, after the 200 status: the status its error type stands for, and its message
       case e: com.anthropic.errors.SseException => streamError(e.body())
+      // a 404 `not_found_error` naming the model is the typed model-not-found error; any other reply keeps its
+      // status, with the Retry-After a 529 or 503 may carry
       case e: com.anthropic.errors.AnthropicServiceException =>
-        ServiceError(e.statusCode(), "anthropic", safe(e.getMessage))
+        HttpErrorMapper.typed(e.statusCode(), errorCodes(e), safe(e.getMessage), "anthropic").getOrElse {
+          val error = ServiceError(e.statusCode(), "anthropic", safe(e.getMessage))
+          Try(headerMap(e.headers())).toOption
+            .flatMap(org.llm4s.http.HttpHeaders.retryAfter(_, java.time.Clock.systemUTC()))
+            .fold(error)(error.withRetryAfter)
+        }
       // the SDK wraps every I/O failure - a refused connection, a timeout - in one exception: map it by its
       // cause, as OpenAIClient does, so it is a recoverable NetworkError or TimeoutError, not an UnknownError
-      case io: com.anthropic.errors.AnthropicIoException if io.getCause != null => mapSdkError(io.getCause)
+      case io: com.anthropic.errors.AnthropicIoException if io.getCause != null => mapException(io.getCause)
       case e =>
         SdkErrorMapper(e, "anthropic") match {
           case unknown: UnknownError => UnknownError(safe(unknown.message), e)

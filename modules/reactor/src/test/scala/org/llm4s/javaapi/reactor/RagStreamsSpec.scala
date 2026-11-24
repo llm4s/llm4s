@@ -27,7 +27,7 @@ class RagStreamsSpec extends AnyFlatSpec with Matchers {
 
   private def streaming(pieces: Seq[String], end: => Result[Completion]): LLMClient =
     new Scripted(
-      onChunk => { pieces.foreach(p => onChunk(StreamedChunk(id = "c", content = Some(p)))); end },
+      onChunk => { pieces.foreach(p => onChunk(StreamedChunk(id = "c", contentDelta = Some(p)))); end },
       () => end
     )
 
@@ -160,7 +160,7 @@ class RagStreamsSpec extends AnyFlatSpec with Matchers {
       onChunk => {
         thread.set(Thread.currentThread())
         emitting.countDown()
-        pieces.foreach(p => onChunk(StreamedChunk(id = "c", content = Some(p))))
+        pieces.foreach(p => onChunk(StreamedChunk(id = "c", contentDelta = Some(p))))
         ended.countDown()
         Right(completion(pieces.mkString))
       },

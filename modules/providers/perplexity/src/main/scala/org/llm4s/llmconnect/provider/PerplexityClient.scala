@@ -218,7 +218,7 @@ class PerplexityClient(
                   case "response.output_text.delta" =>
                     fields.flatMap(_.get("delta")).flatMap(_.strOpt).filter(_.nonEmpty).foreach { delta =>
                       streamed.append(delta)
-                      onChunk(StreamedChunk(id = responseId, content = Some(delta)))
+                      onChunk(StreamedChunk(id = responseId, contentDelta = Some(delta)))
                     }
                   case "response.completed" =>
                     completed = Some(fields.flatMap(_.get("response")).getOrElse(ujson.Null))
@@ -246,8 +246,8 @@ class PerplexityClient(
       // checked before the calls are delivered: a call in a reply cut at a limit never reaches the caller
       done <- ToolCallRules.checked(completion(whole.copy(id = id)))
     } yield {
-      whole.toolCalls.foreach(call => onChunk(StreamedChunk(id = id, content = None, toolCall = Some(call))))
-      onChunk(StreamedChunk(id = id, content = None, finishReason = Some(finishReasonOf(whole))))
+      whole.toolCalls.foreach(call => onChunk(StreamedChunk(id = id, contentDelta = None, toolCallDelta = Some(call))))
+      onChunk(StreamedChunk(id = id, contentDelta = None, finishReason = Some(finishReasonOf(whole))))
       done
     }
   }

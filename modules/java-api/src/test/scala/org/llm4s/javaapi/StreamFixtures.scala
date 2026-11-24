@@ -35,7 +35,7 @@ private[javaapi] object StreamFixtures {
   def completion(text: String): Completion =
     Completion(id = "id", created = Instant.EPOCH, model = ModelName("m"), message = AssistantMessage(Some(text)))
 
-  def chunk(i: Int): StreamedChunk = StreamedChunk(id = s"c$i", content = Some("x"))
+  def chunk(i: Int): StreamedChunk = StreamedChunk(id = s"c$i", contentDelta = Some("x"))
 
   /** A client whose `streamComplete` and `complete` run `onStream`, `onComplete`. */
   final class Scripted(

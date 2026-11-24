@@ -65,8 +65,8 @@ class OpenAICompatibleStreamedToolCallSpec extends AnyFlatSpec with Matchers wit
 
     toolCalls shouldBe Seq(ToolCall(ToolCallId("call_1"), "get_weather", ujson.Obj("location" -> "Paris")))
     // Every continuation chunk handed to the caller names its call.
-    chunks.flatMap(_.toolCall).map(tc => (tc.id, tc.name)).distinct shouldBe Seq(("call_1", "get_weather"))
-    chunks.flatMap(_.toolCall) should have size 5
+    chunks.flatMap(_.toolCallDelta).map(tc => (tc.id, tc.name)).distinct shouldBe Seq(("call_1", "get_weather"))
+    chunks.flatMap(_.toolCallDelta) should have size 5
   }
 
   it should "hand the caller fragments that reassemble, even one that is valid JSON on its own" in {
@@ -83,7 +83,7 @@ class OpenAICompatibleStreamedToolCallSpec extends AnyFlatSpec with Matchers wit
     )
 
     toolCalls shouldBe Seq(ToolCall(ToolCallId("call_1"), "lookup", ujson.Obj("topic" -> "vault")))
-    chunks.flatMap(_.toolCall).map(_.arguments).collect { case ujson.Str(s) => s }.mkString shouldBe
+    chunks.flatMap(_.toolCallDelta).map(_.arguments).collect { case ujson.Str(s) => s }.mkString shouldBe
       """{"topic":"vault"}"""
     val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator(ModelName("test-model"))
     chunks.foreach(accumulator.addChunk)
@@ -103,7 +103,7 @@ class OpenAICompatibleStreamedToolCallSpec extends AnyFlatSpec with Matchers wit
       ToolCall(ToolCallId("call_a"), "get_weather", ujson.Obj("city" -> "Oslo")),
       ToolCall(ToolCallId("call_b"), "get_time", ujson.Obj("tz" -> "CET"))
     )
-    chunks.flatMap(_.toolCall).map(_.id) shouldBe Seq("call_a", "call_b", "call_a", "call_b")
+    chunks.flatMap(_.toolCallDelta).map(_.id) shouldBe Seq("call_a", "call_b", "call_a", "call_b")
   }
 
   it should "keep calls apart when one event carries fragments of several" in {
@@ -142,8 +142,8 @@ class OpenAICompatibleStreamedToolCallSpec extends AnyFlatSpec with Matchers wit
     )
     val state = new OpenAICompatibleClient.StreamToolCalls
     client.parseStreamingChunks(ujson.read(first(0, "c", "f", "")), state)
-    client.parseStreamingChunks(ujson.read(more(0, "{}")), state).flatMap(_.toolCall).map(_.id) shouldBe Seq("c")
+    client.parseStreamingChunks(ujson.read(more(0, "{}")), state).flatMap(_.toolCallDelta).map(_.id) shouldBe Seq("c")
     // A fresh stream knows nothing of `c`.
-    client.parseStreamingChunks(ujson.read(more(0, "{}"))).flatMap(_.toolCall).map(_.id) shouldBe Seq("")
+    client.parseStreamingChunks(ujson.read(more(0, "{}"))).flatMap(_.toolCallDelta).map(_.id) shouldBe Seq("")
   }
 }

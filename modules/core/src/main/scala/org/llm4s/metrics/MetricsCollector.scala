@@ -300,6 +300,9 @@ object ErrorKind {
       case _: org.llm4s.error.ConfigurationError   => Validation
       case _: org.llm4s.error.CancelledError       => Cancelled
       case _: org.llm4s.error.ContentFilteredError => Validation
+      // the labels these had before they were types of their own: a refused request, and a 404 from the service
+      case _: org.llm4s.error.ContextLengthError   => Validation
+      case _: org.llm4s.error.ModelNotFoundError   => ServiceError
       case _                                       => Unknown
     }
 }

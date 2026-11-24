@@ -48,7 +48,7 @@ object EffectSystemsGuide {
       def program: Result[String] = {
         val reply = new StringBuilder
         for {
-          _      <- client.streamComplete(greeting, CompletionOptions())(_.content.foreach(reply.append))
+          _      <- client.streamComplete(greeting, CompletionOptions())(_.contentDelta.foreach(reply.append))
           tool   <- temperature
           tools  <- ToolRegistry.of(Seq(tool))
           agent  <- Agent.builder("assistant", client).withTools(tools).build()
@@ -68,7 +68,7 @@ object EffectSystemsGuide {
     def catsProgram(client: LLMClient, timeout: FiniteDuration): IO[String] = {
       val llm = LLMClientIO[IO](client)
       val program = for {
-        reply  <- llm.streamComplete(greeting).map(_.content.getOrElse("")).compile.string
+        reply  <- llm.streamComplete(greeting).map(_.contentDelta.getOrElse("")).compile.string
         tools  <- IO.fromEither(temperature.flatMap(tool => ToolRegistry.of(Seq(tool))).left.map(new LLMException(_)))
         agent  <- llm.agent("assistant")(_.withTools(tools))
         result <- agent.run(question)
@@ -86,7 +86,7 @@ object EffectSystemsGuide {
     def zioProgram(client: LLMClient, timeout: FiniteDuration): UIO[String] = {
       val llm = LLMClientZ(client)
       val program = for {
-        reply  <- llm.streamComplete(greeting).map(_.content.getOrElse("")).runFold("")(_ + _)
+        reply  <- llm.streamComplete(greeting).map(_.contentDelta.getOrElse("")).runFold("")(_ + _)
         tools  <- ZIO.fromEither(temperature.flatMap(tool => ToolRegistry.of(Seq(tool))))
         agent  <- llm.agent("assistant")(_.withTools(tools))
         result <- agent.run(question)
@@ -112,7 +112,7 @@ object EffectSystemsGuide {
       tools.flatMap(registry => llm.agent("assistant")(_.withTools(registry))) match {
         case Left(error) => Future.successful(s"failed: ${error.message}")
         case Right(agent) =>
-          val reply = llm.streamComplete(greeting).map(_.content.getOrElse("")).fold("")(_ + _)
+          val reply = llm.streamComplete(greeting).map(_.contentDelta.getOrElse("")).fold("")(_ + _)
           val answer = agent.stream(ThreadId("pick-your-stack"), question).collect {
             case AgentStreamItem.Done(result) => result.answer.getOrElse("")
           }

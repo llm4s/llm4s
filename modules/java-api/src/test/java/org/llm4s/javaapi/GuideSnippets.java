@@ -335,9 +335,10 @@ final class GuideSnippets {
                     + e.getRetryAfter().map(d -> d.toSeconds() + " s").orElse("a while"));
                 case SERVICE -> System.err.println("the provider answered HTTP "
                     + (e.getStatusCode().isPresent() ? e.getStatusCode().getAsInt() : "?"));
+                case CONTEXT_LENGTH -> System.err.println("the conversation is too long for the model; shorten it");
                 default -> { }
             }
-            if (e.isRecoverable()) {
+            if (e.isRetryable()) {
                 System.err.println("a retry may succeed");
             }
         }

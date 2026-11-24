@@ -45,7 +45,7 @@ object CatsEffectAgentExample extends IOApp.Simple {
         _ <- IO.println("Streaming response:")
         _ <- client
           .streamComplete(Conversation(Seq(UserMessage("Count to 5 slowly."))))
-          .evalMap(chunk => IO.print(chunk.content.getOrElse("")))
+          .evalMap(chunk => IO.print(chunk.contentDelta.getOrElse("")))
           .compile
           .drain
         _ <- IO.println("")

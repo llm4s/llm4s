@@ -75,7 +75,7 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
     call.arguments shouldBe ujson.Obj("city" -> "Paris")
 
     // Every tool-call chunk the caller saw names its call, continuations included.
-    val toolChunks = chunks.flatMap(_.toolCall)
+    val toolChunks = chunks.flatMap(_.toolCallDelta)
     toolChunks should have size 4
     toolChunks.map(_.id).distinct shouldBe Seq("call_1")
     toolChunks.map(_.name).distinct shouldBe Seq("get_weather")
@@ -101,7 +101,7 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
       "call_a" -> ("get_weather", ujson.Obj("city" -> "Paris")),
       "call_b" -> ("get_time", ujson.Obj("zone" -> "CET"))
     )
-    chunks.flatMap(_.toolCall).map(tc => tc.id.asString -> tc.name).distinct.toMap shouldBe Map(
+    chunks.flatMap(_.toolCallDelta).map(tc => tc.id.asString -> tc.name).distinct.toMap shouldBe Map(
       "call_a" -> "get_weather",
       "call_b" -> "get_time"
     )

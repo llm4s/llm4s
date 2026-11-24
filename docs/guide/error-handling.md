@@ -98,31 +98,34 @@ making the call are four steps that can each fail, and you handle them once, at 
 
 ## 4. Error types and when each is raised
 
-Every error is an `LLMError`, carrying a `message`, an optional `code` and a `context` map. The types in
-`org.llm4s.error` are each also marked as one of two kinds:
+Every error is an `LLMError`, carrying a `message`, an optional `code` and a `context` map, and answering four
+questions the same way whatever its type:
 
-- **Recoverable** (`RecoverableError`): the call may succeed if tried again, perhaps after you do
-  something first (wait, re-read a record, correct the request).
-- **Non-recoverable** (`NonRecoverableError`): trying again will not help; something has to change.
+- **`isRetryable`**: whether sending the identical request again may succeed, with nobody in the loop. It is the one
+  rule in the library: `ReliableClient`'s `RetryPolicy`, the agent graph's node retry and the Java and Kotlin APIs
+  all read it. It is `false` unless an error says otherwise, so an error type of your own is not retried until it
+  overrides the member.
+- **`httpStatus`**: the HTTP status of the provider's response, `None` when the error is not a response.
+- **`retryAfter`**: the delay the server asked for (its `Retry-After` header), and only that. It is `None` when the
+  server gave none; how long to wait then is the retry policy's decision, never reported as if the server said it.
+- **`requestId`**: the provider's id for the failed request, from the response's headers, for a support ticket.
 
-`LLMError.isRecoverable(error)` tells you which. It answers for every error: one that carries neither marker,
-as some errors from other modules do (see [errors defined by other modules](#errors-defined-by-other-modules)),
-is not recoverable, since nothing says a retry can help.
-
-| Error | Recoverable | Where the library raises it |
+| Error | Retryable | Where the library raises it |
 |---|---|---|
 | `AuthenticationError` | no | A provider rejects the credentials: HTTP 401 or 403, Anthropic's `UnauthorizedException`, Bedrock's access-denied or missing-credentials exceptions, Gemini's invalid-key 400. Also when Vertex AI or watsonx cannot obtain a token, and from the OpenAI, Anthropic, Bedrock and Spring AI clients for an SDK exception whose message names HTTP status 401 (`HTTP 401`, `401 Unauthorized`, `status code: 401`). |
 | `ConfigurationError` | no | Configuration is missing or invalid: no provider section, no API key, a provider id that no module on the classpath registers, an embedding model with no known dimensions, or a block a config loader cannot read (providers, embeddings, tracing, metrics, tools, RAG, speech). |
-| `ValidationError` | no | A request or value is rejected: an invalid message or conversation, a model the model registry does not know, a guardrail rejecting input or output (the built-in guardrails reject with one), HTTP 400 (on field `request`), Anthropic's or Bedrock's invalid-request exceptions, or a response body that cannot be parsed. |
+| `ValidationError` | no | A request or value is rejected: an invalid message or conversation, a model the model registry does not know, a guardrail rejecting input or output (the built-in guardrails reject with one), HTTP 400 (on field `request`, with `httpStatus` 400), Anthropic's or Bedrock's invalid-request exceptions, or a response body that cannot be parsed. |
+| `ContextLengthError` | no | The provider refused the request because the conversation, with the room asked for the reply, does not fit the model's context window: OpenAI's `context_length_exceeded` (and the OpenAI-compatible services that copy it), Anthropic's `prompt is too long`, Gemini's `input token count ... exceeds the maximum`, Bedrock's `Input is too long`. It carries `limit` and `requestedTokens` when the provider's message states them. Shorten the conversation, lower `maxTokens`, or use a model with a larger window. |
+| `ModelNotFoundError` | no | The provider does not know the model the request named: OpenAI's `model_not_found`, Anthropic's 404 `not_found_error`, Gemini's 404 for an unknown `models/...`, Ollama's 404 for a model that is not pulled, and the same from an OpenAI-compatible service. It carries the `model` when the client knows it. A 404 that does not say the model is unknown (a wrong `baseUrl`) stays a `ServiceError`. |
 | `ContentFilteredError` | no | The provider's content filter stopped the call: Gemini or Vertex AI blocked the prompt (`promptFeedback.blockReason`) or stopped the reply with a filter `finishReason` (`SAFETY`, `RECITATION`, `PROHIBITED_CONTENT`, `BLOCKLIST`, `SPII`, the image ones and others), even after some text. It carries the `provider`, the `reason` and `promptBlocked`. `ReliableClient`'s circuit breaker counts it as neither a success nor a failure. |
 | `InvalidInputError` | no | Only `llm4s-image`'s image processing (`LocalImageProcessor`, saving an image): an unreadable path, a bad resize or crop, a path traversal. It carries the `field`, the `value` and the `reason`. |
 | `RateLimitError` | yes | A provider's rate limit: HTTP 429, or Anthropic's or Bedrock's throttling exception. Also `ReliableClient`'s own limiter, and the OpenAI, Anthropic, Bedrock and Spring AI clients for an SDK exception whose message names HTTP status 429 (`HTTP 429`, `429 Too Many Requests`, `status code: 429`). It carries `retryAfter` when the provider says how long to wait. |
-| `ServiceError` | yes | Any other non-2xx status from a provider (through `HttpErrorMapper` or `Llm4sHttpClient`, and from Bedrock and watsonx). Also `llm4s-image`'s vision clients (OpenAI, Anthropic, Gemini), for a non-2xx answer or a reply with no text. It carries `httpStatus`; see the note below. |
+| `ServiceError` | 408, 429 and 5xx | Any other non-2xx status from a provider (through `HttpErrorMapper` or `Llm4sHttpClient`, and from Bedrock and watsonx). Also `llm4s-image`'s vision clients (OpenAI, Anthropic, Gemini), for a non-2xx answer or a reply with no text. It carries its `status`; see the note below. |
 | `NetworkError` | yes | A connection fails, a host is unknown or I/O breaks, in llm4s's HTTP client or the Bedrock client; `Safety.fromThrowable`, which the OpenAI and Anthropic clients use for I/O failures, gives one for a socket timeout or a refused connection. Also a URL refused by the SSRF check, and a failed `llm4s-rag` URL, web-crawl or S3 load, including a non-2xx answer to `UrlLoader`. |
 | `TimeoutError` | yes | A connect, request or socket timeout elapses in llm4s's own HTTP client, or a `ReliableClient` deadline passes. The vendor-SDK clients map timeouts themselves: OpenAI and Bedrock report a `NetworkError`, and Anthropic maps its exceptions as [section 7](#7-turning-exceptions-into-errors) describes. |
 | `ExecutionError` | yes | Nothing in the library: it is there for an operation of your own that failed in a way worth trying again. Tool and MCP failures are other types; see the note below. |
-| `CircuitOpenError` | yes | A `ReliableClient` refused the call without making it: its circuit is open, or half-open with a probe in flight. `retryAfter` is the time left before a probe is let through. |
-| `OptimisticLockFailure` | yes | Only `llm4s-memory-postgres`'s `PostgresMemoryStore`, when another writer updated the same memory record first; re-read it and try again. |
+| `CircuitOpenError` | no | A `ReliableClient` refused the call without making it: its circuit is open, or half-open with a probe in flight. `remaining` is the time left before a probe is let through; sending the call again at once is what the open circuit prevents. |
+| `OptimisticLockFailure` | no | Only `llm4s-memory-postgres`'s `PostgresMemoryStore`, when another writer updated the same memory record first; re-read it and try again: the same update fails until you do. |
 | `CancelledError` | no | The thread was interrupted. Interruption is how llm4s cancels work, and a cancelled call is never retried. |
 | `ProcessingError` | no | A storage, parsing or processing step fails: a vector-store, keyword-index or memory-store operation, RAG document loading, extraction or permissions, knowledge-graph storage, extraction or queries, speech audio processing, image encoding or saving. |
 | `NotFoundError` | no | A memory store (in-memory, SQLite, Postgres) is asked to update a memory it does not hold, or `VectorStoreFactory` is given an unknown backend name. |
@@ -141,25 +144,24 @@ case for a tool that threw is `ToolCallError.ExecutionError`. `ToolCallError` is
 agent hands it back to the model as the tool's result instead of failing the run. A graph's tool loop fails
 with `GraphError.ToolFailed`, described below.
 
-**`ServiceError` and its status.** The marker says a `ServiceError` is recoverable, but a 404 is not
-going to fix itself. When it matters, look at `httpStatus`: `error.isRecoverableStatus` (a method of
-`ServiceError`, no import needed) is true for 5xx, 429 and 408. The library's automatic retries retry a
-`ServiceError` only when it is; see the next paragraph.
+**`ServiceError` and its status.** A `ServiceError` is retryable only when its status is one a retry may fix:
+5xx, 429 and 408. A 404 or a 409 is not going to fix itself, so `ServiceError(404, ...).isRetryable` is `false`.
 
-**Recoverable is not the same as retried automatically.** Every retry in the library -
-`ReliableClient`'s `RetryPolicy` and the agent graph's default node retry - uses one rule, `RetryPolicy.isRetryable`: it resends the identical request with nobody in the loop,
-so it retries a recoverable error unless repeating the request cannot help. That leaves out three recoverable
-cases: a `ServiceError` with a client-error status (any 4xx but 408 and 429), because the
-request itself is wrong, an `OptimisticLockFailure`, because you must re-read the record first, and a
-`CircuitOpenError`, because repeating the call at once is what an open circuit prevents. A
-non-recoverable error is never retried, and neither is an error that carries no marker.
+**One rule, everywhere.** Every retry in the library - `ReliableClient`'s `RetryPolicy` and the agent graph's
+default node retry - resends the identical request with nobody in the loop, and asks `error.isRetryable` whether to.
+Two errors are worth another attempt only after something else happens, and so are not retryable: an
+`OptimisticLockFailure` (re-read the record first) and a `CircuitOpenError` (wait for the circuit). Match on their
+types to handle them.
 
 **Which status becomes which error.** The status mapping in the table is `HttpErrorMapper`'s: 401 and
-403 to `AuthenticationError`, 429 to `RateLimitError`, 400 to `ValidationError`, any other non-2xx to
-`ServiceError`. The OpenAI, Azure, Requesty, Gemini, Vertex AI, Ollama, watsonx and OpenAI-compatible
+403 to `AuthenticationError`, 429 to `RateLimitError`, a response that says the request is too long for the model
+to `ContextLengthError`, one that says the model is unknown to `ModelNotFoundError`, any other 400 to
+`ValidationError`, and any other non-2xx to `ServiceError`. Each carries the response's `httpStatus`, its
+`requestId` and its `retryAfter`. The OpenAI, Azure, Requesty, Gemini, Vertex AI, Ollama, watsonx and OpenAI-compatible
 clients use it; Gemini first turns a 400 that reports an invalid API key into an `AuthenticationError`.
 The Anthropic client maps its SDK's exceptions instead: unauthorized (401) to `AuthenticationError`, rate
-limited to `RateLimitError` (with no `retryAfter`), invalid data to a `ValidationError` on field `input`,
+limited to `RateLimitError`, `prompt is too long` to `ContextLengthError`, a 404 naming the model to
+`ModelNotFoundError`, invalid data to a `ValidationError` on field `input`,
 and anything else by its type ([section 7](#7-turning-exceptions-into-errors)) and then by a 401 or 429 its
 message names, usually to an `UnknownError`. The Bedrock client maps the
 AWS SDK's exceptions: throttling or an exceeded quota to `RateLimitError`, an invalid request to
@@ -176,31 +178,19 @@ the error's type and fields, never on its message.
 
 ### Errors defined by other modules
 
-Some modules add their own `LLMError` subtypes. The errors below carry **neither** marker, so
-`LLMError.isRecoverable` reports them as not recoverable and the library's automatic retries leave them alone.
-For each, the right answer depends on more than the type (a status inside a string `code`, a flag, a wrapped
-cause, which of several failures it reports), so none carries a marker:
+Some modules add their own `LLMError` subtypes, and each says whether it is retryable the same way, through
+`isRetryable`:
 
-| Module | Package | Errors |
-|---|---|---|
-| `llm4s-core` | `org.llm4s.error` | `EmbeddingError`: how `EmbeddingClient.embed` and the embedding providers (OpenAI, Ollama, Voyage, Cohere, Jina) report a failure other than cancellation, except that the Cohere provider reports a 429 as a `RateLimitError` |
-| `llm4s-rag` | `org.llm4s.rag.evaluation`, `org.llm4s.reranker` | `EvaluationError` from RAGAS evaluation and the RAG benchmark tools; `RerankError` from the Cohere and LLM rerankers (`Reranker.rerank`) |
-| `llm4s-speech` | `org.llm4s.speech.stt`, `.tts` | `STTError.ProcessingFailed` from the speech-to-text clients (an empty transcription, no recognisable speech, an unparseable response; its `retryable` flag says `true`); `TTSError.SynthesisFailed` from the text-to-speech clients (an empty audio body) |
+| Module | Package | Errors | Retryable |
+|---|---|---|---|
+| `llm4s-core` | `org.llm4s.error` | `EmbeddingError`: how `EmbeddingClient.embed` and the embedding providers (OpenAI, Ollama, Voyage, Cohere, Jina) report a failure other than cancellation, except that the Cohere provider reports a 429 as a `RateLimitError` | when its `code` is the status 408, 429 or 5xx, as a `ServiceError` with it would be |
+| `llm4s-rag` | `org.llm4s.rag.evaluation`, `org.llm4s.reranker` | `EvaluationError` from RAGAS evaluation and the RAG benchmark tools; `RerankError` from the Cohere and LLM rerankers (`Reranker.rerank`) | no |
+| `llm4s-speech` | `org.llm4s.speech.stt`, `.tts`, `.io` | `STTError`, `TTSError`, `WavFileGenerator.WavError`, `AudioIO.AudioIOError` | only `STTError.EngineNotAvailable` and `TTSError.EngineNotAvailable` |
+| `llm4s-agent` | `org.llm4s.agent.graph` | `GraphError`, from the graph runtime | only `DeadlineExceeded` and `ThreadBusy` |
+| `llm4s-image` | `org.llm4s.imagegeneration` | `ImageGenerationError`, from the image-generation clients | `ImageRateLimitError`, and an `ImageServiceError` with a transient status |
 
-The rest of those families are marked:
-
-| Module | Recoverable | Non-recoverable |
-|---|---|---|
-| `llm4s-speech` (`org.llm4s.speech.stt`, `.tts`, `.io`) | `STTError.EngineNotAvailable`, `TTSError.EngineNotAvailable` | `STTError.UnsupportedFormat`, `STTError.InvalidInput`, `WavFileGenerator.WavError`, `AudioIO.AudioIOError` |
-
-So are two whole families: `GraphError` in `llm4s-agent`
-(`org.llm4s.agent.graph`, from the graph runtime; every case is non-recoverable except `DeadlineExceeded` and
-`ThreadBusy`)
-and `ImageGenerationError` in `llm4s-image` (`org.llm4s.imagegeneration`, from the image-generation
-clients; a `ServiceError` there is recoverable only for a transient status). The image module reuses the
-names `AuthenticationError`, `RateLimitError`, `ServiceError`, `ValidationError` and `UnknownError`, so
-import those by package instead of with a wildcard next to `org.llm4s.error._`. Its vision clients
-(`org.llm4s.imageprocessing`) return the core errors in the table above.
+The image module's cases that would share a name with an `org.llm4s.error` type carry an `Image` prefix. Its vision
+clients (`org.llm4s.imageprocessing`) return the core errors in the table above.
 
 ## 5. Handling specific error types
 
@@ -209,34 +199,39 @@ a catch-all:
 
 ```scala
 import org.llm4s.error._
+import org.llm4s.reliability.RetryPolicy
 import org.llm4s.types.Result
 
 def describe(result: Result[String]): String =
   result match {
     case Right(text) => s"ok: $text"
     case Left(e: RateLimitError) =>
-      s"wait ${e.retryDelay.getOrElse(RateLimitError.DefaultRetryDelay)}, then retry"
+      s"wait ${e.retryAfter.getOrElse(RetryPolicy.DefaultRateLimitDelay)}, then retry"
     case Left(e: AuthenticationError) => s"fix the credentials for ${e.provider}"
-    case Left(e: RecoverableError)    => s"transient, may succeed on retry: ${e.message}"
-    case Left(e)                      => s"not retried (permanent, or not marked either way): ${e.message}"
+    case Left(e: ContextLengthError)  => s"shorten the conversation: ${e.message}"
+    case Left(e) if e.isRetryable     => s"transient, may succeed on retry: ${e.message}"
+    case Left(e)                      => s"not retried: ${e.message}"
   }
 ```
 
-`RateLimitError.retryDelay` is the delay the provider asked for, or 30 seconds when it did not say.
+`retryAfter` is the delay the provider asked for, and `None` when it did not say; `RetryPolicy.DefaultRateLimitDelay`
+(30 seconds) is what the library's own retries wait then.
 
 Two things to know:
 
 - **`LLMError` is not sealed**, so the compiler cannot tell you that a match is complete. Always end
   with a `case Left(e)`.
-- **A custom error must say what kind it is.** If you define your own error type, mix in
-  `RecoverableError` or `NonRecoverableError` as well as `LLMError`.
-  `LLMError.isRecoverable` reports a type that is neither as not recoverable, so a transient failure that
-  forgets its marker is never retried.
+- **A custom error is not retried unless it says so.** If you define your own error type for a transient failure,
+  override `isRetryable`; left alone it is `false`.
 
 ```scala
-import org.llm4s.error.{ LLMError, NonRecoverableError }
+import org.llm4s.error.LLMError
 
-final case class VendorError(message: String) extends LLMError with NonRecoverableError
+final case class VendorError(message: String) extends LLMError
+
+final case class FlakyVendorError(message: String) extends LLMError {
+  override def isRetryable: Boolean = true
+}
 ```
 
 ## 6. Converting to exceptions (when you must)
@@ -335,7 +330,7 @@ parseAll(List("1", "x", "y")) // Left(...), the first failure
 
 ## 9. Recovering from failures
 
-A recoverable error is worth a retry. `ReliableClient` wraps any `LLMClient` and retries its calls, up to its
+A retryable error is worth a retry. `ReliableClient` wraps any `LLMClient` and retries its calls, up to its
 `RetryPolicy`'s `maxAttempts` in all, waiting between attempts. It is the library's one retry and circuit-breaker
 mechanism. Here `client` is any `LLMClient` and `conversation` a `Conversation`, built as in
 [section 3](#3-chaining-with-for-comprehensions):
@@ -354,9 +349,9 @@ val reliable = ReliableClient(
 val result = reliable.complete(conversation)
 ```
 
-It retries what every retry in the library retries (`RetryPolicy.isRetryable`; see
-[section 4](#4-error-types-and-when-each-is-raised)). A `RateLimitError` waits its `retryDelay` (the provider's
-`retryAfter` when it gave one, else 30 seconds) and a `ServiceError` the provider's `retryAfter` when it gave one.
+It retries what every retry in the library retries (an error that is `isRetryable`; see
+[section 4](#4-error-types-and-when-each-is-raised)). An error whose provider gave a `retryAfter` waits that long, and
+a `RateLimitError` without one waits `RetryPolicy.DefaultRateLimitDelay` (30 seconds).
 Every other wait is the policy's: `RetryPolicy.exponentialBackoff` (`baseDelay`, doubled after each attempt, up to `maxDelay`),
 `linearBackoff`, `fixedDelay`, or your own with `RetryPolicy.custom`.
 
@@ -418,11 +413,9 @@ See the [Testing Guide](../getting-started/testing-guide).
 - Return `Result` from your own functions; do not throw.
 - Convert exceptions to errors where they enter your code, and errors to exceptions only where a
   framework forces you to, in one place.
-- Match on specific types first, then on `RecoverableError`, then a catch-all. `LLMError.isRecoverable`
-  asks the same question of any error.
-- Retry only what is recoverable, with a limit and a delay; never retry a `CancelledError`. The
-  library's own retries also leave out a client-error status, an `OptimisticLockFailure` and a
-  `CircuitOpenError`.
+- Match on specific types first, then on `isRetryable`, then a catch-all.
+- Retry only what is `isRetryable`, with a limit and a delay. That leaves out a `CancelledError`, a client-error
+  status, an `OptimisticLockFailure` and a `CircuitOpenError`, as the library's own retries do.
 - Log `error.formatted`, show `error.message`, and never put an API key in either.
 
 ## See also

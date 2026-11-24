@@ -39,7 +39,7 @@ private[pekko] object Fixtures {
 
   val conversation: Conversation = Conversation(Seq(UserMessage("ping")))
 
-  def chunk(i: Int): StreamedChunk = StreamedChunk(id = s"c$i", content = Some("x"))
+  def chunk(i: Int): StreamedChunk = StreamedChunk(id = s"c$i", contentDelta = Some("x"))
 
   /** Safety deadline for any condition expected to hold; only ever reached by a broken implementation. */
   val DeadlineSeconds: Long = 60L

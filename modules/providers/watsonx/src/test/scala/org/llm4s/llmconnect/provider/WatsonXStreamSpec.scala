@@ -88,7 +88,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
     val http   = streaming(streamOf(in))
     val chunks = ListBuffer.empty[(Option[String], Option[FinishReason])]
     val result = new WatsonXClient(config, httpClient = http)
-      .streamComplete(hi, CompletionOptions())(c => chunks += ((c.content, c.finishReason)))
+      .streamComplete(hi, CompletionOptions())(c => chunks += ((c.contentDelta, c.finishReason)))
       .map(c =>
         Observed(chunks.toList, c.content, c.usage.map(u => (u.promptTokens, u.completionTokens, u.totalTokens)))
       )
@@ -194,7 +194,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
       .streamComplete(hi, CompletionOptions())(chunks += _)
     result.isLeft shouldBe true
     result.toOption shouldBe None
-    chunks.flatMap(_.content).mkString shouldBe "partial"
+    chunks.flatMap(_.contentDelta).mkString shouldBe "partial"
   }
 
   test("a stream that ends without a finish_reason is a ServiceError, not a success with the text so far") {
@@ -222,7 +222,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
     val result = new WatsonXClient(config, httpClient = streaming(streamOf(bytes(text))))
       .streamComplete(hi, CompletionOptions())(chunks += _)
     result.isLeft shouldBe true
-    chunks.flatMap(_.content).mkString shouldBe "Hel"
+    chunks.flatMap(_.contentDelta).mkString shouldBe "Hel"
   }
 
   test("a final event cut off mid-JSON is a Left, not a silently shortened completion") {
@@ -249,7 +249,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
     val result = new WatsonXClient(config, httpClient = streaming(streamOf(stream)))
       .streamComplete(hi, CompletionOptions())(seen += _)
     result.left.toOption.exists(_.isInstanceOf[NetworkError]) shouldBe true
-    seen.flatMap(_.content).mkString shouldBe "Hel"
+    seen.flatMap(_.contentDelta).mkString shouldBe "Hel"
     stream.closedFlag.get() shouldBe true
   }
 
@@ -328,9 +328,9 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
     val expectedCall = ToolCall(ToolCallId("call-a"), "add", ujson.Obj("a" -> 1, "b" -> 2))
     completion.toolCalls shouldBe List(expectedCall)
     completion.message.toolCalls shouldBe Seq(expectedCall)
-    chunks.flatMap(_.toolCall) shouldBe Seq(expectedCall)
+    chunks.flatMap(_.toolCallDelta) shouldBe Seq(expectedCall)
     chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
-    chunks.indexWhere(_.toolCall.isDefined) should be < chunks.indexWhere(_.finishReason.isDefined)
+    chunks.indexWhere(_.toolCallDelta.isDefined) should be < chunks.indexWhere(_.finishReason.isDefined)
   }
 
   test("two calls streamed interleaved are separated by index and reported in index order") {
@@ -431,7 +431,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
     val completion = result.getOrElse(fail(s"expected success, got $result"))
     completion.content shouldBe "Let me check."
     completion.toolCalls.map(_.name) shouldBe List("lookup")
-    chunks.map(c => (c.content.isDefined, c.toolCall.isDefined, c.finishReason.isDefined)) shouldBe
+    chunks.map(c => (c.contentDelta.isDefined, c.toolCallDelta.isDefined, c.finishReason.isDefined)) shouldBe
       Seq((true, false, false), (false, true, false), (false, false, true))
   }
 
@@ -469,14 +469,14 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
       .streamComplete(hi, CompletionOptions())(chunks += _)
     result.left.toOption match
       case Some(e: ServiceError) =>
-        e.httpStatus shouldBe 500
+        e.status shouldBe 500
         e.provider shouldBe "watsonx"
         e.message should include("stream error event")
         e.message should include("model_overloaded")
         e.message should include("try later")
         (e.message should not).include("finish_reason")
       case other => fail(s"expected ServiceError, got $other")
-    chunks.flatMap(_.content).mkString shouldBe "par"
+    chunks.flatMap(_.contentDelta).mkString shouldBe "par"
   }
 
   test("an error frame's status_code picks the error as an HTTP status would; none is a ServiceError(502)") {
@@ -485,13 +485,13 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
       ("403", ibmError(Some(403)), { case _: AuthenticationError => true; case _ => false }),
       ("429", ibmError(Some(429)), { case _: RateLimitError => true; case _ => false }),
       ("400", ibmError(Some(400)), { case e: ValidationError => e.message.contains("try later"); case _ => false }),
-      ("503", ibmError(Some(503)), { case e: ServiceError => e.httpStatus == 503; case _ => false }),
-      ("no status", ibmError(None), { case e: ServiceError => e.httpStatus == 502; case _ => false }),
-      ("2xx status", ibmError(Some(200)), { case e: ServiceError => e.httpStatus == 502; case _ => false }),
+      ("503", ibmError(Some(503)), { case e: ServiceError => e.status == 503; case _ => false }),
+      ("no status", ibmError(None), { case e: ServiceError => e.status == 502; case _ => false }),
+      ("2xx status", ibmError(Some(200)), { case e: ServiceError => e.status == 502; case _ => false }),
       (
         "not JSON",
         "upstream exploded",
-        { case e: ServiceError => e.httpStatus == 502 && e.message.contains("upstream exploded"); case _ => false }
+        { case e: ServiceError => e.status == 502 && e.message.contains("upstream exploded"); case _ => false }
       )
     )
     table.foreach { case (name, data, check) =>

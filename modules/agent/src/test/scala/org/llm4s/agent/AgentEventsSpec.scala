@@ -505,7 +505,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
       override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] =
-        onChunk(StreamedChunk(id = "s", content = Some("cut"), finishReason = Some(FinishReason.Length)))
+        onChunk(StreamedChunk(id = "s", contentDelta = Some("cut"), finishReason = Some(FinishReason.Length)))
         Right(answer("cut").withFinishReason(FinishReason.Length))
       override def getContextWindow(): Int     = 4096
       override def getReserveCompletion(): Int = 1024

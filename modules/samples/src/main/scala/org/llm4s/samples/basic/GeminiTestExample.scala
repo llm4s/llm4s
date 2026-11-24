@@ -87,7 +87,7 @@ object GeminiTestExample {
       CompletionOptions()
     ) { chunk =>
       chunkCount += 1
-      chunk.content.foreach { c =>
+      chunk.contentDelta.foreach { c =>
         fullContent.append(c)
         print(c)
       }

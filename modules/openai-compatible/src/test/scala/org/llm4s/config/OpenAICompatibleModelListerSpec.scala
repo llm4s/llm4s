@@ -311,7 +311,7 @@ class OpenAICompatibleModelListerSpec extends AnyFunSuite with Matchers:
       .openAICompatible(ProviderId("meta"), BaseUrl("https://meta.invalid"))
       .listModels(config, MockHttpClient(response)) match
       case Left(err: org.llm4s.error.ServiceError) =>
-        err.httpStatus shouldBe 503
+        err.status shouldBe 503
         err.requestId shouldBe Some("req-2266")
         err.retryAfter shouldBe Some(scala.concurrent.duration.DurationInt(12).seconds)
       case other => fail(s"Expected a ServiceError, got $other")

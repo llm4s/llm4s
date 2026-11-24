@@ -129,7 +129,7 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
         val client = clientAt(baseUrl)
         client.validate() match
           case Left(error: org.llm4s.error.ServiceError) =>
-            error.httpStatus shouldBe 404
+            error.status shouldBe 404
             error.formatted should include("ollama pull")
           case other => fail(s"expected the 404 a completion gets, got $other")
         client.close()

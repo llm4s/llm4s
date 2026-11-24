@@ -621,8 +621,8 @@ class GeminiClient(
     logger.error(s"[Gemini] Error response: $statusCode")
     val details = HttpErrorMapper.extractErrorDetails(body, statusCode, providerName)
     if statusCode == 400 && isInvalidApiKey(details) then
-      Left(TroubleshootingLinks.annotate(AuthenticationError(providerName, details)))
-    else Left(HttpErrorMapper.toError(statusCode, body, providerName, headers))
+      Left(TroubleshootingLinks.annotate(AuthenticationError(providerName, details).withHttpStatus(statusCode)))
+    else Left(HttpErrorMapper.naming(HttpErrorMapper.toError(statusCode, body, providerName, headers), config.model.asString))
   }
 
   private def isInvalidApiKey(details: String): Boolean = {

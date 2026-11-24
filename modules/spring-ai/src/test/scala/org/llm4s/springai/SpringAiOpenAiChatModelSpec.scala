@@ -102,7 +102,7 @@ class SpringAiOpenAiChatModelSpec extends AnyFlatSpec with Matchers with EitherV
       .streamComplete(conversation, CompletionOptions())(c => chunks += c)
       .value
     completion.content shouldBe "hi"
-    chunks.result().flatMap(_.content).mkString shouldBe "hi"
+    chunks.result().flatMap(_.contentDelta).mkString shouldBe "hi"
     lastBody() should include("\"stream\":true")
   }
 }

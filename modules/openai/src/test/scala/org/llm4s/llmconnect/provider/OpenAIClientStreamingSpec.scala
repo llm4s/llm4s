@@ -56,7 +56,7 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
     val conversation = Conversation(Seq(UserMessage("hello")))
     val received     = scala.collection.mutable.ListBuffer.empty[String]
 
-    val result = client.streamComplete(conversation, CompletionOptions())(c => received += c.content.getOrElse(""))
+    val result = client.streamComplete(conversation, CompletionOptions())(c => received += c.contentDelta.getOrElse(""))
 
     result.isRight shouldBe true
 

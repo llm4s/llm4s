@@ -236,7 +236,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
       val result = client.streamComplete(
         Conversation(Seq(UserMessage("hello"))),
         CompletionOptions()
-      )(chunk => chunk.content.foreach(chunks += _))
+      )(chunk => chunk.contentDelta.foreach(chunks += _))
 
       assert(result.isRight)
       chunks.mkString shouldBe "Hello"

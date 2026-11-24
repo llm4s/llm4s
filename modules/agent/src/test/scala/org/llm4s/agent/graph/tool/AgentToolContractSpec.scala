@@ -234,6 +234,6 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     error.message should include("search")
     error.message should include("call-1")
     error.message should include("boom")
-    error shouldBe a[org.llm4s.error.NonRecoverableError]
+    error.isRetryable shouldBe false
   }
 }

@@ -40,7 +40,7 @@ class HttpResponseOpsSpec extends AnyFlatSpec with Matchers with EitherValues {
     Seq(199, 300, 302, 404, 500).foreach { status =>
       val error = failure(HttpResponse(status, "upstream said no").ensureSuccess("acme"))
       withClue(s"status $status: ") {
-        error.httpStatus shouldBe status
+        error.status shouldBe status
         error.provider shouldBe "acme"
         error.message should include("upstream said no")
       }
@@ -82,7 +82,7 @@ class HttpResponseOpsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val original = ServiceError(503, "x", "down")
     val error    = failure((Left(original): Result[Int]).mapServiceError("acme", "Listing models"))
 
-    error.httpStatus shouldBe 503
+    error.status shouldBe 503
     error.provider shouldBe "acme"
     error.message should include(s"Listing models: ${original.message}")
   }
