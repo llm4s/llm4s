@@ -154,6 +154,35 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
       )
     }
 
+    "validate by looking its model up with the key, through the Models API (#2830)" in {
+      def anthropicError(exchange: com.sun.net.httpserver.HttpExchange, status: Int, message: String): Unit =
+        sendJsonResponse(
+          exchange,
+          status,
+          ujson.Obj("type" -> "error", "error" -> ujson.Obj("type" -> "api_error", "message" -> message)).render()
+        )
+      val model = section.model.asString
+      val found =
+        s"""{"type":"model","id":"$model","display_name":"Test","created_at":"2025-02-19T00:00:00Z"}"""
+      assertValidates(sendJsonResponse(_, 200, found), anthropicError)(clientAt)
+
+      val seen = new java.util.concurrent.ConcurrentLinkedQueue[(String, String)]()
+      withServer("/") { exchange =>
+        seen.add(
+          s"${exchange.getRequestMethod} ${exchange.getRequestURI.getPath}" ->
+            Option(exchange.getRequestHeaders.getFirst("x-api-key")).getOrElse("")
+        )
+        anthropicError(exchange, 404, s"model: $model")
+      } { baseUrl =>
+        val client = clientAt(baseUrl)
+        client.validate() should matchPattern {
+          case Left(error: org.llm4s.error.ServiceError) if error.httpStatus == 404 =>
+        }
+        client.close()
+      }
+      seen.toArray.toSeq.distinct shouldBe Seq(s"GET /v1/models/$model" -> section.apiKey.map(_.asKey).getOrElse(""))
+    }
+
     "send the content parts Anthropic takes and refuse the rest before sending" in {
       import org.llm4s.testkit.ContentPartCase.*
       // a provider's 400 or 413 - a vendor limit llm4s leaves to it - is a typed error with its message

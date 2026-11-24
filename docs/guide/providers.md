@@ -421,9 +421,9 @@ it, and `GOOGLE_API_KEY` / `GEMINI_API_KEY` apply to the Gemini API provider onl
 
 `project` and `location` are Vertex AI's own keys ([provider-specific keys](#provider-specific-keys)).
 Before [#1215](https://github.com/llm4s/llm4s/issues/1215) Vertex read the project from `endpoint`
-and the region from `organization`. Those still work as deprecated aliases, with a warning each
-time the config loads; rename them. Setting both a key and a different value under its old name
-is an error. See the [migration note](../reference/migration#vertex-ai-endpoint-becomes-project-organization-becomes-location).
+and the region from `organization`. Those names are no longer read: they are unknown keys, logged
+with a warning and ignored, so a section that still sets `endpoint` instead of `project` fails to
+load. See the [migration note](../reference/migration#vertex-ai-no-longer-reads-endpoint-and-organization).
 
 ---
 

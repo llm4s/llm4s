@@ -266,7 +266,7 @@ final class AgentBuilder private (
   /**
    * Static breakpoints that hold each task of these nodes of this agent before it runs, on every run;
    * added to those set before, and to those a run's `RunConfig.interruptBefore` names. A held task is
-   * an interrupt of its own - `AgentStatus.Suspended.breakpoints` - continued with
+   * an interrupt of its own - `Suspension.breakpoints` - continued with
    * `AgentResult.proceed`. Like streaming, breakpoints change nothing stored, so they are not part of
    * the graph's version: a thread held by one agent is continued by one without them. A task continued
    * after an approval or a question is not held before again: the reviewer has just seen it. Java and

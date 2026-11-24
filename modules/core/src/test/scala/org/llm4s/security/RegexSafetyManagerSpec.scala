@@ -1,5 +1,6 @@
 package org.llm4s.security
 
+import org.llm4s.error.ValidationError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -24,22 +25,37 @@ class RegexSafetyManagerSpec extends AnyFlatSpec with Matchers {
     result.getOrElse(fail("the match produced no result"))
   }
 
+  "RegexSafetyManager.safeCompile" should "accept a quantified alternation whose alternatives do not overlap (#2825)" in {
+    Seq("(foo|bar)+", "(?:jpg|png)*", "^(GET|POST)+$", "(?<verb>GET|POST)+ /").foreach { pattern =>
+      withClue(pattern)(RegexSafetyManager.safeCompile(pattern).isRight shouldBe true)
+    }
+  }
+
+  it should "still reject a quantified alternation whose alternatives overlap, and nested quantifiers" in {
+    Seq("(a|a)*b", "(a|aa)+", "(ab|a)*c", "(?:a|ab)*c", "(?<x>a|ab)+", "(a+)+b", "((a+)+)+b").foreach { pattern =>
+      withClue(pattern)(RegexSafetyManager.safeCompile(pattern).isLeft shouldBe true)
+    }
+  }
+
   "RegexSafetyManager.safeFind" should "match normally within the budget" in {
     RegexSafetyManager.safeFind(Pattern.compile("b+"), "aabbb") shouldBe Right(true)
-    RegexSafetyManager.safeMatches(Pattern.compile("a+"), "aaab") shouldBe Right(false)
+    RegexSafetyManager.safeFind(Pattern.compile("^a+$"), "aaab") shouldBe Right(false)
   }
 
   it should "return a Left when the match exceeds its step budget" in {
     val result = RegexSafetyManager.safeFind(Pattern.compile("(a+)+c"), "a" * 30 + "b", maxSteps = 1000L)
-    result shouldBe Left("Regex matching aborted: exceeded complexity budget (possible ReDoS)")
+    result shouldBe Left(
+      ValidationError("pattern", "Regex matching aborted: exceeded complexity budget (possible ReDoS)")
+    )
 
-    RegexSafetyManager.safeMatches(Pattern.compile("a+"), "aaaa", maxSteps = 1L).isLeft shouldBe true
+    RegexSafetyManager.safeFind(Pattern.compile("^a+$"), "aaaa", maxSteps = 1L).isLeft shouldBe true
   }
 
   it should "return a Left when a recursive pattern overflows the stack" in {
-    val expected = Left("Regex matching aborted: pattern recursed too deeply for the input (stack overflow)")
+    val expected = Left(
+      ValidationError("pattern", "Regex matching aborted: pattern recursed too deeply for the input (stack overflow)")
+    )
     onSmallStack(RegexSafetyManager.safeFind(recursivePattern, recursiveInput)) shouldBe expected
-    onSmallStack(RegexSafetyManager.safeMatches(recursivePattern, recursiveInput)) shouldBe expected
   }
 
   it should "keep matching on the same thread after a stack overflow" in {
@@ -53,11 +69,33 @@ class RegexSafetyManagerSpec extends AnyFlatSpec with Matchers {
     // A null pattern makes building the matcher throw NullPointerException inside the guard.
     val result = RegexSafetyManager.safeFind(null, "abc")
     result.isLeft shouldBe true
-    result.left.toOption.get should startWith("Regex matching failed:")
+    result.left.toOption.get.message should startWith("Invalid pattern: Regex matching failed:")
   }
 
   it should "reject null and oversized input before matching" in {
-    RegexSafetyManager.safeFind(Pattern.compile("a"), null) shouldBe Left("Input cannot be null")
-    RegexSafetyManager.safeFind(Pattern.compile("a"), "a" * 100001).isLeft shouldBe true
+    RegexSafetyManager.safeFind(Pattern.compile("a"), null) shouldBe Left(
+      ValidationError("input", "Input cannot be null")
+    )
+    RegexSafetyManager.safeFind(Pattern.compile("a"), "a" * 100001) shouldBe Left(
+      ValidationError("input", "Input too large: 100001 > 100000")
+    )
+  }
+
+  "RegexSafetyManager.safeCompile" should "refuse a null, blank, oversized or malformed pattern with a ValidationError" in {
+    RegexSafetyManager.safeCompile(null) shouldBe Left(ValidationError("pattern", "Pattern cannot be null"))
+    RegexSafetyManager.safeCompile("  ") shouldBe Left(ValidationError("pattern", "Pattern cannot be empty"))
+    RegexSafetyManager.safeCompile("a" * 1001) shouldBe Left(
+      ValidationError("pattern", "Pattern too long: 1001 > 1000")
+    )
+    val malformed = RegexSafetyManager.safeCompile("(").left.toOption.get
+    malformed shouldBe a[ValidationError]
+    malformed.message should startWith("Invalid pattern: Invalid regex syntax:")
+    RegexSafetyManager.safeCompile("(a+)+b").left.toOption.get.message shouldBe
+      "Invalid pattern: Regex pattern contains nested quantifiers and may cause ReDoS"
+  }
+
+  it should "compile with the flags it is given" in {
+    val compiled = RegexSafetyManager.safeCompile("(get|post)+", Pattern.CASE_INSENSITIVE).toOption.get
+    RegexSafetyManager.safeFind(compiled, "GETPOST /") shouldBe Right(true)
   }
 }

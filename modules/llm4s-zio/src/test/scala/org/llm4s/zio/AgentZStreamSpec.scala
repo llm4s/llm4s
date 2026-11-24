@@ -1,6 +1,7 @@
 package org.llm4s.zio
 
 import org.llm4s.agent.graph.{
+  RunStartedDetails,
   Checkpointer,
   Commit,
   EventRecord,
@@ -143,7 +144,7 @@ object AgentZStreamSpec extends ZIOSpecDefault {
         assertTrue(
           doneOk,
           eventsOk,
-          durable.head == RunEvent.RunStarted(None, None),
+          durable.head == RunEvent.RunStarted(RunStartedDetails(None, None)),
           durable.last == RunEvent.RunCompleted
         )
       }

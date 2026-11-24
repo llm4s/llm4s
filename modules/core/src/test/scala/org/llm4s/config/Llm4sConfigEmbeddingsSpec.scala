@@ -32,9 +32,8 @@ class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
   "Llm4sConfig.embeddings" should {
     "load embeddings config via llm4s.*" in {
       val props = Map(
-        "llm4s.embeddings.provider"                 -> "fixtureembedding",
+        "llm4s.embeddings.model"                    -> "fixtureembedding/fixture-embed-large",
         "llm4s.embeddings.fixtureembedding.baseUrl" -> "https://embeddings.example.test",
-        "llm4s.embeddings.fixtureembedding.model"   -> "fixture-embed-large",
         "llm4s.embeddings.fixtureembedding.apiKey"  -> "vk-test"
       )
       withProps(props) {
@@ -67,18 +66,13 @@ class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
       }
     }
 
-    "prefer unified model format over legacy provider" in {
-      val props = Map(
-        "llm4s.embeddings.model"                   -> "fixtureembedding/fixture-embed-large", // Takes precedence
-        "llm4s.embeddings.provider"                -> "openai",                               // Should be ignored
-        "llm4s.embeddings.fixtureembedding.apiKey" -> "vk-test"
-      )
-      withProps(props) {
-        val (provider, cfg): (String, EmbeddingProviderConfig) =
-          Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
+    "fail, naming EMBEDDING_MODEL, when only the removed llm4s.embeddings.provider is set" in {
+      withProps(Map("llm4s.embeddings.provider" -> "fixtureembedding")) {
+        val message = Llm4sConfig.embeddings().left.toOption.getOrElse(fail("Expected a failure")).message
 
-        provider shouldBe "fixtureembedding" // Unified format wins
-        cfg.model shouldBe "fixture-embed-large"
+        message should include("llm4s.embeddings.provider ('fixtureembedding') is no longer read")
+        message should include("EMBEDDING_MODEL (llm4s.embeddings.model)")
+        message should include("fixtureembedding/<model>")
       }
     }
 

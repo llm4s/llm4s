@@ -77,8 +77,8 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with TestTimeLimit with Matchers
       e match
         case StreamEvent.Durable(record) =>
           record.event match
-            case RunEvent.RunCompleted | RunEvent.RunFailed(_, _, _) | RunEvent.RunSuspended(_) |
-                RunEvent.RunCancelled(_, _) | RunEvent.RunTimedOut(_, _) =>
+            case RunEvent.RunCompleted | RunEvent.RunFailed(_) | RunEvent.RunSuspended(_) | RunEvent.RunCancelled(_) |
+                RunEvent.RunTimedOut(_) =>
               ended.countDown()
             case _ => ()
         case _ => ()
@@ -190,8 +190,8 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val (_, c)     = collect(Agent.builder("assistant", client).withMiddleware(middleware), "hello")
     val events     = c.durable.map(_.record.event)
 
-    events.head should matchPattern { case RunEvent.RunStarted(_, _) => }
-    events.last should matchPattern { case RunEvent.RunFailed(message, _, _) if message.contains("RuleA") => }
+    events.head should matchPattern { case RunEvent.RunStarted(_) => }
+    events.last should matchPattern { case RunEvent.RunFailed(details) if details.message.contains("RuleA") => }
     events should not contain RunEvent.RunCompleted
     blockIndex(events) should ((be > 0).and(be < events.size - 1))
     modelCallIndex(events) shouldBe -1 // the model was never called
@@ -209,7 +209,7 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val events = c.durable.map(_.record.event)
 
     events should not contain RunEvent.RunCompleted
-    events.last should matchPattern { case RunEvent.RunFailed(message, _, _) if message.contains("RuleA") => }
+    events.last should matchPattern { case RunEvent.RunFailed(details) if details.message.contains("RuleA") => }
     modelCallIndex(events) should be >= 0
     blockIndex(events) should be > modelCallIndex(events)
     blockIndex(events) should be < events.size - 1
@@ -252,9 +252,9 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val events      = c.durable.map(_.record.event)
 
     result.isLeft shouldBe true
-    events.head should matchPattern { case RunEvent.RunStarted(_, _) => }
+    events.head should matchPattern { case RunEvent.RunStarted(_) => }
     events should contain(RunEvent.TaskFailed("Node 'assistant/model' (task 1.0) failed: provider down"))
-    events.last should matchPattern { case RunEvent.RunFailed(message, _, _) if message.contains("provider down") => }
+    events.last should matchPattern { case RunEvent.RunFailed(details) if details.message.contains("provider down") => }
   }
 
   // ---- finding 7: events after a handoff

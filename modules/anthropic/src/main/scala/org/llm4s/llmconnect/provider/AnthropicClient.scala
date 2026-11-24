@@ -372,7 +372,7 @@ curl https://api.anthropic.com/v1/messages \
         val requestBody   = serializeRequestBody(messageParams)
 
         // Create accumulator for building the final completion
-        val accumulator = StreamingAccumulator.create()
+        val accumulator = StreamingAccumulator(config.model)
         // the sources the streamed text blocks cite, each once, in order
         val citations                        = mutable.LinkedHashSet.empty[Citation]
         var currentMessageId: Option[String] = None
@@ -574,7 +574,7 @@ curl https://api.anthropic.com/v1/messages \
               val message =
                 if (thinkingBlocks.isEmpty) c.message
                 else c.message.withThinking(thinkingBlocks.values.map(_.toBlock).toSeq)
-              c.withModel(config.model)
+              c
                 .withMessage(ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options))
                 .withEstimatedCost(cost)
                 .withCitations(citations.toList)
@@ -593,6 +593,18 @@ curl https://api.anthropic.com/v1/messages \
   override def getContextWindow(): Int = providerConfig.contextWindow
 
   override def getReserveCompletion(): Int = providerConfig.reserveCompletion
+
+  /**
+   * Asks for the configured model with the Models API (`GET /v1/models/<model>`), through the SDK client and with
+   * the credential a message is sent with. `Right(())` means the endpoint answered, took the credential and has
+   * the model. A refused key is an `AuthenticationError` and an unknown model the `ServiceError` 404 a message
+   * gets.
+   */
+  override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
+    Try(client.models().retrieve(config.model, AnthropicClient.ValidationOptions)).toEither.left
+      .map(AnthropicClient.mapError(_))
+      .map(_ => ())
+  }
 
   /** This client's model's registry capabilities, looked up once: the registry is a static snapshot. */
   private lazy val capabilities: Option[ModelCapabilities] =
@@ -1013,6 +1025,10 @@ object AnthropicClient {
 
   /** The provider name a refusal's `ContentFilteredError` carries. */
   private val DisplayName = "Anthropic"
+
+  /** `validate()`'s request waits ten seconds at most. */
+  private val ValidationOptions: RequestOptions =
+    RequestOptions.builder().timeout(java.time.Duration.ofSeconds(10)).build()
 
   /**
    * Anthropic's `stop_reason` as a [[FinishReason]] (RFC 0009): `end_turn` and `stop_sequence` are `Stop`, `tool_use`

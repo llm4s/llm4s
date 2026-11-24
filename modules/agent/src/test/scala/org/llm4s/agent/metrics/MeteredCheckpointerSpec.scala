@@ -143,10 +143,24 @@ class MeteredCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValue
     val claim = f.metered.claim(on, ClaimRequest(RunId("a"), None, 30.seconds)).value
     val first = checkpoint(on, "a", claim.token)
     f.metered
-      .commit(on, Commit(claim.token, Some(first), events = Vector(event("a", start, RunEvent.RunStarted(None, None)))))
+      .commit(
+        on,
+        Commit(
+          claim.token,
+          Some(first),
+          events = Vector(event("a", start, RunEvent.RunStarted(RunStartedDetails(None, None))))
+        )
+      )
       .value
     f.metered
-      .commit(on, Commit(claim.token, None, events = Vector(event("a", start.plusSeconds(4), RunEvent.RunCancelled()))))
+      .commit(
+        on,
+        Commit(
+          claim.token,
+          None,
+          events = Vector(event("a", start.plusSeconds(4), RunEvent.RunCancelled(RunStoppedDetails())))
+        )
+      )
       .value
 
     f.metrics.count(RunsEnded, "researcher", "cancelled") shouldBe 1.0
@@ -165,7 +179,7 @@ class MeteredCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValue
         Commit(
           claim.token,
           Some(checkpoint(child, "c1", claim.token, origin = Some(origin))),
-          events = Vector(event("c1", start, RunEvent.RunStarted(None, None)))
+          events = Vector(event("c1", start, RunEvent.RunStarted(RunStartedDetails(None, None))))
         )
       )
       .value
@@ -217,7 +231,7 @@ class MeteredCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValue
         Commit(
           claim.token,
           Some(checkpoint(on, "a", claim.token)),
-          events = Vector(event("a", start, RunEvent.RunStarted(None, None)))
+          events = Vector(event("a", start, RunEvent.RunStarted(RunStartedDetails(None, None))))
         )
       )
       .value should have size 1
@@ -242,7 +256,14 @@ class MeteredCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValue
     val claim = f.metered.claim(on, ClaimRequest(RunId("a"), None, 30.seconds)).value
     val first = checkpoint(on, "a", claim.token)
     f.metered
-      .commit(on, Commit(claim.token, Some(first), events = Vector(event("a", start, RunEvent.RunStarted(None, None)))))
+      .commit(
+        on,
+        Commit(
+          claim.token,
+          Some(first),
+          events = Vector(event("a", start, RunEvent.RunStarted(RunStartedDetails(None, None))))
+        )
+      )
       .value
     f.metered.latest(on).value shouldBe f.store.latest(on).value
     f.metered.history(on, None, 10).value shouldBe f.store.history(on, None, 10).value

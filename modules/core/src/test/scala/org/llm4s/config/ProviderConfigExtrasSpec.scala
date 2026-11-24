@@ -25,10 +25,8 @@ import scala.jdk.CollectionConverters.*
  * and how the section validator checks them.
  *
  * `RegionalProvider` is the shape Bedrock needs - a required `region`, an optional `profile`,
- * and a `tier` with a default - plus a deprecated alias, `organization`, as Vertex AI has.
- * `organization` was a built-in field until #1133; it is now an ordinary key that OpenAI-format
- * providers declare, so an alias of that name is resolved from the section's extras. It builds a `FixtureChatConfig`, putting the region in the base URL so a
- * round trip can show the value reached `buildConfig`.
+ * and a `tier` with a default. It builds a `FixtureChatConfig`, putting the region in the base
+ * URL so a round trip can show the value reached `buildConfig`.
  */
 class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
 
@@ -38,12 +36,7 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
     val configSpec: ProviderConfigSpec = ProviderConfigSpec(
       requiresApiKey = true,
       extras = Seq(
-        ProviderConfigKey(
-          "region",
-          "the cloud region hosting the model, e.g. eu-west-1",
-          required = true,
-          deprecatedAliases = Seq("organization")
-        ),
+        ProviderConfigKey("region", "the cloud region hosting the model, e.g. eu-west-1", required = true),
         ProviderConfigKey.optional("profile", "the named credentials profile"),
         ProviderConfigKey.optional("tier", "the service tier", default = Some("standard"))
       )
@@ -85,42 +78,14 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
       ModelRegistryService
     ): Result[LLMClient] = Left(ConfigurationError("not needed for this test"))
 
-  /** A descriptor that only has a spec: for validation cases that never build a config. */
-  private def stub(idName: String, spec: ProviderConfigSpec): ProviderDescriptor =
-    new ProviderDescriptor:
-      val id: ProviderId                 = ProviderId(idName)
-      val configSpec: ProviderConfigSpec = spec
-      def buildConfig(providerName: String, section: NamedProviderConfig)(using
-        ContextWindowResolver
-      ): Result[ProviderConfig] = Left(ConfigurationError("unused"))
-      def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-        ModelRegistryService
-      ): Result[LLMClient] = Left(ConfigurationError("unused"))
-
-  /** A key renamed twice: `proj`, then `organization` - both former extra keys. */
-  private val twoAliases = stub(
-    "twoaliases",
-    ProviderConfigSpec(extras =
-      Seq(ProviderConfigKey("projectId", "the project", deprecatedAliases = Seq("proj", "organization")))
-    )
-  )
-
   private given ProviderRegistry = ProviderRegistry.of(RegionalProvider, EnvBoundProvider, FixtureChatProvider)
 
   private def section(
     provider: String = "regional",
     apiKey: Option[String] = Some("k"),
-    organization: Option[String] = None,
     extras: Map[String, String] = Map.empty
   ): RawNamedProviderSection =
-    // `organization` is no longer a built-in field, so the loader puts it in `extras` as it would any other key.
-    RawNamedProviderSection(
-      Some(provider),
-      Some("m"),
-      None,
-      apiKey.map(ApiKey(_)),
-      extras = extras ++ organization.map("organization" -> _)
-    )
+    RawNamedProviderSection(Some(provider), Some("m"), None, apiKey.map(ApiKey(_)), extras = extras)
 
   private def validated(
     raw: RawNamedProviderSection,
@@ -216,50 +181,14 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
     events.map(_.getFormattedMessage).exists(_.contains("unknown key(s) bogus")) shouldBe true
   }
 
-  "a deprecated alias" should "stand in for the key, with a deprecation warning" in {
-    val (config, warnings) = ok(validated(section(organization = Some("eu-west-1"))))
-
-    config.extra("region") shouldBe Some("eu-west-1")
-    warnings shouldBe Seq(
-      "llm4s.providers.my-regional.organization is deprecated for provider = regional; rename it to " +
-        "llm4s.providers.my-regional.region. The old name will stop working in a future release."
-    )
-  }
-
-  it should "not be reported as an unknown key when it is a former extra key" in {
-    object Renamed extends ProviderDescriptor:
-      val id: ProviderId = ProviderId("renamed")
-      val configSpec: ProviderConfigSpec =
-        ProviderConfigSpec(extras =
-          Seq(ProviderConfigKey("projectId", "the project", deprecatedAliases = Seq("project")))
-        )
-      def buildConfig(providerName: String, section: NamedProviderConfig)(using
-        ContextWindowResolver
-      ): Result[ProviderConfig] = Left(ConfigurationError("unused"))
-      def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-        ModelRegistryService
-      ): Result[LLMClient] = Left(ConfigurationError("unused"))
-
-    val (config, warnings) = ok(validated(section(provider = "renamed", extras = Map("project" -> "p")), Renamed))
-
-    config.extras shouldBe Map("projectId" -> "p")
-    warnings should have size 1
-    warnings.head should include("project is deprecated")
-  }
-
-  it should "be accepted, with a warning, when it agrees with the key" in {
-    val (config, warnings) = ok(validated(section(organization = Some("r"), extras = Map("region" -> "r"))))
+  // There are no key aliases before 1.0 (docs/reference/compatibility-policy.md): a renamed key's
+  // old name is an unknown key like any other, so a section still using it fails if the key is required.
+  "a key's old name" should "be an unknown key, not a stand-in for the key" in {
+    val (config, warnings) = ok(validated(section(extras = Map("region" -> "r", "organization" -> "eu-west-1"))))
 
     config.extra("region") shouldBe Some("r")
-    warnings.head should include("organization is deprecated")
-  }
-
-  it should "be an error when it disagrees with the key" in {
-    val message = error(validated(section(organization = Some("us-east-1"), extras = Map("region" -> "eu-west-1"))))
-
-    message should include(
-      "- region: also set, to a different value, as its deprecated alias `organization`; remove llm4s.providers.my-regional.organization"
-    )
+    warnings.head should include("llm4s.providers.my-regional has unknown key(s) organization, which are ignored")
+    error(validated(section(extras = Map("organization" -> "eu-west-1")))) should include("- region:")
   }
 
   "a descriptor" should "not be able to declare a built-in field as a provider-specific key" in {
@@ -275,63 +204,6 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
 
     error(validated(section(provider = "clashing"), Clashing)) should include(
       "Provider 'clashing' declares provider-specific key(s) baseUrl, which are built-in named-provider fields"
-    )
-  }
-
-  it should "not be able to use a built-in field without a string form as a deprecated alias" in {
-    val spec = ProviderConfigSpec(extras =
-      Seq(
-        ProviderConfigKey("modelId", "x", deprecatedAliases = Seq("model")),
-        ProviderConfigKey("h", "x", deprecatedAliases = Seq("headers"))
-      )
-    )
-
-    val message = error(validated(section(provider = "badalias"), stub("badalias", spec)))
-    message should include("Provider 'badalias' declares built-in field(s) model, headers as deprecated aliases")
-    message should include("only apiKey, baseUrl can")
-  }
-
-  "a built-in field as a deprecated alias" should "resolve for every field with a string form, apiKey included" in {
-    val spec = ProviderConfigSpec(extras =
-      Seq(
-        ProviderConfigKey("token", "the access token", required = true, deprecatedAliases = Seq("apiKey")),
-        ProviderConfigKey("host", "the host", deprecatedAliases = Seq("baseUrl"))
-      )
-    )
-    val raw = section(provider = "tokened", apiKey = Some("secret-token")).copy(baseUrl = Some("https://h.invalid"))
-
-    val (config, warnings) = ok(validated(raw, stub("tokened", spec)))
-
-    config.extras shouldBe Map("token" -> "secret-token", "host" -> "https://h.invalid")
-    warnings.map(_.takeWhile(_ != ';')) shouldBe Seq(
-      "llm4s.providers.my-regional.apiKey is deprecated for provider = tokened",
-      "llm4s.providers.my-regional.baseUrl is deprecated for provider = tokened"
-    )
-  }
-
-  "several deprecated aliases" should "be accepted when they agree, with a warning for each" in {
-    val (config, warnings) =
-      ok(validated(section(provider = "twoaliases", organization = Some("p"), extras = Map("proj" -> "p")), twoAliases))
-
-    config.extras shouldBe Map("projectId" -> "p")
-    warnings.map(_.takeWhile(_ != ';')) shouldBe Seq(
-      "llm4s.providers.my-regional.proj is deprecated for provider = twoaliases",
-      "llm4s.providers.my-regional.organization is deprecated for provider = twoaliases"
-    )
-  }
-
-  it should "be an error when they disagree, rather than silently using the first" in {
-    val message =
-      error(
-        validated(
-          section(provider = "twoaliases", organization = Some("new"), extras = Map("proj" -> "old")),
-          twoAliases
-        )
-      )
-
-    message should include(
-      "- projectId: set through several deprecated aliases with different values (`proj` = \"old\", " +
-        "`organization` = \"new\"); replace them with llm4s.providers.my-regional.projectId"
     )
   }
 
@@ -452,7 +324,7 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
       |    provider     = "regional"
       |    model        = "m"
       |    apiKey       = "k"
-      |    organization = "eu-west-1"
+      |    region       = "eu-west-1"
       |    regoin       = "typo"
       |  }
       |}
@@ -465,8 +337,7 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
       case Right(config: FixtureChatConfig) => config.baseUrl shouldBe "https://eu-west-1.regional.invalid"
       case other                            => fail(s"Expected FixtureChatConfig, got $other")
 
-    warnings should have size 2
-    warnings.count(_.contains("llm4s.providers.my-regional.organization is deprecated")) shouldBe 1
+    warnings should have size 1
     warnings.count(_.contains("unknown key(s) regoin")) shouldBe 1
   }
 
@@ -477,5 +348,5 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
 
     // RegionalProvider has no model lister, so this fails after the block has been loaded.
     error(result) should include("Model discovery is not supported yet for provider 'regional'")
-    warnings should have size 2
+    warnings should have size 1
   }

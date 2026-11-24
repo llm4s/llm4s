@@ -246,7 +246,7 @@ object Fixtures {
       agent(
         context => {
           (1 to 50).foreach(i => Pinged.emit(context.run, Ping(i)))
-          ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+          ToolOutcome.success(ToolContent.Json(ujson.Str("ok")))
         },
         turns = 25
       )
@@ -262,7 +262,7 @@ object Fixtures {
     val pinging: ToolContext => ToolOutcome = context => {
       Pinged.emit(context.run, Ping(1))
       Progressed.progress(context.run, Ping(2))
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("ok")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("ok")))
     }
   }
 }

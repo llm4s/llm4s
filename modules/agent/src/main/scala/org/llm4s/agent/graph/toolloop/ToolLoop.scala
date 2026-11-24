@@ -2444,14 +2444,14 @@ object ToolLoop:
       def failRun(error: LLMError): NodeResult =
         NodeResult.Fail(GraphError.ToolFailed(ToolName(name), ToolCallId(call.id), error))
       chain.outcome match
-        case ToolOutcome.Success(content, update) =>
+        case ToolOutcome.Success(success) =>
           val allowed = tool.writes ++ stack.writes
           val undeclared =
-            update.operations.map(_.key.id).filterNot(k => allowed.exists(_.id == k)).map(_.value).distinct
+            success.update.operations.map(_.key.id).filterNot(k => allowed.exists(_.id == k)).map(_.value).distinct
           if undeclared.isEmpty then
             // a tool that bounds its messages (the task tools, design 4.44) has its final result checked too: a wrapper
             // outside it may have replaced the result it checked
-            resultParts(name, content).flatMap(parts => ToolErrors.overBound(tool, parts).toLeft(parts)) match
+            resultParts(name, success.content).flatMap(parts => ToolErrors.overBound(tool, parts).toLeft(parts)) match
               case Left(problem) => record(task, problem, isError = true, context, ToolExecutionOutcome.Errored, took)
               case Right(parts)  =>
                 // live only, and the text view only: media is not put on the event bus
@@ -2459,7 +2459,7 @@ object ToolLoop:
                   .progress(context, events.ToolCallResult(call.id, ContentPart.text(parts), isError = false))
                 executed(task.call, task.idempotencyKey, context, ToolExecutionOutcome.Succeeded, took)
                 NodeResult.Continue(
-                  Command(update, Nil)
+                  Command(success.update, Nil)
                     .update(results, ToolResult(task.assistantMessageId, call.id, parts, isError = false))
                 )
           else

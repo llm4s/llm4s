@@ -243,7 +243,11 @@ object HandedOff:
 enum GuardrailPhase derives ReadWriter:
   case Input, Output
 
-/** A guardrail blocked the turn; the reason is on `AgentStatus.Blocked`, never in the log. */
+/**
+ * A guardrail blocked the turn. The reason is on `AgentStatus.Blocked`, never in the event log: no durable event of a
+ * blocked run holds it (its `TaskFailed` and `RunFailed` name the guardrail only). The run's closing checkpoint does,
+ * as `RunOutcome.Blocked`.
+ */
 @Experimental
 final case class GuardrailBlock private (guardrail: String, phase: GuardrailPhase) derives ReadWriter:
   def withGuardrail(value: String): GuardrailBlock     = copy(guardrail = value)

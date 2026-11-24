@@ -26,12 +26,6 @@ class MetricsCollectorComposeSpec extends AnyFlatSpec with Matchers {
       calls += "addTokens"
     override def recordCost(provider: String, model: String, costUsd: Double): Unit =
       calls += "recordCost"
-    override def recordRetryAttempt(provider: String, attemptNumber: Int): Unit =
-      calls += "recordRetryAttempt"
-    override def recordCircuitBreakerTransition(provider: String, newState: String): Unit =
-      calls += "recordCircuitBreakerTransition"
-    override def recordError(errorKind: ErrorKind, provider: String): Unit =
-      calls += "recordError"
     override def observeImageGeneration(
       provider: String,
       model: String,
@@ -107,9 +101,6 @@ class MetricsCollectorComposeSpec extends AnyFlatSpec with Matchers {
     composed.observeRequest("openai", "gpt-4o", Outcome.Success, 1.second)
     composed.addTokens("openai", "gpt-4o", 10L, 20L)
     composed.recordCost("openai", "gpt-4o", 0.01)
-    composed.recordRetryAttempt("openai", 1)
-    composed.recordCircuitBreakerTransition("openai", "open")
-    composed.recordError(ErrorKind.RateLimit, "openai")
     composed.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 2.seconds, 1)
     composed.recordImageGenerationCost("openai", "dall-e-3", 0.04, 1)
     composed.increment(Metric.counter("test.things", "things"), Seq.empty)
@@ -120,9 +111,6 @@ class MetricsCollectorComposeSpec extends AnyFlatSpec with Matchers {
       "observeRequest",
       "addTokens",
       "recordCost",
-      "recordRetryAttempt",
-      "recordCircuitBreakerTransition",
-      "recordError",
       "observeImageGeneration",
       "recordImageGenerationCost",
       "increment",

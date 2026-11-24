@@ -38,13 +38,13 @@ class SqliteAbandonSpec extends AnyFlatSpec with Matchers with EitherValues with
     val entered = new Semaphore(0)
     private val good = SpecTools.tool("good") { (_, _) =>
       goodRan.incrementAndGet()
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("good")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("good")))
     }
     private val slow = SpecTools.tool("slow") { (_, _) =>
       slowRan.incrementAndGet()
       entered.release()
       Thread.sleep(60_000) // interrupted by the cancel: the call then has no result
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("late")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("late")))
     }
     def agent(client: ScriptedLLMClient, store: SqliteCheckpointer): Agent =
       Agent

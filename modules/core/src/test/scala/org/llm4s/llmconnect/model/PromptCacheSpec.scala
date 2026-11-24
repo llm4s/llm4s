@@ -7,7 +7,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /** RFC 0008 PR 6 in core: `PromptCache`, the option, the reports, and the price of a 1-hour cache write. */
-class PromptCacheSpec extends AnyFlatSpec with Matchers {
+class PromptCacheSpec extends AnyFlatSpec with Matchers with org.scalatest.EitherValues {
 
   "PromptCache.default" should "cache the system prompt and the tools for the short lifetime" in {
     PromptCache.default.scope shouldBe Set(PromptCache.Scope.System, PromptCache.Scope.Tools)
@@ -67,8 +67,6 @@ class PromptCacheSpec extends AnyFlatSpec with Matchers {
       mode = ModelMode.Chat,
       maxInputTokens = None,
       maxOutputTokens = None,
-      inputCostPerToken = pricing.inputCostPerToken,
-      outputCostPerToken = pricing.outputCostPerToken,
       capabilities = ModelCapabilities(),
       pricing = pricing,
       deprecationDate = None
@@ -129,11 +127,13 @@ class PromptCacheSpec extends AnyFlatSpec with Matchers {
     CostEstimator.estimateFromMetadata(Some(metadata(pricing)), usage) shouldBe Some(100 * 2.0)
   }
 
-  "ModelPricing.fromJson" should "read the 1-hour cache-write price" in {
-    ModelPricing
-      .fromJson(ujson.Obj("cache_creation_input_token_cost_above_1hr" -> 6e-6))
+  "ModelMetadata.fromJson" should "read the 1-hour cache-write price" in {
+    ModelMetadata
+      .fromJson("m", ujson.Obj("cache_creation_input_token_cost_above_1hr" -> 6e-6))
+      .value
+      .pricing
       .cacheCreationInputTokenCostAbove1hr shouldBe Some(6e-6)
-    ModelPricing.fromJson(ujson.Obj()).cacheCreationInputTokenCostAbove1hr shouldBe None
+    ModelMetadata.fromJson("m", ujson.Obj()).value.pricing.cacheCreationInputTokenCostAbove1hr shouldBe None
   }
 
   "The bundled metadata" should "carry the 1-hour price for a current Claude model" in {
@@ -149,7 +149,7 @@ class PromptCacheSpec extends AnyFlatSpec with Matchers {
   }
 
   "StreamingAccumulator" should "carry the 1-hour cache writes onto the streamed completion's usage" in {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("test-model")
     accumulator.updateUsage(
       TokenUsage(100, 0, 0, cacheCreationTokens = Some(80), longCacheCreationTokens = Some(80))
     )

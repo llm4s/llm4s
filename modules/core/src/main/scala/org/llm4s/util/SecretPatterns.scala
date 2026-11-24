@@ -1,245 +1,73 @@
 package org.llm4s.util
 
-import org.llm4s.annotation.Stable
-
 import scala.util.matching.Regex
 
 /**
- * Library of credential-detection patterns used by `org.llm4s.agent.guardrails.builtin.SecretLeakGuardrail` (`llm4s-agent`)
- * and `Redaction`.
+ * The credential regexes `Redaction` applies to every string it redacts, and which
+ * `org.llm4s.agent.guardrails.patterns.SecretPatterns` (`llm4s-agent`) publishes as `SecretType`s for
+ * `SecretLeakGuardrail`.
  *
- * All regex matching is performed via [[SecretType]] instances.  Each type
- * knows its own pattern, human-readable name, and the placeholder text to use
- * when redacting.
+ * Every pattern runs on text a model, a user or a provider supplies, so each takes time linear in the text: a
+ * pattern may not start a scan to the end of a run from every position of that run. Where a pattern holds a
+ * capturing group, group 1 is the secret and the rest of the match is text the pattern had to read to stay linear
+ * ([[secretGroup]]).
  */
-@Stable
-object SecretPatterns {
+private[llm4s] object SecretPatterns {
 
   /**
-   * A single regex match of a secret inside a larger string.
-   *
-   * @param secretType  The [[SecretType]] that produced this match.
-   * @param value       The matched secret text (un-redacted).
-   * @param startIndex  Inclusive start position in the original string.
-   * @param endIndex    Exclusive end position in the original string.
+   * OpenAI API keys: a legacy `sk-...` key is alphanumeric; a project, service-account or admin key
+   * (`sk-proj-...`, `sk-svcacct-...`, `sk-admin-...`) also holds `-` and `_`.
    */
-  final case class SecretMatch private (
-    secretType: SecretType,
-    value: String,
-    startIndex: Int,
-    endIndex: Int
-  ) {
+  val OpenAIKey: Regex = """sk-(?:(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}|[A-Za-z0-9]{20,})""".r
 
-    /** The placeholder that should replace [[value]] when masking. */
-    def redactedValue: String = secretType.placeholder
+  /** Anthropic API keys: `sk-ant-...`, base64url after the prefix. */
+  val AnthropicKey: Regex = """sk-ant-[A-Za-z0-9_\-]{20,}""".r
 
-    /** Sets the [[SecretType]] that produced this match. */
-    def withSecretType(secretType: SecretType): SecretMatch = copy(secretType = secretType)
+  /** Google API keys: `AIza...` */
+  val GoogleApiKey: Regex = """AIza[A-Za-z0-9\-_]{35,}""".r
 
-    /** Sets the matched secret text. */
-    def withValue(value: String): SecretMatch = copy(value = value)
+  /** Voyage AI keys: `pa-...` */
+  val VoyageKey: Regex = """pa-[A-Za-z0-9]{20,}""".r
 
-    /** Sets the inclusive start position. */
-    def withStartIndex(startIndex: Int): SecretMatch = copy(startIndex = startIndex)
+  /** Langfuse public and secret keys: `pk-lf-...` / `sk-lf-...` */
+  val LangfuseKey: Regex = """(?:pk|sk)-lf-[A-Za-z0-9]{10,}""".r
 
-    /** Sets the exclusive end position. */
-    def withEndIndex(endIndex: Int): SecretMatch = copy(endIndex = endIndex)
+  /** AWS Access Key IDs: `AKIA` and 16 uppercase alphanumeric characters. */
+  val AwsAccessKey: Regex = """AKIA[A-Z0-9]{16}""".r
+
+  /**
+   * JWT tokens: three base64url segments separated by dots, the first two starting `eyJ` (a JSON object). Group 1
+   * is the token.
+   *
+   * It finds what `eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+` finds, in linear time (#2824). That
+   * pattern scanned to the end of a run of base64url characters from every `eyJ` in it, which is quadratic on a
+   * run of `eyJ` with no dot. Every `eyJ` of one run reaches the same dot or none, so only the first can start a
+   * token: this pattern starts at the head of a run only, skips to the run's first `eyJ` and never backtracks.
+   */
+  val JwtToken: Regex =
+    """(?<![A-Za-z0-9\-_])(?:(?!eyJ)[A-Za-z0-9\-_])*+(eyJ[A-Za-z0-9\-_]++\.eyJ[A-Za-z0-9\-_]++\.[A-Za-z0-9\-_]++)""".r
+
+  /**
+   * A PEM private key (PKCS#8, RSA, EC, DSA, OpenSSH, encrypted): the whole block, from `-----BEGIN ... PRIVATE
+   * KEY-----` through `-----END ... PRIVATE KEY-----`, whatever lies between (base64 lines, RFC 1421 headers,
+   * newlines written as `\n` in a JSON string).
+   *
+   * A block cut off before its footer matches through the base64 lines that follow the header, so a truncated
+   * reply does not leave the key readable; a header followed by neither (prose that quotes it) matches alone.
+   * Linear: the body stops at the next `-----`, so each header reads no further than the one after it.
+   */
+  val PrivateKeyPem: Regex = {
+    val kind = "(?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?"
+    val body = """(?:(?!-----)[\s\S])*+"""
+    val cut  = """[\r\n\\][A-Za-z0-9+/=\r\n\\]*+"""
+    s"-----BEGIN ${kind}PRIVATE KEY-----(?:$body-----END ${kind}PRIVATE KEY-----|$cut|)".r
   }
 
-  object SecretMatch {
+  /** The patterns `Redaction` applies: every one but [[PrivateKeyPem]]. */
+  val default: Vector[Regex] =
+    Vector(OpenAIKey, AnthropicKey, GoogleApiKey, VoyageKey, LangfuseKey, AwsAccessKey, JwtToken)
 
-    /** Creates a [[SecretMatch]]. */
-    def apply(secretType: SecretType, value: String, startIndex: Int, endIndex: Int): SecretMatch =
-      new SecretMatch(secretType, value, startIndex, endIndex)
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // SecretType ADT
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /**
-   * A single category of secret credential.
-   *
-   * Each instance carries:
-   *  - `name`        – human-readable label used in error messages
-   *  - `pattern`     – the [[scala.util.matching.Regex]] that recognises this credential
-   *  - `placeholder` – what to write in place of the secret when masking
-   */
-  sealed abstract class SecretType(
-    val name: String,
-    val pattern: Regex,
-    val placeholder: String
-  ) {
-
-    /**
-     * Return all non-overlapping matches found in `text`.
-     * Results are ordered by start position.
-     */
-    def findAll(text: String): Seq[SecretMatch] =
-      pattern
-        .findAllMatchIn(text)
-        .map { m =>
-          // Use group 1 if the pattern captures the secret in a group,
-          // otherwise use the whole match.
-          val (value, start, end) =
-            if (m.groupCount >= 1 && m.group(1) != null)
-              (m.group(1), m.start(1), m.end(1))
-            else
-              (m.matched, m.start, m.end)
-          SecretMatch(this, value, start, end)
-        }
-        .toSeq
-  }
-
-  object SecretType {
-
-    /** OpenAI API keys: `sk-...` and `sk-proj-...` */
-    case object OpenAIKey
-        extends SecretType(
-          name = "OpenAI API Key",
-          pattern = """sk-(?:proj-)?[A-Za-z0-9]{20,}""".r,
-          placeholder = "[REDACTED_OPENAI_KEY]"
-        )
-
-    /** Anthropic API keys: `sk-ant-...` */
-    case object AnthropicKey
-        extends SecretType(
-          name = "Anthropic API Key",
-          pattern = """sk-ant-[A-Za-z0-9\-]{20,}""".r,
-          placeholder = "[REDACTED_ANTHROPIC_KEY]"
-        )
-
-    /** Google API keys: `AIza...` */
-    case object GoogleApiKey
-        extends SecretType(
-          name = "Google API Key",
-          pattern = """AIza[A-Za-z0-9\-_]{35,}""".r,
-          placeholder = "[REDACTED_GOOGLE_KEY]"
-        )
-
-    /** Voyage AI keys: `pa-...` */
-    case object VoyageKey
-        extends SecretType(
-          name = "Voyage API Key",
-          pattern = """pa-[A-Za-z0-9]{20,}""".r,
-          placeholder = "[REDACTED_VOYAGE_KEY]"
-        )
-
-    /** Langfuse public and secret keys: `pk-lf-...` / `sk-lf-...` */
-    case object LangfuseKey
-        extends SecretType(
-          name = "Langfuse API Key",
-          pattern = """(?:pk|sk)-lf-[A-Za-z0-9]{10,}""".r,
-          placeholder = "[REDACTED_LANGFUSE_KEY]"
-        )
-
-    /** AWS Access Key IDs: `AKIA...` (20 uppercase alphanumeric chars) */
-    case object AwsAccessKey
-        extends SecretType(
-          name = "AWS Access Key ID",
-          pattern = """AKIA[A-Z0-9]{16}""".r,
-          placeholder = "[REDACTED_AWS_KEY]"
-        )
-
-    /**
-     * JWT tokens: three base64url segments separated by dots.
-     * The first segment always decodes to a JSON header starting with `eyJ`.
-     */
-    case object JwtToken
-        extends SecretType(
-          name = "JWT Token",
-          pattern = """eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+""".r,
-          placeholder = "[REDACTED_JWT]"
-        )
-
-    /** PEM private key block headers (RSA, EC, PKCS8 variants). */
-    case object PrivateKeyPem
-        extends SecretType(
-          name = "PEM Private Key",
-          pattern = """-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----""".r,
-          placeholder = "[REDACTED_PRIVATE_KEY]"
-        )
-
-    /** The 7 types checked by default (excludes [[PrivateKeyPem]]). */
-    val default: Seq[SecretType] = Seq(
-      OpenAIKey,
-      AnthropicKey,
-      GoogleApiKey,
-      VoyageKey,
-      LangfuseKey,
-      AwsAccessKey,
-      JwtToken
-    )
-
-    /** All 8 known types, including [[PrivateKeyPem]]. */
-    val all: Seq[SecretType] = default :+ PrivateKeyPem
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Top-level helpers (operate on SecretType.default unless told otherwise)
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Find every secret in `text` using the supplied `types`
-   * (defaults to [[SecretType.default]]).
-   */
-  def detect(
-    text: String,
-    types: Seq[SecretType] = SecretType.default
-  ): Seq[SecretMatch] =
-    types.flatMap(_.findAll(text))
-
-  /**
-   * Returns `true` if `text` contains at least one secret from `types`.
-   */
-  def containsSecret(
-    text: String,
-    types: Seq[SecretType] = SecretType.default
-  ): Boolean =
-    types.exists(_.findAll(text).nonEmpty)
-
-  /**
-   * Replace each matched secret with its type-specific placeholder
-   * (e.g. `sk-abc... → [REDACTED_OPENAI_KEY]`).
-   *
-   * When multiple secrets of different types overlap, earlier matches in
-   * the type list take precedence (leftmost-longest wins within a type;
-   * types are applied left-to-right).
-   */
-  def redactAll(
-    text: String,
-    types: Seq[SecretType] = SecretType.default
-  ): String =
-    types.foldLeft(text)((acc, t) => t.pattern.replaceAllIn(acc, _ => Regex.quoteReplacement(t.placeholder)))
-
-  /**
-   * Replace every matched secret with the supplied uniform `placeholder`
-   * string (e.g. `"[REDACTED]"`).
-   *
-   * Useful when callers want a single marker regardless of credential type.
-   */
-  def redactAllWithPlaceholder(
-    text: String,
-    placeholder: String,
-    types: Seq[SecretType] = SecretType.default
-  ): String = {
-    // Quoted, so a `$` or `\` in the caller's placeholder is written as it is, not read as a group reference.
-    val quoted = Regex.quoteReplacement(placeholder)
-    types.foldLeft(text)((acc, t) => t.pattern.replaceAllIn(acc, _ => quoted))
-  }
-
-  /**
-   * Count occurrences of each credential type in `text`.
-   *
-   * @return A map from [[SecretType.name]] to the number of matches found.
-   *         Types with zero matches are omitted.
-   */
-  def summarize(
-    text: String,
-    types: Seq[SecretType] = SecretType.default
-  ): Map[String, Int] =
-    types.flatMap { t =>
-      val count = t.findAll(text).size
-      if (count > 0) Some(t.name -> count) else None
-    }.toMap
+  /** The group of `pattern` that holds the secret: 1 when it has a capturing group, else 0, the whole match. */
+  def secretGroup(pattern: Regex): Int =
+    if (pattern.pattern.matcher("").groupCount >= 1) 1 else 0
 }

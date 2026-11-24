@@ -19,13 +19,20 @@ import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference 
  *
  * Provides:
  * - Retry with configurable policies (exponential backoff, linear, fixed)
- * - Circuit breaker to fail fast when service is down
- * - Deadline enforcement to prevent hanging operations
+ * - Circuit breaker to fail fast when service is down: while the circuit is open, or half-open with a probe in
+ *   flight, a call is refused with a [[org.llm4s.error.CircuitOpenError CircuitOpenError]], which is not retried
+ * - A deadline on the attempts taken together: it is checked before each attempt and before each wait, so no
+ *   retry starts once it has passed. It does not interrupt an attempt: a call hung inside the underlying client
+ *   is bounded by that client's own timeout, not by the deadline
  * - Local token-bucket rate limiting ([[RateLimitConfig]]), checked before every attempt
- * - Metrics tracking for retry attempts and circuit breaker state
+ * - Metrics for retry attempts, circuit breaker transitions and the errors it ends on ([[ReliabilityMetrics]])
  *
  * Thread-safety: Uses AtomicInteger/AtomicReference for circuit breaker state management
  * to ensure correct behavior under concurrent access.
+ *
+ * A configuration the client cannot run with ([[ReliabilityConfig.validate]]: a `failureThreshold` below 1, a
+ * `burstCapacity` below 1, a negative `requestsPerMinute`) does not throw here: every call, and `validate()`,
+ * returns its [[org.llm4s.error.ValidationError ValidationError]].
  *
  * @param underlying The client to wrap
  * @param providerName Explicit provider name for stable metrics labels
@@ -47,6 +54,10 @@ final class ReliableClient(
 
   private val cancelledOperation = "reliable-client.complete"
 
+  // What is wrong with the configuration, when it is enabled and cannot be run with
+  private val configError: Option[LLMError] =
+    if (config.enabled) config.validate.left.toOption else None
+
   // Deadline and circuit-breaker arithmetic is in epoch milliseconds internally
   private def nowMillis(): Long = clock().toEpochMilli
 
@@ -63,7 +74,7 @@ final class ReliableClient(
         () =>
           if (bucket.tryAcquire()) operation()
           else {
-            collector.foreach(_.recordError(ErrorKind.RateLimit, providerName))
+            collector.foreach(ReliabilityMetrics.failed(_, providerName, ErrorKind.RateLimit))
             Left(RateLimitError.local(providerName))
           }
     }
@@ -84,7 +95,9 @@ final class ReliableClient(
     if (!config.enabled) {
       underlying.complete(conversation, options)
     } else {
-      executeWithReliability(rateLimited(() => underlying.complete(conversation, options)))
+      configError
+        .map(error => Left(error): Result[Completion])
+        .getOrElse(executeWithReliability(rateLimited(() => underlying.complete(conversation, options))))
     }
 
   override def streamComplete(
@@ -94,33 +107,34 @@ final class ReliableClient(
   ): Result[Completion] =
     if (!config.enabled) {
       underlying.streamComplete(conversation, options, onChunk)
-    } else {
-      // Once a chunk has reached the caller, a failure is returned rather than retried: a retry would
-      // deliver the reply again from the start and run (and bill) the call twice. A failure before the
-      // first chunk is retried as usual. `LLMClientRetry.streamCompleteWithRetry` keeps the same rule.
-      val delivered = new java.util.concurrent.atomic.AtomicBoolean(false)
-      // The caller's own onChunk threw: the client turns that into a Left, but it says nothing about the
-      // provider, so the circuit breaker counts it as neither success nor failure. It is rethrown unchanged.
-      val callerFailed = new java.util.concurrent.atomic.AtomicBoolean(false)
-      val tracking: StreamedChunk => Unit = { chunk =>
-        delivered.set(true)
-        Try(onChunk(chunk)) match {
-          case Failure(e) =>
-            callerFailed.set(true)
-            throw e
-          case _ => ()
+    } else
+      configError.map(error => Left(error): Result[Completion]).getOrElse {
+        // Once a chunk has reached the caller, a failure is returned rather than retried: a retry would
+        // deliver the reply again from the start and run (and bill) the call twice. A failure before the
+        // first chunk is retried as usual. `LLMClientRetry.streamCompleteWithRetry` keeps the same rule.
+        val delivered = new java.util.concurrent.atomic.AtomicBoolean(false)
+        // The caller's own onChunk threw: the client turns that into a Left, but it says nothing about the
+        // provider, so the circuit breaker counts it as neither success nor failure. It is rethrown unchanged.
+        val callerFailed = new java.util.concurrent.atomic.AtomicBoolean(false)
+        val tracking: StreamedChunk => Unit = { chunk =>
+          delivered.set(true)
+          Try(onChunk(chunk)) match {
+            case Failure(e) =>
+              callerFailed.set(true)
+              throw e
+            case _ => ()
+          }
         }
+        executeWithReliability(
+          rateLimited(() => underlying.streamComplete(conversation, options, tracking)),
+          canRetry = () => !delivered.get(),
+          callerFailed = () => callerFailed.get()
+        )
       }
-      executeWithReliability(
-        rateLimited(() => underlying.streamComplete(conversation, options, tracking)),
-        canRetry = () => !delivered.get(),
-        callerFailed = () => callerFailed.get()
-      )
-    }
 
   override def getContextWindow(): Int     = underlying.getContextWindow()
   override def getReserveCompletion(): Int = underlying.getReserveCompletion()
-  override def validate(): Result[Unit]    = underlying.validate()
+  override def validate(): Result[Unit]    = configError.toLeft(()).flatMap(_ => underlying.validate())
   override def close(): Unit               = underlying.close()
 
   override def providerId: Option[org.llm4s.types.ProviderModelTypes.ProviderId] = underlying.providerId
@@ -133,12 +147,13 @@ final class ReliableClient(
     canRetry: () => Boolean = () => true,
     callerFailed: () => Boolean = () => false
   ): Result[A] = {
-    // Check circuit breaker state
-    checkCircuitBreaker() match {
+    // Check circuit breaker state. A call let through a half-open circuit is its probe: it holds the probe
+    // permit, and hands it back with its outcome.
+    val isProbe = checkCircuitBreaker() match {
       case Left(error) =>
-        collector.foreach(_.recordError(ErrorKind.ServiceError, providerName))
+        collector.foreach(ReliabilityMetrics.failed(_, providerName, ErrorKind.ServiceError))
         return Left(error)
-      case Right(_) => // Continue
+      case Right(probe) => probe
     }
 
     // Whether any attempt reached the provider and failed. The final result alone cannot say:
@@ -168,25 +183,25 @@ final class ReliableClient(
     // back a half-open probe permit.
     result match {
       case Right(_) =>
-        onSuccess()
+        onSuccess(isProbe)
       // The caller's own callback failed, not the provider
       case Left(_) if callerFailed() =>
-        onNeutralOutcome()
+        onNeutralOutcome(isProbe)
       // The provider's content filter answered: it is healthy, and one user's blocked prompts must not open the
       // breaker for every caller
       case Left(_: ContentFilteredError) =>
-        onNeutralOutcome()
+        onNeutralOutcome(isProbe)
       case Left(e) if isLocalThrottle(e) && !providerFailed.get() =>
-        onNeutralOutcome()
+        onNeutralOutcome(isProbe)
       // Cancelled while waiting for a local token after the provider had failed: that failure
       // counts, as it would had the wait ended as a local throttle
       case Left(_: CancelledError) if cancelledAwaitingToken.get() && providerFailed.get() =>
-        onFailure()
+        onFailure(isProbe)
       // Otherwise a cancelled call says nothing about the provider's health
       case Left(_: CancelledError) =>
-        onNeutralOutcome()
+        onNeutralOutcome(isProbe)
       case Left(_) =>
-        onFailure()
+        onFailure(isProbe)
     }
 
     result
@@ -233,7 +248,7 @@ final class ReliableClient(
         case Left(error) =>
           (if (canRetry()) decideRetry(attemptNumber, error) else RetryDecision.DoNotRetry) match {
             case RetryDecision.Retry(delay) =>
-              collector.foreach(_.recordRetryAttempt(providerName, attemptNumber))
+              collector.foreach(ReliabilityMetrics.retried(_, providerName))
 
               // Recompute remaining time after operation to avoid a stale value
               val remainingAfterDelay = (deadlineMs - nowMillis()) - delay.toMillis
@@ -295,7 +310,7 @@ final class ReliableClient(
         (if (canRetry()) decideRetry(attemptNumber, error) else RetryDecision.DoNotRetry) match {
           case RetryDecision.Retry(delay) =>
             // Record retry attempt
-            collector.foreach(_.recordRetryAttempt(providerName, attemptNumber))
+            collector.foreach(ReliabilityMetrics.retried(_, providerName))
 
             try
               sleep(delay)
@@ -375,7 +390,7 @@ final class ReliableClient(
     lastError match {
       case Some(e) if isLocalThrottle(e) => Left(e)
       case _ =>
-        collector.foreach(_.recordError(ErrorKind.Timeout, providerName))
+        collector.foreach(ReliabilityMetrics.failed(_, providerName, ErrorKind.Timeout))
         Left(
           TimeoutError(
             message = lastError match {
@@ -403,89 +418,81 @@ final class ReliableClient(
     error match {
       case _: CancelledError                                                  => ()
       case rle: RateLimitError if rle.origin == RateLimitOrigin.LocalThrottle => ()
-      case _ => collector.foreach(_.recordError(ErrorKind.fromLLMError(error), providerName))
+      case _ => collector.foreach(ReliabilityMetrics.failed(_, providerName, ErrorKind.fromLLMError(error)))
     }
 
   /**
-   * Check circuit breaker state and transition if needed.
+   * Whether the circuit lets this call through, and if so whether as the probe of a half-open circuit.
+   *
+   * The probe permit is taken before the circuit moves from open to half-open, and by the caller that moves it, so
+   * of any number of callers that arrive once the recovery time has passed exactly one probes (#2797): the caller
+   * that made the transition used to go ahead without the permit, and a second caller could take it.
    */
-  private def checkCircuitBreaker(): Result[Unit] =
+  private def checkCircuitBreaker(): Result[Boolean] =
     circuitState.get() match {
       case CircuitState.Closed =>
-        Right(())
+        Right(false)
 
       case CircuitState.Open =>
-        val now = nowMillis()
-        if ((now - lastFailureTime.get()) > config.circuitBreaker.recoveryTimeout.toMillis) {
-          // Transition to half-open
-          if (circuitState.compareAndSet(CircuitState.Open, CircuitState.HalfOpen)) {
-            successCount.set(0)
-            probePermit.set(false)
-            collector.foreach(_.recordCircuitBreakerTransition(providerName, "half-open"))
-          }
-          Right(())
+        val remaining = config.circuitBreaker.recoveryTimeout.toMillis - (nowMillis() - lastFailureTime.get())
+        if (remaining >= 0)
+          Left(CircuitOpenError.open(providerName, FiniteDuration(math.max(remaining, 1L), MILLISECONDS)))
+        else if (!probePermit.compareAndSet(false, true)) Left(CircuitOpenError.probing(providerName))
+        else if (circuitState.compareAndSet(CircuitState.Open, CircuitState.HalfOpen)) {
+          successCount.set(0)
+          collector.foreach(ReliabilityMetrics.transitioned(_, providerName, CircuitState.HalfOpen))
+          Right(true)
         } else {
-          // Stay open
-          Left(
-            ServiceError(
-              httpStatus = 503,
-              provider = "circuit-breaker",
-              details = "Circuit breaker is open - service appears to be down"
-            )
-          )
+          // The circuit moved while the permit was being taken: hand it back and read the state again
+          probePermit.set(false)
+          checkCircuitBreaker()
         }
 
       case CircuitState.HalfOpen =>
         // Only allow one probe request through at a time to avoid flooding a recovering service
-        if (probePermit.compareAndSet(false, true))
-          Right(())
-        else
-          Left(
-            ServiceError(
-              httpStatus = 503,
-              provider = "circuit-breaker",
-              details = "Circuit breaker is half-open - service probe already in progress"
-            )
-          )
+        if (!probePermit.compareAndSet(false, true)) Left(CircuitOpenError.probing(providerName))
+        else if (circuitState.get() == CircuitState.HalfOpen) Right(true)
+        else {
+          probePermit.set(false)
+          checkCircuitBreaker()
+        }
     }
 
   /**
-   * Handle successful operation.
+   * Handle successful operation. Only a probe's success counts towards closing a half-open circuit: a call that
+   * started before the circuit opened says nothing about the service now.
    */
-  private def onSuccess(): Unit =
+  private def onSuccess(isProbe: Boolean): Unit = {
     circuitState.get() match {
       case CircuitState.Closed =>
         // Reset failure count
         failureCount.set(0)
 
-      case CircuitState.HalfOpen =>
-        // Track successes in half-open state
-        val newSuccessCount = successCount.incrementAndGet()
-        if (newSuccessCount >= config.circuitBreaker.successThreshold) {
-          // Close circuit
-          if (circuitState.compareAndSet(CircuitState.HalfOpen, CircuitState.Closed)) {
-            failureCount.set(0)
-            successCount.set(0)
-            probePermit.set(false)
-            collector.foreach(_.recordCircuitBreakerTransition(providerName, "closed"))
-          }
-        } else {
-          // Need more successes — release probe permit to allow next probe
-          probePermit.set(false)
+      case CircuitState.HalfOpen if isProbe =>
+        if (
+          successCount.incrementAndGet() >= config.circuitBreaker.successThreshold &&
+          circuitState.compareAndSet(CircuitState.HalfOpen, CircuitState.Closed)
+        ) {
+          failureCount.set(0)
+          successCount.set(0)
+          collector.foreach(ReliabilityMetrics.transitioned(_, providerName, CircuitState.Closed))
         }
 
-      case CircuitState.Open =>
-      // Should not happen
+      case _ => ()
     }
+    releaseProbe(isProbe)
+  }
 
-  /** An outcome that says nothing about the provider: hands back a half-open probe permit. */
-  private def onNeutralOutcome(): Unit =
-    if (circuitState.get() == CircuitState.HalfOpen) probePermit.set(false)
+  /** An outcome that says nothing about the provider: a probe only hands back its permit. */
+  private def onNeutralOutcome(isProbe: Boolean): Unit = releaseProbe(isProbe)
+
+  /** Hands back the probe permit, whatever state the circuit is in by now, so the next probe can be let through. */
+  private def releaseProbe(isProbe: Boolean): Unit = if (isProbe) probePermit.set(false)
 
   /**
    * Handle failed operation.
    */
-  private def onFailure(): Unit = {
+  private def onFailure(isProbe: Boolean): Unit = {
     lastFailureTime.set(nowMillis())
 
     circuitState.get() match {
@@ -495,7 +502,7 @@ final class ReliableClient(
         if (newFailureCount >= config.circuitBreaker.failureThreshold) {
           // Open circuit
           if (circuitState.compareAndSet(CircuitState.Closed, CircuitState.Open)) {
-            collector.foreach(_.recordCircuitBreakerTransition(providerName, "open"))
+            collector.foreach(ReliabilityMetrics.transitioned(_, providerName, CircuitState.Open))
           }
         }
 
@@ -503,13 +510,13 @@ final class ReliableClient(
         // Single failure in half-open → back to open
         if (circuitState.compareAndSet(CircuitState.HalfOpen, CircuitState.Open)) {
           successCount.set(0)
-          probePermit.set(false)
-          collector.foreach(_.recordCircuitBreakerTransition(providerName, "open"))
+          collector.foreach(ReliabilityMetrics.transitioned(_, providerName, CircuitState.Open))
         }
 
       case CircuitState.Open =>
       // Already open
     }
+    releaseProbe(isProbe)
   }
 
   /**

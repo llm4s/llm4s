@@ -21,10 +21,10 @@ import java.time.Instant
  * missing or cannot start (#946).
  *
  * `TracingSpec` already checks that each method returns `Right(())` once, and
- * `TracingEdgeCasesSpec` that `shutdown()` does not throw. This spec covers what those do not:
+ * `TracingEdgeCasesSpec` that `close()` does not throw. This spec covers what those do not:
  * every `TraceEvent` variant, including `AgentRunEnded`; that `NoOpTracing` never reads what it is given; that it writes
  * nothing to stdout, stderr or the log; repeated and concurrent calls; and calls after
- * `shutdown()`.
+ * `close()`.
  *
  * Based on #1102 by @georgxzh, rewritten against the current API: `traceAgentState` was
  * removed in #1233, and agent state is now traced as an ordinary `TraceEvent`.
@@ -95,8 +95,9 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
   private def callEverything(tracing: Tracing): Seq[Either[Any, Unit]] =
     everyEvent.map(tracing.traceEvent) ++ Seq(
       tracing.traceEvent("plain string event"),
-      tracing.traceToolCall("calculator", """{"a":1,"b":2}""", "3"),
-      tracing.traceToolCall("", "", ""),
+      tracing
+        .traceToolCall("calculator", """{"a":1,"b":2}""", "3", scala.concurrent.duration.Duration.Zero, success = true),
+      tracing.traceToolCall("", "", "", scala.concurrent.duration.Duration.Zero, success = true),
       tracing.traceError(new RuntimeException("no context")),
       tracing.traceError(new IllegalStateException("boom", new RuntimeException("cause")), "agent step"),
       tracing.traceCompletion(completionWithToolCalls, "test-model"),
@@ -151,7 +152,7 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
     tracing.traceEvent(TraceEvent.ToolExecuted("calculator", "{}", "error", 1.millis, success = false)) shouldBe Right(
       ()
     )
-    tracing.traceToolCall("", "", "") shouldBe Right(())
+    tracing.traceToolCall("", "", "", scala.concurrent.duration.Duration.Zero, success = true) shouldBe Right(())
   }
 
   it should "succeed for an error without reading it" in {
@@ -187,7 +188,7 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
     val (out, err, logged) = captureAllOutput {
       callEverything(tracing).foreach(_ shouldBe Right(()))
-      tracing.shutdown()
+      tracing.close()
     }
 
     out shouldBe empty
@@ -210,12 +211,12 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
     results.flatten.forall(_ == Right(())) shouldBe true
   }
 
-  it should "allow shutdown more than once, and keep succeeding after it" in {
+  it should "allow close more than once, and keep succeeding after it" in {
     val tracing = new NoOpTracing()
 
     noException should be thrownBy {
-      tracing.shutdown()
-      tracing.shutdown()
+      tracing.close()
+      tracing.close()
     }
     callEverything(tracing).forall(_ == Right(())) shouldBe true
   }

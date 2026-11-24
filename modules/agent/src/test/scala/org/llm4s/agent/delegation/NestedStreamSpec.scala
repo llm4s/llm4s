@@ -275,7 +275,7 @@ class NestedStreamSpec
           case 2 => Left(ProcessingError("provider", "the provider is down"))
           case _ => Right(CompletionFixture.simple("""{"summary":"recovered","sources":1}"""))
     }
-    val probe = AgentTool(SpecText.spec("probe"))((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("probed"))))
+    val probe = AgentTool(SpecText.spec("probe"))((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("probed"))))
     val agent = lead(client)
       .withSubagents(researcher.withTools(ToolSet.of(probe).value).withFailure(ChildFailure.Fail))
       .build()
@@ -483,7 +483,7 @@ class NestedStreamSpec
         case _ =>
           entered.countDown()
           release.await(30, TimeUnit.SECONDS)
-          ToolOutcome.Success(ToolContent.Json(ujson.Str("open")))
+          ToolOutcome.success(ToolContent.Json(ujson.Str("open")))
     }
     def family(runtime: GraphRuntime): (Agent, Agent) =
       val child = Agent
@@ -505,7 +505,7 @@ class NestedStreamSpec
           ctx,
           settleOnFailure = false
         ) match
-          case Right(ChildEnd.Ended(_, _))      => ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
+          case Right(ChildEnd.Ended(_, _))      => ToolOutcome.success(ToolContent.Json(ujson.Str("done")))
           case Right(ChildEnd.Failed(error, _)) => ToolOutcome.Fatal(error)
           case Left(error)                      => ToolOutcome.Fatal(error)
       }
@@ -615,9 +615,5 @@ object NestedStreamSpec {
     private val recorded                            = new ConcurrentLinkedQueue[TraceEvent]()
     def events: Vector[TraceEvent]                  = recorded.asScala.toVector
     def traceEvent(event: TraceEvent): Result[Unit] = { recorded.add(event); Right(()) }
-    def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
-    def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
-    def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
-    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
   }
 }

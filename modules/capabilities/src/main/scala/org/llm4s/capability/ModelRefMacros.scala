@@ -23,7 +23,7 @@ private[capability] object ModelRefMacros {
     registry match {
       case Left(error) => Left(s"the bundled model data of llm4s-core cannot be read (${error.message})")
       case Right(registry) =>
-        val ids = registry.listProviders().getOrElse(Nil).flatMap { provider =>
+        val ids = registry.listProviders().flatMap { provider =>
           registry.listByProvider(provider).getOrElse(Nil).map(qualifiedId)
         }
         Right((registry, ids.distinct.sorted))

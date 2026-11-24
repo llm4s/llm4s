@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # Tests for scripts/mima-dry-run.sh, with no sbt and no network. Each case runs the script against a small fixture
-# git repository (a build.sbt with three projects, two of them frozen) and a fake `sbt` that answers the way the real
+# git repository (a build.sbt with four projects, two of them frozen) and a fake `sbt` that answers the way the real
 # one does, with one thing wrong: an empty baseline, an artifact that was not published, MiMa comparing nothing,
-# MiMa finding problems in the build's own copy, a negative control that cannot fail, an @Experimental type that is
-# not excluded, artifacts left in ~/.m2, a failing publish. Every one of them must fail the script with a message
-# that names the problem, and the good case must pass.
+# MiMa finding problems in the build's own copy, a negative control that cannot fail or whose baseline does not
+# resolve, an @Experimental type that is not excluded, artifacts left in ~/.m2, a failing publish. Every one of them
+# must fail the script with a message that names the problem, and the good case must pass.
+#
+# The fake resolves a baseline the way sbt does (#2794): a published module's POM names each module it depends on at
+# the version that module was published at, and a baseline whose POM names a module the repository lacks is a
+# `ResolveException`, not a comparison. The fixture's core depends on media, as the real one does, so a negative
+# control that publishes its probe baseline without what the probe depends on fails the good case.
 #
 # Per-module baselines (#2355) run against fixture variants whose `mimaBaselineOverrides` gives llm4s-agent a
 # baseline of its own (`Some`) or none (`None`): each must pass, comparing every module with its own baseline, and
@@ -28,7 +33,7 @@ fail() { FAILED=$((FAILED + 1)); echo "FAIL $1"; }
 
 # ---- the fixture repository: its own build.sbt, committed
 FIXTURE="$WORK/fixture"
-mkdir -p "$FIXTURE/modules/core" "$FIXTURE/modules/agent" "$FIXTURE/modules/samples"
+mkdir -p "$FIXTURE/modules/media" "$FIXTURE/modules/core" "$FIXTURE/modules/agent" "$FIXTURE/modules/samples"
 cat > "$FIXTURE/build.sbt" <<'EOF'
 val mimaBaselineVersion: Option[String] = None
 
@@ -36,7 +41,11 @@ val mimaBaselineOverrides: Map[String, Option[String]] = Map.empty
 
 def mimaFrozen(module: String) = Seq()
 
+lazy val media = (project in file("modules/media"))
+  .settings(name := "llm4s-media")
+
 lazy val core = (project in file("modules/core"))
+  .dependsOn(media)
   .settings(name := "llm4s-core", mimaFrozen("llm4s-core"))
 
 lazy val agent = (project in file("modules/agent"))
@@ -75,10 +84,48 @@ baseline_of() { # artifact -> its baseline version, empty for none; FAKE_IGNORE_
 artifact_of() { # project id -> artifact
   awk -v id="$1" '$0 ~ "^lazy val " id " " {f=1} f && /name := "/ {match($0, /name := "[^"]*"/); print substr($0, RSTART+9, RLENGTH-10); exit}' build.sbt
 }
-publish_artifact() { # artifact
+id_of() { # artifact -> project id
+  awk -v art="$1" '/^lazy val / { id = $3 } index($0, "name := \"" art "\"") { print id; exit }' build.sbt
+}
+dir_of() { # project id -> its base directory
+  awk -v id="$1" '$0 ~ "^lazy val " id " " { if (match($0, /file\("[^"]*"\)/)) print substr($0, RSTART + 6, RLENGTH - 8); exit }' build.sbt
+}
+version_of() { # project id -> the version it is published at: the build's, unless a .sbt file in the project's own
+  # directory sets one. A `<project> / version` line in the root dryrun.sbt is deliberately not read: the real
+  # build's plugins replace it (#2794).
+  own_version=""
+  for f in "$(dir_of "$1")"/*.sbt; do
+    [ -f "$f" ] && own_version="$(sed -n 's/^version *:= *"\(.*\)"$/\1/p' "$f")"
+  done
+  echo "${own_version:-$version}"
+}
+deps_of() { # project id -> the ids of the projects it depends on
+  awk -v id="$1" '
+    $0 ~ "^lazy val " id " " { f = 1; next }
+    f && /^lazy val / { exit }
+    f && match($0, /\.dependsOn\([^)]*\)/) { s = substr($0, RSTART + 11, RLENGTH - 12); gsub(/,/, " ", s); print s }
+  ' build.sbt
+}
+publish_artifact() { # artifact: its jar, and a POM naming each module it depends on at that module's version
   [ "${FAKE_SKIP_PUBLISH:-}" = "$1" ] && return 0
-  mkdir -p "$repo/org/llm4s/${1}_3/$version"
-  : > "$repo/org/llm4s/${1}_3/$version/${1}_3-$version.jar"
+  pid="$(id_of "$1")"; pv="$(version_of "$pid")"; pdir="$repo/org/llm4s/${1}_3/$pv"
+  mkdir -p "$pdir"
+  : > "$pdir/${1}_3-$pv.jar"
+  : > "$pdir/${1}_3-$pv.pom"
+  for dep in $(deps_of "$pid"); do echo "$(artifact_of "$dep") $(version_of "$dep")" >> "$pdir/${1}_3-$pv.pom"; done
+}
+resolve() { # artifact baseline: as sbt resolves a baseline, with the modules its POM names; 1 when one is missing
+  if [ "$2" = "0.0.0-mima-probe" ] && [ "${FAKE_NEG:-}" = "unresolved" ]; then
+    echo "[error] sbt.librarymanagement.ResolveException: Error downloading org.llm4s:${1}_3:$2"; return 1
+  fi
+  pom="$repo/org/llm4s/${1}_3/$2/${1}_3-$2.pom"
+  [ -f "$pom" ] || return 0
+  while read -r dep depv; do
+    [ -z "$dep" ] && continue
+    [ -f "$repo/org/llm4s/${dep}_3/$depv/${dep}_3-$depv.jar" ] && continue
+    echo "[error] sbt.librarymanagement.ResolveException: Error downloading org.llm4s:${dep}_3:$depv"; return 1
+  done < "$pom"
+  return 0
 }
 status=0
 for cmd in "$@"; do
@@ -100,7 +147,8 @@ for cmd in "$@"; do
       baseline="$(baseline_of "$art")"
       [ "${FAKE_NO_MAP:-}" = "$id" ] && continue
       [ -z "$baseline" ] && { echo "[info] Map()"; continue; }
-      if [ "$baseline" = "0.0.0-mima-probe" ]; then
+      if ! resolve "$art" "$baseline"; then status=1
+      elif [ "$baseline" = "0.0.0-mima-probe" ]; then
         case "${FAKE_NEG:-stable}" in
           none) echo "[info] Map(org.llm4s:${art}_3:$baseline -> (List(),List()))" ;;
           both) echo "[info] Map(org.llm4s:${art}_3:$baseline -> (List(MissingClassProblem(class MimaDryRunExperimentalProbe), MissingClassProblem(class MimaDryRunStableProbe)),List()))" ;;
@@ -173,7 +221,11 @@ run_case "a failing mimaReportBinaryIssues fails" 1 "mimaReportBinaryIssues fail
 run_case "a failing publish fails and shows sbt's output" 1 "simulated publish failure" FAKE_PUBLISH_FAIL=1
 run_case "a negative control that cannot fail is reported" 1 "the check cannot fail" FAKE_NEG=none
 run_case "an @Experimental type that is not excluded is reported" 1 "@Experimental is not excluded" FAKE_NEG=both
+run_case "a negative control whose probe baseline does not resolve is reported" 1 "could not resolve the probe baseline" FAKE_NEG=unresolved
 run_case "the negative control shows MiMa failing on the @Stable class" 0 "the removed @Stable class is reported"
+grep -F -q "compared with org.llm4s:llm4s-core_3:0.0.0-mima-probe" "$WORK/out" \
+  && pass "and names the probe baseline MiMa compared, so the control is seen to reach the comparison" \
+  || fail "the negative control does not say that MiMa compared the probe baseline"
 grep -F -q "@Experimental is outside the freeze" "$WORK/out" \
   && pass "and shows the @Experimental class is not reported" || fail "it does not say @Experimental is outside the freeze"
 

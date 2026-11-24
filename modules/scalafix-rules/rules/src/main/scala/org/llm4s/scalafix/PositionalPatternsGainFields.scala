@@ -8,9 +8,9 @@ import scalafix.v1._
  *
  * Every field added since 0.5.1 to a public case class or enum case is appended after the old ones, so a pattern that
  * binds the old fields by position gets one `_` per new field: `case ServiceError(message, status, provider,
- * requestId)` becomes `case ServiceError(message, status, provider, requestId, _)` (#2266),
- * `case RunEvent.RunFailed(message, usage)` becomes `case RunEvent.RunFailed(message, usage, _)` (#2049), and
- * `case AgentStatus.Suspended(a, q, m, b)` gains `delegated` (#2050). A pattern with 0.6.0's arity gets a `_` for each
+ * requestId)` becomes `case ServiceError(message, status, provider, requestId, _)` (#2266). `AgentStatus.Suspended`
+ * and the `RunEvent` cases that gained fields are not here: each now holds one growth-safe class (#2781), so a
+ * positional pattern on one is rewritten by hand to read its fields by name. A pattern with 0.6.0's arity gets a `_` for each
  * field added since 0.6.0: `Completion`'s ten fields gain `finishReason` (#2613) and `servedTier` (#2746),
  * `ModelCapabilities` gains the five thinking and effort fields (#2115), `TraceEvent.ErrorOccurred`'s nine gain `usage`
  * (#2676), `TraceEvent.CompletionReceived`'s fourteen gain `servedTier` (#2750), `TokenUsage`'s six gain
@@ -51,7 +51,6 @@ object PositionalPatternsGainFields {
    */
   val arity: Map[String, (Int, Int)] = Map(
     "org/llm4s/error/ServiceError"                                  -> (4  -> 5),
-    "org/llm4s/agent/AgentStatus.Suspended"                         -> (4  -> 5),
     "org/llm4s/agent/events/ModelCallCompleted"                     -> (6  -> 10),
     "org/llm4s/agent/events/ToolExecuted"                           -> (5  -> 6),
     "org/llm4s/agent/graph/Checkpoint"                              -> (10 -> 11),
@@ -59,9 +58,6 @@ object PositionalPatternsGainFields {
     "org/llm4s/agent/graph/Observer"                                -> (2  -> 3),
     "org/llm4s/agent/graph/RunBudgets"                              -> (3  -> 4),
     "org/llm4s/agent/graph/RunConfig"                               -> (8  -> 10),
-    "org/llm4s/agent/graph/RunEvent.RunFailed"                      -> (2  -> 3),
-    "org/llm4s/agent/graph/RunEvent.RunCancelled"                   -> (1  -> 2),
-    "org/llm4s/agent/graph/RunEvent.RunTimedOut"                    -> (1  -> 2),
     "org/llm4s/agent/graph/toolloop/TurnState"                      -> (5  -> 6),
     "org/llm4s/agent/harness/HarnessProfile"                        -> (12 -> 13),
     "org/llm4s/config/ProvidersConfigModel.NamedProviderConfig"     -> (8  -> 9),
@@ -90,7 +86,7 @@ object PositionalPatternsGainFields {
     "org/llm4s/reranker/RerankProviderConfig"                       -> (3  -> 4),
     "org/llm4s/toolapi/SafeParameterExtractor"                      -> (1  -> 2),
     "org/llm4s/toolapi/ToolRetryPolicy"                             -> (3  -> 4),
-    "org/llm4s/trace/TraceEvent.AgentRunEnded"                      -> (7  -> 11),
+    "org/llm4s/trace/TraceEvent.AgentRunEnded"                      -> (7  -> 12),
     "org/llm4s/trace/TraceEvent.CompletionReceived"                 -> (5  -> 15),
     "org/llm4s/trace/TraceEvent.CustomEvent"                        -> (3  -> 4),
     "org/llm4s/trace/TraceEvent.EmbeddingUsageRecorded"             -> (5  -> 7),

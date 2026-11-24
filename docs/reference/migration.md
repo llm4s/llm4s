@@ -51,49 +51,134 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the PostgreSQL checkpoint schema moves to version 6](#the-postgresql-checkpoint-schema-moves-to-version-6-2453),
 [RAG loaders take a `UrlPolicy`, and `DirectoryLoader` stays in its root](#rag-loaders-take-a-urlpolicy-and-directoryloader-stays-in-its-root-2724),
 [context pruning enforces both limits and `minRecentTurns`](#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729),
-and [`llm4s-agent` has a small stable core](#llm4s-agent-has-a-small-stable-core-2778-2785).
+[`llm4s-agent` types are tiered and growth-safe](#llm4s-agent-types-are-tiered-and-growth-safe-2778),
+[the legacy embedding provider selector is removed](#the-legacy-embedding-provider-selector-is-removed),
+[Vertex AI no longer reads `endpoint` and `organization`](#vertex-ai-no-longer-reads-endpoint-and-organization),
+[`ProviderRegistry` lookups accept aliases](#providerregistry-lookups-accept-aliases-2812),
+[`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
+and [context trimming fails when nothing fits, and externalizes only into a store](#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817).
 
-## `llm4s-agent` has a small stable core (#2778, #2785)
+## Context trimming fails when nothing fits, and externalizes only into a store (#2817)
 
-Every public top-level type of `llm4s-agent` now carries `@Stable` or `@Experimental`
-([Tiers in the Code](api-stability#tiers-in-the-code)), and `sbt stabilityTierCheck` covers the module. Only a small
-core is `@Stable`: `Agent`, `AgentBuilder`, `AgentResult`, `AgentStatus`, `AgentRun`, `Handoff`, `AgentId`; in
-`agent.graph`, `ThreadId`, `RunId`, `InterruptId`, `NodeId`, `TenantId`, `Principal`, `RunConfig`, `RunBudgets`,
-`RetentionPolicy`, `RunStatus`; `Guardrail`, `InputGuardrail`, `OutputGuardrail`, and `LengthCheck`,
-`ProfanityFilter`, `JSONValidator`, `RegexValidator`. Everything else - the graph runtime, checkpointers, events and
-streaming, middleware, tools and the tool loop, human review, delegation, the harness, `agent.service`, encryption,
-metrics, the other guardrails and `org.llm4s.assistant` - is `@Experimental`, and so are the members of the Stable
-types that name it (`withMiddleware`, `withRuntime`, `withStreaming`, `stream`, `resume`, `AgentStatus.Suspended`
-and the others listed in [Tiers in the Code](api-stability#tiers-in-the-code)). Nothing changes for code that uses
-them; they may change in a 1.x minor release. Case classes that may gain a field have a private constructor and
-`copy`, as core's do. There is no shim.
+In `org.llm4s.context` (`llm4s-core`). No signature changes; behaviour you may rely on changed.
 
-**Guardrails attach through the builder.** `withInputGuardrails` and `withOutputGuardrails` are the Stable way;
-`withMiddleware(new GuardrailMiddleware(...))` still works and is the Experimental form for choosing the position in
-the stack ([Guardrails](../guide/agents/guardrails)). The builder's guardrails run innermost, closest to the model.
+**`TokenWindow.trimToBudget`** pins every leading `SystemMessage` (the system prompt and all `[HISTORY_SUMMARY]`
+digests, where it pinned only a digest in first position), and drops older history in whole turns: an assistant
+message with tool calls goes with its tool results, so the window never starts at an orphaned `ToolMessage`. It now
+returns `Left(ContextError)` when the pinned messages exceed the budget, or when not even the newest turn fits beside
+them, where it returned `Right` with an empty or pinned-only conversation. `ContextManager.manageContext` returns that
+`Left` from its last step; raise the budget, or trim the system prompt. To leave room for the turns,
+`ContextManager` now caps the history digests at half the budget left after headroom (and at
+`summaryTokenTarget`, as before).
 
-```scala
-// before
-Agent.builder("assistant", client)
-  .withMiddleware(new GuardrailMiddleware(input = Seq(LengthCheck(1, 10000)), output = Seq(JSONValidator())))
-// after
-Agent.builder("assistant", client)
-  .withInputGuardrails(LengthCheck(1, 10000))
-  .withOutputGuardrails(JSONValidator())
+**Externalization needs a store.** With `artifactStore = None` (the default of `DeterministicCompressor.compressToCap`
+and of `ContextManager`), tool output over 8 KB used to become an `[EXTERNALIZED: key ...]` pointer into a store
+created and discarded on each call. Now nothing is externalized: the output is compressed inline. Pass
+`Some(store)` to keep externalizing and be able to `retrieve` the content.
+
+**Binary content** is a `data:...;base64,` URI, a run of 256 or more base64 characters, or text that is mostly
+control characters; mentioning the word "base64" no longer counts. It is never cut: over 2 KB it is externalized
+whole when there is a store, and otherwise left as it is. The `[BINARY CONTENT - n bytes - externalized: id]`
+placeholder, which stored nothing, is gone.
+
+**User messages** are no longer rewritten by `CompressionRule.compressRepetitiveContent` or
+`removeRedundantPhrases`, as `DeterministicCompressor`'s Scaladoc always promised.
+
+## `StreamingAccumulator` takes the model and reports usage one way (#2813)
+
+For provider authors using `org.llm4s.llmconnect.streaming` in `llm4s-core`.
+
+| Before | After |
+|---|---|
+| `StreamingAccumulator.create()` | `StreamingAccumulator(model)`; `toCompletion`'s `Completion.model` is `model`, where it was `"unknown"` |
+| `updateTokens(prompt, completion)` | `updateUsage(TokenUsage(prompt, completion, prompt + completion))` |
+| `updateTokensWithThinking(prompt, completion, thinking)` | `updateUsage(TokenUsage(prompt, completion, prompt + completion + thinking, thinkingTokens = Some(thinking)))` |
+| `addThinkingDelta(delta)` | `addChunk` a `StreamedChunk` whose `thinkingDelta` is `Some(delta)` |
+| `SSEEvent.retry: Option[Int]`, `withRetry(Int)` | `Option[FiniteDuration]`, `withRetry(FiniteDuration)`: `retry.map(_.toMillis)` for the number |
+| `SSEParser.parseStream(text)` | a `createStreamingParser()`: `addChunk(text)`, drain `nextEvent()`, then `flush()` |
+| `StreamingParser#getEvents()` | drain `nextEvent()` while `hasEvents` |
+| `new SSEParser.StreamingParser()` | `SSEParser.createStreamingParser()` (the class is `final`) |
+
+`updateUsage` keeps the cache counts the removed methods dropped. The streaming parser now reads CRLF and CR line
+endings, so a CRLF stream fed in raw chunks yields each event as its blank line arrives, where it yielded nothing until
+`flush()` and then one merged event.
+
+## `ProviderRegistry` lookups accept aliases (#2812)
+
+`find`, `resolve`, `findEmbedding` and `resolveEmbedding` accept a provider's alias as well as its id, so
+`registry.resolve(registry.canonicalId(raw))` is now `registry.resolve(ProviderId(raw))`. `canonicalId` stays, for
+when you need the canonical id itself.
+
+| Before | After |
+|---|---|
+| `registry.get(id)` | `registry.resolve(id)` |
+| `registry.resolve(registry.canonicalId(raw), path)` | `registry.resolve(ProviderId(raw), path)` |
+
+Behaviour changes:
+
+- **An id beats an alias.** An alias equal to another provider's id used to win, so that provider could not be
+  reached from config. Now the id wins. The alias is ignored and reported as a collision of kind `chat alias` or
+  `embedding alias`.
+- **Alias collisions are reported.** When two providers declare the same alias, the later one still keeps it, but
+  `report.collisions` now records it, the discovery log warns about it, and `ProviderModuleChecks.assertSoleSupplier`
+  fails a module whose id or alias collides.
+- **A version-skewed descriptor no longer aborts discovery.** A descriptor whose `id` or `aliases` throws is left out
+  and recorded in `report.failures`. The module's other descriptors are kept.
+- **`discover()` scans core's own class loader as well as the context loader.** A module both loaders see counts once.
+  `discover(loader)` scans only the loaders you pass.
+
+## The legacy embedding provider selector is removed
+
+Embeddings are selected by `EMBEDDING_MODEL` (`llm4s.embeddings.model`) alone, as `provider/model`. The older form,
+`EMBEDDING_PROVIDER` (`llm4s.embeddings.provider`) naming only the provider, is no longer bound or read:
+
+```bash
+# before
+EMBEDDING_PROVIDER=openai
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+
+# after
+EMBEDDING_MODEL=openai/text-embedding-3-small
 ```
 
-**The four validators are built through their companions.** `LengthCheck`, `ProfanityFilter`, `JSONValidator` and
-`RegexValidator` are final with private constructors:
+In HOCON, replace `llm4s.embeddings.provider = "openai"` with
+`llm4s.embeddings.model = "openai/text-embedding-3-small"`. A configuration that still sets
+`llm4s.embeddings.provider` and no model fails to load with
+`llm4s.embeddings.provider ('openai') is no longer read: set EMBEDDING_MODEL (llm4s.embeddings.model) to provider/model, e.g. openai/<model>, and remove llm4s.embeddings.provider`;
+one that sets only the `EMBEDDING_PROVIDER` variable gets `Missing embedding config: set EMBEDDING_MODEL ...`.
+`ConfigKeys.EMBEDDING_PROVIDER` is removed. The model now always comes from `EMBEDDING_MODEL`: a block's own
+`llm4s.embeddings.<id>.model` (and the `<PROVIDER>_EMBEDDING_MODEL` variable bound to it), and a provider's default
+model, applied only to the provider-only form, so move a model set there into `EMBEDDING_MODEL`.
 
-| Was | Now |
-|---|---|
-| `new LengthCheck(min, max)` | `LengthCheck(min, max)` (or `LengthCheck.maxOnly`, `minOnly`) |
-| `new ProfanityFilter()`, `new ProfanityFilter(customBadWords = ws)`, `..., caseSensitive = true)` | `ProfanityFilter()`, `ProfanityFilter.withCustomWords(ws)`, `ProfanityFilter.caseSensitive(ws)` |
-| `new JSONValidator()`, `new JSONValidator(Some(schema))` | `JSONValidator()`, `JSONValidator.withSchema(schema)` |
-| `new RegexValidator(regex)`, `new RegexValidator(regex, Some(message))` | `RegexValidator(regex)`, `RegexValidator(regex, message)` |
+## Vertex AI no longer reads `endpoint` and `organization`
 
-**`ThreadId.child` is internal.** It named `IdempotencyKey`, an Experimental type; a child thread's id is the one
-`Agent.children` and the delegation events report.
+Vertex AI's `endpoint` and `organization` keys, renamed to `project` and `location` in 0.5.0
+([the note](#vertex-ai-endpoint-becomes-project-organization-becomes-location)), are no longer accepted as aliases.
+Rename them:
+
+```hocon
+vertex-main {
+  provider = "vertexai"
+  model    = "gemini-2.0-flash"
+  project  = "my-gcp-project"    # was endpoint
+  location = "europe-west4"      # was organization; optional, default us-central1
+}
+```
+
+They are now unknown keys: logged with a warning that names them and lists the keys Vertex AI accepts, and ignored.
+A section that sets `endpoint` and no `project` fails with
+`- project: the GCP project ID that owns your Vertex AI resources (set it in application.conf under llm4s.providers.<name>.project)`;
+one that sets `organization` and no `location` uses `us-central1`, so check the warning.
+
+For provider authors, the alias mechanism goes with them: `ProviderConfigKey` loses `deprecatedAliases` and
+`withDeprecatedAliases`, and `ProviderConfigSpec.BuiltinAliasKeys` is removed. Before 1.0 a key is renamed outright,
+with a migration note ([compatibility policy](compatibility-policy)).
+
+## `llm4s-agent` types are tiered and growth-safe (#2778)
+
+Every public top-level type of `llm4s-agent` now carries `@Stable` or `@Experimental`
+([Tiers in the Code](api-stability#tiers-in-the-code)), and `sbt stabilityTierCheck` covers the module. A `@Stable`
+case class that may gain a field has a private constructor and `copy`, as core's do. There is no shim.
 
 **Growth-safe types.** `X(...)` still builds each one; `new X(...)` and `.copy(...)` no longer compile.
 
@@ -120,6 +205,52 @@ config.withMaxTokens(8000).withMinRecentTurns(2)
 records.map(_.event).collect { case f: RunEvent.RunFailed => f }
 ```
 
+**Enum cases that hold a growth-safe class (#2781).** An enum case with fields is a case class too, so one that
+may gain a field now holds a single growth-safe class and is read through it by name. `sbt stabilityTierCheck` fails
+for an enum case with fields, in any frozen module, that is neither such a wrapper nor listed as closed.
+
+| Case | Was | Now |
+|---|---|---|
+| `AgentStatus.Suspended` | `(approvals, questions, middlewareQuestions, breakpoints, delegated)` | `(suspension: Suspension)` |
+| `RunEvent.RunStarted` | `(tenantId, principal)` | `(details: RunStartedDetails)` |
+| `RunEvent.RunRecovered` | `(fromCheckpoint, tenantId, principal, takenOverFrom)` | `(details: RunRecoveredDetails)` |
+| `RunEvent.RunResumed` | `(answered, tenantId, principal)` | `(details: RunResumedDetails)` |
+| `RunEvent.RunFailed` | `(message, usage, steps)` | `(details: RunFailedDetails)` |
+| `RunEvent.RunCancelled`, `RunTimedOut` | `(usage, steps)` | `(details: RunStoppedDetails)` |
+| `RunEvent.StateUpdated` | `(fromCheckpoint, asNode, tenantId, principal)` | `(details: StateUpdatedDetails)` |
+| `RunEvent.ThreadForked` | `(fromThread, fromCheckpoint, tenantId, principal)` | `(details: ThreadForkedDetails)` |
+| `StreamEvent.Live` | `(threadId, runId, token, taskId, nodeId, name, version, payload)` | `(event: LiveEvent)` |
+| `ToolOutcome.Success` | `(content, update)` | `(result: ToolSuccess)`, built with `ToolOutcome.success(content, update)` |
+
+The field names are unchanged, one level down. A stored event log is unchanged too: a `RunEvent` is still written
+flat, its fields beside its `$type`, and every log already written reads. The other cases of these enums, and the
+cases with fields of the other `@Stable` enums (`RunResult`, `NodeResult`, `Route`, `ThinkingBlock`, ...), are closed
+and keep their shape.
+
+```scala
+// before
+status match
+  case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.map((id, _) => result.approve(id))
+events.collect { case RunEvent.RunFailed(message, _, _) => message }
+events.collect { case StreamEvent.Live(_, _, _, _, _, name, _, payload) => name -> payload }
+AgentTool(spec)((args, context) => ToolOutcome.Success(ToolContent.Json(ujson.Str("done"))))
+next() match
+  case ToolOutcome.Success(content, update) => ToolOutcome.Success(redact(content), update)
+// after
+status match
+  case AgentStatus.Suspended(suspension) => suspension.approvals.map((id, _) => result.approve(id))
+events.collect { case RunEvent.RunFailed(details) => details.message }
+events.collect { case StreamEvent.Live(live) => live.name -> live.payload }
+AgentTool(spec)((args, context) => ToolOutcome.success(ToolContent.Json(ujson.Str("done"))))
+next() match
+  case ToolOutcome.Success(result) => ToolOutcome.Success(result.withContent(redact(result.content)))
+```
+
+There is no Scalafix rewrite for these patterns: `PositionalPatternsGainFields` no longer pads
+`AgentStatus.Suspended` or the `RunEvent` cases, so the compiler reports each pattern to rewrite. From Java and
+Kotlin, `ToolOutcome.Success.apply(content, update)` becomes `ToolOutcome.success(content, update)`; `JAgentResult`
+is unchanged.
+
 **No longer public.** None was used outside `llm4s-agent`:
 
 | Was | Now |
@@ -130,10 +261,16 @@ records.map(_.event).collect { case f: RunEvent.RunFailed => f }
 | `guardrails.rag.GroundingResult`, `ContextRelevanceResult`, `SourceAttributionResult`, `TopicBoundaryResult`, `guardrails.builtin.InjectionMatch` | internal: each guardrail's parsed verdict |
 | `org.llm4s.assistant.Command` | internal to `AssistantAgent` |
 
-**Tiers that moved.** Core's `ToolHints` is now `@Stable` (the tool contract). `Agent.loop` is now an `@Experimental`
-`def` rather than a constructor `val`, so `agent.loop.graph` reads as before. The RAG guardrails
-(`org.llm4s.agent.guardrails.rag`) are `@Experimental`: an agent gives them the turn's `RAGContext` only through
-`RAGGuardrail.withTurnContext`, whose shape may still change.
+**Tiers that moved.** Now `@Stable`, because a Stable signature names them: `ModelContext`, `ModelResponse`,
+`BoundaryResult`, `PromptSection`, `Placement` (the `AgentMiddleware` hooks); `ToolResource`, `Operation`, `LockKey`,
+`OutputFormat` and core's `ToolHints` (the tool contract); `EffectKey`, `EffectRecord`, `RunOrigin`, `RunOutcome`,
+`ChildThread`, `ThreadStatus`, `ThreadMetadata`, `ThreadCursor`, `ThreadQuery`, `ThreadSummary`, `ThreadPage`,
+`SweepPolicy`, `SweepGuard`, `SweepPage` (the `Checkpointer` contract); `ChildRef`, `ChildInterrupt`,
+`DelegatedRequest` (`Suspension.delegated`, `StreamEvent.Nested`). `@Experimental` members of Stable
+types: `AgentBuilder.withHarness`, `withSubagents`, `withDelegation`, `Agent.delegation`, and
+`InMemoryCheckpointer.runQueue`. The RAG
+guardrails (`org.llm4s.agent.guardrails.rag`) are `@Experimental`: an agent gives them the turn's `RAGContext` only
+through `RAGGuardrail.withTurnContext`, whose shape may still change.
 
 ## Context pruning enforces both limits and `minRecentTurns` (#2728, #2729)
 
@@ -691,12 +828,12 @@ In 0.5.1. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/issues/1913)
   ```
 
   The two are no longer case classes and have no extractor, so every positional pattern is a compile error: an extractor of the parts would have kept `s"$content"` compiling and printing the parts, and one of the text would have kept a client compiling that drops media. `msg.copy(content = ...)` becomes `msg.withParts(...)`.
-- **`ToolOutcome.Success(content: ToolContent, update)`**, with `ToolContent.Json(value)` for the JSON result a tool returned before and `ToolContent.Parts(parts)` for images and documents:
+- **`ToolOutcome.success(content: ToolContent, update)`**, with `ToolContent.Json(value)` for the JSON result a tool returned before and `ToolContent.Parts(parts)` for images and documents:
 
   ```scala
   ToolOutcome.Success(ujson.Str("done"))                    // before
-  ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))  // after
-  ToolOutcome.Success(ToolContent.Parts(Vector(ContentPart.Text("The chart:"), chart)))
+  ToolOutcome.success(ToolContent.Json(ujson.Str("done")))  // after
+  ToolOutcome.success(ToolContent.Parts(Vector(ContentPart.Text("The chart:"), chart)))
   ```
 
   `Parts` with no content, or with more than `ContentPart.MaxInlineBytes` of inline bytes in total, is the call's error result.
@@ -2404,7 +2541,7 @@ Experimental, so these are source breaks with no shims. Design:
   final case class SearchArgs(query: String) derives ReadWriter
   val schema = Schema.`object`[SearchArgs]("Search arguments").withRequiredField("query", Schema.string("Query"))
   val spec   = AgentToolSpec[SearchArgs]("search", "Search the index", schema)
-  val search = AgentTool(spec)((args, context) => ToolOutcome.Success(ToolContent.Json(ujson.Str(run(args.query)))))
+  val search = AgentTool(spec)((args, context) => ToolOutcome.success(ToolContent.Json(ujson.Str(run(args.query)))))
   ```
 
   `LoopTool.fromToolFunction(f)` becomes `AgentTool.fromToolFunction(f)`; its arguments are now
@@ -3598,8 +3735,8 @@ vertex-main {
 }
 ```
 
-The old spellings still work for now, as deprecated aliases: each one logs a warning naming the
-section and the key to rename it to, and will stop working in a later release. Setting both
+The old spellings were kept as deprecated aliases until 0.7.0, which removed them
+([note](#vertex-ai-no-longer-reads-endpoint-and-organization)). Setting both
 `project` and a *different* `endpoint` (or `location` and a different `organization`) is an
 error rather than a guess. A missing project is now reported as
 `- project: the GCP project ID that owns your Vertex AI resources (set it in application.conf under llm4s.providers.<name>.project)`.

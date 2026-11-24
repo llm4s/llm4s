@@ -21,8 +21,8 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
 
   private val client = ScriptedLLMClient.of()
 
-  private val echo  = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
-  private val other = SpecTools.tool("other")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+  private val echo  = SpecTools.tool("echo")((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
+  private val other = SpecTools.tool("other")((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
 
   private def base: AgentBuilder =
     Agent
@@ -73,7 +73,7 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
           .`object`[SpecTools.Text]("lookup")
           .withRequiredField("text", org.llm4s.toolapi.Schema.string("Text"))
       )
-    )((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+    )((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
     override def tools: Vector[org.llm4s.agent.graph.tool.AgentTool[?]] = Vector(lookup)
   }
 
@@ -175,8 +175,8 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
       )
     val parked = family(Agent.builder("root", client)).run(thread, "q1").value
     val approval = parked.status match {
-      case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
-      case other                                        => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(suspension) => suspension.approvals.head._1
+      case other                             => fail(s"expected Suspended, got $other")
     }
     val answers = Map(parked.approve(approval))
 
@@ -190,7 +190,7 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
     built(Agent.builder("root", client).withTools(SpecTools.set(tool))).loop.graph.fingerprint
 
   private def echoWith(spec: org.llm4s.agent.graph.tool.AgentToolSpec[SpecTools.Text]) =
-    org.llm4s.agent.graph.tool.AgentTool(spec)((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+    org.llm4s.agent.graph.tool.AgentTool(spec)((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
 
   "The structural fingerprint" should "not change with timeouts or resources, nor without locks: no tool-queue key" in {
     import scala.concurrent.duration._
@@ -220,8 +220,8 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
       val parked =
         agent(SpecTools.spec("echo"), SpecTools.calling(SpecTools.call("c1", "echo"))).run(thread, "go").value
       parked.status match {
-        case AgentStatus.Suspended(approvals, _, _, _, _) => parked.approve(approvals.head._1)
-        case other                                        => fail(s"expected Suspended, got $other")
+        case AgentStatus.Suspended(suspension) => parked.approve(suspension.approvals.head._1)
+        case other                             => fail(s"expected Suspended, got $other")
       }
     }
 
@@ -291,7 +291,7 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
     val spec    = policy.fold(SpecTools.spec("step"))(SpecTools.spec("step").withLocks(_))
     val step = org.llm4s.agent.graph.tool.AgentTool(spec, writes = Set(counter)) { (_, context) =>
       val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
-      ToolOutcome.Success(
+      ToolOutcome.success(
         ToolContent.Json(ujson.Str(next.toString)),
         org.llm4s.agent.graph.StateUpdate.update(counter, next)
       )
@@ -306,8 +306,8 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
   }
 
   private def approveAll(parked: AgentResult) = parked.status match {
-    case AgentStatus.Suspended(pending, _, _, _, _) => pending.map(p => parked.approve(p._1)).toMap
-    case other                                      => fail(s"expected Suspended, got $other")
+    case AgentStatus.Suspended(suspension) => suspension.approvals.map(p => parked.approve(p._1)).toMap
+    case other                             => fail(s"expected Suspended, got $other")
   }
 
   private def stepResults(result: AgentResult) = result.messages.collect { case t: ToolMessage => t.content }.toVector
@@ -368,14 +368,14 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
         writes = Set(counter)
       ) { (_, context) =>
         val next = context.state.get(counter).fold(e => fail(e.message), identity) + 1
-        ToolOutcome.Success(
+        ToolOutcome.success(
           ToolContent.Json(ujson.Str(next.toString)),
           org.llm4s.agent.graph.StateUpdate.update(counter, next)
         )
       }
       val helperTool =
         org.llm4s.agent.graph.tool.AgentTool(SpecTools.spec("other").withLocks(_ => Set(LockKey("h"))))((a, _) =>
-          ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text)))
+          ToolOutcome.success(ToolContent.Json(ujson.Str(a.text)))
         )
       built(
         Agent

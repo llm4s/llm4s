@@ -8,7 +8,8 @@ import org.llm4s.error.{
   LLMError,
   NetworkError,
   ServiceError,
-  ValidationError
+  ValidationError,
+  ValidationUnsupportedError
 }
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
@@ -223,7 +224,7 @@ class OpenAICompatibleClient(
     rawStream: StringBuilder,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator(settings.model)
     val toolCalls   = new StreamToolCalls
     val details     = Vector.newBuilder[ujson.Value]
     val sseParser   = SSEParser.createStreamingParser()
@@ -234,9 +235,14 @@ class OpenAICompatibleClient(
     var failure     = Option.empty[LLMError]
     var filtered    = Option.empty[ContentFilteredError] // a content-filter finish: the stream's end
     var textLength  = 0                                  // characters of answer text delivered
-    Iterator.continually(if (failure.isEmpty) reader.readLine() else null).takeWhile(_ != null).foreach { line =>
-      rawStream.append(line).append('\n')
-      sseParser.addChunk(line + "\n")
+    val lines =
+      Iterator.continually(if (failure.isEmpty) reader.readLine() else null).takeWhile(_ != null).map { line =>
+        rawStream.append(line).append('\n')
+        line + "\n"
+      }
+    // the end of the body ends an event that no blank line closed
+    (lines ++ Iterator.single("\n").filter(_ => failure.isEmpty)).foreach { chunk =>
+      sseParser.addChunk(chunk)
       while (sseParser.hasEvents)
         sseParser.nextEvent().foreach { event =>
           if (event.data.contains("[DONE]")) ended = true
@@ -761,6 +767,41 @@ class OpenAICompatibleClient(
 
   override def getReserveCompletion(): Int = settings.reserveCompletion
 
+  /**
+   * Sends one `GET` to the dialect's [[OpenAICompatibleDialect.validationPath validationPath]] under the base URL -
+   * the model listing, `<baseUrl>/models`, unless the dialect names another request - with the headers and the
+   * credential of a completion, and returns the error a reply that is not 2xx maps to: an `AuthenticationError`
+   * for a refused key, a `ServiceError` for an endpoint that is not this API. A dynamic credential's 401 is retried
+   * once with a fresh token, as a completion's is.
+   *
+   * It shows that the endpoint answers and takes the credential. It does not look for the configured model in the
+   * listing: a gateway may serve a model it does not list, and an alias is often listed under another id. A
+   * dialect with no such request ([[OpenAICompatibleDialect.validationPath]] `None`) is
+   * `Left(ValidationUnsupportedError)`.
+   */
+  override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
+    dialect.validationPath match
+      case None => Left(ValidationUnsupportedError(clientDescription))
+      case Some(path) =>
+        withAuthRetry { headers =>
+          httpClient
+            .get(s"${settings.baseUrl}$path", headers - "Content-Type", Map.empty, validationTimeout)
+            .flatMap { response =>
+              if (response.statusCode >= 200 && response.statusCode < 300) Right(())
+              else
+                HttpErrorMapper.mapHttpError(
+                  response.statusCode,
+                  Redaction.scrubRemote(response.body),
+                  providerName,
+                  response.headers
+                )
+            }
+        }
+  }
+
+  /** The timeout of [[validate]]'s request: the request timeout, and never more than ten seconds. */
+  private def validationTimeout: FiniteDuration = requestTimeout.min(OpenAICompatibleClient.ValidationTimeout)
+
   // A client the caller supplied is the caller's to close (#2341).
   override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(suppliedHttpClient, httpClient)
 }
@@ -867,6 +908,9 @@ object OpenAICompatibleClient {
    * ([[https://github.com/llm4s/llm4s/issues/712 #712]]).
    */
   val RequestTimeout: FiniteDuration = 2.minutes
+
+  /** The longest `validate()` waits for its one request: ten seconds, as the model listers wait. */
+  val ValidationTimeout: FiniteDuration = 10.seconds
 
   /**
    * The timeout on `streamComplete`'s request: five minutes, as in the clients this one replaced. A

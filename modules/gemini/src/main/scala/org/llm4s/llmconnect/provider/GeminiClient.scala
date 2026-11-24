@@ -217,7 +217,7 @@ class GeminiClient(
               handleErrorResponse(response.statusCode, err, response.headers)
             )(Some(err))
           case Right(response) =>
-            val accumulator = StreamingAccumulator.create()
+            val accumulator = StreamingAccumulator(config.model)
             val messageId   = UUID.randomUUID().toString
             val rawStream   = StringBuilder()
             val signatures  = scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
@@ -303,7 +303,7 @@ class GeminiClient(
                     val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
                     // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
                     val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
-                    c.withModel(config.model)
+                    c
                       .withToolCalls(
                         c.message.toolCalls.toList
                       ) // the accumulator keeps streamed calls on the message only
@@ -329,6 +329,26 @@ class GeminiClient(
   override def getContextWindow(): Int = config.contextWindow
 
   override def getReserveCompletion(): Int = config.reserveCompletion
+
+  /**
+   * Asks for the configured model with `GET <baseUrl>/models/<model>` (the API's `models.get`), sending the key as
+   * a completion does. `Right(())` means the endpoint answered, took the key and has the model. A refused key is an
+   * `AuthenticationError` and an unknown model the `ServiceError` 404 a completion gets.
+   */
+  override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
+    requestKey().flatMap { key =>
+      // the URL carries the key as a query parameter, as a completion's does: it is not logged
+      http
+        .get(
+          s"${config.baseUrl}/models/${config.model}?key=$key",
+          timeout = requestTimeout.min(GeminiClient.ValidationTimeout)
+        )
+        .flatMap { response =>
+          if (response.statusCode >= 200 && response.statusCode < 300) Right(())
+          else handleErrorResponse(response.statusCode, response.body, response.headers)
+        }
+    }
+  }
 
   /**
    * Builds the Gemini API request body from a conversation and options.
@@ -668,6 +688,9 @@ object GeminiClient {
 
   /** The timeout of a non-streaming call when the section sets no `timeouts.request`: two minutes. */
   val DefaultRequestTimeout: FiniteDuration = 120.seconds
+
+  /** The longest `validate()` waits for its one request: ten seconds. */
+  val ValidationTimeout: FiniteDuration = 10.seconds
 
   /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
   val DefaultStreamTimeout: FiniteDuration = 10.minutes

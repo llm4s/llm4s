@@ -44,7 +44,7 @@ import scala.util.Using
  *     val thread = ThreadId("format-7-approval")
  *     val store  = new InMemoryCheckpointer()
  *     val deploy = SpecTools.tool("deploy")((_, _) =>
- *       ToolOutcome.Success(ToolContent.Json(ujson.Str("never run by the old build"))))
+ *       ToolOutcome.success(ToolContent.Json(ujson.Str("never run by the old build"))))
  *     val client = ScriptedLLMClient.of(calling(call("c1", "deploy", "one")))
  *     val agent = Agent
  *       .builder("assistant", client)
@@ -55,7 +55,7 @@ import scala.util.Using
  *       .fold(e => sys.error(e.message), identity)
  *     val parked = agent.run(thread, "deploy once").fold(e => sys.error(e.message), identity)
  *     val approvals = parked.status match
- *       case AgentStatus.Suspended(approvals, _, _, _) => approvals
+ *       case AgentStatus.Suspended(suspension) => suspension.approvals
  *       case other                                     => sys.error(s"expected Suspended, got $other")
  *     require(approvals.size == 1, s"one approval expected: $approvals")
  *     val stored = store.latest(thread).fold(e => sys.error(e.message), identity).get
@@ -110,7 +110,7 @@ class FormatSevenCheckpointSpec extends AnyFlatSpec with Matchers with EitherVal
     val seen = new AtomicReference[Option[IdempotencyKey]](None)
     val deploy = SpecTools.tool("deploy") { (_, context) =>
       seen.set(Some(context.idempotencyKey))
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("deployed")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("deployed")))
     }
     val store  = seeded()
     val client = ScriptedLLMClient.of(CompletionFixture.simple("shipped"), CompletionFixture.simple("still shipped"))

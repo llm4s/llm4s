@@ -63,7 +63,7 @@ class BlockSpec extends AnyFlatSpec with Matchers with EitherValues with OptionV
     store.latest(thread).value.value.checkpoint.status shouldBe CheckpointStatus.Failed
     val events = store.eventsAfter(thread, 0L, 100).value
     kinds(events) shouldBe Vector("RunStarted", "TaskFailed@guard", "RunFailed")
-    events.last.event shouldBe RunEvent.RunFailed(refusal("bad-1").message)
+    events.last.event shouldBe RunEvent.RunFailed(RunFailedDetails(refusal("bad-1").message))
   }
 
   it should "leave the thread usable: start applies a new input over the committed state" in {

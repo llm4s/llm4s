@@ -263,7 +263,7 @@ object StreamingBridgeContract {
   def shape(event: StreamEvent): String = event match {
     case StreamEvent.Durable(record) =>
       s"durable ${record.seq} ${record.nodeId.getOrElse("-")} ${record.event.productPrefix}"
-    case live: StreamEvent.Live => s"live ${live.nodeId} ${live.name}"
+    case StreamEvent.Live(live) => s"live ${live.nodeId} ${live.name}"
     case other                  => other.productPrefix
   }
 

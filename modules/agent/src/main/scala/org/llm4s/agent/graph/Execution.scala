@@ -180,7 +180,10 @@ final private[graph] case class DynamicActivation(
 ):
   def isComplete: Boolean = expected.forall(arrived.contains)
 
-/** The outcome of a run. */
+/**
+ * The outcome of a run. Its cases are closed: each is exactly the thread's [[ThreadState]] and what the run ended
+ * with, and anything more about the thread goes on `ThreadState`.
+ */
 @Experimental
 enum RunResult[+O]:
   case Completed[+O](state: ThreadState, output: O, supersteps: Int) extends RunResult[O]

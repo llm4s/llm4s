@@ -34,7 +34,7 @@ The LLM4S Agent Framework provides a production-ready foundation for building LL
 - **Human review** - Pause a turn for approvals, questions and breakpoints, and resume it ([human review guide](human-review))
 - **Streaming** - Real-time events for responsive UIs (`agent.stream`, [streaming guide](streaming))
 - **Durable threads** - Keep threads in SQLite or PostgreSQL, recover a run after a crash, share threads between machines ([durable checkpointers](durable-checkpointers), [several machines](multiple-machines))
-- **Graphs** - Typed multi-agent workflows on {% include api.html t="org.llm4s.agent.graph.GraphBuilder" %}: parallel nodes, joins and checkpoints ([recipe](../../examples/cookbook/multi-agent-graph.html))
+- **Graphs** - Your own workflow on {% include api.html t="org.llm4s.agent.graph.GraphBuilder" %}: fan-out, joins, routing, interrupts and checkpoints ([graphs guide](graphs), [recipe](../../examples/cookbook/multi-agent-graph.html))
 
 ## Quick Start
 
@@ -159,7 +159,7 @@ agent.run("Deploy the release").map { r =>
     case AgentStatus.Blocked(guardrail, why)   => println(s"Blocked by $guardrail: $why")
     case AgentStatus.StepLimitReached          => println("Hit the step limit")
     case AgentStatus.TokenLimitReached         => println("Hit the run's token budget")
-    case AgentStatus.Suspended(approvals, qs, asked, held, delegated) => println("Waiting for a person")
+    case AgentStatus.Suspended(suspension) => println("Waiting for a person")
   }
 }
 ```
@@ -424,7 +424,7 @@ import org.llm4s.agent.graph.tool.{AgentTool, ToolContent, ToolOutcome}
 
 val charge = AgentTool(chargeSpec) { (args, context) =>
   payments.charge(args.amount, idempotencyKey = context.idempotencyKey.value) match
-    case Right(receipt) => ToolOutcome.Success(ToolContent.Json(ujson.Str(receipt.id)))
+    case Right(receipt) => ToolOutcome.success(ToolContent.Json(ujson.Str(receipt.id)))
     case Left(error)    => ToolOutcome.Error(error.message)
 }
 ```
@@ -531,7 +531,7 @@ val append = AgentTool(appendSpec) { (args, context) =>
       writeIfUnchanged(args.path, StateCheck.of(before), after).map(_ => after.length)
     })
   } match
-    case Right(length)                           => ToolOutcome.Success(ToolContent.Json(ujson.Num(length)))
+    case Right(length)                           => ToolOutcome.success(ToolContent.Json(ujson.Num(length)))
     case Left(r: GraphError.EffectReplayRefused) => ToolOutcome.Error(r.message)
     case Left(other)                             => ToolOutcome.Fatal(other) // outcome unknown: recover replays it
 }
@@ -1008,6 +1008,12 @@ another, any instance can follow or cancel any run, and a message for a busy thr
 interrupts the running turn, as the caller chooses.
 
 [Learn more about running on several machines →](multiple-machines)
+
+### [Writing Middleware](middleware)
+
+Add your own cross-cutting concern - logging, redaction, a tool-call policy, context in the prompt - with hooks around each turn, model call and tool call: what each hook may return, state keys, prompt sections, ordering, errors, and replay on a durable thread.
+
+[Learn more about writing middleware →](middleware)
 
 ---
 

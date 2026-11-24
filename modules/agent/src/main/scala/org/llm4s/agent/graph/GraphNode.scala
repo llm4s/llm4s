@@ -54,7 +54,10 @@ final class DynamicJoin private[graph] (
 /** Identity of the builder that issued a handle; handles compare owners by reference. */
 final private[graph] class GraphOwner(val graphId: String)
 
-/** A routing decision returned by a node; scheduled for the next superstep. */
+/**
+ * A routing decision returned by a node; scheduled for the next superstep. Its cases are closed: each is exactly its
+ * target and what it sends.
+ */
 @Experimental
 enum Route:
   case Goto(target: NodeRef[Unit])
@@ -88,7 +91,10 @@ object Command:
 
   val empty: Command = Command(StateUpdate.empty, Nil)
 
-/** What a node task produced. */
+/**
+ * What a node task produced. Its cases are closed, each exactly what the instruction takes; what a node writes and
+ * where it routes grow on [[Command]] and [[StateUpdate]].
+ */
 @Experimental
 enum NodeResult:
   case Continue(command: Command)

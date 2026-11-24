@@ -28,7 +28,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
 
   private def tokens(usage: UsageSummary): Long = usage.inputTokens + usage.outputTokens
 
-  private val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+  private val echo = SpecTools.tool("echo")((a, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(a.text))))
 
   "A token budget" should "end the turn TokenLimitReached before the next model call, without calling the model" in {
     val client = ScriptedLLMClient.of(calling(call("c1", "echo")), CompletionFixture.simple("never sent"))
@@ -107,7 +107,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
     val broken = new AtomicBoolean(true)
     val flaky = SpecTools.tool("flaky") { (_, _) =>
       if (broken.get) ToolOutcome.Fatal(ValidationError("flaky", "backend down"))
-      else ToolOutcome.Success(ToolContent.Json(ujson.Str("fixed")))
+      else ToolOutcome.success(ToolContent.Json(ujson.Str("fixed")))
     }
     val client = ScriptedLLMClient.of(
       calling(call("c1", "flaky")),
@@ -240,7 +240,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
     // a tool whose definition alone is about 2000 tokens, sent on every call
     val schema = SpecTools.spec("big")
     val big = AgentTool(AgentToolSpec[SpecTools.Text]("big", "word " * 2000, schema.schema))((a, _) =>
-      ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text)))
+      ToolOutcome.success(ToolContent.Json(ujson.Str(a.text)))
     )
     val client =
       ScriptedLLMClient.of(calling(call("c1", "big")).withUsage(None), CompletionFixture.simple("never sent"))

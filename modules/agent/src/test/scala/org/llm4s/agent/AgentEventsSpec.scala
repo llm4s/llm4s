@@ -81,17 +81,17 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
       e match
         case StreamEvent.Durable(record) =>
           record.event match
-            case RunEvent.RunCompleted | RunEvent.RunFailed(_, _, _) | RunEvent.RunSuspended(_) |
-                RunEvent.RunCancelled(_, _) | RunEvent.RunTimedOut(_, _) =>
+            case RunEvent.RunCompleted | RunEvent.RunFailed(_) | RunEvent.RunSuspended(_) | RunEvent.RunCancelled(_) |
+                RunEvent.RunTimedOut(_) =>
               ended.countDown()
             case _ => ()
         case _ => ()
     def all: Vector[StreamEvent]             = events.asScala.toVector
     def durable: Vector[StreamEvent.Durable] = all.collect { case d: StreamEvent.Durable => d }
     def of(runId: RunId): Vector[StreamEvent] = all.filter {
-      case StreamEvent.Durable(r)                     => r.runId == runId.value
-      case StreamEvent.Live(_, run, _, _, _, _, _, _) => run == runId.value
-      case _                                          => false
+      case StreamEvent.Durable(r) => r.runId == runId.value
+      case StreamEvent.Live(live) => live.runId == runId.value
+      case _                      => false
     }
 
   /**
@@ -213,8 +213,8 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val ((first, second), c) = collecting(builder, 2) { (agent, threadId, listener) =>
       val first = ok(agent.stream(threadId, "go")(listener).flatMap(_.await()))
       val id = first.status match
-        case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
-        case other                                        => fail(s"expected a suspension, got $other")
+        case AgentStatus.Suspended(suspension) => suspension.approvals.head._1
+        case other                             => fail(s"expected a suspension, got $other")
       val second = ok(agent.streamResume(threadId, Map(first.reject(id, "no thanks")))(listener).flatMap(_.await()))
       (first, second)
     }
@@ -241,8 +241,8 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val ((first, second), c) = collecting(builder, 2) { (agent, threadId, listener) =>
       val first = ok(agent.stream(threadId, "go")(listener).flatMap(_.await()))
       val id = first.status match
-        case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
-        case other                                        => fail(s"expected a suspension, got $other")
+        case AgentStatus.Suspended(suspension) => suspension.approvals.head._1
+        case other                             => fail(s"expected a suspension, got $other")
       (first, ok(agent.streamResume(threadId, Map(first.approve(id)))(listener).flatMap(_.await())))
     }
     second.answer shouldBe Some("fine")

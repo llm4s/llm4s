@@ -46,8 +46,10 @@ import scala.util.Using
  * Finally it fails for a growth-unsafe case class (RFC 0002, #2369): a `case class` in a `@Stable` (or untiered)
  * public type, top-level or nested, whose primary constructor is not `private` / `private[x]` and has fields, and a
  * public `copy` defined in one. Adding a field to either would break binary compatibility after the baseline.
- * `GrowthExempted` lists the deliberately closed types; an entry that matches nothing is itself reported. The
- * cases of a `@Stable` `enum` are not checked.
+ * The same holds for a case with fields of an `enum` in such a type (#2781): `case Done(output: O)` compiles to a
+ * case class with a public constructor, `apply` and `copy`, and is matched positionally. A case that may grow holds
+ * one growth-safe payload class instead, and is listed as the wrapper it then is.
+ * `GrowthExempted` lists the deliberately closed types and cases; an entry that matches nothing is itself reported.
  */
 object StabilityTiers {
 
@@ -432,7 +434,10 @@ object StabilityTiers {
 
   // ---- growth safety of @Stable case classes (RFC 0002, #2369) ----
 
-  /** A `@Stable` case class (by fully qualified name) that may keep a public constructor and `copy`, and why. */
+  /**
+   * A `@Stable` case class or enum case (by fully qualified name) that may keep a public constructor and `copy`,
+   * and why.
+   */
   final case class GrowthExempt(name: String, reason: String)
 
   /**
@@ -441,10 +446,35 @@ object StabilityTiers {
    * public constructor or `copy` breaks binary compatibility once the MiMa baseline exists. An entry here is a type
    * that is deliberately closed (a single-value wrapper, a fixed record, an error case whose fields are exactly what
    * went wrong), with the reason it stays closed. The types that predated the check were converted or given a reason
-   * before the baseline (#2377-#2384). An entry that matches no failing type fails the check, so a converted type
+   * before the baseline (#2377-#2384). An enum case with fields is held to the same rule (#2781): a case that may
+   * grow holds a single growth-safe payload class, and is then listed here as the wrapper over it. An entry that matches no failing type fails the check, so a converted type
    * cannot leave its entry behind.
    */
   val GrowthExempted: Seq[GrowthExempt] = Seq(
+    GrowthExempt(
+      "org.llm4s.agent.AgentStatus.Blocked",
+      "a status case that is exactly the refusing guardrail's name and its reason"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.AgentStatus.Completed",
+      "a status case holding only the answer; anything more about the turn is on AgentResult"
+    ),
+    GrowthExempt(
+      "org.llm4s.agent.AgentStatus.Truncated",
+      "a status case holding only the partial answer; anything more about the turn is on AgentResult"
+    ),
+    GrowthExempt(
+      "org.llm4s.config.ApiKeySource.Credentials",
+      "a key source case holding only the config path the key was read from"
+    ),
+    GrowthExempt(
+      "org.llm4s.config.ApiKeySource.Section",
+      "a key source case holding only the config path the key was read from"
+    ),
+    GrowthExempt(
+      "org.llm4s.config.ApiKeySource.WorkloadIdentity",
+      "a key source case holding only the config path that set it up"
+    ),
     GrowthExempt("org.llm4s.context.tokens.Token", "a single token id"),
     GrowthExempt(
       "org.llm4s.context.tokens.TokenizerAccuracy.Approximate",
@@ -464,7 +494,66 @@ object StabilityTiers {
     ),
     GrowthExempt("org.llm4s.http.MultipartPart.TextField", "a multipart text field is exactly a name and a value"),
     GrowthExempt("org.llm4s.identity.TokenizerId", "a single-name identifier"),
+    GrowthExempt("org.llm4s.llmconnect.ProviderExchangeLogging.Enabled", "a single-value wrapper over the sink"),
+    GrowthExempt(
+      "org.llm4s.llmconnect.auth.IdentitySource.File",
+      "an identity source case holding only the token file's path"
+    ),
+    GrowthExempt("org.llm4s.llmconnect.auth.IdentitySource.Literal", "an identity source case holding only the token"),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.FinishReason.Other",
+      "a single-value wrapper over a finish reason llm4s has no case for"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.RequestAdjustment.Adjusted",
+      "exactly the option, what was asked, what was sent and why; a new kind of adjustment is a new case; its " +
+        "codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.RequestAdjustment.Dropped",
+      "exactly the option and why it was not sent; a new kind of adjustment is a new case; its codec is a stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.RequestAdjustment.NotNeeded",
+      "exactly the option and why it was not needed; a new kind of adjustment is a new case; its codec is a " +
+        "stored format"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.ServiceTier.Other",
+      "a single-value wrapper over a service tier llm4s has no case for"
+    ),
     GrowthExempt("org.llm4s.llmconnect.model.TextChunkInput", "a single-value wrapper over the text chunks"),
+    GrowthExempt("org.llm4s.model.ModelRegistrySource.File", "a registry source case holding only its path"),
+    GrowthExempt("org.llm4s.model.ModelRegistrySource.Resource", "a registry source case holding only its path"),
+    GrowthExempt("org.llm4s.model.ModelRegistrySource.Url", "a registry source case holding only its URL"),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.ThinkingBlock.Opaque",
+      "exactly a provider id and that provider's own encoding, which is where a new shape goes"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.ThinkingBlock.Redacted",
+      "a single-value wrapper over the provider's encrypted payload"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.ThinkingBlock.Text",
+      "exactly the reasoning text and the provider's signature over it; any other provider shape is an Opaque block"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.provider.OpenAICompatibleClient.Credential.Dynamic",
+      "a credential case holding only its token provider"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.provider.OpenAICompatibleClient.Credential.Exchange",
+      "a credential case holding only its growth-safe TokenExchangeConfig"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.provider.OpenAICompatibleClient.Credential.Rotating",
+      "a credential case holding only its key provider"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.provider.OpenAICompatibleClient.Credential.Static",
+      "a credential case holding only its key"
+    ),
     GrowthExempt("org.llm4s.metrics.Outcome.Error", "an outcome case holding only its ErrorKind"),
     GrowthExempt("org.llm4s.toolapi.NullableSchema", "a single-value wrapper over the schema it makes nullable"),
     GrowthExempt("org.llm4s.toolapi.ToolCallError.Cancelled", "an error case holding only the tool name"),
@@ -530,11 +619,11 @@ object StabilityTiers {
   }
 
   /**
-   * A case class header's primary constructor: whether it is `private` / `private[x]`, and the text of its first
+   * A case class header's (or, with `keyword = "case"`, an enum case's) primary constructor: whether it is `private` / `private[x]`, and the text of its first
    * parameter list (empty for `case class X()`).
    */
-  private def constructor(header: String, name: String): (Boolean, String) =
-    ("\\bclass\\s+" + java.util.regex.Pattern.quote(name) + "\\b").r.findFirstMatchIn(header) match {
+  private def constructor(header: String, name: String, keyword: String = "class"): (Boolean, String) =
+    ("\\b" + keyword + "\\s+" + java.util.regex.Pattern.quote(name) + "\\b").r.findFirstMatchIn(header) match {
       case None => (false, "")
       case Some(m) =>
         def ws(j: Int): Int = { var k = j; while (k < header.length && header.charAt(k).isWhitespace) k += 1; k }
@@ -552,8 +641,8 @@ object StabilityTiers {
 
   /**
    * Case classes of the file's `@Stable` (or untiered) public types, nested ones included, whose constructor is not
-   * private and whose first parameter list is not empty, and public `copy` methods defined in such a type's case
-   * classes, as (zero-based line, fully qualified type name, problem).
+   * private and whose first parameter list is not empty, the cases with fields of such a type's enums, and public
+   * `copy` methods defined in such a type's case classes, as (zero-based line, fully qualified type name, problem).
    */
   private[this] def growthUnsafe(lines: Vector[String]): Seq[(Int, String, String)] = {
     val pkg                           = packageOf(lines)
@@ -568,6 +657,17 @@ object StabilityTiers {
               f.header.head._1,
               qualified(f.owners.map(_._1) :+ f.name),
               "is a @Stable case class whose constructor is public, so a field cannot be added after the baseline"
+            )
+          )
+      } else if (f.keyword == "case" && f.owners.lastOption.exists(_._2 == "enum") && f.header.nonEmpty) {
+        val (isPrivate, params) = constructor(f.header.map(_._2).mkString(" "), f.name, "case")
+        if (isPrivate || params.trim.isEmpty) None
+        else
+          Some(
+            (
+              f.header.head._1,
+              qualified(f.owners.map(_._1) :+ f.name),
+              "is a @Stable enum case with fields, so a field cannot be added after the baseline"
             )
           )
       } else if (f.keyword == "def" && f.name == "copy" && f.owners.lastOption.exists(_._3))
@@ -665,7 +765,7 @@ object StabilityTiers {
         stableTiersFile,
         0,
         s"GrowthExempt(${e.name})",
-        "is a GrowthExempted entry that matches no @Stable case class with a public constructor or copy; remove it"
+        "is a GrowthExempted entry that matches no @Stable case class or enum case with a public constructor or copy; remove it"
       )
     }
     (perModule.flatMap(_._2._3) ++ stale, perModule.map { case (m, (s, e, _)) => m -> (s -> e) }.toMap)
@@ -895,6 +995,38 @@ object StabilityTiers {
         |  @Experimental case class Exp(x: Int)
         |  def make(x: Int): Deep = Deep(x)
         |}
+        |
+        |@Stable
+        |enum Outcome[+O]:
+        |  case Pending, Dropped
+        |  case Done(output: O) // growth
+        |  case Failed[E <: Throwable]( // growth
+        |    error: E,
+        |    retryable: Boolean = false
+        |  ) extends Outcome[Nothing]
+        |  case Wrapped(payload: Safe)
+        |  case Sealed private (x: Int)
+        |  case Unit() extends Outcome[Nothing]
+        |  @Experimental case Trial(x: Int)
+        |
+        |  def describe: String = this match
+        |    case Done(o)      => "done"
+        |    case Wrapped(p) if p.b > 0 =>
+        |      "wrapped"
+        |    case _            => "other"
+        |
+        |object Outcome:
+        |  enum Inner:
+        |    case Leaf(x: Int) // growth
+        |
+        |@Experimental
+        |enum Loose:
+        |  case Any(x: Int)
+        |
+        |@Stable
+        |enum Coded(val code: Int):
+        |  case Ok extends Coded(0)
+        |  case Custom(c: Int) extends Coded(c) // growth
         |""".stripMargin
     )
     IO.write(
@@ -949,13 +1081,17 @@ object StabilityTiers {
     val fixtureExempt = Seq(
       GrowthExempt("fixture.Closed", "fixture: a deliberately closed wrapper"),
       GrowthExempt("fixture.Holder.Nested.Allowed", "fixture: a nested exemption"),
+      GrowthExempt("fixture.Outcome.Wrapped", "fixture: an enum case holding only its growth-safe payload"),
       GrowthExempt("fixture.Factory.Nested", "fixture: Api.scala's leak fixture, not under test here"),
+      GrowthExempt("fixture.Credential.Static", "fixture: Api.scala's leak fixture, not under test here"),
+      GrowthExempt("fixture.Credential.Dynamic", "fixture: Api.scala's leak fixture, not under test here"),
       GrowthExempt("fixture.Settings", "fixture: ThirdParty.scala's fixture, not under test here"),
       GrowthExempt("fixture.Gone", "fixture: matches nothing, so it is reported as stale")
     )
-    val (found, _)               = violations(Seq(module), Nil, ThirdPartyDenied, fixtureAllowed, fixtureExempt)
-    def isStale(v: Violation)    = v.problem.contains("GrowthExempted entry")
-    def isGrowth(v: Violation)   = v.problem.contains("@Stable case class") && !isStale(v)
+    val (found, _)            = violations(Seq(module), Nil, ThirdPartyDenied, fixtureAllowed, fixtureExempt)
+    def isStale(v: Violation) = v.problem.contains("GrowthExempted entry")
+    def isGrowth(v: Violation) =
+      (v.problem.contains("@Stable case class") || v.problem.contains("@Stable enum case")) && !isStale(v)
     def isUntiered(v: Violation) = v.file.getName == "Untiered.scala" && v.problem.contains("carries neither")
     def isLeak(v: Violation)     = v.problem.contains("signature names")
     def isForeign(v: Violation)  = v.problem.contains("signature exposes third-party")
@@ -1030,6 +1166,9 @@ object StabilityTiers {
            |project/StabilityTiers.scala. A @Stable case class with fields needs a private constructor
            |(RFC 0002): `final case class X private (...)` with a companion `apply` and `with*` setters, and
            |no public `copy`; a type that is deliberately closed goes in GrowthExempted with its reason.
+           |An enum case with fields is held to the same rule: one that may grow holds a single such
+           |payload class (`case Suspended(suspension: Suspension)`) and is listed in GrowthExempted as the
+           |wrapper it then is; one that is closed by definition is listed with that reason.
            |See docs/reference/api-stability.md.""".stripMargin
       )
     }

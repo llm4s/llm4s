@@ -2063,6 +2063,9 @@ lazy val samples = (project in file("modules//samples"))
     // Test scope: docs/guide/vector-store.md's Elasticsearch, OpenSearch and Redis snippets are compiled (#2359).
     vectorstoreElasticsearch % Test,
     vectorstoreRedis         % Test,
+    // Test scope: docs/guide/secrets.md's Vault and AWS Secrets Manager snippets are compiled.
+    secretsVault % Test,
+    secretsAws   % Test,
     // Test scope: docs/reference/doctor.md's `Doctor.run` snippet is compiled (#2283).
     doctor % Test,
     // Test scope: docs/guide/reference-architecture.md's gateway policy is compiled and checked against the

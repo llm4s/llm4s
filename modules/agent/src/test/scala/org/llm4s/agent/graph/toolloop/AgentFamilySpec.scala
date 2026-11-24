@@ -48,7 +48,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
   private val echo: AgentTool[Echo] =
     AgentTool(
       AgentToolSpec[Echo]("echo", "Echoes", Schema.`object`[Echo]("echo").withRequiredField("text", Schema.string("t")))
-    )((args, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(args.text))))
+    )((args, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(args.text))))
 
   private val tools = ToolSet.of(echo).value
 
@@ -182,7 +182,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
     val loop  = family(LoopAgent(idA, model, tools))
     val cut   = Vector(UserMessage("hi"), AssistantMessage(None, Seq(ToolCall("t1", "echo", ujson.Obj("text" -> "x")))))
     val (_, error) = runInMemory(loop.graph, AgentInput("go", cut)).failed
-    error.message should include("Conversation validation failed")
+    error.message should include("Invalid conversation")
     model.calls shouldBe 0
   }
 
@@ -190,7 +190,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
     val gated = AgentTool(
       AgentToolSpec[Echo]("gated", "Gated", Schema.`object`[Echo]("g").withRequiredField("text", Schema.string("t")))
     )((args, context) =>
-      if context.approved then ToolOutcome.Success(ToolContent.Json(ujson.Str(args.text)))
+      if context.approved then ToolOutcome.success(ToolContent.Json(ujson.Str(args.text)))
       else ToolOutcome.NeedsApproval("check")
     )
     val idle  = ScriptedModel()
@@ -241,7 +241,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
         Schema.`object`[Echo]("t").withRequiredField("text", Schema.string("t"))
       ),
       Set(LoopKeys.turn)
-    )((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("x"))))
+    )((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("x"))))
     val activeWriter = AgentTool(
       AgentToolSpec[Echo](
         "active_writer",
@@ -249,7 +249,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
         Schema.`object`[Echo]("w").withRequiredField("text", Schema.string("t"))
       ),
       Set(LoopKeys.activeAgent)
-    )((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("x"))))
+    )((_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str("x"))))
     val refused =
       ToolLoop.build(
         "family",

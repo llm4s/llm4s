@@ -45,7 +45,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
   }
 
   // Test metrics collector
-  class TestMetricsCollector extends MetricsCollector {
+  class TestMetricsCollector extends MetricsCollector with ReliabilityRecordings {
     val retryAttempts             = new AtomicInteger(0)
     val circuitBreakerTransitions = scala.collection.mutable.ListBuffer[String]()
     val recordedErrors            = scala.collection.mutable.ListBuffer[ErrorKind]()
@@ -61,15 +61,15 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
 
     override def recordCost(provider: String, model: String, costUsd: Double): Unit = ()
 
-    override def recordRetryAttempt(provider: String, attemptNumber: Int): Unit =
+    override def onRetry(provider: String): Unit =
       retryAttempts.incrementAndGet()
 
-    override def recordCircuitBreakerTransition(provider: String, newState: String): Unit =
+    override def onTransition(provider: String, newState: String): Unit =
       circuitBreakerTransitions.synchronized {
         circuitBreakerTransitions += newState
       }
 
-    override def recordError(errorKind: ErrorKind, provider: String): Unit =
+    override def onError(errorKind: ErrorKind, provider: String): Unit =
       recordedErrors.synchronized {
         recordedErrors += errorKind
       }
@@ -207,7 +207,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     val result          = reliableClient.complete(testConversation)
 
     result match {
-      case Left(e: ServiceError) if e.httpStatus == 503 && e.provider == "circuit-breaker" => succeed
+      case Left(e: org.llm4s.error.CircuitOpenError) if e.provider == "test" && !e.probing => succeed
       case _ => fail("Expected circuit breaker error")
     }
 
@@ -414,7 +414,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     val config = ReliabilityConfig.default
       .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
       .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1))
-      .withoutDeadline
+      .withDeadline(None)
     val client = new ReliableClient(mockClient, "test-provider", config)
     val result = client.complete(testConversation)
     val flag   = Thread.interrupted()

@@ -49,11 +49,12 @@ object ChildInterrupt:
 
   /** Every interrupt `status` waits on, in the order it lists them: approvals, questions, middleware questions, breakpoints, then delegated ones. */
   def of(status: AgentStatus.Suspended): Vector[ChildInterrupt] =
-    status.approvals.map(Approval(_, _)) ++
-      status.questions.map(Question(_, _)) ++
-      status.middlewareQuestions.map(MiddlewareQuestion(_, _)) ++
-      status.breakpoints.map(Breakpoint(_, _)) ++
-      status.delegated.map(Delegated(_, _))
+    val waiting = status.suspension
+    waiting.approvals.map(Approval(_, _)) ++
+      waiting.questions.map(Question(_, _)) ++
+      waiting.middlewareQuestions.map(MiddlewareQuestion(_, _)) ++
+      waiting.breakpoints.map(Breakpoint(_, _)) ++
+      waiting.delegated.map(Delegated(_, _))
 
   private given ReadWriter[InterruptId] = Codecs.interruptId
 
@@ -66,7 +67,7 @@ object ChildInterrupt:
       )
 
 /**
- * A suspended child's interrupt, as its parent's `AgentStatus.Suspended.delegated` lists it under a composite id
+ * A suspended child's interrupt, as its parent's `Suspension.delegated` lists it under a composite id
  * (design 4.46): the child run that waits, and its `request`, never itself `Delegated` - a grandchild's interrupt names
  * the grandchild here.
  */
@@ -76,7 +77,7 @@ final case class DelegatedRequest(child: ChildRef, request: ChildInterrupt) deri
 /**
  * The question a `task` tool asks when its child suspends (design 4.46): the child run, and every interrupt it waits
  * on. Its answer is a [[DelegatedAnswers]]. Application code does not answer it directly: the parent's
- * `AgentStatus.Suspended.delegated` lists each pending child interrupt under a composite id, which the answer helpers
+ * `Suspension.delegated` lists each pending child interrupt under a composite id, which the answer helpers
  * (`approve`, `reject`, `edit`, `reply`, `proceed`) and `Agent.resume` take unchanged.
  */
 @Experimental

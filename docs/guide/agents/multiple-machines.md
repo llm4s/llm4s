@@ -198,7 +198,8 @@ identity, so two machines name the same spans without coordinating.
 
 Spans are emitted by the agent's tracing: build the agent `withTracing(tracing)` with a backend from
 `llm4s-observability-otel` (`TRACING_MODE=opentelemetry`) or `llm4s-observability` (Langfuse). Delegated child runs
-sit under the tool call that started them. No message content goes into a span attribute.
+sit under the tool call that started them. No message content goes into a span attribute, and no guardrail reason:
+a blocked run's failure names only the guardrail. Any other failure's error message is recorded as it is.
 
 ## Metrics
 

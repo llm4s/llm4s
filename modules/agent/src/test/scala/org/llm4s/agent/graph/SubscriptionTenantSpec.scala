@@ -4,7 +4,6 @@ import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.ProcessingError
-import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.trace.{ TraceEvent, Tracing }
 import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
@@ -73,7 +72,7 @@ class SubscriptionTenantSpec extends AnyFlatSpec with TestTimeLimit with Matcher
           case RunEvent.Custom(_, _, payload) => payload.str
           case _                              => ""
         }
-      case l: StreamEvent.Live => l.payload.str
+      case StreamEvent.Live(l) => l.payload.str
     }
     .filter(_.nonEmpty)
 
@@ -268,11 +267,7 @@ class SubscriptionTenantSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     val thread  = newThread()
     await(runtime.start(thread, emitter, "x", tenant("a", "a1")).value).completed
     val tracing = new Tracing {
-      def traceEvent(event: TraceEvent): Result[Unit]                                        = Right(())
-      def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
-      def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
-      def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
-      def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
+      def traceEvent(event: TraceEvent): Result[Unit] = Right(())
     }
     TracingSubscriber.attach(runtime, thread, tracing, config = tenant("b", "b1")).left.value shouldBe
       GraphError.TenantMismatch(thread.value, Some("b"))

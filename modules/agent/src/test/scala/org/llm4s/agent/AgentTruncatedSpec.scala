@@ -27,7 +27,7 @@ class AgentTruncatedSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "end Truncated after a tool round too, and leave the thread for a next turn that completes" in {
     val call = SpecTools.calling(SpecTools.call("c1", "echo"))
     val echo =
-      SpecTools.tool("echo")((a, _) => graph.tool.ToolOutcome.Success(graph.tool.ToolContent.Json(ujson.Str(a.text))))
+      SpecTools.tool("echo")((a, _) => graph.tool.ToolOutcome.success(graph.tool.ToolContent.Json(ujson.Str(a.text))))
     val client = ScriptedLLMClient.of(call, cut("partial"), CompletionFixture.simple("the rest"))
     val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
     val first  = agent.run("go").value

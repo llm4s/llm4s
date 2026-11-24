@@ -110,19 +110,20 @@ If you exported `llm4s_*` series with `llm4s-observability-prometheus` and switc
 `PrometheusMeterRegistry`, the same queries keep working. This is tested: `MicrometerPrometheusSeriesSpec` sends identical
 calls to both collectors and compares the series they expose (names, label names, bucket boundaries and values).
 
-Two differences:
+One difference:
 
-- This module also records retries (`llm4s_retries_total`), circuit-breaker transitions
-  (`llm4s_circuit_breaker_transitions_total`) and `recordError` calls (`llm4s_reliability_errors_total`), which the
-  Prometheus collector leaves as no-ops.
 - A Micrometer timer also exposes a `_max` series. The Prometheus module has no equivalent.
+
+`ReliableClient`'s retries (`llm4s_retries_total`), circuit-breaker transitions
+(`llm4s_circuit_breaker_transitions_total`) and errors (`llm4s_reliability_errors_total`) are generic metrics,
+`org.llm4s.reliability.ReliabilityMetrics`, which both modules export alike.
 
 ## Errors and `ReliableClient`
 
 `llm4s.errors` counts failed requests and failed image generations, exactly as `llm4s_errors_total` does in the
 Prometheus module: one increment per call the provider client observed failing.
 
-`llm4s.reliability.errors` counts `recordError` calls instead. In llm4s the caller is `ReliableClient`, which reports a
+`llm4s.reliability.errors` (`ReliabilityMetrics.Errors`) counts what `ReliableClient` reports instead: a
 call its local rate limit or open circuit rejected, a deadline exceeded, and the final failure once retries are
 exhausted. Pass the same collector to both layers:
 
@@ -144,7 +145,7 @@ Tags are provider, model and values from a fixed set, so the number of meters st
 ids are never tags. Guards apply to values the caller supplies:
 
 - A null or blank provider or model is recorded as `unknown` (Micrometer rejects null tag values).
-- An image operation or circuit-breaker state outside the sets above is recorded as `other`, so a stray value cannot create
+- An image operation outside the set above is recorded as `other`, so a stray value cannot create
   a new meter. A test sends a thousand distinct values and checks the meter count does not grow.
 - `provider` and `model` come from your configuration, so they are normally a handful of values. They are capped anyway:
   one collector records at most 64 distinct providers and 256 distinct models, and records any further value as `other`

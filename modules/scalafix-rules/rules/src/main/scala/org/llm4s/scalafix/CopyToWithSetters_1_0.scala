@@ -57,7 +57,6 @@ object CopyToWithSetters_1_0 {
           "llmconnect/config/EmbeddingProviderConfig",
           "llmconnect/config/LocalEmbeddingModels",
           "llmconnect/config/TracingSettings",
-          "model/ModelRegistryConfig",
           "toolapi/ToolExecutionConfig"
         ),
         "core-data-types-are-growth-safe-2356" -> List(
@@ -111,7 +110,6 @@ object CopyToWithSetters_1_0 {
         ),
         "provider-spi-caching-streaming-and-exchange-sink-types-are-growth-safe-2379" -> List(
           "llmconnect/JsonlProviderExchangeSink",
-          "llmconnect/caching/CacheEntry",
           "llmconnect/caching/CacheStats",
           "llmconnect/provider/OpenAICompatibleClient.Settings",
           "llmconnect/spi/EmbeddingProviderSection",
@@ -157,8 +155,7 @@ object CopyToWithSetters_1_0 {
         "config-model-and-util-types-are-growth-safe-2384" -> List(
           "config/Llm4sConfig.TextEmbeddingModelSettings",
           "config/ProvidersConfigModel.ProvidersConfig",
-          "model/TransformationResult",
-          "util/SecretPatterns.SecretMatch"
+          "model/TransformationResult"
         )
       )
     byNote.flatMap { case (anchor, names) => names.map(n => s"org/llm4s/$n" -> Migration.guide10(anchor)) }.toMap

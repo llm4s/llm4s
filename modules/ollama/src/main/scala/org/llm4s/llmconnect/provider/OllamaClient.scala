@@ -280,7 +280,7 @@ class OllamaClient(
           mapError(response.statusCode, err, response.headers, options)
         )
       case Right(response) =>
-        val accumulator = StreamingAccumulator.create()
+        val accumulator = StreamingAccumulator(config.model)
         val ids         = new OllamaClient.CallIds
         var failure     = Option.empty[org.llm4s.error.LLMError]
         var sawCalls    = false
@@ -344,7 +344,7 @@ class OllamaClient(
                       if (done) {
                         val prompt = json.obj.get("prompt_eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
                         val comp   = json.obj.get("eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
-                        if (prompt > 0 || comp > 0) accumulator.updateTokens(prompt, comp)
+                        accumulator.updateUsage(TokenUsage(prompt, comp, prompt + comp))
                       }
                   }
                 }
@@ -358,7 +358,7 @@ class OllamaClient(
           .map { c =>
             // the accumulator reports streamed calls on the message only
             val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            c.withModel(config.model).withToolCalls(c.message.toolCalls.toList).withEstimatedCost(cost)
+            c.withToolCalls(c.message.toolCalls.toList).withEstimatedCost(cost)
           }
 
         recordingExchange(startedAt, requestText, rawResponse.result())(result)
@@ -481,6 +481,25 @@ class OllamaClient(
 
   override def getReserveCompletion(): Int = config.reserveCompletion
 
+  /**
+   * Asks the server for the configured model with `POST /api/show`, which loads nothing and generates nothing.
+   * `Right(())` means the server answered and has the model. A model that is not pulled is the `ServiceError` 404 a
+   * completion gets, with the `ollama pull` hint; nothing listening at the base URL is a `NetworkError` with the
+   * hint to start the server. Ollama takes no key, so none is checked.
+   */
+  override def validate(): Result[Unit] = validateNotClosed.flatMap { _ =>
+    val headers = Map("Content-Type" -> "application/json")
+    val body    = ujson.Obj("model" -> config.model).render()
+    http
+      .post(s"${config.baseUrl}/api/show", headers, body, timeout = requestTimeout.min(OllamaClient.ValidationTimeout))
+      .left
+      .map(OllamaClient.notRunningHint)
+      .flatMap { response =>
+        if (response.statusCode >= 200 && response.statusCode < 300) Right(())
+        else mapError(response.statusCode, response.body, response.headers, CompletionOptions())
+      }
+  }
+
   // A client the caller supplied is the caller's to close (#2341).
   override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(httpClient, http)
 }
@@ -526,6 +545,9 @@ object OllamaClient {
 
   /** The timeout of a non-streaming call when the section sets no `timeouts.request`: two minutes. */
   val DefaultRequestTimeout: FiniteDuration = 120.seconds
+
+  /** The longest `validate()` waits for its one request: ten seconds. */
+  val ValidationTimeout: FiniteDuration = 10.seconds
 
   /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
   val DefaultStreamTimeout: FiniteDuration = 10.minutes

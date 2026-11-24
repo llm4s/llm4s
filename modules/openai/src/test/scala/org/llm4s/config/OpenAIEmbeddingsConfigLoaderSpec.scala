@@ -64,30 +64,6 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
       cfg.baseUrl shouldBe "https://custom-openai.proxy.com/v1"
     }
 
-    "successfully load OpenAI embeddings via legacy provider setting" in {
-      val hocon =
-        """
-          |llm4s {
-          |  llm { model = "openai/gpt-4o" }
-          |  embeddings {
-          |    provider = "openai"
-          |    openai {
-          |      model = "text-embedding-ada-002"
-          |      apiKey = "sk-legacy-test"
-          |    }
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      val (provider, cfg) = result.value
-      provider shouldBe "openai"
-      cfg.model shouldBe "text-embedding-ada-002"
-      cfg.apiKey.reveal shouldBe "sk-legacy-test"
-    }
-
     "fail with clear error when OpenAI API key is missing for embeddings" in {
       val hocon =
         """
@@ -110,28 +86,6 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
       // The key is the embeddings block's own, else OpenAI's shared llm4s.credentials.openai.apiKey,
       // which this module binds to OPENAI_API_KEY: the error names both places.
       error.message should include("set OPENAI_API_KEY, or set apiKey under llm4s.embeddings.openai")
-    }
-
-    "fail with clear error when OpenAI embeddings model is missing in legacy mode" in {
-      val hocon =
-        """
-          |llm4s {
-          |  embeddings {
-          |    provider = "openai"
-          |    openai {
-          |      baseUrl = "https://api.openai.com/v1"
-          |      apiKey = "sk-test"
-          |    }
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
-
-      result.isLeft shouldBe true
-      val error = result.left.value
-      error.message should include("Missing openai embeddings model")
-      error.message should include("OPENAI_EMBEDDING_MODEL")
     }
 
     "use default baseUrl for OpenAI when not specified" in {

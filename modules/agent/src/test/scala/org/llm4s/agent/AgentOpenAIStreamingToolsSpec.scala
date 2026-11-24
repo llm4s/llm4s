@@ -79,7 +79,7 @@ class AgentOpenAIStreamingToolsSpec extends AnyFlatSpec with TestTimeLimit with 
     val events = new CopyOnWriteArrayList[StreamEvent]()
     val lookup = SpecTools.tool("lookup") { (args, _) =>
       ran.add(args.text)
-      ToolOutcome.Success(ToolContent.Json(ujson.Num(391)))
+      ToolOutcome.success(ToolContent.Json(ujson.Num(391)))
     }
 
     LocalProviderTestServer.withServer("/") { exchange =>

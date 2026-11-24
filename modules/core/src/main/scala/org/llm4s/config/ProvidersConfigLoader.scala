@@ -3,6 +3,7 @@ package org.llm4s.config
 import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 import pureconfig.ConfigSource
@@ -77,7 +78,7 @@ final private[config] case class ProviderSections(
       for
         raw        <- section.toOption
         provider   <- raw.provider.map(_.trim).filter(_.nonEmpty)
-        descriptor <- registry.find(registry.canonicalId(provider))
+        descriptor <- registry.find(ProviderId(provider))
         if descriptor.configSpec.requiresApiKey
       yield
         val source =

@@ -262,7 +262,7 @@ class HarnessProfileSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
     val big = (1 to 2000).map(i => s"line $i of the page").mkString("\n")
     val fetch: AgentTool[ujson.Value] =
       AgentTool(AgentToolSpec[ujson.Value]("fetch", "fetches", org.llm4s.toolapi.Schema.`object`[ujson.Value]("none")))(
-        (_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(big)))
+        (_, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(big)))
       )
     // a model that fetches, then reads the path the preview names, then answers
     val seen = new CopyOnWriteArrayList[Vector[Message]]()

@@ -109,7 +109,7 @@ import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolOutcome }
 
 val plot = AgentTool(plotSpec) { (args, _) =>
   ContentPart.image(MediaSource.Inline(IArray.from(render(args))), MediaType.Png) match {
-    case Right(image) => ToolOutcome.Success(ToolContent.Parts(Vector(ContentPart.Text("The plot:"), image)))
+    case Right(image) => ToolOutcome.success(ToolContent.Parts(Vector(ContentPart.Text("The plot:"), image)))
     case Left(error)  => ToolOutcome.Error(error.message)
   }
 }

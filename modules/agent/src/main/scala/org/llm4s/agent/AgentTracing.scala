@@ -63,6 +63,8 @@ final private[agent] class AgentTracing(
   private val usage = new AtomicReference(UsageSummary())
   // the provider of the run's first model call that reported one: the run span's gen_ai.provider.name (#2275)
   private val provider = new AtomicReference[Option[ProviderId]](None)
+  // who the run is for: the principal its RunConfig named, which the event that began the run records (#2828)
+  private val principal = new AtomicReference[Option[String]](None)
 
   // ends - once - after the terminal event is traced, after a Disconnected, or when the run lacks a terminal event
   private val scope = RunScope(handle.runId, onEvent, () => scopeEnded())
@@ -83,6 +85,11 @@ final private[agent] class AgentTracing(
       if incarnated.compareAndSet(false, true) then
         runSpan = AgentTraceSpans.run(handle.threadId, handle.runId, Some(record.token), continues)
       trace(AgentTracing.toTrace(record).withSpan(placement(event, record)))
+      record.event match
+        case RunEvent.RunStarted(d)   => principal.set(d.principal)
+        case RunEvent.RunRecovered(d) => principal.set(d.principal)
+        case RunEvent.RunResumed(d)   => principal.set(d.principal)
+        case _                        => ()
       event match
         case AgentEvents.ModelCallCompleted(m) =>
           if m.provider.isDefined then provider.compareAndSet(None, m.provider): Unit
@@ -163,7 +170,8 @@ final private[agent] class AgentTracing(
         parentThreadId = parent.map(_._1.value),
         parentRunId = parent.map(_._2.value),
         span = Some(TraceSpan(runSpan, continues, startedAt.get.getOrElse(attachedAt))),
-        provider = provider.get
+        provider = provider.get,
+        userId = principal.get
       )
     )
 
@@ -256,16 +264,16 @@ private[agent] object AgentTracing:
     case Right(AgentStatus.Blocked(guardrail, _)) => s"blocked:$guardrail"
     case Left(_) =>
       terminal match
-        case RunEvent.RunCancelled(_, _) => "cancelled"
-        case RunEvent.RunTimedOut(_, _)  => "timed_out"
-        case _                           => "failed"
+        case RunEvent.RunCancelled(_) => "cancelled"
+        case RunEvent.RunTimedOut(_)  => "timed_out"
+        case _                        => "failed"
 
   /** The usage a terminal event carries for the attempts that committed nothing; `None` for any other event. */
   def lostUsage(event: RunEvent): Option[UsageSummary] = event match
-    case RunEvent.RunFailed(_, usage, _) => usage
-    case RunEvent.RunCancelled(usage, _) => usage
-    case RunEvent.RunTimedOut(usage, _)  => usage
-    case _                               => None
+    case RunEvent.RunFailed(details)    => details.usage
+    case RunEvent.RunCancelled(details) => details.usage
+    case RunEvent.RunTimedOut(details)  => details.usage
+    case _                              => None
 
   /** How long `detach` waits, after the run ends, for its last event to be traced. */
   val Drain: FiniteDuration = 5.seconds

@@ -66,9 +66,9 @@ object TapirEndpointToolsExample {
     val approval = new ApprovalMiddleware(call => Option.when(gated(call.spec.name))("this changes an order"))
 
     def approveAll(agent: Agent, result: AgentResult): Result[AgentResult] = result.status match {
-      case suspended: AgentStatus.Suspended =>
-        suspended.approvals.foreach((_, request) => println(s"Approving: $request"))
-        agent.resume(result.threadId, suspended.approvals.map((id, _) => result.approve(id)).toMap)
+      case AgentStatus.Suspended(suspension) =>
+        suspension.approvals.foreach((_, request) => println(s"Approving: $request"))
+        agent.resume(result.threadId, suspension.approvals.map((id, _) => result.approve(id)).toMap)
       case _ => Right(result)
     }
 

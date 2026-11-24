@@ -4,8 +4,8 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.agent.guardrails.{ GuardrailAction, InputGuardrail, OutputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
-import org.llm4s.util.SecretPatterns
-import org.llm4s.util.SecretPatterns.SecretType
+import org.llm4s.agent.guardrails.patterns.SecretPatterns
+import org.llm4s.agent.guardrails.patterns.SecretPatterns.SecretType
 import org.slf4j.LoggerFactory
 
 /**

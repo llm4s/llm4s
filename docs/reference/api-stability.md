@@ -117,7 +117,26 @@ there is one `apply` per type, so the baseline freezes no overload. Never re-exp
 record) goes on the allow-list, `GrowthExempted` in `project/StabilityTiers.scala`, by fully qualified name with a
 one-line reason. Every type that predated the check has been converted or given its reason (#2377 to #2384).
 An entry that no longer matches a failing type fails the check, so a converted type cannot leave its entry behind.
-The scanner does not look at the cases of a `@Stable` `enum`.
+
+An `enum` case with fields is held to the same rule ([#2781](https://github.com/llm4s/llm4s/issues/2781)):
+`case Done(output: String)` compiles to a case class with a public constructor, `apply` and `copy`, and is matched
+positionally, so it cannot gain a field either. A case cannot have a private constructor and a companion `apply`, so
+a case that may grow holds one growth-safe class, and is read by name through it:
+
+```scala
+@Stable
+enum AgentStatus:
+  case Completed(answer: String)         // closed: exactly the answer, listed in GrowthExempted
+  case Suspended(suspension: Suspension) // may grow: Suspension is a `final case class Suspension private (...)`
+
+status match
+  case AgentStatus.Suspended(suspension) => suspension.approvals
+```
+
+Every case with fields is on the allow-list with its reason: the wrapper as "holding only its growth-safe
+`Suspension`", a closed case (a single value, an error or outcome case whose fields are what it is, a stored form
+whose derived codec is a wire format) as what it is exactly. A case of an `@Experimental` enum, or one marked
+`@Experimental` itself, is not checked.
 
 `scripts/check-tier-drift.sh` (also a CI quick check, and it needs no sbt) keeps this page, the tiers in
 [1.0 Scope](v1-scope) and the lists in `build.sbt` from drifting apart: the modules that call `mimaFrozen`

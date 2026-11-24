@@ -309,7 +309,7 @@ object SmokeChecks {
 
   /** The completion a consumer of `onChunk` would rebuild from `chunks`. */
   private def fromChunks(chunks: Seq[StreamedChunk]): Either[String, Completion] = {
-    val accumulator = StreamingAccumulator.create()
+    val accumulator = StreamingAccumulator("")
     chunks.foreach(accumulator.addChunk)
     accumulator.toCompletion
       .map(c => c.withToolCalls(c.message.toolCalls.toList))

@@ -1,9 +1,8 @@
 package org.llm4s.llmconnect
 
 import org.llm4s.security.Secret
-import org.llm4s.llmconnect.caching.{ CacheEntry, CacheStats }
+import org.llm4s.llmconnect.caching.CacheStats
 import org.llm4s.llmconnect.config.ProviderTimeouts
-import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions }
 import org.llm4s.llmconnect.spi.{
   EmbeddingProviderSection,
   ProviderConfigKey,
@@ -17,7 +16,6 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.nio.file.Path
-import java.time.Instant
 import scala.concurrent.duration.*
 
 /**
@@ -26,15 +24,6 @@ import scala.concurrent.duration.*
  */
 class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
 
-  private val completion = Completion(
-    id = "c-1",
-    created = Instant.EPOCH,
-    content = "hi",
-    model = "m",
-    message = AssistantMessage("hi"),
-    usage = None
-  )
-
   "JsonlProviderExchangeSink" should "be built by apply and re-pointed by withPath" in {
     val sink = JsonlProviderExchangeSink(Path.of("a.jsonl"))
     sink.path shouldBe Path.of("a.jsonl")
@@ -42,29 +31,11 @@ class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
     sink match { case JsonlProviderExchangeSink(p) => p shouldBe Path.of("a.jsonl") }
   }
 
-  "CacheEntry" should "be built by apply and changed by its setters" in {
-    val entry = CacheEntry(Seq(1.0), completion, Instant.EPOCH, CompletionOptions())
-    entry.embedding shouldBe Seq(1.0)
-    entry.response shouldBe completion
-    entry.timestamp shouldBe Instant.EPOCH
-    entry.options shouldBe CompletionOptions()
-
-    val other = completion.withContent("bye")
-    val later = Instant.EPOCH.plusSeconds(5)
-    val opts  = CompletionOptions().withTemperature(0.1)
-    val changed =
-      entry.withEmbedding(Seq(0.5, 0.5)).withResponse(other).withTimestamp(later).withOptions(opts)
-    changed.embedding shouldBe Seq(0.5, 0.5)
-    changed.response shouldBe other
-    changed.timestamp shouldBe later
-    changed.options shouldBe opts
-  }
-
   "CacheStats" should "be built by apply and changed by its setters" in {
-    val stats = CacheStats(1, 2L, 3L, 5L, 40.0)
-    stats shouldBe CacheStats(size = 1, hits = 2L, misses = 3L, totalRequests = 5L, hitRatePercent = 40.0)
-    val changed = stats.withSize(9).withHits(8L).withMisses(7L).withTotalRequests(15L).withHitRatePercent(53.3)
-    changed shouldBe CacheStats(9, 8L, 7L, 15L, 53.3)
+    val stats = CacheStats(1, 2L, 3L)
+    stats shouldBe CacheStats(size = 1, hits = 2L, misses = 3L)
+    val changed = stats.withSize(9).withHits(8L).withMisses(7L)
+    changed shouldBe CacheStats(9, 8L, 7L)
   }
 
   "EmbeddingProviderSection" should "default every field and be changed by its setters" in {
@@ -84,12 +55,11 @@ class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
       EmbeddingProviderSection(Some(Secret("k2")), Some("http://c"), Some("m2"), timeouts)
   }
 
-  "ProviderConfigKey" should "default to optional with no default, env or aliases" in {
+  "ProviderConfigKey" should "default to optional with no default or env" in {
     val key = ProviderConfigKey("region", "the region")
     key.required shouldBe false
     key.default shouldBe None
     key.env shouldBe None
-    key.deprecatedAliases shouldBe Seq.empty
   }
 
   it should "be changed by its setters" in {
@@ -99,9 +69,8 @@ class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
       .withRequired(true)
       .withDefault("eu")
       .withEnv("ZONE")
-      .withDeprecatedAliases(Seq("area"))
-    key shouldBe ProviderConfigKey("zone", "the zone", true, Some("eu"), Some("ZONE"), Seq("area"))
-    key.withDefault(None).withEnv(None) shouldBe ProviderConfigKey("zone", "the zone", true, None, None, Seq("area"))
+    key shouldBe ProviderConfigKey("zone", "the zone", true, Some("eu"), Some("ZONE"))
+    key.withDefault(None).withEnv(None) shouldBe ProviderConfigKey("zone", "the zone", true, None, None)
     key.withDefault(Some("us")).withEnv(Some("Z")).default shouldBe Some("us")
     ProviderConfigKey.optional("r", "d").withEnv("R").env shouldBe Some("R")
   }
@@ -165,10 +134,10 @@ class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
     val empty = SSEEvent()
     empty.isEmpty shouldBe true
 
-    val set = empty.withData("d").withEvent("e").withId("i").withRetry(5)
-    set shouldBe SSEEvent(Some("d"), Some("e"), Some("i"), Some(5))
+    val set = empty.withData("d").withEvent("e").withId("i").withRetry(5.millis)
+    set shouldBe SSEEvent(Some("d"), Some("e"), Some("i"), Some(5.millis))
     set.withData(None).withEvent(None).withId(None).withRetry(None) shouldBe empty
-    empty.withData(Some("x")).withEvent(Some("y")).withId(Some("z")).withRetry(Some(1)) shouldBe
-      SSEEvent(data = Some("x"), event = Some("y"), id = Some("z"), retry = Some(1))
+    empty.withData(Some("x")).withEvent(Some("y")).withId(Some("z")).withRetry(Some(1.second)) shouldBe
+      SSEEvent(data = Some("x"), event = Some("y"), id = Some("z"), retry = Some(1.second))
   }
 }

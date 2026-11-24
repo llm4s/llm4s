@@ -47,7 +47,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
   private val deployed = new CopyOnWriteArrayList[String]()
   private val deploy = SpecTools.tool("deploy") { (a, _) =>
     deployed.add(a.text)
-    ToolOutcome.Success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
+    ToolOutcome.success(ToolContent.Json(ujson.Str(s"deployed ${a.text}")))
   }
 
   /** The durable `ModelCallCompleted` events of `threadId`, in order. */
@@ -61,8 +61,8 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
       }
 
   private def askedOf(result: AgentResult): Vector[(InterruptId, MiddlewareQuestionRequest)] = result.status match {
-    case AgentStatus.Suspended(_, _, asked, _, _) => asked
-    case other                                    => fail(s"expected Suspended, got $other")
+    case AgentStatus.Suspended(suspension) => suspension.middlewareQuestions
+    case other                             => fail(s"expected Suspended, got $other")
   }
 
   "A beforeAgent question" should "suspend before anything of the turn is stored, and run the input again once answered" in {
@@ -238,7 +238,8 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val parked = agent.run("deploy").value
     val asked  = agent.resume(parked.threadId, Map(parked.reply(askedOf(parked).head._1, Info("prod")))).value
     val approval = asked.status match {
-      case AgentStatus.Suspended(Vector((id, request)), _, Vector(), _, _) =>
+      case AgentStatus.Suspended(s) if s.approvals.sizeIs == 1 && s.middlewareQuestions.isEmpty =>
+        val (id, request) = s.approvals.head
         request.answered.map(_.middleware) shouldBe Vector(MiddlewareId("environment"))
         id
       case other => fail(s"expected an approval, got $other")
@@ -253,7 +254,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val confirm = new AgentTool.Asking[Text, Confirm, Boolean](SpecTools.spec("confirm")) {
       def execute(args: Text, context: ToolContext): ToolOutcome = ask(Confirm("sure?"))
       def resume(args: Text, question: Confirm, answer: Boolean, context: ToolContext): ToolOutcome =
-        ToolOutcome.Success(ToolContent.Json(ujson.Str(s"confirmed $answer")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str(s"confirmed $answer")))
     }
     val env    = new Environment(new CopyOnWriteArrayList[String]())
     val client = ScriptedLLMClient.of(calling(call("c1", "confirm")), CompletionFixture.simple("done"))
@@ -261,7 +262,9 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val parked = agent.run("go").value
     val asked  = agent.resume(parked.threadId, Map(parked.reply(askedOf(parked).head._1, Info("prod")))).value
     val question = asked.status match {
-      case AgentStatus.Suspended(Vector(), Vector((id, request)), Vector(), _, _) =>
+      case AgentStatus.Suspended(s)
+          if s.approvals.isEmpty && s.middlewareQuestions.isEmpty && s.questions.sizeIs == 1 =>
+        val (id, request) = s.questions.head
         request.answered.map(_.answer) shouldBe Vector(upickle.default.writeJs(Info("prod")))
         id
       case other => fail(s"expected a tool question, got $other")
@@ -275,7 +278,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val confirm = new AgentTool.Asking[Text, Confirm, Boolean](SpecTools.spec("confirm")) {
       def execute(args: Text, context: ToolContext): ToolOutcome = ask(Confirm("sure?"))
       def resume(args: Text, question: Confirm, answer: Boolean, context: ToolContext): ToolOutcome =
-        ToolOutcome.Success(ToolContent.Json(ujson.Str("never")))
+        ToolOutcome.success(ToolContent.Json(ujson.Str("never")))
     }
     val calls = new AtomicInteger(0)
     // passes the first invocation through, so the tool asks; asks itself on the second, the tool's resume
@@ -288,8 +291,8 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(confirm)).withMiddleware(late))
     val parked = agent.run("go").value
     val id = parked.status match {
-      case AgentStatus.Suspended(_, Vector((id, _)), _, _, _) => id
-      case other                                              => fail(s"expected a tool question, got $other")
+      case AgentStatus.Suspended(s) if s.questions.sizeIs == 1 => s.questions.head._1
+      case other                                               => fail(s"expected a tool question, got $other")
     }
     val done = agent.resume(parked.threadId, Map(parked.reply(id, true))).value
     done.answer shouldBe Some("done")

@@ -2,7 +2,6 @@ package org.llm4s.imagegeneration
 
 import org.llm4s.security.Secret
 import org.llm4s.error.{ CancelledError, LLMError }
-import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.media.MediaType
 import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
 import org.llm4s.trace.{ Tracing, TraceEvent }
@@ -61,10 +60,6 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
       events += event
       Right(())
     }
-    override def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
-    override def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
-    override def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
-    override def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
   }
 
   private class StubDelegate(

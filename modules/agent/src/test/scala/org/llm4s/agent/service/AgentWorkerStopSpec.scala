@@ -163,7 +163,7 @@ class AgentWorkerStopSpec
     val slow = SpecTools.tool("slow") { (_, _) =>
       entered.release()
       CancelledError.catchInterrupt(Thread.sleep(60_000)): Unit
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("late")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("late")))
     }
     val client =
       new FnClient((n, c) => if (n == 1) Right(SpecTools.calling(SpecTools.call("c1", "slow"))) else echoing(n, c))
@@ -307,8 +307,8 @@ class AgentWorkerStopSpec
     val on     = thread()
     val parked = agent.run(on, "running").value
     val id = parked.status match {
-      case AgentStatus.Suspended(_, _, questions, _, _) => questions.head._1
-      case other                                        => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(suspension) => suspension.middlewareQuestions.head._1
+      case other                             => fail(s"expected Suspended, got $other")
     }
     client.calls shouldBe 0
     val worker  = workerOf(store, agent)
@@ -341,7 +341,7 @@ class AgentWorkerStopSpec
       ran.add(args.text)
       entered.release()
       gate.await(10, TimeUnit.SECONDS)
-      ToolOutcome.Success(ToolContent.Json(ujson.Str(s"did ${args.text}")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str(s"did ${args.text}")))
     }
     val client = new FnClient((n, c) =>
       if (n == 1) Right(SpecTools.calling(SpecTools.call("c1", "step", "one"), SpecTools.call("c2", "step", "two")))
@@ -377,7 +377,7 @@ class AgentWorkerStopSpec
     val step = SpecTools.tool("step") { (_, _) =>
       entered.release()
       gate.await(10, TimeUnit.SECONDS)
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("done")))
     }
     val client =
       new FnClient((n, c) => if (n == 1) Right(SpecTools.calling(SpecTools.call("c1", "step"))) else echoing(n, c))
@@ -403,7 +403,7 @@ class AgentWorkerStopSpec
     val step = SpecTools.tool("step") { (_, _) =>
       entered.release()
       CancelledError.catchInterrupt(Thread.sleep(60_000)): Unit
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("late")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("late")))
     }
     val client =
       new FnClient((n, c) => if (n == 1) Right(SpecTools.calling(SpecTools.call("c1", "step"))) else echoing(n, c))
@@ -498,7 +498,7 @@ class AgentWorkerStopSpec
     val step = SpecTools.tool("step") { (_, _) =>
       entered.release()
       CancelledError.catchInterrupt(Thread.sleep(60_000)): Unit
-      ToolOutcome.Success(ToolContent.Json(ujson.Str("late")))
+      ToolOutcome.success(ToolContent.Json(ujson.Str("late")))
     }
     val client =
       new FnClient((n, c) => if (n == 1) Right(SpecTools.calling(SpecTools.call("c1", "step"))) else echoing(n, c))
@@ -569,7 +569,7 @@ class AgentWorkerStopSpec
 
   "A queued start" should "be refused while the thread's interrupts are pending, whatever the policy" in {
     val store = InMemoryCheckpointer()
-    val echo  = SpecTools.tool("echo")((args, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(args.text))))
+    val echo  = SpecTools.tool("echo")((args, _) => ToolOutcome.success(ToolContent.Json(ujson.Str(args.text))))
     val client =
       new FnClient((n, c) => if (n == 1) Right(SpecTools.calling(SpecTools.call("c1", "echo"))) else echoing(n, c))
     val agent =

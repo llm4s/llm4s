@@ -12,10 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
-- 36 `llm4s-agent` case classes (`ContextWindowConfig`, `Handoff`, the `AgentEvents` payloads, `EventRecord`, `GraphSnapshot`, `Command` and others) have a private constructor and `copy`: use `X(...)` and the `with*` setters. `GuardrailResult` is removed, and `MiddlewareStack`, `ToolLoop.results`/`queue` and nine other internal types are no longer public;
-  [migration](docs/reference/migration.md#llm4s-agent-has-a-small-stable-core-2778-2785).
-- `LengthCheck`, `ProfanityFilter`, `JSONValidator` and `RegexValidator` are final with private constructors: build them with their companions (`LengthCheck(1, 100)`, `ProfanityFilter.withCustomWords(...)`, `RegexValidator("...".r, "message")`). `ThreadId.child` is internal;
-  [migration](docs/reference/migration.md#llm4s-agent-has-a-small-stable-core-2778-2785).
+- `TokenWindow.trimToBudget` (and so `ContextManager`) returns a `ContextError` when the pinned system and digest messages, or they and the newest turn, do not fit, where it returned an empty or digest-only conversation; with no `ArtifactStore`, `DeterministicCompressor` and `ContextManager` no longer externalize ([#2817](https://github.com/llm4s/llm4s/issues/2817)); [migration](docs/reference/migration.md#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817).
+- `StreamingAccumulator.create()` is `StreamingAccumulator(model)`; `updateTokens`, `updateTokensWithThinking` and
+  `addThinkingDelta` are removed for `updateUsage`; `SSEEvent.retry` is a `FiniteDuration`; `SSEParser.parseStream` and
+  `getEvents` are removed; [migration](docs/reference/migration.md#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813).
+- `ProviderRegistry.get` is removed: use `resolve`, which with `find`, `findEmbedding` and `resolveEmbedding` now
+  accepts an alias as well as an id;
+  [migration](docs/reference/migration.md#providerregistry-lookups-accept-aliases-2812).
+- 36 `llm4s-agent` case classes (`ContextWindowConfig`, `Handoff`, the `AgentEvents` payloads, `EventRecord`, `GraphSnapshot`, `Command` and others) have a private constructor and `copy`: use `X(...)` and the `with*` setters. `GuardrailResult` is removed, and `MiddlewareStack`, `ToolLoop.results`/`queue` and nine other internal types are no longer public. `AgentStatus.Suspended`, eight `RunEvent` cases, `StreamEvent.Live` and `ToolOutcome.Success` each hold one growth-safe class (`Suspension`, `RunFailedDetails`, `LiveEvent`, `ToolSuccess`, ...) in place of positional fields, and a tool returns `ToolOutcome.success(content)` ([#2781](https://github.com/llm4s/llm4s/issues/2781));
+  [migration](docs/reference/migration.md#llm4s-agent-types-are-tiered-and-growth-safe-2778).
 - `CompletionOptions.budgetTokens` and `withBudgetTokens`, and `ReasoningEffort.None`, are removed: use `thinking`
   (`Thinking.budget(n)`, `Thinking.Off`); Java's `budgetTokens` and `JReasoningEffort.NONE` likewise give way to
   `JThinking`. On OpenAI, `Thinking.Off` asks for the lowest effort where `None` sent none (RFC 0008, PR 4);
@@ -68,9 +73,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its turn count with no other limit set
   ([#2728](https://github.com/llm4s/llm4s/issues/2728), [#2729](https://github.com/llm4s/llm4s/issues/2729));
   [migration](docs/reference/migration.md#context-pruning-enforces-both-limits-and-minrecentturns-2728-2729).
+- `EMBEDDING_PROVIDER` (`llm4s.embeddings.provider`) is removed: select embeddings with `EMBEDDING_MODEL=provider/model`;
+  [migration](docs/reference/migration.md#the-legacy-embedding-provider-selector-is-removed).
+- Vertex AI no longer reads `endpoint` and `organization` (use `project` and `location`), and `ProviderConfigKey`'s
+  `deprecatedAliases` mechanism is removed; [migration](docs/reference/migration.md#vertex-ai-no-longer-reads-endpoint-and-organization).
 
 ### Providers
 
+- **Removed** Vertex AI's `endpoint` / `organization` aliases for `project` / `location`, and with them
+  `ProviderConfigKey.deprecatedAliases` and `ProviderConfigSpec.BuiltinAliasKeys` ([migration](docs/reference/migration.md#vertex-ai-no-longer-reads-endpoint-and-organization)).
+- **Fixed** `SSEParser`'s streaming parser reads CRLF and CR line endings, where a CRLF stream fed in raw chunks yielded
+  no event until `flush()`, and ends an event only at a blank line, where a chunk ending at a line break split it; a streamed `Completion.model` is the model the client was created for, never `"unknown"`,
+  and `StreamingAccumulator` reports usage only through `updateUsage`, which keeps cache counts [#2813](https://github.com/llm4s/llm4s/issues/2813).
+- **Fixed** `ProviderRegistry`: an id beats an alias, so another provider's alias can no longer make a provider
+  unreachable; alias collisions are reported like id collisions; a descriptor whose `id` or `aliases` throws is
+  recorded instead of aborting `ProviderRegistry.default`; and `discover()` also scans core's own class loader
+  when the context loader is set [#2812](https://github.com/llm4s/llm4s/issues/2812).
 - **Fixed** watsonx, Perplexity and Jlama leaving options out without reporting them: each now puts on
   `Completion.adjustments` what it does not send as asked (`reasoning` and `thinking`; Perplexity and Jlama also the
   penalties, Jlama also `top_p` and `responseFormat`), on `complete` and streams; watsonx's per-process warnings give way to the reports ([RFC 0008](docs/rfcs/0008-generation-controls.md) decision 15) [#2115](https://github.com/llm4s/llm4s/issues/2115).
@@ -119,6 +137,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
+- **Fixed** context compression loses no content it cannot give back: without an `ArtifactStore` nothing is externalized (it went to a throwaway store); binary tool output is detected by content, not the word "base64", and stored whole or left; `TokenWindow` pins every leading system and digest message and trims whole tool-call turns; the subjective rules no longer rewrite user messages; `SemanticBlock.getBlockSummary` no longer throws on an empty block [#2817](https://github.com/llm4s/llm4s/issues/2817).
 - **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
   traces too, and on each agent call's `ModelCallCompleted` (an event stored before reads with none, a reason this version cannot read as `Other(raw)`), mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider, in place of `assertStreams`
   ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1, 2, 5 and 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
@@ -136,14 +155,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   moving every digest to the end of the conversation [#2481](https://github.com/llm4s/llm4s/issues/2481).
 - **Fixed** `HistoryCompressor`, `LLMCompressor` and `TokenWindow` recognise a history digest the same way: a `SystemMessage`
   starting with `[HISTORY_SUMMARY]`, so `TokenWindow` no longer pins a message that merely quotes the marker [#2505](https://github.com/llm4s/llm4s/issues/2505).
+- **Fixed** message and conversation validation name the field they reject (`content`, `toolCallId`, `toolMessage`,
+  `conversation`) and give the reason as the violation, where field and reason were swapped [#2796](https://github.com/llm4s/llm4s/issues/2796).
 
 ### Agent runtime
 
 - **Added** RAG guardrails run inside an agent (experimental): `RAGGuardrail.withTurnContext(guardrail)(turn => Some(RAGContext.fromToolResults(turn, Set("search"))))` is an output guardrail for `GuardrailMiddleware` that checks each final answer against the turn's retrieval-tool results,
   its judge calls counted in the run's usage; `GuardrailConfig.outputGuardrailsWithContext` does it for a preset ([guide](docs/guide/agents/guardrails.md#rag-guardrails)) [#2781](https://github.com/llm4s/llm4s/issues/2781).
-- **Changed** `llm4s-agent` is tiered, with a small `@Stable` core (`Agent`, `AgentBuilder`, `AgentResult`, `AgentStatus`, `AgentRun`, `Handoff`, the run ids, `RunConfig`, the guardrail traits and four validators); the rest - graph runtime, checkpointers, events and streaming, middleware, tools, human review, delegation, harness - is `@Experimental`, and `sbt stabilityTierCheck` covers the module
-  ([tiers](docs/reference/api-stability.md#tiers-in-the-code), [migration](docs/reference/migration.md#llm4s-agent-has-a-small-stable-core-2778-2785)) [#2778](https://github.com/llm4s/llm4s/issues/2778), [#2785](https://github.com/llm4s/llm4s/issues/2785).
-- **Added** `AgentBuilder.withInputGuardrails` and `withOutputGuardrails`, the Stable way to attach guardrails; `withMiddleware(new GuardrailMiddleware(...))` is the Experimental form for choosing the position ([guide](docs/guide/agents/guardrails.md)) [#2785](https://github.com/llm4s/llm4s/issues/2785).
+- **Changed** `llm4s-agent` is tiered: every public top-level type is `@Stable` (the agent, graph, event, middleware and guardrail APIs) or `@Experimental` (harness, run queue and worker, encryption, subagent definition, permissions, the checkpointer SPI, the RAG guardrails, `assistant`), `sbt stabilityTierCheck` covers the module, and its Stable case classes are growth-safe. So are the enum cases with fields of every frozen module: the check now fails for one that is neither a wrapper over a growth-safe class nor listed as closed with its reason ([#2781](https://github.com/llm4s/llm4s/issues/2781))
+  ([tiers](docs/reference/api-stability.md#tiers-in-the-code), [migration](docs/reference/migration.md#llm4s-agent-types-are-tiered-and-growth-safe-2778)) [#2778](https://github.com/llm4s/llm4s/issues/2778).
 - **Fixed** context pruning (`ContextWindowMiddleware`): `ContextWindowConfig.minRecentTurns`, which nothing read, keeps the last N turns whole under every strategy (default 1, the current turn), and `maxTokens` and `maxMessages` set together are both limits, as are `AdaptiveWindowing`'s window and `RecentTurnsOnly`'s turn count, which did nothing with neither set; `MiddleOut` fits `maxTokens`
   ([guide](docs/guide/context-window-pruning.md)) [#2728](https://github.com/llm4s/llm4s/issues/2728), [#2729](https://github.com/llm4s/llm4s/issues/2729).
 - **Added** checkpoint encryption at rest (`org.llm4s.agent.encryption`, experimental): `EncryptingCheckpointer`, `EncryptingRunQueue` and `EncryptingLongTermStore` wrap any store, its queue and its long-term store, sealing state, pending writes, custom events, effect outcomes, queued inputs and long-term items (`/memories/` files included) with AES-256-GCM under keys from an `EncryptionKeySource` (`StaticKeySource`: per-tenant keys, rotation by key id)
@@ -186,6 +206,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Embeddings & RAG
 
+- **Removed** the provider-only `EMBEDDING_PROVIDER` / `llm4s.embeddings.provider` selector; a config still setting it
+  fails, naming `EMBEDDING_MODEL` ([migration](docs/reference/migration.md#the-legacy-embedding-provider-selector-is-removed)).
 - **Fixed** `RAGConfig.withTracing` traces the answer, LLM-rerank and `LLMQueryRewriter` calls, tagged `rag.answer`,
   `rag.rerank`, `rag.rewrite`, and each query's `RAGOperationCompleted` with stage durations; **Added**
   `RAGAnswerResult.metrics` (`RAGQueryMetrics`) [#2734](https://github.com/llm4s/llm4s/issues/2734).

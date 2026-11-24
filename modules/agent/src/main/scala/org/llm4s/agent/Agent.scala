@@ -278,7 +278,7 @@ final class Agent private[agent] (
    * [[AgentResult.proceed]] - and continues. Unanswered ones stay pending. Interrupting the calling
    * thread cancels the turn, as for [[run]].
    *
-   * A subagent's interrupt (`AgentStatus.Suspended.delegated`) is answered by its composite id: the answers are
+   * A subagent's interrupt (`Suspension.delegated`) is answered by its composite id: the answers are
    * grouped by the parent interrupt they go through and reach the child when its `task` call resumes (design 4.46).
    * A composite id that is not pending is refused (`GraphError.InvalidResume`), as any other interrupt is.
    */
@@ -329,8 +329,8 @@ final class Agent private[agent] (
     runtime.childAtRest(threadId, loop.graph, configured(config)).flatMap {
       case Some((checkpoint, exec)) if checkpoint.status == CheckpointStatus.Suspended =>
         AgentRun.status(runtime.suspendedResult(loop.graph, exec), isBlock = false, loop).map {
-          case suspended: AgentStatus.Suspended => Some(suspended.delegated)
-          case _                                => None
+          case AgentStatus.Suspended(suspension) => Some(suspension.delegated)
+          case _                                 => None
         }
       case _ => Right(None)
     }

@@ -119,15 +119,9 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
   }
 
   private class Recording extends Tracing {
-    val events: mutable.Buffer[TraceEvent]                                           = mutable.Buffer.empty
-    val usages: mutable.Buffer[String]                                               = mutable.Buffer.empty
-    def traceEvent(event: TraceEvent): Result[Unit]                                  = { events += event; Right(()) }
-    def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())
-    def traceError(error: Throwable, context: String): Result[Unit]                  = Right(())
-    def traceCompletion(completion: Completion, model: String): Result[Unit]         = Right(())
-    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = {
-      usages += operation; Right(())
-    }
+    val events: mutable.Buffer[TraceEvent]          = mutable.Buffer.empty
+    def traceEvent(event: TraceEvent): Result[Unit] = { events += event; Right(()) }
+    def usages: Seq[String] = events.collect { case e: TraceEvent.TokenUsageRecorded => e.operation }.toSeq
   }
 
   private object Embeddings extends EmbeddingProvider {

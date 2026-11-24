@@ -858,28 +858,10 @@ size.
 ollama pull nomic-embed-text
 ```
 
-### Legacy Format (Still Supported)
-
-The legacy format using `EMBEDDING_PROVIDER` is still supported for backward compatibility:
-
-```bash
-# OpenAI
-EMBEDDING_PROVIDER=openai
-OPENAI_EMBEDDING_BASE_URL=https://api.openai.com/v1
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-OPENAI_API_KEY=sk-...
-
-# Voyage AI
-EMBEDDING_PROVIDER=voyage
-VOYAGE_EMBEDDING_BASE_URL=https://api.voyageai.com/v1
-VOYAGE_EMBEDDING_MODEL=voyage-3
-VOYAGE_API_KEY=pa-...
-
-# Ollama
-EMBEDDING_PROVIDER=ollama
-OLLAMA_EMBEDDING_BASE_URL=http://localhost:11434
-OLLAMA_EMBEDDING_MODEL=nomic-embed-text
-```
+`EMBEDDING_MODEL` is the only selector. The older `EMBEDDING_PROVIDER` variable (`llm4s.embeddings.provider`)
+was removed in 0.7.0: a configuration that still sets `llm4s.embeddings.provider` and no model fails to load,
+asking for `EMBEDDING_MODEL=provider/model` (see the
+[migration note](../reference/migration#the-legacy-embedding-provider-selector-is-removed)).
 
 ### Using Embeddings in Code
 
@@ -959,13 +941,7 @@ question they answer as a query. Code that does not say keeps embedding document
 When running via sbt, use system properties for reliable configuration:
 
 ```bash
-# Using unified format (recommended)
 sbt -Dllm4s.embeddings.model=ollama/nomic-embed-text \
-    "run"
-
-# Or with legacy format
-sbt -Dllm4s.embeddings.provider=ollama \
-    -Dllm4s.embeddings.ollama.model=nomic-embed-text \
     "run"
 ```
 
@@ -1010,6 +986,10 @@ required: without one, `Tracing.fromSettings` returns a `ConfigurationError` nam
 `llm4s.tracing.langfuse.publicKey (LANGFUSE_PUBLIC_KEY)` and/or `secretKey`, and
 `Tracing.create` logs it and traces nothing. Without the module, `TRACING_MODE=langfuse` gives
 an error naming the `llm4s-observability` artifact.
+
+Traces are private to your Langfuse project. `llm4s.tracing.langfuse.public = true` (no variable
+is bound to it) sends them public instead: readable, messages included, by anyone holding a
+trace's URL.
 
 Get keys from [Langfuse](https://langfuse.com):
 
@@ -1129,7 +1109,7 @@ val result = for {
   tracer   <- Tracing.fromSettings(settings)
   _        <- tracer.traceEvent(TraceEvent.AgentInitialized("query", Vector("tool1")))
   _        <- tracer.traceTokenUsage(usage, "gpt-4o", "completion")
-  _         = tracer.shutdown() // always shut down to flush pending spans
+  _         = tracer.close() // always shut down to flush pending spans
 } yield ()
 ```
 
@@ -1173,7 +1153,7 @@ also set in `application.conf` or with `-D`.
 | `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION` | `llm4s.tracing.langfuse.*` | `llm4s-observability` |
 | `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `llm4s.tracing.opentelemetry.serviceName`, `.endpoint` | `llm4s-observability-otel` |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | `llm4s.tracing.opentelemetry.captureContent` (`false` by default: spans carry no prompt or completion content) | `llm4s-observability-otel` |
-| `EMBEDDING_MODEL` (or legacy `EMBEDDING_PROVIDER`) | `llm4s.embeddings.model` (`.provider`) | `llm4s-core` |
+| `EMBEDDING_MODEL` | `llm4s.embeddings.model` | `llm4s-core` |
 | `LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT` | `llm4s.tracing.console.captureContent` (`false` by default: console tracing prints no prompt or completion content) | `llm4s-core` |
 | `LLM4S_EXCHANGE_LOGGING_ENABLED`, `LLM4S_EXCHANGE_LOGGING_DIR` | `llm4s.exchangeLogging.*` | `llm4s-core` |
 | `HTTPS_PROXY`, `NO_PROXY`, `LLM4S_PROXY_USER`, `LLM4S_PROXY_PASSWORD` | `llm4s.http.proxy.url`, `.nonProxyHosts`, `.username`, `.password` ([Corporate networks](#corporate-networks-a-proxy-and-a-custom-ca)) | `llm4s-core` |

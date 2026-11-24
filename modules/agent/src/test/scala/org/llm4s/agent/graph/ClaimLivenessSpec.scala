@@ -918,7 +918,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       val sub       = handle.subscribe()(replaying).value
       // the hung write is let land only after this, so a subscription that waited on it could not end
       replaying.ended.await(5, TimeUnit.SECONDS) shouldBe true
-      replaying.eventsOf("first") should contain(RunEvent.RunStarted(None, None))
+      replaying.eventsOf("first") should contain(RunEvent.RunStarted(RunStartedDetails(None, None)))
       replaying.eventsOf("first") should not contain RunEvent.TaskCompleted
       writerAlive shouldBe true
       sub.cancel()
@@ -1034,7 +1034,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       val sub       = handle.subscribe()(replaying).value
       // the hung commit is let return only after this, so a subscription that waited on it could not end
       replaying.ended.await(5, TimeUnit.SECONDS) shouldBe true
-      replaying.eventsOf("first") should contain(RunEvent.RunStarted(None, None))
+      replaying.eventsOf("first") should contain(RunEvent.RunStarted(RunStartedDetails(None, None)))
       sub.cancel()
 
       hang.countDown()
@@ -1407,8 +1407,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
       val stored = store.latest(thread).value.value
       stored.checkpoint.runId shouldBe "first"
       stored.checkpoint.status shouldBe CheckpointStatus.Running
-      events(store).filter(_.runId == "first").map(_.event) should matchPattern {
-        case Vector(RunEvent.RunStarted(_, _)) =>
+      events(store).filter(_.runId == "first").map(_.event) should matchPattern { case Vector(RunEvent.RunStarted(_)) =>
       }
       two.entered.getCount shouldBe 1
 
@@ -2319,7 +2318,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
     val successor = TwoStep()
     successor.gate.countDown()
     await(runtime(store, time, slow).recover(thread, successor.graph, run("second")).value).completed
-    events(store).map(_.event).collect { case r: RunEvent.RunRecovered => r.takenOverFrom } shouldBe
+    events(store).map(_.event).collect { case RunEvent.RunRecovered(r) => r.takenOverFrom } shouldBe
       Vector(Some("first"))
 
     stale.gate.countDown()
@@ -2337,7 +2336,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
     successor.gate.countDown()
     // a reused run id: the store still reports the expired claim it replaced, which may still be executing
     await(runtime(store, time, slow).recover(thread, successor.graph, run("same")).value).completed
-    events(store).map(_.event).collect { case r: RunEvent.RunRecovered => r.takenOverFrom } shouldBe
+    events(store).map(_.event).collect { case RunEvent.RunRecovered(r) => r.takenOverFrom } shouldBe
       Vector(Some("same"))
 
     stale.gate.countDown()
@@ -2359,7 +2358,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
     val successor = TwoStep()
     successor.gate.countDown()
     await(runtime(store, time, slow).recover(thread, successor.graph, mine("second")).value).completed
-    events(store).map(_.event).collect { case r: RunEvent.RunRecovered => r.takenOverFrom } shouldBe Vector(None)
+    events(store).map(_.event).collect { case RunEvent.RunRecovered(r) => r.takenOverFrom } shouldBe Vector(None)
     events(store).map(_.toString).filter(_.contains("b-secret")) shouldBe empty
 
     stale.gate.countDown()
@@ -2376,7 +2375,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
     await(first)
     two.gate.countDown()
     await(runtime(store, time, slow).recover(thread, two.graph, run("second")).value).completed
-    events(store).map(_.event).collect { case r: RunEvent.RunRecovered => r.takenOverFrom } shouldBe Vector(None)
+    events(store).map(_.event).collect { case RunEvent.RunRecovered(r) => r.takenOverFrom } shouldBe Vector(None)
   }
 
   // ---- #1918: a reused RunId names two runs; a fencing token names one ----
@@ -2503,7 +2502,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
 
   /** The payloads, rendered, of the live events in `events`. */
   private def livePayloads(events: Iterable[StreamEvent]): Vector[String] =
-    events.toVector.collect { case StreamEvent.Live(_, _, _, _, _, _, _, payload) => payload.render() }
+    events.toVector.collect { case StreamEvent.Live(live) => live.payload.render() }
 
   "A run that reuses a lost run's RunId, while a node of the lost run that ignores the interrupt still runs" should
     "never deliver that node's progress to its observer or its handle's subscription (#1918)" in {
@@ -2637,8 +2636,10 @@ class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers wit
     val json =
       """{"threadId":"t","seq":1,"runId":"r","checkpointId":null,"taskId":null,"nodeId":null,""" +
         """"timestamp":"2026-10-02T12:00:00Z","event":{"$type":"RunRecovered","fromCheckpoint":"c1","tenantId":null,"principal":null}}"""
-    upickle.default.read[EventRecord](json).event shouldBe RunEvent.RunRecovered("c1", None, None, None)
-    val taken = RunEvent.RunRecovered("c1", Some("a"), None, Some("r-1"))
+    upickle.default.read[EventRecord](json).event shouldBe RunEvent.RunRecovered(
+      RunRecoveredDetails("c1", None, None, None)
+    )
+    val taken = RunEvent.RunRecovered(RunRecoveredDetails("c1", Some("a"), None, Some("r-1")))
     upickle.default.read[RunEvent](upickle.default.write(taken)) shouldBe taken
   }
 
