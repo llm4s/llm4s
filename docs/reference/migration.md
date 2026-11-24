@@ -90,7 +90,8 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [opaque newtypes in `org.llm4s.types`](#newtypes-in-orgllm4stypes-are-opaque-and-headroompercent-is-always-valid-2822),
 [`ReliableClient`'s private constructor](#reliableclient-has-a-private-constructor-2797),
 [tracing backend aliases and the removal of `Tracing.create`](#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799),
-[image metrics as `ImageMetrics` in `llm4s-image`](#image-metrics-are-imagemetrics-in-llm4s-image-2801)
+[image metrics as `ImageMetrics` in `llm4s-image`](#image-metrics-are-imagemetrics-in-llm4s-image-2801),
+[the Hugging Face image client on Inference Providers](#the-hugging-face-image-client-calls-inference-providers-2832),
 [which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824),
 [`llm4s.providers.provider` is now `llm4s.defaultProvider`](#llm4sprovidersprovider-is-now-llm4sdefaultprovider-2806),
 [`Llm4sConfig` takes `ProviderName`, and `embeddings()` returns the config alone](#llm4sconfig-takes-providername-and-embeddings-returns-the-config-alone-2804)
@@ -437,6 +438,31 @@ image code at all.
 of your own can add its failed operations to it with
 `metrics.increment(MetricsCollector.Errors, Seq(provider, errorType))`. A backend of your own that keeps that count in
 a meter of its own should record this metric into it.
+
+## The Hugging Face image client calls Inference Providers (#2832)
+
+Hugging Face retired the serverless Inference API at `api-inference.huggingface.co`, which `HuggingFaceClient` posted
+to; it now posts to Hugging Face's own `hf-inference` provider on the
+[Inference Providers router](https://huggingface.co/docs/inference-providers/tasks/text-to-image),
+`https://router.huggingface.co/hf-inference/models/<model>`, in the format that page documents.
+
+- **The default model** is `stabilityai/stable-diffusion-3-medium-diffusers` (was `stabilityai/stable-diffusion-xl-base-1.0`,
+  which `hf-inference` does not serve): the text-to-image model the Hub lists for `hf-inference`. A model only
+  third-party providers serve does not work with this client.
+- **The token** needs the "Make calls to Inference Providers" permission.
+- **`HuggingFaceConfig`** gains a last field, `baseUrl` (default `HuggingFaceConfig.DefaultBaseUrl`), for a proxy or a
+  test server; a pattern match on its three fields no longer compiles.
+- **`Parameters`** (the request body's `parameters`) names its steps field `num_inference_steps`, as the API does,
+  where it was `inferenceSteps`, which the API never read; it gains `width` and `height`, from
+  `ImageGenerationOptions.size` (none for `ImageSize.Auto`). An absent optional parameter is left out of the body.
+- **`health()`** asks the Hub whether `hf-inference` serves the model
+  (`GET https://huggingface.co/api/models/<model>?expand[]=inferenceProviderMapping`): `Healthy` when it does, live;
+  `Degraded` otherwise.
+
+| Before | After |
+|---|---|
+| `Parameters(guidance_scale, inferenceSteps, negative_prompt, seed)` | `Parameters(guidance_scale, num_inference_steps, negative_prompt, width, height, seed)` |
+| `HuggingFaceConfig(apiKey, model, timeout)` | `HuggingFaceConfig(apiKey, model, timeout, baseUrl)` |
 
 ## `Secret` or `Secret.token`: which one stays registered (#2824)
 

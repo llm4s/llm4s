@@ -96,7 +96,7 @@ llm4s {
   providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }
@@ -323,7 +323,7 @@ llm4s {
   providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o"
+      model    = "gpt-5.6-terra"
     }
   }
 }
@@ -354,7 +354,7 @@ JVM system properties override `application.conf`, key for key:
 
 ```bash
 java -Dllm4s.defaultProvider=claude \
-     -Dllm4s.providers.openai-main.model=gpt-4o-mini \
+     -Dllm4s.providers.openai-main.model=gpt-5.6-luna \
      -jar app.jar
 ```
 

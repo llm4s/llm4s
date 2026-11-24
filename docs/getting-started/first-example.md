@@ -50,7 +50,7 @@ llm4s {
   providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }
@@ -326,7 +326,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.types.ProviderModelTypes.ProviderName
 
 // The model belongs to the provider section, so to use another model load the section that names it,
-// for example one with provider = "openai" and model = "gpt-4-turbo"
+// for example one with provider = "openai" and model = "gpt-5.6-terra"
 val gpt4Turbo = Llm4sConfig.provider(ProviderName("openai-gpt4-turbo"))
 ```
 
@@ -338,7 +338,7 @@ as temperature and token limits go in {% include api.html t="org.llm4s.llmconnec
 ```hocon
 openai-main {
   provider = "openai"
-  model    = "gpt-4o"
+  model    = "gpt-5.6-terra"
 }
 ```
 
@@ -549,7 +549,7 @@ stream), and a provider section can change them:
 ```hocon
 llm4s.providers.my-openai {
   provider = "openai"
-  model    = "gpt-4o"
+  model    = "gpt-5.6-terra"
   timeouts { request = 3m, stream = 15m }
 }
 ```
@@ -573,7 +573,7 @@ llm4s.providers {
 
   openai-main {                        # production: select with provider = "openai-main"
     provider = "openai"
-    model    = "gpt-4o-mini"           # much cheaper than gpt-4o
+    model    = "gpt-5.6-luna"           # much cheaper than gpt-5.6-terra
   }
 }
 ```

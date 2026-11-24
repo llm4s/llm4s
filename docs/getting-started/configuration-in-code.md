@@ -41,7 +41,7 @@ The default. The section and the code that loads it:
 ```hocon
 llm4s.defaultProvider = "openai-main"
 llm4s.providers {
-  openai-main { provider = "openai", model = "gpt-4o-mini" }   # the key: OPENAI_API_KEY
+  openai-main { provider = "openai", model = "gpt-5.6-luna" }   # the key: OPENAI_API_KEY
 }
 ```
 
@@ -76,7 +76,7 @@ import org.llm4s.types.Result
 val appConfig: Config = ConfigFactory.parseString(
   """llm4s.defaultProvider = "openai-main"
     |llm4s.providers {
-    |  openai-main { provider = "openai", model = "gpt-4o-mini", apiKey = "sk-tenant-a" }
+    |  openai-main { provider = "openai", model = "gpt-5.6-luna", apiKey = "sk-tenant-a" }
     |}""".stripMargin
 )
 
@@ -193,7 +193,7 @@ import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName }
 final case class LlmSettings(model: String, apiKey: ciris.Secret[String], baseUrl: String)
 
 val settings: ConfigValue[Effect, LlmSettings] = (
-  env("OPENAI_MODEL").default("gpt-4o-mini"),
+  env("OPENAI_MODEL").default("gpt-5.6-luna"),
   env("OPENAI_API_KEY").secret,
   env("OPENAI_BASE_URL").default(OpenAIConfig.DEFAULT_BASE_URL.asUrl)
 ).parMapN(LlmSettings.apply)
@@ -232,7 +232,7 @@ final case class LlmSettings(model: String, apiKey: Config.Secret, baseUrl: Stri
 
 // From the environment: OPENAI_MODEL, OPENAI_API_KEY, OPENAI_BASE_URL.
 val descriptor: Config[LlmSettings] =
-  (Config.string("model").withDefault("gpt-4o-mini") ++
+  (Config.string("model").withDefault("gpt-5.6-luna") ++
     Config.secret("api_key") ++
     Config.string("base_url").withDefault(OpenAIConfig.DEFAULT_BASE_URL.asUrl))
     .nested("openai")

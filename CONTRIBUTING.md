@@ -80,7 +80,7 @@ samples' `application.conf`) and select it with `LLM4S_PROVIDER`, which the samp
 ```hocon
 llm4s.providers.openai-main {
   provider = "openai"
-  model    = "gpt-4o-mini"
+  model    = "gpt-5.6-luna"
 }
 ```
 ```bash

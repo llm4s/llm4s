@@ -27,7 +27,7 @@ import zio.config.*
  */
 class ConfigurationInCodeGuideSpec extends AnyWordSpec with Matchers with EitherValues {
 
-  private val model = "gpt-4o-mini"
+  private val model = "gpt-5.6-luna"
 
   /** The plain-values recipe that the ciris and zio-config ones end in. */
   private def openAiClient(model: String, apiKey: String, baseUrl: String): Result[LLMClient] =

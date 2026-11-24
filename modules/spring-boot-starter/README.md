@@ -7,7 +7,7 @@ against the latest 3.x, 4.0.x and latest 4.x releases too ([#1467](https://githu
 ```properties
 # openai | anthropic | ollama
 llm4s.provider=openai
-llm4s.model=gpt-4o
+llm4s.model=gpt-5.6-terra
 llm4s.api-key=${OPENAI_API_KEY}
 ```
 
@@ -31,7 +31,7 @@ Spring-specific code, and so does any extra the provider declares:
 # the default section
 llm4s.default-provider=gemini-main
 llm4s.providers.gemini-main.provider=gemini
-llm4s.providers.gemini-main.model=gemini-2.0-flash
+llm4s.providers.gemini-main.model=gemini-3.8-flash
 llm4s.providers.gemini-main.api-key=${GOOGLE_API_KEY}
 ```
 

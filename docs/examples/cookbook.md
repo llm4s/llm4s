@@ -64,7 +64,7 @@ a section to the git-ignored `modules/samples/src/main/resources/application.loc
 llm4s.providers {
   openai-main {
     provider = "openai"
-    model    = "gpt-4o-mini"
+    model    = "gpt-5.6-luna"
   }
 }
 ```

@@ -107,11 +107,11 @@ machine names the same spans without coordination. A run that called one tool, a
 ```text
 invoke_agent assistant                     the run (sent when the run ends)
 ├── graph.run_started
-├── chat gpt-4o                            a model call
+├── chat gpt-5.6-terra                            a model call
 ├── Token Usage - agent_completion         its usage
 ├── execute_tool search_docs               a tool call, spanning its duration
 ├── graph.checkpoint_committed
-├── chat gpt-4o
+├── chat gpt-5.6-terra
 ├── Token Usage - agent_completion
 └── graph.run_completed
 ```

@@ -142,7 +142,7 @@ llm4s.providers {
   bedrock-private {
     provider = "bedrock"
     region   = "eu-central-1"
-    model    = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+    model    = "us.anthropic.claude-sonnet-5-5"
     # baseUrl = "https://vpce-0123456789abcdef0-abcdefgh.bedrock-runtime.eu-central-1.vpce.amazonaws.com"
     #   only when the VPC endpoint's private DNS is off
   }

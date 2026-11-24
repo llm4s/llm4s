@@ -76,7 +76,7 @@ llm4s {
   providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o"
+      model    = "gpt-5.6-terra"
       apiKey   = ${?OPENAI_API_KEY}      # explicit: this section bills the OPENAI_API_KEY account
     }
 
@@ -227,7 +227,7 @@ full rules are in [Rotating keys](../getting-started/configuration#rotating-keys
 ```hocon
 llm4s.providers.openai-main {
   provider   = "openai"
-  model      = "gpt-4o-mini"
+  model      = "gpt-5.6-luna"
   apiKeyFile = "/vault/secrets/openai-api-key"   # instead of apiKey
 }
 ```
@@ -600,7 +600,7 @@ Trace: "RAG Query Processing"
 ├── Span: "Document Retrieval" (200ms)
 │   └── Event: "Retrieved 5 documents"
 ├── Generation: "RAG Response" (1200ms)
-│   ├── Model: gpt-4o
+│   ├── Model: gpt-5.6-terra
 │   ├── Input tokens: 1,234
 │   └── Output tokens: 456
 └── Event: "Final Response"

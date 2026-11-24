@@ -31,7 +31,7 @@ llm4s.defaultProvider = "anthropic-main"      # the default section
 llm4s.providers {
   anthropic-main {
     provider = "anthropic"
-    model    = "claude-sonnet-4-20250514"
+    model    = "claude-sonnet-5-5"
   }
 }
 ```
@@ -41,7 +41,7 @@ A section for a second account sets its own key, which wins over the shared one:
 ```hocon
 llm4s.providers.anthropic-team {
   provider = "anthropic"
-  model    = "claude-sonnet-4-20250514"
+  model    = "claude-sonnet-5-5"
   apiKey   = ${?ANTHROPIC_TEAM_API_KEY}
 }
 ```

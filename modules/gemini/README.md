@@ -34,7 +34,7 @@ are set):
 ```hocon
 llm4s.providers.gemini-main {
   provider = "gemini"          # "google" is accepted too
-  model    = "gemini-2.0-flash"
+  model    = "gemini-3.8-flash"
 }
 ```
 
@@ -45,7 +45,7 @@ Default Credentials are used:
 ```hocon
 llm4s.providers.vertexai-main {
   provider = "vertexai"        # "vertex" is accepted too
-  model    = "gemini-2.0-flash"
+  model    = "gemini-3.8-flash"
   project  = "my-gcp-project"
   location = "us-central1"
 }

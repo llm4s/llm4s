@@ -1,6 +1,6 @@
 package org.llm4s.imagegeneration.provider
 
-import org.llm4s.imagegeneration.ImageGenerationOptions
+import org.llm4s.imagegeneration.{ ImageGenerationOptions, ImageSize }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -22,20 +22,29 @@ class HuggingClientPayloadSpec extends AnyFlatSpec with Matchers {
     val parameters = HuggingClientPayload("a red fox", fullOptions).parameters
 
     parameters.guidance_scale shouldBe 9.25
-    parameters.inferenceSteps shouldBe 35
+    parameters.num_inference_steps shouldBe 35
     parameters.negative_prompt shouldBe Some("blurry, low quality")
     parameters.seed shouldBe Some(42L)
   }
 
-  it should "use the default options: 7.5 guidance, 20 steps, no negative prompt and no seed" in {
+  it should "use the default options: 7.5 guidance, 20 steps, 512x512, no negative prompt and no seed" in {
     val parameters = HuggingClientPayload("a red fox", ImageGenerationOptions()).parameters
 
     parameters shouldBe Parameters(
       guidance_scale = 7.5,
-      inferenceSteps = 20,
+      num_inference_steps = 20,
       negative_prompt = None,
+      width = Some(512),
+      height = Some(512),
       seed = None
     )
+  }
+
+  it should "send no width or height for ImageSize.Auto" in {
+    val parameters = HuggingClientPayload("p", ImageGenerationOptions(size = ImageSize.Auto)).parameters
+
+    parameters.width shouldBe None
+    parameters.height shouldBe None
   }
 
   it should "carry a negative prompt with quotes and non-ASCII text through unchanged" in {
