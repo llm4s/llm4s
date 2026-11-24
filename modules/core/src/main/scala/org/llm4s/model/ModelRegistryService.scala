@@ -13,10 +13,20 @@ import scala.io.Source
 import scala.util.{ Try, Using }
 
 /**
- * Read-only service interface for model registry operations.
+ * What llm4s knows about each model: its context window, output limit, prices and capabilities
+ * ([[ModelMetadata]]), looked up by provider and model name.
  *
- * Implementations are immutable snapshots of model metadata that can be passed
- * through the application without relying on global process state.
+ * Provider clients read it to size a conversation to the model's context window and to price a call, so
+ * [[org.llm4s.llmconnect.LLMConnect.getClient LLMConnect.getClient]] takes one as a `using` parameter; code
+ * can also query it directly, for example to find the models that support a capability.
+ *
+ * Obtain one once, at the application's edge, and pass it on as a `given`:
+ * `Llm4sConfig.modelRegistryService()` reads the `llm4s.modelRegistry` block of the application's
+ * configuration (so an application can point it at its own catalogue), and [[ModelRegistryService.default]]
+ * loads the catalogue bundled with llm4s without reading any configuration.
+ *
+ * Each instance is an immutable snapshot, so it can be shared freely and never depends on global process
+ * state.
  */
 @Stable
 trait ModelRegistryService:
