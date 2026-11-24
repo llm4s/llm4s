@@ -20,7 +20,7 @@ import org.llm4s.types.Result
  *
  * @param projectId          GCP project ID that owns the Vertex AI resources.
  * @param location           GCP region, e.g. `"us-central1"`.
- * @param model              Model identifier, e.g. `"gemini-2.0-flash"`.
+ * @param model              Model identifier, e.g. `"gemini-3.8-flash"`.
  * @param credentialFilePath Optional path to a Google JSON credential file.
  *                           Falls back to `GOOGLE_APPLICATION_CREDENTIALS` env,
  *                           then gcloud's `application_default_credentials.json`
@@ -143,7 +143,7 @@ object VertexAIConfig:
    * Constructs a [[VertexAIConfig]], resolving `contextWindow` and
    * `reserveCompletion` from the model registry if available.
    *
-   * @param modelName          Model identifier, e.g. `"gemini-2.0-flash"`.
+   * @param modelName          Model identifier, e.g. `"gemini-3.8-flash"`.
    * @param projectId          GCP project ID.
    * @param location           GCP region (defaults to `"us-central1"`).
    * @param credentialFilePath Optional path to a Google JSON credential file.

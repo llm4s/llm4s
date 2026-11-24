@@ -294,14 +294,14 @@ class ClientBuildersSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "take an OpenAI-compatible model's window from the catalogue for the base URL's host, as config does" in {
-    val groq  = ClientSettings.EMPTY.baseUrl("https://api.groq.com/openai/v1").model("llama-3.3-70b-versatile")
+    val groq  = ClientSettings.EMPTY.baseUrl("https://api.groq.com/openai/v1").model("openai/gpt-oss-120b")
     val built = fromBuilder(ClientBuilds.openAiCompatibleConfig(groq.apiKey("k")))
     built shouldBe fromConfig(
-      """p { provider = openai-compatible, model = "llama-3.3-70b-versatile", baseUrl = "https://api.groq.com/openai/v1",
+      """p { provider = openai-compatible, model = "openai/gpt-oss-120b", baseUrl = "https://api.groq.com/openai/v1",
         |apiKey = k }""".stripMargin,
       "p"
     )
-    (built.contextWindow, built.reserveCompletion) shouldBe ((128000, 2048))
+    (built.contextWindow, built.reserveCompletion) shouldBe ((131072, 2048))
   }
 
   it should "report every call to the MetricsCollector it was given" in {

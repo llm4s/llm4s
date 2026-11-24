@@ -935,8 +935,8 @@ the first of these that has an answer:
 internal-gateway {
   provider = "openai-compatible"
   baseUrl = "https://llm-gateway.internal.example/v1"   # not a known host, so name the registry provider
-  model = "llama-3.1-8b-instant"
-  registryProvider = "groq"                             # the window comes from groq/llama-3.1-8b-instant
+  model = "openai/gpt-oss-120b"
+  registryProvider = "groq"                             # the window comes from groq/openai/gpt-oss-120b
 }
 ```
 
@@ -947,8 +947,8 @@ internal-gateway {
   does not list under that provider gets the default, never a neighbour's window.
 - **The host is matched exactly, never by substring.** `https://api.groq.com.evil.example/v1`,
   `https://api.groq.com@evil.example/v1` and `https://evil.example/api.groq.com` all get no registry window.
-  NVIDIA NIM is not in the table because the registry's three `nvidia_nim` entries carry no chat model with a
-  window; `registryProvider = "nvidia_nim"` is still accepted.
+  NVIDIA NIM is not in the table because the registry's `nvidia_nim` entries carry no window;
+  `registryProvider = "nvidia_nim"` is still accepted.
 - **The registry can only enlarge the window.** A registry window below 8192 is ignored and the default used:
   many entries, most of Fireworks' and Perplexity's older ones among them, carry a 4096 placeholder for input,
   output and total alike (`fireworks_ai/.../minimax-m1-80k` is one), which would cut an 80k-context model's prompt
@@ -956,10 +956,9 @@ internal-gateway {
   `contextWindow`. The skipped entry is logged like a miss.
 - **Only the window is taken.** `reserveCompletion` keeps its own rule, a quarter of the window up to 2048,
   because a registry entry's output limit can be as large as the whole window.
-- **The registry does not know every model.** It has no input limit for the Together recipe's model, and does
-  not list xAI's `grok-4.7` or the NVIDIA NIM model at all, so those recipes keep their `contextWindow`. A miss
-  under an explicit `registryProvider` is logged as a warning, and under an inferred one at info; a hit is
-  logged at info with the entry it used.
+- **The registry does not know every model.** It does not list the NVIDIA NIM recipe's model, so that recipe
+  keeps its `contextWindow`. A miss under an explicit `registryProvider` is logged as a warning, and under an
+  inferred one at info; a hit is logged at info with the entry it used.
 
 
 ### Selecting it, and environment variables
@@ -1124,12 +1123,11 @@ together-main {
   baseUrl = "https://api.together.ai/v1"
   model = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
   apiKey = ${?TOGETHER_API_KEY}
-  contextWindow = 131072
 }
 ```
 
-- Keep `contextWindow`: the registry lists this model with no input limit, so without it the provider would
-  use 8192. (For a Together model the registry does give a limit for, it is taken automatically.)
+- The context window, 131072 for this model, comes from the model registry. Set `contextWindow` for a model the
+  registry lists with no input limit (some Together entries have none), or the provider uses 8192.
 - Model ids are the `<organisation>/<model>` API strings from Together's serverless model list.
 - For a reasoning model on Together, the same reasoning limits apply as for Groq above.
 
@@ -1165,12 +1163,11 @@ xai-generic {
   baseUrl = "https://api.x.ai/v1"
   model = "grok-4.7"
   apiKey = ${?XAI_API_KEY}
-  contextWindow = 500000
 }
 ```
 
-- Keep `contextWindow`: the model registry does not list `grok-4.7`, so without it the provider would use
-  8192. (For an xAI model the registry does list, such as `grok-2`, it is taken automatically.)
+- The context window, 500000 for `grok-4.7`, comes from the model registry. Set `contextWindow` for a Grok
+  model the registry does not list yet, or the provider uses 8192.
 - On this path Grok's reasoning output is not read and the effort cannot be set, and xAI rejects
   `presencePenalty` and `frequencyPenalty` on reasoning models: leave them at 0.
 
