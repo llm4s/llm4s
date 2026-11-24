@@ -48,7 +48,7 @@ class RAGQueryTransformerSpec extends AnyFlatSpec with Matchers with EitherValue
     val rag = RAG
       .buildWithClient(
         config.inMemory.vectorOnly.withEmbeddingDimensions(3),
-        new EmbeddingClient(provider)
+        EmbeddingClient(provider)
       )
       .value
     Using.resource(rag)(r => f(r, provider))

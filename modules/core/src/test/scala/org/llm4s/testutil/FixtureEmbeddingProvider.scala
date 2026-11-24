@@ -3,7 +3,12 @@ package org.llm4s.testutil
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor, Llm4sProviderModule }
+import org.llm4s.llmconnect.spi.{
+  EmbeddingBuildContext,
+  EmbeddingConfigSpec,
+  EmbeddingProviderDescriptor,
+  Llm4sProviderModule
+}
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -56,7 +61,7 @@ object FixtureEmbeddingProvider extends EmbeddingProviderDescriptor:
     "fixture-embed-large" -> 1024
   )
 
-  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+  def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
     Right(
       new EmbeddingProvider:
         def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =

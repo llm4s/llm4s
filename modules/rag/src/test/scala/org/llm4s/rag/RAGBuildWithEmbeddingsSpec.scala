@@ -36,7 +36,7 @@ class RAGBuildWithEmbeddingsSpec extends AnyFlatSpec with Matchers {
     // a provider no registry knows: building through `RAG.build` would fail with "not registered"
     val config = RAGConfig.default.copy(embeddingProvider = ProviderId("no-such-provider"))
     val rag = RAG
-      .buildWithEmbeddings(config, new EmbeddingClient(provider), model)
+      .buildWithEmbeddings(config, EmbeddingClient(provider), model)
       .fold(e => fail(s"could not build the RAG: ${e.formatted}"), identity)
     try {
       rag.ingestText("Scala runs on the JVM.", "doc-1") shouldBe Right(1)
@@ -47,6 +47,6 @@ class RAGBuildWithEmbeddingsSpec extends AnyFlatSpec with Matchers {
 
   it should "fail as RAG.build does when a setting cannot be built" in {
     val config = RAGConfig.default.withLLMReranking
-    RAG.buildWithEmbeddings(config, new EmbeddingClient(new RecordingProvider), model).isLeft shouldBe true
+    RAG.buildWithEmbeddings(config, EmbeddingClient(new RecordingProvider), model).isLeft shouldBe true
   }
 }

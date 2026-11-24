@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
 class TokenCountingBenchmark(
   private val counterFactory: () => Result[ConversationTokenCounter]
 ) {
-  def this() = this(() => ConversationTokenCounter.openAI())
+  def this() = this(() => ConversationTokenCounter.cl100k())
 
   private var counter: ConversationTokenCounter = _
   private var small: Conversation               = _

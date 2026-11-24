@@ -4,8 +4,14 @@ import org.llm4s.config.BedrockConfigKeys.*
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ BedrockConfig, BedrockCredentials, ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigKey,
+  ProviderConfigSpec,
+  ProviderDescriptor
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -56,12 +62,11 @@ object BedrockProvider extends ProviderDescriptor:
     )
   )
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    given ContextWindowResolver = context.contextWindows
     for
-      region      <- ProviderDescriptor.requireExtra(providerName, section, REGION_KEY)
-      credentials <- credentialsOf(providerName, section)
+      region      <- ProviderDescriptor.requireExtra(context.providerName, section, REGION_KEY)
+      credentials <- credentialsOf(context.providerName, section)
       config <- BedrockConfig.fromValues(
         modelName = section.model.asString,
         region = region,
@@ -90,9 +95,8 @@ object BedrockProvider extends ProviderDescriptor:
           )
         )
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[BedrockConfig](id, config)
-      .flatMap(BedrockClient(_, options.metrics, options.exchangeLogging))
+      .flatMap(BedrockClient(_, context.metrics, context.exchangeLogging))

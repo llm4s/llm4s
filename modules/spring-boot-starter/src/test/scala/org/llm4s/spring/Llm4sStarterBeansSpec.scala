@@ -34,7 +34,7 @@ object Llm4sStarterBeansSpec {
           Right(EmbeddingResponse(embeddings = request.input.map(_ => Vector(1.0, 0.0))))
       }
       val registry = Llm4sConfig.modelRegistryService().fold(e => throw new IllegalStateException(e.message), identity)
-      Llm4s.wrapEmbeddingClient(new EmbeddingClient(provider)(using registry), EmbeddingModelConfig("mine", 2))
+      Llm4s.wrapEmbeddingClient(EmbeddingClient(provider)(using registry), EmbeddingModelConfig("mine", 2))
     }
   }
 

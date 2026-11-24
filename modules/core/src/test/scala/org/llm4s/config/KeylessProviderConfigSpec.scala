@@ -2,16 +2,17 @@ package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName }
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
+import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.spi.{
   KeylessSetting,
+  ProviderBuildContext,
+  ProviderConfigContext,
   ProviderConfigKey,
   ProviderConfigSpec,
   ProviderDescriptor,
   ProviderRegistry
 }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -31,23 +32,20 @@ class KeylessProviderConfigSpec extends AnyWordSpec with Matchers with EitherVal
         .apiKeyAndDefaultBaseUrl(FixtureChatProvider.DefaultBaseUrl, Seq("KEYLESSFIXTURE_API_KEY"))
         .withExtras(Seq(ProviderConfigKey.optional("authentication", "how to authenticate", Some("key"))))
         .withKeylessWhen("authentication", "token")
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] =
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
       FixtureChatConfig.fromValues(section.model.asString, "unused", FixtureChatProvider.DefaultBaseUrl)
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
-      FixtureChatProvider.buildClient(config, options)
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+      FixtureChatProvider.build(config, context)
 
   /** Names a keyless key it does not declare: a descriptor bug. */
   private object UndeclaredKeyless extends ProviderDescriptor:
     val id: ProviderId = ProviderId("undeclaredkeyless")
     val configSpec: ProviderConfigSpec =
       ProviderConfigSpec(requiresApiKey = true, keylessWhen = Some(KeylessSetting("authentication", "token")))
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] = KeylessProvider.buildConfig(providerName, section)
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
-      FixtureChatProvider.buildClient(config, options)
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+      KeylessProvider.buildConfig(section, context)
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+      FixtureChatProvider.build(config, context)
 
   private given ProviderRegistry = ProviderRegistry.of(KeylessProvider, UndeclaredKeyless, FixtureChatProvider)
 

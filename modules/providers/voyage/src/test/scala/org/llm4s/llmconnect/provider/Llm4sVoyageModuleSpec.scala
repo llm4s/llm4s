@@ -26,7 +26,7 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     }
 
     "contribute no chat provider, so voyage is not a chat id" in {
-      new Llm4sVoyageModule().chatProviders shouldBe empty
+      new Llm4sVoyageModule().providers shouldBe empty
       ProviderRegistry.default.find(ProviderId("voyage")) shouldBe None
     }
   }
@@ -63,6 +63,13 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
         val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "voyage-3", apiKey = Secret("test-key"))
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(VoyageAIEmbeddingProvider, config))
       }
+    }
+
+    "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
+      assertEmbeddingUsesSuppliedHttpClient(
+        VoyageAIEmbeddingProvider,
+        EmbeddingProviderConfig(baseUrl = "http://localhost:1", model = "test-model", apiKey = Secret("test-key"))
+      )
     }
 
     "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {

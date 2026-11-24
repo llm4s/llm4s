@@ -13,7 +13,7 @@ import org.llm4s.llmconnect.spi.{
   ProviderRegistryReport
 }
 import org.llm4s.llmconnect.streaming.SSEParser.SSEEvent
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -46,15 +46,34 @@ class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
     section.baseUrl shouldBe None
     section.model shouldBe None
     section.timeouts shouldBe ProviderTimeouts.default
+    section.extras shouldBe Map.empty
 
     val timeouts = ProviderTimeouts(request = Some(3.seconds))
-    val set      = section.withApiKey(Secret("k")).withBaseUrl("http://b").withModel("m").withTimeouts(timeouts)
-    set shouldBe EmbeddingProviderSection(Some(Secret("k")), Some("http://b"), Some("m"), timeouts)
+    val set = section
+      .withApiKey(Secret("k"))
+      .withBaseUrl(BaseUrl("http://b"))
+      .withModel(ModelName("m"))
+      .withTimeouts(timeouts)
+    set shouldBe EmbeddingProviderSection(Some(Secret("k")), Some(BaseUrl("http://b")), Some(ModelName("m")), timeouts)
 
     val cleared = set.withApiKey(None).withBaseUrl(None).withModel(None)
     cleared shouldBe EmbeddingProviderSection(timeouts = timeouts)
-    set.withApiKey(Some(Secret("k2"))).withBaseUrl(Some("http://c")).withModel(Some("m2")) shouldBe
-      EmbeddingProviderSection(Some(Secret("k2")), Some("http://c"), Some("m2"), timeouts)
+    set
+      .withApiKey(Some(Secret("k2")))
+      .withBaseUrl(Some(BaseUrl("http://c")))
+      .withModel(Some(ModelName("m2"))) shouldBe
+      EmbeddingProviderSection(Some(Secret("k2")), Some(BaseUrl("http://c")), Some(ModelName("m2")), timeouts)
+  }
+
+  it should "hold the provider's declared extras, and keep their values out of toString (#2811)" in {
+    val section = EmbeddingProviderSection().withExtras(Map("region" -> "eu-west-secret-1"))
+    section.extra("region") shouldBe Some("eu-west-secret-1")
+    section.extra("absent") shouldBe None
+    section shouldBe EmbeddingProviderSection(extras = Map("region" -> "eu-west-secret-1"))
+    section.toString should include("region -> ***")
+    (section.toString should not).include("eu-west-secret-1")
+    EmbeddingProviderSection(baseUrl = Some(BaseUrl("https://user:pw@host.example/v1?token=abc"))).toString should
+      (not.include("pw@").and(not).include("abc"))
   }
 
   "ProviderConfigKey" should "default to optional with no default or env" in {

@@ -26,7 +26,7 @@ object ContextTestFixtures {
    * Uses a test-only factory instead of reflection.
    */
   def createSimpleCounter(): ConversationTokenCounter =
-    ConversationTokenCounter.forTest(simpleTokenizer)
+    ConversationTokenCounter.of(simpleTokenizer)
 
   // ============ Sample Messages ============
 

@@ -2,7 +2,7 @@ package org.llm4s.error
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
-import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, EmbeddingError, StreamedChunk }
+import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
 import org.llm4s.testutil.MockLLMClients.{ FailingMock, SimpleMock }

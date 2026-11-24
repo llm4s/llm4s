@@ -176,12 +176,12 @@ Nothing is thrown: `embed` and `EmbeddingClient.from` return a `Result`, so a fa
 `LLMError` (see [Error Handling](error-handling)). A failure the provider reports, such as a rejected key or a
 refused request, is an `EmbeddingError`, with an optional `code` (typically the HTTP status), a `message` and
 the `provider` that produced it. A configuration problem, such as an unset `EMBEDDING_MODEL` or a provider whose
-module is missing, is a `ConfigurationError` from `Llm4sConfig.embeddings()` instead (and an unregistered
-provider id given to `EmbeddingClient.from` is reported as an `EmbeddingError` whose provider is `config`).
+module is missing, is a `ConfigurationError` from `Llm4sConfig.embeddings()` instead, as is an unregistered
+provider id given to `EmbeddingClient.from`.
 
 ```scala
 import org.llm4s.error.LLMError
-import org.llm4s.llmconnect.model.EmbeddingError
+import org.llm4s.error.EmbeddingError
 
 def explain(error: LLMError): String =
   error match {

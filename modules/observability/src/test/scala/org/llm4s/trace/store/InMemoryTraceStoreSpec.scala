@@ -1,7 +1,7 @@
 package org.llm4s.trace.store
 
 import org.llm4s.trace.model.{ Span, SpanId, SpanKind, SpanStatus, Trace }
-import org.llm4s.types.TraceId
+import org.llm4s.trace.model.TraceId
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers

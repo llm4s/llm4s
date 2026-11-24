@@ -10,6 +10,7 @@ import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.rag.loader._
 import org.llm4s.rag.permissions._
@@ -363,7 +364,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
     config: RAGConfig = RAGConfig.default
   ): Result[RAG] = {
     val effectiveConfig = if (withLLM) config.copy(llmClient = Some(mockLLMClient)) else config
-    val embeddingClient = new EmbeddingClient(mockEmbeddingProvider)
+    val embeddingClient = EmbeddingClient(mockEmbeddingProvider)
 
     // Use the package-private buildWithClient to inject our mock
     RAG.buildWithClient(effectiveConfig, embeddingClient)
@@ -623,7 +624,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
 
   "RAG.embedBatch" should "return EmbeddingError when provider returns empty embeddings list" in {
     val emptyProvider   = new EmptyEmbeddingProvider()
-    val embeddingClient = new EmbeddingClient(emptyProvider)
+    val embeddingClient = EmbeddingClient(emptyProvider)
 
     val config = RAGConfig.default
     val rag    = RAG.buildWithClient(config, embeddingClient).toOption.get
@@ -646,7 +647,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
 
   it should "return EmbeddingError when embeddings count doesn't match batch size" in {
     val mismatchedProvider = new MismatchedEmbeddingProvider(returnCount = 1)
-    val embeddingClient    = new EmbeddingClient(mismatchedProvider)
+    val embeddingClient    = EmbeddingClient(mismatchedProvider)
 
     val config = RAGConfig.default
     val rag    = RAG.buildWithClient(config, embeddingClient).toOption.get
@@ -981,7 +982,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
   // ==========================================================================
 
   "RAG.query" should "return EmbeddingError when the embedding provider returns an empty list" in {
-    val emptyEmbeddingClient = new EmbeddingClient(new EmptyEmbeddingProvider)
+    val emptyEmbeddingClient = EmbeddingClient(new EmptyEmbeddingProvider)
     val result = RAG
       .buildWithClient(RAGConfig.default, emptyEmbeddingClient)
       .flatMap(_.query("what is Scala?"))

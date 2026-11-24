@@ -5,6 +5,7 @@ import org.llm4s.config.SharedCredentials
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, IdentitySource }
 import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.security.Secret
 import org.llm4s.testutil.FixtureChatConfig
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
@@ -106,7 +107,7 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
   // ---------------------------------------------------------------------------------------------
 
   private def auth(extras: Map[String, String] = Map.empty): AuthConfig =
-    AuthConfig(IdentitySource.Literal("token"), extras = extras)
+    AuthConfig(IdentitySource.Literal(Secret("token")), extras = extras)
 
   "requireAuthExtra" should "return the declared auth key's value when it is present" in {
     val result =

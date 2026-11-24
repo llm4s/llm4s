@@ -8,23 +8,20 @@ import org.llm4s.annotation.Stable
  * Used by the embedding and extraction subsystems to select the appropriate
  * encoder or extractor for a given piece of content. Each modality maps to a
  * distinct processing pipeline (e.g. text embedding via an API provider,
- * image embedding via a local CLIP model).
+ * image embedding via a multimodal one).
  */
 @Stable
-sealed trait Modality
+enum Modality {
 
-/** Plain text content, the primary modality for LLM embedding providers. */
-@Stable
-case object Text extends Modality
+  /** Plain text content, the primary modality for LLM embedding providers. */
+  case Text
 
-/** Image content (e.g. PNG, JPEG), processed via local image encoders. */
-@Stable
-case object Image extends Modality
+  /** Image content (e.g. PNG, JPEG). */
+  case Image
 
-/** Audio content (e.g. WAV, MP3), processed via local audio encoders. */
-@Stable
-case object Audio extends Modality
+  /** Audio content (e.g. WAV, MP3). */
+  case Audio
 
-/** Video content (e.g. MP4), processed via local video encoders. */
-@Stable
-case object Video extends Modality
+  /** Video content (e.g. MP4). */
+  case Video
+}

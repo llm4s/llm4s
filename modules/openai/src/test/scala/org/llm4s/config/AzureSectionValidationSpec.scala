@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.provider.AzureProvider
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.llmconnect.spi.ProviderConfigContext
 
 /**
  * Azure's requirements through the spec-driven section validator: an API key and a
@@ -106,7 +107,12 @@ class AzureSectionValidationSpec extends AnyFlatSpec with Matchers {
       apiKey = Some(ApiKey("k"))
     )
 
-    AzureProvider.buildConfig("in-code", section).left.toOption.getOrElse(fail("Expected Left")).message shouldBe
+    AzureProvider
+      .buildConfig(section, ProviderConfigContext.of("in-code"))
+      .left
+      .toOption
+      .getOrElse(fail("Expected Left"))
+      .message shouldBe
       "Configured provider 'in-code' is missing endpoint (llm4s.providers.in-code.endpoint)"
   }
 }

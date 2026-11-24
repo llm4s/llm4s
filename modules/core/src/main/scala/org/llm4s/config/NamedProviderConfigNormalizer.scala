@@ -4,6 +4,7 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, IdentitySource }
 import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 
@@ -62,7 +63,7 @@ private[config] object NamedProviderConfigNormalizer:
                 )
                 .map(absolute => Some(AuthConfig(IdentitySource.File(absolute), rest)))
             case (None, Some(token)) =>
-              Right(Some(AuthConfig(IdentitySource.Literal(token), rest)))
+              Right(Some(AuthConfig(IdentitySource.Literal(Secret(token)), rest)))
             case (None, None) =>
               Left(
                 ConfigurationError(

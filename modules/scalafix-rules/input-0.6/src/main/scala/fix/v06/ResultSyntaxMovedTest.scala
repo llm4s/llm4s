@@ -7,7 +7,9 @@ import org.llm4s.Result
 import org.llm4s.core.safety.{ NetworkSecurity, Safety }
 import org.llm4s.error.LLMError
 import org.llm4s.error.ThrowableOps._
-import org.llm4s.types.{ OptionOps, Result, TryOps }
+import org.llm4s.identity.TokenizerId
+import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingUsage }
+import org.llm4s.types.{ OptionOps, Result, TraceId, TryOps }
 
 import scala.util.Try
 
@@ -23,4 +25,11 @@ object ResultSyntaxMovedTest {
   def safe(raw: String): Result[Int] = Safety.safely(raw.toInt)
 
   def url(raw: String) = NetworkSecurity.validateUrl(raw)
+
+  def vocabulary: TokenizerId = TokenizerId.CL100K_BASE
+
+  def refused(usage: EmbeddingUsage): EmbeddingError =
+    EmbeddingError(Some("401"), s"refused after ${usage.totalTokens} tokens", "openai")
+
+  def trace(raw: String): TraceId = TraceId(raw)
 }

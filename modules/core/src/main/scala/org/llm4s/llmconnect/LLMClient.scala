@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.error.{ ValidationError, ValidationUnsupportedError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ObjectSchema
-import org.llm4s.types.{ HeadroomPercent, Result, TokenBudget }
+import org.llm4s.types.{ HeadroomPercent, Result }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.BoundedJson
 
@@ -150,7 +150,7 @@ trait LLMClient extends AutoCloseable {
    * @param headroom safety margin as percentage of prompt budget (default: HeadroomPercent.Standard ~10%)
    * @return maximum tokens available for prompt content
    */
-  def getContextBudget(headroom: HeadroomPercent = HeadroomPercent.Standard): TokenBudget = {
+  def getContextBudget(headroom: HeadroomPercent = HeadroomPercent.Standard): Int = {
     val promptBudget = getContextWindow() - getReserveCompletion()
     (promptBudget * (1.0 - headroom.asRatio)).toInt
   }

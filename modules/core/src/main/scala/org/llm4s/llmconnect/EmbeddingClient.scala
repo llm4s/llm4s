@@ -2,9 +2,9 @@ package org.llm4s.llmconnect
 
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
-import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse }
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.spi.{ EmbeddingBuildContext, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.trace.{ TraceAttributeNames, TraceEvent, Tracing }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -22,36 +22,27 @@ import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
  * It is an [[org.llm4s.llmconnect.provider.EmbeddingProvider]] itself, so a decorator over one (such as
  * [[org.llm4s.llmconnect.caching.CachedEmbeddingClient]]) takes either, and an `EmbeddingClient` can wrap a decorator.
  *
+ * Build one with [[EmbeddingClient.apply]] over a provider, or with [[EmbeddingClient.from]] from configuration,
+ * then set what tracing reports with `withTracing`, `withOperation` and `withProviderId`.
+ *
  * @param providerId the canonical id of the provider, which tracing reports; [[EmbeddingClient.from]] sets it
  */
 @Stable
-class EmbeddingClient(
+final class EmbeddingClient private (
   provider: EmbeddingProvider,
-  tracer: Option[Tracing] = None,
-  operation: String = "embedding",
-  val providerId: Option[ProviderId] = None
+  tracer: Option[Tracing],
+  operation: String,
+  val providerId: Option[ProviderId]
 )(using service: ModelRegistryService)
     extends EmbeddingProvider {
   private val logger = LoggerFactory.getLogger(getClass)
 
-  /** Text embeddings via the configured HTTP provider. */
+  /** Embeds the request's texts through the wrapped provider, tracing the call when a tracer is set. */
   override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
     logger.debug(s"[EmbeddingClient] Embedding with model=${request.model.name}, inputs=${request.input.size}")
     val startedAt = System.nanoTime()
     val result    = provider.embed(request)
     traced(result, request.model.name, request.input.size, startedAt)
-  }
-
-  /** Multimodal embeddings via the configured HTTP provider. */
-  override def embedMultimodal(
-    request: org.llm4s.llmconnect.model.MultimediaEmbeddingRequest
-  ): Result[EmbeddingResponse] = {
-    logger.debug(
-      s"[EmbeddingClient] Multimodal embedding with model=${request.model.name}, modality=${request.modality}"
-    )
-    val startedAt = System.nanoTime()
-    val result    = provider.embedMultimodal(request)
-    traced(result, request.model.name, request.inputs.size, startedAt)
   }
 
   // Emits the call's trace events when tracing is enabled: its usage and cost, or its failure
@@ -112,11 +103,21 @@ class EmbeddingClient(
     new EmbeddingClient(provider, Some(tracer), operation, providerId)
 
   /** Create a new client with a specific operation label for tracing. */
-  def withOperation(op: String): EmbeddingClient =
-    new EmbeddingClient(provider, tracer, op, providerId)
+  def withOperation(operation: String): EmbeddingClient =
+    new EmbeddingClient(provider, tracer, operation, providerId)
+
+  /** Create a new client whose traced calls name `providerId` as their provider. */
+  def withProviderId(providerId: ProviderId): EmbeddingClient =
+    new EmbeddingClient(provider, tracer, operation, Some(providerId))
 }
 
 object EmbeddingClient {
+
+  /**
+   * A client over `provider`, with no tracing, the operation label `embedding` and no provider id.
+   */
+  def apply(provider: EmbeddingProvider)(using ModelRegistryService): EmbeddingClient =
+    new EmbeddingClient(provider, tracer = None, operation = "embedding", providerId = None)
 
   /**
    * Typed factory: build client from resolved provider name and typed provider config.
@@ -136,8 +137,16 @@ object EmbeddingClient {
    * @param provider the provider name as configured, e.g. the `openai` in
    *                 `EMBEDDING_MODEL=openai/text-embedding-3-small`. Aliases are folded
    *                 onto the canonical id.
+   * @param options  construction options: `EmbeddingClientOptions().withHttpClient(client)` sends the
+   *                 provider's requests through the caller's own HTTP client, which the caller closes.
+   * @return the client; a `ConfigurationError` from the registry when no embedding provider has that name
+   *         (it lists the registered ones), or the provider's own error when it cannot be built from `cfg`
    */
-  def from(provider: String, cfg: EmbeddingProviderConfig)(using
+  def from(
+    provider: String,
+    cfg: EmbeddingProviderConfig,
+    options: EmbeddingClientOptions = EmbeddingClientOptions.default
+  )(using
     ModelRegistryService,
     ProviderRegistry
   ): Result[EmbeddingClient] = {
@@ -145,14 +154,8 @@ object EmbeddingClient {
     val id       = registry.canonicalEmbeddingId(provider)
     registry
       .resolveEmbedding(id, Some("llm4s.embeddings.model"))
-      .left
-      .map(error =>
-        // The registry reports a ConfigurationError; embedding callers have always been
-        // handed an EmbeddingError here, and the message carries the registry's diagnostics.
-        EmbeddingError(code = Some("400"), message = error.message, provider = "config")
-      )
-      .flatMap(_.build(cfg))
-      .map(new EmbeddingClient(_, providerId = Some(id)))
+      .flatMap(_.build(cfg, EmbeddingBuildContext(options)))
+      .map(EmbeddingClient(_).withProviderId(id))
   }
 
 }

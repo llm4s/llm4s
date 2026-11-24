@@ -417,13 +417,15 @@ val config = adaptiveFor(registry, providerConfig.model).map { strategy =>
 ```scala
 import org.llm4s.context.ConversationTokenCounter
 import org.llm4s.llmconnect.model.Conversation
+import org.llm4s.llmconnect.provider.OpenAITokenizers
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 
-// the input cost of sending `conversation` once, at the registry's price for the model
+// the input cost of sending `conversation` once, at the registry's price for the model:
+// exact for an OpenAI model (llm4s-openai), the cl100k_base approximation for any other
 def inputCost(registry: ModelRegistryService, model: String, conversation: Conversation): Result[Option[Double]] =
   for {
-    counter  <- ConversationTokenCounter.forModel(model)
+    counter  <- OpenAITokenizers.counterFor(model).orElse(ConversationTokenCounter.cl100k())
     metadata <- registry.lookup(model)
   } yield {
     val tokens = counter.countConversation(conversation)
@@ -484,10 +486,11 @@ def inputCost(registry: ModelRegistryService, model: String, conversation: Conve
    ```
 
 3. **Treat the default count as exact for every model** - The default counter is `cl100k_base`, an approximation
-   for non-OpenAI models; pass your model's counter for an exact one
+   for non-OpenAI models; pass your model's counter for an exact one (`OpenAITokenizers.counterFor` in
+   `llm4s-openai`, or `ConversationTokenCounter.of` over your own `StringTokenizer`)
    ```scala
    val middleware: Result[ContextWindowMiddleware] =
-     ConversationTokenCounter.forModel("gpt-4o").map(counter => new ContextWindowMiddleware(config, counter.countMessage))
+     OpenAITokenizers.counterFor("gpt-4o").map(counter => new ContextWindowMiddleware(config, counter.countMessage))
    ```
 
 4. **Hard-code window sizes** - Derive them from the model's metadata instead

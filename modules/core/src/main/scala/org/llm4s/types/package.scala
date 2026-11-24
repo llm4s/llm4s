@@ -14,93 +14,109 @@ package object types {
   /** Async result type for Future-based operations */
   type AsyncResult[+A] = Future[Result[A]]
 
-  /**
-   * Type-safe wrapper for trace IDs for distributed tracing
-   */
-  final case class TraceId(value: String) extends AnyVal {
-    override def toString: String = value
+  // Context management newtypes. Like the identifiers in `ProviderModelTypes`, each is an opaque type:
+  // no wrapper at runtime, built through its companion and read through an `as...` accessor.
+
+  /** Identifies a semantic block of a conversation. */
+  opaque type SemanticBlockId = String
+
+  /** Companion for the [[SemanticBlockId]] opaque type. */
+  object SemanticBlockId {
+
+    /** Wraps a raw string as a [[SemanticBlockId]]. */
+    def apply(value: String): SemanticBlockId = value
+
+    /** A new random id. */
+    def generate(): SemanticBlockId = java.util.UUID.randomUUID().toString.take(8)
+
+    /** Unwraps a [[SemanticBlockId]] to its underlying string. */
+    extension (id: SemanticBlockId) def asString: String = id
   }
 
-  // Context Management Types (for conversation context handling)
-  final case class SemanticBlockId(value: String) extends AnyVal {
-    override def toString: String = value
-  }
+  /** The key of an entry in an artifact store. */
+  opaque type ArtifactKey = String
 
-  /** Type alias for externalization threshold in bytes */
-  type ExternalizationThreshold = Long
-
-  /** Type-safe wrapper for artifact store keys */
-  final case class ArtifactKey(value: String) extends AnyVal {
-    override def toString: String = value
-  }
-
+  /** Companion for the [[ArtifactKey]] opaque type. */
   object ArtifactKey {
-    def generate(): ArtifactKey =
-      ArtifactKey(java.util.UUID.randomUUID().toString)
 
+    /** Wraps a raw string as an [[ArtifactKey]]. */
+    def apply(value: String): ArtifactKey = value
+
+    /** A new random key. */
+    def generate(): ArtifactKey = java.util.UUID.randomUUID().toString
+
+    /** The key of `content`: `content_` followed by its SHA-256, so equal content has an equal key. */
     def fromContent(content: String): ArtifactKey = {
       val hash =
         org.llm4s.util.Hex.of(java.security.MessageDigest.getInstance("SHA-256").digest(content.getBytes("UTF-8")))
-      ArtifactKey(s"content_$hash")
+      s"content_$hash"
+    }
+
+    /** Unwraps an [[ArtifactKey]] to its underlying string. */
+    extension (key: ArtifactKey) def asString: String = key
+  }
+
+  /** A content size in bytes. */
+  opaque type ContentSize = Long
+
+  /** Companion for the [[ContentSize]] opaque type. */
+  object ContentSize {
+
+    /** Wraps a byte count as a [[ContentSize]]. */
+    def apply(bytes: Long): ContentSize = bytes
+
+    /** The size of `content` encoded as UTF-8. */
+    def fromString(content: String): ContentSize = content.getBytes("UTF-8").length.toLong
+
+    /** The size of a byte array. */
+    def fromBytes(bytes: Array[Byte]): ContentSize = bytes.length.toLong
+
+    extension (size: ContentSize) {
+
+      /** The size in bytes. */
+      def asBytes: Long = size
+
+      /** The size in kibibytes. */
+      def toKB: Double = size / 1024.0
+
+      /** The size in mebibytes. */
+      def toMB: Double = size / (1024.0 * 1024.0)
+
+      /** Whether the size is over `thresholdBytes`. */
+      def exceedsThreshold(thresholdBytes: Long): Boolean = size > thresholdBytes
     }
   }
 
-  /** Information about externalized content */
-  case class ExternalizedContent(
-    key: ArtifactKey,
-    originalSize: ByteCount,
-    contentType: String,
-    summary: String
-  )
+  /**
+   * The share of a token budget held back as a safety margin: a ratio in `[0.0, 1.0)`. Built only through
+   * [[HeadroomPercent.create]] or one of the presets, so every value is valid.
+   */
+  opaque type HeadroomPercent = Double
 
-  object SemanticBlockId {
-    def generate(): SemanticBlockId =
-      SemanticBlockId(java.util.UUID.randomUUID().toString.take(8))
-  }
-
-  /** Type alias for context window size in semantic blocks */
-  type ContextWindowSize = Int
-
-  /** Type-safe wrapper for content size in bytes with validation */
-  final case class ContentSize(bytes: Long) extends AnyVal {
-    override def toString: String                                      = s"${bytes}B"
-    def toKB: Double                                                   = bytes / 1024.0
-    def toMB: Double                                                   = bytes / (1024.0 * 1024.0)
-    def exceedsThreshold(threshold: ExternalizationThreshold): Boolean = bytes > threshold
-  }
-
-  object ContentSize {
-    def fromString(content: String): ContentSize =
-      ContentSize(content.getBytes("UTF-8").length.toLong)
-
-    def fromBytes(bytes: Array[Byte]): ContentSize =
-      ContentSize(bytes.length.toLong)
-  }
-
-  /** Type alias for byte count */
-  type ByteCount = Long
-
-  /** Type alias for token budget */
-  type TokenBudget = Int
-
-  /** Type-safe wrapper for headroom percentage with validation */
-  final case class HeadroomPercent(value: Double) extends AnyVal {
-    override def toString: String = f"${value * 100}%.1f%%"
-    def asRatio: Double           = value
-    def isValid: Boolean          = value >= 0.0 && value < 1.0
-  }
-
+  /** Companion for the [[HeadroomPercent]] opaque type. */
   object HeadroomPercent {
+
+    /** A headroom of `value` (a ratio: `0.1` is 10%), or a `ValidationError` when it is outside `[0.0, 1.0)`. */
     def create(value: Double): Result[HeadroomPercent] =
       value match {
-        case v if v >= 0.0 && v < 1.0 => Right(HeadroomPercent(v))
+        case v if v >= 0.0 && v < 1.0 => Right(v)
         case v => Left(error.ValidationError(s"Invalid headroom: $v. Must be between 0.0 and 1.0", "headroom"))
       }
 
-    val None: HeadroomPercent         = HeadroomPercent(0.0)
-    val Light: HeadroomPercent        = HeadroomPercent(0.05) // 5%
-    val Standard: HeadroomPercent     = HeadroomPercent(0.08) // 8%
-    val Conservative: HeadroomPercent = HeadroomPercent(0.15) // 15%
+    /** No headroom: the whole budget is usable. */
+    val Zero: HeadroomPercent = 0.0
+
+    /** 5% headroom. */
+    val Light: HeadroomPercent = 0.05
+
+    /** 8% headroom. */
+    val Standard: HeadroomPercent = 0.08
+
+    /** 15% headroom. */
+    val Conservative: HeadroomPercent = 0.15
+
+    /** The headroom as a ratio in `[0.0, 1.0)`. */
+    extension (headroom: HeadroomPercent) def asRatio: Double = headroom
   }
 
   /**

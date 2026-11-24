@@ -26,6 +26,7 @@ import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
+import org.llm4s.llmconnect.spi.ProviderBuildContext
 
 /**
  * `OpenAIClient` over the real `openai-java` transport, against a local HTTP server: the URL,
@@ -364,7 +365,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
     val reported = failOnce { (baseUrl, options) =>
       val config =
         AzureConfig.fromValues("my-deploy", Secret("azure-key"), baseUrl, AzureConfig.DEFAULT_API_VERSION).value
-      AzureProvider.buildClient(config, options).value
+      AzureProvider.build(config, ProviderBuildContext.of(options)).value
     }
     assertLabelled("azure", reported)
   }
@@ -372,7 +373,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
   it should "be requesty for a Requesty client built by its descriptor" in {
     val reported = failOnce { (baseUrl, options) =>
       val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", Secret("rq-key"), baseUrl).value
-      RequestyProvider.buildClient(config, options).value
+      RequestyProvider.build(config, ProviderBuildContext.of(options)).value
     }
     assertLabelled("requesty", reported)
   }
@@ -380,7 +381,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
   it should "stay openai for an OpenAI client" in {
     val reported = failOnce { (baseUrl, options) =>
       val config = OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl).value
-      OpenAIProvider.buildClient(config, options).value
+      OpenAIProvider.build(config, ProviderBuildContext.of(options)).value
     }
     assertLabelled("openai", reported)
   }

@@ -20,7 +20,7 @@ class HexSpec extends AnyFlatSpec with Matchers:
 
   "The digests it now writes" should "be the ones they always were" in {
     // pinned from SHA-256 computed outside the JVM
-    ArtifactKey.fromContent("hello").value shouldBe
+    ArtifactKey.fromContent("hello").asString shouldBe
       "content_2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
     CacheKeyGenerator.sha256("a", "é𝄞") shouldBe "58eb6fd911e009c412af9498af753b329c8a9e43a4dafc0fd298043e36153c15"
   }

@@ -15,25 +15,25 @@ class ModelSelectorSpec extends AnyFunSuite with Matchers {
   )
 
   test("selectModel returns error for Text modality") {
-    val result = ModelSelector.selectModel(Text, testLocalModels)
+    val result = ModelSelector.selectModel(Modality.Text, testLocalModels)
     result.isLeft shouldBe true
     result.left.toOption.get.formatted should include("Text model selection is configuration-driven")
   }
 
   test("selectModel returns config for Image modality") {
-    val result = ModelSelector.selectModel(Image, testLocalModels)
+    val result = ModelSelector.selectModel(Modality.Image, testLocalModels)
     result.isRight shouldBe true
     result.toOption.get.name shouldBe "openclip-vit-b32"
   }
 
   test("selectModel returns config for Audio modality") {
-    val result = ModelSelector.selectModel(Audio, testLocalModels)
+    val result = ModelSelector.selectModel(Modality.Audio, testLocalModels)
     result.isRight shouldBe true
     result.toOption.get.name shouldBe "wav2vec2-base"
   }
 
   test("selectModel returns config for Video modality") {
-    val result = ModelSelector.selectModel(Video, testLocalModels)
+    val result = ModelSelector.selectModel(Modality.Video, testLocalModels)
     result.isRight shouldBe true
     result.toOption.get.name shouldBe "timesformer-base"
   }

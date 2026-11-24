@@ -1,15 +1,21 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ AnthropicConfigKeys, AnthropicModelLister, ProviderModelLister }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, IdentitySource }
 import org.llm4s.llmconnect.config.{ AnthropicConfig, AnthropicWorkloadIdentity, ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigKey,
+  ProviderConfigSpec,
+  ProviderDescriptor
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -52,20 +58,20 @@ object AnthropicProvider extends ProviderDescriptor:
 
   override val modelLister: Option[ProviderModelLister] = Some(AnthropicModelLister)
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    given ContextWindowResolver = context.contextWindows
     for
-      workloadIdentity <- workloadIdentityOf(providerName, section)
+      workloadIdentity <- workloadIdentityOf(context.providerName, section)
       apiKey <-
-        if (workloadIdentity.isDefined) Right(Secret("")) else ProviderDescriptor.requireApiKey(providerName, section)
-      baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      search  <- AnthropicWebSearch.webSearch(providerName, section)
+        if (workloadIdentity.isDefined) Right(Secret(""))
+        else ProviderDescriptor.requireApiKey(context.providerName, section)
+      baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
+      search  <- AnthropicWebSearch.webSearch(context.providerName, section)
       // `fromValues` holds the rules (an https baseUrl with workload identity, ...); a refusal names the section key.
       config <- AnthropicConfig
         .fromValues(section.model.asString, apiKey, baseUrl, workloadIdentity)
         .left
-        .map(ProviderConfig.inSection(providerName, AuthSectionKeys))
+        .map(ProviderConfig.inSection(context.providerName, AuthSectionKeys))
     yield config.withWebSearch(search)
 
   private def workloadIdentityOf(
@@ -92,9 +98,8 @@ object AnthropicProvider extends ProviderDescriptor:
           AnthropicWorkloadIdentity(file, rule, org, auth.extra(ServiceAccountIdKey), auth.extra(WorkspaceIdKey))
         )
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[AnthropicConfig](id, config)
-      .flatMap(AnthropicClient(_, options.metrics, options.exchangeLogging))
+      .flatMap(AnthropicClient(_, context.metrics, context.exchangeLogging))

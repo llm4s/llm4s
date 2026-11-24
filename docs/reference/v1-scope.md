@@ -52,11 +52,10 @@ Every top-level package of the published modules, the module that ships it, and 
 | `model` | `llm4s-core` | Frozen at 1.0 |
 | `toolapi` — the tool API: `ToolFunction`, `ToolRegistry`, schemas, execution | `llm4s-core` | Frozen at 1.0 |
 | `toolapi/builtin`, `toolapi/tools` — the built-in tools (core utilities, filesystem, HTTP, shell, Brave/DuckDuckGo/Exa search) and `ToolsConfigLoader` — **carved** | `llm4s-agent-tools` | Beta |
-| `context` | `llm4s-core` | Frozen at 1.0 |
+| `context` — token counting: `ConversationTokenCounter`, `context.tokens` | `llm4s-core` | Frozen at 1.0 |
+| `context` — the compression pipeline: `ContextManager`, `TokenWindow`, the compressors, `SemanticBlocks`, `ArtifactStore` ([#2818](https://github.com/llm4s/llm4s/issues/2818)) | `llm4s-core` | Experimental |
 | `util` | `llm4s-core` | Frozen at 1.0 |
 | `syntax` | `llm4s-core` | Frozen at 1.0 |
-| `identity` | `llm4s-core` | Frozen at 1.0 |
-| `resource` | `llm4s-core` | Frozen at 1.0 |
 | `core` | `llm4s-core` | Frozen at 1.0 |
 | `http` | `llm4s-core` | Frozen at 1.0 |
 | `security` | `llm4s-core` | Frozen at 1.0 |
