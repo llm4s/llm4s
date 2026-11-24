@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.caching.guide.CachingGuideSnippets.OwnStorage.MapEmb
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.testutil.GuideMirror
 import org.llm4s.trace.TraceEvent
 import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
@@ -27,9 +28,19 @@ import scala.concurrent.duration._
  * with only the imports the guide shows for it; the assertions here pin what the surrounding prose claims. The stand-ins at the bottom replace the
  * real provider clients, which the guide's snippets receive as `baseClient` and `embeddingClient`.
  */
+@org.llm4s.tags.DocsSpec
 class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with OptionValues {
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+
+  "docs/guide/caching.md" should {
+    "show every block this spec runs, as written" in {
+      GuideMirror.missingFromPage(
+        "docs/guide/caching.md",
+        "modules/core/src/test/scala/org/llm4s/llmconnect/caching/guide/CachingGuideSnippets.scala"
+      ) shouldBe empty
+    }
+  }
 
   // ----------------------------------------------------------------------------------------------------
 

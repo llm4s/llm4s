@@ -1,5 +1,7 @@
 package org.llm4s.rag
 
+import org.llm4s.testutil.GuideMirror
+
 import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.utils.ChunkingUtils
@@ -20,12 +22,14 @@ import scala.util.Try
  * change the guide and this spec together. Each `snippet` method is the code of one block in the guide; the
  * assertions pin what the surrounding prose claims.
  */
+@org.llm4s.tags.DocsSpec
 class RagValidationGuideSpec extends AnyWordSpec with Matchers with EitherValues {
 
   // ---- Weighted score fusion: how the two channels are combined
 
   private def snippetWeakestHit(): Result[Seq[(String, Double)]] = {
     // Only the vector channel counts (vector weight 1.0), and the keyword channel finds nothing.
+    // guide-block
     val hits = for {
       store    <- VectorStoreFactory.inMemory()
       keywords <- KeywordIndex.inMemory()
@@ -38,6 +42,7 @@ class RagValidationGuideSpec extends AnyWordSpec with Matchers with EitherValues
         strategy = FusionStrategy.WeightedScore(vectorWeight = 1.0, keywordWeight = 0.0)
       )
     } yield found.map(hit => hit.id -> hit.score)
+    // end-guide-block
     hits
   }
 
@@ -116,7 +121,9 @@ class RagValidationGuideSpec extends AnyWordSpec with Matchers with EitherValues
     }
 
     "be reported as a Left(ValidationError) by ChunkingUtils.chunkTextValidated" in {
+      // guide-block
       val text = "one two three four five six seven eight nine ten"
+      // end-guide-block
       ChunkingUtils.chunkTextValidated(text, size = 20, overlap = 5).value should not be empty
 
       val badOverlap = ChunkingUtils.chunkTextValidated(text, size = 20, overlap = 20).left.value
@@ -125,6 +132,12 @@ class RagValidationGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
       val badSize = ChunkingUtils.chunkTextValidated(text, 0, 0).left.value
       badSize.asInstanceOf[ValidationError].field shouldBe "size"
+    }
+  }
+
+  "docs/guide/vector-store.md" should {
+    "show every block this spec runs, as written" in {
+      GuideMirror.missingFromPage("docs/guide/vector-store.md", "modules/rag/src/test/scala/org/llm4s/rag/RagValidationGuideSpec.scala") shouldBe empty
     }
   }
 }

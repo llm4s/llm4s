@@ -1,5 +1,7 @@
 package org.llm4s.agent.memory
 
+import org.llm4s.testutil.GuideMirror
+
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
@@ -23,12 +25,14 @@ import scala.util.Using
  * compiled but not run against one; the Postgres store lives in another module and its snippets
  * are not here.
  */
+@org.llm4s.tags.DocsSpec
 class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
 
   // ---- Quick Start
 
   private def quickStart(): Result[String] =
     for {
+      // guide-block
       // Record a user fact
       m1 <- SimpleMemoryManager.empty.recordUserFact(
         fact = "Prefers Scala over Java",
@@ -46,12 +50,14 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
 
       // Get relevant context for a query
       context <- m2.getRelevantContext("Tell me about Scala programming")
+      // end-guide-block
     } yield context
 
   // ---- Memory Manager
 
   private def managers(): (SimpleMemoryManager, SimpleMemoryManager) = {
     // In-memory store, default configuration
+    // guide-block
     val manager = SimpleMemoryManager.empty
 
     // A store and a configuration of your own
@@ -59,6 +65,7 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       store = InMemoryStore.empty,
       config = MemoryManagerConfig(defaultImportance = 0.7)
     )
+    // end-guide-block
     (manager, configured)
   }
 
@@ -79,9 +86,9 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
         importance = Some(0.8)
       )
       m3 <- m2.recordKnowledge(
-        content = "The latest LLM4S version is 0.5.0",
-        source = "release-notes",
-        metadata = Map("channel" -> "stable")
+        content = "Orders over 50 EUR ship free",
+        source = "shipping-policy",
+        metadata = Map("region" -> "eu")
       )
       m4 <- m3.recordTask(
         description = "Generate the quarterly report",
@@ -147,9 +154,11 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
   ): EmbeddingService =
     LLMEmbeddingService(embeddingClient, modelConfig)
 
+  // guide-block
   // A vector store in a SQLite file (VectorMemoryStore.inMemory(embeddingService) keeps it in memory)
-  private def vectorManager(embeddingService: EmbeddingService, path: String): Result[SimpleMemoryManager] =
+  def vectorManager(embeddingService: EmbeddingService, path: String): Result[SimpleMemoryManager] =
     VectorMemoryStore(path, embeddingService).map(store => SimpleMemoryManager.withStore(store))
+  // end-guide-block
 
   // ---- Memory with Agents
 
@@ -169,13 +178,16 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
         |$context""".stripMargin
 
       // Run your agent with that prompt (see the Agents guide) and keep what was said
+      // guide-block
       messages <- runAgent(systemPrompt)
       updated  <- manager.recordConversation(messages, conversationId)
+      // end-guide-block
     } yield updated
 
   // ---- Semantic Search
 
-  private def semanticSearch(embeddingService: EmbeddingService): Result[Seq[ScoredMemory]] =
+  // guide-block
+  def semanticSearch(embeddingService: EmbeddingService): Result[Seq[ScoredMemory]] =
     VectorMemoryStore.inMemory(embeddingService).flatMap { store =>
       Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
         for {
@@ -186,30 +198,38 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
         } yield results
       }
     }
+  // end-guide-block
   private def searchWithFilter(store: MemoryStore): Result[Seq[ScoredMemory]] = {
+    // guide-block
     val filter = MemoryFilter.ByType(MemoryType.Knowledge) &&
       MemoryFilter.MinImportance(0.7) &&
       MemoryFilter.ByMetadata("user_id", "user-123")
+    // end-guide-block
 
     store.search(query = "programming languages", topK = 5, filter = filter)
   }
 
   // ---- Memory Consolidation and Entity Extraction
 
-  private def consolidate(manager: MemoryManager): Result[MemoryManager] =
+  // guide-block
+  def consolidate(manager: MemoryManager): Result[MemoryManager] =
     manager.consolidateMemories(
       olderThan = Instant.now().minus(7, ChronoUnit.DAYS),
       minCount = 10
     )
+  // end-guide-block
 
-  private def llmManager(client: LLMClient): LLMMemoryManager =
+  // guide-block
+  def llmManager(client: LLMClient): LLMMemoryManager =
     LLMMemoryManager(
       config = MemoryManagerConfig.default,
       store = InMemoryStore.empty,
       client = client
     )
+  // end-guide-block
 
-  private def extractEntities(manager: MemoryManager): Result[String] =
+  // guide-block
+  def extractEntities(manager: MemoryManager): Result[String] =
     for {
       m1 <- manager.extractEntities(
         text = "Anthropic is an AI company that created Claude",
@@ -218,6 +238,7 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       // The extracted entities are ordinary entity memories
       info <- m1.getEntityContext(EntityId.fromName("Anthropic"))
     } yield info
+  // end-guide-block
 
   // ---- Memory Statistics
 
@@ -234,31 +255,38 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
   private def saveAndLoad(path: String): Result[String] =
     SQLiteMemoryStore(path)
       .flatMap { store =>
+        // guide-block
         Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
           SimpleMemoryManager.withStore(store).recordUserFact("Likes Scala", Some("user-1")).map(_ => ())
         }
+        // end-guide-block
       }
       .flatMap { _ =>
         SQLiteMemoryStore(path).flatMap { reopened =>
+          // guide-block
           Using.resource(new AutoCloseable { override def close(): Unit = reopened.close() }) { _ =>
             SimpleMemoryManager.withStore(reopened).getUserContext(Some("user-1"))
           }
+          // end-guide-block
         }
       }
 
-  private class PersistentMemory(dbPath: String) {
+  class PersistentMemory(dbPath: String) {
+    // guide-block
     def withManager[A](use: MemoryManager => Result[A]): Result[A] =
       SQLiteMemoryStore(dbPath).flatMap { store =>
         Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
           use(SimpleMemoryManager.withStore(store))
         }
       }
+    // end-guide-block
   }
 
   // ---- Best Practices
 
   private def importance(manager: MemoryManager): Result[MemoryManager] =
     for {
+      // guide-block
       // High importance - core user preferences
       m1 <- manager.recordUserFact("Primary programming language is Scala", importance = Some(0.9))
 
@@ -267,18 +295,23 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
 
       // Low importance - ephemeral information
       m3 <- m2.recordTask("Run the tests", "Passed", success = true, importance = Some(0.3))
+      // end-guide-block
     } yield m3
 
   private def tokenBudget(manager: MemoryManager, query: String): Result[String] =
     // About four characters per token: the context is cut to fit
+    // guide-block
     manager.getRelevantContext(query, maxTokens = 500)
+    // end-guide-block
 
   private def cleanUp(store: MemoryStore, thirtyDaysAgo: Instant): Result[MemoryStore] =
     // Delete old, low-importance memories (there is no "maximum importance" filter: use `Custom`)
+    // guide-block
     store.deleteMatching(
       MemoryFilter.Custom(_.importance.exists(_ <= 0.3)) &&
         MemoryFilter.ByTimeRange(before = Some(thirtyDaysAgo))
     )
+    // end-guide-block
 
   // ---- Test support
 
@@ -348,8 +381,10 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
     }
 
     "build the configuration of the Configuration Options block" in {
+      // guide-block
       val config  = MemoryManagerConfig(contextTokenBudget = 500, autoExtractEntities = true)
       val tighter = config.withContextTokenBudget(250)
+      // end-guide-block
       SimpleMemoryManager(config).contextTokenBudget shouldBe 500
       config.autoExtractEntities shouldBe true
       SimpleMemoryManager(tighter).contextTokenBudget shouldBe 250
@@ -394,8 +429,8 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       val knowledge = for {
         m <- recordEverything(SimpleMemoryManager.empty)
         k <- m.store.recall(MemoryFilter.ByType(MemoryType.Knowledge))
-      } yield k.map(memory => (memory.metadata.get("channel"), memory.importance))
-      knowledge.value shouldBe Seq((Some("stable"), None))
+      } yield k.map(memory => (memory.metadata.get("region"), memory.importance))
+      knowledge.value shouldBe Seq((Some("eu"), None))
     }
   }
 
@@ -675,6 +710,12 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
         left <- s3.recall(MemoryFilter.All)
       } yield (n, left.flatMap(_.importance))
       remaining.value shouldBe ((1L, Seq(0.9)))
+    }
+  }
+
+  "docs/guide/agents/memory.md" should {
+    "show every block this spec runs, as written" in {
+      GuideMirror.missingFromPage("docs/guide/agents/memory.md", "modules/memory/src/test/scala/org/llm4s/agent/memory/MemoryGuideSpec.scala") shouldBe empty
     }
   }
 }

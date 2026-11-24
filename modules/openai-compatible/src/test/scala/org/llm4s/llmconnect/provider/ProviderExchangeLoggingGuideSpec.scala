@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.testutil.GuideMirror
+
 import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{
@@ -36,6 +38,7 @@ import scala.jdk.CollectionConverters._
  * longer happens: change the guide and this spec together. The sink and file format claims that need no
  * client (naming, redaction, truncation, configuration) are in `ProviderExchangeLoggingGuideCoreSpec`.
  */
+@org.llm4s.tags.DocsSpec
 class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
@@ -56,6 +59,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
   // ---- "From configuration": the snippet compiles (it reads the application's own configuration,
   //      so it is not run here; the keys it reads are checked in the core spec)
 
+  // guide-block
   def fromConfiguration(): Result[LLMClient] =
     for {
       providerConfig <- Llm4sConfig.defaultProvider()
@@ -64,21 +68,28 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
       exchangeLogging <- Llm4sConfig.exchangeLogging()
       client          <- LLMConnect.getClient(providerConfig, LlmClientOptions(exchangeLogging = exchangeLogging))
     } yield client
+  // end-guide-block
 
   // ---- "From code": a JSONL file for this run
 
+  // guide-block
   def jsonlLogging(dir: Path): Result[ProviderExchangeLogging] =
     ProviderExchangeSink.createRunScopedJsonl(dir).map(ProviderExchangeLogging.Enabled(_))
+  // end-guide-block
 
   // ---- "Writing your own sink"
 
+  // guide-block
   final class MetadataOnlySink(out: String => Unit) extends ProviderExchangeSink:
     def record(exchange: ProviderExchange): Unit =
       out(s"${exchange.provider} ${exchange.model.getOrElse("-")} ${exchange.outcome} ${exchange.duration.toMillis}ms")
+  // end-guide-block
 
+  // guide-block
   final class ErrorsOnlySink(delegate: ProviderExchangeSink) extends ProviderExchangeSink:
     def record(exchange: ProviderExchange): Unit =
       if exchange.outcome == ProviderExchangeOutcome.Error then delegate.record(exchange)
+  // end-guide-block
 
   // ---- helpers
 
@@ -347,5 +358,9 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
         (sink.path.getFileName.toString should fullyMatch).regex("provider-exchanges-.*\\.jsonl")
       case other => fail(s"expected an enabled JSONL setting, got $other")
     }
+  }
+
+  "docs/guide/observability/provider-exchange-logging.md" should "show every block this spec runs, as written" in {
+    GuideMirror.missingFromPage("docs/guide/observability/provider-exchange-logging.md", "modules/openai-compatible/src/test/scala/org/llm4s/llmconnect/provider/ProviderExchangeLoggingGuideSpec.scala") shouldBe empty
   }
 }
