@@ -31,7 +31,7 @@ final class OpenAICredentialEchoSpec extends AnyFlatSpec with Matchers with Eith
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
       val config =
         AzureConfig.fromValues(ModelName("gpt-4o"), Secret(echoKey), BaseUrl(baseUrl), "2025-01-01-preview").value
-      OpenAIClient(config).value.complete(hello, CompletionOptions())
+      OpenAIClient.azure(config).value.complete(hello, CompletionOptions())
     }
   }
 }

@@ -5,7 +5,7 @@ import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAICompatibleConfig }
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
-import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
+import org.llm4s.llmconnect.{ LlmClientOptions, ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer._
@@ -128,7 +128,7 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
     withServer("/chat/completions")(exchange => sendSseResponse(exchange, openAISseBody(Seq("a", "b")))) { baseUrl =>
       val c = OpenAICompatibleClient(
         OpenAICompatibleConfig(ModelName("m"), BaseUrl(baseUrl), None),
-        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
+        LlmClientOptions(exchangeLogging = ProviderExchangeLogging.Enabled(sink))
       ).value
       c.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ()).value.usage shouldBe Some(
         TokenUsage(10, 5, 15)

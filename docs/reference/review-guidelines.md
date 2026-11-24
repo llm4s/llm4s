@@ -1245,9 +1245,9 @@ object LLMConnect {
 // GOOD - returns trait
 object LLMConnect {
   def getClient(config: ProviderConfig): Result[LLMClient] = config match {
-    case cfg: OpenAIConfig => Right(new OpenAIClient(cfg))
-    case cfg: AnthropicConfig => Right(new AnthropicClient(cfg))
-    case cfg: GeminiConfig => Right(new GeminiClient(cfg))
+    case cfg: OpenAIConfig => OpenAIClient(cfg)
+    case cfg: AnthropicConfig => AnthropicClient(cfg)
+    case cfg: GeminiConfig => GeminiClient(cfg)
   }
 }
 ```

@@ -269,7 +269,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       val config = AzureConfig
         .fromValues(ModelName("gpt-6-luna"), Secret("azure-key"), BaseUrl(baseUrl), AzureConfig.DEFAULT_API_VERSION)
         .value
-      val client     = OpenAIClient(config).value
+      val client     = OpenAIClient.azure(config).value
       val completion = client.complete(hello, CompletionOptions().withTools(Seq(noopTool))).value
       client.close()
 
@@ -353,7 +353,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
         AzureConfig
           .fromValues(ModelName("my-deploy"), Secret("azure-key"), BaseUrl(baseUrl), AzureConfig.DEFAULT_API_VERSION)
           .value
-      val client = OpenAIClient(config).value
+      val client = OpenAIClient.azure(config).value
       val result = client.complete(hello, CompletionOptions())
       client.close()
 
@@ -389,7 +389,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
             AzureConfig.DEFAULT_API_VERSION
           )
           .value
-      val client = OpenAIClient(config).value
+      val client = OpenAIClient.azure(config).value
       val result = client.streamComplete(hello, CompletionOptions().withReasoning(ReasoningEffort.Low))(_ => ())
       client.close()
 
@@ -409,7 +409,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
     } { baseUrl =>
       val config =
         AzureConfig.fromValues(ModelName("my-deploy"), Secret("azure-key"), BaseUrl(s"$baseUrl/"), "2024-10-21").value
-      val client = OpenAIClient(config).value
+      val client = OpenAIClient.azure(config).value
       client.complete(hello, CompletionOptions()).isRight shouldBe true
       client.close()
 
@@ -433,7 +433,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
             AzureConfig.DEFAULT_API_VERSION
           )
           .value
-      val client = OpenAIClient(config).value
+      val client = OpenAIClient.azure(config).value
       client.complete(hello, CompletionOptions()).isRight shouldBe true
       client.close()
 
@@ -535,7 +535,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
     val azure = AzureConfig
       .fromValues(ModelName("my-deploy"), Secret("k"), BaseUrl("https://r.openai.azure.com"), "2024-10-21")
       .value
-    val client = OpenAIClient(azure).value
+    val client = OpenAIClient.azure(azure).value
     client.close()
     client.complete(hello, CompletionOptions()).left.value.message should include(
       "Azure OpenAI client for model my-deploy"

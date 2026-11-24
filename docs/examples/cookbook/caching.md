@@ -58,7 +58,7 @@ object CachingRecipe extends RecipeApp {
       config <- CacheConfig.create(similarityThreshold = 0.98, ttl = 1.hour, maxSize = 500)
     } yield {
       given ModelRegistryService = models
-      new CachingLLMClient(
+      CachingLLMClient(
         baseClient = client,
         // The stand-in embedding model; see "Use a real provider".
         embeddingClient = EmbeddingClient(BagOfWordsEmbeddings.provider),

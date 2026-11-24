@@ -10,6 +10,7 @@ import org.llm4s.error.TroubleshootingLinks
 import org.llm4s.error.ValidationError
 import org.llm4s.syntax.toLLMError
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.auth.CachingAccessTokenProvider
@@ -67,9 +68,12 @@ import scala.util.{ Try, Using }
  * @param config  `GeminiConfig` with API key, model, and base URL.
  * @param metrics Receives per-call latency and token-usage events.
  *                Defaults to `MetricsCollector.noop`.
+ *
+ * Build one with the companion's factory, or let `LLMConnect.getClient` build it from a named section: the
+ * constructor is not public, so that an option can be added without breaking a caller, and the class is final.
  */
 @Stable
-class GeminiClient(
+final class GeminiClient private[provider] (
   config: GeminiConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
@@ -93,10 +97,10 @@ class GeminiClient(
     )
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else GeminiClient.DefaultRequestTimeout. */
-  protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(GeminiClient.DefaultRequestTimeout)
+  private[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(GeminiClient.DefaultRequestTimeout)
 
   /** How long a streamed call may take: the section's `timeouts.stream`, else GeminiClient.DefaultStreamTimeout. */
-  protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(GeminiClient.DefaultStreamTimeout)
+  private[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(GeminiClient.DefaultStreamTimeout)
 
   protected def clientDescription: String = s"Gemini client for model ${config.model}"
   protected def providerName: String      = "gemini"
@@ -693,19 +697,23 @@ object GeminiClient {
   val DefaultStreamTimeout: FiniteDuration = 10.minutes
   import org.llm4s.syntax.toResult
 
-  def apply(config: GeminiConfig)(using ModelRegistryService): Result[GeminiClient] =
-    Try(new GeminiClient(config)).toResult
-
-  def apply(config: GeminiConfig, metrics: org.llm4s.metrics.MetricsCollector)(using
+  /**
+   * A [[GeminiClient]] for `config`, or why one cannot be built: a config its provider refuses, or anything the
+   * client's construction fails on, is a `Left`, never an exception.
+   * `options.httpClient`, when set, carries every request and stays the caller's to close.
+   *
+   * @param config  the provider's configuration.
+   * @param options the metrics collector, exchange logging and HTTP client of the client; none of them by default.
+   */
+  def apply(config: GeminiConfig, options: LlmClientOptions = LlmClientOptions())(using
     ModelRegistryService
   ): Result[GeminiClient] =
-    Try(new GeminiClient(config, metrics)).toResult
-
-  def apply(
-    config: GeminiConfig,
-    metrics: org.llm4s.metrics.MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging,
-    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
-  )(using ModelRegistryService): Result[GeminiClient] =
-    Try(new GeminiClient(config, metrics, exchangeLogging, httpClient)).toResult
+    Try(
+      new GeminiClient(
+        config,
+        options.metrics,
+        options.exchangeLogging,
+        Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+      )
+    ).toResult
 }

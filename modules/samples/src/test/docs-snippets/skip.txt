@@ -251,12 +251,12 @@ guide/rag-query-transformers.md | a005eab676 | with | import org.llm4s.rag.RAG; 
 guide/observability/provider-exchange-logging.md | cd9f4a77b3 | with | import org.llm4s.llmconnect.ProviderExchange
 guide/agents/multiple-machines.md | df8910b85c | with | val store: org.llm4s.agent.graph.spi.CheckpointStore = ???; val runtime: org.llm4s.agent.graph.GraphRuntime = ???; val queue: org.llm4s.agent.service.RunQueue = ???; val metrics: org.llm4s.metrics.MetricsCollector = ???; val tenant: org.llm4s.agent.graph.TenantId = ???; val submitter: org.llm4s.agent.service.RunSubmitter = ???
 guide/agents/multiple-machines.md | cd981b6c6e | with | val registry: io.prometheus.metrics.model.registry.PrometheusRegistry = ???; val store: org.llm4s.agent.graph.spi.CheckpointStore = ???
-guide/caching.md | e622c0c859 | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
-guide/caching.md | 3b4e4ac09d | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
-guide/caching.md | 0912448d0c | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder; given org.llm4s.model.ModelRegistryService = ???
-guide/caching.md | 29a2d91f8f | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
-guide/caching.md | b26c99f8bd | with | val embeddingClient: org.llm4s.llmconnect.EmbeddingClient = embedder; val cacheConfig: org.llm4s.llmconnect.caching.CacheConfig = ???; val tracing: org.llm4s.trace.Tracing = ???
-guide/caching.md | fa7f6dfff8 | with | val embeddingClient: org.llm4s.llmconnect.EmbeddingClient = embedder; val cacheConfig: org.llm4s.llmconnect.caching.CacheConfig = ???; val tracing: org.llm4s.trace.Tracing = ???; val clock: java.time.Clock = ???
+guide/caching.md | 083446a869 | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
+guide/caching.md | 5a5eacb3b7 | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
+guide/caching.md | 51a461300f | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder; given org.llm4s.model.ModelRegistryService = ???
+guide/caching.md | 01750da568 | with | val base: org.llm4s.llmconnect.EmbeddingClient = embedder
+guide/caching.md | f5ee5e39c7 | with | val embeddingClient: org.llm4s.llmconnect.EmbeddingClient = embedder; val cacheConfig: org.llm4s.llmconnect.caching.CacheConfig = ???; val tracing: org.llm4s.trace.Tracing = ???
+guide/caching.md | 674e919be2 | with | val embeddingClient: org.llm4s.llmconnect.EmbeddingClient = embedder; val cacheConfig: org.llm4s.llmconnect.caching.CacheConfig = ???; val tracing: org.llm4s.trace.Tracing = ???; val clock: java.time.Clock = ???
 guide/jev.md | 975f60b158 | skip | sbt build definition, not Scala source
 guide/jev.md | f1e8f1ba15 | with | import org.llm4s.jev._; val config: JevConfig = ???
 guide/jev.md | 734f942306 | with | import org.llm4s.jev._
