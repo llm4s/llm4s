@@ -11,14 +11,14 @@ nav_order: 24
 
 The `llm4s-pekko` module (Beta) exposes `LLMClient.streamComplete` and an `Agent` run as
 [Apache Pekko Streams](https://pekko.apache.org/docs/pekko/current/stream/index.html) `Source`s, so LLM output plugs into
-a Pekko, Pekko HTTP or Play pipeline with the backpressure and cancellation you already use. It is the third streaming
-bridge, next to [cats-effect](cats-effect) (fs2) and [ZIO](zio) (ZStream), and it has the same shape.
+a Pekko, Pekko HTTP or Play pipeline with the backpressure and cancellation you already use. It is one of the streaming
+bridges, next to [cats-effect](cats-effect) (fs2), [ZIO](zio) (ZStream) and [Ox](direct-style), and it has the same shape.
 
 ## Dependency
 
 ```scala
 // build.sbt
-libraryDependencies += "org.llm4s" %% "llm4s-pekko" % "<version>"
+libraryDependencies += "org.llm4s" %% "llm4s-pekko" % "{{ site.data.project.latest_release }}"
 ```
 
 The module depends on `llm4s-core`, `llm4s-agent` and `pekko-stream` 1.x (Apache-2.0). Add a provider module as for

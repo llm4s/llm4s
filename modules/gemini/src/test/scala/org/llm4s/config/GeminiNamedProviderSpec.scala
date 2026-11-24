@@ -106,10 +106,10 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
       ).map(_.extra("location")) shouldBe Right(Some(VertexAIConfig.DEFAULT_LOCATION))
     }
 
-    // #1215: `endpoint` and `organization` were Vertex's project and location until the keys existed.
-    // Since #1133 neither is a built-in field: the loader reads them into `extras` like any other
-    // key, and the aliases resolve from there, with the same warnings as before.
-    "still accept the deprecated endpoint/organization fields, with a deprecation warning each" in {
+    // #1215 renamed Vertex's `endpoint` and `organization` to `project` and `location`. The old names
+    // are no longer read: they are unknown keys, reported with a warning, and without `project` the
+    // section is missing a required key.
+    "no longer read the old endpoint/organization keys" in {
       val name = ProviderName("vertex-legacy")
       val raw = RawNamedProviderSection(
         provider = Some("vertexai"),
@@ -117,6 +117,28 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
         baseUrl = None,
         apiKey = None,
         extras = Map("organization" -> "europe-west4", "endpoint" -> "my-gcp-project")
+      )
+
+      val message = NamedProviderConfigNormalizer
+        .normalize(name, raw)
+        .flatMap(NamedProviderSectionValidator.validate(name, org.llm4s.llmconnect.provider.VertexAIProvider, _))
+        .left
+        .toOption
+        .getOrElse(fail("Expected a missing-project failure"))
+        .message
+
+      message should include("- project: the GCP project ID that owns your Vertex AI resources")
+      message should include("llm4s.providers.vertex-legacy.project")
+    }
+
+    "warn that the old endpoint/organization keys are unknown and ignored" in {
+      val name = ProviderName("vertex-renamed")
+      val raw = RawNamedProviderSection(
+        provider = Some("vertexai"),
+        model = Some("gemini-2.0-flash"),
+        baseUrl = None,
+        apiKey = None,
+        extras = Map("project" -> "my-gcp-project", "organization" -> "europe-west4", "endpoint" -> "old")
       )
 
       val (cfg, warnings) = NamedProviderConfigNormalizer
@@ -127,28 +149,12 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
         )
         .fold(err => fail(err.message), identity)
 
-      cfg.extras shouldBe Map("project" -> "my-gcp-project", "location" -> "europe-west4")
-      warnings shouldBe Seq(
-        "llm4s.providers.vertex-legacy.endpoint is deprecated for provider = vertexai; rename it to " +
-          "llm4s.providers.vertex-legacy.project. The old name will stop working in a future release.",
-        "llm4s.providers.vertex-legacy.organization is deprecated for provider = vertexai; rename it to " +
-          "llm4s.providers.vertex-legacy.location. The old name will stop working in a future release."
+      cfg.extras shouldBe Map("project" -> "my-gcp-project", "location" -> VertexAIConfig.DEFAULT_LOCATION)
+      warnings should have size 1
+      warnings.head should startWith(
+        "llm4s.providers.vertex-renamed has unknown key(s) endpoint, organization, which are ignored."
       )
-    }
-
-    "reject a section that sets project and a different deprecated endpoint" in {
-      val message = validate(
-        "vertex-conflict",
-        RawNamedProviderSection(
-          provider = Some("vertexai"),
-          model = Some("gemini-2.0-flash"),
-          baseUrl = None,
-          apiKey = None,
-          extras = Map("project" -> "new-project", "endpoint" -> "old-project")
-        )
-      ).left.toOption.getOrElse(fail("Expected a conflict failure")).message
-
-      message should include("- project: also set, to a different value, as its deprecated alias `endpoint`")
+      warnings.head should include("provider = vertexai also accepts project, location")
     }
 
     "accept the 'vertex' alias for Vertex AI" in {
@@ -270,7 +276,7 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           fail(s"Expected VertexAIConfig, got $other")
     }
 
-    "load a Vertex AI section still written with the deprecated endpoint/organization fields" in {
+    "fail to load a Vertex AI section still written with the old endpoint/organization keys" in {
       val hocon =
         """
           |llm4s.providers.vertex-legacy {
@@ -282,11 +288,8 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           |""".stripMargin
 
       Llm4sConfig.provider(ConfigSource.string(hocon), "vertex-legacy") match
-        case Right(vertex: VertexAIConfig) =>
-          vertex.projectId shouldBe "legacy-project"
-          vertex.location shouldBe "asia-northeast1"
-        case other =>
-          fail(s"Expected VertexAIConfig, got $other")
+        case Left(err) => err.message should include("- project: the GCP project ID")
+        case other     => fail(s"Expected a missing-project failure, got $other")
     }
 
     "default the Vertex AI region when a section sets no location" in {

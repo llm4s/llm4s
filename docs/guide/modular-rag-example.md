@@ -8,7 +8,12 @@ parent: User Guide
 
 # Modular RAG Example
 
-This guide introduces a practical, modular Retrieval-Augmented Generation (RAG) example for LLM4S.
+This guide introduces a practical, modular Retrieval-Augmented Generation (RAG) example for LLM4S, built on the
+`RAG` pipeline of `llm4s-rag`:
+
+```sbt
+libraryDependencies += "org.llm4s" %% "llm4s-rag" % "{{ site.data.project.latest_release }}"
+```
 
 The sample lives in:
 
@@ -24,6 +29,34 @@ The example intentionally separates the pipeline into modules:
 3. `GenerationModule`: grounded answer generation from retrieved contexts.
 
 This keeps cross-cutting concerns small and makes each stage easy to evolve or test independently.
+
+Each stage is a small trait, and its default implementation delegates to one `RAG`:
+
+```scala
+import org.llm4s.rag.{ RAG, RAGAnswerResult, RAGSearchResult }
+import org.llm4s.types.Result
+
+trait RetrievalModule {
+  def retrieve(query: String, topK: Int): Result[Seq[RAGSearchResult]]
+}
+
+final class DefaultRetrievalModule(rag: RAG) extends RetrievalModule {
+  override def retrieve(query: String, topK: Int): Result[Seq[RAGSearchResult]] =
+    rag.query(query, topK = Some(topK))
+}
+
+trait GenerationModule {
+  def answer(question: String, topK: Int): Result[RAGAnswerResult]
+}
+
+final class DefaultGenerationModule(rag: RAG) extends GenerationModule {
+  override def answer(question: String, topK: Int): Result[RAGAnswerResult] =
+    rag.queryWithAnswer(question, topK = Some(topK))
+}
+```
+
+A test can replace any one stage with a stub of its trait, and a retrieval-only deployment can leave the
+`GenerationModule` out.
 
 ## Run
 
@@ -41,7 +74,7 @@ If no document path is passed, the sample ingests a small built-in corpus.
 sbt "samples/runMain org.llm4s.samples.rag.modular.ModularRAGExample ./docs \"What are the key reliability patterns?\""
 ```
 
-The ingestion stage supports file extraction through the core RAG API, including PDF.
+The ingestion stage extracts files through the `llm4s-rag` API, including PDF and DOCX.
 
 ## Configuration
 

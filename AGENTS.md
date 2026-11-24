@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Modules
-- `modules/core` is the spine (LLM client API, config, tool API, tracing and metrics contracts), designated stable for 1.0; no MiMa baseline is active yet. The agent runtime and guardrails are `modules/agent`, the built-in tools `modules/agent-tools`, providers their own modules (`modules/openai`, `modules/anthropic`, …), and RAG, memory, MCP, image, speech and observability likewise; `build.sbt` lists them all. A new module must also be added to `hooks/pre-commit`. Workspace support sits in `modules/workspace` (runner/client/shared), and runnable demos are in `modules/samples`. `docs/` stores documentation; `hooks/` provides the pre-commit installer. Sources live in `src/main/scala`; add version-specific sources under `src/main/scala-3` when needed. See also [szork](https://github.com/llm4s/szork) - a demo game showcasing LLM4S agents.
+- `modules/core` is the spine (LLM client API, config, tool API, tracing and metrics contracts), designated stable for 1.0; no MiMa baseline is active yet. The agent runtime and guardrails are `modules/agent`, the built-in tools `modules/agent-tools`, providers their own modules (`modules/openai`, `modules/anthropic`, …), and RAG, memory, MCP, image, speech and observability likewise; `build.sbt` lists them all. A new module must also be added to `hooks/pre-commit`. Workspace support sits in `modules/workspace` (runner/client/shared), and runnable demos are in `modules/samples`. `docs/` stores documentation; `hooks/` provides the pre-commit installer. Sources live in `src/main/scala` (Scala 3.7.1 only). See also [szork](https://github.com/llm4s/szork) - a demo game showcasing LLM4S agents.
 
 ## Build, Test, and Development Commands
 - Compile: `sbt compile`. Run examples via `sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"`.
@@ -33,9 +33,10 @@
 - **Bug Reports** ([bug_report.yml](.github/ISSUE_TEMPLATE/bug_report.yml)): Use for crashes, errors, unexpected behavior. Include environment (Scala, JDK, OS), LLM provider/model, reproduction steps, and error logs.
 - **Feature Requests** ([feature_request.yml](.github/ISSUE_TEMPLATE/feature_request.yml)): Use for new functionality. Describe problem, proposed solution, alternatives considered, and willingness to implement.
 - **Enhancements** ([enhancement.yml](.github/ISSUE_TEMPLATE/enhancement.yml)): Use to improve existing features. Explain current behavior, proposed improvement, benefits, and implementation approach.
-- See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed contribution guidelines and [contribution-guidelines.md](./docs/reference/contribution-guidelines.md) for advanced patterns.
+- See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed contribution guidelines and [docs/reference/contributing.md](./docs/reference/contributing.md) for advanced patterns.
 
 ## Commit & Pull Request Guidelines
+- Every commit needs a `Signed-off-by` trailer: commit with `git commit -s` (the Developer Certificate of Origin; `.github/workflows/dco.yml` fails a pull request with an unsigned commit). See [CONTRIBUTING.md](./CONTRIBUTING.md#developer-certificate-of-origin-dco).
 - Use short, imperative commit subjects (e.g., "Add centralized model metadata system") and include issue/PR refs when relevant.
 - Before a PR: run scalafmtAll and tests, update docs for user-facing changes, and add sample commands/output for new workflows.
 - PR text should state motivation, key changes, and validation steps. Screenshots only when altering docs/assets; otherwise keep notes concise.
@@ -43,4 +44,4 @@
 
 ## Security & Configuration Tips
 - Never commit secrets. Providers are configured as named sections under `llm4s.providers` in HOCON; keep API keys in env vars or in the untracked `application.local.conf`, never in a committed file. Each provider module binds its vendor's conventional variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...) to the shared `llm4s.credentials.<providerId>.apiKey`, which a section without its own `apiKey` uses; a section for a second account binds its own (`apiKey = ${?OPENAI_BATCH_API_KEY}`), and in production every section should. llm4s reads no `LLM_MODEL`; see `docs/getting-started/configuration.md#api-keys`.
-- For workspace demos, ensure Docker is running before `sbt docker:publishLocal` or workspace samples, and scrub sensitive data from logs.
+- For workspace demos, ensure Docker is running before `sbt workspaceRunner/Docker/publishLocal` or workspace samples, and scrub sensitive data from logs.

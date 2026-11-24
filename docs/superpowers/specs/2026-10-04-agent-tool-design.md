@@ -272,7 +272,7 @@ acknowledgement. The design doc's carry-forward row (now §4.8) closes.
 
 ## Design doc changes (`docs/design/typed-agent-runtime-design.md`)
 
-- New §4.7 "Stage 0 prototype: agent tool contract ([#1278](...))", in the style of §4.4-4.6. The
+- New §4.7 "Stage 0 prototype: agent tool contract ([#1278](https://github.com/llm4s/llm4s/issues/1278))", in the style of §4.4-4.6. The
   carry-forward becomes §4.8 and the durable workflow API §4.9; fix cross-references.
 - Carry-forward: the `AgentTool` row and the stop-handshake row close.
 - §4 sketch and §5.2: `ToolOutcome` as above (`Ask` replaces `Suspend`; no routing); `ToolContext`

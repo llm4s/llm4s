@@ -111,7 +111,7 @@ for {
 ```
 
 Each section needs its provider module and key; see [Switching providers](../../getting-started/configuration#switching-providers)
-and the [reliability guide](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md).
+and the [reliability guide](../../guide/reliability).
 
 ## Pitfalls
 

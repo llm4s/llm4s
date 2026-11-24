@@ -64,17 +64,73 @@ Other posts use the same feed with their own tag: `community` (Dev Hour recaps, 
 recordings) or `guides` (a summary of an external article, or a cross-post with `canonical_url` set to the
 original). Each tag gets its own feed at `/feed/by_tag/<tag>.xml` once a post uses it.
 
+### Pre-tag checklist
+
+Everything below goes in the pull request that prepares the release, and is merged before the tag is pushed. Each
+release costs part of the organisation's monthly Sonatype quota ([What is published](#what-is-published-to-maven-central)),
+so there are few of them: 0.6.0, then 0.7.0, which sets the compatibility baseline, then 1.0. Roughly one release a
+month fits; a security patch takes that slot ahead of a planned release, and minor releases come at most about once a
+quarter ([Support Policy](support-policy#release-cadence)).
+
+**Every release:**
+
+- [ ] Rename `## [Unreleased]` in `CHANGELOG.md` to `## [X.Y.Z] - <date>`, add its `### Highlights`, and open a new,
+      empty `[Unreleased]`. Every entry under `### Breaking changes` links its note in the
+      [Migration Guide](migration).
+- [ ] Add the version's entry point to the [0.x to 1.0 upgrade index](../migrations/0x-to-1x) and a row to the
+      [Migrations](../migrations/) table.
+- [ ] [Update the support table](#update-the-support-table) and [write the News post](#write-the-news-post).
+- [ ] Set the RFCs implemented in this release to their version: the index in [RFCs](../rfcs/) and each RFC's
+      **Status** line ("release after 0.6.0" today in RFC 0008 and RFC 0009).
+- [ ] Update "Current documented version series" under [Version Numbering](#version-numbering) and the Quick Status
+      table of the [Roadmap](roadmap).
+- [ ] Check that everything the release is for is on the commit you will tag
+      ([What gets published](#3-what-gets-published-is-whatever-the-tagged-commit-aggregates)).
+
+**0.7.0, the baseline release, in addition:**
+
+- [ ] Review `llm4s-agent`'s tiers one last time (`sbt stabilityTierCheck` covers it since
+      [#2778](https://github.com/llm4s/llm4s/issues/2778): what is `@Stable` here is what 1.0 promises), and decide the
+      Beta parts inside frozen modules ([The Baseline](api-stability#the-baseline)).
+- [ ] Run `scripts/mima-dry-run.sh` on the commit to tag ([Release readiness](#release-readiness-a-mima-dry-run)).
+- [ ] After the release is on Central, set `mimaBaselineVersion = Some("0.7.0")` in a follow-up pull request
+      ([Setting and bumping the baseline](api-stability#setting-and-bumping-the-baseline)), and change the pages that
+      say no baseline is set yet ([API Stability](api-stability), [Compatibility and Deprecation Policy](compatibility-policy),
+      [1.0 Scope](v1-scope), [Enterprise Evaluation](enterprise-evaluation), `SECURITY.md`, this page).
+
+**1.0, in addition:**
+
+- [ ] In the support table, mark 0.7.x `security-only` (critical fixes for three months after 1.0, with the end date)
+      and every older 0.x line `eol` ([Supported lines](support-policy#supported-lines)).
+- [ ] Publish the Scalafix migration rules as `org.llm4s::llm4s-scalafix` with the release
+      ([#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](scalafix#migration-rules)), and put the one-line
+      command in the 1.0 upgrade notes.
+- [ ] Release-day wording pass: the pages that call LLM4S pre-1.0 or say the compatibility promise is still to come.
+      In `README.md`, "Current Status" ("LLM4S is under active pre-1.0 development", "The path to 1.0 is focused on");
+      `docs/why-llm4s.md` ("LLM4S is pre-1.0 and Scala 3 only", "Frozen modules will be binary compatible across 1.x");
+      `docs/index.md` ("Latest release, on the road to 1.0", and "The road to 1.0" timeline with its "Pre-1.0" step);
+      `docs/scala-ai/llm-framework.md` ("it is pre-1.0: the API can still change between releases");
+      `docs/guide/comparison.md` ("A stable 1.0 API", "You need a stable, frozen API today. LLM4S is pre-1.0");
+      `docs/guide/migrating-from-scala-llm-clients.md` ("You need a stable API today. LLM4S is pre-1.0");
+      `docs/guide/writing-a-provider.md` ("reaches a binary-compatibility baseline (MiMa) at a pre-1.0 release");
+      `docs/guide/agents/multiple-machines.md` ("planned with the 1.0 compatibility"); and on the reference pages
+      above, the "Before the baseline" rows and the [Roadmap](roadmap).
+
+### What the tag starts
+
 Pushing the tag is the whole procedure. Everything after it is automated, in this order:
 
 ```
-ci → publish → publish-kotlin → github-release → docs
-             │                                 └→ sbom
-             └──────────────────────────────────→ docker
+ci ──────────┐
+support-table┴→ publish → publish-kotlin → github-release → docs
+                        │                                 └→ sbom
+                        └──────────────────────────────────→ docker
 ```
 
 | Job | Does |
 |-----|------|
 | `ci` | Full CI on the tagged commit |
+| `support-table` | Fails a tag that is not the `latest` line of the [support table](#update-the-support-table), before anything is published |
 | `publish` | Checks the release's Scaladoc (`sbt doc`, then `scripts/check-scaladoc-warnings.sh`: no warning in an llm4s source, none in a third-party source that `scripts/scaladoc-third-party-warnings.txt` does not list) and that every `-javadoc.jar` is the pointer jar (`sbt javadocJarCheck`), then signs and stages the sbt artifacts (`sbt ci-release`, whose bundle is [checked](#what-is-published-to-maven-central) before upload), attests the build provenance of the staged jars and POMs, and uploads them to Maven Central (`sbt sonaRelease`) |
 | `publish-kotlin` | Builds, signs, checks, attests and uploads `llm4s-kotlin-api`, the Gradle-built Kotlin artifact, at the same version (see [The Kotlin artifact](#the-kotlin-artifact-llm4s-kotlin-api)) |
 | `github-release` | Creates the GitHub Release for the tag |
@@ -364,8 +420,8 @@ need a maintainer:
 ## Release readiness: a MiMa dry run
 
 `mimaBaselineVersion` in `build.sbt` is `None` and `mimaBaselineOverrides` is empty, so `sbt mimaReportBinaryIssues` compiles the build and checks
-nothing ([The Baseline](api-stability#the-baseline)). It is set at a pre-1.0 release, version to be decided, once
-the designs are final ([#1281](https://github.com/llm4s/llm4s/issues/1281)); 0.5.0 sets none. `scripts/mima-dry-run.sh` does those steps early, against a throwaway version, to show that they will work:
+nothing ([The Baseline](api-stability#the-baseline)). It is set at **0.7.0**, for every frozen module
+([#1281](https://github.com/llm4s/llm4s/issues/1281)); 0.5.0, 0.5.1 and 0.6.0 set none. `scripts/mima-dry-run.sh` does those steps early, against a throwaway version, to show that they will work:
 
 ```bash
 scripts/mima-dry-run.sh                 # on JDK 21, from a clean checkout of the commit you want to check
@@ -474,11 +530,9 @@ help.
 
 ## Version Numbering
 
-We follow semantic versioning (MAJOR.MINOR.PATCH):
-- MAJOR: Breaking API changes
-- MINOR: New features, backwards compatible
-- PATCH: Bug fixes, backwards compatible
+Versions are `MAJOR.MINOR.PATCH`, with `versionScheme := early-semver`. What each kind of release may break,
+before and after the baseline, is in the [Compatibility Policy](compatibility-policy#versions).
 
-Current documented version series: 0.6.x (pre-1.0 development). Until the MiMa baseline is set, any release,
-patch included, may carry a breaking change, listed in the CHANGELOG with a migration note; see
-[Compatibility Policy](compatibility-policy#versions).
+Current documented version series: 0.6.x (pre-1.0 development). Until the MiMa baseline is set at 0.7.0, any
+release, patch included, may carry a breaking change, listed in the CHANGELOG with a migration note. From 0.7.0 to
+1.0 a minor release still may, with a MiMa filter as well, and a patch release may not; from 1.0, semantic versioning.

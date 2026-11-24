@@ -1,8 +1,11 @@
 ---
 layout: page
 title: Production Deployment
+description: "Deploying LLM4S applications to production: configuration, secrets, reliability, observability, scaling and container images, specific to LLM4S patterns."
 nav_order: 22
 parent: User Guide
+redirect_from:
+  - /PRODUCTION_DEPLOYMENT
 ---
 
 # Production Deployment Guide
@@ -32,7 +35,7 @@ LLM4S follows a configuration boundary principle: all configuration loading happ
 API keys belong in environment variables or a secrets manager—never in source control. A section's
 key is its own `apiKey` when it sets one, and otherwise its vendor's shared
 `llm4s.credentials.<provider>.apiKey`, which each provider module binds to the vendor's variable
-(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...; see [API keys](getting-started/configuration#api-keys)).
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...; see [API keys](../getting-started/configuration#api-keys)).
 That default is convenient in development. **In production, give every section its own `apiKey`**:
 a section meant for a second account whose key is missing would otherwise fall back to the shared
 key and silently bill the default account. llm4s logs at INFO which path each key came from
@@ -58,7 +61,7 @@ precedence):
 Environment variables are not a layer of their own: one is read only where a `${?VAR}` substitution
 binds it - in your `application.conf`, or in a module's `reference.conf` (tracing, embeddings,
 tools and each provider's vendor key bind theirs there; see
-[the variables llm4s reads](getting-started/configuration#environment-variables-llm4s-reads)).
+[the variables llm4s reads](../getting-started/configuration#environment-variables-llm4s-reads)).
 
 ### Production application.conf
 
@@ -221,7 +224,7 @@ request on - no restart, no client rebuild. Every built-in chat provider that ta
 `llm4s.credentials.<id>` take `apiKeyFile` too, and the embedding providers and the reranker re-read it per
 request, so RAG needs no environment-variable key either. Mount the file with mode `0400`: one readable by its
 group or by others is logged as a WARN. The
-full rules are in [Rotating keys](getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider).
+full rules are in [Rotating keys](../getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider).
 
 ```hocon
 llm4s.providers.openai-main {
@@ -351,7 +354,7 @@ with `withCredentials(() => ...)`: it is called again for every read, so renewed
 **Fetched by your code.** Without a file, implement `ApiKeyProvider` over your secret store's client
 (Azure Key Vault, GCP Secret Manager, ...) and set it with `withApiKeyProvider`; the client
 asks it for the key on every request. llm4s itself depends on no secret-manager SDK. A compiled example is
-in [Rotating keys](getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider).
+in [Rotating keys](../getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider).
 
 ---
 
@@ -360,7 +363,7 @@ in [Rotating keys](getting-started/configuration#rotating-keys-apikeyfile-and-ap
 ### Rate Limits
 
 LLM providers enforce rate limits. In production, expect and handle `429 Too Many Requests`.
-`ReliableClient` ([Reliable LLM Calling](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md)) retries a `429` with backoff, honouring the
+`ReliableClient` ([Reliable LLM Calling](reliability)) retries a `429` with backoff, honouring the
 provider's `Retry-After`, and can rate-limit locally; by hand, the loop looks like this:
 
 ```scala
@@ -388,7 +391,7 @@ def callWithBackoff(
 ### Timeout Configuration
 
 Each provider section takes a `timeouts` block, which bounds how long one request and one stream may wait
-([Timeouts](getting-started/configuration#timeouts) lists each provider's defaults and what exactly they bound):
+([Timeouts](../getting-started/configuration#timeouts) lists each provider's defaults and what exactly they bound):
 
 ```hocon
 llm4s.providers.openai-main.timeouts {
@@ -402,11 +405,11 @@ llm4s.providers.openai-main.timeouts {
 ### Provider Fallbacks
 
 `ReliableClient` (`org.llm4s.reliability`) wraps any `LLMClient` with retries, a circuit breaker, a per-call
-deadline and an optional local rate limit ([Reliable LLM Calling](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md)). To fail over to a second
+deadline and an optional local rate limit ([Reliable LLM Calling](reliability)). To fail over to a second
 provider or region, wrap each client once and ask the second only when the first still fails after its own
 retries: the cookbook's
 [fallback recipe](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook/FallbackRecipe.scala)
-does exactly that, and the [reference architecture](guide/reference-architecture#resilience) shows it with a second
+does exactly that, and the [reference architecture](reference-architecture#resilience) shows it with a second
 gateway section. LLM4S does not pick the fallback for you: which provider may stand in for which is your decision,
 written in code.
 
@@ -415,7 +418,7 @@ written in code.
 Call `client.validate()` during application startup to fail fast on misconfiguration. It sends the provider one
 cheap authenticated request (a model lookup or listing, never a completion). A provider with no such request returns
 `Left(ValidationUnsupportedError)`, which means nothing was checked, not that the client is broken; the
-[observability guide](guide/observability/#startup-validation) lists what each provider checks.
+[observability guide](observability/#startup-validation) lists what each provider checks.
 
 ```scala
 import org.llm4s.error.ValidationUnsupportedError
@@ -714,7 +717,7 @@ Key considerations:
 ### Enterprise VPC
 
 For regulated industries or multi-tenant deployments, the
-[Enterprise Reference Architecture](guide/reference-architecture) is the tested picture: the app behind an AI
+[Enterprise Reference Architecture](reference-architecture) is the tested picture: the app behind an AI
 gateway (a LiteLLM proxy in the example) through the generic `openai-compatible` provider with tenant headers, its
 gateway key a rotating file from the External Secrets Operator, NetworkPolicies that let only the gateway leave the
 cluster, `ReliableClient` and a second section for failover, quotas and spend at the gateway and in-process, and
@@ -863,11 +866,11 @@ Before deploying to production, verify:
 
 ## Related Documentation
 
-- [Configuration Guide](getting-started/configuration) - Complete configuration reference
-- [Configuration Boundary](reference/configuration-boundary) - Architecture pattern explanation
-- [Langfuse Workflow Patterns](langfuse-workflow-patterns.md) - Tracing event sequences
-- [Roadmap](reference/roadmap) - Planned reliability and security features
-- [Agent Framework](guide/agents/) - Agent lifecycle and state management
+- [Configuration Guide](../getting-started/configuration) - Complete configuration reference
+- [Configuration Boundary](../reference/configuration-boundary) - Architecture pattern explanation
+- [Langfuse Workflow Patterns](observability/#what-an-agent-run-sends) - Tracing event sequences
+- [Roadmap](../reference/roadmap) - Planned reliability and security features
+- [Agent Framework](agents/) - Agent lifecycle and state management
 
 ---
 
@@ -876,11 +879,11 @@ Before deploying to production, verify:
 Current limitations to be aware of in production:
 
 - **Fallback between providers is code you write** - `ReliableClient` retries, opens a circuit breaker and bounds each call, but which provider stands in for which is yours to wire, as the [fallback recipe](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook/FallbackRecipe.scala) shows
-- **`ReliableClient`'s rate limit is per client instance** - it counts one process's calls; a limit across replicas or tenants belongs in a gateway ([Reference Architecture](guide/reference-architecture#quotas-and-cost))
-- **Tool registries not serializable** - Tools belong to the `Agent`, so rebuild the agent on restart; a durable checkpointer ([SQLite or Postgres](guide/agents/durable-checkpointers)) keeps the threads, while the default in-memory store does not survive a restart
-- **Caches are per process** - the completion (semantic) cache is in memory; the embedding cache takes a store of your own ([Caching](guide/caching))
+- **`ReliableClient`'s rate limit is per client instance** - it counts one process's calls; a limit across replicas or tenants belongs in a gateway ([Reference Architecture](reference-architecture#quotas-and-cost))
+- **Tool registries not serializable** - Tools belong to the `Agent`, so rebuild the agent on restart; a durable checkpointer ([SQLite or Postgres](agents/durable-checkpointers)) keeps the threads, while the default in-memory store does not survive a restart
+- **Caches are per process** - the completion (semantic) cache is in memory; the embedding cache takes a store of your own ([Caching](caching))
 
-These are tracked for improvement in the [Production Readiness Roadmap](reference/roadmap#production-readiness-pillars).
+These are tracked for improvement in the [Production Readiness Roadmap](../reference/roadmap#production-readiness-pillars).
 
 ---
 

@@ -43,21 +43,6 @@ kramdown:
     block:
       line_numbers: true
 
-# Collections for organized content
-collections:
-  guide:
-    output: true
-    permalink: /guide/:name
-  examples:
-    output: true
-    permalink: /examples/:name
-  advanced:
-    output: true
-    permalink: /advanced/:name
-  api:
-    output: true
-    permalink: /api/:name
-
 # Defaults
 defaults:
   # The share card (og:image, twitter:image) of every page, and one per landing page and docs section below: rendered
@@ -153,30 +138,6 @@ defaults:
     values:
       layout: "post"
       permalink: /news/:year/:month/:day/:title/
-  - scope:
-      path: ""
-      type: "guide"
-    values:
-      layout: "page"
-      parent: "User Guide"
-  - scope:
-      path: ""
-      type: "examples"
-    values:
-      layout: "page"
-      parent: "Examples"
-  - scope:
-      path: ""
-      type: "advanced"
-    values:
-      layout: "page"
-      parent: "Advanced Topics"
-  - scope:
-      path: ""
-      type: "api"
-    values:
-      layout: "page"
-      parent: "API Reference"
 
 # Exclude from processing
 exclude:
@@ -187,6 +148,13 @@ exclude:
   - .sass-cache/
   - .jekyll-cache/
   - gemfiles/
+  # Internal records and repository-only files: no front matter, so Jekyll would copy them as raw files.
+  - design/
+  - superpowers/
+  - README.md
+  - people/README.md
+  - events_details/
+  - community/launch-1.0.md
 
 # Social links
 github_username: llm4s

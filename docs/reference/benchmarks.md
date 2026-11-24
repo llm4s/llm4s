@@ -1,53 +1,26 @@
 ---
 layout: page
-title: Performance Benchmarks
-description: "JMH benchmarks for LLM4S hot paths such as token counting, context compression, tool dispatch and keyword search, and how to run them."
+title: Running the JMH Benchmarks
+description: "How to run the LLM4S JMH benchmarks for token counting, context compression, tool dispatch and keyword search, and how regression detection works."
+search_title: "LLM4S JMH benchmarks: how to run them"
 parent: Reference
 nav_order: 18
 ---
 
-# Performance Benchmarks
+# Running the JMH Benchmarks
 
-Baseline JMH benchmark results for llm4s critical hot paths.
-Run with: `sbt "benchmarks/Jmh/run -rf json -rff results.json"`
+`modules/benchmarks` holds JMH benchmarks for the library's hot paths. No reference results are published: scores
+depend on the hardware, so run them on your own machine and track **relative** changes. For how llm4s compares with
+LangChain4j and Spring AI at runtime, see [Comparative Benchmarks](comparative-benchmarks).
 
-> No reference results have been recorded yet, so the scores below are TBD. When they are, numbers will differ by hardware: track **relative** changes for regression detection.
+## What is measured
 
-## Token Counting — `ConversationTokenCounter`
-
-| Benchmark | Messages | Score (µs/op) | Error (±µs) |
-|-----------|----------|--------------|-------------|
-| `countTokens10Messages` | 10 | TBD | TBD |
-| `countTokens100Messages` | 100 | TBD | TBD |
-| `countTokens1000Messages` | 1 000 | TBD | TBD |
-
-Tokenizer: `cl100k_base` (OpenAI). Counts include 4-token-per-message overhead.
-
-## Context Compression — `DeterministicCompressor`
-
-| Benchmark | Messages | Cap (tokens) | Score (ms/op) | Error (±ms) |
-|-----------|----------|-------------|--------------|-------------|
-| `compressToolOutput20Messages` | 20 | 500 | TBD | TBD |
-| `compressToolOutput200Messages` | 200 | 2 000 | TBD | TBD |
-| `compressWithSubjectiveEdits500Messages` | 500 | 4 000 | TBD | TBD |
-
-Subjective edits include filler-word removal and repetition deduplication.
-
-## Tool Dispatch — `ToolRegistry`
-
-| Benchmark | Tools | Strategy | Score (µs/op) | Error (±µs) |
-|-----------|-------|----------|--------------|-------------|
-| `dispatchSingleTool` | 1 | — | TBD | TBD |
-| `dispatchBatch10Sequential` | 10 | Sequential | TBD | TBD |
-| `dispatchBatch10Parallel` | 10 | Parallel | TBD | TBD |
-
-## Keyword Search — `SQLiteKeywordIndex` (FTS5 / BM25, in-memory, 1 000 docs)
-
-| Benchmark | Query | topK | Score (µs/op) | Error (±µs) |
-|-----------|-------|------|--------------|-------------|
-| `searchSingleTerm` | `"scala"` | 10 | TBD | TBD |
-| `searchMultiTerm` | `"scala programming language"` | 10 | TBD | TBD |
-| `indexSingleDocument` | — | — | TBD | TBD |
+| Benchmark class | Hot path | Methods |
+|---|---|---|
+| `TokenCountingBenchmark` | `ConversationTokenCounter` (`cl100k_base`, with the 4-token-per-message overhead) on 10, 100 and 1,000 messages | `countTokens10Messages`, `countTokens100Messages`, `countTokens1000Messages` |
+| `ContextCompressionBenchmark` | `DeterministicCompressor` on 20, 200 and 500 messages, with filler-word removal and repetition deduplication in the last | `compressToolOutput20Messages`, `compressToolOutput200Messages`, `compressWithSubjectiveEdits500Messages` |
+| `ToolRegistryBenchmark` | `ToolRegistry` dispatch of one tool and of a batch of 10, sequential and parallel | `dispatchSingleTool`, `dispatchBatch10Sequential`, `dispatchBatch10Parallel` |
+| `KeywordIndexBenchmark` | `SQLiteKeywordIndex` (FTS5 / BM25, in memory, 1,000 documents) | `searchSingleTerm`, `searchMultiTerm`, `indexSingleDocument` |
 
 ## Running Benchmarks Locally
 

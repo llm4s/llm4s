@@ -29,9 +29,12 @@ The LLM4S Agent Framework provides a production-ready foundation for building LL
 - **Tool Calling** - Type-safe tools with automatic schema generation
 - **Guardrails** - Input/output validation for safety and quality
 - **Memory** - Short and long-term context with semantic search
-- **Handoffs** - Agent-to-agent delegation for specialist routing
+- **Handoffs** - Pass the conversation to a specialist agent ([handoffs guide](handoffs))
+- **Subagents** - Delegate a self-contained task to a typed subagent on a child thread, in parallel and within bounds ([delegation guide](delegation))
+- **Human review** - Pause a turn for approvals, questions and breakpoints, and resume it ([human review guide](human-review))
 - **Streaming** - Real-time events for responsive UIs (`agent.stream`, [streaming guide](streaming))
-- **Graphs** - Typed multi-agent workflows on {% include api.html t="org.llm4s.agent.graph.GraphBuilder" %}: parallel nodes, joins and checkpoints ([recipe](../../examples/cookbook/multi-agent-graph.html))
+- **Durable threads** - Keep threads in SQLite or PostgreSQL, recover a run after a crash, share threads between machines ([durable checkpointers](durable-checkpointers), [several machines](multiple-machines))
+- **Graphs** - Your own workflow on {% include api.html t="org.llm4s.agent.graph.GraphBuilder" %}: fan-out, joins, routing, interrupts and checkpoints ([graphs guide](graphs), [recipe](../../examples/cookbook/multi-agent-graph.html))
 
 ## Quick Start
 
@@ -70,6 +73,9 @@ result match {
 `Agent.builder(id, client)` takes the agent's id (letters, digits, `_` and `-`, up to 52) and an
 {% include api.html t="org.llm4s.llmconnect.LLMClient" %}. `build()` returns a `Result[Agent]` and refuses an invalid agent: clashing tool names,
 a bad or duplicate handoff id, or `withMaxSteps` below 1.
+
+The shorter examples below assume the `client` built here and, where they use them, an `agent` already built and a
+`threadId` (a `ThreadId`).
 
 ### Agent with Tools
 
@@ -144,7 +150,9 @@ the turn has ended; name the thread to recover such a turn.
 defined way is `Right`, with a status:
 
 ```scala
-result.map { r =>
+import org.llm4s.agent.AgentStatus
+
+agent.run("Deploy the release").map { r =>
   r.status match {
     case AgentStatus.Completed(answer)         => println(answer)
     case AgentStatus.Truncated(partial)        => println(s"Cut off at the output limit: $partial")
@@ -173,6 +181,10 @@ and a call that offers no tools also carries it as its `responseFormat`. A call 
 no format, because several providers cannot combine one with tool calls. `decodeOutput[O]` reads the answer:
 
 ```scala
+import org.llm4s.agent.Agent
+import org.llm4s.toolapi.ObjectSchema
+import upickle.default.ReadWriter
+
 case class Invoice(customer: String, total: Double) derives ReadWriter
 val invoiceSchema: ObjectSchema[Invoice] = ??? // or SchemaOf[Invoice].definition
 
@@ -233,7 +245,8 @@ The Java facade (`llm4s-java-api`) returns every turn as a `JAgentResult`, read 
 `partialAnswer()`, `guardrail()` and
 `reason()` as `Optional<String>`s (see the [Java guide](../java#an-agent-turn)). A `SUSPENDED`
 status's `pending()` is a `java.util.List<PendingInterrupt>`: the turn's approvals, then its tool
-questions, middleware questions and breakpoints; it is empty for any other status, and
+questions, middleware questions and breakpoints, then its subagents' interrupts (each under its composite id, with
+the kind it has in the child); it is empty for any other status, and
 `JAgent.pending(result)` is a shortcut for it. Each `PendingInterrupt` has `id()` and `kind()` (the Java
 enum `InterruptKind`: `APPROVAL`, `QUESTION`, `MIDDLEWARE_QUESTION` or `BREAKPOINT`). The rest are
 `Optional`s, present only for the kinds they belong to: `toolName()` and `argumentsJson()` when a tool
@@ -774,7 +787,9 @@ and lists each skill's name, description and path in one prompt section; the mod
 `SKILL.md`, and its other files, with `read_file` when a task matches it.
 
 ```scala
-import org.llm4s.agent.harness.{SkillsMiddleware, VPath}
+import org.llm4s.agent.harness.{SkillsMiddleware, StateFileBackend, VPath}
+
+val backend = StateFileBackend() // or any FileBackend: a HostFileBackend, a CompositeBackend
 
 for {
   user    <- VPath("/user/skills")
@@ -807,7 +822,9 @@ one prompt section: the files at the paths given, read through a `FileBackend` i
 file refines an earlier one), each under a heading naming its path.
 
 ```scala
-import org.llm4s.agent.harness.{InstructionMemoryMiddleware, VPath}
+import org.llm4s.agent.harness.{InstructionMemoryMiddleware, StateFileBackend, VPath}
+
+val backend = StateFileBackend() // or any FileBackend: a HostFileBackend, a CompositeBackend
 
 for {
   user    <- VPath("/user/AGENTS.md")
@@ -911,8 +928,7 @@ Persistent context across conversations:
 import org.llm4s.agent.memory._
 
 val result = for {
-  manager <- SimpleMemoryManager.empty
-  m1 <- manager.recordUserFact("Prefers Scala", Some("user-1"), Some(0.9))
+  m1      <- SimpleMemoryManager.empty.recordUserFact("Prefers Scala", Some("user-1"), Some(0.9))
   context <- m1.getRelevantContext("programming preferences")
 } yield context
 ```
@@ -940,11 +956,33 @@ val agent = Agent.builder("triage", client)
 
 [Learn more about handoffs →](handoffs)
 
+### [Subagents](delegation)
+
+Give an agent typed subagents: each is offered as a tool, runs on a child thread of its own - several in parallel,
+within the bounds you set - and returns a typed result. A child's approvals and questions suspend the parent, and its
+events can be followed in the parent's stream:
+
+```scala
+import org.llm4s.agent.delegation.TypedAgent
+
+val general = TypedAgent.text("general-purpose", "Any self-contained task")
+
+val lead = Agent.builder("lead", client)
+  .withSubagents(general)
+  .build()
+```
+
+Use a handoff to pass the conversation on, a subagent to get one task done and carry on.
+
+[Learn more about subagents →](delegation)
+
 ### [Human Review](human-review)
 
 Pause a turn for a person: tool approvals, questions from tools and from middleware - to review or edit
 an answer, or for missing information - and static breakpoints before or after an agent's model calls,
 tool calls and final answer. Answer any subset of what a turn waits for; the rest stays pending.
+
+[Learn more about human review →](human-review)
 
 ### [Streaming Events](streaming)
 
@@ -976,6 +1014,12 @@ interrupts the running turn, as the caller chooses.
 
 [Learn more about running on several machines →](multiple-machines)
 
+### [Writing Middleware](middleware)
+
+Add your own cross-cutting concern - logging, redaction, a tool-call policy, context in the prompt - with hooks around each turn, model call and tool call: what each hook may return, state keys, prompt sections, ordering, errors, and replay on a durable thread.
+
+[Learn more about writing middleware →](middleware)
+
 ---
 
 ## Built-in Tools
@@ -995,8 +1039,8 @@ import org.llm4s.toolapi.builtin.BuiltinTools
 val result = for {
   tools <- BuiltinTools.coreSafe // date/time, calculator, UUID, JSON: no files, network or processes
   agent <- Agent.builder("assistant", client).withTools(new ToolRegistry(tools)).build()
-  state <- agent.run("What is 15% of 850?")
-} yield state
+  result <- agent.run("What is 15% of 850?")
+} yield result
 ```
 
 The bundles, smallest to largest: `coreSafe`, `withHttpSafe()` (adds read-only HTTP), `withFilesSafe()` (adds
@@ -1054,7 +1098,7 @@ val agent = Agent.builder("assistant", client)
     new SummarizationMiddleware(
       trigger = SummaryTrigger.Tokens(60000),
       keepRecent = 10,
-      compressor = SummaryCompressor.model(summariserClient),
+      compressor = SummaryCompressor.model(client), // or a smaller model's client
       maxSummaryTokens = 2000
     )
   )
@@ -1100,14 +1144,21 @@ A thread lives in the runtime. To keep a conversation across processes, save the
 and import them as the `history` of a new thread:
 
 ```scala
-import upickle.default.{read, write}
+import java.nio.file.{ Files, Path }
+import org.llm4s.agent.{ Agent, AgentResult }
+import org.llm4s.agent.graph.{ RunConfig, ThreadId }
+import org.llm4s.llmconnect.model.Message
+import org.llm4s.types.Result
+import upickle.default.{ read, write }
 
 // Save the messages of a completed run
-Files.writeString(path, write(result.messages))
+def save(result: AgentResult, path: Path): Unit =
+  Files.writeString(path, write(result.messages))
 
 // Later: load them and continue on a new thread
-val saved = read[Vector[Message]](Files.readString(path))
-val next = agent.run(ThreadId(java.util.UUID.randomUUID().toString), "Continue our conversation", RunConfig(), saved)
+def continueSaved(agent: Agent, path: Path): Result[AgentResult] =
+  val saved = read[Vector[Message]](Files.readString(path))
+  agent.run(ThreadId(java.util.UUID.randomUUID().toString), "Continue our conversation", RunConfig(), saved)
 ```
 
 `history` is accepted only on a thread that does not exist yet, and may not contain system messages
@@ -1132,7 +1183,8 @@ val options = CompletionOptions()
 Agent.builder("assistant", client).withCompletionOptions(options).build()
 ```
 
-Supported by OpenAI o1/o3 and Anthropic Claude models.
+Which models honour it, and what each provider sends, is in the [Providers guide](../providers): OpenAI's
+[reasoning models](../providers#reasoning-models) and Anthropic's [thinking](../providers#thinking), for example.
 
 ---
 
@@ -1149,6 +1201,10 @@ Supported by OpenAI o1/o3 and Anthropic Claude models.
 | [DeepResearchExample](/examples/#deep-research) | The harness on state files: plan, offload, summary, memory, recover after a stop |
 | [CodingWorkspaceExample](/examples/#coding-workspace) | The harness in a workspace: permissions, approval of `execute`, resume |
 | [ParallelDeepResearchExample](/examples/#parallel-deep-research) | Typed subagents in parallel: bounds, a child's approval through the lead, nested streams, recover after a stop |
+| [PermissionRulesExample](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/PermissionRulesExample.scala) | Allow, deny and ask permission rules on a file tool, with a scripted model |
+| [SqliteRestartRecoveryExample](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/durable/SqliteRestartRecoveryExample.scala) | A run stopped part-way and recovered by a new process from the SQLite file |
+| [AdaptiveWindowingExample](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/AdaptiveWindowingExample.scala) | A context window sized from the model's capabilities and pricing |
+| [ResearcherAgentExample](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/ResearcherAgentExample.scala) | An agent researching with the Brave Search tools (needs a Brave API key) |
 
 [Browse all examples →](/examples/)
 
@@ -1158,13 +1214,12 @@ Supported by OpenAI o1/o3 and Anthropic Claude models.
 
 For in-depth technical details:
 
-- [Agent Framework Roadmap](/design/agent-framework-roadmap) - Strategic direction
-- [Phase 1.1: Conversations](/design/phase-1.1-functional-conversation-management) - Conversation API
-- [Phase 1.2: Guardrails](/design/phase-1.2-guardrails-framework) - Validation framework
-- [Phase 1.3: Handoffs](/design/phase-1.3-handoff-mechanism) - Agent delegation
-- [Phase 1.4: Memory](/design/phase-1.4-memory-system) - Memory architecture
+- [Typed Agent Runtime](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime-design.md) - The model of the graph runtime the agent runs on, and the index of its design records
 - [Typed Agent Runtime §4.13](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.13-stage-1-slice-2-the-agent-loop-on-the-graph-runtime.md) - How `Agent` runs on the graph runtime
-- [Phase 2.1: Streaming](/design/phase-2.1-streaming-events) - Event system
+- [Agent Framework Roadmap](https://github.com/llm4s/llm4s/blob/main/docs/design/agent-framework-roadmap.md) - Strategic direction
+
+The earlier phase documents (conversations, guardrails, handoffs, memory, streaming) describe the agent API before
+the graph runtime and are kept in `docs/design` as history.
 
 ---
 
@@ -1172,8 +1227,10 @@ For in-depth technical details:
 
 1. **[Guardrails Guide](guardrails)** - Input/output validation
 2. **[Memory Guide](memory)** - Persistent context
-3. **[Handoffs Guide](handoffs)** - Agent delegation
-4. **[Streaming Guide](streaming)** - Real-time events
-5. **[Durable Checkpointers](durable-checkpointers)** - Shared stores, claims and recovery
-6. **[Running agents on several machines](multiple-machines)** - One service, several instances, one Postgres
-7. **[Examples Gallery](/examples/)** - Working code samples
+3. **[Handoffs Guide](handoffs)** - Passing the conversation to a specialist
+4. **[Subagents](delegation)** - Typed subagents on child threads
+5. **[Human Review](human-review)** - Approvals, questions and breakpoints
+6. **[Streaming Guide](streaming)** - Real-time events
+7. **[Durable Checkpointers](durable-checkpointers)** - Shared stores, claims and recovery
+8. **[Running agents on several machines](multiple-machines)** - One service, several instances, one Postgres
+9. **[Examples Gallery](/examples/)** - Working code samples

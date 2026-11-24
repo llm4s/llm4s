@@ -15,6 +15,6 @@ feature and ends with code you would ship.
 
 | Tutorial | You build |
 |---|---|
-| [Build a support assistant](support-assistant/) | A customer-support assistant for a small online shop: answers, typed tickets, tools and an agent |
+| [Build a support assistant](support-assistant/) | A customer-support assistant for a small online shop: answers, typed tickets, tools and an agent, help-centre answers, guardrails and memory |
 
 Every Scala block in a tutorial is compiled and run by a spec, so the code on the page is the code that works.

@@ -18,7 +18,7 @@ A committer with overall responsibility for the project's direction, releases, a
 - Most day-to-day decisions (code review, small features, bug fixes) are made by lazy consensus among committers and maintainers.
 - Larger or contested decisions (breaking changes, new maintainers/committers, project direction) require agreement from a majority of maintainers.
 - Disagreements that cannot be resolved through discussion are decided by maintainer vote.
-- A change to the public API of a Frozen module, a module's tier, a new SPI or a published wire format is proposed as an [RFC](docs/rfcs/README.md) first: a pull request against `docs/rfcs/`, with a final comment period of 7 days before the maintainers decide as above.
+- From 1.0, a change to the public API of a Frozen module, a module's tier, a new SPI or a published wire format is proposed as an [RFC](docs/rfcs/README.md) first: a pull request against `docs/rfcs/`, with a final comment period of 7 days before the maintainers decide as above. Before 1.0 an RFC is optional: APIs are still being fixed and improved, each break with a migration note.
 
 ## Code of Conduct
 

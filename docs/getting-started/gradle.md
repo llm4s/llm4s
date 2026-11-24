@@ -26,10 +26,7 @@ Add LLM4S to a Gradle project (Java, Kotlin, or Kotlin/Ktor).
 LLM4S is published for **Scala 3 only**, and Gradle does **not** resolve Scala cross-version suffixes automatically. The coordinate is `org.llm4s:llm4s-core_3` - you must write the `_3` suffix yourself, unlike sbt where `%%` adds it.
 
 {: .note }
-> Releases up to `0.3.4` used unprefixed names (`core_3`); from `0.4.0` every artifact carries an `llm4s-` prefix. See the [migration guide](/reference/migration#artifact-coordinate-rename-v040).
-
-{: .note }
-> From `0.5.0` the provider clients, agent runtime and other features are separate artifacts (`llm4s-openai_3`, `llm4s-anthropic_3`, `llm4s-agent_3`, ...): add the modules you use alongside `llm4s-core_3`, or align them with the [BOM](installation#align-versions-with-the-bom). Up to `0.4.x` everything shipped in `llm4s-core`. The dependency notes below say which version each one applies to.
+> The provider clients, agent runtime and other features are separate artifacts (`llm4s-openai_3`, `llm4s-anthropic_3`, `llm4s-agent_3`, ...): add the modules you use alongside `llm4s-core_3`, or align them with the [BOM](installation#align-versions-with-the-bom).
 
 ---
 
@@ -45,9 +42,7 @@ val llm4sVersion = "{{ site.data.project.latest_release }}"
 dependencies {
     // Scala 3 artifacts - note the explicit _3 suffix
     implementation("org.llm4s:llm4s-core_3:$llm4sVersion")
-{%- unless site.data.project.latest_release contains "0.4." %}
     implementation("org.llm4s:llm4s-openai_3:$llm4sVersion") // the provider module you use
-{%- endunless %}
 }
 
 // Pin the Scala 3 library to avoid binary incompatibility from transitive deps.
@@ -74,9 +69,7 @@ def llm4sVersion = '{{ site.data.project.latest_release }}'
 
 dependencies {
     implementation "org.llm4s:llm4s-core_3:${llm4sVersion}"
-{%- unless site.data.project.latest_release contains "0.4." %}
     implementation "org.llm4s:llm4s-openai_3:${llm4sVersion}" // the provider module you use
-{%- endunless %}
 }
 
 configurations.all {
@@ -90,55 +83,10 @@ configurations.all {
 
 ---
 
-## Dependency exclusion recipes
+## Dependency alignment
 
-### Logback conflict (Spring Boot 3.x, `0.4.x` only)
-
-`llm4s-core` `0.4.x` declares `logback-classic` as a compile dependency. Spring Boot 3.2.x defaults to `1.4.x`, and Gradle picks the highest version, so you may see _"multiple SLF4J bindings"_ warnings or a changed log format. From `0.5.0` the split modules depend on `slf4j-api` only (logback is a test dependency), so this recipe is not needed.
-
-**Kotlin DSL:**
-```kotlin
-implementation("org.llm4s:llm4s-core_3:$llm4sVersion") {
-    exclude(group = "ch.qos.logback", module = "logback-classic")
-}
-```
-
-**Groovy DSL:**
-```groovy
-implementation("org.llm4s:llm4s-core_3:${llm4sVersion}") {
-    exclude group: 'ch.qos.logback', module: 'logback-classic'
-}
-```
-
-Then declare your preferred Logback version directly:
-
-```kotlin
-runtimeOnly("ch.qos.logback:logback-classic:1.4.14") // or let Spring BOM manage it
-```
-
----
-
-### Azure SDK exclusion (non-Azure projects, `0.4.x` only)
-
-`llm4s-core` `0.4.x` depends on `com.azure:azure-ai-openai`, which transitively pulls the Azure SDK jars. If you do not use the Azure provider, exclude it:
-
-**Kotlin DSL:**
-```kotlin
-implementation("org.llm4s:llm4s-core_3:$llm4sVersion") {
-    exclude(group = "com.azure", module = "azure-ai-openai")
-}
-```
-
-**Groovy DSL:**
-```groovy
-implementation("org.llm4s:llm4s-core_3:${llm4sVersion}") {
-    exclude group: 'com.azure', module: 'azure-ai-openai'
-}
-```
-
-The split modules on `main` have no Azure dependency.
-
----
+llm4s depends on `slf4j-api` only and brings no logging backend: declare the one you use (for example
+`runtimeOnly("ch.qos.logback:logback-classic:...")`, or let the Spring Boot BOM manage it).
 
 ### OkHttp and Kotlin standard library alignment
 
@@ -158,7 +106,8 @@ Use `./gradlew dependencyInsight --dependency okhttp --configuration runtimeClas
 
 ## Spring Boot BOM alignment
 
-If you use the Spring Boot dependency-management plugin, align the BOM with your Spring Boot version. With `llm4s-core` `0.4.x`, also exclude the llm4s logback dependency:
+If you use the Spring Boot dependency-management plugin, align the BOM with your Spring Boot version; it manages the
+logging backend, and llm4s needs no exclusion:
 
 ```kotlin
 plugins {
@@ -167,12 +116,12 @@ plugins {
 }
 
 dependencies {
-    implementation("org.llm4s:llm4s-core_3:$llm4sVersion") {
-        exclude(group = "ch.qos.logback", module = "logback-classic")
-    }
-    // Spring Boot BOM manages logback version automatically
+    implementation("org.llm4s:llm4s-core_3:$llm4sVersion")
+    implementation("org.llm4s:llm4s-openai_3:$llm4sVersion") // the provider module you use
 }
 ```
+
+For the auto-configuration itself, see the [Spring Boot starter](/guide/spring-boot).
 
 ---
 
@@ -187,10 +136,7 @@ dependencies {
     implementation("io.ktor:ktor-server-netty:$ktorVersion")
 
     implementation("org.llm4s:llm4s-core_3:$llm4sVersion")
-{%- unless site.data.project.latest_release contains "0.4." %}
     implementation("org.llm4s:llm4s-openai_3:$llm4sVersion")
-{%- endunless %}
-    // With 0.4.x, exclude logback-classic from llm4s-core here (see above): Ktor manages its own logging backend
 }
 ```
 
@@ -225,7 +171,7 @@ API key, and says what to fix.
 Gradle could not find the artifact. Use the prefixed name and the explicit Scala suffix: `org.llm4s:llm4s-core_3`. There is no Scala 2.13 artifact.
 
 ### `Multiple SLF4J bindings found`
-Two SLF4J implementations are on the classpath. With `llm4s-core` `0.4.x`, exclude `logback-classic` (see [Logback conflict](#logback-conflict-spring-boot-3x-04x-only)) and ensure only one binding is declared.
+Two SLF4J implementations are on the classpath. llm4s brings none, so another dependency brought the second: find it with `./gradlew dependencyInsight --dependency slf4j --configuration runtimeClasspath` and keep only one binding.
 
 ### `Binary incompatible Scala library versions`
 Add the `resolutionStrategy` block shown above to pin `org.scala-lang:scala3-library_3` to `3.7.1`. Pin that artifact only: Scala 3 runs on the Scala 2.13 `scala-library` (`2.13.x`), which has no `3.x` release, so a rule that matches the whole `org.scala-lang` group fails with `Could not find org.scala-lang:scala-library:3.7.1`.

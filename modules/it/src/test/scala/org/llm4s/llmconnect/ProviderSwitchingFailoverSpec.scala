@@ -55,7 +55,7 @@ import scala.util.{ Try, Using }
  * who sent them.
  *
  * llm4s has no built-in failover client. The failover tests cover the documented pattern instead
- * (`docs/reliability-guide.md`, "Fallback between providers", and the cookbook's `FallbackRecipe`): each
+ * (`docs/guide/reliability.md`, "Fallback between providers", and the cookbook's `FallbackRecipe`): each
  * provider wrapped in its own `ReliableClient`, the second asked only when the first still fails.
  *
  * Nothing asserts on elapsed time: the timeout test only needs the configured timeout to end the call.

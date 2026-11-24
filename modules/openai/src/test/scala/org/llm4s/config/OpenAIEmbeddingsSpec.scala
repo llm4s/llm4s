@@ -54,9 +54,8 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
 
     "load OpenAI embeddings config via llm4s.*" in {
       val props = Map(
-        "llm4s.embeddings.provider"       -> "openai",
+        "llm4s.embeddings.model"          -> "openai/text-embedding-3-small",
         "llm4s.embeddings.openai.baseUrl" -> "https://example.com/v1",
-        "llm4s.embeddings.openai.model"   -> "text-embedding-3-small",
         "llm4s.embeddings.openai.apiKey"  -> "sk-test"
       )
       withProps(props) {
@@ -105,9 +104,8 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
 
     "load OpenAI embeddings config via llm4s.* (from EmbeddingsConfigSpec)" in {
       val props = Map(
-        "llm4s.embeddings.provider"       -> "openai",
+        "llm4s.embeddings.model"          -> "openai/text-embedding-3-small",
         "llm4s.embeddings.openai.baseUrl" -> "https://example.com/v1",
-        "llm4s.embeddings.openai.model"   -> "text-embedding-3-small",
         "llm4s.embeddings.openai.apiKey"  -> "sk-test"
       )
       withProps(props) {
@@ -125,9 +123,8 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
 
     "return OpenAI text model settings with dimensions from the registry" in {
       val props = Map(
-        "llm4s.embeddings.provider"       -> "openai",
+        "llm4s.embeddings.model"          -> "openai/text-embedding-3-small",
         "llm4s.embeddings.openai.baseUrl" -> "https://example.com/v1",
-        "llm4s.embeddings.openai.model"   -> "text-embedding-3-small",
         "llm4s.embeddings.openai.apiKey"  -> "sk-test"
       )
 

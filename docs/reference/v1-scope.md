@@ -13,7 +13,7 @@ This page states which parts of the LLM4S API are safe to build on ahead of a 1.
 
 Until 0.4.1 all of it shipped in one `core` Maven artifact of roughly 84k lines — agent runtime, RAG, MCP, speech, image, knowledge graph, and eleven provider clients together. There was no way to tell from the artifact alone which parts of that surface are meant to be a long-term contract and which are still moving fast.
 
-The modularisation programme tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126) split it up. Rows marked **carved** below live in their target module; any other row still ships inside `llm4s-core`, and its target-module column says where it is heading, not where it lives today.
+The modularisation programme tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126) split it up, and is complete. Every row below names the module that ships the package today: **carved** marks a package that moved out of the old `core` artifact, **new** one that did not exist there.
 
 The carves, all published from 0.5.0:
 
@@ -27,7 +27,7 @@ The carves, all published from 0.5.0:
 | [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`; `llm4s-observability-prometheus` (Prometheus). The tracing and metrics contracts stay in `llm4s-core`, which declares no observability dependency | published in 0.5.0 |
 | [7](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (the built-in tools and their config), `llm4s-agent` (`agent`, `assistant`) | published in 0.5.0 |
 
-**0.5.0** is the first release to publish separate module artifacts (0.4.x was a single `llm4s-core`; 0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). It sets no MiMa baseline: that comes at a pre-1.0 release, version to be decided, once the designs are final ([#1281](https://github.com/llm4s/llm4s/issues/1281)). Until then nothing is frozen: "Frozen at 1.0" is the tier a module will hold, not a constraint on changing it now.
+**0.5.0** is the first release to publish separate module artifacts (0.4.x was a single `llm4s-core`; 0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). It set no MiMa baseline, and neither did 0.5.1 or 0.6.0: the baseline is **0.7.0**, for all seven frozen modules, `llm4s-agent` included, and 1.0 follows it ([#1281](https://github.com/llm4s/llm4s/issues/1281)). Until 1.0 nothing is frozen: "Frozen at 1.0" is the tier a module will hold, not a constraint on changing it now. From the baseline, a break to a frozen module needs a MiMa filter and a migration note, so it is visible and reviewed; the compatibility promise starts at 1.0.
 
 ## Maturity Legend
 
@@ -42,7 +42,7 @@ These definitions are shared with the [Roadmap](roadmap) so the two pages agree.
 
 ## Package Map
 
-Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its target module, and its tier.
+Every top-level package of the published modules, the module that ships it, and its tier.
 
 | Package | Target module | Tier |
 |---------|---------------|------|
@@ -84,7 +84,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `llmconnect/provider` — AWS Bedrock (Converse, ConverseStream) — **new** | `llm4s-bedrock` (`modules/providers/bedrock`) | Beta |
 | `llmconnect/provider` — Jina AI embeddings — **new** | `llm4s-jina` (`modules/providers/jina`) | Beta |
 | `llmconnect/provider` — Cohere embeddings, on Cohere's native `/v2/embed` (Cohere chat is a dialect in `llm4s-openai-compatible`) — **new** | `llm4s-cohere` (`modules/providers/cohere`) | Beta |
-| `llmconnect/provider` — IBM watsonx.ai, on the chat endpoints (never run against the live service: verification against it is still open in [#1314](https://github.com/llm4s/llm4s/issues/1314)) — **new** | `llm4s-watsonx` (`modules/providers/watsonx`) | Beta |
+| `llmconnect/provider` — IBM watsonx.ai, on the chat endpoints (never run against the live service) — **new** | `llm4s-watsonx` (`modules/providers/watsonx`) | Beta |
 | `llmconnect/provider` — Perplexity Agent API (`/v1/agent`), with web search and citations (never run against the live service) — **new** | `llm4s-perplexity` (`modules/providers/perplexity`) | Beta |
 | `llmconnect/provider` — a local model run in-process by Jlama, on the JDK Vector API (incubator; a JDK upgrade can break it) — **new** | `llm4s-jlama` (`modules/providers/jlama`) | Experimental |
 | `llmconnect/provider` — other community providers | `llm4s-openai-compatible` dialects, or `modules/providers/<name>` | Beta |
@@ -144,13 +144,20 @@ Notes:
 
 ## What Frozen means
 
-- **Source and binary compatible within 1.x.** Once the pre-1.0 baseline is set, `mimaPreviousArtifacts` enforces binary compatibility on every Frozen module for all subsequent 1.x releases.
-- **Deprecate before removing.** A Frozen API is only removed after a deprecation cycle, never dropped outright in a minor release. See the [Compatibility and Deprecation Policy](compatibility-policy).
+A Frozen module can hold Experimental parts. `llm4s-agent` is the main case: its agent, graph, event, middleware and
+guardrail APIs are `@Stable`, while the harness, the run queue and worker (`agent.service`), encryption, subagent
+definition (`agent.delegation`), permissions, the checkpointer SPI, the RAG guardrails and `org.llm4s.assistant` are
+`@Experimental` ([#2778](https://github.com/llm4s/llm4s/issues/2778)). That summary is not the source of truth: each public
+type's tier is its `@Stable` or `@Experimental` annotation (`org.llm4s.annotation`), shown in the
+[Scaladoc](/scaladoc/), and MiMa skips `@Experimental` types ([API Stability](api-stability#tiers-in-the-code)).
+
+- **Source and binary compatible within 1.x.** From 1.0, `mimaPreviousArtifacts` enforces binary compatibility on every Frozen module for all 1.x releases. Between the 0.7.0 baseline and 1.0 MiMa already runs, but a minor release may still break a frozen API, with a MiMa filter, a CHANGELOG *Breaking changes* line and a migration note.
+- **Deprecate before removing, from 1.0.** A Frozen API is then only removed after a deprecation cycle, never dropped outright in a minor release. Before 1.0 a wrong API is fixed outright, with no `@deprecated` shim. See the [Compatibility and Deprecation Policy](compatibility-policy).
 - **Beta and Experimental can move faster.** They may change in a minor release, but a migration note ships with the change in the same release's CHANGELOG.
 
 ## Scala and JDK support
 
-1.0 targets **Scala 3 only (3.7.1)**. Scala 2.13 support is deferred to post-1.0 and, if it happens, would target the frozen spine (`llm4s-core`, `llm4s-agent`, and the frozen provider modules) rather than the full tree. The tracing and metrics contracts are part of `llm4s-core`; the observability integration modules are not in the spine. JDK 21 is used in CI; the JDK each artifact needs is below.
+1.0 targets **Scala 3 only (3.7.1)**. Scala 2.13 support is deferred to post-1.0 and, if it happens, would target the frozen spine (`llm4s-core`, `llm4s-agent`, and the frozen provider modules) rather than the full tree. Calling LLM4S from Scala 2.13 through the TASTy reader is best effort: CI probes it, but it is not a supported configuration and there are no 2.13 artifacts ([the TASTy reader guide](../getting-started/scala-2-13)). The tracing and metrics contracts are part of `llm4s-core`; the observability integration modules are not in the spine. JDK 21 is used in CI; the JDK each artifact needs is below.
 
 See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind the Scala-3-only decision.
 
@@ -167,6 +174,11 @@ See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind
 
 **Why not JDK 17 for some artifacts** ([#1493](https://github.com/llm4s/llm4s/issues/1493)). A lower floor for a chat-only subset, with Ox made optional or `JAgent` split from `llm4s-java-api`, was considered and rejected: `llm4s-core` itself starts a virtual thread (`ToolRegistry`), the provider modules and `llm4s-java-api` depend on core, and the cancellation contract (interrupts that close a blocking socket read) is defined on JDK 21 virtual threads. A JDK 17 floor would mean a second code path for core and every provider, and a second JDK in CI, for a pre-1.0 library whose agent runtime needs 21 regardless.
 
+## Outside 1.0
+
+- **The Quarkus extension** (`quarkus-llm4s`, `modules/quarkus`) is not published and is not part of 1.0: publishing it with each release, in the BOM, is planned for after 1.0 ([#2280](https://github.com/llm4s/llm4s/issues/2280)).
+- **No Scala 2.13 builds** (see [Scala and JDK support](#scala-and-jdk-support)).
+
 ## Programme status
 
-For current progress against this target structure, see the tracking issue [#1126](https://github.com/llm4s/llm4s/issues/1126) and its slice sub-issues.
+The modularisation ([#1126](https://github.com/llm4s/llm4s/issues/1126)) is complete. What remains before 1.0 is the 0.7.0 baseline and the release itself, tracked in [#1281](https://github.com/llm4s/llm4s/issues/1281).

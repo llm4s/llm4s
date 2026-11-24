@@ -385,10 +385,11 @@ runtime. Search tool config comes from `ToolsConfigLoader.load*SearchTool()`.
 ```scala
 import org.llm4s.toolapi.builtin.BuiltinTools
 
-BuiltinTools.core          // DateTime, Calculator, UUID, JSON
-BuiltinTools.safe()        // + web search, HTTP
-BuiltinTools.withFiles()   // + read-only file access
-BuiltinTools.development() // All tools (use with caution)
+// each returns Result[Seq[ToolFunction[_, _]]]
+BuiltinTools.coreSafe          // DateTime, Calculator, UUID, JSON
+BuiltinTools.withHttpSafe()    // + read-only HTTP (web search is configured separately)
+BuiltinTools.withFilesSafe()   // + read-only file access
+BuiltinTools.developmentSafe() // All tools (use with caution)
 ```
 
 ### Guardrails

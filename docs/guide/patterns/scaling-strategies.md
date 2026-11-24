@@ -1,511 +1,91 @@
 ---
 layout: page
 title: Scaling Strategies
-description: "Scale LLM applications: request and distributed caching, rate limiting, batching embeddings and worker pools, as illustrative patterns."
+description: "Scale LLM4S applications: caching, local rate limits, batched embedding, parallel delegation and a run queue with workers on several machines."
 search_title: "Scale LLM applications: caching, rate limits, batching"
 parent: Real-World Application Patterns
+grand_parent: User Guide
 nav_order: 4
 ---
 
 # Scaling Strategies
+{: .no_toc }
 
-> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](https://github.com/llm4s/llm4s/tree/main/modules/samples).
+An LLM application scales on three things: how many model calls it makes, how fast the provider lets it make them,
+and how many machines can run its agents. LLM4S ships a component for each; none needs a cache server, a broker or a
+coordinator of its own.
+{: .fs-6 .fw-300 }
 
-Production patterns for handling high throughput, reducing latency, and distributing load. This guide covers caching, rate limiting, batch processing, and distributed execution.
-
-## Caching Strategies
-
-### Request-Level Caching
-
-```text
-object RequestCaching {
-  
-  import scala.collection.mutable
-  import scala.concurrent.duration._
-  
-  case class CachedResponse(
-    result: String,
-    timestamp: Long,
-    ttl: Duration
-  ) {
-    def isExpired: Boolean = 
-      System.currentTimeMillis() - timestamp > ttl.toMillis
-  }
-  
-  class RequestCache(maxSize: Int = 1000) {
-    private val cache = mutable.LinkedHashMap[String, CachedResponse]()
-    
-    def get(key: String): Option[String] = {
-      cache.get(key).flatMap { cached =>
-        if (cached.isExpired) {
-          cache.remove(key)
-          None
-        } else {
-          Some(cached.result)
-        }
-      }
-    }
-    
-    def put(key: String, value: String, ttl: Duration): Unit = {
-      if (cache.size >= maxSize) {
-        cache.remove(cache.head._1) // Remove oldest
-      }
-      cache(key) = CachedResponse(value, System.currentTimeMillis(), ttl)
-    }
-    
-    def stats(): CacheStats = CacheStats(
-      size = cache.size,
-      hits = hitCount,
-      misses = missCount,
-      hitRate = hitCount.toDouble / (hitCount + missCount)
-    )
-  }
-  
-  case class CacheStats(size: Int, hits: Long, misses: Long, hitRate: Double)
-}
-```
-
-### Distributed Cache (Redis)
-
-```text
-object DistributedCache {
-  
-  import redis.clients.jedis.Jedis
-  
-  class RedisCache(host: String = "localhost", port: Int = 6379) {
-    private val jedis = new Jedis(host, port)
-    
-    def get(key: String): Option[String] = {
-      Option(jedis.get(key))
-    }
-    
-    def put(key: String, value: String, ttlSeconds: Int): Unit = {
-      jedis.setex(key, ttlSeconds, value)
-    }
-    
-    def invalidate(keyPattern: String): Long = {
-      val keys = jedis.keys(keyPattern)
-      if (keys.isEmpty) 0L
-      else jedis.del(keys.toArray: _*)
-    }
-  }
-  
-  // Usage with LLM4S
-  def answerWithCaching(
-    query: String,
-    agent: Agent,
-    cache: RedisCache
-  ): Result[String] = {
-    val cacheKey = s"query:${query.hashCode}"
-    
-    cache.get(cacheKey) match {
-      case Some(cachedAnswer) =>
-        println(s"Cache hit for: $query")
-        Result.success(cachedAnswer)
-      case None =>
-        agent.run(query).map { response =>
-          cache.put(cacheKey, response.message, ttlSeconds = 3600)
-          response.message
-        }
-    }
-  }
-}
-```
+1. TOC
+{:toc}
 
 ---
 
-## Rate Limiting
+## Make fewer calls
 
-### Token Bucket Algorithm
+| Technique | Component | Guide |
+|---|---|---|
+| Never embed the same text twice | `CachedEmbeddingClient` with `InMemoryEmbeddingCache`, or your own `EmbeddingCache` for a shared store | [Caching](../caching#3-caching-embeddings) |
+| Answer a near-identical prompt from an earlier answer | `CachingLLMClient` with `CacheConfig.create(similarityThreshold, ttl, maxSize)` | [Caching](../caching#4-caching-model-responses), [cookbook recipe](../../examples/cookbook/caching) |
+| Pay less for a long, repeated prompt prefix | Provider-side prompt caching | [Cost controls](../cost-controls#provider-side-prompt-caching) |
+| Spend fewer thinking tokens | Reasoning effort and thinking budgets | [Cost controls](../cost-controls#thinking-and-reasoning-effort) |
+| Send less history | `ContextWindowMiddleware` prunes what is sent to the model, never what the thread stores | [Context window pruning](../context-window-pruning) |
 
-```text
-object RateLimiting {
-  
-  import scala.concurrent.duration._
-  
-  class TokenBucket(
-    capacity: Int,
-    refillRate: Int, // tokens per second
-    refillInterval: Duration = 1.second
-  ) {
-    private var tokens = capacity.toDouble
-    private var lastRefillTime = System.currentTimeMillis()
-    
-    def tryConsume(amount: Int = 1): Boolean = {
-      refill()
-      if (tokens >= amount) {
-        tokens -= amount
-        true
-      } else {
-        false
-      }
-    }
-    
-    def availableTokens: Int = tokens.toInt
-    
-    private def refill(): Unit = {
-      val now = System.currentTimeMillis()
-      val timeSinceLastRefill = now - lastRefillTime
-      val tokensToAdd = (timeSinceLastRefill / refillInterval.toMillis) * refillRate
-      tokens = Math.min(capacity, tokens + tokensToAdd)
-      lastRefillTime = now
-    }
-  }
-  
-  // Usage
-  val rateLimiter = new TokenBucket(
-    capacity = 1000,
-    refillRate = 100 // 100 tokens per second = 100 requests/sec
+The completion cache is approximate: it costs an embedding call on every request and a hit can be a false hit. Read
+[choosing between them](../caching#2-choosing-between-them) before turning it on.
+
+## Stay within the provider's limits
+
+`ReliableClient` keeps a local token bucket when its `RateLimitConfig` is enabled: a call over the limit fails at once
+with a local `RateLimitError` (its origin `RateLimitOrigin.LocalThrottle`) instead of reaching the provider, and the
+retry policy retries it like any rate limit. A 429 that still arrives from the provider is retried after its
+`Retry-After`.
+
+```scala
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.reliability.{ RateLimitConfig, ReliabilityConfig, ReliableClient }
+
+def throttled(client: LLMClient): ReliableClient =
+  new ReliableClient(
+    client,
+    "openai-main",
+    ReliabilityConfig.default.withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 500, burstCapacity = 50))
   )
-  
-  def limitedLLMCall(
-    query: String,
-    agent: Agent
-  ): Result[String] = {
-    if (rateLimiter.tryConsume()) {
-      agent.run(query)
-    } else {
-      Result.failure(s"Rate limit exceeded. Available tokens: ${rateLimiter.availableTokens}")
-    }
-  }
-}
 ```
 
-### Per-User Rate Limiting
+The bucket is per `ReliableClient` instance, so it limits one process. Share one instance across the process, and
+divide the provider's quota between processes. See the [reliability guide](../reliability) and
+[Error Recovery](error-recovery).
 
-```text
-object PerUserRateLimiting {
-  
-  import scala.collection.mutable
-  
-  class UserRateLimiter {
-    private val buckets = mutable.Map[String, TokenBucket]()
-    
-    def getLimiter(userId: String): TokenBucket = {
-      buckets.getOrElseUpdate(userId, new TokenBucket(100, 10))
-    }
-    
-    def tryConsume(userId: String): Boolean = {
-      getLimiter(userId).tryConsume()
-    }
-    
-    def getStatus(userId: String): String = {
-      val limiter = getLimiter(userId)
-      s"User $userId has ${limiter.availableTokens} tokens available"
-    }
-  }
-}
-```
+## Do more at once
 
----
+- **Ingesting documents.** The RAG pipeline embeds in batches and loads documents in parallel:
+  `RAGConfig.withBatchSize(n)` and `withParallelism(n)`; `rag.ingestAsync(loader)` and `syncAsync` run on your
+  `ExecutionContext`. See [Document Loaders](../document-loaders#feeding-a-loader-to-rag).
+- **Independent subtasks of one request.** A lead agent's [subagents](../agents/delegation) run on child threads,
+  bounded by `DelegationConfig.withMaxConcurrentChildren`. A fixed fan-out is an
+  [agent graph](../../examples/cookbook/multi-agent-graph), whose parallel nodes run in one superstep.
+- **Tool calls.** The tool calls of one model message run in parallel, bounded by `RunBudgets.maxConcurrency` in the
+  `RunConfig` you pass to `run`; see [parallel tool calls](../agents/#parallel-tool-calls).
 
-## Batch Processing
+## Run agents on several machines
 
-### Embedding Batching
+For an agent service behind a load balancer, LLM4S ships the service kernel in `llm4s-agent`: a run queue in the
+shared PostgreSQL store (`llm4s-agent-checkpoint-postgres`), a `RunSubmitter` your endpoints call, and an
+`AgentWorker` on every instance that takes queued runs, recovers runs whose machine died, and drains on shutdown.
+Instances talk only to the database. Add instances to add capacity; the queue depth and wait metrics tell you when.
 
-```text
-object EmbeddingBatching {
-  
-  import scala.concurrent.Future
-  
-  case class EmbeddingJob(
-    text: String,
-    callback: Vector[Double] => Unit
-  )
-  
-  class BatchEmbeddingProcessor(
-    embeddingClient: EmbeddingClient,
-    batchSize: Int = 50,
-    batchTimeoutMs: Int = 1000
-  ) {
-    private var batch = scala.collection.mutable.ListBuffer[EmbeddingJob]()
-    private var lastBatchTime = System.currentTimeMillis()
-    
-    def embed(text: String): Future[Vector[Double]] = {
-      val promise = scala.concurrent.Promise[Vector[Double]]()
-      
-      synchronized {
-        batch += EmbeddingJob(text, embedding => {
-          promise.success(embedding)
-        })
-        
-        if (batch.size >= batchSize || 
-            System.currentTimeMillis() - lastBatchTime > batchTimeoutMs) {
-          processBatch()
-        }
-      }
-      
-      promise.future
-    }
-    
-    private def processBatch(): Unit = {
-      if (batch.nonEmpty) {
-        val texts = batch.map(_.text).toList
-        val callbacks = batch.map(_.callback).toList
-        
-        // Embed all at once
-        val embeddings = embeddingClient.embedBatch(texts)
-        
-        // Call callbacks
-        embeddings.zip(callbacks).foreach { case (emb, callback) =>
-          callback(emb)
-        }
-        
-        batch.clear()
-        lastBatchTime = System.currentTimeMillis()
-      }
-    }
-  }
-}
-```
+[Running agents on several machines](../agents/multiple-machines) has the configuration, the worker loop and the
+example deployment; [Durable Checkpointers](../agents/durable-checkpointers) covers the store.
 
----
+## Measure first
 
-## Distributed Execution
+Before scaling, measure where the time and money go: request latency and spend by model from
+[metrics](../observability/#metrics), and queue depth and wait from the
+[agent runtime metrics](../observability/#agent-runtime-metrics).
 
-### Worker Pool Pattern
+## See also
 
-```text
-object WorkerPool {
-  
-  import scala.concurrent.{ExecutionContext, Future}
-  import java.util.concurrent.{Executors, ThreadPoolExecutor}
-  
-  class AgentWorkerPool(numWorkers: Int) {
-    private implicit val ec = ExecutionContext.fromExecutor(
-      Executors.newFixedThreadPool(numWorkers)
-    )
-    
-    def processInParallel[T](
-      tasks: List[String],
-      processor: String => Result[T]
-    ): Future[List[Result[T]]] = {
-      val futures = tasks.map(task =>
-        Future {
-          processor(task)
-        }
-      )
-      Future.sequence(futures)
-    }
-  }
-  
-  // Usage: Process multiple queries in parallel
-  def processMultipleQueries(
-    queries: List[String],
-    agent: Agent
-  ): Future[List[Result[String]]] = {
-    val pool = new AgentWorkerPool(numWorkers = 4)
-    
-    pool.processInParallel(queries) { query =>
-      agent.run(query).map(_.message)
-    }
-  }
-}
-```
-
-### Load Balancing Across Models
-
-```text
-object LoadBalancing {
-  
-  case class ModelLoad(
-    modelName: String,
-    currentLoad: Int,
-    capacity: Int
-  ) {
-    def utilization: Double = currentLoad.toDouble / capacity
-  }
-  
-  class LoadBalancer(models: List[LlmClient]) {
-    private val loads = scala.collection.mutable.Map[String, Int]()
-    models.foreach(m => loads(m.modelName) = 0)
-    
-    def selectLeastLoaded(): LlmClient = {
-      models.minBy(m => loads(m.modelName))
-    }
-    
-    def recordRequest(modelName: String): Unit = {
-      loads(modelName) = loads.getOrElse(modelName, 0) + 1
-    }
-    
-    def recordCompletion(modelName: String): Unit = {
-      loads(modelName) = Math.max(0, loads.getOrElse(modelName, 1) - 1)
-    }
-    
-    def execute(query: String): Result[String] = {
-      val model = selectLeastLoaded()
-      recordRequest(model.modelName)
-      try {
-        model.generate(query)
-      } finally {
-        recordCompletion(model.modelName)
-      }
-    }
-  }
-}
-```
-
----
-
-## Queue-Based Processing
-
-### Task Queue
-
-```text
-object TaskQueue {
-  
-  import scala.concurrent.{Future, Promise}
-  import scala.collection.mutable
-  
-  sealed trait TaskStatus
-  case object Pending extends TaskStatus
-  case object Processing extends TaskStatus
-  case object Completed extends TaskStatus
-  case object Failed extends TaskStatus
-  
-  case class Task(
-    id: String,
-    query: String,
-    status: TaskStatus = Pending,
-    result: Option[String] = None
-  )
-  
-  class TaskProcessor(agent: Agent, numWorkers: Int = 3) {
-    private val queue = mutable.Queue[Task]()
-    private val tasks = mutable.Map[String, Task]()
-    private var running = true
-    
-    def submitTask(query: String): String = {
-      val taskId = java.util.UUID.randomUUID().toString
-      val task = Task(taskId, query)
-      queue.enqueue(task)
-      tasks(taskId) = task
-      taskId
-    }
-    
-    def getStatus(taskId: String): Option[TaskStatus] = {
-      tasks.get(taskId).map(_.status)
-    }
-    
-    def getResult(taskId: String): Option[String] = {
-      tasks.get(taskId).flatMap(_.result)
-    }
-    
-    def start(): Future[Unit] = {
-      Future {
-        while (running) {
-          if (queue.nonEmpty) {
-            val task = queue.dequeue()
-            processTask(task)
-          }
-          Thread.sleep(100)
-        }
-      }(scala.concurrent.ExecutionContext.global)
-    }
-    
-    private def processTask(task: Task): Unit = {
-      tasks(task.id) = task.copy(status = Processing)
-      
-      agent.run(task.query) match {
-        case Result.Success(response) =>
-          tasks(task.id) = task.copy(
-            status = Completed,
-            result = Some(response.message)
-          )
-        case Result.Failure(error) =>
-          tasks(task.id) = task.copy(
-            status = Failed,
-            result = Some(s"Error: $error")
-          )
-      }
-    }
-  }
-}
-```
-
----
-
-## Performance Optimization
-
-### Inference Optimization
-
-```text
-object InferenceOptimization {
-  
-  // Use smaller models for simple tasks
-  def selectModelByComplexity(query: String): LlmClient = {
-    if (query.length < 100) {
-      fastModel // faster, cheaper
-    } else {
-      powerfulModel // slower, more capable
-    }
-  }
-  
-  // Parallel generation with early stopping
-  def generateWithTimeout(
-    agent: Agent,
-    query: String,
-    timeoutMs: Long = 5000
-  ): Result[String] = {
-    val future = scala.concurrent.Future {
-      agent.run(query)
-    }(scala.concurrent.ExecutionContext.global)
-    
-    scala.concurrent.Await.result(
-      future,
-      scala.concurrent.duration.Duration(timeoutMs, "ms")
-    )
-  }
-  
-  // Speculative decoding (decode multiple possibilities in parallel)
-  def speculativeDecoding(
-    agent: Agent,
-    query: String
-  ): Result[String] = {
-    // Generate with draft model
-    val draft = draftAgent.run(query)
-    
-    // Verify with main model
-    val verified = agent.run(draft.message)
-    
-    verified
-  }
-}
-```
-
----
-
-## Scaling Checklist
-
-### ✅ Before scaling
-
-- [ ] Current implementation handles 10x load?
-- [ ] Identified bottleneck (CPU, memory, I/O)?
-- [ ] Have baseline metrics?
-- [ ] Cost estimates for 10x scale?
-- [ ] Cache strategy defined?
-- [ ] Rate limiting in place?
-- [ ] Error handling for overload?
-
-### ✅ Scaling implementation
-
-- [ ] Horizontal scaling set up?
-- [ ] Load balancing configured?
-- [ ] Database/cache scaled?
-- [ ] Monitoring alarms set?
-- [ ] Gradual rollout planned (10% → 25% → 50% → 100%)?
-- [ ] Rollback plan ready?
-- [ ] Performance verified at scale?
-
----
-
-## See Also
-
-- [Production Monitoring](./production-monitoring) - Monitor scaled systems
-- [Error Recovery](./error-recovery) - Handle failures at scale
-- [Security Best Practices](./security-best-practices) - Secure at scale
-
----
-
-**Last Updated:** February 2026  
-**Status:** Production Ready
+- [Caching](../caching), [Cost controls](../cost-controls)
+- [Production Monitoring](production-monitoring)
+- [Production Deployment](../production-deployment)

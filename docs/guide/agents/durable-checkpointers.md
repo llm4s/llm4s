@@ -823,8 +823,8 @@ def sweepAll(after: Option[ThreadId]): Result[Unit] =
   store has reclaimed a tombstone, new threads no longer number from `1`. Paging `children` after a reclaimed child
   refuses that cursor.
 - A `SweepGuard` names the threads something outside the store still depends on: each keeps its tombstone, and the
-  newest checkpoint each of its named `RunId`s committed, whatever the policy. A run queue's open entries are what a
-  guard will name (Stage 5, rule 4); `SweepGuard.none` protects nothing.
+  newest checkpoint each of its named `RunId`s committed, whatever the policy. The sweep an `AgentWorker` runs guards its run
+  queue's open entries (`RunQueue.openRuns`), so it never removes what a queued run needs; `SweepGuard.none` protects nothing.
 
 A sweep needs no claim. Run one at a time per store, on a schedule: two at once are safe, only wasteful.
 
@@ -1108,9 +1108,9 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 - [Running agents on several machines](multiple-machines): one agent service on several instances over the
   PostgreSQL store - the run queue, workers, cancel, busy-thread policy, tracing, metrics, retention and upgrades.
 - [Streaming events](streaming): subscribing to a thread's events, which a store numbers and replays.
-- `docs/design/typed-agent-runtime/`: §4.16 (`4.16-stage-2-slice-1-the-durable-checkpointer-contract.md`), the
-  design of claims and fencing; §4.19 (`4.19-stage-2-slice-3-checkpoint-history-fork-and-retention.md`), history,
-  fork, `updateState` and retention; and §4.21 (`4.21-stage-2-slice-6-live-subscriptions-across-runtimes.md`),
+- The design records: [§4.16](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.16-stage-2-slice-1-the-durable-checkpointer-contract.md), the
+  design of claims and fencing; [§4.19](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.19-stage-2-slice-3-checkpoint-history-fork-and-retention.md), history,
+  fork, `updateState` and retention; and [§4.21](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.21-stage-2-slice-6-live-subscriptions-across-runtimes.md),
   subscriptions across runtimes.
 - [Migration guide](../../reference/migration#stage-2-migration-durable-execution): what changed for code that
   implemented `Checkpointer` or built a `Commit`.

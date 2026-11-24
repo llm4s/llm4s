@@ -8,7 +8,7 @@ nav_order: 26
 # Issues this page links, by how it cites them. scripts/check-cited-issues.sh (weekly, and on docs pull requests)
 # fails when a cites_open_issues issue is closed, a cites_closed_issues issue is open, or a linked issue is in neither.
 cites_open_issues: [1442]
-cites_closed_issues: [1467, 1472, 1473, 1475, 1484, 1485, 1486, 1493]
+cites_closed_issues: [1467, 1472, 1473, 1475, 1484, 1485, 1486]
 ---
 
 # Comparing LLM4S with other JVM libraries
@@ -18,7 +18,7 @@ This page compares LLM4S with LangChain4j, Spring AI, Koog and Embabel, so that 
 your project. It states facts and trade-offs, not rankings.
 
 **Last verified: 2026-10-25 for LLM4S, 2026-10-11 for the other projects.** The statements about LLM4S describe the
-`main` branch on that date; the latest release is v0.5.1; v0.5.0 was the first to publish the module split described in
+`main` branch on that date; the latest release is v{{ site.data.project.latest_release }}; v0.5.0 was the first to publish the module split described in
 the [v1 scope](../reference/v1-scope). LLM4S's providers, their streaming and tool-calling support and the versions it is
 tested with are generated from the code into the [compatibility matrix](../reference/compatibility-matrix). Every
 statement about another project comes from that project's own documentation, fetched on 2026-10-11 and listed under
@@ -41,7 +41,7 @@ refreshed at each LLM4S release.
   builder; and `JAgent` runs, continues, streams the events of, resumes and recovers an agent run (added in
   [#1484](https://github.com/llm4s/llm4s/issues/1484), [#1485](https://github.com/llm4s/llm4s/issues/1485) and
   [#1486](https://github.com/llm4s/llm4s/issues/1486)); `completeAsync` and `runAsync` return a `CompletableFuture`.
-  Some Scala types still appear in its signatures ([what is not here yet](java#what-is-not-here-yet)). Moving a Java
+  Some Scala types still appear in its signatures ([what Java cannot do](java#what-is-not-here-yet)). Moving a Java
   codebase over: [Moving a Java app from LangChain4j or Spring AI](java-migration).
 - **Spring shops.** LLM4S has a Spring Boot starter (`llm4s-spring-boot-starter`, [guide](spring-boot)). A flat
   `llm4s.provider` key covers OpenAI, Anthropic and Ollama, and every other provider on the classpath is configured
@@ -65,9 +65,9 @@ refreshed at each LLM4S release.
 | MCP | Client (stdio, SSE and Streamable HTTP transports) and a server class in `llm4s-mcp`; no user guide yet ([#1442](https://github.com/llm4s/llm4s/issues/1442)) | Client with Streamable HTTP, stdio, WebSocket and Docker stdio [L5]; a stdio server in the `langchain4j-community-mcp-server` module [L9] | Client and server; stdio, Streamable HTTP, stateless Streamable HTTP and SSE; Spring Boot starters [S3] | MCP and A2A integrations, both marked beta [K1] | not verified |
 | Observability | Langfuse, OpenTelemetry and Prometheus modules, a trace collector and cost tracking ([guide](observability/)) | Listeners and events; Micrometer listeners; OpenTelemetry semantic conventions; Arize integrations [L6] | Micrometer metrics and tracing for `ChatClient`, `ChatModel`, `EmbeddingModel`, `ImageModel` and `VectorStore` [S5] | OpenTelemetry is listed among its integrations [K1] | not verified |
 | Testing and evaluation | RAGAS-style metrics and a benchmark harness for RAG ([guide](rag-evaluation)); LLM-as-judge guardrails; `llm4s-testkit` (scripted clients for application tests, [#1475](https://github.com/llm4s/llm4s/issues/1475)); `llm4s-provider-testkit` for provider authors | not verified | `Evaluator`, `RelevancyEvaluator` and `FactCheckingEvaluator` [S1] | not verified | not verified |
-| Frameworks and runtimes | Spring Boot 3 and 4 starter, every provider ([guide](spring-boot)), a Quarkus extension, not yet published ([guide](quarkus)), Micronaut and Helidon samples ([Micronaut](micronaut), [Helidon](helidon)), cats-effect ([guide](cats-effect)), ZIO ([guide](zio)), Pekko Streams ([guide](pekko)), Project Reactor ([guide](java-reactor)), a Kotlin coroutine API, a Java facade ([guide](java)); the versions each is tested with are in the [compatibility matrix](../reference/compatibility-matrix#tested-versions) | Spring Boot 3 and 4 starters and `@AiService`; example projects for Spring Boot, Quarkus, Helidon, Payara Micro, WildFly and Jakarta EE/MicroProfile [L2][L8] | Spring AI 2.0.x supports Spring Boot 4.0.x and 4.1.x [S9]; Spring Boot starters, for example for its MCP client and server [S3] | Spring Boot and Ktor integrations (both beta) [K1] | Built on Spring [E1] |
-| Java baseline | JDK 21: CI runs only JDK 21, and the agent runtime depends on Ox, whose jars are JDK 21 bytecode ([#1493](https://github.com/llm4s/llm4s/issues/1493)) | Its Spring Boot integration page states a minimum Java version, quoted in the note below the table [L8] | not verified | not verified | not verified |
-| Maturity | Pre-1.0: latest release v0.5.1; stability tiers (Frozen, Beta, Experimental) in the [v1 scope](../reference/v1-scope) | Latest release 1.22.0, 2026-10-08 [R1]; some modules, such as agents and guardrails, are marked experimental [L10][L11] | Latest GA release 2.0.1, 2026-08-21 [R2] | Latest release 1.3.0, 2026-09-24 [R3]; its Spring Boot, Ktor and planner agents are marked beta [K1] | Latest release 1.5.3, 2026-10-05 [R4] |
+| Frameworks and runtimes | Spring Boot 3 and 4 starter, every provider ([guide](spring-boot)), a Quarkus extension, built from source and outside the 1.0 scope ([guide](quarkus)), Micronaut and Helidon samples ([Micronaut](micronaut), [Helidon](helidon)), cats-effect ([guide](cats-effect)), ZIO ([guide](zio)), Pekko Streams ([guide](pekko)), Project Reactor ([guide](java-reactor)), a Kotlin coroutine API, a Java facade ([guide](java)); the versions each is tested with are in the [compatibility matrix](../reference/compatibility-matrix#tested-versions) | Spring Boot 3 and 4 starters and `@AiService`; example projects for Spring Boot, Quarkus, Helidon, Payara Micro, WildFly and Jakarta EE/MicroProfile [L2][L8] | Spring AI 2.0.x supports Spring Boot 4.0.x and 4.1.x [S9]; Spring Boot starters, for example for its MCP client and server [S3] | Spring Boot and Ktor integrations (both beta) [K1] | Built on Spring [E1] |
+| Java baseline | JDK 21: CI runs only JDK 21, and the agent runtime depends on Ox, whose jars are JDK 21 bytecode ([Scala and JDK support](../reference/v1-scope#scala-and-jdk-support)) | Its Spring Boot integration page states a minimum Java version, quoted in the note below the table [L8] | not verified | not verified | not verified |
+| Maturity | Pre-1.0: latest release v{{ site.data.project.latest_release }}; stability tiers (Frozen, Beta, Experimental) in the [v1 scope](../reference/v1-scope) | Latest release 1.22.0, 2026-10-08 [R1]; some modules, such as agents and guardrails, are marked experimental [L10][L11] | Latest GA release 2.0.1, 2026-08-21 [R2] | Latest release 1.3.0, 2026-09-24 [R3]; its Spring Boot, Ktor and planner agents are marked beta [K1] | Latest release 1.5.3, 2026-10-05 [R4] |
 
 Note on the *Java baseline* row: LangChain4j's Spring Boot integration page says "LangChain4j Spring Boot integration requires Java 17" [L8]. This is a statement about that project, quoted as fetched on 2026-10-11. <!-- doc-support: ignore -->
 
@@ -78,7 +78,7 @@ Plainly, as of the date above:
 - **A stable schema derivation.** `llm4s-schema-derivation` is Experimental, outside the 1.0 frozen surface.
 - **A smaller integration catalogue.** Vector stores for SQLite, PostgreSQL, Qdrant, Elasticsearch, OpenSearch, Redis
   and Valkey, against the long lists of LangChain4j and Spring AI. Quarkus has a [guide](quarkus) and a
-  JVM-mode extension, not yet published, without Dev Services or a Dev UI.
+  JVM-mode extension, built from source and outside the 1.0 scope, without Dev Services or a Dev UI.
 - **An MCP user guide.** The client and server exist; the guide is an open issue
   ([#1442](https://github.com/llm4s/llm4s/issues/1442)).
 - **No Scala 2.13 artifact.** The artifacts are Scala 3 only.

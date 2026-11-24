@@ -23,7 +23,14 @@ Enterprise-grade access control for RAG applications.
 
 ## Overview
 
-Permission-based RAG extends LLM4S with enterprise-grade access control for document retrieval. It enables you to:
+Permission-based RAG extends LLM4S with enterprise-grade access control for document retrieval. It is part of
+`llm4s-rag`, with the PostgreSQL `SearchIndex` in `org.llm4s.rag.permissions.pg`:
+
+```sbt
+libraryDependencies += "org.llm4s" %% "llm4s-rag" % "{{ site.data.project.latest_release }}"
+```
+
+It enables you to:
 
 - **Organize documents in collections** with hierarchical structure (e.g., `confluence/EN/archive`)
 - **Control who can search** with collection-level `queryableBy` permissions

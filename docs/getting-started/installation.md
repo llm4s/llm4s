@@ -27,7 +27,7 @@ Before installing LLM4S, ensure you have:
 
 - **Java Development Kit (JDK) 21**
 - **Scala 3.7.x** (llm4s {{ site.data.project.latest_release }} is built with 3.7.1)
-  - Scala 2.13: call-only, via the TASTy reader; see [Using LLM4S from Scala 2.13](scala-2-13)
+  - Scala 2.13: call-only, via the TASTy reader, best effort (not a supported configuration); see [Using LLM4S from Scala 2.13](scala-2-13)
 - **sbt 1.10.6** or higher
 - An API key from at least one LLM provider (OpenAI, Anthropic, Azure OpenAI, ...), or a local [Ollama](ollama-quickstart) server, which needs none
 
@@ -47,13 +47,6 @@ sbt version  # 1.10.6 or higher
 ---
 
 ## Add LLM4S to Your Project
-
-{: .warning }
-> **Artifact coordinates changed in 0.4.0.** Every published module now carries an
-> `llm4s-` prefix (`core` → `llm4s-core`, `workspaceClient` → `llm4s-workspace-client`,
-> and so on). Releases up to and including `0.3.4` remain available under the old names.
-> See the [migration guide](/reference/migration#artifact-coordinate-rename-v040) for the
-> full old → new table.
 
 ### SBT
 
@@ -130,7 +123,7 @@ configurations.all {
 ```
 
 > **Using Spring Boot, Ktor, or encountering dependency conflicts?**
-> See the full [Gradle integration guide](gradle) for dependency exclusion recipes
+> See the full [Gradle integration guide](gradle) for dependency alignment recipes
 > and the [dependency conflicts reference](/reference/dependency-conflicts).
 
 
@@ -142,9 +135,7 @@ No build at all: declare the dependency in the file.
 //> using scala 3.7.1
 //> using jvm 21
 //> using dep org.llm4s::llm4s-core:{{ site.data.project.latest_release }}
-{%- unless site.data.project.latest_release contains "0.4." %}
 //> using dep org.llm4s::llm4s-openai:{{ site.data.project.latest_release }}
-{%- endunless %}
 ```
 
 Add the provider module you use next to `llm4s-core` (`llm4s-openai` above). The
@@ -281,11 +272,9 @@ sbt run
 ```
 
 Pass `--llm4s_version` (or type the version at its prompt) so the project starts on
-{{ site.data.project.latest_release }}, then check the generated `build.sbt`: it needs `llm4s-core` **and at least one
-provider module** at that version, because since 0.5.0 `llm4s-core` ships no provider. The template is being
-moved to 0.5.x ([llm4s.g8#6](https://github.com/llm4s/llm4s.g8/pull/6)), which adds `llm4s-ollama` and
-`llm4s-openai` itself; a template from before that defaults to llm4s `0.4.0` and lists `llm4s-core` only, so add
-the provider you use, for example `"org.llm4s" %% "llm4s-openai" % "{{ site.data.project.latest_release }}"`.
+{{ site.data.project.latest_release }}. `llm4s-core` ships no provider, so the generated `build.sbt` adds
+`llm4s-ollama` and `llm4s-openai` at the same version; add the module of any other provider you use, for example
+`"org.llm4s" %% "llm4s-anthropic" % "{{ site.data.project.latest_release }}"`.
 
 The generated project has an sbt build, a logging backend, an `application.conf` with
 [named provider sections](configuration#named-provider-sections), a small sample program and its tests.
@@ -367,8 +356,9 @@ imports keep working; see the
 libraryDependencies += "org.llm4s" %% "llm4s-speech" % llm4sVersion
 ```
 
-Carries speech-to-text (Vosk for offline recognition, Whisper), text-to-speech (Tacotron 2),
-and the audio IO, conversion and validation helpers. **This is the module that brings Vosk**,
+Carries speech-to-text (Vosk for offline recognition, Whisper), text-to-speech (Tacotron 2), cloud
+text-to-speech (OpenAI, ElevenLabs, Azure) and speech-to-text (OpenAI, Azure) (selected with `SPEECH_TTS_MODEL` /
+`SPEECH_STT_MODEL`, see [Speech](../guide/speech)), and the audio IO, conversion and validation helpers. **This is the module that brings Vosk**,
 a 25 MB dependency that used to sit on every `llm4s-core` user's classpath — which is much of
 the point of the split. Package names are unchanged; see the
 [migration note](../reference/migration#slice-3-llm4s-speech).
@@ -469,7 +459,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-secrets-vault" % llm4sVersion
 Vault's KV secrets engine, caches it and reads it again every refresh interval, for a deployment that cannot run
 Vault Agent or a CSI driver to write the key to an `apiKeyFile`. It talks to Vault's HTTP API with llm4s's own
 HTTP client, so it brings no Vault SDK. See
-[Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation).
+[Secrets and key rotation](../guide/production-deployment#secrets-and-key-rotation).
 
 ### For API keys read from AWS Secrets Manager
 
@@ -482,7 +472,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-secrets-aws" % llm4sVersion
 from AWS Secrets Manager, caches it and reads it again every refresh interval, for a deployment that cannot run the
 Secrets Store CSI driver or External Secrets Operator to write the key to an `apiKeyFile`. It calls `GetSecretValue`
 with llm4s's own HTTP client and signs the request with Signature Version 4 itself, so it brings no AWS SDK. See
-[Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation).
+[Secrets and key rotation](../guide/production-deployment#secrets-and-key-rotation).
 
 ### For DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint
 
@@ -997,7 +987,7 @@ sbt run
 #### Ollama (Local)
 
 1. Install Ollama: [ollama.com](https://ollama.com)
-2. Pull a model: `ollama pull llama2`
+2. Pull a model: `ollama pull llama3`
 3. Start server: `ollama serve`
 4. No API key needed!
 
@@ -1104,7 +1094,7 @@ Now that LLM4S is installed:
 
 1. **[Write your first program →](first-example)** - Create a simple LLM application
 2. **[Configure providers →](configuration)** - Set up multiple LLM providers
-3. **[Explore examples →](/examples/)** - Browse 69 working examples
+3. **[Explore examples →](/examples/)** - Browse the working examples
 
 ---
 

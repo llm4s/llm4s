@@ -222,9 +222,9 @@ val result = manager.recordEntityFact(
 ```scala
 // Record external knowledge: `source` says where it came from
 val result = manager.recordKnowledge(
-  content = "The latest LLM4S version is 0.5.0",
-  source = "release-notes",
-  metadata = Map("channel" -> "stable")
+  content = "Orders over 50 EUR ship free",
+  source = "shipping-policy",
+  metadata = Map("region" -> "eu")
 )
 ```
 

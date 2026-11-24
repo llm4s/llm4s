@@ -47,9 +47,10 @@ nav_order: 4
 ## Migration rules
 
 `modules/scalafix-rules` holds semantic Scalafix rules that rewrite *user* code across llm4s's breaking changes
-([#2330](https://github.com/llm4s/llm4s/issues/2330)). They are not published yet: publishing them as
-`org.llm4s::llm4s-scalafix` with the release workflow, and the one-line command in each migration guide, are the
-rest of #2330.
+([#2330](https://github.com/llm4s/llm4s/issues/2330)). They are first published at **1.0**, as
+`org.llm4s::llm4s-scalafix`, with a one-line command in the 1.0 upgrade notes; 0.7.0 does not publish them. Until then
+they exist only as source in this repository (the `scalafixRules` project); the rewrites each rule makes, listed below,
+can also be applied by hand.
 
 `Llm4sMigrate_0_5` runs every rule for the [0.4.1 to 0.5.0 guide](../migrations/0-4-1-to-0-5-0):
 

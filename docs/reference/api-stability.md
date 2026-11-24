@@ -22,10 +22,11 @@ Binary compatibility is enforced between releases with [MiMa](https://github.com
 
 | Release type | Guarantee |
 |---|---|
-| **Before the baseline** (0.5.x now) | Still stabilising: any release, patch included, may break, with a CHANGELOG entry and a migration note and no `@deprecated` shim |
-| **Patch, after the baseline** (0.x.y to 0.x.z) | No binary-breaking changes in frozen modules |
-| **Minor, after the baseline** (0.x to 0.y) | Binary-breaking changes allowed, with a CHANGELOG entry and a migration note |
-| **1.0.0 and later** | Full SemVer: a MAJOR version for breaking changes |
+| **Before the baseline** (up to 0.7.0) | Still stabilising: any release, patch included, may break, with a CHANGELOG entry and a migration note and no `@deprecated` shim |
+| **From the baseline to 1.0** (0.7.0 to 1.0.0) | A patch release makes no binary-breaking change in a frozen module. A minor release may still break one, with a MiMa filter, a CHANGELOG *Breaking changes* line and a migration note, and no shim or `@deprecated` member |
+| **1.0.0 and later** | Full SemVer: a MAJOR version for breaking changes, after a deprecation |
+
+The 0.7.0 baseline makes every break visible and reviewed; the compatibility promise starts at 1.0.
 
 ---
 
@@ -49,7 +50,7 @@ none. A type in a module 1.0 does not freeze (anything Beta or Experimental in t
 
 `sbt stabilityTierCheck` (a CI quick check) fails the build for a top-level public type of a frozen
 module that has neither annotation or both, and for a Beta dialect that lives inside a frozen module
-and is not `@Experimental`: today the Mistral and Cohere dialects of `llm4s-openai-compatible`, listed in
+and is not `@Experimental`: today the Mistral, Cohere and xAI dialects of `llm4s-openai-compatible`, listed in
 `build.sbt`. It also fails for a public member of a `@Stable` type whose signature names an
 `@Experimental` type - a `def`, `val`, enum `case`, nested type or constructor parameter, unless it is `private`,
 `protected` or itself `@Experimental` - because renaming or reshaping the Experimental type would then break the
@@ -185,9 +186,8 @@ map is empty, so no frozen module has a baseline, `sbt mimaReportBinaryIssues` c
 No release so far has set one. 0.5.0, 0.5.1 and 0.6.0 are the releases with the split coordinates so far, and were
 published without a baseline. 0.4.1 and earlier are a single `llm4s-core` of the pre-modularisation code, so
 they are not usable baselines for the split modules: the packages they hold have since moved to other
-artifacts, and `llm4s-agent` and the provider modules do not exist there. The baseline is set at a pre-1.0
-release, version to be decided, once the designs are final
-([#1281](https://github.com/llm4s/llm4s/issues/1281)); until then nothing is frozen.
+artifacts, and `llm4s-agent` and the provider modules do not exist there. The baseline is **0.7.0**, for every
+frozen module ([#1281](https://github.com/llm4s/llm4s/issues/1281)); until it is set nothing is frozen.
 `llm4s-agent` takes the same baseline as the other frozen modules: [RFC 0001](../rfcs/0001-agent-baseline), which
 proposed a later one, was rejected once the graph runtime ([#1266](https://github.com/llm4s/llm4s/issues/1266)) was complete.
 
@@ -217,8 +217,8 @@ the file; they cannot be changed with `set`:
 5. Update this page and the CHANGELOG entry if the covered module list changes.
 
 Before the first run against the baseline, review the Beta parts that ship inside frozen modules, because
-[1.0 Scope](v1-scope) does not freeze them: `org.llm4s.assistant.*` (`llm4s-agent`) and the Mistral and
-Cohere dialect classes (`llm4s-openai-compatible`). Either exclude them with a documented filter or
+[1.0 Scope](v1-scope) does not freeze them: `org.llm4s.assistant.*` (`llm4s-agent`) and the Mistral, Cohere
+and xAI dialect classes (`llm4s-openai-compatible`). Either exclude them with a documented filter or
 decide that they are frozen too. A module that must miss the shared baseline is held back with
 `"<module>" -> None` in `mimaBaselineOverrides` and given `Some("X.Y.Z")` later; it stays a frozen module
 meanwhile, so the stability, dependency and tier checks keep covering it. No module is planned to: `llm4s-agent`
@@ -233,9 +233,10 @@ version returns, CI must run it cross-built (with sbt's `+` prefix) to check eac
 
 Once a baseline is set, a change to a frozen module that breaks binary compatibility needs:
 
-1. A `@deprecated` version of the old API pointing to the new one, where that is possible
-2. A `ProblemFilters.exclude` entry in the module's `mimaBinaryIssueFilters`, with a comment saying why the break is intentional
-3. An entry in `CHANGELOG.md` under `[Unreleased]`
+1. A `ProblemFilters.exclude` entry in the module's `mimaBinaryIssueFilters`, with a comment saying why the break is intentional
+2. A line under `### Breaking changes` in `CHANGELOG.md`'s `[Unreleased]`, and a note in the [Migration Guide](migration)
+3. From 1.0 only: a `@deprecated` version of the old API pointing to the new one, kept until the next major release.
+   Between the baseline and 1.0 there is no `@deprecated` member and no shim: the API is fixed outright
 
 `ProblemFilters` is not in sbt's default imports, so `build.sbt` needs
 `import com.typesafe.tools.mima.core._` at the top before a filter compiles.
@@ -243,7 +244,7 @@ Once a baseline is set, a change to a frozen module that breaks binary compatibi
 ```scala
 // build.sbt, in the module's settings
 mimaBinaryIssueFilters ++= Seq(
-  // Agent.run gained a parameter; the old overload is deprecated, not removed.
+  // Agent.run gained a parameter (a minor release between 0.7.0 and 1.0); migration note: "Agent.run takes ...".
   ProblemFilters.exclude[DirectMissingMethodProblem]("org.llm4s.agent.Agent.run")
 )
 ```
