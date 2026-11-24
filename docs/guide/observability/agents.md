@@ -150,7 +150,8 @@ spans are named after the event: `graph.<event>` for the runtime's events (`grap
 Every event's data holds `threadId`, `runId`, `seq`, `checkpointId`, `taskId` and `nodeId`, and the event's own
 fields: for an agent event `name`, `version` and `payload`. Output token counts include thinking tokens, as billed.
 In Langfuse, a top-level run also creates the trace itself (name `LLM4S Agent Run`, session id = the thread id,
-`userId` `llm4s-user`, `public: true`, tags `llm4s`, `agent`, `conversation`) and adds one span per message of the
+`userId` the run's `RunConfig.principal`, left out for a run that names none, `public: false` unless
+`llm4s.tracing.langfuse.public = true`, tags `llm4s`, `agent`, `conversation`) and adds one span per message of the
 turn under the run (`User Input <n>`, `LLM Generation <n>`, `System Message <n>`, or the message's class name).
 
 Only a tool call spans its duration. A model call's span is a point at the time its result was committed; the call's
@@ -178,7 +179,7 @@ thread's earlier runs, so per-run figures add up; `agent` is the agent active wh
 
 | Where | Content recorded | Setting |
 |---|---|---|
-| Durable events (`chat`, `execute_tool`, `graph.*`, `agent.*` spans) | None of the messages, tool arguments or results. They do carry the run's `tenantId` and `principal` (`graph.run_started`, `graph.run_resumed`, `graph.run_recovered`) and failure messages (`graph.task_failed`, `graph.run_failed`; for a guardrail block `Guardrail '<name>' blocked: <reason>`) | none |
+| Durable events (`chat`, `execute_tool`, `graph.*`, `agent.*` spans) | None of the messages, tool arguments or results. They do carry the run's `tenantId` and `principal` (`graph.run_started`, `graph.run_resumed`, `graph.run_recovered`) and failure messages (`graph.task_failed`, `graph.run_failed`; for a guardrail block `Guardrail '<name>' blocked`, without its reason) | none |
 | OpenTelemetry `invoke_agent` | Message count only | `llm4s.tracing.opentelemetry.captureContent` (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`, default `false`) applies to `TracingLLMClient`'s spans and the `TraceEvent.AgentInitialized` and `TraceEvent.ToolExecuted` events, not to an agent run's spans |
 | Langfuse | `AgentRunEnded.messages`: the turn's messages from its user message on, as the trace's input and output and one span per message. Empty when blocked, cancelled, timed out or failed | none in the backend; filter them out as below |
 | Console | Metadata only | `llm4s.tracing.console.captureContent` (default `false`) |
