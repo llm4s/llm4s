@@ -44,13 +44,13 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
     ).withHandler(_ => Right(EmptyResult(success = true))).buildSafe()
   }
 
-  // ============ ToolFunction.toOpenAITool ============
+  // ============ ToolFunction.toolDefinition ============
 
-  "ToolFunction.toOpenAITool" should "generate correct OpenAI format" in {
+  "ToolFunction.toolDefinition" should "generate correct OpenAI format" in {
     createGreetingTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val json = tool.toOpenAITool()
+        val json = tool.toolDefinition(strict = true)
         json("type").str shouldBe "function"
         json("function")("name").str shouldBe "greet"
         json("function")("description").str shouldBe "Creates a greeting message"
@@ -61,7 +61,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
 
   it should "set strict to true by default" in {
     createGreetingTool()
-      .map(_.toOpenAITool())
+      .map(_.toolDefinition(strict = true))
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         json => json("function")("strict").bool shouldBe true
@@ -70,7 +70,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
 
   it should "allow setting strict to false" in {
     createGreetingTool()
-      .map(_.toOpenAITool(strict = false))
+      .map(_.toolDefinition(strict = false))
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         json => json("function")("strict").bool shouldBe false
@@ -79,7 +79,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
 
   it should "include parameter schema" in {
     createGreetingTool()
-      .map(_.toOpenAITool())
+      .map(_.toolDefinition(strict = true))
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         json => {
@@ -121,7 +121,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
           result.isLeft shouldBe true
           val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
           error shouldBe a[ToolCallError.HandlerError]
-          error.getMessage should include("intentional failure")
+          error.message should include("intentional failure")
         }
       )
   }
@@ -134,7 +134,7 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
         result.isLeft shouldBe true
         val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
         error shouldBe a[ToolCallError.NullArguments]
-        error.getMessage should include("null arguments")
+        error.message should include("null arguments")
       }
     )
   }
@@ -161,89 +161,79 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  // ============ ToolFunction.executeEnhanced ============
+  // ============ One handler error type (#2815) ============
 
-  "ToolFunction.executeEnhanced" should "execute with enhanced error reporting" in {
-    val schema = Schema
-      .`object`[Map[String, Any]]("Params")
-      .withProperty(Schema.property("a", Schema.number("First number")))
-      .withProperty(Schema.property("b", Schema.number("Second number")))
-
+  private def adder(handler: SafeParameterExtractor => Either[ToolHandlerError, MathResult]) =
     ToolBuilder[Map[String, Any], MathResult](
       "add",
       "Adds two numbers",
-      schema
-    ).withHandler(_ => Right(MathResult(0))) // Original handler not used
-      .buildSafe()
-      .fold(
-        e => fail(s"Tool creation failed: ${e.formatted}"),
-        tool => {
-          val result = tool.executeEnhanced(
-            ujson.Obj("a" -> 5, "b" -> 3),
-            extractor =>
-              for {
-                a <- extractor.getDoubleEnhanced("a").left.map(List(_))
-                b <- extractor.getDoubleEnhanced("b").left.map(List(_))
-              } yield MathResult(a + b)
-          )
-          result.isRight shouldBe true
-          result.map(json => json("result").num) shouldBe Right(8.0)
-        }
-      )
+      Schema
+        .`object`[Map[String, Any]]("Params")
+        .withProperty(Schema.property("a", Schema.number("First number")))
+        .withProperty(Schema.property("b", Schema.number("Second number")))
+    ).withHandler(handler).buildSafe().fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
+
+  private def sum = adder { args =>
+    for {
+      a <- args.getDouble("a")
+      b <- args.getDouble("b")
+      _ <- Either.cond(a + b < 100, (), "the sum must stay below 100")
+    } yield MathResult(a + b)
   }
 
-  it should "return InvalidArguments for parameter errors" in {
-    val schema = Schema
-      .`object`[Map[String, Any]]("Params")
-      .withProperty(Schema.property("required_field", Schema.string("Required")))
-
-    ToolBuilder[Map[String, Any], GreetingResult](
-      "test_tool",
-      "Test tool",
-      schema
-    ).withHandler(_ => Right(GreetingResult("")))
-      .buildSafe()
-      .fold(
-        e => fail(s"Tool creation failed: ${e.formatted}"),
-        tool => {
-          val result = tool.executeEnhanced(
-            ujson.Obj(), // Missing required field
-            extractor => extractor.getStringEnhanced("required_field").left.map(List(_)).map(GreetingResult(_))
-          )
-          result.isLeft shouldBe true
-          val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
-          error shouldBe a[ToolCallError.InvalidArguments]
-          error.getMessage should include("missing")
-        }
-      )
+  "A handler" should "read its arguments and report its own failure in one for comprehension" in {
+    sum.execute(ujson.Obj("a" -> 5, "b" -> 3)).map(_("result").num) shouldBe Right(8.0)
   }
 
-  it should "handle null input for zero-parameter tools" in {
-    createZeroParamTool().fold(
-      e => fail(s"Tool creation failed: ${e.formatted}"),
-      tool => {
-        val result = tool.executeEnhanced(
-          ujson.Null,
-          _ => Right(EmptyResult(success = true))
-        )
-        result.isRight shouldBe true
-      }
+  it should "have a getter's error reported as InvalidArguments, with the parameter error itself" in {
+    sum.execute(ujson.Obj("a" -> 5)) shouldBe Left(
+      ToolCallError.InvalidArguments("add", List(ToolParameterError.MissingParameter("b", "number", List("a"))))
+    )
+    sum.execute(ujson.Obj("a" -> "five", "b" -> 3)) shouldBe Left(
+      ToolCallError.InvalidArguments("add", List(ToolParameterError.TypeMismatch("a", "number", "string")))
     )
   }
 
-  it should "return NullArguments for null input with required params" in {
-    createGreetingTool().fold(
-      e => fail(s"Tool creation failed: ${e.formatted}"),
-      tool => {
-        val result = tool.executeEnhanced(
-          ujson.Null,
-          extractor => extractor.getStringEnhanced("name").left.map(List(_)).map(GreetingResult(_))
-        )
-        result.isLeft shouldBe true
-        val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
-        error shouldBe a[ToolCallError.NullArguments]
-      }
+  it should "have its own message reported as HandlerError" in {
+    sum.execute(ujson.Obj("a" -> 60, "b" -> 60)) shouldBe
+      Left(ToolCallError.HandlerError("add", "the sum must stay below 100"))
+  }
+
+  it should "have every error of validateRequired listed, one per parameter, in the JSON the model reads" in {
+    val checked = adder { args =>
+      args
+        .validateRequired("a" -> ToolParameterType.Number, "b" -> ToolParameterType.Number)
+        .map(_ => MathResult(0))
+    }
+    val error = checked.execute(ujson.Obj("a" -> "x")).left.toOption.get
+
+    error shouldBe ToolCallError.InvalidArguments(
+      "add",
+      List(
+        ToolParameterError.TypeMismatch("a", "number", "string"),
+        ToolParameterError.MissingParameter("b", "number", List("a"))
+      )
     )
+    val json = ToolCallErrorJson.toJson(error)
+    json("errorType").str shouldBe "invalid_arguments"
+    json("parameterErrors").arr.map(e => e("parameterName").str -> e("kind").str).toSeq shouldBe
+      Seq("a" -> "type_mismatch", "b" -> "missing_parameter")
+  }
+
+  it should "be given the call it runs for, structured errors included" in {
+    val keyed = adder(args =>
+      args.call.map(_.idempotencyKey).toRight("no call").flatMap(_ => args.getDouble("a")).map(MathResult(_))
+    )
+    keyed.execute(ujson.Obj(), ToolCallInfo("call-1", "key-1")) shouldBe Left(
+      ToolCallError.InvalidArguments("add", List(ToolParameterError.MissingParameter("a", "number", Nil)))
+    )
+    keyed.execute(ujson.Obj("a" -> 1)) shouldBe Left(ToolCallError.HandlerError("add", "no call"))
+  }
+
+  "ToolFunction" should "have no second way to execute that ignores its handler" in {
+    assertTypeError("""sum.executeEnhanced(ujson.Obj(), _ => Right(MathResult(0)))""")
+    assertTypeError("""SafeParameterExtractor.enhanced(ujson.Obj())""")
+    assertTypeError("""SafeParameterExtractor(ujson.Obj()).getStringEnhanced("x")""")
   }
 
   // ============ ToolBuilder ============

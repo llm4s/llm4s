@@ -194,10 +194,11 @@ object TestingWithTestkitGuideSpec {
 
   def packingAdvice(client: LLMClient, city: String): Result[String] =
     for {
-      tool   <- temperatureTool
-      agent  <- Agent.builder("packing-assistant", client).withTools(new ToolRegistry(Seq(tool))).build()
-      run    <- agent.run(s"What should I pack for $city today?")
-      answer <- run.answer.toRight(ProcessingError("packing-advice", s"the run did not complete: ${run.status}"))
+      tool     <- temperatureTool
+      registry <- ToolRegistry.of(Seq(tool))
+      agent    <- Agent.builder("packing-assistant", client).withTools(registry).build()
+      run      <- agent.run(s"What should I pack for $city today?")
+      answer   <- run.answer.toRight(ProcessingError("packing-advice", s"the run did not complete: ${run.status}"))
     } yield answer
 
   val temperatureSchema: ObjectSchema[Temperature] = ObjectSchema[Temperature](

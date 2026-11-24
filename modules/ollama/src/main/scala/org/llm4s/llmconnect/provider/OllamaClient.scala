@@ -438,7 +438,7 @@ class OllamaClient(
       "options"  -> opts
     )
     if (options.tools.nonEmpty)
-      body("tools") = ujson.Arr.from(options.tools.map(t => OllamaClient.encodeTool(t.toOpenAITool(strict = false))))
+      body("tools") = ujson.Arr.from(options.tools.map(t => OllamaClient.encodeTool(t.toolDefinition(strict = false))))
     options.responseFormat.foreach(rf => body("format") = OllamaClient.encodeFormat(rf))
     think.think.foreach(value => body("think") = value)
     body

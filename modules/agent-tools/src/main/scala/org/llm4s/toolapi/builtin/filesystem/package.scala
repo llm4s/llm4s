@@ -32,10 +32,11 @@ package org.llm4s.toolapi.builtin
  *   readFile <- ReadFileTool.toolSafe
  *   listDir  <- ListDirectoryTool.toolSafe
  *   fileInfo <- FileInfoTool.toolSafe
- * } yield new ToolRegistry(Seq(readFile, listDir, fileInfo))
+ *   registry <- ToolRegistry.of(Seq(readFile, listDir, fileInfo))
+ * } yield registry
  *
  * // Or use the convenience val
- * readOnlyToolsSafe.map(tools => new ToolRegistry(tools))
+ * readOnlyToolsSafe.flatMap(ToolRegistry.of)
  *
  * // Tools with custom restrictions
  * val config = FileConfig(
@@ -46,7 +47,8 @@ package org.llm4s.toolapi.builtin
  * for {
  *   readFile <- ReadFileTool.createSafe(config)
  *   listDir  <- ListDirectoryTool.createSafe(config)
- * } yield new ToolRegistry(Seq(readFile, listDir))
+ *   registry <- ToolRegistry.of(Seq(readFile, listDir))
+ * } yield registry
  *
  * // Write tool with explicit allowlist
  * val writeConfig = WriteConfig(
@@ -56,7 +58,8 @@ package org.llm4s.toolapi.builtin
  *
  * for {
  *   writeTool <- WriteFileTool.createSafe(writeConfig)
- * } yield new ToolRegistry(Seq(writeTool))
+ *   registry <- ToolRegistry.of(Seq(writeTool))
+ * } yield registry
  * }}}
  */
 package object filesystem {

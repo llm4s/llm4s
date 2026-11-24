@@ -216,7 +216,7 @@ class MCPServer(
       MCPTool(
         name = tool.name,
         description = tool.description,
-        inputSchema = tool.toOpenAITool(strict = false)("function")("parameters")
+        inputSchema = tool.toolDefinition(strict = false)("function")("parameters")
       )
     }
     JsonRpcResponse(id = request.id, result = Some(upickle.default.writeJs(ToolsListResponse(mcpTools))))
@@ -252,9 +252,9 @@ class MCPServer(
           case Left(error) =>
             // A tool-level failure is a normal result flagged isError (MCP specification, tools/call); a JSON-RPC
             // error is for a protocol problem such as an unknown tool.
-            logger.error(s"Tool execution failed: $toolName - ${error.getMessage}")
+            logger.error(s"Tool execution failed: $toolName - ${error.message}")
             val response = ToolsCallResponse(
-              content = Seq(MCPContent(`type` = "text", text = Some(error.getMessage))),
+              content = Seq(MCPContent(`type` = "text", text = Some(error.message))),
               isError = Some(true)
             )
             JsonRpcResponse(id = request.id, result = Some(upickle.default.writeJs(response)))

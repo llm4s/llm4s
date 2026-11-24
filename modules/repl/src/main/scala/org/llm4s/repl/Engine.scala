@@ -69,8 +69,8 @@ private[repl] object Engine {
                     out.println(Render.toolResult(rendered))
                     rendered
                   case Left(failure) =>
-                    out.println(Render.toolFailure(failure.getFormattedMessage))
-                    ujson.Obj("error" -> ujson.Str(failure.getFormattedMessage)).render()
+                    out.println(Render.toolFailure(failure.formatted))
+                    ujson.Obj("error" -> ujson.Str(failure.formatted)).render()
                 }
                 ToolMessage(content, call.id)
               }

@@ -7,7 +7,8 @@ import org.llm4s.annotation.Stable
  *
  * Each concrete subclass corresponds to a JSON Schema type and can be converted
  * to a `ujson.Value` for inclusion in OpenAI-compatible tool definitions via
- * [[SchemaDefinition.toJsonSchema]].
+ * [[SchemaDefinition.toJsonSchema]]. [[AnyOfSchema]] is a union of schemas, and
+ * [[RawJsonSchema]] any JSON Schema this model has no case for.
  */
 @Stable
 sealed trait SchemaDefinition[T] {
@@ -15,8 +16,8 @@ sealed trait SchemaDefinition[T] {
   /**
    * Serialise this schema to a JSON Schema `ujson.Value`.
    *
-   * @param strict When `true`, all object properties are treated as required,
-   *               matching OpenAI strict-mode tool definitions.
+   * @param strict When `true`, all object properties are listed as required and the optional
+   *               ones accept `null`, matching OpenAI strict-mode tool definitions.
    */
   def toJsonSchema(strict: Boolean): ujson.Value
 }
@@ -73,15 +74,6 @@ final case class StringSchema private (
 
   /** Set or clear the maximum allowed string length (inclusive). */
   def withMaxLength(max: Option[Int]): StringSchema = copy(maxLength = max)
-
-  /**
-   * Add minimum and/or maximum length constraints.
-   *
-   * @param min Optional minimum length (inclusive)
-   * @param max Optional maximum length (inclusive)
-   */
-  def withLengthConstraints(min: Option[Int] = None, max: Option[Int] = None): StringSchema =
-    copy(minLength = min, maxLength = max)
 }
 
 object StringSchema {
@@ -131,24 +123,6 @@ final case class NumberSchema private (
 
     base
   }
-
-  /**
-   * Add inclusive minimum and/or maximum range constraints.
-   *
-   * @param min Optional inclusive lower bound
-   * @param max Optional inclusive upper bound
-   */
-  def withRange(min: Option[Double] = None, max: Option[Double] = None): NumberSchema =
-    copy(minimum = min, maximum = max)
-
-  /**
-   * Add exclusive minimum and/or maximum range constraints.
-   *
-   * @param min Optional exclusive lower bound
-   * @param max Optional exclusive upper bound
-   */
-  def withExclusiveRange(min: Option[Double] = None, max: Option[Double] = None): NumberSchema =
-    copy(exclusiveMinimum = min, exclusiveMaximum = max)
 
   /**
    * Require the value to be an integer multiple of `multiple`.
@@ -240,24 +214,6 @@ final case class IntegerSchema private (
 
     base
   }
-
-  /**
-   * Add inclusive minimum and/or maximum range constraints.
-   *
-   * @param min Optional inclusive lower bound
-   * @param max Optional inclusive upper bound
-   */
-  def withRange(min: Option[Int] = None, max: Option[Int] = None): IntegerSchema =
-    copy(minimum = min, maximum = max)
-
-  /**
-   * Add exclusive minimum and/or maximum range constraints.
-   *
-   * @param min Optional exclusive lower bound
-   * @param max Optional exclusive upper bound
-   */
-  def withExclusiveRange(min: Option[Int] = None, max: Option[Int] = None): IntegerSchema =
-    copy(exclusiveMinimum = min, exclusiveMaximum = max)
 
   /**
    * Require the value to be an integer multiple of `multiple`.
@@ -369,15 +325,6 @@ final case class ArraySchema[A] private (
   }
 
   /**
-   * Add minimum and/or maximum array size constraints.
-   *
-   * @param min Optional minimum number of items
-   * @param max Optional maximum number of items
-   */
-  def withSizeConstraints(min: Option[Int] = None, max: Option[Int] = None): ArraySchema[A] =
-    copy(minItems = min, maxItems = max)
-
-  /**
    * Require all array elements to be unique.
    *
    * @param unique `true` to enforce uniqueness (default)
@@ -452,9 +399,11 @@ object PropertyDefinition {
 /**
  * Object schema with a fixed set of typed properties.
  *
- * In strict mode all properties are emitted as required regardless of
- * the individual [[PropertyDefinition.required]] flag, matching the
- * behaviour expected by OpenAI strict-mode tool definitions.
+ * In strict mode all properties are emitted as required, as OpenAI strict-mode
+ * tool definitions demand, and a property whose [[PropertyDefinition.required]]
+ * flag is `false` is emitted as nullable: the model sends `null` where it would
+ * have left the property out, which `SafeParameterExtractor`'s `getOptional*`
+ * reads as absent.
  *
  * @param description          Human-readable description shown to the LLM
  * @param properties           Ordered sequence of property definitions
@@ -469,10 +418,13 @@ final case class ObjectSchema[T] private (
   def toJsonSchema(strict: Boolean): ujson.Value = {
     val props = ujson.Obj()
 
-    // in strict mode all properties are required
+    // in strict mode all properties are required, so an optional one is one that may be null
     val required = (if (strict) properties else properties.filter(_.required)).map(_.name).distinct
 
-    properties.foreach(prop => props(prop.name) = prop.schema.toJsonSchema(strict))
+    properties.foreach { prop =>
+      val rendered = prop.schema.toJsonSchema(strict)
+      props(prop.name) = if (strict && !prop.required) JsonSchemaJson.nullable(rendered) else rendered
+    }
 
     ujson.Obj(
       "type"                 -> ujson.Str("object"),
@@ -533,7 +485,8 @@ object ObjectSchema {
 /**
  * Nullable schema wrapper that widens an existing schema to also accept `null`.
  *
- * Emits `"type": ["<original>", "null"]` in the JSON Schema output.
+ * Emits `"type": ["<original>", "null"]` in the JSON Schema output, adds `null` to an `enum`, and adds a
+ * `{"type": "null"}` alternative to an `anyOf`.
  *
  * @param underlying The non-nullable schema to wrap
  */
@@ -541,30 +494,117 @@ object ObjectSchema {
 case class NullableSchema[T](
   underlying: SchemaDefinition[T]
 ) extends SchemaDefinition[Option[T]] {
-  def toJsonSchema(strict: Boolean): ujson.Value = {
-    val schema    = underlying.toJsonSchema(strict).obj
-    val typeField = schema.get("type")
+  def toJsonSchema(strict: Boolean): ujson.Value = JsonSchemaJson.nullable(underlying.toJsonSchema(strict))
+}
 
-    typeField match {
-      case Some(ujson.Str(typeValue)) =>
-        // Replace type field with array of types
-        schema("type") = ujson.Arr(ujson.Str(typeValue), ujson.Str("null"))
-      case Some(arr: ujson.Arr) =>
-        // Add null to the existing type array, unless it is already there
-        val nullType = ujson.Str("null")
-        schema("type") = if (arr.value.contains(nullType)) arr else ujson.Arr.from(arr.value :+ nullType)
+/**
+ * A union: a value that matches at least one of `alternatives` (JSON Schema `anyOf`).
+ *
+ * Emits `{"description": ..., "anyOf": [...]}`. There is always at least one alternative: an `anyOf` with none
+ * matches nothing.
+ *
+ * @param description  Human-readable description shown to the LLM
+ * @param alternatives The schemas a value may match, in order
+ * @tparam T The Scala type the union reads as (unused at runtime)
+ */
+@Stable
+final case class AnyOfSchema[T] private (
+  description: String,
+  alternatives: Seq[SchemaDefinition[_]]
+) extends SchemaDefinition[T] {
+  def toJsonSchema(strict: Boolean): ujson.Value =
+    ujson.Obj(
+      "description" -> ujson.Str(description),
+      "anyOf"       -> ujson.Arr.from(alternatives.map(_.toJsonSchema(strict)))
+    )
+
+  /** Replace the description shown to the LLM. */
+  def withDescription(description: String): AnyOfSchema[T] = copy(description = description)
+
+  /** Replace the alternatives; at least one. */
+  def withAlternatives(first: SchemaDefinition[_], rest: SchemaDefinition[_]*): AnyOfSchema[T] =
+    copy(alternatives = first +: rest)
+
+  /** Append one more alternative. */
+  def withAlternative(alternative: SchemaDefinition[_]): AnyOfSchema[T] =
+    copy(alternatives = alternatives :+ alternative)
+}
+
+object AnyOfSchema {
+
+  /** Creates an [[AnyOfSchema]] of at least one alternative; [[Schema.anyOf]] is the usual way in. */
+  def apply[T](description: String, first: SchemaDefinition[_], rest: SchemaDefinition[_]*): AnyOfSchema[T] =
+    new AnyOfSchema[T](description, first +: rest)
+}
+
+/**
+ * A JSON Schema written out as JSON, for what the other cases cannot express: `$ref`, `oneOf`, `pattern`, a
+ * free-form object, a schema received from elsewhere (an MCP server's).
+ *
+ * It is emitted as it was written, whatever `strict` is: nothing in it is made required or nullable. Whether a
+ * provider accepts it, and whether an agent's argument validator supports its keywords, is for the caller to know.
+ *
+ * @param json The JSON Schema, an object
+ */
+@Stable
+final case class RawJsonSchema private (
+  private val schema: ujson.Obj
+) extends SchemaDefinition[ujson.Value] {
+
+  /** The JSON Schema; a fresh copy each call, since `ujson` values are mutable. */
+  def json: ujson.Obj = ujson.copy(schema).obj
+
+  def toJsonSchema(strict: Boolean): ujson.Value = json
+
+  /** Replace the JSON Schema. */
+  def withJson(json: ujson.Obj): RawJsonSchema = RawJsonSchema(json)
+}
+
+object RawJsonSchema {
+
+  /** Creates a [[RawJsonSchema]] from a copy of `json`; [[Schema.raw]] is the usual way in. */
+  def apply(json: ujson.Obj): RawJsonSchema = new RawJsonSchema(ujson.copy(json).obj)
+}
+
+/** Operations on rendered JSON Schema that more than one schema case, and `llm4s-schema-derivation`, share. */
+private[llm4s] object JsonSchemaJson {
+
+  private val NullType: ujson.Value = ujson.Str("null")
+
+  /**
+   * `schema` widened to accept `null`: one more `anyOf` alternative, or `null` added to its `type` (and to its
+   * `enum`, since a nullable enum is one of its values or null). A schema with neither, which only
+   * [[RawJsonSchema]] writes, becomes an `anyOf` of itself and null; the empty schema already accepts null.
+   * Widening twice changes nothing.
+   */
+  def nullable(schema: ujson.Value): ujson.Value = {
+    val widened = ujson.Obj.from(schema.obj)
+    (widened.value.get("anyOf"), widened.value.get("type")) match {
+      case (Some(alternatives: ujson.Arr), _) =>
+        val nullAlternative = ujson.Obj("type" -> NullType)
+        if (!alternatives.value.contains(nullAlternative))
+          widened("anyOf") = ujson.Arr.from(alternatives.value :+ nullAlternative)
+        widened
+      case (_, Some(declared)) =>
+        declared match {
+          case ujson.Str(name) => widened("type") = ujson.Arr(ujson.Str(name), NullType)
+          case names: ujson.Arr =>
+            if (!names.value.contains(NullType)) widened("type") = ujson.Arr.from(names.value :+ NullType)
+          case _ => ()
+        }
+        // a nullable enum is one of its values, or null
+        widened.value.get("enum") match {
+          case Some(values: ujson.Arr) if !values.value.contains(ujson.Null) =>
+            widened("enum") = ujson.Arr.from(values.value :+ ujson.Null)
+          case _ => ()
+        }
+        widened
+      case _ if widened.value.isEmpty => widened
       case _ =>
-        // Create new type array if none exists
-        schema("type") = ujson.Arr(ujson.Str("null"))
+        val union = ujson.Obj()
+        widened.value.get("description").foreach(d => union("description") = d)
+        union("anyOf") = ujson.Arr(widened, ujson.Obj("type" -> NullType))
+        union
     }
-
-    // a nullable enum is one of its values, or null
-    schema.get("enum") match {
-      case Some(values: ujson.Arr) if !values.value.contains(ujson.Null) =>
-        schema("enum") = ujson.Arr.from(values.value :+ ujson.Null)
-      case _ => ()
-    }
-
-    ujson.Obj.from(schema)
   }
 }

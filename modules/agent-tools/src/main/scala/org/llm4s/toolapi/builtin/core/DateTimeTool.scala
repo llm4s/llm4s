@@ -48,7 +48,7 @@ object DateTimeResult {
  * {{{
  * import org.llm4s.toolapi.builtin.core.DateTimeTool
  *
- * val tools = new ToolRegistry(Seq(DateTimeTool.tool))
+ * val tools = ToolRegistry.of(Seq(DateTimeTool.tool))
  * agent.run("What is the current time in Tokyo?", tools)
  * }}}
  */
@@ -121,8 +121,8 @@ object DateTimeTool {
       schema = schema
     ).withHandler { extractor =>
       for {
-        timezoneParam <- extractor.getOptionalString("timezone").left.map(_.getMessage)
-        formatParam   <- extractor.getOptionalString("format").left.map(_.getMessage)
+        timezoneParam <- extractor.getOptionalString("timezone")
+        formatParam   <- extractor.getOptionalString("format")
         timezone = timezoneParam.getOrElse("UTC")
         format <- parseFormat(formatParam.getOrElse("iso"))
         zoneId <- Try(ZoneId.of(timezone)).toEither.left.map(e => s"Invalid timezone '$timezone': ${e.getMessage}")

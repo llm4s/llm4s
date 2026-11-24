@@ -31,7 +31,7 @@ private[schema] object MethodTools {
         name,
         description,
         parameters,
-        extractor => Tool.decodeFields(parameters, extractor.params, readers).left.map(Tool.message).flatMap(invoke)
+        extractor => Tool.decodeFields(parameters, extractor.params, readers).left.map(Tool.refused).flatMap(invoke)
       )
     }
   }

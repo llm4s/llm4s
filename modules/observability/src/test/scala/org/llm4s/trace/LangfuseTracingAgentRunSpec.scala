@@ -110,9 +110,13 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
     val tracing = new RecordingLangfuseTracing(http)
 
     val result = for {
-      tool  <- echoTool
-      agent <- Agent.builder("assistant", client()).withTools(new ToolRegistry(Seq(tool))).withTracing(tracing).build()
-      done  <- agent.run("Echo hello")
+      tool <- echoTool
+      agent <- Agent
+        .builder("assistant", client())
+        .withTools(ToolRegistry.of(Seq(tool)).toOption.get)
+        .withTracing(tracing)
+        .build()
+      done <- agent.run("Echo hello")
     } yield done
 
     result.map(_.status) shouldBe Right(AgentStatus.Completed("Echoed."))

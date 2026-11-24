@@ -71,7 +71,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe().fold(e => fail(e.formatted), identity)
 
   private def agentWith(client: LLMClient, tools: org.llm4s.toolapi.ToolFunction[?, ?]*): AgentBuilder =
-    Agent.builder("assistant", client).withTools(new ToolRegistry(tools))
+    Agent.builder("assistant", client).withTools(ToolRegistry.of(tools).toOption.get)
 
   final private class Gathered(runs: Int):
     val events = new CopyOnWriteArrayList[StreamEvent]()
@@ -320,7 +320,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val client = Scripted(Right(toolCallCompletion), Left(NetworkError("down", None, "test")), Right(answer("done")))
     val agent = Agent
       .builder("assistant", client)
-      .withTools(new ToolRegistry(Seq(echoTool)))
+      .withTools(ToolRegistry.of(Seq(echoTool)).toOption.get)
       .withRuntime(runtime)
       .build()
       .fold(e => fail(e.message), identity)
@@ -343,7 +343,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     )
     val agent = Agent
       .builder("assistant", client)
-      .withTools(new ToolRegistry(Seq(echoTool)))
+      .withTools(ToolRegistry.of(Seq(echoTool)).toOption.get)
       .withRuntime(runtime)
       .build()
       .fold(e => fail(e.message), identity)

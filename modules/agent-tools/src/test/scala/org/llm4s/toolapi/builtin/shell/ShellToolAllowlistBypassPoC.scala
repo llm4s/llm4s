@@ -24,7 +24,12 @@ object ShellToolAllowlistBypassPoC {
       .createSafe(ShellConfig(allowedCommands = Seq("echo")))
       .fold(
         err => Left(s"Tool creation failed: ${err.formatted}"),
-        tool => tool.handler(SafeParameterExtractor(ujson.Obj("command" -> payload))).map(_.toString())
+        tool =>
+          tool
+            .handler(SafeParameterExtractor(ujson.Obj("command" -> payload)))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
+            .map(_.toString())
       )
 
   def run(

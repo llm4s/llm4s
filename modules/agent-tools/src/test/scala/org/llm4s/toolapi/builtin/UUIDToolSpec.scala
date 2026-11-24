@@ -42,7 +42,7 @@ class UUIDToolSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "expose count as an integer and format as an enum of exactly standard and compact" in {
-    val properties = tool.toOpenAITool(strict = false)("function")("parameters")("properties")
+    val properties = tool.toolDefinition(strict = false)("function")("parameters")("properties")
     properties("count")("type").str shouldBe "integer"
     properties("format")("type").str shouldBe "string"
     properties("format")("enum").arr.map(_.str).toSet shouldBe Set("standard", "compact")

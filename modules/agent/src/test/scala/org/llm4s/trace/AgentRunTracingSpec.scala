@@ -105,7 +105,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
   private def traced(client: LLMClient, tracing: Tracing): Agent =
     Agent
       .builder("assistant", client)
-      .withTools(new ToolRegistry(Seq(echoTool)))
+      .withTools(ToolRegistry.of(Seq(echoTool)).toOption.get)
       .withTracing(tracing)
       .build()
       .fold(e => fail(e.message), identity)

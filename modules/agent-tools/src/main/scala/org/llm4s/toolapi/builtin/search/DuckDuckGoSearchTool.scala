@@ -88,7 +88,7 @@ case class DuckDuckGoSearchConfig(
  *   case Right(toolConfig) =>
  *     // Create the tool with loaded configuration
  *     val searchTool = DuckDuckGoSearchTool.create(toolConfig)
- *     val tools = new ToolRegistry(Seq(searchTool))
+ *     val tools = ToolRegistry.of(Seq(searchTool))
  *     agent.run("What is Scala programming language?", tools)
  *
  *   case Left(error) =>

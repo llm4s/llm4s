@@ -29,9 +29,10 @@ object MultiTurnConversationExample {
       given org.llm4s.model.ModelRegistryService = registryService
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
+      registry    <- ToolRegistry.of(Seq(weatherTool))
       agent <- Agent
         .builder("multi-turn-conversation", client)
-        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withTools(registry)
         .build()
 
       _ = logger.info("Turn 1: Asking about Paris weather")

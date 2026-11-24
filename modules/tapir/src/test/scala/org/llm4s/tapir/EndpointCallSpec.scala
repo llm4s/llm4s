@@ -20,7 +20,7 @@ class EndpointCallSpec extends AnyFlatSpec with Matchers with EitherValues {
   private def call(registry: ToolRegistry, name: String, args: String): Either[ToolCallError, ujson.Value] =
     registry.execute(ToolCallRequest(name, ujson.read(args)))
 
-  private def message(result: Either[ToolCallError, ujson.Value]): String = result.left.value.getMessage
+  private def message(result: Either[ToolCallError, ujson.Value]): String = result.left.value.message
 
   private def body(recording: Recording): String = recording.last.body match {
     case StringBody(s, _, _) => s

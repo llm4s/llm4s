@@ -115,10 +115,9 @@ object DeepSeekTestExample {
   }
 
   private def testToolCalling(client: org.llm4s.llmconnect.LLMClient): Unit =
-    WeatherTool.toolSafe match {
+    WeatherTool.toolSafe.flatMap(tool => ToolRegistry.of(Seq(tool)).map(tool -> _)) match {
       case Left(err) => logger.error(s"Failed to load weather tool: ${err.formatted}")
-      case Right(weatherTool) =>
-        val toolRegistry = new ToolRegistry(Seq(weatherTool))
+      case Right((weatherTool, toolRegistry)) =>
         val conversation = Conversation(
           Seq(
             SystemMessage(

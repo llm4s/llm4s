@@ -123,7 +123,10 @@ class ShellWindowsBestFitSpec extends AnyFlatSpec with Matchers {
     val tool   = ShellTool.createSafe(config).fold(e => fail(e.formatted), identity)
     Separators.foreach { c =>
       val result =
-        tool.handler(SafeParameterExtractor(ujson.Obj("command" -> s"findstr x ..${c}outside${c}secret.txt")))
+        tool
+          .handler(SafeParameterExtractor(ujson.Obj("command" -> s"findstr x ..${c}outside${c}secret.txt")))
+          .left
+          .map(org.llm4s.toolapi.ToolHandlerError.message)
       result.left.toOption.getOrElse(fail(s"expected a refusal, got $result")) should include("not allowed on Windows")
     }
   }

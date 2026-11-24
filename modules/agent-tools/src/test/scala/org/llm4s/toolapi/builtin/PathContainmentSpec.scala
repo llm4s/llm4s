@@ -36,13 +36,28 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
   }
 
   private def read(config: FileConfig, path: Path): Either[String, ReadFileResult] =
-    ReadFileTool.createSafe(config).fold(e => fail(e.formatted), identity).handler(params(path))
+    ReadFileTool
+      .createSafe(config)
+      .fold(e => fail(e.formatted), identity)
+      .handler(params(path))
+      .left
+      .map(org.llm4s.toolapi.ToolHandlerError.message)
 
   private def list(config: FileConfig, path: Path): Either[String, ListDirectoryResult] =
-    ListDirectoryTool.createSafe(config).fold(e => fail(e.formatted), identity).handler(params(path))
+    ListDirectoryTool
+      .createSafe(config)
+      .fold(e => fail(e.formatted), identity)
+      .handler(params(path))
+      .left
+      .map(org.llm4s.toolapi.ToolHandlerError.message)
 
   private def info(config: FileConfig, path: Path): Either[String, FileInfoResult] =
-    FileInfoTool.createSafe(config).fold(e => fail(e.formatted), identity).handler(params(path))
+    FileInfoTool
+      .createSafe(config)
+      .fold(e => fail(e.formatted), identity)
+      .handler(params(path))
+      .left
+      .map(org.llm4s.toolapi.ToolHandlerError.message)
 
   private def write(
     config: WriteConfig,
@@ -56,6 +71,8 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
       .handler(
         SafeParameterExtractor(ujson.Obj("path" -> path.toString, "content" -> text, "append" -> append))
       )
+      .left
+      .map(org.llm4s.toolapi.ToolHandlerError.message)
 
   private def params(path: Path): SafeParameterExtractor =
     SafeParameterExtractor(ujson.Obj("path" -> path.toString))

@@ -23,7 +23,7 @@ class GrowthSafeToolErrorsSpec extends AnyFlatSpec with Matchers {
   it should "change each field through its setter" in {
     val e = UnknownFunction("t").withToolName("u").withAvailableTools(Seq("a", "b"))
     e shouldBe UnknownFunction("u", Seq("a", "b"))
-    e.getMessage should include("Available tools: [a, b].")
+    e.message should include("Available tools: [a, b].")
     e.withAvailableTools(Seq.empty) shouldBe UnknownFunction("u")
   }
 
@@ -58,7 +58,7 @@ class GrowthSafeToolErrorsSpec extends AnyFlatSpec with Matchers {
       .withExpectedType("integer")
       .withAvailableParameters(List("a", "b"))
     e shouldBe MissingParameter("q", "integer", List("a", "b"))
-    e.getMessage shouldBe "required parameter 'q' (type: integer) is missing (available: a, b)"
+    e.message shouldBe "required parameter 'q' (type: integer) is missing (available: a, b)"
     e.withAvailableParameters(Nil) shouldBe MissingParameter("q", "integer")
   }
 

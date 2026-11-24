@@ -73,19 +73,20 @@ val tools = BuiltinTools.customSafe(
 import org.llm4s.toolapi.{ ToolCallRequest, ToolRegistry }
 import org.llm4s.toolapi.builtin.BuiltinTools
 
-BuiltinTools.coreSafe.foreach { tools =>
-  val registry = new ToolRegistry(tools)
+BuiltinTools.coreSafe.flatMap(ToolRegistry.of).foreach { registry =>
 
   registry.execute(ToolCallRequest("calculator", ujson.Obj("operation" -> "multiply", "a" -> 6, "b" -> 7))) match {
     case Right(json)  => println(json("result")) // 42.0
-    case Left(error)  => println(error.getFormattedMessage)
+    case Left(error)  => println(error.formatted)
   }
 }
 ```
 
-`registry.getOpenAITools()` gives the tool definitions in the format every client takes. `execute` returns
+`ToolRegistry.of` returns a `Result`: two tools with the same name are a `ValidationError`.
+`ToolFunction.toolDefinitions(registry.tools, strict = true)` gives the tool definitions in the format every client
+starts from. `execute` returns
 `Either[ToolCallError, ujson.Value]`: a refused or failed call is a `Left` you can read, never an exception. For
-example, dividing by zero comes back as `Left(...)` whose `getFormattedMessage` includes "Division by zero".
+example, dividing by zero comes back as `Left(...)` whose `formatted` includes "Division by zero".
 
 ### With an `Agent`
 
@@ -97,7 +98,8 @@ import org.llm4s.toolapi.builtin.BuiltinTools
 // `client` is an LLMClient: see Basic Usage for how to create one
 val result = for {
   tools <- BuiltinTools.coreSafe
-  agent <- Agent.builder("calculator-agent", client).withTools(new ToolRegistry(tools)).build()
+  toolRegistry <- ToolRegistry.of(tools)
+  agent <- Agent.builder("calculator-agent", client).withTools(toolRegistry).build()
   state <- agent.run("What is 15% of 850?")
 } yield state
 
@@ -145,8 +147,9 @@ import org.llm4s.toolapi.builtin.search.DuckDuckGoSearchTool
 val registry = for {
   config <- ToolsConfigLoader.loadDuckDuckGoSearchTool()
   search <- DuckDuckGoSearchTool.create(config)
+  toolRegistry <- ToolRegistry.of(core :+ search)
   core   <- BuiltinTools.coreSafe
-} yield new ToolRegistry(core :+ search)
+} yield toolRegistry
 ```
 
 The Brave and Exa tools are built the same way:
@@ -406,7 +409,7 @@ The built-in tools are built with `ToolBuilder`, the same way you build yours, a
 
 ```scala
 // myTool: a ToolFunction you built with ToolBuilder
-val registry = BuiltinTools.coreSafe.map(core => new ToolRegistry(core :+ myTool))
+val registry = BuiltinTools.coreSafe.flatMap(core => ToolRegistry.of(core :+ myTool))
 ```
 
 [Build Your Own Tool](custom-tools) walks through writing one: the `Schema` DSL, reading arguments, returning

@@ -33,8 +33,9 @@ object ParallelToolExecutionExample {
     val result = for {
       // Create a weather tool that simulates API delay
       weatherTool <- createWeatherTool()
+      registry    <- ToolRegistry.of(Seq(weatherTool))
+      twoAtATime  <- ToolExecutionStrategy.parallelWithLimit(2)
     } yield {
-      val registry = new ToolRegistry(Seq(weatherTool))
 
       // Create multiple requests (simulating LLM requesting weather for multiple cities)
       val cities   = Seq("London", "Paris", "Tokyo", "New York", "Sydney")
@@ -48,7 +49,7 @@ object ParallelToolExecutionExample {
       logger.info("Expected time: ~{}ms (5 x 200ms)", cities.size * 200)
 
       val seqStart    = System.currentTimeMillis()
-      val seqFuture   = registry.executeAll(requests, ToolExecutionStrategy.Sequential)
+      val seqFuture   = ToolExecutor.executeAll(registry, requests, ToolExecutionStrategy.Sequential)
       val seqResults  = Await.result(seqFuture, 30.seconds)
       val seqDuration = System.currentTimeMillis() - seqStart
 
@@ -61,7 +62,7 @@ object ParallelToolExecutionExample {
       logger.info("Expected time: ~200ms (all run simultaneously)")
 
       val parStart    = System.currentTimeMillis()
-      val parFuture   = registry.executeAll(requests, ToolExecutionStrategy.Parallel)
+      val parFuture   = ToolExecutor.executeAll(registry, requests, ToolExecutionStrategy.Parallel)
       val parResults  = Await.result(parFuture, 30.seconds)
       val parDuration = System.currentTimeMillis() - parStart
 
@@ -74,7 +75,7 @@ object ParallelToolExecutionExample {
       logger.info("Expected time: ~600ms (3 batches of 2,2,1)")
 
       val limitStart    = System.currentTimeMillis()
-      val limitFuture   = registry.executeAll(requests, ToolExecutionStrategy.ParallelWithLimit(2))
+      val limitFuture   = ToolExecutor.executeAll(registry, requests, twoAtATime)
       val limitResults  = Await.result(limitFuture, 30.seconds)
       val limitDuration = System.currentTimeMillis() - limitStart
 
@@ -146,6 +147,6 @@ object ParallelToolExecutionExample {
         val weather = read[WeatherResult](json)
         logger.info("  {}: {}C, {}", weather.city, weather.temperature, weather.condition)
       case Left(error) =>
-        logger.error("  Error: {}", error.getFormattedMessage)
+        logger.error("  Error: {}", error.formatted)
     }
 }

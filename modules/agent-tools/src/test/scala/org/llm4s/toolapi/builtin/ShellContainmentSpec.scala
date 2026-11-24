@@ -33,6 +33,8 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
       .createSafe(config)
       .fold(e => fail(e.formatted), identity)
       .handler(SafeParameterExtractor(ujson.Obj("command" -> command)))
+      .left
+      .map(org.llm4s.toolapi.ToolHandlerError.message)
 
   /** What the parent JVM has, read the way a child process would receive it. */
   private def parentEnvironment: Map[String, String] = new ProcessBuilder().environment().asScala.toMap

@@ -64,8 +64,9 @@ object BuiltinToolsAgentExample {
         logger.info("LLM client created successfully")
         logger.info("Available tools: {}", tools.map(_.name).mkString(", "))
 
-        val registry = new ToolRegistry(tools)
-        val agent    = Agent.builder("builtin-tools-agent", client).withTools(registry).build()
+        val agent = ToolRegistry
+          .of(tools)
+          .flatMap(registry => Agent.builder("builtin-tools-agent", client).withTools(registry).build())
 
         // Example queries that use different built-in tools
         val queries = Seq(

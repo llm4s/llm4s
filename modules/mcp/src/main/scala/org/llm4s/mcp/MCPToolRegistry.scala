@@ -9,7 +9,7 @@ import org.slf4j.LoggerFactory
 import java.util.concurrent.ConcurrentHashMap
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
-import scala.util.{ Failure, Success, Try }
+import scala.util.Try
 
 import scala.util.chaining.scalaUtilChainingOps
 
@@ -55,7 +55,7 @@ class MCPToolRegistry(
   localTools: Seq[ToolFunction[_, _]] = Seq.empty,
   cacheTTL: FiniteDuration = 10.minutes,
   initializeOnStartup: Boolean = true
-) extends ToolRegistry(localTools)
+) extends ToolRegistry
     with AutoCloseable {
 
   private val logger                                            = LoggerFactory.getLogger(getClass)
@@ -68,43 +68,32 @@ class MCPToolRegistry(
   }
   logger.debug(s"Cache TTL set to $cacheTTL")
 
-  // Override to return ALL tools (local + MCP)
+  /** Every tool, local and MCP, each name once; see [[getAllTools]]. */
   override def tools: Seq[ToolFunction[_, _]] = getAllTools
 
-  // Execute tools, trying local first then MCP
+  /**
+   * Runs a local tool when one has the name, otherwise the first configured MCP server's tool of that name.
+   * A local tool's own failure is returned as it is: it is never retried against an MCP server.
+   */
   override def execute(request: ToolCallRequest): Either[ToolCallError, ujson.Value] = {
     logger.debug(s"Executing tool request: ${request.functionName}")
-
-    // Try local tools first
-    super.execute(request) match {
-      case Right(result) =>
-        logger.debug(s"Tool ${request.functionName} executed successfully via local tools")
-        Right(result)
-      case Left(_) =>
-        logger.debug(s"Tool ${request.functionName} not found in local tools, trying MCP tools")
-        // If local tools fail, try MCP tools
+    localTools.find(_.name == request.functionName) match {
+      case Some(local) =>
+        logger.debug(s"Executing local tool: ${request.functionName}")
+        ToolRegistry.run(local, request)
+      case None =>
         findMCPTool(request.functionName) match {
           case Some(tool) =>
             logger.debug(s"Executing MCP tool: ${request.functionName}")
-            // The same rule as ToolRegistry.execute applies to local tools (design section 4.4): a call
-            // that ends while its thread is interrupted is cancelled, whatever it returned, and is
-            // never reported as a failed tool.
-            CancelledError.catchInterrupt(Try(tool.execute(request.arguments))) match {
-              case Left(_) =>
-                Thread.currentThread().interrupt()
-                Left(ToolCallError.Cancelled(request.functionName))
-              case Right(_) if Thread.currentThread().isInterrupted =>
-                Left(ToolCallError.Cancelled(request.functionName))
-              case Right(Failure(e)) if CancelledError.isCancellation(e) =>
-                // A tool that wrapped the InterruptedException has cleared the flag; restore it so the
-                // caller still sees the cancellation (design section 4.4).
-                Thread.currentThread().interrupt()
-                Left(ToolCallError.Cancelled(request.functionName))
-              case Right(Failure(e)) =>
+            // The same rule as for a local tool (design section 4.4): a call that ends while its thread
+            // is interrupted is cancelled, whatever it returned, and is never reported as a failed tool.
+            val outcome = ToolRegistry.run(tool, request)
+            outcome match {
+              case Left(ToolCallError.ExecutionError(_, e)) =>
                 logger.error(s"MCP tool ${request.functionName} execution failed", e)
-                Left(ToolCallError.ExecutionError(request.functionName, e))
-              case Right(Success(outcome)) => outcome
+              case _ => ()
             }
+            outcome
           case None if Thread.currentThread().isInterrupted =>
             // Finding the tool meant asking a server, and that was interrupted: not "no such tool".
             Left(ToolCallError.Cancelled(request.functionName))
@@ -136,17 +125,18 @@ class MCPToolRegistry(
         .flatMap(server => Option(mcpClients.get(server.name)).flatMap(_.getToolHints().get(name)))
         .headOption
 
-  // Get tools in OpenAI format
-  override def getOpenAITools(strict: Boolean = true): ujson.Arr =
-    ujson.Arr.from(tools.map(_.toOpenAITool(strict)))
-
-  // Get all tools (local + MCP)
+  /**
+   * All tools, local first, then each server's in configuration order. A name is listed once: a local tool
+   * shadows an MCP tool of the same name, and an earlier server's tool a later server's, which is also the
+   * tool [[execute]] runs.
+   */
   def getAllTools: Seq[ToolFunction[_, _]] = {
     val mcpTools = getAllMCPTools
+    val all      = (localTools ++ mcpTools).distinctBy(_.name)
     logger.debug(
-      s"Total tools available: ${localTools.size} local + ${mcpTools.size} MCP = ${localTools.size + mcpTools.size}"
+      s"Total tools available: ${localTools.size} local + ${mcpTools.size} MCP = ${all.size} distinct names"
     )
-    localTools ++ mcpTools
+    all
   }
 
   // Find a specific MCP tool by name

@@ -455,11 +455,13 @@ val grounded = RAGGuardrail.withTurnContext(GroundingGuardrail.balanced(judge)) 
   Some(RAGContext.fromToolResults(turn, Set("search_docs")))
 }
 
-val agent = Agent
-  .builder("support", client)
-  .withTools(new ToolRegistry(Seq(searchDocs)))
-  .withMiddleware(new GuardrailMiddleware(input = Seq.empty, output = Seq(grounded)))
-  .build()
+val agent = ToolRegistry.of(Seq(searchDocs)).flatMap { tools =>
+  Agent
+    .builder("support", client)
+    .withTools(tools)
+    .withMiddleware(new GuardrailMiddleware(input = Seq.empty, output = Seq(grounded)))
+    .build()
+}
 
 val result = agent.flatMap(_.run("What is the refund window?"))
 ```

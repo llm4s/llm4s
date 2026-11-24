@@ -46,7 +46,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
       toolCalls(("c1", "echo", ujson.Obj("text" -> "one")), ("c2", "echo", ujson.Obj("text" -> "two"))),
       CompletionFixture.simple("both echoed")
     )
-    val agent  = built(Agent.builder("assistant", client).withTools(new ToolRegistry(Seq(echoTool()))))
+    val agent  = built(Agent.builder("assistant", client).withTools(ToolRegistry.of(Seq(echoTool())).toOption.get))
     val result = agent.run("echo twice").value
 
     result.answer shouldBe Some("both echoed")
@@ -62,7 +62,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(new ToolRegistry(Seq(echoTool())))
+        .withTools(ToolRegistry.of(Seq(echoTool())).toOption.get)
         .withCompletionOptions(CompletionOptions().withTemperature(0.2).withMaxTokens(77))
     )
     agent.run("q").value
@@ -89,7 +89,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
       toolCalls(("c1", "echo", ujson.Obj("wrong" -> "argument"))),
       CompletionFixture.simple("handled")
     )
-    val result = built(Agent.builder("assistant", client).withTools(new ToolRegistry(Seq(echoTool()))))
+    val result = built(Agent.builder("assistant", client).withTools(ToolRegistry.of(Seq(echoTool())).toOption.get))
       .run("q")
       .value
 
@@ -103,7 +103,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
       toolCalls(("c2", "echo", ujson.Obj("text" -> "b"))),
       CompletionFixture.withUsage("done", prompt = 100, completion = 7)
     )
-    val result = built(Agent.builder("assistant", client).withTools(new ToolRegistry(Seq(echoTool()))))
+    val result = built(Agent.builder("assistant", client).withTools(ToolRegistry.of(Seq(echoTool())).toOption.get))
       .run("q")
       .value
 
@@ -122,7 +122,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
       Agent
         .builder("assistant", client)
         .withSystemPrompt("You are terse.")
-        .withTools(new ToolRegistry(Seq(echoTool())))
+        .withTools(ToolRegistry.of(Seq(echoTool())).toOption.get)
     )
     val result = agent.run("q").value
 
@@ -192,7 +192,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
     val agent = built(
       Agent
         .builder("assistant", client)
-        .withTools(new ToolRegistry(Seq(echoTool())))
+        .withTools(ToolRegistry.of(Seq(echoTool())).toOption.get)
         .withMiddleware(new ApprovalMiddleware(_ => Some("every call is reviewed")))
     )
     val parked = agent.run("q").value
@@ -224,9 +224,16 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
   }
 
   "AgentBuilder.build" should "refuse two tools with one name" in {
+    // ToolRegistry.of refuses the pair itself (#2816); a registry of another kind may still hold one
+    ToolRegistry.of(Seq(echoTool(), echoTool())).left.map(_.message).left.toOption.get should include("echo")
+    val twice = new ToolRegistry {
+      def tools: Seq[org.llm4s.toolapi.ToolFunction[?, ?]] = Seq(echoTool(), echoTool())
+      def execute(request: org.llm4s.toolapi.ToolCallRequest): Either[org.llm4s.toolapi.ToolCallError, ujson.Value] =
+        Left(org.llm4s.toolapi.ToolCallError.UnknownFunction(request.functionName))
+    }
     val error = Agent
       .builder("assistant", ScriptedLLMClient.of())
-      .withTools(new ToolRegistry(Seq(echoTool(), echoTool())))
+      .withTools(twice)
       .build()
       .fold(identity, _ => fail("expected a refusal"))
 
@@ -301,7 +308,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
     version(Agent.builder("assistant", a)) should not be version(Agent.builder("assistant", a).withSystemPrompt("p"))
     version(Agent.builder("assistant", a)) should not be version(Agent.builder("assistant", a).withMaxSteps(3))
     version(Agent.builder("assistant", a)) should not be version(
-      Agent.builder("assistant", a).withTools(new ToolRegistry(Seq(echoTool())))
+      Agent.builder("assistant", a).withTools(ToolRegistry.of(Seq(echoTool())).toOption.get)
     )
     version(Agent.builder("assistant", a)).matches("[0-9a-f]{64}") shouldBe true
     built(Agent.builder("assistant", a)).loop.graph.id shouldBe "assistant"

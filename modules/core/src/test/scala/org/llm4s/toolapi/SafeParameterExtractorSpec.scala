@@ -5,7 +5,7 @@ import org.scalatest.matchers.should.Matchers
 
 class SafeParameterExtractorSpec extends AnyFlatSpec with Matchers {
 
-  // ---- simple mode: primitive types ----
+  // ---- primitive types ----
 
   "SafeParameterExtractor.getString" should "return the string value" in {
     SafeParameterExtractor(ujson.Obj("x" -> ujson.Str("hello"))).getString("x") shouldBe Right("hello")
@@ -45,56 +45,56 @@ class SafeParameterExtractorSpec extends AnyFlatSpec with Matchers {
     SafeParameterExtractor(ujson.Obj("inner" -> ujson.Num(5))).getObject("inner") shouldBe a[Left[_, _]]
   }
 
-  // ---- enhanced mode: primitive types ----
+  // ---- which error ----
 
-  "SafeParameterExtractor.getStringEnhanced" should "return Right for a present string" in {
-    SafeParameterExtractor(ujson.Obj("s" -> ujson.Str("hi"))).getStringEnhanced("s") shouldBe Right("hi")
+  "SafeParameterExtractor.getString" should "return Right for a present string" in {
+    SafeParameterExtractor(ujson.Obj("s" -> ujson.Str("hi"))).getString("s") shouldBe Right("hi")
   }
 
   it should "return MissingParameter when key is absent" in {
-    val result = SafeParameterExtractor(ujson.Obj("other" -> ujson.Str("x"))).getStringEnhanced("s")
+    val result = SafeParameterExtractor(ujson.Obj("other" -> ujson.Str("x"))).getString("s")
     result.left.toOption.get shouldBe a[ToolParameterError.MissingParameter]
   }
 
   it should "return NullParameter for a null value" in {
-    val result = SafeParameterExtractor(ujson.Obj("s" -> ujson.Null)).getStringEnhanced("s")
+    val result = SafeParameterExtractor(ujson.Obj("s" -> ujson.Null)).getString("s")
     result.left.toOption.get shouldBe a[ToolParameterError.NullParameter]
   }
 
   it should "return TypeMismatch for the wrong type" in {
-    val result = SafeParameterExtractor(ujson.Obj("s" -> ujson.Num(1))).getStringEnhanced("s")
+    val result = SafeParameterExtractor(ujson.Obj("s" -> ujson.Num(1))).getString("s")
     result.left.toOption.get shouldBe a[ToolParameterError.TypeMismatch]
   }
 
-  "SafeParameterExtractor.getIntEnhanced" should "return Right for a numeric value" in {
-    SafeParameterExtractor(ujson.Obj("n" -> ujson.Num(7))).getIntEnhanced("n") shouldBe Right(7)
+  "SafeParameterExtractor.getInt" should "return Right for a numeric value" in {
+    SafeParameterExtractor(ujson.Obj("n" -> ujson.Num(7))).getInt("n") shouldBe Right(7)
   }
 
-  "SafeParameterExtractor.getDoubleEnhanced" should "return Right for a double" in {
-    SafeParameterExtractor(ujson.Obj("d" -> ujson.Num(2.5))).getDoubleEnhanced("d") shouldBe Right(2.5)
+  "SafeParameterExtractor.getDouble" should "return Right for a double" in {
+    SafeParameterExtractor(ujson.Obj("d" -> ujson.Num(2.5))).getDouble("d") shouldBe Right(2.5)
   }
 
-  "SafeParameterExtractor.getBooleanEnhanced" should "return Right for a boolean" in {
-    SafeParameterExtractor(ujson.Obj("b" -> ujson.Bool(false))).getBooleanEnhanced("b") shouldBe Right(false)
+  "SafeParameterExtractor.getBoolean" should "return Right for a boolean" in {
+    SafeParameterExtractor(ujson.Obj("b" -> ujson.Bool(false))).getBoolean("b") shouldBe Right(false)
   }
 
-  "SafeParameterExtractor.getArrayEnhanced" should "return Right for an array" in {
+  "SafeParameterExtractor.getArray" should "return Right for an array" in {
     val arr = ujson.Arr(ujson.Str("a"))
-    SafeParameterExtractor(ujson.Obj("list" -> arr)).getArrayEnhanced("list") shouldBe Right(arr)
+    SafeParameterExtractor(ujson.Obj("list" -> arr)).getArray("list") shouldBe Right(arr)
   }
 
   it should "return TypeMismatch for a non-array" in {
-    val result = SafeParameterExtractor(ujson.Obj("list" -> ujson.Str("oops"))).getArrayEnhanced("list")
+    val result = SafeParameterExtractor(ujson.Obj("list" -> ujson.Str("oops"))).getArray("list")
     result.left.toOption.get shouldBe a[ToolParameterError.TypeMismatch]
   }
 
-  "SafeParameterExtractor.getObjectEnhanced" should "return Right for an object" in {
+  "SafeParameterExtractor.getObject" should "return Right for an object" in {
     val inner = ujson.Obj("a" -> ujson.Num(1))
-    SafeParameterExtractor(ujson.Obj("inner" -> inner)).getObjectEnhanced("inner") shouldBe Right(inner)
+    SafeParameterExtractor(ujson.Obj("inner" -> inner)).getObject("inner") shouldBe Right(inner)
   }
 
   it should "return TypeMismatch for a non-object" in {
-    val result = SafeParameterExtractor(ujson.Obj("inner" -> ujson.Bool(true))).getObjectEnhanced("inner")
+    val result = SafeParameterExtractor(ujson.Obj("inner" -> ujson.Bool(true))).getObject("inner")
     result.left.toOption.get shouldBe a[ToolParameterError.TypeMismatch]
   }
 
@@ -145,43 +145,65 @@ class SafeParameterExtractorSpec extends AnyFlatSpec with Matchers {
 
   "SafeParameterExtractor.validateRequired" should "return Right when all requirements are satisfied" in {
     val ex = SafeParameterExtractor(ujson.Obj("name" -> ujson.Str("Alice"), "age" -> ujson.Num(30)))
-    ex.validateRequired("name" -> "string", "age" -> "integer") shouldBe Right(())
+    ex.validateRequired("name" -> ToolParameterType.String, "age" -> ToolParameterType.Integer) shouldBe Right(())
   }
 
   it should "return Left with one error when a parameter is missing" in {
     val ex     = SafeParameterExtractor(ujson.Obj("name" -> ujson.Str("Alice")))
-    val result = ex.validateRequired("name" -> "string", "score" -> "number")
-    (result.left.toOption.get should have).length(1)
+    val result = ex.validateRequired("name" -> ToolParameterType.String, "score" -> ToolParameterType.Number)
+    result shouldBe Left(ToolParameterError.MissingParameter("score", "number", List("name")))
   }
 
   it should "collect all errors from multiple missing parameters" in {
-    val ex     = SafeParameterExtractor(ujson.Obj())
-    val result = ex.validateRequired("a" -> "string", "b" -> "integer", "c" -> "boolean")
-    (result.left.toOption.get should have).length(3)
+    val ex = SafeParameterExtractor(ujson.Obj())
+    val result = ex.validateRequired(
+      "a" -> ToolParameterType.String,
+      "b" -> ToolParameterType.Integer,
+      "c" -> ToolParameterType.Boolean
+    )
+    result.left.toOption.get shouldBe a[ToolParameterError.MultipleErrors]
+    (ToolCallErrorJson.flattenErrors(result.left.toOption.toList) should have).length(3)
   }
 
-  // ---- companion object ----
+  it should "take a type, not a type's name: a name it does not know cannot be asked for (#2815)" in {
+    assertTypeError("""SafeParameterExtractor(ujson.Obj()).validateRequired("x" -> "uuid")""")
+    ToolParameterType.values.map(_.name).toSeq shouldBe
+      Seq("string", "integer", "number", "boolean", "array", "object")
+  }
 
-  "SafeParameterExtractor.enhanced" should "construct an extractor that retrieves values" in {
-    val params = ujson.Obj("x" -> ujson.Str("y"))
-    SafeParameterExtractor.enhanced(params).getString("x") shouldBe Right("y")
+  // ---- a property whose own name has a dot (#2815) ----
+
+  "A dotted path" should "read the property of that exact name when there is one" in {
+    val args = SafeParameterExtractor(ujson.Obj("a.b" -> "literal", "a" -> ujson.Obj("b" -> "nested", "c" -> 1)))
+    args.getString("a.b") shouldBe Right("literal")
+    args.getOptionalString("a.b") shouldBe Right(Some("literal"))
+    args.getInt("a.c") shouldBe Right(1)
+    args.validateRequired("a.b" -> ToolParameterType.String, "a.c" -> ToolParameterType.Integer) shouldBe Right(())
+  }
+
+  it should "still step into nested objects when no property has that name" in {
+    val args = SafeParameterExtractor(ujson.Obj("user" -> ujson.Obj("name" -> "Ada")))
+    args.getString("user.name") shouldBe Right("Ada")
+    args.getString("user.email") shouldBe Left(
+      ToolParameterError.MissingParameter("user.email", "string", List("name"))
+    )
   }
 
   // ---- edge cases in path navigation ----
 
   "SafeParameterExtractor" should "return InvalidNesting when root is null and path is non-empty" in {
-    val result = SafeParameterExtractor(ujson.Null).getStringEnhanced("key")
+    val result = SafeParameterExtractor(ujson.Null).getString("key")
     result.left.toOption.get shouldBe a[ToolParameterError.InvalidNesting]
   }
 
   it should "return InvalidNesting when navigating into a non-object intermediate value" in {
-    val result = SafeParameterExtractor(ujson.Obj("list" -> ujson.Arr())).getStringEnhanced("list.item")
+    val result = SafeParameterExtractor(ujson.Obj("list" -> ujson.Arr())).getString("list.item")
     result.left.toOption.get shouldBe a[ToolParameterError.InvalidNesting]
   }
 
   it should "return MissingParameter when an intermediate path segment is absent" in {
     val params = ujson.Obj("a" -> ujson.Obj("b" -> ujson.Str("v")))
-    val result = SafeParameterExtractor(params).getStringEnhanced("a.c.d")
+    val result = SafeParameterExtractor(params).getString("a.c.d")
     result.left.toOption.get shouldBe a[ToolParameterError.MissingParameter]
   }
 

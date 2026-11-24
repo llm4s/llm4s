@@ -200,16 +200,18 @@ mainAgent.flatMap(_.run("Explain quantum entanglement"))
 Tools belong to the agent that uses them:
 
 ```scala
-val dataAgent = Agent.builder("data", client)
-  .withSystemPrompt("You are a data analysis specialist.")
-  .withTools(new ToolRegistry(Seq(queryDatabaseTool, generateChartTool, exportCSVTool)))
-
-val mainAgent = Agent.builder("main", client)
-  .withTools(new ToolRegistry(basicTools))
-  .withHandoffs(Handoff.to("data", dataAgent, "Data analysis with database access"))
-  .build()
-
-mainAgent.flatMap(_.run("Analyze our Q4 sales data"))
+for {
+  dataTools <- ToolRegistry.of(Seq(queryDatabaseTool, generateChartTool, exportCSVTool))
+  mainTools <- ToolRegistry.of(basicTools)
+  dataAgent = Agent.builder("data", client)
+    .withSystemPrompt("You are a data analysis specialist.")
+    .withTools(dataTools)
+  mainAgent <- Agent.builder("main", client)
+    .withTools(mainTools)
+    .withHandoffs(Handoff.to("data", dataAgent, "Data analysis with database access"))
+    .build()
+  result <- mainAgent.run("Analyze our Q4 sales data")
+} yield result
 ```
 
 ### Customer Support Triage

@@ -45,7 +45,7 @@ object PythonDevelopersGuide {
 
   object ATool {
     // snippet: tool
-    import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolFunction }
+    import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolFunction, ToolHandlerError }
     import org.llm4s.types.Result
 
     def searchDatabase: Result[ToolFunction[Map[String, Any], String]] = {
@@ -54,10 +54,10 @@ object PythonDevelopersGuide {
         .withRequiredField("query", Schema.string("What to search for"))
         .withOptionalField("limit", Schema.integer("The most records to return (default 10)"))
 
-      def handler(params: SafeParameterExtractor): Either[String, String] =
+      def handler(params: SafeParameterExtractor): Either[ToolHandlerError, String] =
         for {
           query <- params.getString("query")
-          limit <- params.getOptionalInt("limit").left.map(_.getMessage)
+          limit <- params.getOptionalInt("limit")
         } yield s"Found ${limit.getOrElse(10)} results for '$query'"
 
       ToolBuilder[Map[String, Any], String](

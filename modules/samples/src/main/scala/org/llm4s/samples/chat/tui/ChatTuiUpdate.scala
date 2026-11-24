@@ -350,7 +350,7 @@ private[tui] object ChatTuiUpdate:
         val task: AsyncResult[ToolOutcome] = Future {
           registry.execute(ToolCallRequest(call.name, call.arguments)) match {
             case Right(json) => Right(toolOutcomeFromJson(json))
-            case Left(err)   => Right(ToolOutcome.Err(err.getMessage))
+            case Left(err)   => Right(ToolOutcome.Err(err.message))
           }
         }
         val cmd = Cmd.asyncResult[ToolOutcome, Msg](

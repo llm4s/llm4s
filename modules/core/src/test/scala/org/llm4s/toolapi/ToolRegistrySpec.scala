@@ -134,7 +134,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     val registry = ToolRegistry.empty
 
     registry.tools shouldBe empty
-    registry.getTool("anything") shouldBe None
+    registry.tool("anything") shouldBe None
   }
 
   // ============ ToolRegistry Construction ============
@@ -144,11 +144,11 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       addTool      <- createAddTool()
       multiplyTool <- createMultiplyTool()
     } yield {
-      val registry = new ToolRegistry(Seq(addTool, multiplyTool))
+      val registry = ToolRegistry.of(Seq(addTool, multiplyTool)).toOption.get
       registry.tools should have size 2
-      registry.getTool("add") shouldBe Some(addTool)
-      registry.getTool("multiply") shouldBe Some(multiplyTool)
-      registry.getTool("nonexistent") shouldBe None
+      registry.tool("add") shouldBe Some(addTool)
+      registry.tool("multiply") shouldBe Some(multiplyTool)
+      registry.tool("nonexistent") shouldBe None
     }
     result.left.foreach(e => fail(s"Tool creation failed: ${e.formatted}"))
   }
@@ -159,7 +159,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
-        val registry = new ToolRegistry(Seq(addTool))
+        val registry = ToolRegistry.of(Seq(addTool)).toOption.get
         val request  = ToolCallRequest("add", ujson.Obj("a" -> 5, "b" -> 3))
         val result   = registry.execute(request)
         result.isRight shouldBe true
@@ -172,11 +172,11 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
-        val registry = new ToolRegistry(Seq(addTool))
+        val registry = ToolRegistry.of(Seq(addTool)).toOption.get
         val request  = ToolCallRequest("unknown_function", ujson.Obj())
         val result   = registry.execute(request)
         result.isLeft shouldBe true
-        result.fold(identity, v => fail(s"Expected Left but got Right: $v")).getMessage should include(
+        result.fold(identity, v => fail(s"Expected Left but got Right: $v")).message should include(
           "not a recognized tool"
         )
       }
@@ -187,11 +187,11 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
-        val registry = new ToolRegistry(Seq(addTool))
+        val registry = ToolRegistry.of(Seq(addTool)).toOption.get
         val request  = ToolCallRequest("add", ujson.Obj("a" -> "not a number", "b" -> 3))
         val result   = registry.execute(request)
         result.isLeft shouldBe true
-        result.fold(identity, v => fail(s"Expected Left but got Right: $v")).getMessage should include("wrong type")
+        result.fold(identity, v => fail(s"Expected Left but got Right: $v")).message should include("wrong type")
       }
     )
   }
@@ -200,11 +200,11 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
-        val registry = new ToolRegistry(Seq(addTool))
+        val registry = ToolRegistry.of(Seq(addTool)).toOption.get
         val request  = ToolCallRequest("add", ujson.Obj("a" -> 5))
         val result   = registry.execute(request)
         result.isLeft shouldBe true
-        result.fold(identity, v => fail(s"Expected Left but got Right: $v")).getMessage should include("missing")
+        result.fold(identity, v => fail(s"Expected Left but got Right: $v")).message should include("missing")
       }
     )
   }
@@ -215,9 +215,9 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
-        val registry     = new ToolRegistry(Seq(addTool))
+        val registry     = ToolRegistry.of(Seq(addTool)).toOption.get
         val request      = ToolCallRequest("add", ujson.Obj("a" -> 10, "b" -> 20))
-        val futureResult = registry.executeAsync(request)
+        val futureResult = ToolExecutor.executeAsync(registry, request)
         val result       = Await.result(futureResult, 5.seconds)
         result.isRight shouldBe true
         result.map(json => json("result").num) shouldBe Right(30.0)
@@ -229,12 +229,12 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
-        val registry     = new ToolRegistry(Seq(addTool))
+        val registry     = ToolRegistry.of(Seq(addTool)).toOption.get
         val request      = ToolCallRequest("nonexistent", ujson.Obj())
-        val futureResult = registry.executeAsync(request)
+        val futureResult = ToolExecutor.executeAsync(registry, request)
         val result       = Await.result(futureResult, 5.seconds)
         result.isLeft shouldBe true
-        result.fold(identity, v => fail(s"Expected Left but got Right: $v")).getMessage should include(
+        result.fold(identity, v => fail(s"Expected Left but got Right: $v")).message should include(
           "not a recognized tool"
         )
       }
@@ -248,13 +248,13 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       addTool      <- createAddTool()
       multiplyTool <- createMultiplyTool()
     } yield {
-      val registry = new ToolRegistry(Seq(addTool, multiplyTool))
+      val registry = ToolRegistry.of(Seq(addTool, multiplyTool)).toOption.get
       val requests = Seq(
         ToolCallRequest("add", ujson.Obj("a" -> 1, "b" -> 2)),
         ToolCallRequest("multiply", ujson.Obj("a" -> 3, "b" -> 4)),
         ToolCallRequest("add", ujson.Obj("a" -> 5, "b" -> 6))
       )
-      val futureResults = registry.executeAll(requests, ToolExecutionStrategy.Sequential)
+      val futureResults = ToolExecutor.executeAll(registry, requests, ToolExecutionStrategy.Sequential)
       val results       = Await.result(futureResults, 10.seconds)
 
       results should have size 3
@@ -270,13 +270,13 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       addTool      <- createAddTool()
       multiplyTool <- createMultiplyTool()
     } yield {
-      val registry = new ToolRegistry(Seq(addTool, multiplyTool))
+      val registry = ToolRegistry.of(Seq(addTool, multiplyTool)).toOption.get
       val requests = Seq(
         ToolCallRequest("add", ujson.Obj("a" -> 10, "b" -> 20)),
         ToolCallRequest("multiply", ujson.Obj("a" -> 5, "b" -> 5)),
         ToolCallRequest("add", ujson.Obj("a" -> 100, "b" -> 200))
       )
-      val futureResults = registry.executeAll(requests, ToolExecutionStrategy.Parallel)
+      val futureResults = ToolExecutor.executeAll(registry, requests, ToolExecutionStrategy.Parallel)
       val results       = Await.result(futureResults, 10.seconds)
 
       results should have size 3
@@ -291,7 +291,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
-        val registry = new ToolRegistry(Seq(addTool))
+        val registry = ToolRegistry.of(Seq(addTool)).toOption.get
         val requests = Seq(
           ToolCallRequest("add", ujson.Obj("a" -> 1, "b" -> 1)),
           ToolCallRequest("add", ujson.Obj("a" -> 2, "b" -> 2)),
@@ -299,8 +299,9 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
           ToolCallRequest("add", ujson.Obj("a" -> 4, "b" -> 4)),
           ToolCallRequest("add", ujson.Obj("a" -> 5, "b" -> 5))
         )
-        val futureResults = registry.executeAll(requests, ToolExecutionStrategy.ParallelWithLimit(2))
-        val results       = Await.result(futureResults, 10.seconds)
+        val futureResults =
+          ToolExecutor.executeAll(registry, requests, ToolExecutionStrategy.parallelWithLimit(2).toOption.get)
+        val results = Await.result(futureResults, 10.seconds)
 
         results should have size 5
         results.map(_.map(json => json("result").num)) shouldBe Seq(
@@ -318,9 +319,9 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
-        val registry      = new ToolRegistry(Seq(addTool))
+        val registry      = ToolRegistry.of(Seq(addTool)).toOption.get
         val requests      = Seq(ToolCallRequest("add", ujson.Obj("a" -> 1, "b" -> 1)))
-        val futureResults = registry.executeAll(requests)
+        val futureResults = ToolExecutor.executeAll(registry, requests)
         val results       = Await.result(futureResults, 5.seconds)
 
         results should have size 1
@@ -333,13 +334,13 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
-        val registry = new ToolRegistry(Seq(addTool))
+        val registry = ToolRegistry.of(Seq(addTool)).toOption.get
         val requests = Seq(
           ToolCallRequest("add", ujson.Obj("a" -> 1, "b" -> 2)),
           ToolCallRequest("unknown", ujson.Obj()),
           ToolCallRequest("add", ujson.Obj("a" -> 3, "b" -> 4))
         )
-        val futureResults = registry.executeAll(requests, ToolExecutionStrategy.Sequential)
+        val futureResults = ToolExecutor.executeAll(registry, requests, ToolExecutionStrategy.Sequential)
         val results       = Await.result(futureResults, 10.seconds)
 
         results should have size 3
@@ -354,8 +355,8 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
-        val registry      = new ToolRegistry(Seq(addTool))
-        val futureResults = registry.executeAll(Seq.empty)
+        val registry      = ToolRegistry.of(Seq(addTool)).toOption.get
+        val futureResults = ToolExecutor.executeAll(registry, Seq.empty)
         val results       = Await.result(futureResults, 5.seconds)
         results shouldBe empty
       }
@@ -368,14 +369,14 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createSleepTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       sleepTool => {
-        val registry = new ToolRegistry(Seq(sleepTool))
+        val registry = ToolRegistry.of(Seq(sleepTool)).toOption.get
         val config   = ToolExecutionConfig(timeout = Some(100.millis))
         val request  = ToolCallRequest("sleep", ujson.Obj("ms" -> 500))
-        val result   = registry.execute(request, config)
+        val result   = ToolExecutor.execute(registry, request, config)
         result.isLeft shouldBe true
         result.left.toOption.get shouldBe a[ToolCallError.Timeout]
-        result.left.toOption.get.getMessage should include("timed out")
-        result.left.toOption.get.getMessage should include("sleep")
+        result.left.toOption.get.message should include("timed out")
+        result.left.toOption.get.message should include("sleep")
       }
     )
   }
@@ -384,14 +385,14 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createSleepTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       sleepTool => {
-        val registry = new ToolRegistry(Seq(sleepTool))
+        val registry = ToolRegistry.of(Seq(sleepTool)).toOption.get
         val config   = ToolExecutionConfig(timeout = Some(2.seconds))
         // ms = 0: this test asserts that a non-timing-out result flows through the timeout
         // wrapper correctly, not that a specific margin holds under load. A nonzero sleep would
         // race the timeout on a real wall clock, which a busy CI runner can occasionally lose
         // regardless of how generous the margin is; a tool that never sleeps cannot lose that race.
         val request = ToolCallRequest("sleep", ujson.Obj("ms" -> 0))
-        val result  = registry.execute(request, config)
+        val result  = ToolExecutor.execute(registry, request, config)
         result.isRight shouldBe true
       }
     )
@@ -401,12 +402,9 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createSleepTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       sleepTool => {
-        val registry = new ToolRegistry(Seq(sleepTool))
-        // A single-thread pool forces every call below onto the same physical thread, so a
-        // leaked interrupt from one call's timeout would corrupt the very next call.
-        val singleThreadExecutor                      = java.util.concurrent.Executors.newSingleThreadExecutor()
-        implicit val singleThreadEc: ExecutionContext = ExecutionContext.fromExecutor(singleThreadExecutor)
-
+        val registry = ToolRegistry.of(Seq(sleepTool)).toOption.get
+        // Every call below runs on this one test thread (the synchronous path takes no ExecutionContext),
+        // so a leaked interrupt from one call's timeout would corrupt the very next call.
         try
           // The timeout matches the tool's own sleep duration, so the scheduler's timeout and
           // the tool's natural completion race to complete the promise first. Repeating this
@@ -414,17 +412,19 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
           // already returning to the pool - the case a naive fix (clearing the interrupt only
           // from inside the worker's own task body) cannot cover.
           for (_ <- 1 to 200) {
-            registry.execute(
+            ToolExecutor.execute(
+              registry,
               ToolCallRequest("sleep", ujson.Obj("ms" -> 15)),
               ToolExecutionConfig(timeout = Some(15.millis))
             )
-            val afterRace = registry.execute(
+            val afterRace = ToolExecutor.execute(
+              registry,
               ToolCallRequest("sleep", ujson.Obj("ms" -> 1)),
               ToolExecutionConfig(timeout = Some(2.seconds))
             )
             afterRace.isRight shouldBe true
           }
-        finally singleThreadExecutor.shutdown()
+        finally Thread.interrupted(): Unit
       }
     )
   }
@@ -433,12 +433,12 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createFlakyTool(2).fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       flakyTool => {
-        val registry = new ToolRegistry(Seq(flakyTool))
+        val registry = ToolRegistry.of(Seq(flakyTool)).toOption.get
         val config = ToolExecutionConfig(
-          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 10.millis, backoffFactor = 1.5))
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 10.millis, backoffFactor = 1.5).toOption.get)
         )
         val request = ToolCallRequest("flaky", ujson.Obj("x" -> 42.0))
-        val result  = registry.execute(request, config)
+        val result  = ToolExecutor.execute(registry, request, config)
         result.isRight shouldBe true
         result.toOption.get("result").num shouldBe 42.0
       }
@@ -449,10 +449,10 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createFlakyTool(1).fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       flakyTool => {
-        val registry = new ToolRegistry(Seq(flakyTool))
+        val registry = ToolRegistry.of(Seq(flakyTool)).toOption.get
         val config   = ToolExecutionConfig() // no retry
         val request  = ToolCallRequest("flaky", ujson.Obj("x" -> 1.0))
-        val result   = registry.execute(request, config)
+        val result   = ToolExecutor.execute(registry, request, config)
         result.isLeft shouldBe true
       }
     )
@@ -462,12 +462,12 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createFailingTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       failTool => {
-        val registry = new ToolRegistry(Seq(failTool))
+        val registry = ToolRegistry.of(Seq(failTool)).toOption.get
         val config = ToolExecutionConfig(
-          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 10.millis))
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 10.millis).toOption.get)
         )
         val request = ToolCallRequest("fail", ujson.Obj("x" -> 1.0))
-        val result  = registry.execute(request, config)
+        val result  = ToolExecutor.execute(registry, request, config)
         result.isLeft shouldBe true
         result.left.toOption.get shouldBe a[ToolCallError.HandlerError]
       }
@@ -497,10 +497,10 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     hangingTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val registry = new ToolRegistry(Seq(tool))
+        val registry = ToolRegistry.of(Seq(tool)).toOption.get
         val config   = ToolExecutionConfig(timeout = Some(1.second))
         val request  = ToolCallRequest("hang", ujson.Obj("ms" -> 10_000))
-        val result   = registry.execute(request, config)
+        val result   = ToolExecutor.execute(registry, request, config)
 
         result.isLeft shouldBe true
         result.left.toOption.get shouldBe a[ToolCallError.Timeout]
@@ -533,19 +533,19 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     interruptSafeSleepTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       sleepTool => {
-        val registry   = new ToolRegistry(Seq(sleepTool))
+        val registry   = ToolRegistry.of(Seq(sleepTool)).toOption.get
         val config     = ToolExecutionConfig(timeout = Some(50.millis))
         val threadBean = ManagementFactory.getThreadMXBean
         val request    = ToolCallRequest("sleep-interruptible", ujson.Obj("ms" -> 500))
 
         // Warm up the JIT/thread pools once before taking the baseline.
-        (1 to 5).foreach(_ => registry.execute(request, config))
+        (1 to 5).foreach(_ => ToolExecutor.execute(registry, request, config))
         Thread.sleep(200)
 
         val baseline = threadBean.getThreadCount
 
         (1 to 50).foreach { _ =>
-          val result = registry.execute(request, config)
+          val result = ToolExecutor.execute(registry, request, config)
           result.isLeft shouldBe true
         }
 
@@ -579,10 +579,10 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     fastTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val registry = new ToolRegistry(Seq(tool))
+        val registry = ToolRegistry.of(Seq(tool)).toOption.get
         val config   = ToolExecutionConfig(timeout = Some(3.seconds))
         val request  = ToolCallRequest("fast", ujson.Obj("ms" -> 50))
-        val result   = registry.execute(request, config)
+        val result   = ToolExecutor.execute(registry, request, config)
 
         result.isRight shouldBe true
         result.toOption.get("result").num shouldBe 42.0
@@ -597,16 +597,16 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createSleepTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       sleepTool => {
-        val registry = new ToolRegistry(Seq(sleepTool))
+        val registry = ToolRegistry.of(Seq(sleepTool)).toOption.get
         val config   = ToolExecutionConfig(timeout = Some(1.second))
         val request  = ToolCallRequest("sleep", ujson.Obj("ms" -> 5000))
-        val result   = registry.execute(request, config)
+        val result   = ToolExecutor.execute(registry, request, config)
 
         result.isLeft shouldBe true
         val err = result.left.toOption.get
         err shouldBe a[ToolCallError.Timeout]
-        err.getMessage should include("sleep")
-        err.getMessage should include("timed out")
+        err.message should include("sleep")
+        err.message should include("timed out")
       }
     )
   }
@@ -634,13 +634,13 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     slowFirstTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val registry = new ToolRegistry(Seq(tool))
+        val registry = ToolRegistry.of(Seq(tool)).toOption.get
         val config = ToolExecutionConfig(
           timeout = Some(1.second),
-          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 2, baseDelay = 100.millis))
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 2, baseDelay = 100.millis).toOption.get)
         )
         val request = ToolCallRequest("slowfirst", ujson.Obj("x" -> 99.0))
-        val result  = registry.execute(request, config)
+        val result  = ToolExecutor.execute(registry, request, config)
 
         // Retry should succeed since second call is not blocked
         result.isRight shouldBe true
@@ -670,7 +670,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
         createAddTool().fold(
           e => fail(s"Add tool creation failed: ${e.formatted}"),
           addTool => {
-            val registry = new ToolRegistry(Seq(blocker, addTool))
+            val registry = ToolRegistry.of(Seq(blocker, addTool)).toOption.get
             val config   = ToolExecutionConfig(timeout = Some(1.second))
             // 5 blocking + 5 fast calls interleaved
             val requests = (1 to 5).flatMap { i =>
@@ -679,7 +679,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
                 ToolCallRequest("add", ujson.Obj("a" -> i.toDouble, "b" -> i.toDouble))
               )
             }
-            val future  = registry.executeAll(requests, ToolExecutionStrategy.Parallel, config)
+            val future  = ToolExecutor.executeAll(registry, requests, ToolExecutionStrategy.Parallel, config)
             val results = Await.result(future, 15.seconds)
 
             results should have size 10
@@ -704,12 +704,12 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createFlakyTool(2).fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       flakyTool => {
-        val registry = new ToolRegistry(Seq(flakyTool))
+        val registry = ToolRegistry.of(Seq(flakyTool)).toOption.get
         val config = ToolExecutionConfig(
-          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 50.millis, backoffFactor = 2.0))
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 50.millis, backoffFactor = 2.0).toOption.get)
         )
         val request = ToolCallRequest("flaky", ujson.Obj("x" -> 7.0))
-        val result  = registry.execute(request, config)
+        val result  = ToolExecutor.execute(registry, request, config)
         result.isRight shouldBe true
         result.toOption.get("result").num shouldBe 7.0
       }
@@ -720,14 +720,14 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createFlakyTool(1).fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       flakyTool => {
-        val registry  = new ToolRegistry(Seq(flakyTool))
+        val registry  = ToolRegistry.of(Seq(flakyTool)).toOption.get
         val baseDelay = 300.millis
         val config = ToolExecutionConfig(
-          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 2, baseDelay = baseDelay, backoffFactor = 1.0))
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 2, baseDelay = baseDelay, backoffFactor = 1.0).toOption.get)
         )
         val request = ToolCallRequest("flaky", ujson.Obj("x" -> 5.0))
         val start   = System.currentTimeMillis()
-        val result  = registry.execute(request, config)
+        val result  = ToolExecutor.execute(registry, request, config)
         val elapsed = System.currentTimeMillis() - start
 
         result.isRight shouldBe true
@@ -756,12 +756,12 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     trackedTool.fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
-        val registry = new ToolRegistry(Seq(tool))
+        val registry = ToolRegistry.of(Seq(tool)).toOption.get
         val config = ToolExecutionConfig(
-          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 4, baseDelay = 50.millis, backoffFactor = 2.0))
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 4, baseDelay = 50.millis, backoffFactor = 2.0).toOption.get)
         )
         val start   = System.currentTimeMillis()
-        val result  = registry.execute(ToolCallRequest("tracked", ujson.Obj("x" -> 1.0)), config)
+        val result  = ToolExecutor.execute(registry, ToolCallRequest("tracked", ujson.Obj("x" -> 1.0)), config)
         val elapsed = System.currentTimeMillis() - start
         // 3 failures then success on 4th attempt
         result.isRight shouldBe true
@@ -779,13 +779,13 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createFailingTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       failTool => {
-        val registry = new ToolRegistry(Seq(failTool))
+        val registry = ToolRegistry.of(Seq(failTool)).toOption.get
         val config = ToolExecutionConfig(
-          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 5.seconds))
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 5.seconds).toOption.get)
         )
         val request = ToolCallRequest("fail", ujson.Obj("x" -> 1.0))
         val start   = System.currentTimeMillis()
-        val result  = registry.execute(request, config)
+        val result  = ToolExecutor.execute(registry, request, config)
         val elapsed = System.currentTimeMillis() - start
 
         result.isLeft shouldBe true
@@ -803,14 +803,14 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
         createSleepTool().fold(
           e2 => fail(s"Sleep tool failed: ${e2.formatted}"),
           sleepTool => {
-            val registry = new ToolRegistry(Seq(addTool, sleepTool))
+            val registry = ToolRegistry.of(Seq(addTool, sleepTool)).toOption.get
             val config   = ToolExecutionConfig(timeout = Some(150.millis))
             val requests = Seq(
               ToolCallRequest("add", ujson.Obj("a" -> 1, "b" -> 2)),
               ToolCallRequest("sleep", ujson.Obj("ms" -> 5000)),
               ToolCallRequest("add", ujson.Obj("a" -> 3, "b" -> 4))
             )
-            val futureResults = registry.executeAll(requests, ToolExecutionStrategy.Parallel, config)
+            val futureResults = ToolExecutor.executeAll(registry, requests, ToolExecutionStrategy.Parallel, config)
             val results       = Await.result(futureResults, 10.seconds)
             results should have size 3
             results(0).map(_("result").num) shouldBe Right(3.0)
@@ -823,13 +823,13 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
 
   // ============ OpenAI Tool Format ============
 
-  "ToolRegistry.getOpenAITools" should "generate OpenAI tool definitions" in {
+  "ToolFunction.toolDefinitions" should "generate the tool definitions of a registry's tools" in {
     val result = for {
       addTool  <- createAddTool()
       echoTool <- createEchoTool()
     } yield {
-      val registry = new ToolRegistry(Seq(addTool, echoTool))
-      val tools    = registry.getOpenAITools()
+      val registry = ToolRegistry.of(Seq(addTool, echoTool)).toOption.get
+      val tools    = ToolFunction.toolDefinitions(registry.tools, strict = true)
 
       tools.arr should have size 2
 
@@ -848,9 +848,9 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
-        val registry       = new ToolRegistry(Seq(addTool))
-        val strictTools    = registry.getOpenAITools(strict = true)
-        val nonStrictTools = registry.getOpenAITools(strict = false)
+        val registry       = ToolRegistry.of(Seq(addTool)).toOption.get
+        val strictTools    = ToolFunction.toolDefinitions(registry.tools, strict = true)
+        val nonStrictTools = ToolFunction.toolDefinitions(registry.tools, strict = false)
 
         strictTools.arr.head("function")("strict").bool shouldBe true
         nonStrictTools.arr.head("function")("strict").bool shouldBe false
@@ -872,10 +872,11 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       Right(MathResult(0.0))
     }.buildSafe()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
-    val registry                                                                 = new ToolRegistry(Seq(blocking))
+    val registry = ToolRegistry.of(Seq(blocking)).toOption.get
     @volatile var outcome: Option[(Either[ToolCallError, ujson.Value], Boolean)] = None
     val caller = Thread.ofVirtual().start { () =>
-      val r = registry.execute(ToolCallRequest("blocker", ujson.Obj()), ToolExecutionConfig(timeout = Some(20.seconds)))
+      val r = ToolExecutor
+        .execute(registry, ToolCallRequest("blocker", ujson.Obj()), ToolExecutionConfig(timeout = Some(20.seconds)))
       outcome = Some(r -> Thread.currentThread().isInterrupted)
     }
     Thread.sleep(200)
@@ -895,7 +896,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     ).withHandler(_ => throw new InterruptedException("stop"))
       .buildSafe()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
-    val registry = new ToolRegistry(Seq(thrower))
+    val registry = ToolRegistry.of(Seq(thrower)).toOption.get
     val result   = registry.execute(ToolCallRequest("thrower", ujson.Obj()))
     Thread.interrupted() shouldBe true
     result shouldBe Left(ToolCallError.Cancelled("thrower"))
@@ -912,9 +913,10 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       throw new java.io.IOException("read aborted", new InterruptedException("stop"))
     }.buildSafe()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
-    val registry = new ToolRegistry(Seq(wrapping))
-    val config   = ToolExecutionConfig(retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 1.millis)))
-    val result   = registry.execute(ToolCallRequest("wrapper", ujson.Obj()), config)
+    val registry = ToolRegistry.of(Seq(wrapping)).toOption.get
+    val config =
+      ToolExecutionConfig(retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 1.millis).toOption.get))
+    val result = ToolExecutor.execute(registry, ToolCallRequest("wrapper", ujson.Obj()), config)
     Thread.interrupted() shouldBe true // the tool's catch cleared the flag; the registry restores it
     result shouldBe Left(ToolCallError.Cancelled("wrapper"))
     attempts.get shouldBe 1
@@ -931,13 +933,13 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       throw new java.io.IOException("transient")
     }.buildSafe()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
-    val registry = new ToolRegistry(Seq(failing))
+    val registry = ToolRegistry.of(Seq(failing)).toOption.get
     val config = ToolExecutionConfig(
-      retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 30.seconds))
+      retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 30.seconds).toOption.get)
     )
     @volatile var outcome: Option[(Either[ToolCallError, ujson.Value], Boolean)] = None
     val caller = Thread.ofVirtual().start { () =>
-      val r = registry.execute(ToolCallRequest("flaky", ujson.Obj()), config)
+      val r = ToolExecutor.execute(registry, ToolCallRequest("flaky", ujson.Obj()), config)
       outcome = Some(r -> Thread.currentThread().isInterrupted)
     }
     Thread.sleep(300)
@@ -965,13 +967,14 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
       Right(MathResult(1.0))
     }.buildSafe()
       .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
-    val registry = new ToolRegistry(Seq(thrower, sleeper))
+    val registry = ToolRegistry.of(Seq(thrower, sleeper)).toOption.get
     // One fork-join worker, so the second call runs on the thread the first was cancelled on. Unlike
     // a ThreadPoolExecutor, a ForkJoinPool does not clear a worker's flag between tasks.
     val pool   = new java.util.concurrent.ForkJoinPool(1)
     val single = ExecutionContext.fromExecutorService(pool)
     val results = Await.result(
-      registry.executeAll(
+      ToolExecutor.executeAll(
+        registry,
         Seq(ToolCallRequest("thrower", ujson.Obj()), ToolCallRequest("sleeper", ujson.Obj())),
         ToolExecutionStrategy.Sequential
       )(using single),

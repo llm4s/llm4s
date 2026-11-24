@@ -42,7 +42,11 @@ class FileInfoToolSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
       .createSafe(FileConfig(allowedPaths = Some(allowedPaths), blockedPaths = Seq.empty))
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
-        tool => tool.handler(SafeParameterExtractor(ujson.Obj("path" -> path)))
+        tool =>
+          tool
+            .handler(SafeParameterExtractor(ujson.Obj("path" -> path)))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message)
       )
 
   private def fileOfSize(name: String, bytes: Int): Path = {
@@ -152,7 +156,10 @@ class FileInfoToolSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool =>
-          tool.handler(SafeParameterExtractor(ujson.Obj("not-path" -> "x"))) match {
+          tool
+            .handler(SafeParameterExtractor(ujson.Obj("not-path" -> "x")))
+            .left
+            .map(org.llm4s.toolapi.ToolHandlerError.message) match {
             case Left(err) => err should include("path")
             case Right(_)  => fail("Expected Left for a missing path parameter")
           }

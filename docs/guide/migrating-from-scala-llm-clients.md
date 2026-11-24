@@ -224,9 +224,10 @@ val client = ScriptedLLMClient.sequence(
 
 ```scala
 val answer: Result[Option[String]] = for {
-  tool   <- weatherTool
-  agent  <- Agent.builder("weather-agent", client).withTools(new ToolRegistry(Seq(tool))).build()
-  result <- agent.run("What's the weather in Paris?")
+  tool     <- weatherTool
+  registry <- ToolRegistry.of(Seq(tool))
+  agent    <- Agent.builder("weather-agent", client).withTools(registry).build()
+  result   <- agent.run("What's the weather in Paris?")
 } yield result.answer
 ```
 

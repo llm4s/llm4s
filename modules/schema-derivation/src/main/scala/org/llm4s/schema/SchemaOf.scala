@@ -2,7 +2,9 @@ package org.llm4s.schema
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.toolapi.{
+  AnyOfSchema,
   ArraySchema,
+  JsonSchemaJson,
   NullableSchema,
   NumberSchema,
   ObjectSchema,
@@ -53,9 +55,8 @@ import scala.deriving.Mirror
  * through the generic `derives SchemaOf` instance (`SchemaOf[W[...[Int]]]`) it is refused when the schema is built,
  * with the same `IllegalStateException`.
  *
- * A sum type with fields, and a type that holds one, has no schema in core's model, which has no union: its
- * [[toJsonSchema]] is the JSON Schema, while [[schema]] and [[definition]] throw an `UnsupportedOperationException`
- * saying so. `completeStructuredOf` sends such a schema as it is, and a tool refuses it.
+ * A sum type with fields is core's `AnyOfSchema`: one alternative per case. A tool's arguments may hold one, but
+ * cannot be one, since a tool's arguments are a JSON object.
  *
  * @tparam A the described type
  */
@@ -85,14 +86,11 @@ trait SchemaOf[A] {
    *
    * @throws java.lang.IllegalStateException for a derived instance whose type turns out to be recursive, or nests a
    *                                         generic case class in itself more than 16 deep (see [[SchemaOf]])
-   * @throws java.lang.UnsupportedOperationException for a sum type with fields, or a type that holds one: core's
-   *                                                 schema model has no union (use [[jsonSchema]])
    */
   def schema(description: String): SchemaDefinition[A]
 
   /**
-   * The JSON Schema, described to the model by `description`: `schema(description).toJsonSchema(strict)`, except
-   * for a sum type with fields (and a type that holds one), whose `anyOf` core's schema model cannot express.
+   * The JSON Schema, described to the model by `description`: `schema(description).toJsonSchema(strict)`.
    *
    * @param strict as in [[toJsonSchema]]
    * @throws java.lang.IllegalStateException as [[schema]] does
@@ -108,7 +106,6 @@ trait SchemaOf[A] {
    * (`ToolBuilder[A, R](name, text, SchemaOf[A].definition)`).
    *
    * @throws java.lang.IllegalStateException as [[schema]] does
-   * @throws java.lang.UnsupportedOperationException as [[schema]] does
    */
   final def definition: SchemaDefinition[A] = schema(defaultDescription)
 
@@ -396,12 +393,33 @@ object SchemaOf {
     def typeName: String                         = name
     override def typeDescription: Option[String] = described
 
-    def schema(d: String): SchemaDefinition[A] =
-      throw new UnsupportedOperationException(
-        s"$name is a sum type with fields: its schema is a JSON Schema anyOf, which llm4s-core's schema model " +
-          "(and so a tool's parameters) cannot express. SchemaOf.toJsonSchema and completeStructuredOf describe it; " +
-          "a tool's arguments cannot hold a sum type yet."
-      )
+    // The same alternatives as `jsonSchema` below, as core's schema model: a string with the one tag, or the
+    // case's object with the discriminator as its first, required property.
+    def schema(d: String): SchemaDefinition[A] = {
+      val alternatives: List[SchemaDefinition[?]] = labels.zip(caseSchemas).map { case (label, of) =>
+        val tag         = keys.getOrElse(label, label)
+        val description = caseDescriptions.getOrElse(label, label)
+        of match {
+          case None => Schema.string(description).withEnum(Seq(tag))
+          case Some(of) =>
+            of.schema(description) match {
+              case fields: ObjectSchema[?] =>
+                val tagProperty =
+                  PropertyDefinition(
+                    discriminator,
+                    Schema.string(s"Always \"$tag\"").withEnum(Seq(tag)),
+                    required = true
+                  )
+                fields.withProperties(tagProperty +: fields.properties.filterNot(_.name == discriminator))
+              case other => other
+            }
+        }
+      }
+      alternatives match {
+        case first :: rest => AnyOfSchema[A](d, first, rest*)
+        case Nil           => Schema.string(d).asInstanceOf[SchemaDefinition[A]] // a sum has at least one case
+      }
+    }
 
     override def jsonSchema(d: String, strict: Boolean): ujson.Value =
       JsonSchemas.anyOf(
@@ -427,7 +445,10 @@ private[schema] object JsonSchemas {
 
   def obj(description: String, properties: List[(String, ujson.Value, Boolean)], strict: Boolean): ujson.Value = {
     val props = ujson.Obj()
-    properties.foreach { case (name, schema, _) => props(name) = schema }
+    // as `ObjectSchema`: under strict every property is required, so an optional one is nullable
+    properties.foreach { case (name, schema, required) =>
+      props(name) = if (strict && !required) nullable(schema) else schema
+    }
     val required = (if (strict) properties else properties.filter(_._3)).map(_._1).distinct
     ujson.Obj(
       "type"                 -> ujson.Str("object"),
@@ -441,29 +462,8 @@ private[schema] object JsonSchemas {
   def array(description: String, items: ujson.Value): ujson.Value =
     ujson.Obj("type" -> ujson.Str("array"), "description" -> ujson.Str(description), "items" -> items)
 
-  // `null` added: to an `anyOf` as one more alternative, otherwise to the type (and the `enum`, if any)
-  def nullable(schema: ujson.Value): ujson.Value = {
-    val widened  = ujson.Obj.from(schema.obj)
-    val nullType = ujson.Str("null")
-    widened.value.get("anyOf") match {
-      case Some(alternatives) =>
-        if (!alternatives.arr.contains(ujson.Obj("type" -> nullType)))
-          widened("anyOf") = ujson.Arr.from(alternatives.arr :+ ujson.Obj("type" -> nullType))
-      case None =>
-        widened.value.get("type") match {
-          case Some(ujson.Str(name)) => widened("type") = ujson.Arr(ujson.Str(name), nullType)
-          case Some(names: ujson.Arr) =>
-            if (!names.value.contains(nullType)) widened("type") = ujson.Arr.from(names.value :+ nullType)
-          case _ => widened("type") = ujson.Arr(nullType)
-        }
-        widened.value.get("enum") match {
-          case Some(values: ujson.Arr) if !values.value.contains(ujson.Null) =>
-            widened("enum") = ujson.Arr.from(values.value :+ ujson.Null)
-          case _ => ()
-        }
-    }
-    widened
-  }
+  // `null` added, exactly as core's `NullableSchema` adds it
+  def nullable(schema: ujson.Value): ujson.Value = JsonSchemaJson.nullable(schema)
 
   def anyOf(description: String, alternatives: List[ujson.Value]): ujson.Value =
     ujson.Obj("description" -> ujson.Str(description), "anyOf" -> ujson.Arr.from(alternatives))

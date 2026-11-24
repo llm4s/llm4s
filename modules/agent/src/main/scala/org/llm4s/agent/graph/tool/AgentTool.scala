@@ -136,7 +136,7 @@ final case class AgentToolSpec[A] private (
   private lazy val strictSchema: ujson.Value = schema.toJsonSchema(true)
 
   /**
-   * The tool definition in OpenAI's strict format, the shape of `ToolFunction.toOpenAITool(true)`,
+   * The tool definition in OpenAI's strict format, the shape of `ToolFunction.toolDefinition(strict = true)`,
    * for callers that send definitions themselves; core's clients receive [[ToolSet.toolFunctions]]
    * and render their own from `schema`. Its parameters are a fresh copy each time, so a caller that
    * edits one definition cannot change another.
@@ -450,7 +450,7 @@ object AgentTool:
     def execute(args: ujson.Value, context: ToolContext): ToolOutcome =
       function.execute(args, ToolCallInfo(context.toolCallId.value, context.idempotencyKey.value)) match
         case Right(json) => ToolOutcome.success(ToolContent.Json(json))
-        case Left(error) => ToolOutcome.Error(error.getFormattedMessage)
+        case Left(error) => ToolOutcome.Error(error.formatted)
 
   /**
    * A tool that asks questions of type `Q` and takes answers of type `Ans`. Its spec is `base`

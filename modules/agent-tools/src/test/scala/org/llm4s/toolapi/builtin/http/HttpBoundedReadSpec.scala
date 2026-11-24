@@ -125,6 +125,8 @@ class HttpBoundedReadSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
       .createSafe(config)
       .fold(e => fail(e.formatted), identity)
       .handler(SafeParameterExtractor(ujson.Obj("url" -> s"http://127.0.0.1:${server.getAddress.getPort}$path")))
+      .left
+      .map(org.llm4s.toolapi.ToolHandlerError.message)
   }
 
   "The HTTP tool" should "cut a huge response at the cap and stop the server from sending the rest" in {

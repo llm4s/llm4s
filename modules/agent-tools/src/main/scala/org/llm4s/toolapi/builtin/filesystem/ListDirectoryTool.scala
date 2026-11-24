@@ -58,7 +58,7 @@ object ListDirectoryResult {
  *   allowedPaths = Some(Seq("/tmp", "/home/user"))
  * ))
  *
- * val tools = new ToolRegistry(Seq(listTool))
+ * val tools = ToolRegistry.of(Seq(listTool))
  * agent.run("List files in /tmp", tools)
  * }}}
  */

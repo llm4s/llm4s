@@ -26,12 +26,12 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
     ).withHandler { params =>
       // Use SafeParameterExtractor in enhanced mode for structured errors
       val result = for {
-        item <- params.getStringEnhanced("item")
-        qty  <- params.getDoubleEnhanced("quantity")
-        loc  <- params.getStringEnhanced("location")
+        item <- params.getString("item")
+        qty  <- params.getDouble("quantity")
+        loc  <- params.getString("location")
       } yield TestResult(s"Success: $item, $qty, $loc")
 
-      result.left.map(_.getMessage)
+      result.left.map(_.message)
     }.buildSafe()
   }
 
@@ -43,7 +43,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
 
         (result should be).a(Symbol("left"))
         val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
-        val message = error.getFormattedMessage
+        val message = error.formatted
 
         message shouldBe "Tool call 'add_inventory_item' received null arguments - expected an object with required parameters"
       }
@@ -63,7 +63,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
 
         (result should be).a(Symbol("left"))
         val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
-        val message = error.getFormattedMessage
+        val message = error.formatted
 
         // Should get the first missing parameter
         message should include("Tool call 'add_inventory_item'")
@@ -89,7 +89,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
 
         (result should be).a(Symbol("left"))
         val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
-        val message = error.getFormattedMessage
+        val message = error.formatted
 
         message shouldBe "Tool call 'add_inventory_item' failed with error: parameter 'quantity' (type: number) is required but value was null"
       }
@@ -110,7 +110,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
 
         (result should be).a(Symbol("left"))
         val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
-        val message = error.getFormattedMessage
+        val message = error.formatted
 
         message shouldBe "Tool call 'add_inventory_item' failed with error: parameter 'quantity' has wrong type - expected number but got string"
       }
@@ -127,10 +127,10 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
       "Divides 10 by the provided value",
       schema
     ).withHandler { params =>
-      params.getDoubleEnhanced("value") match {
+      params.getDouble("value") match {
         case Right(0)  => Left("cannot divide by zero")
         case Right(v)  => Right(TestResult(s"Result: ${10.0 / v}"))
-        case Left(err) => Left(err.getMessage)
+        case Left(err) => Left(err.message)
       }
     }.buildSafe()
       .fold(
@@ -140,7 +140,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
 
           (result should be).a(Symbol("left"))
           val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
-          val message = error.getFormattedMessage
+          val message = error.formatted
 
           message shouldBe "Tool call 'divide_by_value' failed with error: cannot divide by zero"
         }
@@ -154,36 +154,36 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
       "string",
       List("name", "age", "address")
     )
-    missing.getMessage shouldBe "required parameter 'email' (type: string) is missing (available: name, age, address)"
+    missing.message shouldBe "required parameter 'email' (type: string) is missing (available: name, age, address)"
 
     // Test NullParameter
     val nullParam = ToolParameterError.NullParameter("age", "number")
-    nullParam.getMessage shouldBe "parameter 'age' (type: number) is required but value was null"
+    nullParam.message shouldBe "parameter 'age' (type: number) is required but value was null"
 
     // Test TypeMismatch
     val typeMismatch = ToolParameterError.TypeMismatch("count", "integer", "string")
-    typeMismatch.getMessage shouldBe "parameter 'count' has wrong type - expected integer but got string"
+    typeMismatch.message shouldBe "parameter 'count' has wrong type - expected integer but got string"
 
     // Test InvalidNesting
     val invalidNesting = ToolParameterError.InvalidNesting("name", "user", "string")
-    invalidNesting.getMessage shouldBe "cannot access parameter 'name' because parent 'user' is string, not an object"
+    invalidNesting.message shouldBe "cannot access parameter 'name' because parent 'user' is string, not an object"
   }
 
   "ToolCallError messages" should "have consistent format" in {
     // Test UnknownFunction
     val unknown = ToolCallError.UnknownFunction("foo_bar")
-    unknown.getFormattedMessage should include("Tool call 'foo_bar' is not a recognized tool")
+    unknown.formatted should include("Tool call 'foo_bar' is not a recognized tool")
 
     // Test NullArguments
     val nullArgs = ToolCallError.NullArguments("process_data")
-    nullArgs.getFormattedMessage shouldBe "Tool call 'process_data' received null arguments - expected an object with required parameters"
+    nullArgs.formatted shouldBe "Tool call 'process_data' received null arguments - expected an object with required parameters"
 
     // Test InvalidArguments with single error
     val singleError = ToolCallError.InvalidArguments(
       "calculate",
       List(ToolParameterError.MissingParameter("value", "number"))
     )
-    singleError.getFormattedMessage shouldBe "Tool call 'calculate' required parameter 'value' (type: number) is missing"
+    singleError.formatted shouldBe "Tool call 'calculate' required parameter 'value' (type: number) is missing"
 
     // Test InvalidArguments with multiple errors
     val multipleErrors = ToolCallError.InvalidArguments(
@@ -194,22 +194,22 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
         ToolParameterError.NullParameter("name", "string")
       )
     )
-    multipleErrors.getFormattedMessage should include("Tool call 'submit_form' has parameter issues:")
-    multipleErrors.getFormattedMessage should include("- required parameter 'email' (type: string) is missing")
-    multipleErrors.getFormattedMessage should include(
+    multipleErrors.formatted should include("Tool call 'submit_form' has parameter issues:")
+    multipleErrors.formatted should include("- required parameter 'email' (type: string) is missing")
+    multipleErrors.formatted should include(
       "- parameter 'age' has wrong type - expected number but got string"
     )
-    multipleErrors.getFormattedMessage should include(
+    multipleErrors.formatted should include(
       "- parameter 'name' (type: string) is required but value was null"
     )
 
     // Test ExecutionError
     val execError = ToolCallError.ExecutionError("process", new RuntimeException("Network timeout"))
-    execError.getFormattedMessage shouldBe "Tool call 'process' failed during execution: Network timeout"
+    execError.formatted shouldBe "Tool call 'process' failed during execution: Network timeout"
 
     // Test HandlerError
     val handlerError = ToolCallError.HandlerError("validate", "Invalid format")
-    handlerError.getFormattedMessage shouldBe "Tool call 'validate' failed with error: Invalid format"
+    handlerError.formatted shouldBe "Tool call 'validate' failed with error: Invalid format"
   }
 
   "SafeParameterExtractor (enhanced mode)" should "provide helpful information about available properties" in {
@@ -221,12 +221,12 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
       )
     )
 
-    val result = extractor.getStringEnhanced("username")
+    val result = extractor.getString("username")
 
     (result should be).a(Symbol("left"))
     val error = result.fold(identity, v => fail(s"Expected error but got: $v"))
-    error.getMessage should include("required parameter 'username' (type: string) is missing")
-    error.getMessage should include("available: email, firstName, lastName")
+    error.message should include("required parameter 'username' (type: string) is missing")
+    error.message should include("available: email, firstName, lastName")
   }
 
   "SafeParameterExtractor (enhanced mode)" should "handle nested parameters correctly" in {
@@ -241,14 +241,14 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
     )
 
     // Test successful nested access
-    val nameResult = extractor.getStringEnhanced("user.profile.name")
+    val nameResult = extractor.getString("user.profile.name")
     nameResult shouldBe Right("John")
 
     // Test missing nested property
-    val ageResult = extractor.getIntEnhanced("user.profile.age")
+    val ageResult = extractor.getInt("user.profile.age")
     (ageResult should be).a(Symbol("left"))
     val error = ageResult.fold(identity, v => fail(s"Expected error but got: $v"))
-    error.getMessage should include("required parameter 'user.profile.age' (type: integer) is missing")
+    error.message should include("required parameter 'user.profile.age' (type: integer) is missing")
   }
 
   "SafeParameterExtractor (enhanced mode)" should "handle optional parameters correctly" in {
@@ -271,6 +271,6 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
     val wrongType = extractor.getOptionalInt("required")
     (wrongType should be).a(Symbol("left"))
     val error = wrongType.fold(identity, v => fail(s"Expected error but got: $v"))
-    error.getMessage should include("has wrong type - expected integer but got string")
+    error.message should include("has wrong type - expected integer but got string")
   }
 }

@@ -52,8 +52,8 @@ class GraphQueryToolTest extends AnyFunSuite with Matchers with MockFactory {
     val tool = GraphQueryTool.toolSafe(llmClient, store)
     tool should be(a[Right[_, _]])
 
-    val registry = new ToolRegistry(Seq(tool.toOption.get))
-    registry.getTool("graph_query") should be(defined)
+    val registry = ToolRegistry.of(Seq(tool.toOption.get)).toOption.get
+    registry.tool("graph_query") should be(defined)
   }
 
   test("tool should execute via ToolRegistry with question parameter") {
@@ -84,7 +84,7 @@ class GraphQueryToolTest extends AnyFunSuite with Matchers with MockFactory {
       .once()
 
     val tool     = GraphQueryTool.toolSafe(llmClient, store, config).toOption.get
-    val registry = new ToolRegistry(Seq(tool))
+    val registry = ToolRegistry.of(Seq(tool)).toOption.get
 
     val args   = ujson.Obj("question" -> ujson.Str("Tell me about Alice"))
     val result = registry.execute(ToolCallRequest("graph_query", args))
@@ -100,7 +100,7 @@ class GraphQueryToolTest extends AnyFunSuite with Matchers with MockFactory {
     val store     = buildTestStore()
 
     val tool   = GraphQueryTool.toolSafe(llmClient, store).toOption.get
-    val schema = tool.toOpenAITool()
+    val schema = tool.toolDefinition(strict = true)
 
     val functionSchema = schema("function")
     functionSchema("name").str shouldBe "graph_query"

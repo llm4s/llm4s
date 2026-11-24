@@ -119,9 +119,13 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
     val query   = s"llm4s smoke ${UUID.randomUUID()}: echo hello"
     val tracing = new CheckedLangfuseTracing(publicKey, secretKey)
     val result = for {
-      tool  <- echoTool
-      agent <- Agent.builder("smoke", client).withTools(new ToolRegistry(Seq(tool))).withTracing(tracing).build()
-      done  <- agent.run(query)
+      tool <- echoTool
+      agent <- Agent
+        .builder("smoke", client)
+        .withTools(ToolRegistry.of(Seq(tool)).toOption.get)
+        .withTracing(tracing)
+        .build()
+      done <- agent.run(query)
     } yield done
 
     result.map(_.status) shouldBe Right(AgentStatus.Completed("Echoed."))

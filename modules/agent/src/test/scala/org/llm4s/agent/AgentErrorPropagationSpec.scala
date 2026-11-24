@@ -251,7 +251,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
     val result = built(
       Agent
         .builder("assistant", client)
-        .withTools(new ToolRegistry(Seq(failingTool("flaky", Left("backend unavailable")))))
+        .withTools(ToolRegistry.of(Seq(failingTool("flaky", Left("backend unavailable")))).toOption.get)
     ).run("go").value
 
     result.answer shouldBe Some("handled it")
@@ -270,7 +270,9 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
     val result = built(
       Agent
         .builder("assistant", client)
-        .withTools(new ToolRegistry(Seq(failingTool("explosive", throw new IllegalStateException("kaboom")))))
+        .withTools(
+          ToolRegistry.of(Seq(failingTool("explosive", throw new IllegalStateException("kaboom")))).toOption.get
+        )
     ).run("go").value
 
     result.answer shouldBe Some("still here")

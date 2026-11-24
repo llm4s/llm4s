@@ -128,16 +128,19 @@ class NamedTupleUseSpec extends AnyFlatSpec with Matchers {
       Right(ujson.Obj("high" -> 23.0, "low" -> 12.5))
     forecast.execute(ujson.Obj("city" -> "Paris", "days" -> 1, "units" -> "F")) shouldBe
       Right(ujson.Obj("high" -> 22.0, "low" -> 54.5))
-    new ToolRegistry(Seq(forecast))
+    ToolRegistry
+      .of(Seq(forecast))
+      .toOption
+      .get
       .execute(ToolCallRequest("forecast", ujson.Obj("city" -> "Oslo", "days" -> 3))) shouldBe
       Right(ujson.Obj("high" -> 24.0, "low" -> 12.5))
   }
 
   it should "send the parameters of the case class with the same fields" in {
-    forecast.toOpenAITool()("function")("parameters")("properties") shouldBe
-      forecastClass.toOpenAITool()("function")("parameters")("properties")
-    forecast.toOpenAITool()("function")("parameters")("required") shouldBe
-      forecastClass.toOpenAITool()("function")("parameters")("required")
+    forecast.toolDefinition(strict = true)("function")("parameters")("properties") shouldBe
+      forecastClass.toolDefinition(strict = true)("function")("parameters")("properties")
+    forecast.toolDefinition(strict = true)("function")("parameters")("required") shouldBe
+      forecastClass.toolDefinition(strict = true)("function")("parameters")("required")
   }
 
   it should "report missing, null and mistyped arguments as the case class tool does" in {

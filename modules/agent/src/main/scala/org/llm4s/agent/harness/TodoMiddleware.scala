@@ -175,7 +175,7 @@ object TodoMiddleware:
       .`object`[TodoItem]("One todo")
       .withRequiredField(
         "content",
-        Schema.string("What to do").withLengthConstraints(min = Some(1), max = Some(maxTodoChars))
+        Schema.string("What to do").withMinLength(1).withMaxLength(maxTodoChars)
       )
       .withRequiredField(
         "status",
@@ -189,7 +189,7 @@ object TodoMiddleware:
       .`object`[WriteTodos]("The whole plan, replacing the current one")
       .withRequiredField(
         "todos",
-        Schema.array("The todos, in order", item).withSizeConstraints(max = Some(maxTodos))
+        Schema.array("The todos, in order", item).withMaxItems(maxTodos)
       )
 
   private def codePoints(s: String): Int = s.codePointCount(0, s.length)

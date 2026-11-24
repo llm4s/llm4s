@@ -101,7 +101,7 @@ class ToolDslTest {
 
         assertEquals(java.name(), dsl.name())
         assertEquals(java.description(), dsl.description())
-        assertEquals(java.function().toOpenAITool(true), dsl.function().toOpenAITool(true))
+        assertEquals(java.function().toolDefinition(true), dsl.function().toolDefinition(true))
         assertEquals(parse("5"), dsl.function().execute(parse("""{"a":2,"b":3}""")).toOption().get())
     }
 

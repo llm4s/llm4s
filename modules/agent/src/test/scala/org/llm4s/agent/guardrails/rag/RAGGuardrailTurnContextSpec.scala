@@ -68,7 +68,7 @@ class RAGGuardrailTurnContextSpec extends AnyFlatSpec with Matchers {
     built(
       Agent
         .builder("rag", client)
-        .withTools(new ToolRegistry(Seq(searchTool(), searchTool("other"))))
+        .withTools(ToolRegistry.of(Seq(searchTool(), searchTool("other"))).toOption.get)
         .withMiddleware(new GuardrailMiddleware(Seq.empty, output))
     )
 

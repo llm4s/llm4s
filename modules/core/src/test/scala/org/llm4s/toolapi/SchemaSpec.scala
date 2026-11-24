@@ -23,14 +23,14 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
   private val everything: ObjectSchema[Params] =
     Schema
       .`object`[Params]("Everything")
-      .withRequiredField("name", Schema.string("The user's name").withLengthConstraints(Some(1), Some(80)))
+      .withRequiredField("name", Schema.string("The user's name").withMinLength(1).withMaxLength(80))
       .withRequiredField("color", Schema.string("A colour").withEnum(Seq("red", "green", "blue")))
-      .withRequiredField("count", Schema.integer("Number of items").withRange(Some(0), Some(100)))
-      .withRequiredField("ratio", Schema.number("A ratio").withRange(Some(0.5), Some(1.5)))
+      .withRequiredField("count", Schema.integer("Number of items").withMinimum(0).withMaximum(100))
+      .withRequiredField("ratio", Schema.number("A ratio").withMinimum(0.5).withMaximum(1.5))
       .withRequiredField("enabled", Schema.boolean("Whether to enable"))
       .withRequiredField(
         "tags",
-        Schema.array("Tags", Schema.string("A tag")).withSizeConstraints(Some(1), Some(5)).withUniqueItems()
+        Schema.array("Tags", Schema.string("A tag")).withMinItems(1).withMaxItems(5).withUniqueItems()
       )
       .withRequiredField("home", address)
       .withOptionalField("previous", Schema.array("Earlier addresses", address))
@@ -210,7 +210,7 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "render the same text each time the same tool is rendered" in {
-    val renderings = (1 to 5).map(_ => ujson.write(tool(everything).toOpenAITool()))
+    val renderings = (1 to 5).map(_ => ujson.write(tool(everything).toolDefinition(strict = true)))
 
     renderings.distinct should have size 1
   }
@@ -235,14 +235,14 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
   // ---- the tool definition
 
   "A ToolFunction carrying every schema" should "serialise to JSON that parses back to the same document" in {
-    val definition = tool(everything).toOpenAITool()
+    val definition = tool(everything).toolDefinition(strict = true)
 
     ujson.read(ujson.write(definition)) shouldBe definition
     ujson.read(ujson.write(definition, indent = 2)) shouldBe definition
   }
 
   it should "present itself to a provider as a function whose parameters are the schema" in {
-    val definition = tool(everything).toOpenAITool()
+    val definition = tool(everything).toolDefinition(strict = true)
 
     (definition.obj.keySet should contain).allOf("type", "function")
     definition("type").str shouldBe "function"
@@ -254,12 +254,12 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "render its parameters in the mode its strict flag names" in {
-    val tolerant = tool(everything).toOpenAITool(strict = false)
+    val tolerant = tool(everything).toolDefinition(strict = false)
 
     tolerant("function")("strict").bool shouldBe false
     tolerant("function")("parameters") shouldBe everything.toJsonSchema(strict = false)
     required(tolerant("function")("parameters")) should not contain "nickname"
-    required(tool(everything).toOpenAITool()("function")("parameters")) should contain("nickname")
+    required(tool(everything).toolDefinition(strict = true)("function")("parameters")) should contain("nickname")
   }
 
   it should "contain no null, NaN or infinite value anywhere in the document" in {
@@ -269,10 +269,10 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
       case other        => Seq(other)
     }
 
-    val numbers = leaves(tool(everything).toOpenAITool()).collect { case ujson.Num(n) => n }
+    val numbers = leaves(tool(everything).toolDefinition(strict = true)).collect { case ujson.Num(n) => n }
 
     numbers should not be empty
     numbers.foreach(n => n.isNaN || n.isInfinite shouldBe false)
-    leaves(tool(everything).toOpenAITool()) should not contain ujson.Null
+    leaves(tool(everything).toolDefinition(strict = true)) should not contain ujson.Null
   }
 }

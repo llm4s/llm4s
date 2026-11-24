@@ -38,7 +38,7 @@ class AgentThinkingSpec extends AnyFlatSpec with Matchers {
   private val signedAnswer = AssistantMessage("The weather is sunny.").withThinking(thinking)
 
   private def agent(client: ScriptedLLMClient, streaming: Boolean = false) = {
-    val builder = Agent.builder("assistant", client).withTools(new ToolRegistry(Seq(weather)))
+    val builder = Agent.builder("assistant", client).withTools(ToolRegistry.of(Seq(weather)).toOption.get)
     built(if (streaming) builder.withStreaming() else builder)
   }
 

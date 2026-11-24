@@ -73,7 +73,7 @@ nested inside another pattern. These 0.5 rules change names, not types; the `Sec
 
 | Rule | Rewrites |
 |---|---|
-| `CopyToWithSetters_1_0` | `.copy(field = value)` to `.withField(value)` on the 95 types made growth-safe since 0.5.1 (`ToolRetryPolicy`, the OpenAI-compatible, Gemini, Vertex AI and Azure configs, `TraceEvent` and `AssistantError` cases, tool schemas, context types, ...); a `String` `apiKey` is wrapped in `Secret(...)`. Lints a positional `copy` and `new X(...)` |
+| `CopyToWithSetters_1_0` | `.copy(field = value)` to `.withField(value)` on the 94 types made growth-safe since 0.5.1 (`ToolExecutionConfig`, the OpenAI-compatible, Gemini, Vertex AI and Azure configs, `TraceEvent` and `AssistantError` cases, tool schemas, context types, ...); a `String` `apiKey` is wrapped in `Secret(...)`. Lints a positional `copy` and `new X(...)` |
 | `CredentialsToSecret` | `OpenAIConfig(apiKey = key, ...)` and `config.withApiKey(key)` to `Secret(key)` on the provider configs (`Some(Secret(key))` where the key is an `Option`), and a read of `config.apiKey` to `config.apiKey.reveal` |
 | `FromValuesKeyFirst` | `OpenAIConfig.fromValues(model, key, organization, baseUrl, ...)` to `fromValues(model, Secret(key), baseUrl, organization, ...)`, dropping a `None` organization; `AzureConfig.fromValues(deployment, endpoint, key, apiVersion)` to `fromValues(deployment, Secret(key), endpoint, apiVersion)` |
 | `CompletionCreatedToInstant` | `Completion(created = seconds)`, `withCreated(seconds)` and `toCompletion(seconds)` to `Instant.ofEpochSecond(seconds)` (`0L` to `Instant.EPOCH`), and a read of `completion.created` to `completion.created.getEpochSecond` |

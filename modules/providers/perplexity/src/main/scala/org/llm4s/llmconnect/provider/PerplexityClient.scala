@@ -303,7 +303,7 @@ class PerplexityClient(
       format.foreach(f => body("response_format") = f)
       val tools =
         (if (config.webSearch) Seq(ujson.Obj("type" -> "web_search")) else Seq.empty) ++
-          options.tools.map(tool => functionTool(tool.toOpenAITool(strict = false)))
+          options.tools.map(tool => functionTool(tool.toolDefinition(strict = false)))
       if (tools.nonEmpty) body("tools") = ujson.Arr.from(tools)
       if (stream) body("stream") = true
       body

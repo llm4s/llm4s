@@ -64,22 +64,22 @@ object TypedCalculatorExample {
     )
 
     val outcome = for {
-      handBuilt  <- CalculatorTool.toolSafe
-      typed      <- TypedCalculator.tool
-      namedTuple <- TypedCalculator.namedTupleTool
-      scoped     <- TypedCalculator.scopedTool
+      handBuilt       <- CalculatorTool.toolSafe
+      typed           <- TypedCalculator.tool
+      namedTuple      <- TypedCalculator.namedTupleTool
+      scoped          <- TypedCalculator.scopedTool
+      handBuiltTools  <- ToolRegistry.of(Seq(handBuilt))
+      typedTools      <- ToolRegistry.of(Seq(typed))
+      namedTupleTools <- ToolRegistry.of(Seq(namedTuple))
+      scopedTools     <- ToolRegistry.of(Seq(scoped))
     } yield {
       println("Schema, hand-built:")
-      println(handBuilt.toOpenAITool().render(indent = 2))
+      println(handBuilt.toolDefinition(strict = true).render(indent = 2))
       println("Schema, typed:")
-      println(typed.toOpenAITool().render(indent = 2))
+      println(typed.toolDefinition(strict = true).render(indent = 2))
       println("Schema, named tuple:")
-      println(namedTuple.toOpenAITool().render(indent = 2))
+      println(namedTuple.toolDefinition(strict = true).render(indent = 2))
 
-      val handBuiltTools  = new ToolRegistry(Seq(handBuilt))
-      val typedTools      = new ToolRegistry(Seq(typed))
-      val namedTupleTools = new ToolRegistry(Seq(namedTuple))
-      val scopedTools     = new ToolRegistry(Seq(scoped))
       calls.foreach { arguments =>
         val request = ToolCallRequest("calculator", arguments)
         println(s"\ncalculator(${arguments.render()})")
@@ -94,7 +94,7 @@ object TypedCalculatorExample {
   }
 
   private def show(result: Either[org.llm4s.toolapi.ToolCallError, ujson.Value]): String =
-    result.fold(_.getFormattedMessage, _.render())
+    result.fold(_.formatted, _.render())
 }
 
 /** The built-in calculator as a typed tool. */

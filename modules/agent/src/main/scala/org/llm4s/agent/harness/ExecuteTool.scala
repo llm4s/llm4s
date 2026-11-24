@@ -73,14 +73,15 @@ object ExecuteTool:
         .`object`[Args]("The command to run")
         .withRequiredField(
           "command",
-          Schema.string("The program and its arguments").withLengthConstraints(min = Some(1), max = None)
+          Schema.string("The program and its arguments").withMinLength(1)
         )
         .withOptionalField("workdir", Schema.string("The directory to run it in, such as /src; default /"))
         .withOptionalField(
           "timeout_seconds",
           Schema
             .integer(s"How long it may run, in seconds; default ${defaultTimeout.toSeconds}")
-            .withRange(Some(1), Some(maxSeconds))
+            .withMinimum(1)
+            .withMaximum(maxSeconds)
         )
     )
       .withValidation(args => checked(args, maxTimeout).map(_ => ()))

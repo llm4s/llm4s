@@ -884,10 +884,6 @@ object StabilityTiers {
       "an error case holding only the tool name and the timeout it exceeded"
     ),
     GrowthExempt(
-      "org.llm4s.toolapi.ToolExecutionStrategy.ParallelWithLimit",
-      "a strategy case holding only its concurrency limit"
-    ),
-    GrowthExempt(
       "org.llm4s.toolapi.ToolParameterError.InvalidNesting",
       "an error case naming the parameter, its parent path and the parent type found"
     ),

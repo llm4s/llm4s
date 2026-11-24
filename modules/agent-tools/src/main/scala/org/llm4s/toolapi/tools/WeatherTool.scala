@@ -39,7 +39,7 @@ object WeatherTool {
     )
 
   // Define type-safe handler function
-  def weatherHandler(params: SafeParameterExtractor): Either[String, WeatherResult] =
+  def weatherHandler(params: SafeParameterExtractor): Either[ToolHandlerError, WeatherResult] =
     for {
       location <- params.getString("location")
       units    <- params.getString("units")

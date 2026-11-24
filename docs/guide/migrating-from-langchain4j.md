@@ -159,9 +159,10 @@ val forecastTool = ToolBuilder[Map[String, Any], Forecast](
 
 ```scala
 val result = for {
-  tool  <- forecastTool
-  agent <- Agent.builder("forecast-agent", client).withTools(new ToolRegistry(Seq(tool))).build()
-  state <- agent.run("What is the weather in Oslo?")
+  tool     <- forecastTool
+  registry <- ToolRegistry.of(Seq(tool))
+  agent    <- Agent.builder("forecast-agent", client).withTools(registry).build()
+  state    <- agent.run("What is the weather in Oslo?")
 } yield state
 ```
 
@@ -169,7 +170,7 @@ val result = for {
 client asks for `get_forecast` once and then answers with what the tool returned, which shows that the tool is offered
 with the request, runs, and has its output fed back. A real model decides for itself whether to call it.
 
-Things to know: the handler returns an `Either[String, R]`, so a parameter that is missing or of the wrong type is an
+Things to know: the handler returns an `Either[ToolHandlerError, R]`, so a parameter that is missing or of the wrong type is an
 error the model can see and retry, not an exception; and there are ready-made tools (calculator, date and time, UUID,
 JSON, files, HTTP, shell and web search) in the [built-in tools guide](builtin-tools).
 

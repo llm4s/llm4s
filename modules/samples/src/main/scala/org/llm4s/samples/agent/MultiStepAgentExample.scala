@@ -27,9 +27,10 @@ object MultiStepAgentExample {
       weatherTool <- WeatherTool.toolSafe
 
       // The weather tool needs a person's approval before each call
+      registry <- ToolRegistry.of(Seq(weatherTool))
       agent <- Agent
         .builder("multi-step-agent", client)
-        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withTools(registry)
         .withMiddleware(
           new ApprovalMiddleware(request => Some(s"'${request.spec.name}' needs approval"))
         )

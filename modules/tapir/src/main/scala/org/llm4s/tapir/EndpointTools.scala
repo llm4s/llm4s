@@ -56,7 +56,7 @@ object EndpointTools {
       names.diff(names.distinct).distinct.map(n => s"$n: the name is used by more than one tool")
     val built  = tools.map(tool => function(baseUri, backend, tool))
     val errors = repeated ++ built.collect { case Left(errors) => errors }.flatten
-    if (errors.isEmpty) Right(new ToolRegistry(built.collect { case Right(f) => f }))
+    if (errors.isEmpty) ToolRegistry.of(built.collect { case Right(f) => f })
     else Left(ValidationError("tapir.endpoints", errors.toList))
   }
 

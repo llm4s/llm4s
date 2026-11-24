@@ -119,7 +119,10 @@ object TypedTools {
 
   // What a hand-written handler that checks every parameter up front reports.
   def handWritten(arguments: ujson.Value) =
-    SafeParameterExtractor(arguments).validateRequired("a" -> "integer", "b" -> "integer")
+    SafeParameterExtractor(arguments)
+      .validateRequired("a" -> ToolParameterType.Integer, "b" -> ToolParameterType.Integer)
+      .left
+      .map(error => ToolCallErrorJson.flattenErrors(List(error)))
 
   val orderParameters = SchemaOf[Order].definition.asInstanceOf[ObjectSchema[Order]]
 }
@@ -136,29 +139,29 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
   // ---- the schema
 
   "A typed tool" should "send the schema of the hand-built add tool, in strict and relaxed mode (golden)" in {
-    typedAdd.toOpenAITool() shouldBe handBuiltAdd.toOpenAITool()
-    typedAdd.toOpenAITool(strict = false) shouldBe handBuiltAdd.toOpenAITool(strict = false)
+    typedAdd.toolDefinition(strict = true) shouldBe handBuiltAdd.toolDefinition(strict = true)
+    typedAdd.toolDefinition(strict = false) shouldBe handBuiltAdd.toolDefinition(strict = false)
   }
 
   it should "send the hand-built calculator's schema for the parameters as it declares them (golden)" in {
     val typed = built(
       Tool.of[CalculatorAsDeclared, String]("calculator", calculator.description)(_ => Right("unused"))
     )
-    typed.toOpenAITool() shouldBe calculator.toOpenAITool()
-    typed.toOpenAITool(strict = false) shouldBe calculator.toOpenAITool(strict = false)
+    typed.toolDefinition(strict = true) shouldBe calculator.toolDefinition(strict = true)
+    typed.toolDefinition(strict = false) shouldBe calculator.toolDefinition(strict = false)
   }
 
   it should "differ from the hand-built calculator only in letting the optional operand be null or absent" in {
     val typed = built(Tool.of[CalculatorArgs, String]("calculator", calculator.description)(_ => Right("unused")))
 
-    val strict = calculator.toOpenAITool()
+    val strict = calculator.toolDefinition(strict = true)
     strict("function")("parameters")("properties")("b")("type") = ujson.Arr("number", "null")
-    typed.toOpenAITool() shouldBe strict
+    typed.toolDefinition(strict = true) shouldBe strict
 
-    val relaxed = calculator.toOpenAITool(strict = false)
+    val relaxed = calculator.toolDefinition(strict = false)
     relaxed("function")("parameters")("properties")("b")("type") = ujson.Arr("number", "null")
     relaxed("function")("parameters")("required") = ujson.Arr("operation", "a")
-    typed.toOpenAITool(strict = false) shouldBe relaxed
+    typed.toolDefinition(strict = false) shouldBe relaxed
   }
 
   it should "describe a Long as an integer, as an Int is" in {
@@ -172,9 +175,11 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
     typedAdd.execute(arguments) shouldBe Right(ujson.Str("5"))
     typedAdd.execute(arguments) shouldBe handBuiltAdd.execute(arguments)
 
-    val registry = new ToolRegistry(Seq(typedAdd))
+    val registry = ToolRegistry.of(Seq(typedAdd)).toOption.get
     registry.execute(ToolCallRequest("add", arguments)) shouldBe Right(ujson.Str("5"))
-    registry.getOpenAITools() shouldBe ujson.Arr(handBuiltAdd.toOpenAITool())
+    org.llm4s.toolapi.ToolFunction.toolDefinitions(registry.tools, strict = true) shouldBe ujson.Arr(
+      handBuiltAdd.toolDefinition(strict = true)
+    )
   }
 
   it should "ignore keys the type has no field for, as a hand-written tool does" in {
@@ -253,10 +258,10 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
       )
       // the hand-written handler stops at the first, which is the typed tool's first
       typedAdd.execute(arguments) shouldBe Left(
-        ToolCallError.HandlerError("add", MultipleErrors(handWritten(arguments).left.getOrElse(Nil)).getMessage)
+        ToolCallError.InvalidArguments("add", handWritten(arguments).left.getOrElse(Nil))
       )
       handBuiltAdd.execute(arguments) shouldBe Left(
-        ToolCallError.HandlerError("add", handWritten(arguments).left.getOrElse(Nil).head.getMessage)
+        ToolCallError.InvalidArguments("add", handWritten(arguments).left.getOrElse(Nil).take(1))
       )
     }
   }
@@ -266,7 +271,9 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
     val errors    = List(MissingParameter("a", "integer", List("b")), TypeMismatch("b", "integer", "string"))
     decodeAdd(arguments) shouldBe Left(errors)
     decodeAdd(arguments) shouldBe handWritten(arguments)
-    typedAdd.execute(arguments) shouldBe Left(ToolCallError.HandlerError("add", MultipleErrors(errors).getMessage))
+    typedAdd.execute(arguments) shouldBe Left(ToolCallError.InvalidArguments("add", errors))
+    typedAdd.execute(arguments).left.map(_.message) shouldBe
+      Left(s"has parameter issues:\n${errors.map(e => s"  - ${e.message}").mkString("\n")}")
   }
 
   it should "report a calculator operand of the wrong type as the hand-built calculator does" in {
@@ -329,13 +336,13 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
     val arguments = ujson.read("""{"address": {"zip": "75001"}, "lines": [], "tags": [], "id": 1}""")
     val missing   = MissingParameter("address.city", "string", List("zip"))
     Tool.decode(orderParameters, arguments) shouldBe Left(List(missing))
-    SafeParameterExtractor(arguments).getStringEnhanced("address.city") shouldBe Left(missing)
+    SafeParameterExtractor(arguments).getString("address.city") shouldBe Left(missing)
   }
 
   it should "report a nested object that is not an object as getObject does" in {
     val arguments = ujson.read("""{"address": "Paris", "lines": [], "tags": [], "id": 1}""")
     Tool.decode(orderParameters, arguments) shouldBe
-      SafeParameterExtractor(arguments).getObjectEnhanced("address").map(_ => ()).left.map(List(_))
+      SafeParameterExtractor(arguments).getObject("address").map(_ => ()).left.map(List(_))
     Tool.decode(orderParameters, arguments) shouldBe Left(List(TypeMismatch("address", "object", "string")))
   }
 
@@ -404,7 +411,14 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
       )
     )
     Tool.decode(parameters, sent) shouldBe
-      SafeParameterExtractor(sent).validateRequired("flag" -> "boolean", "ids" -> "array", "id" -> "integer")
+      SafeParameterExtractor(sent)
+        .validateRequired(
+          "flag" -> ToolParameterType.Boolean,
+          "ids"  -> ToolParameterType.Array,
+          "id"   -> ToolParameterType.Integer
+        )
+        .left
+        .map(error => ToolCallErrorJson.flattenErrors(List(error)))
   }
 
   it should "check a Boolean, null items of a list of Options, and Long and Int ranges" in {
@@ -423,10 +437,10 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
     )
     Tool.decode(parameters, wrong) shouldBe Left(
       List(
-        SafeParameterExtractor(wrong).getBooleanEnhanced("flag"),
-        SafeParameterExtractor(ujson.Obj("ids[0]" -> 1.5)).getIntEnhanced("ids[0]"),
-        SafeParameterExtractor(ujson.Obj("ids[1]" -> ujson.Obj())).getIntEnhanced("ids[1]"),
-        SafeParameterExtractor(wrong).getIntEnhanced("id"),
+        SafeParameterExtractor(wrong).getBoolean("flag"),
+        SafeParameterExtractor(ujson.Obj("ids[0]" -> 1.5)).getInt("ids[0]"),
+        SafeParameterExtractor(ujson.Obj("ids[1]" -> ujson.Obj())).getInt("ids[1]"),
+        SafeParameterExtractor(wrong).getInt("id"),
         SafeParameterExtractor(wrong).getOptionalInt("maybe")
       ).flatMap(_.left.toOption)
     )
@@ -455,20 +469,33 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "refuse a sum type with fields, and a case class holding one, saying why" in {
+  it should "refuse a sum type as a tool's arguments, which must be a JSON object" in {
     import SumFixtures.*
-    for (
-      refused <- List(
-        Tool.of[Action, String]("act", "A sum type")(_ => Right("unused")),
-        Tool.of[Drawing, String]("draw", "Holds sum types")(_ => Right("unused"))
+    Tool.of[Action, String]("act", "A sum type")(_ => Right("unused")).left.map(_.message) match {
+      case Left(message) => message should include("Action is not a JSON object")
+      case Right(_)      => fail("a sum type was taken as a tool's arguments")
+    }
+  }
+
+  it should "take a case class that holds sum types, and check each against its alternatives (#2814)" in {
+    import SumFixtures.*
+    val draw = Tool
+      .of[Drawing, String]("draw", "Holds sum types")(d =>
+        Right(s"${d.title}: ${d.shapes.size} shapes, then ${d.last}")
       )
-    )
-      refused.left.map(_.message) match {
-        case Left(message) =>
-          message should include("is a sum type with fields")
-          message should include("a tool's arguments cannot hold a sum type")
-        case Right(_) => fail("a sum type was taken as a tool's arguments")
-      }
+      .fold(e => fail(e.formatted), identity)
+    val drawing = Drawing("t", List(Circle(1.5), Dot, Rectangle(1, 2)), Some(Blank()), Click(1, 2))
+    val sent    = upickle.default.writeJs(drawing)
+
+    draw.schema.toJsonSchema(strict = false)("properties")("last")("anyOf").arr should have size 3
+    draw.execute(sent) shouldBe Right(ujson.Str("t: 3 shapes, then Click(1,2)"))
+
+    val notAShape = ujson.copy(sent)
+    notAShape("shapes")(0) = 5
+    draw.execute(notAShape).left.map(_.message) match {
+      case Left(message) => message should include("shapes[0]")
+      case Right(value)  => fail(s"a number was taken as a shape: $value")
+    }
   }
 
   it should "refuse arguments whose schema cannot be built, with the reason" in {

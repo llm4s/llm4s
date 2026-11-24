@@ -329,8 +329,9 @@ private[javaapi] object AiServices {
         case _                   => None
       }
       val system = (p.system.toList ++ structured.map(s => jsonInstruction(s.schema))).mkString("\n\n")
-      val base   = Agent.builder(AgentId, client.underlying).withTools(new ToolRegistry(tools.map(_.function)))
       for {
+        registry <- ToolRegistry.of(tools.map(_.function))
+        base = Agent.builder(AgentId, client.underlying).withTools(registry)
         agent  <- (if (system.isEmpty) base else base.withSystemPrompt(system)).build()
         result <- agent.run(ThreadId(UUID.randomUUID().toString), p.user, RunConfig(), history)
         text <- result.answer.toRight(

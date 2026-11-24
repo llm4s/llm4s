@@ -8,7 +8,7 @@ import upickle.default.*
 import scala.jdk.CollectionConverters.*
 
 /**
- * `OpenAIToolHelper` converts a `ToolRegistry` into `openai-java`'s tool definitions.
+ * `OpenAIToolHelper` converts tools into `openai-java`'s tool definitions.
  *
  * It replaced `AzureToolHelper` when `llm4s-openai` moved off the deprecated Azure SDK (#1132),
  * so it is the helper the migration note points users to. These are `AzureToolHelperSpec`'s
@@ -31,8 +31,8 @@ class OpenAIToolHelperSpec extends AnyFlatSpec with Matchers {
       .buildSafe()
       .fold(e => fail(e.formatted), identity)
 
-  "OpenAIToolHelper.convertToolRegistryToOpenAITools" should "produce one function definition per tool" in {
-    val tools = OpenAIToolHelper.convertToolRegistryToOpenAITools(new ToolRegistry(Seq(addTool))).asScala
+  "OpenAIToolHelper.chatCompletionTools" should "produce one function definition per tool" in {
+    val tools = OpenAIToolHelper.chatCompletionTools(Seq(addTool)).asScala
 
     tools should have size 1
     tools.head.isFunction shouldBe true
@@ -42,16 +42,16 @@ class OpenAIToolHelperSpec extends AnyFlatSpec with Matchers {
     function.parameters().get()._additionalProperties().asScala.keySet should contain("properties")
   }
 
-  it should "produce no definitions for an empty registry" in {
-    OpenAIToolHelper.convertToolRegistryToOpenAITools(new ToolRegistry(Seq.empty)).asScala shouldBe empty
+  it should "produce no definitions for no tools" in {
+    OpenAIToolHelper.chatCompletionTools(Seq.empty).asScala shouldBe empty
   }
 
-  "OpenAIToolHelper.addToolsToParams" should "set the registry's tools on the builder it returns" in {
+  "OpenAIToolHelper.addToolsToParams" should "set the tools on the builder it returns" in {
     val builder = ChatCompletionCreateParams
       .builder()
       .model("gpt-4o")
       .addMessage(ChatCompletionUserMessageParam.builder().content("hi").build())
-    val result = OpenAIToolHelper.addToolsToParams(new ToolRegistry(Seq(addTool)), builder)
+    val result = OpenAIToolHelper.addToolsToParams(Seq(addTool), builder)
 
     result shouldBe theSameInstanceAs(builder)
     result.build().tools().get().asScala.map(_.asFunction().function().name()) shouldBe Seq("add")
