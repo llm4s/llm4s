@@ -273,6 +273,39 @@ the [model registry](../reference/model-metadata).
 
 See [Anthropic's pricing](https://www.anthropic.com/pricing).
 
+### Sampling parameters, thinking and output length
+
+Claude Opus 4.7 and later, and every Claude 5 model (Sonnet 5 and 5.5, Haiku 5.5, Opus 5 and 5.5, the Fable and Mythos
+models), changed what a request may carry. LLM4S follows the rules for you and reports what it changed on
+`Completion.adjustments`:
+
+| You set | Opus 4.6, Sonnet 4.6, Haiku 4.5 and earlier | Opus 4.7 and later, every Claude 5 model |
+|---------|---------------------------------------------|------------------------------------------|
+| nothing (`CompletionOptions()`) | no sampling parameter, no `thinking` | the same: the model's defaults apply |
+| `withTemperature(t)` | `temperature: t` | not sent (the API answers any value but the default with a 400), reported `Dropped(Temperature, ...)` |
+| `withTopP(p)` | not sent by this client, reported `Dropped(TopP, ...)` | the same |
+| `withReasoning(level)` | `thinking: enabled` with the level's `budget_tokens` | `thinking: adaptive` and `output_config.effort: level` (a budget is a 400), reported `Adjusted(Reasoning, ...)` |
+| `withThinking(Thinking.budget(n))` | `budget_tokens: n` | `thinking: adaptive`, reported `Adjusted(Thinking, ...)` |
+| `withThinking(Thinking.Adaptive).withReasoning(level)` | adaptive at that effort, where the model takes it (4.6) | `thinking: adaptive` and `output_config.effort: level`, nothing to report |
+| `withThinking(Thinking.Off)` | `thinking: disabled` | `disabled` where the model takes it; Sonnet 5.5, Opus 5.5, Fable and Mythos cannot turn thinking off, so nothing is sent and it is reported `Adjusted(Thinking, "Off", ...)` |
+
+Which models these are comes from the [model registry](../reference/model-metadata) (`supports_sampling_params`,
+`supports_budget_thinking`), and from the model's name for an id the registry does not know, such as a new dated
+snapshot: an unknown newer Claude is treated as one that rejects the parameters, because leaving one out only means
+the model's default applies. `llm4s-bedrock` applies the sampling rule to Claude on Bedrock (`anthropic.claude-...`,
+with or without a `us.`, `eu.`, `apac.` or `global.` prefix), and the generic `openai-compatible` client leaves out a
+sampling parameter for a model the registry marks.
+
+- **Effort is the control on a Claude 5 model.** Sonnet 5.5 always thinks, at effort `high` unless you say otherwise.
+  For a chat reply or a tool-calling agent that is often more than the task needs: set
+  `CompletionOptions().withReasoning(ReasoningEffort.Low)` (or `Medium`) for the model call, as
+  [Cost controls](cost-controls#thinking-and-reasoning-effort) describes.
+- **Set `maxTokens` on a model that thinks.** Thinking is spent from the same allowance as the answer, and this client
+  sends `max_tokens: 2048` when you set none (the API requires a value). A long answer, or a hard question at a high
+  effort, can use all of it before any text is written: the completion then has
+  `finishReason == FinishReason.Length` and little or no content, and an agent turn ends `AgentStatus.Truncated`.
+  Give such calls room, for example `withMaxTokens(16000)`.
+
 ### Tips
 
 - Supports prompt caching for repeated queries: `CompletionOptions().withPromptCache(PromptCache.default)` sends

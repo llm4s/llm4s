@@ -33,7 +33,7 @@ import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.metrics.MetricsCollector
-import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, UnmappedOptions }
+import org.llm4s.model.{ AdjustmentLog, ModelCapabilities, ModelRegistryService, UnmappedOptions }
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.syntax.toResult
 import org.llm4s.types.Result
@@ -132,6 +132,13 @@ class OpenAICompatibleClient private[provider] (
 
   // what the dialect could not send goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(settings.providerName)
+
+  /** This client's model's registry capabilities, looked up once: under the provider's own ids first. */
+  private lazy val capabilities: Option[ModelCapabilities] =
+    registryService
+      .lookup(ProviderId(settings.providerName), settings.model)
+      .toOption
+      .map(_.capabilities)
 
   override def complete(
     conversation: Conversation,
@@ -560,9 +567,11 @@ class OpenAICompatibleClient private[provider] (
       "messages" -> ujson.Arr.from(messages)
     )
 
-    // the sampling options are sent only when the caller set them: unset, the provider's own defaults apply
-    options.temperature.foreach(t => body("temperature") = t)
-    options.topP.foreach(p => body("top_p") = p)
+    // the sampling options are sent only when the caller set them: unset, the provider's own defaults apply.
+    // One the registry says the model rejects (`supports_sampling_params: false`) is not sent either (#2909).
+    val (sampled, samplingAdjustments) = UnmappedOptions.sampling(settings.model.asString, options, capabilities)
+    sampled.temperature.foreach(t => body("temperature") = t)
+    sampled.topP.foreach(p => body("top_p") = p)
     options.maxTokens.foreach(mt => body("max_tokens") = mt)
     options.presencePenalty.foreach(p => body("presence_penalty") = p)
     options.frequencyPenalty.foreach(p => body("frequency_penalty") = p)
@@ -571,7 +580,7 @@ class OpenAICompatibleClient private[provider] (
       dialect.encodeResponseFormat(fmt).foreach(rf => body("response_format") = rf)
     }
     val adjustments =
-      dialect.addReasoning(body, settings.model, options) ++ UnmappedOptions.promptCache(
+      samplingAdjustments ++ dialect.addReasoning(body, settings.model, options) ++ UnmappedOptions.promptCache(
         settings.model.asString,
         options
       ) ++
