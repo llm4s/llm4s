@@ -52,7 +52,7 @@ object PositionalPatternsGainFields {
    */
   val arity: Map[String, (Int, Int)] = Map(
     "org/llm4s/error/ServiceError"                                  -> (4  -> 5),
-    "org/llm4s/agent/events/ModelCallCompleted"                     -> (6  -> 10),
+    "org/llm4s/agent/events/ModelCallCompleted"                     -> (6  -> 11),
     "org/llm4s/agent/events/ToolExecuted"                           -> (5  -> 6),
     "org/llm4s/agent/graph/Checkpoint"                              -> (10 -> 11),
     "org/llm4s/agent/graph/Commit"                                  -> (6  -> 8),
@@ -101,7 +101,7 @@ object PositionalPatternsGainFields {
    */
   val arity06: Map[String, (Int, Int)] = Map(
     "org/llm4s/llmconnect/model/Completion"         -> (10 -> 12),
-    "org/llm4s/agent/events/ModelCallCompleted"     -> (8  -> 10),
+    "org/llm4s/agent/events/ModelCallCompleted"     -> (8  -> 11),
     "org/llm4s/trace/TraceEvent.CompletionReceived" -> (14 -> 15)
   )
 

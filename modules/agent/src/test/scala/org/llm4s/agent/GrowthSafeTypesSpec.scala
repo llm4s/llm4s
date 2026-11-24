@@ -100,6 +100,7 @@ class GrowthSafeTypesSpec extends AnyFlatSpec with Matchers {
     val base = ModelCallCompleted("a", "a", 1, 1, None, None, None, Nil, None, None)
     base.withAgent("b").agent shouldBe "b"
     base.withModel("b").model shouldBe "b"
+    base.withDuration(scala.concurrent.duration.Duration(7, "ms")).duration.toMillis shouldBe 7L
     base.withAttempts(7).attempts shouldBe 7
     base.withToolCalls(7).toolCalls shouldBe 7
     base.withUsage(CallUsage(1, 2, 3, None)).usage shouldBe Some(CallUsage(1, 2, 3, None))

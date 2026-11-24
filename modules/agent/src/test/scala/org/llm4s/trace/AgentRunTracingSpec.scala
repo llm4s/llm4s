@@ -415,6 +415,61 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     tracing.all.foreach(e => (e.toJson.render() should not).include(marker))
   }
 
+  it should "trace a turn blocked at admission or in beforeAgent as blocked too, with no reason (#2829, #2854)" in {
+    val marker = "SECRET-42"
+    val stacks = Vector[(String, AgentMiddleware)](
+      "QuotesInput" -> new GuardrailMiddleware(input = Seq(quoting), output = Nil),
+      "blocks-late" -> new BlocksLate(marker)
+    )
+    stacks.foreach { case (blocker, middleware) =>
+      val tracing = Recording()
+      val agent = Agent
+        .builder("assistant", Scripted(Right(answer("never sent"))))
+        .withMiddleware(middleware)
+        .withTracing(tracing)
+        .build()
+        .fold(e => fail(e.message), identity)
+      ok(agent.run(ThreadId(s"t-$blocker"), s"my card is $marker")).status should matchPattern {
+        case AgentStatus.Blocked(`blocker`, Some(_)) =>
+      }
+      val ended = endedOf(tracing)
+      ended.map(_.status) shouldBe Vector(TraceEvent.RunStatus.Blocked)
+      ended.map(_.blockedBy) shouldBe Vector(Some(blocker))
+      ended.head.messages shouldBe empty
+      tracing.all.collect { case e: TraceEvent.ErrorOccurred => e } shouldBe empty
+      tracing.all.foreach(e => (e.toJson.render() should not).include(marker))
+    }
+  }
+
+  it should "give a model call's chat span the call's duration (#2829)" in {
+    val tracing = Recording()
+    val slow = new LLMClient {
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+        Thread.sleep(80)
+        Right(answer("done"))
+      }
+      override def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conversation, options)
+      override def getContextWindow(): Int     = 4096
+      override def getReserveCompletion(): Int = 1024
+    }
+    ok(traced(slow, tracing).run(ThreadId("t-chat-span"), "go"))
+    val calls = tracing.custom.filter(_.name == "agent.model_call_completed")
+    calls should have size 1
+    val span = calls.head.span.getOrElse(fail("the model call has no span"))
+    java.time.Duration.between(span.startedAt, calls.head.timestamp).toMillis should be >= 80L
+  }
+
+  /** Refuses every turn in `beforeAgent`, with a reason quoting `secret`. */
+  final private class BlocksLate(secret: String) extends AgentMiddleware {
+    val id: MiddlewareId = MiddlewareId("blocks-late")
+    override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] =
+      block(s"refused $secret")
+  }
+
   /** An input guardrail whose reason quotes the text it refused, as a PII or prompt-injection match does. */
   private def quoting: InputGuardrail = new InputGuardrail {
     val name: String                            = "QuotesInput"

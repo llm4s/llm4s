@@ -154,8 +154,10 @@ In Langfuse, a top-level run also creates the trace itself (name `LLM4S Agent Ru
 `llm4s.tracing.langfuse.public = true`, tags `llm4s`, `agent`, `conversation`) and adds one span per message of the
 turn under the run (`User Input <n>`, `LLM Generation <n>`, `System Message <n>`, or the message's class name).
 
-Only a tool call spans its duration. A model call's span is a point at the time its result was committed; the call's
-latency is the `llm4s.request.duration` metric below.
+A tool call and a model call span their duration: a `chat <model>` span starts when the agent called the client and
+ends when the call's result was recorded, so it covers a `ReliableClient`'s retries of that call. Every other event is
+a point at the time it was committed. A model call in an event stored before `ModelCallCompleted.duration` existed is a
+point too. The `llm4s.request.duration` metric below is the client's own timing of each attempt.
 
 ### The run's status
 

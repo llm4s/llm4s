@@ -140,8 +140,9 @@ object AdmissionContext:
       private def counted(
         conversation: Conversation,
         options: CompletionOptions,
-        result: Result[Completion]
+        call: => Result[Completion]
       ): Result[Completion] =
+        val (result, took) = ModelContext.timed(call)
         result.foreach { completion =>
           add(
             ModelContext.recorded(
@@ -150,7 +151,8 @@ object AdmissionContext:
               attempt = 0,
               conversation.messages,
               ModelContext.definitions(options.tools, options.responseFormat),
-              client.providerId
+              client.providerId,
+              took
             )
           )
         }

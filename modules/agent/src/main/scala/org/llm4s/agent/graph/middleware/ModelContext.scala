@@ -27,6 +27,7 @@ import org.llm4s.types.Result
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.slf4j.LoggerFactory
 
+import scala.concurrent.duration.*
 import scala.util.Try
 
 /**
@@ -87,9 +88,10 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
     attempt: Int,
     request: Seq[Message],
     definitions: => Seq[String],
-    provider: Option[ProviderId]
+    provider: Option[ProviderId],
+    duration: FiniteDuration
   ): Unit =
-    record(ModelContext.recorded(agent, completion, attempt, request, definitions, provider))
+    record(ModelContext.recorded(agent, completion, attempt, request, definitions, provider, duration))
 
   /**
    * Counts the model calls an admission stage made before this task's run existed (#2854): their `usage` joins the
@@ -139,7 +141,8 @@ object ModelContext:
 
   /**
    * A completed call of `agent`'s, as it is counted: attempt `attempt` of the agent's model step, or 0 for a hook's or
-   * an admission stage's own call. A completion without usage is charged an estimate (#2084).
+   * an admission stage's own call. A completion without usage is charged an estimate (#2084). `duration` is how long
+   * the provider call took.
    */
   private[agent] def recorded(
     agent: AgentId,
@@ -147,7 +150,8 @@ object ModelContext:
     attempt: Int,
     request: Seq[Message],
     definitions: => Seq[String],
-    provider: Option[ProviderId]
+    provider: Option[ProviderId],
+    duration: FiniteDuration
   ): Recorded =
     Recorded(
       completion.model,
@@ -163,7 +167,8 @@ object ModelContext:
         provider,
         nonNull(completion.adjustments).toList,
         Option(completion.finishReason),
-        completion.servedTier
+        completion.servedTier,
+        duration
       )
     )
 
@@ -254,6 +259,12 @@ object ModelContext:
   final private[agent] case class TokenLimitRefused(used: Long, budget: Long) extends LLMError with NonRecoverableError:
     def message: String = s"model call refused: the run has used $used tokens of its budget of $budget"
 
+  /** `call`'s result and how long it took. */
+  private[agent] def timed[A](call: => A): (A, FiniteDuration) =
+    val started = System.nanoTime()
+    val result  = call
+    (result, (System.nanoTime() - started).nanos)
+
   final private class Accounted(client: LLMClient, context: ModelContext) extends LLMClient:
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       context.admitted(recorded(conversation, options, client.complete(conversation, options)))
@@ -273,15 +284,17 @@ object ModelContext:
     private def recorded(
       conversation: Conversation,
       options: CompletionOptions,
-      result: Result[Completion]
+      call: => Result[Completion]
     ): Result[Completion] =
+      val (result, took) = timed(call)
       result.foreach(
         context.recordCall(
           _,
           attempt = 0,
           conversation.messages,
           definitions(options.tools, options.responseFormat),
-          client.providerId
+          client.providerId,
+          took
         )
       )
       result

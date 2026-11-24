@@ -4,10 +4,17 @@ import org.llm4s.agent.{ Agent, AgentId, AgentStatus, CompletionFixture, Failing
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.agent.events.{ SubagentEvents, TaskEnded }
 import org.llm4s.agent.graph.*
-import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  BoundaryResult,
+  GuardrailMiddleware,
+  MiddlewareId,
+  ModelContext
+}
 import org.llm4s.agent.guardrails.builtin.LengthCheck
 import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.model.UsageSummary
+import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -36,6 +43,13 @@ class MeteredCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValue
     val store   = new InMemoryCheckpointer(clock)
     val metrics = new RecordingMetrics
     val metered = MeteredCheckpointer(store, metrics)
+  }
+
+  /** Refuses every turn in `beforeAgent`, with a reason that must reach no label. */
+  final private class BlocksBeforeAgent extends AgentMiddleware {
+    val id: MiddlewareId = MiddlewareId("blocks-late")
+    override def beforeAgent(text: String, context: ModelContext): Result[BoundaryResult] =
+      block("refused SECRET-42")
   }
 
   private def thread(): ThreadId = ThreadId(s"metered-${java.util.UUID.randomUUID().toString.take(8)}")
@@ -143,7 +157,7 @@ class MeteredCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValue
     val f = new Fixture
     val blocked = Agent
       .builder("assistant", new NTurnFakeLLMClient(CompletionFixture.simple("far too long an answer")))
-      .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(new LengthCheck(1, 3))))
+      .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(LengthCheck(1, 3))))
       .withRuntime(new GraphRuntime(f.metered))
       .build()
       .value
@@ -152,6 +166,28 @@ class MeteredCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValue
     val graph = f.store.latest(on).value.value.checkpoint.snapshot.graphId
     f.metrics.series(RunsEnded) shouldBe Map(Vector(graph, "blocked") -> 1.0)
     f.metrics.durations(RunDuration, graph, "blocked") should have size 1
+
+    // however the turn was blocked: at admission (an input guardrail) or by a middleware's beforeAgent
+    val admission = new Fixture
+    val refused = Agent
+      .builder("assistant", new NTurnFakeLLMClient(CompletionFixture.simple("never sent")))
+      .withMiddleware(new GuardrailMiddleware(input = Seq(LengthCheck(1, 3)), output = Nil))
+      .withRuntime(new GraphRuntime(admission.metered))
+      .build()
+      .value
+    refused.run(thread(), "far too long a query").value.status shouldBe a[AgentStatus.Blocked]
+    admission.metrics.series(RunsEnded).toVector.map((labels, n) => labels.last -> n) shouldBe Vector("blocked" -> 1.0)
+
+    val boundary = new Fixture
+    val late = Agent
+      .builder("assistant", new NTurnFakeLLMClient(CompletionFixture.simple("never sent")))
+      .withMiddleware(new BlocksBeforeAgent)
+      .withRuntime(new GraphRuntime(boundary.metered))
+      .build()
+      .value
+    late.run(thread(), "hello").value.status shouldBe a[AgentStatus.Blocked]
+    boundary.metrics.series(RunsEnded).toVector.map((labels, n) => labels.last -> n) shouldBe Vector("blocked" -> 1.0)
+    boundary.metrics.series(RunsEnded).keys.flatten.foreach(label => (label should not).include("SECRET"))
 
     val g = new Fixture
     val looping = Agent

@@ -126,8 +126,8 @@ final private[agent] class AgentTracing(
   private def under(context: TraceContext, at: Instant): TraceSpan = TraceSpan(context, Some(runSpan), at)
 
   /**
-   * Where `record` sits in the run's trace: a tool call spans its duration, ending at the record; any other event is a
-   * point at its time. A call that ended is the call's one logical span, named by its idempotency key - a delegated
+   * Where `record` sits in the run's trace: a tool call and a model call span their duration, ending at the record; any
+   * other event is a point at its time. A call that ended is the call's one logical span, named by its idempotency key - a delegated
    * child's origin records the same one. A call that suspended (for approval, or with a question) is only a phase of
    * the call: a span of its own, named by the key and the record, so a call suspended in one run and resumed in another
    * is never one span id under two parents.
@@ -140,6 +140,11 @@ final private[agent] class AgentTracing(
         case Some(key) => AgentTraceSpans.toolCall(runSpan, key)
         case None      => AgentTraceSpans.toolCallWithoutKey(runSpan, handle.threadId, t.toolCallId, record.seq)
       under(context, record.timestamp.minusNanos(t.duration.toNanos))
+    case AgentEvents.ModelCallCompleted(m) =>
+      under(
+        AgentTraceSpans.event(runSpan, record.threadId, record.seq),
+        record.timestamp.minusNanos(m.duration.toNanos)
+      )
     case _ => under(AgentTraceSpans.event(runSpan, record.threadId, record.seq), record.timestamp)
 
   /**
