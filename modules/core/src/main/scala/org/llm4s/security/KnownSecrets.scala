@@ -76,7 +76,9 @@ private[llm4s] object KnownSecrets {
     if (after.entries.size > Cap && after.overCapWarned.compareAndSet(false, true))
       log.warn(
         s"llm4s holds ${after.entries.size} credentials, more than $Cap: configured keys and identifiers are never " +
-          "evicted, so the registry grows with each distinct one (logged once)"
+          "evicted, so the registry grows with each distinct one. The likely cause is a per-tenant or per-request " +
+          "key created with Secret(...), which is for a fixed set of long-lived credentials: create those keys " +
+          "with Secret.token(...), which can be evicted (logged once)"
       )
   }
 
