@@ -5,6 +5,12 @@ The guides explain how the pieces fit together: start with
 the [examples](https://llm4s.org/examples/) and the [cookbook](https://llm4s.org/examples/cookbook).
 The source is on [GitHub](https://github.com/llm4s/llm4s), and every member below links to its own.
 
+Stability tiers: a type annotated `@Stable` (`org.llm4s.annotation`) is part of the surface 1.0 freezes and keeps
+binary compatible across 1.x, and one annotated `@Experimental` may change in any release.
+Only the frozen modules carry the annotations (`llm4s-core`, `llm4s-agent`, `llm4s-openai`,
+`llm4s-openai-compatible`, `llm4s-anthropic`, `llm4s-gemini` and `llm4s-ollama`); a type in any other module has
+its module's tier, Beta or Experimental. See [API Stability](https://llm4s.org/reference/api-stability).
+
 Where to start in the API:
 
  - [[org.llm4s.llmconnect.LLMClient]]: one chat client for every provider, made by [[org.llm4s.llmconnect.LLMConnect]]

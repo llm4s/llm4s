@@ -19,7 +19,7 @@
 
 ## Status
 
-The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/issues/1126)) is done; slice 8 ([#1281](https://github.com/llm4s/llm4s/issues/1281)) is the 0.5.0 release (published, no MiMa baseline), a MiMa baseline at a pre-1.0 release once the designs are final, then 1.0. **Nothing is frozen until that baseline is set.** "Frozen module" below means a module in 1.0 Scope's *Frozen at 1.0* tier (those calling `mimaFrozen` in `build.sbt`); it is a target, not a constraint. Never argue for or against a design from "frozen", "the baseline" or "can be added later without breaking": fix a bad API outright, record the break in the CHANGELOG and migration guide, and add no shim or `@deprecated` overload. Coverage floors are in [#1127](https://github.com/llm4s/llm4s/issues/1127); they ratchet upward and are never lowered.
+The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/issues/1126)) is done; slice 8 ([#1281](https://github.com/llm4s/llm4s/issues/1281)) is the release run: 0.5.0, 0.5.1 and 0.6.0 are published with no MiMa baseline, 0.7.0 sets it, and 1.0 follows directly, with no release in between. **Nothing is frozen until that baseline is set.** "Frozen module" below means a module in 1.0 Scope's *Frozen at 1.0* tier (those calling `mimaFrozen` in `build.sbt`); it is a target, not a constraint. Never argue for or against a design from "frozen", "the baseline" or "can be added later without breaking": fix a bad API outright, record the break in the CHANGELOG and migration guide (from the 0.7.0 baseline, also as a MiMa filter), and add no shim or `@deprecated` overload. Coverage floors are in [#1127](https://github.com/llm4s/llm4s/issues/1127); they ratchet upward and are never lowered.
 
 ## Architecture rules
 
@@ -104,6 +104,7 @@ llm4s/
 │   │   ├── cohere/            # Cohere embedding provider, native /v2/embed (typed CohereInputType)
 │   │   ├── watsonx/           # IBM watsonx.ai chat provider (Beta; never run against the live service)
 │   │   ├── perplexity/        # Perplexity Agent API chat provider: /v1/agent, web search, citations (Beta)
+│   │   ├── jlama/             # llm4s-jlama: a local model run in-process by Jlama, on the JDK Vector API (Experimental)
 │   │   └── azure-identity/    # llm4s-azure-identity: keyless Azure OpenAI via Microsoft Entra ID (azure-identity SDK; Experimental)
 │   ├── secrets-vault/         # VaultApiKeyProvider: an API key read from HashiCorp Vault's KV engine over HTTP, no SDK (published)
 │   ├── secrets-aws/           # AwsSecretsManagerApiKeyProvider: an API key read from AWS Secrets Manager, SigV4, no SDK (published)
@@ -134,6 +135,7 @@ llm4s/
 │   ├── reactor/               # Reactor Flux over the Java facade's streamed reply: Streams.toFlux (published)
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
 │   ├── spring-ai/             # Spring AI interop: llm4s as ChatModel/EmbeddingModel, a ChatModel as LLMClient (published, experimental)
+│   ├── quarkus/               # quarkus-llm4s: Quarkus extension, a separate Maven build (unpublished; not part of 1.0)
 │   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.6.0
 │   ├── samples/               # Usage examples
 │   ├── examples-http/         # Reference apps serving an agent over HTTP: http4s, ZIO HTTP (unpublished)
