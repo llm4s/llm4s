@@ -97,7 +97,7 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
       val cfg = gatewayConfig(keyFile("sk-gateway-0001"))
 
       cfg.baseUrl shouldBe Gateway
-      cfg.model.asString shouldBe "gpt-5.6-luna"
+      cfg.model.asString shouldBe "gpt-4o-mini"
       cfg.headers shouldBe Map("X-Tenant-Id" -> "acme-retail", "X-Cost-Centre" -> "cc-4711")
       cfg.contextWindow shouldBe 128000
       cfg.timeouts.request shouldBe Some(60.seconds)
@@ -131,8 +131,8 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
         client.close()
       }
       seen.asScala.toList shouldBe List(
-        ("/v1/chat/completions", "Bearer sk-gateway-first-0001", "acme-retail", "cc-4711", "gpt-5.6-luna"),
-        ("/v1/chat/completions", "Bearer sk-gateway-rotated-0002", "acme-retail", "cc-4711", "gpt-5.6-luna")
+        ("/v1/chat/completions", "Bearer sk-gateway-first-0001", "acme-retail", "cc-4711", "gpt-4o-mini"),
+        ("/v1/chat/completions", "Bearer sk-gateway-rotated-0002", "acme-retail", "cc-4711", "gpt-4o-mini")
       )
     }
 
@@ -141,7 +141,7 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
       val gatewayOnly =
         ConfigPolicy()
           .withAllowedProviders("openai-compatible")
-          .withAllowedModelPatterns("openai-compatible/gpt-5.6-luna")
+          .withAllowedModelPatterns("openai-compatible/gpt-4o-mini")
           .withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "openai-compatible", "http://litellm:4000/v1")
           .withMaxContextWindow(CatalogEnvironment.Prod, "openai-compatible", 128000)
           .withOwnApiKeyRequired(CatalogEnvironment.Prod)
@@ -149,7 +149,7 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
       val policyBlock = squash(scala.find(_.contains("gatewayOnly")).getOrElse(fail("no policy block in the guide")))
       List(
         """.withAllowedProviders("openai-compatible")""",
-        """.withAllowedModelPatterns("openai-compatible/gpt-5.6-luna")""",
+        """.withAllowedModelPatterns("openai-compatible/gpt-4o-mini")""",
         """.withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "openai-compatible", "http://litellm:4000/v1")""",
         """.withMaxContextWindow(CatalogEnvironment.Prod, "openai-compatible", 128000)""",
         """.withOwnApiKeyRequired(CatalogEnvironment.Prod)"""
@@ -167,7 +167,7 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
       load(withLocal(hocon(2), DrKey, keyFile("sk-gateway-dr-0001")), Some("gateway-dr")) match
         case cfg: OpenAICompatibleConfig =>
           cfg.baseUrl shouldBe "https://llm-gateway.eu-west-1.example.internal/v1"
-          cfg.model.asString shouldBe "gpt-5.6-luna"
+          cfg.model.asString shouldBe "gpt-4o-mini"
           cfg.headers shouldBe Map("X-Tenant-Id" -> "acme-retail", "X-Cost-Centre" -> "cc-4711")
           cfg.contextWindow shouldBe 128000
         case other => fail(s"expected an openai-compatible section, got $other")
@@ -180,7 +180,7 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
       load(hocon(1), Some("azure-private")) match
         case azure: AzureConfig =>
           azure.endpoint shouldBe "https://contoso-llm.openai.azure.com"
-          azure.model.asString shouldBe "gpt-5.6-terra"
+          azure.model.asString shouldBe "gpt-4o"
           azure.tokenProvider should not be empty
         case other => fail(s"expected an Azure section, got $other")
 
@@ -198,7 +198,7 @@ class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with Eith
 
     "serve the model the app asks for, and mount the key where the app's section reads it" in {
       """model_name: (\S+)""".r.findAllMatchIn(read(s"$Overlay/litellm-config.yaml")).map(_.group(1)).toList shouldBe
-        List("gpt-5.6-luna")
+        List("gpt-4o-mini")
 
       val patch = read(s"$Overlay/deployment-gateway.yaml")
       patch should include("mountPath: /var/run/secrets/llm4s")

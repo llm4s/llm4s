@@ -32,7 +32,7 @@ class JavaGuideConfigSpec extends AnyWordSpec with Matchers {
     "give OpenAI the key from OPENAI_API_KEY with only provider and model in the section" in {
       Llm4sConfig.defaultProvider(ReferenceConfig.withEnv(hocon(0), env)) match {
         case Right(openai: OpenAIConfig) =>
-          openai.model.asString shouldBe "gpt-4o-mini"
+          openai.model.asString shouldBe "gpt-5.6-luna"
           openai.apiKey.reveal shouldBe "sk-openai-env"
         case other => fail(s"Expected OpenAIConfig, got $other")
       }
