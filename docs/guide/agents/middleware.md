@@ -21,8 +21,7 @@ prompt - by wrapping its turn, its model calls and its tool calls.
 1. TOC
 {:toc}
 
-Each type of the middleware SPI carries its stability tier as a `@Stable` or `@Experimental` annotation; see
-[API Stability](/reference/api-stability).
+> **Experimental at 1.0.** The middleware SPI on this page (`AgentMiddleware`, its request, response and context types, `withMiddleware` and the built-in middleware) is `@Experimental`: usable, but outside the 1.x compatibility promise, so it can change in a minor release, with a migration note. The stable core of `llm4s-agent` - building an agent, running, continuing and recovering a thread, handoffs and guardrails (`withInputGuardrails`, `withOutputGuardrails`) - is listed in [API Stability](../../reference/api-stability#tiers-in-the-code).
 
 ---
 
@@ -457,7 +456,7 @@ val built = Agent
   .builder("assistant", client)
   .withMiddleware(
     ApprovalMiddleware.unlessReadOnly,                                   // outermost
-    new GuardrailMiddleware(input = Seq(new LengthCheck(1, 10000)), output = Nil)
+    new GuardrailMiddleware(input = Seq(LengthCheck(1, 10000)), output = Nil)
   )
   .withMaxPromptSectionTokens(2048)
   .build()

@@ -95,6 +95,7 @@ final case class Suspension private (
   def withBreakpoints(value: Vector[(InterruptId, BreakpointRequest)]): Suspension = copy(breakpoints = value)
   def withDelegated(value: Vector[(InterruptId, DelegatedRequest)]): Suspension    = copy(delegated = value)
 
+@Experimental
 object Suspension:
 
   def apply(

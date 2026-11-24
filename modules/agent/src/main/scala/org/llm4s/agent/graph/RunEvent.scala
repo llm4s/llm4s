@@ -73,6 +73,7 @@ final case class RunStartedDetails private (tenantId: Option[String], principal:
   def withPrincipal(value: String): RunStartedDetails         = copy(principal = Some(value))
   def withPrincipal(value: Option[String]): RunStartedDetails = copy(principal = value)
 
+@Experimental
 object RunStartedDetails:
   def apply(tenantId: Option[String] = None, principal: Option[String] = None): RunStartedDetails =
     new RunStartedDetails(tenantId, principal)
@@ -101,6 +102,7 @@ final case class RunRecoveredDetails private (
   def withTakenOverFrom(value: String): RunRecoveredDetails         = copy(takenOverFrom = Some(value))
   def withTakenOverFrom(value: Option[String]): RunRecoveredDetails = copy(takenOverFrom = value)
 
+@Experimental
 object RunRecoveredDetails:
   def apply(
     fromCheckpoint: String,
@@ -123,6 +125,7 @@ final case class RunResumedDetails private (
   def withPrincipal(value: String): RunResumedDetails         = copy(principal = Some(value))
   def withPrincipal(value: Option[String]): RunResumedDetails = copy(principal = value)
 
+@Experimental
 object RunResumedDetails:
   def apply(
     answered: Vector[String],
@@ -145,6 +148,7 @@ final case class RunFailedDetails private (message: String, usage: Option[UsageS
   def withUsage(value: Option[UsageSummary]): RunFailedDetails = copy(usage = value)
   def withSteps(value: Long): RunFailedDetails                 = copy(steps = value)
 
+@Experimental
 object RunFailedDetails:
   def apply(message: String, usage: Option[UsageSummary] = None, steps: Long = 0L): RunFailedDetails =
     new RunFailedDetails(message, usage, steps)
@@ -159,6 +163,7 @@ final case class RunStoppedDetails private (usage: Option[UsageSummary], steps: 
   def withUsage(value: Option[UsageSummary]): RunStoppedDetails = copy(usage = value)
   def withSteps(value: Long): RunStoppedDetails                 = copy(steps = value)
 
+@Experimental
 object RunStoppedDetails:
   def apply(usage: Option[UsageSummary] = None, steps: Long = 0L): RunStoppedDetails =
     new RunStoppedDetails(usage, steps)
@@ -185,6 +190,7 @@ final case class StateUpdatedDetails private (
   def withPrincipal(value: String): StateUpdatedDetails         = copy(principal = Some(value))
   def withPrincipal(value: Option[String]): StateUpdatedDetails = copy(principal = value)
 
+@Experimental
 object StateUpdatedDetails:
   def apply(
     fromCheckpoint: String,
@@ -212,6 +218,7 @@ final case class ThreadForkedDetails private (
   def withPrincipal(value: String): ThreadForkedDetails         = copy(principal = Some(value))
   def withPrincipal(value: Option[String]): ThreadForkedDetails = copy(principal = value)
 
+@Experimental
 object ThreadForkedDetails:
   def apply(
     fromThread: String,
@@ -421,6 +428,7 @@ final case class LiveEvent private (
   def withVersion(value: Int): LiveEvent         = copy(version = value)
   def withPayload(value: ujson.Value): LiveEvent = copy(payload = value)
 
+@Experimental
 object LiveEvent:
   def apply(
     threadId: String,

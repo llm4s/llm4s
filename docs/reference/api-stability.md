@@ -126,17 +126,19 @@ a case that may grow holds one growth-safe class, and is read by name through it
 ```scala
 @Stable
 enum AgentStatus:
-  case Completed(answer: String)         // closed: exactly the answer, listed in GrowthExempted
-  case Suspended(suspension: Suspension) // may grow: Suspension is a `final case class Suspension private (...)`
+  case Completed(answer: String)                       // closed: exactly the answer, listed in GrowthExempted
+  @Experimental case Suspended(suspension: Suspension) // may grow: `final case class Suspension private (...)`
 
 status match
   case AgentStatus.Suspended(suspension) => suspension.approvals
 ```
 
-Every case with fields is on the allow-list with its reason: the wrapper as "holding only its growth-safe
-`Suspension`", a closed case (a single value, an error or outcome case whose fields are what it is, a stored form
-whose derived codec is a wire format) as what it is exactly. A case of an `@Experimental` enum, or one marked
-`@Experimental` itself, is not checked.
+Every case with fields of a `@Stable` enum is on the allow-list with its reason: a wrapper as "holding only its
+growth-safe" payload, a closed case (a single value, an error or outcome case whose fields are what it is, a stored
+form whose derived codec is a wire format) as what it is exactly. A case of an `@Experimental` enum, or one marked
+`@Experimental` itself, is not checked and has no entry: `AgentStatus.Suspended` is one
+([#2785](https://github.com/llm4s/llm4s/issues/2785)), and holds a `Suspension` all the same, so that it can be
+promoted without changing shape.
 
 `scripts/check-tier-drift.sh` (also a CI quick check, and it needs no sbt) keeps this page, the tiers in
 [1.0 Scope](v1-scope) and the lists in `build.sbt` from drifting apart: the modules that call `mimaFrozen`

@@ -338,6 +338,7 @@ enum ToolOutcome:
   /** An infrastructure failure: the run fails with `GraphError.ToolFailed`. */
   case Fatal(error: LLMError)
 
+@Experimental
 object ToolOutcome:
 
   /** A `Success` with `content` for the model and `update` to keys the tool declares in `writes`. */
@@ -355,6 +356,7 @@ final case class ToolSuccess private (content: ToolContent, update: StateUpdate)
   def withContent(value: ToolContent): ToolSuccess = copy(content = value)
   def withUpdate(value: StateUpdate): ToolSuccess  = copy(update = value)
 
+@Experimental
 object ToolSuccess:
   def apply(content: ToolContent, update: StateUpdate = StateUpdate.empty): ToolSuccess =
     new ToolSuccess(content, update)
