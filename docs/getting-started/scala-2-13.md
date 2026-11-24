@@ -28,9 +28,10 @@ Scala 2.13: call-only, via the TASTy reader, best effort. A Spark job, a Play ap
 
 There is no `_2.13` artifact ([#874](https://github.com/llm4s/llm4s/issues/874)). But the Scala 2.13 compiler can read Scala 3 libraries through
 its TASTy reader, and a project on Scala 2.13.16 or later that does so can *call* LLM4S: load a provider, complete
-and stream, build options, run an agent and run tools. What it cannot do is *extend* LLM4S with Scala types (define a
-tool with `ToolBuilder`, ask for structured output into a case class, implement `LLMClient`); for the first two,
-`llm4s-java-api` is the route, and it works from Scala 2.13 through the TASTy reader as well.
+with the default options, run an agent and run tools. What it cannot do is build a `CompletionOptions` of its own, or
+*extend* LLM4S with Scala types (define a tool with `ToolBuilder`, ask for structured output into a case class,
+implement `LLMClient`); for tools and structured output `llm4s-java-api` is the route, and it works from Scala 2.13
+through the TASTy reader as well.
 
 The statements below are not read off the code: each is a probe, a small Scala 2.13 program
 that CI compiles and runs against the current build, on Scala 2.13.16 and the latest 2.13, and that fails the build
@@ -84,23 +85,23 @@ Configuration is the same `application.conf` as from Scala 3 ([Configuration](co
 |---|---|---|
 | `Conversation`, messages, `Result` | yes | `A_conversation` |
 | `Llm4sConfig` + `LLMConnect.getClient` + `complete` | yes | `B_config_client` |
-| `streamComplete` with a Scala 2.13 callback | yes | `C_streaming` |
-| `CompletionOptions` builders, `ReasoningEffort` and the other enumerations | yes | `D_options_enums` |
 | Running tools through a `ToolRegistry` you were given | yes | `E2_tool_registry` |
 | `Agent.builder(...).build()`, `run`, `continueConversation` | yes | `G_agent` |
 | Defining a tool with `llm4s-java-api`'s `JTool.builder`, and an agent calling it | yes | `J_java_api_tool` |
 | Structured output into a Java record with `llm4s-java-api`'s `JLlmClient.complete(prompt, Record.class)` | yes | `K_java_api_structured` |
+| `streamComplete` with a `CompletionOptions` and a Scala 2.13 callback | **no** | `C_streaming` |
+| `CompletionOptions` builders, `ReasoningEffort` and the other enumerations | **no** | `D_options_enums` |
 | Defining a tool with `ToolBuilder` | **no** | `E_tools` |
 | `completeStructured[A]` | **no** | `F_structured` |
 | Implementing `LLMClient` | **no** | `H_subclass_client` |
 | Naming an agent id: `ThreadId("...")` | **no** | `I_opaque_ids` |
 
-## The four caveats and their workarounds
+## The five caveats and their workarounds
 
 ### 1. Defining a tool with `ToolBuilder`
 
-`ToolBuilder` takes a uPickle `ReadWriter` for the tool's result, and the TASTy reader cannot read uPickle's Scala 3
-type classes, whether summoned or written by hand. Use `llm4s-java-api`'s tool builder, which needs no codec, and the
+`ToolBuilder` takes a handler that returns a `ToolHandlerError` (caveat 5) and a uPickle `ReadWriter` for the tool's
+result, and the TASTy reader cannot read uPickle's Scala 3 type classes, whether summoned or written by hand. Use `llm4s-java-api`'s tool builder, which needs no codec, and the
 agent it builds:
 
 ```scala
@@ -145,8 +146,8 @@ val city: City = Llm4s.createDefaultClient().get().complete("The largest city in
 
 ### 3. Implementing `LLMClient`
 
-Implementing the trait means the compiler checks every member, including `completeStructured`'s `Reader`, so a
-Scala 2.13 class cannot extend it. Calling the members of a client LLM4S gives you works. For a test double, use
+Implementing the trait means the compiler checks every member, including `CompletionOptions` (caveat 5) and
+`completeStructured`'s `Reader`, so a Scala 2.13 class cannot extend it. Calling the members of a client LLM4S gives you works. For a test double, use
 `llm4s-java-api`'s `FakeLlmClient` (`FakeLlmClient.replying("first", "second").client()`), which the structured-output
 probe uses from Scala 2.13. A custom provider is written in Scala 3, in its own module
 ([writing a provider](../guide/writing-a-provider)), and called from Scala 2.13 like the built-in ones.
@@ -157,6 +158,17 @@ The agent runtime's ids (`ThreadId`, `RunId`, ...) are top-level opaque types wh
 Scala 2.13 does not see, so `ThreadId("saved-1")` does not compile. Pass back the ids LLM4S returns
 (`result.threadId`, or `agent.continueConversation(result, ...)`); through `llm4s-java-api` the ids are plain
 `String`s (`JAgentResult.threadId()`).
+
+### 5. Building a `CompletionOptions`
+
+A tool handler returns a `ToolHandlerError`, the Scala 3 union type `String | ToolParameterError`, and the TASTy
+reader of Scala 2.13 reads no union type (`Unsupported Scala 3 union in bounds of type ToolHandlerError`).
+`CompletionOptions` carries a request's tools, so a Scala 2.13 program that names it does not compile: neither
+`CompletionOptions().withTemperature(0.2)` nor `streamComplete(conversation, CompletionOptions())(onChunk)`. A call
+that leaves the options to their default, as `client.complete(conversation)` and an agent's `run` do, is not
+affected. To set options, use `llm4s-java-api` (its `JCompletionOptions`), or set them in the Scala 3 module that
+builds the client or the agent. LLM4S keeps its Scala 3 idioms, so this stays until Scala 2.13 is taken up after 1.0
+([#874](https://github.com/llm4s/llm4s/issues/874)).
 
 ## How this is checked
 

@@ -103,7 +103,7 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
       [Migrations](../migrations/) table.
 - [ ] [Update the support table](#update-the-support-table) and [write the News post](#write-the-news-post).
 - [ ] Set the RFCs implemented in this release to their version: the index in [RFCs](../rfcs/) and each RFC's
-      **Status** line ("release after 0.6.0" today in RFC 0008 and RFC 0009).
+      **Status** line (an RFC implemented since the previous release says "release after X.Y.Z" until then).
 - [ ] Update "Current documented version series" under [Version Numbering](#version-numbering) and the Quick Status
       table of the [Roadmap](../reference/roadmap).
 - [ ] Check that everything the release is for is on the commit you will tag
@@ -597,6 +597,6 @@ help.
 Versions are `MAJOR.MINOR.PATCH`, with `versionScheme := early-semver`. What each kind of release may break,
 before and after the baseline, is in the [Compatibility Policy](../reference/compatibility-policy#versions).
 
-Current documented version series: 0.6.x (pre-1.0 development). Until the MiMa baseline is set at 0.7.0, any
-release, patch included, may carry a breaking change, listed in the CHANGELOG with a migration note. From 0.7.0 to
+Current documented version series: 0.7.x (pre-1.0 development). Up to 0.7.0, which sets the MiMa baseline, any
+release, patch included, could carry a breaking change, listed in the CHANGELOG with a migration note. From 0.7.0 to
 1.0 a minor release still may, with a MiMa filter as well, and a patch release may not; from 1.0, semantic versioning.

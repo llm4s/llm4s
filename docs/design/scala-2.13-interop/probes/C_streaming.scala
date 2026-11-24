@@ -13,7 +13,7 @@ object Probe extends App {
       models <- Llm4sConfig.modelRegistryService()
       config <- Llm4sConfig.defaultProvider()(registry)
       client <- LLMConnect.getClient(config)(models, registry)
-      done <- client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions(), chunk => chunks ++= chunk.content)
+      done <- client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions())(chunk => chunks ++= chunk.content)
     } yield done
     reply match {
       case Right(c)    => println(s"PASS: ${chunks.size} chunks ${chunks.mkString("[", "|", "]")}, final: ${c.content}")

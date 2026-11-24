@@ -297,14 +297,14 @@ val ticket: Result[Ticket] = for {
     <header class="lp-section__head">
       <p class="lp-eyebrow">Roadmap</p>
       <h2 id="roadmap-heading">The road to 1.0</h2>
-      <p>1.0 freezes a stable spine with a binary-compatibility promise. The date is intentionally not fixed: 0.7.0 sets the compatibility baseline once the designs are final, and 1.0 is the next release after it.</p>
+      <p>1.0 freezes a stable spine with a binary-compatibility promise. The date is intentionally not fixed: 0.7.0 set the compatibility baseline, and 1.0 is the next release after it.</p>
     </header>
     <ol class="lp-timeline">
       <li class="is-done"><strong>0.4.x</strong><span>Artifacts renamed to <code>llm4s-*</code></span></li>
       <li class="is-done"><strong>0.5.0</strong><span>Modular artifacts, provider SPI, Java, Spring Boot, cats-effect and ZIO modules</span></li>
       <li class="is-done"><strong>0.5.1</strong><span>Multimodal messages, agent harness SPIs, Agent Skills</span></li>
       <li class="is-done"><strong>0.6.0</strong><span>Subagents, durable multi-machine agents, Secret credentials, Kotlin API</span></li>
-      <li><strong>0.7.0</strong><span>Designs final, MiMa compatibility baseline set</span></li>
+      <li class="is-done"><strong>0.7.0</strong><span>Designs final, MiMa compatibility baseline set</span></li>
       <li><strong>1.0</strong><span>Frozen, binary-compatible surface across 1.x</span></li>
     </ol>
     <p class="lp-actions"><a class="lp-btn lp-btn--ghost" href="{{ '/reference/roadmap' | relative_url }}">Read the roadmap</a> <a class="lp-btn lp-btn--ghost" href="{{ '/reference/v1-scope' | relative_url }}">What 1.0 freezes</a> <a class="lp-btn lp-btn--ghost" href="{{ '/reference/enterprise-evaluation' | relative_url }}">Evaluating for your organisation?</a></p>

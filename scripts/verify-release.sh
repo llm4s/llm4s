@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Verifies that a release is on Maven Central: every artifact the build publishes resolves at <version>.
 #
-#   scripts/verify-release.sh 0.5.0
-#   scripts/verify-release.sh v0.5.0                       # a leading v is accepted
-#   scripts/verify-release.sh 0.5.0 --list expected.txt    # use a saved list instead of asking sbt
-#   scripts/verify-release.sh 0.5.0 --attestations         # also check each artifact's build provenance
+#   scripts/verify-release.sh 0.7.0
+#   scripts/verify-release.sh v0.7.0                       # a leading v is accepted
+#   scripts/verify-release.sh 0.7.0 --list expected.txt    # use a saved list instead of asking sbt
+#   scripts/verify-release.sh 0.7.0 --attestations         # also check each artifact's build provenance
 #
 # The expected coordinates come from the build (`sbt -error listPublishedArtifacts`), not from a list kept
 # here, so a module added to the build is checked the day it is added. For each real artifact the POM and
@@ -22,7 +22,7 @@
 # SBOMs are on the GitHub Release). Only the POM's and the jar's extras are probed, not every file's.
 #
 # Those upload rules (the pointer javadoc jar, no checksum of a signature, no SBOM on Central; #2667) apply to every
-# release after 0.6.0 (0.7.0 is the next; the script tests for 0.6.1 or later).
+# release from 0.7.0 (the script tests for 0.6.1 or later).
 # 0.6.0 and earlier were uploaded before them, with each module's full Scaladoc in its -javadoc.jar and the extras: for
 # those the javadoc jar must only exist, and the extras are not probed.
 #

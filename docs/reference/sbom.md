@@ -108,7 +108,7 @@ scripts/osv-new-findings.sh target/osv.json        # the report; add a base repo
 
 ## What is not covered
 
-- The SBOMs are not PGP-signed. From the first release after 0.6.0 the release workflow attests their build
+- The SBOMs are not PGP-signed. From 0.7.0 the release workflow attests their build
   provenance, so a downloaded BOM can be tied to the run that generated it: see [Verifying Releases](../contribute/verifying-releases#check-an-sbom).
 - They list dependencies, not licences: the licences are in a separate report per module, attached to the same
   Release and checked against a policy on every pull request ([Dependency licences](licences)). Nor do they say

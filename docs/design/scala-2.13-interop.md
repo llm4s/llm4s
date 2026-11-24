@@ -69,6 +69,15 @@ So the Java facade covers blocker 1's `ToolBuilder` and `completeStructured` fro
 `FakeLlmClient` stands in for a hand-written `LLMClient` in tests. `H_subclass_client` was updated for
 `Completion.created`, now an `Instant`, so that it still fails on the uPickle `ReadWriter` it records.
 
+**Changed since (0.7.0).** `org.llm4s.toolapi.ToolHandlerError` is a union type, `String | ToolParameterError`, which
+the TASTy reader of Scala 2.13 does not read (`Unsupported Scala 3 union in bounds of type ToolHandlerError`).
+`CompletionOptions` carries a request's tools, so the probes that name it no longer compile: `C_streaming`,
+`D_options_enums` and `H_subclass_client`, and `E_tools` stops there before it reaches uPickle. Calls that leave the
+options to their default (`B_config_client`, `G_agent`) still compile and run. Scala 2.13 use is deferred to after
+1.0 and the Scala 3 idioms stay, so `scala-2.13-interop/expected.md` and the
+[getting-started page](../getting-started/scala-2-13.md) record it as a fifth caveat; the tables above are the
+measurements as taken.
+
 ## The blockers
 
 **1. uPickle's type classes (`ToolBuilder`, `completeStructured`, implementing `LLMClient`; by the same signature,
