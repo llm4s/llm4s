@@ -507,7 +507,6 @@ object StabilityTiers {
       "org.llm4s.llmconnect.model.ServiceTier.Other",
       "a single-value wrapper over a service tier llm4s has no case for"
     ),
-    GrowthExempt("org.llm4s.llmconnect.model.TextChunkInput", "a single-value wrapper over the text chunks"),
     GrowthExempt("org.llm4s.model.ModelRegistrySource.File", "a registry source case holding only its path"),
     GrowthExempt("org.llm4s.model.ModelRegistrySource.Resource", "a registry source case holding only its path"),
     GrowthExempt("org.llm4s.model.ModelRegistrySource.Url", "a registry source case holding only its URL"),

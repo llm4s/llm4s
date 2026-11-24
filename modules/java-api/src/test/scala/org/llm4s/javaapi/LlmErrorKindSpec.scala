@@ -1,7 +1,6 @@
 package org.llm4s.javaapi
 
 import org.llm4s.error._
-import org.llm4s.error.EmbeddingError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -60,6 +59,7 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
     (UnsupportedContentPartError("ollama", "image (url, image/png)", "user"), LlmErrorKind.VALIDATION, false),
     (ContentFilteredError.reply("Gemini", "SAFETY"), LlmErrorKind.VALIDATION, false),
     (ConfigurationError("no provider"), LlmErrorKind.CONFIGURATION, false),
+    (EmbeddingError(Some("503"), "overloaded", "voyage"), LlmErrorKind.SERVICE, false),
     (CancelledError("complete"), LlmErrorKind.CANCELLED, false),
     (ContextError.artifactStoreFailed("store", "key", "disk full"), LlmErrorKind.OTHER, false),
     (ExecutionError("exit 1", "shell"), LlmErrorKind.OTHER, true),
