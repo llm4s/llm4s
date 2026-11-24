@@ -25,7 +25,10 @@ import java.time.Instant
 class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "docs/guide/builtin-tools.md" should "show every block this spec runs, as written" in {
-    GuideMirror.missingFromPage("docs/guide/builtin-tools.md", "modules/samples/src/test/scala/org/llm4s/samples/toolapi/BuiltinToolsGuideAgentSpec.scala") shouldBe empty
+    GuideMirror.missingFromPage(
+      "docs/guide/builtin-tools.md",
+      "modules/samples/src/test/scala/org/llm4s/samples/toolapi/BuiltinToolsGuideAgentSpec.scala"
+    ) shouldBe empty
   }
 
   private class CalculatorScript extends LLMClient {

@@ -6,7 +6,7 @@ parent: Reference
 nav_order: 4
 cites_open_issues: [2330]
 cites_closed_issues: [2778, 2807, 2810]
-cites_issues: [2809]
+cites_issues: [2804, 2805, 2809]
 ---
 
 # Scalafix: Configuration Boundary Enforcement

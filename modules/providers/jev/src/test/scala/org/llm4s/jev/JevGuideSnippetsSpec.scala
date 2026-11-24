@@ -111,6 +111,9 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   "docs/guide/jev.md" should "show every block this spec runs, as written" in {
-    GuideMirror.missingFromPage("docs/guide/jev.md", "modules/providers/jev/src/test/scala/org/llm4s/jev/JevGuideSnippetsSpec.scala") shouldBe empty
+    GuideMirror.missingFromPage(
+      "docs/guide/jev.md",
+      "modules/providers/jev/src/test/scala/org/llm4s/jev/JevGuideSnippetsSpec.scala"
+    ) shouldBe empty
   }
 }

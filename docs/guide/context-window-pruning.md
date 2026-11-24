@@ -403,7 +403,7 @@ Derive the budget from the configured model's metadata (`adaptiveFor` from
 changes the budget with it:
 
 ```scala
-val config = adaptiveFor(registry, providerConfig.model).map { strategy =>
+val config = adaptiveFor(registry, providerConfig.model.asString).map { strategy =>
   ContextWindowConfig(pruningStrategy = strategy)
 }
 ```

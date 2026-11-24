@@ -137,7 +137,10 @@ class RagValidationGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
   "docs/guide/vector-store.md" should {
     "show every block this spec runs, as written" in {
-      GuideMirror.missingFromPage("docs/guide/vector-store.md", "modules/rag/src/test/scala/org/llm4s/rag/RagValidationGuideSpec.scala") shouldBe empty
+      GuideMirror.missingFromPage(
+        "docs/guide/vector-store.md",
+        "modules/rag/src/test/scala/org/llm4s/rag/RagValidationGuideSpec.scala"
+      ) shouldBe empty
     }
   }
 }

@@ -361,6 +361,9 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
   }
 
   "docs/guide/observability/provider-exchange-logging.md" should "show every block this spec runs, as written" in {
-    GuideMirror.missingFromPage("docs/guide/observability/provider-exchange-logging.md", "modules/openai-compatible/src/test/scala/org/llm4s/llmconnect/provider/ProviderExchangeLoggingGuideSpec.scala") shouldBe empty
+    GuideMirror.missingFromPage(
+      "docs/guide/observability/provider-exchange-logging.md",
+      "modules/openai-compatible/src/test/scala/org/llm4s/llmconnect/provider/ProviderExchangeLoggingGuideSpec.scala"
+    ) shouldBe empty
   }
 }

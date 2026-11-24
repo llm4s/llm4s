@@ -715,7 +715,10 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
 
   "docs/guide/agents/memory.md" should {
     "show every block this spec runs, as written" in {
-      GuideMirror.missingFromPage("docs/guide/agents/memory.md", "modules/memory/src/test/scala/org/llm4s/agent/memory/MemoryGuideSpec.scala") shouldBe empty
+      GuideMirror.missingFromPage(
+        "docs/guide/agents/memory.md",
+        "modules/memory/src/test/scala/org/llm4s/agent/memory/MemoryGuideSpec.scala"
+      ) shouldBe empty
     }
   }
 }

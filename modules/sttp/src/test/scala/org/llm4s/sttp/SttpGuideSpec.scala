@@ -79,7 +79,7 @@ class SttpGuideSpec extends AnyFlatSpec with Matchers {
     // guide-block
     given ModelRegistryService = Llm4sConfig.modelRegistryService().fold(e => fail(e.message), identity)
     // end-guide-block
-    val chunks                 = ListBuffer.empty[StreamedChunk]
+    val chunks = ListBuffer.empty[StreamedChunk]
 
     val streamed = for {
       // guide-block
@@ -105,6 +105,9 @@ class SttpGuideSpec extends AnyFlatSpec with Matchers {
   }
 
   "docs/guide/http-transport.md" should "show every block this spec runs, as written" in {
-    GuideMirror.missingFromPage("docs/guide/http-transport.md", "modules/sttp/src/test/scala/org/llm4s/sttp/SttpGuideSpec.scala") shouldBe empty
+    GuideMirror.missingFromPage(
+      "docs/guide/http-transport.md",
+      "modules/sttp/src/test/scala/org/llm4s/sttp/SttpGuideSpec.scala"
+    ) shouldBe empty
   }
 }

@@ -31,7 +31,10 @@ import scala.concurrent.duration._
 class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "docs/guide/builtin-tools.md" should "show every block this spec runs, as written" in {
-    GuideMirror.missingFromPage("docs/guide/builtin-tools.md", "modules/agent-tools/src/test/scala/org/llm4s/toolapi/builtin/BuiltinToolsGuideSpec.scala") shouldBe empty
+    GuideMirror.missingFromPage(
+      "docs/guide/builtin-tools.md",
+      "modules/agent-tools/src/test/scala/org/llm4s/toolapi/builtin/BuiltinToolsGuideSpec.scala"
+    ) shouldBe empty
   }
 
   private def isWindows: Boolean = System.getProperty("os.name").toLowerCase.contains("win")

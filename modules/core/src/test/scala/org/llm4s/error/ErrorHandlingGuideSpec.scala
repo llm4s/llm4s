@@ -30,7 +30,10 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
   "docs/guide/error-handling.md" should {
     "show every block this spec runs, as written" in {
-      GuideMirror.missingFromPage("docs/guide/error-handling.md", "modules/core/src/test/scala/org/llm4s/error/ErrorHandlingGuideSpec.scala") shouldBe empty
+      GuideMirror.missingFromPage(
+        "docs/guide/error-handling.md",
+        "modules/core/src/test/scala/org/llm4s/error/ErrorHandlingGuideSpec.scala"
+      ) shouldBe empty
     }
   }
 
@@ -160,7 +163,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
     "need a catch-all, because LLMError is an open trait (not sealed), and a custom error mixes in a marker" in {
       // guide-block
-      final case class VendorError(message: String)      extends LLMError with NonRecoverableError
+      final case class VendorError(message: String) extends LLMError with NonRecoverableError
       // end-guide-block
       final case class FlakyVendorError(message: String) extends LLMError with RecoverableError
       describe(Left(VendorError("custom"))) shouldBe

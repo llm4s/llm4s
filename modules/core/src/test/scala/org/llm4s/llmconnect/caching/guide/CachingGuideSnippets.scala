@@ -105,7 +105,7 @@ object CachingGuideSnippets {
       def put(key: String, embedding: Seq[Double]): Result[Unit] = { store.put(key, embedding); Right(()) }
       def clear(): Result[Unit]                                  = { store.clear(); Right(()) }
       override def stats(): Option[CacheStats] = Some(CacheStats(store.size(), hits.get(), misses.get()))
-    // end-guide-block
+      // end-guide-block
     }
   }
 
@@ -120,7 +120,7 @@ object CachingGuideSnippets {
       similarityThreshold = 0.95, // cosine similarity, 0.0 to 1.0
       ttl = 5.minutes,            // an older entry is ignored
       maxSize = 100               // least recently used entry is evicted beyond this
-    // end-guide-block
+      // end-guide-block
     )
   }
 
@@ -187,7 +187,7 @@ object CachingGuideSnippets {
       case TraceEvent.CacheHit(similarity, threshold, _) => f"hit, similarity $similarity%.3f >= $threshold%.3f"
       case TraceEvent.CacheMiss(reason, _)               => s"miss: ${reason.value}"
       case other                                         => other.eventType
-    // end-guide-block
+      // end-guide-block
     }
   }
 }
