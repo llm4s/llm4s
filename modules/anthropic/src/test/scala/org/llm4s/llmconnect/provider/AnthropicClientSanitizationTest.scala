@@ -61,7 +61,7 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
   private def schemaJsonOf(toolResult: Result[ToolFunction[String]]): String =
     toolResult match {
       case Right(tool) =>
-        val sdkTool = client.convertToolToAnthropicTool(tool)
+        val sdkTool = client.convertToolToAnthropicTool(tool).fold(e => fail(e.message), identity)
         ObjectMappers.jsonMapper().writeValueAsString(sdkTool.inputSchema())
       case Left(err) => fail(s"makeTool failed: ${err.message}")
     }
@@ -138,7 +138,7 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
 
     makeTool("my_tool", "My description", schema) match {
       case Right(tool) =>
-        val sdkTool = client.convertToolToAnthropicTool(tool)
+        val sdkTool = client.convertToolToAnthropicTool(tool).fold(e => fail(e.message), identity)
         sdkTool.name() shouldBe "my_tool"
         sdkTool.description() shouldBe java.util.Optional.of("My description")
       case Left(err) => fail(s"makeTool failed: ${err.message}")

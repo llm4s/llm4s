@@ -11,7 +11,7 @@ import com.anthropic.config.{
   InMemoryProfileConfigProvider,
   ProfileConfig
 }
-import com.anthropic.core.{ JsonObject, ObjectMappers, RequestOptions }
+import com.anthropic.core.{ ObjectMappers, RequestOptions }
 import com.anthropic.core.http.ProxyAuthenticator
 import com.anthropic.models.messages.{
   Base64ImageSource,
@@ -59,7 +59,7 @@ import org.llm4s.model.{
   TransformationResult
 }
 import org.llm4s.security.{ KnownSecrets, TokenGenerations }
-import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
+import org.llm4s.toolapi.{ RawJsonSchema, ToolFunction }
 import org.llm4s.types.Result
 import org.llm4s.error.{
   AuthenticationError,
@@ -236,7 +236,9 @@ class AnthropicClient(
       )
       // a part Anthropic cannot take fails the request here, before anything is sent
       .flatMap(t => AnthropicClient.checkParts(providerName, t.messages).map(_ => t))
-      .flatMap { transformed =>
+      // a tool schema Anthropic cannot take fails the request here too (#2903)
+      .flatMap(t => anthropicTools(t.options).map(tools => (t, tools)))
+      .flatMap { (transformed, tools) =>
         val transformedConversation = conversation.withMessages(transformed.messages)
 
         // Create message parameters builder
@@ -265,7 +267,7 @@ class AnthropicClient(
           .foreach(paramsBuilder.cacheControl)
 
         // Add tools if specified
-        addTools(paramsBuilder, transformed.options)
+        addTools(paramsBuilder, tools, transformed.options)
         addWebSearch(paramsBuilder)
 
         // Add messages from conversation
@@ -334,7 +336,9 @@ curl https://api.anthropic.com/v1/messages \
       )
       // a part Anthropic cannot take fails the request here, before anything is sent
       .flatMap(t => AnthropicClient.checkParts(providerName, t.messages).map(_ => t))
-      .flatMap { transformed =>
+      // a tool schema Anthropic cannot take fails the request here too (#2903)
+      .flatMap(t => anthropicTools(t.options).map(tools => (t, tools)))
+      .flatMap { (transformed, tools) =>
         val transformedConversation = conversation.withMessages(transformed.messages)
 
         // Build parameters
@@ -362,7 +366,7 @@ curl https://api.anthropic.com/v1/messages \
           .foreach(paramsBuilder.cacheControl)
 
         // Add tools if specified
-        addTools(paramsBuilder, transformed.options)
+        addTools(paramsBuilder, tools, transformed.options)
         addWebSearch(paramsBuilder)
         // Add messages from conversation
         addMessagesToParams(transformedConversation, paramsBuilder, transformed.options)
@@ -740,9 +744,18 @@ curl https://api.anthropic.com/v1/messages \
         )
     }
 
-  /** Adds `options`' tools, the last with a `cache_control` breakpoint when `options` caches the tools. */
-  private def addTools(paramsBuilder: MessageCreateParams.Builder, options: CompletionOptions): Unit = {
-    val tools   = options.tools.map(convertToolToAnthropicTool)
+  /** `options`' tools as Anthropic's, or the first that cannot be one. */
+  private def anthropicTools(options: CompletionOptions): Result[Seq[Tool]] =
+    options.tools.foldLeft[Result[Vector[Tool]]](Right(Vector.empty)) { (acc, tool) =>
+      acc.flatMap(tools => convertToolToAnthropicTool(tool).map(tools :+ _))
+    }
+
+  /** Adds the tools, the last with a `cache_control` breakpoint when `options` caches the tools. */
+  private def addTools(
+    paramsBuilder: MessageCreateParams.Builder,
+    tools: Seq[Tool],
+    options: CompletionOptions
+  ): Unit = {
     val control = AnthropicPromptCache.control(options, PromptCache.Scope.Tools)
     tools.zipWithIndex.foreach { (tool, index) =>
       val last = index == tools.size - 1
@@ -768,48 +781,45 @@ curl https://api.anthropic.com/v1/messages \
     }
 
   /**
-   * Convert a ToolFunction to Anthropic's Tool format.
-   * Strips OpenAI-specific fields like 'strict' and 'additionalProperties' from the schema
-   * to maintain compatibility with the Anthropic API.
+   * Convert a ToolFunction to Anthropic's Tool format: the tool's whole JSON schema becomes `input_schema`, its
+   * `required` lists and every other keyword with it (#2903).
+   *
+   * A derived schema has the OpenAI-only `strict` and `additionalProperties` stripped, at every level. A
+   * `Schema.raw` one is sent as written. Anthropic takes only an object schema (`"type": "object"`); any other
+   * is a `ValidationError` naming the tool, and nothing is sent.
    */
-  private[provider] def convertToolToAnthropicTool(toolFunction: ToolFunction[_]): Tool = {
-    val objectSchema = toolFunction.schema.asInstanceOf[ObjectSchema[_]]
-    // Generate raw schema without 'strict' mode
-    val jsonSchemaStr = objectSchema.toJsonSchema(false).render()
-
-    // Parse the JSON and sanitize the schema
-    val jsonNode = ujson.read(jsonSchemaStr)
-
-    // Fix: Remove OpenAI-only top-level fields
-    jsonNode.obj.remove("strict")
-    jsonNode.obj.remove("additionalProperties")
-
-    // Recursively strip additionalProperties from nested parts
-    stripAdditionalProperties(jsonNode)
-
-    val sanitizedSchemaStr = jsonNode.render()
-    val jsonSchema: JsonObject =
-      ObjectMappers.jsonMapper().readValue(sanitizedSchemaStr, classOf[JsonObject])
-    val jsonSchemaMap = jsonSchema.values()
-
-    val inputSchemaBuilder = Tool.InputSchema.builder()
-    val propertiesValue    = jsonSchemaMap.get("properties")
-    if (propertiesValue != null) {
-      val propertiesObj = ObjectMappers
-        .jsonMapper()
-        .readValue(
-          ObjectMappers.jsonMapper().writeValueAsString(propertiesValue),
-          classOf[Tool.InputSchema.Properties]
-        )
-      inputSchemaBuilder.properties(propertiesObj)
+  private[provider] def convertToolToAnthropicTool(toolFunction: ToolFunction[_]): Result[Tool] = {
+    val schema: ujson.Value = toolFunction.schema match {
+      case raw: RawJsonSchema => raw.json
+      case derived            =>
+        // a copy: the rendering is sanitised in place
+        val json = ujson.copy(derived.toJsonSchema(false))
+        json.objOpt.foreach { obj =>
+          obj.remove("strict")
+          obj.remove("additionalProperties")
+        }
+        stripAdditionalProperties(json)
+        json
     }
-
-    Tool
-      .builder()
-      .name(toolFunction.name)
-      .description(toolFunction.description)
-      .inputSchema(inputSchemaBuilder.build().validate())
-      .build()
+    schema match {
+      case obj: ujson.Obj if obj.value.get("type").contains(ujson.Str("object")) =>
+        Try {
+          val inputSchema = ObjectMappers.jsonMapper().readValue(obj.render(), classOf[Tool.InputSchema]).validate()
+          Tool.builder().name(toolFunction.name).description(toolFunction.description).inputSchema(inputSchema).build()
+        }.toEither.left.map(e =>
+          ValidationError(
+            "tools",
+            s"tool '${toolFunction.name}': its schema is not a valid input_schema: ${e.getMessage}"
+          )
+        )
+      case _ =>
+        Left(
+          ValidationError(
+            "tools",
+            s"tool '${toolFunction.name}': Anthropic takes only an object schema (\"type\": \"object\") as a tool's input_schema"
+          )
+        )
+    }
   }
 
   /**
