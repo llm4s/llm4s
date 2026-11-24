@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.spi
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.security.Secret
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId }
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -34,7 +34,7 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
   "resolveModel" should {
 
     val withDefault = EmbeddingConfigSpec(defaultModel = Some("default-model"))
-    val section     = EmbeddingProviderSection(model = Some("section-model"))
+    val section     = EmbeddingProviderSection(model = Some(ModelName("section-model")))
 
     "prefer the override to the section and the default" in {
       EmbeddingConfigSpec.resolveModel(id, section, Some("override-model"), withDefault) shouldBe
@@ -55,8 +55,8 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
     }
 
     "skip a blank or whitespace-only section model" in {
-      val blank      = EmbeddingProviderSection(model = Some(""))
-      val whitespace = EmbeddingProviderSection(model = Some(" \t "))
+      val blank      = EmbeddingProviderSection(model = Some(ModelName("")))
+      val whitespace = EmbeddingProviderSection(model = Some(ModelName(" \t ")))
       EmbeddingConfigSpec.resolveModel(id, blank, None, withDefault) shouldBe Right("default-model")
       EmbeddingConfigSpec.resolveModel(id, whitespace, None, withDefault) shouldBe Right("default-model")
     }
@@ -64,7 +64,7 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
     "trim the override and the section model" in {
       EmbeddingConfigSpec.resolveModel(id, noSection, Some("  override-model "), withDefault) shouldBe
         Right("override-model")
-      val padded = EmbeddingProviderSection(model = Some(" section-model "))
+      val padded = EmbeddingProviderSection(model = Some(ModelName(" section-model ")))
       EmbeddingConfigSpec.resolveModel(id, padded, None, withDefault) shouldBe Right("section-model")
     }
 
@@ -92,7 +92,7 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
     val withDefault = EmbeddingConfigSpec(defaultBaseUrl = Some("https://default.acme.example"))
 
     "prefer the section to the default" in {
-      val section = EmbeddingProviderSection(baseUrl = Some("https://section.acme.example"))
+      val section = EmbeddingProviderSection(baseUrl = Some(BaseUrl("https://section.acme.example")))
       EmbeddingConfigSpec.resolveBaseUrl(id, section, withDefault) shouldBe Right("https://section.acme.example")
     }
 
@@ -101,7 +101,7 @@ class EmbeddingConfigSpecSpec extends AnyWordSpec with Matchers with EitherValue
     }
 
     "use the default when the section's is blank" in {
-      val blank = EmbeddingProviderSection(baseUrl = Some("  "))
+      val blank = EmbeddingProviderSection(baseUrl = Some(BaseUrl("  ")))
       EmbeddingConfigSpec.resolveBaseUrl(id, blank, withDefault) shouldBe Right("https://default.acme.example")
     }
 

@@ -775,6 +775,23 @@ object AcmeEmbeddings extends EmbeddingProviderDescriptor:
 through it and do not close it, as a chat client does with `LlmClientOptions.httpClient`. Prove it with
 `assertEmbeddingUsesSuppliedHttpClient(AcmeEmbeddings, config)` in the module spec.
 
+The section a descriptor is handed, `EmbeddingProviderSection`, is typed as a chat section is: `baseUrl` is an
+`Option[BaseUrl]` and `model` an `Option[ModelName]`. A key of your own - a region, an API version - is declared
+in `EmbeddingConfigSpec.extras` with the same `ProviderConfigKey` a chat provider uses:
+
+```scala
+override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
+  requiresApiKey = true,
+  extras = Seq(ProviderConfigKey.optional("region", "the Acme region serving the model", default = Some("eu-west")))
+)
+```
+
+The loader reads `llm4s.embeddings.acme.region`, applies the default, and fails the load naming a required key
+that is missing. The value arrives in `section.extra("region")`, and the default `buildConfig` carries every
+declared key over, so `build` reads `config.extra("region")`. A key you do not declare is not passed on, and a
+name every section has (`EmbeddingConfigSpec.BuiltinKeys`: `apiKey`, `apiKeyFile`, `baseUrl`, `model`,
+`timeouts`) cannot be declared.
+
 `EmbeddingConfigSpec.defaultApiKey` is for a provider that takes a key but needs no real one
 (local Ollama). Override `buildConfig(section, context)` only when the config cannot be
 expressed with the spec; `context.modelOverride` is the `<model>` half of `EMBEDDING_MODEL=<id>/<model>`, which

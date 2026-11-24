@@ -9,6 +9,7 @@ import org.llm4s.llmconnect.spi.{
   EmbeddingConfigSpec,
   EmbeddingProviderDescriptor,
   EmbeddingProviderSection,
+  ProviderConfigKey,
   ProviderRegistry
 }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -266,6 +267,100 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
 
       config.baseUrl shouldBe "http://gpu-box:9999"
       config.model shouldBe "fixture-large"
+    }
+  }
+
+  "an embedding provider's declared extras (#2811)" should {
+
+    /** A provider with a required key, one with a default, and a `buildConfig` of its own that reads them. */
+    object RegionalEmbeddings extends EmbeddingProviderDescriptor {
+      val id: ProviderId = ProviderId("regionalfixture")
+
+      val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
+        defaultBaseUrl = Some("https://regional.fixture.example/v1"),
+        defaultModel = Some("regional-small"),
+        extras = Seq(
+          ProviderConfigKey.required("region", "the region serving the model").withEnv("REGIONAL_FIXTURE_REGION"),
+          ProviderConfigKey.optional("task", "what the vectors are for", default = Some("retrieval"))
+        )
+      )
+
+      def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+        Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
+    }
+
+    /** Declares a key every section already has. */
+    object ClashingEmbeddings extends EmbeddingProviderDescriptor {
+      val id: ProviderId = ProviderId("clashingfixture")
+      val configSpec: EmbeddingConfigSpec =
+        EmbeddingConfigSpec(extras = Seq(ProviderConfigKey.optional("baseUrl", "not its to declare")))
+      def build(config: EmbeddingProviderConfig, context: EmbeddingBuildContext): Result[EmbeddingProvider] =
+        Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
+    }
+
+    given ProviderRegistry = ProviderRegistry.ofEmbeddings(RegionalEmbeddings, ClashingEmbeddings)
+
+    def loaded(hocon: String): Result[(String, EmbeddingProviderConfig)] =
+      EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
+
+    "reach the config the descriptor builds, defaults applied and undeclared keys left out" in {
+      val (_, config) = loaded(
+        """llm4s.embeddings {
+          |  model = "regionalfixture/regional-large"
+          |  regionalfixture { region = " eu-west ", colour = "blue" }
+          |}""".stripMargin
+      ).value
+
+      config.extras shouldBe Map("region" -> "eu-west", "task" -> "retrieval")
+      config.extra("region") shouldBe Some("eu-west")
+      config.extra("colour") shouldBe None
+    }
+
+    "let the section override a default" in {
+      val (_, config) = loaded(
+        """llm4s.embeddings {
+          |  model = "regionalfixture/regional-large"
+          |  regionalfixture { region = "us-east", task = "clustering" }
+          |}""".stripMargin
+      ).value
+
+      config.extra("task") shouldBe Some("clustering")
+    }
+
+    "name a required key that is missing, its path and the binding for its variable" in {
+      val message = loaded("""llm4s.embeddings.model = "regionalfixture/regional-large"""").left.value.message
+
+      message should include("Embedding provider 'regionalfixture' is missing required fields")
+      message should include("region: the region serving the model")
+      message should include("llm4s.embeddings.regionalfixture.region")
+      message should include("region = ${?REGIONAL_FIXTURE_REGION}")
+    }
+
+    "treat a blank value as unset" in {
+      loaded(
+        """llm4s.embeddings {
+          |  model = "regionalfixture/regional-large"
+          |  regionalfixture { region = "  " }
+          |}""".stripMargin
+      ).left.value.message should include("missing required fields")
+    }
+
+    "refuse a provider that declares a key every section has" in {
+      loaded("""llm4s.embeddings.model = "clashingfixture/m"""").left.value.message should include(
+        "declares baseUrl as provider-specific key(s)"
+      )
+    }
+
+    "keep extra values out of the config's toString" in {
+      val (_, config) = loaded(
+        """llm4s.embeddings {
+          |  model = "regionalfixture/regional-large"
+          |  regionalfixture { region = "eu-west-secret" }
+          |}""".stripMargin
+      ).value
+
+      config.toString should include("region=***")
+      (config.toString should not).include("eu-west-secret")
     }
   }
 }

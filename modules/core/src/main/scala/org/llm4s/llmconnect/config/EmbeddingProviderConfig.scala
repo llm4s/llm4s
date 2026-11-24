@@ -22,6 +22,10 @@ import org.llm4s.types.Result
  *                 `llm4s.credentials.<id>.apiKeyFile`) sets [[org.llm4s.llmconnect.auth.ApiKeyProvider.file]],
  *                 and code sets any implementation with [[withApiKeyProvider]]. `apiKey` then holds the key read
  *                 at load. An embedding provider reads the key with [[currentApiKey]].
+ * @param extras   the provider-specific keys of the section, as the provider declares them in
+ *                 `EmbeddingConfigSpec.extras`: how a declared key reaches the provider that
+ *                 `EmbeddingProviderDescriptor.build` constructs. Empty for a provider that declares none.
+ *                 Redacted in `toString`.
  *
  * Build one with [[EmbeddingProviderConfig.apply]] and change it with the `with*` setters; the constructor and `copy`
  * are private, so a new field never breaks callers.
@@ -33,8 +37,15 @@ final case class EmbeddingProviderConfig private (
   apiKey: Secret,
   timeouts: ProviderTimeouts,
   network: HttpNetworkSettings,
-  apiKeyProvider: Option[ApiKeyProvider]
+  apiKeyProvider: Option[ApiKeyProvider],
+  extras: Map[String, String]
 ) {
+
+  /** Sets the provider-specific keys. */
+  def withExtras(extras: Map[String, String]): EmbeddingProviderConfig = copy(extras = extras)
+
+  /** The value of a provider-specific key the provider declares in `EmbeddingConfigSpec.extras`. */
+  def extra(key: String): Option[String] = extras.get(key)
 
   /** Sets the base URL of the embedding service. */
   def withBaseUrl(baseUrl: String): EmbeddingProviderConfig = copy(baseUrl = baseUrl)
@@ -69,15 +80,17 @@ final case class EmbeddingProviderConfig private (
 
   override def toString: String =
     s"EmbeddingProviderConfig(baseUrl=$baseUrl, model=$model, apiKey=$apiKey" +
-      apiKeyProvider.fold("")(p => s", apiKeyProvider=$p") + ")"
+      apiKeyProvider.fold("")(p => s", apiKeyProvider=$p") +
+      (if (extras.isEmpty) "" else extras.keys.toSeq.sorted.map(k => s"$k=***").mkString(", extras=[", ", ", "]")) +
+      ")"
 }
 
 object EmbeddingProviderConfig {
 
   /**
    * Creates an [[EmbeddingProviderConfig]]. `timeouts` defaults to [[ProviderTimeouts.default]], the provider's own
-   * default, `network` to [[org.llm4s.http.HttpNetworkSettings.default]], no proxy, and `apiKeyProvider` to none,
-   * so `apiKey` is sent.
+   * default, `network` to [[org.llm4s.http.HttpNetworkSettings.default]], no proxy, `apiKeyProvider` to none,
+   * so `apiKey` is sent, and `extras` to none.
    */
   def apply(
     baseUrl: String,
@@ -85,8 +98,9 @@ object EmbeddingProviderConfig {
     apiKey: Secret,
     timeouts: ProviderTimeouts = ProviderTimeouts.default,
     network: HttpNetworkSettings = HttpNetworkSettings.default,
-    apiKeyProvider: Option[ApiKeyProvider] = None
+    apiKeyProvider: Option[ApiKeyProvider] = None,
+    extras: Map[String, String] = Map.empty
   ): EmbeddingProviderConfig =
-    new EmbeddingProviderConfig(baseUrl, model, apiKey, timeouts, network, apiKeyProvider)
+    new EmbeddingProviderConfig(baseUrl, model, apiKey, timeouts, network, apiKeyProvider, extras)
 
 }

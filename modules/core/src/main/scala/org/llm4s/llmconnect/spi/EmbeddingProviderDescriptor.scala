@@ -92,8 +92,9 @@ trait EmbeddingProviderDescriptor:
    * client needs.
    *
    * The default implementation resolves model, base URL and API key against
-   * [[configSpec]], which is all any of the project's own providers needs. Override it only
-   * for a provider whose config genuinely cannot be expressed that way.
+   * [[configSpec]] and carries the section's declared `extras` over, which is all any of the
+   * project's own providers needs. Override it only for a provider whose config genuinely cannot
+   * be expressed that way.
    *
    * @param section       the `llm4s.embeddings.<id>` section, already parsed, its `apiKey`
    *                      already falling back to the shared `llm4s.credentials.<id>.apiKey`
@@ -110,6 +111,7 @@ trait EmbeddingProviderDescriptor:
       baseUrl <- EmbeddingConfigSpec.resolveBaseUrl(id, section, configSpec)
       apiKey  <- EmbeddingConfigSpec.resolveApiKey(id, section, configSpec)
     yield EmbeddingProviderConfig(baseUrl = baseUrl, model = model, apiKey = apiKey, timeouts = section.timeouts)
+      .withExtras(section.extras)
 
   /**
    * Constructs the embedding provider for an already-resolved config.
