@@ -60,6 +60,7 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`StreamingAccumulator` takes the model and reports usage one way](#streamingaccumulator-takes-the-model-and-reports-usage-one-way-2813),
 [context trimming fails when nothing fits, and externalizes only into a store](#context-trimming-fails-when-nothing-fits-and-externalizes-only-into-a-store-2817),
 [Langfuse traces are private and name the run's user](#langfuse-traces-are-private-and-name-the-runs-user-2828),
+[the Langfuse backend sends OpenTelemetry spans](#the-langfuse-backend-sends-opentelemetry-spans-2883),
 [`Tracing` has one abstract method](#tracing-has-one-abstract-method-2799),
 [`ReliableClient`'s metrics are generic metrics](#reliableclients-metrics-are-generic-metrics-2801),
 [`SecretPatterns` is in `llm4s-agent`](#secretpatterns-is-in-llm4s-agent-2824),
@@ -1885,6 +1886,31 @@ created `public: false`, and nothing is hard-coded as the user.
   dashboard filtered on the user `llm4s-user` matches nothing from this version on.
 - `AgentRunEnded` gains the field `userId` (it has fourteen fields in all), so a positional pattern on it no longer
   compiles: match `case e: TraceEvent.AgentRunEnded` and read its fields. `LangfuseConfig`'s `toString` and equality include `publicTraces`.
+
+## The Langfuse backend sends OpenTelemetry spans (#2883)
+
+Langfuse removed its legacy batch ingestion API, `POST /api/public/ingestion`, from Langfuse Cloud on 2026-11-16, and a
+self-hosted Langfuse v4 in `events_only` mode rejects it. The `langfuse` tracing mode now sends OTLP/HTTP JSON to
+Langfuse's OpenTelemetry endpoint, `<url>/api/public/otel/v1/traces`, with `x-langfuse-ingestion-version: 4`; each
+trace, span, generation and event it sent is a span whose `langfuse.*` attributes carry the same fields. The mode,
+the `llm4s.tracing.langfuse.*` keys and the `LANGFUSE_*` variables are unchanged.
+
+- **`LANGFUSE_URL` is the host.** `LangfuseConfig.DEFAULT_URL` is `https://cloud.langfuse.com`, was
+  `https://cloud.langfuse.com/api/public/ingestion`. A URL that still ends in `/api/public/ingestion` keeps working:
+  it is read as the host it is on. A self-hosted Langfuse must be v3.22 or later, which has the OTel endpoint.
+- **An unplaced run's trace id.** A run traced without a placement (a hand-built `AgentRunEnded`) was the trace whose
+  id is the run id; OTLP trace ids are 32 hex digits, so it is now the trace `TraceContext.rootFor(runId).traceId`.
+  The run id stays in the trace's `run_id` metadata. Any other event without a placement is a trace of its own, as
+  before. A run's trace now has a root span (`LLM4S Agent Run`) with its messages under it.
+- **`LangfuseBatchSender`** has `sendTraces(request: ujson.Obj, config)`, an OTLP `ExportTraceServiceRequest`, and
+  `sendScores(scores: Seq[ujson.Obj], config)`, posted to `/api/public/scores`; `sendBatch(events, config)` and
+  `DefaultLangfuseBatchSender.normalizeIngestionUrl` are removed. A `LangfuseTracing` subclass that overrode
+  `sendBatch(events: Seq[ujson.Obj])` overrides `sendBatch(request: ujson.Obj)`, the export.
+- **`RAGASLangfuseObserver.logEvaluation(result, traceId)`** scores the trace with that id. To add its
+  `Evaluation Details` span to the trace too, the id must be an OpenTelemetry trace id (32 hex digits), as every trace
+  llm4s sends now has; any other id gets the scores alone, with a warning.
+- Message spans no longer carry `tags` (Langfuse observations have none; the trace keeps `llm4s`, `agent`,
+  `conversation`), and a model call's `usage` no longer has `unit: TOKENS`.
 
 ## Context trimming fails when nothing fits, and externalizes only into a store (#2817)
 

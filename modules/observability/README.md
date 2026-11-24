@@ -34,14 +34,16 @@ Read from the `llm4s.tracing.langfuse` block (see
 
 | Key | Environment variable | Default |
 |---|---|---|
-| `url` | `LANGFUSE_URL` | `https://cloud.langfuse.com/api/public/ingestion` (Langfuse Cloud) |
+| `url` | `LANGFUSE_URL` | `https://cloud.langfuse.com` (Langfuse Cloud, EU) |
 | `publicKey` | `LANGFUSE_PUBLIC_KEY` | none - required |
 | `secretKey` | `LANGFUSE_SECRET_KEY` | none - required |
 | `env` | `LANGFUSE_ENV` | `"production"` |
 | `release` | `LANGFUSE_RELEASE` | `"1.0.0"` |
 | `version` | `LANGFUSE_VERSION` | `"1.0.0"` |
 
-For a self-hosted instance, set `LANGFUSE_URL` to its ingestion endpoint.
+For another region or a self-hosted instance, set `LANGFUSE_URL` to its base URL (for example
+`https://us.cloud.langfuse.com`). The backend sends OTLP/HTTP JSON to `<url>/api/public/otel/v1/traces`
+(#2883); a URL that still ends in the legacy `/api/public/ingestion` path is read as the host it is on.
 
 With `TRACING_MODE=langfuse`, `llm4s-core` hands this block to `LangfuseTracingBackend`
 automatically. To read it independently of `TRACING_MODE` - for example to combine Langfuse with

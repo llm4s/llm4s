@@ -25,7 +25,7 @@ import scala.util.Try
  * 4. Performance metrics and comparison
  *
  * To enable Langfuse tracing, set these environment variables:
- * - LANGFUSE_URL: Your Langfuse instance URL (default: https://cloud.langfuse.com/api/public/ingestion)
+ * - LANGFUSE_URL: Your Langfuse instance URL (default: https://cloud.langfuse.com)
  * - LANGFUSE_PUBLIC_KEY: Your Langfuse public key
  * - LANGFUSE_SECRET_KEY: Your Langfuse secret key
  * - LANGFUSE_ENV: Environment name (default: production)

@@ -94,7 +94,7 @@ class LangfuseConfigSpec extends AnyWordSpec with Matchers {
 
     "use the defaults for an empty block" in {
       LangfuseConfig.fromExtras(Map.empty) shouldBe LangfuseConfig()
-      LangfuseConfig().url shouldBe "https://cloud.langfuse.com/api/public/ingestion"
+      LangfuseConfig().url shouldBe "https://cloud.langfuse.com"
     }
 
     "trim values and treat a blank one as unset" in {
