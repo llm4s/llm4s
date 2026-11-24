@@ -32,7 +32,9 @@ import scala.util.control.NonFatal
  * two sets overlap without either containing the other - OpenAI and Ollama
  * supply both, Voyage only embeddings, Anthropic only chat. The same id may
  * therefore appear in both, and does: `ollama` names a chat client and an
- * embedding provider that share nothing but a base URL.
+ * embedding provider that share nothing but a base URL. A member with no prefix is the
+ * chat half and its `embedding*` twin the embedding half: [[find]] and [[findEmbedding]],
+ * [[ids]] and [[embeddingIds]], `of` and `ofEmbeddings`.
  *
  * Lookup is by `ProviderId` or by an alias a descriptor declares, and never
  * throws: an id nothing handles produces a `Left` naming the ids that are
@@ -176,7 +178,7 @@ final class ProviderRegistry private (
   /** This registry plus every provider `module` supplies, of either kind. */
   def withModule(module: Llm4sProviderModule): ProviderRegistry =
     ProviderRegistry.fromDescriptors(
-      descriptors ++ module.chatProviders,
+      descriptors ++ module.providers,
       embeddingDescriptors ++ module.embeddingProviders,
       report
     )
@@ -200,7 +202,7 @@ object ProviderRegistry:
   /** A registry holding everything `modules` supply, of either kind. */
   def ofModules(modules: Llm4sProviderModule*): ProviderRegistry =
     fromDescriptors(
-      modules.toVector.flatMap(_.chatProviders),
+      modules.toVector.flatMap(_.providers),
       modules.toVector.flatMap(_.embeddingProviders),
       ProviderRegistryReport.explicit
     )
@@ -386,7 +388,7 @@ object ProviderRegistry:
               // separately means a module whose embedding half throws still contributes its
               // chat half, and the report says which half failed.
               val name = module.getClass.getName
-              val chat = guarded(s"asking $name for its chat providers")(module.chatProviders.toVector)
+              val chat = guarded(s"asking $name for its chat providers")(module.providers.toVector)
                 .map(usable(name, "chat", _)(_.id.asString, _.aliases))
               val embeddings =
                 guarded(s"asking $name for its embedding providers")(module.embeddingProviders.toVector)
@@ -463,7 +465,7 @@ object ProviderRegistry:
    * `NonFatal` and so deliberately lets every `LinkageError` through. A
    * `LinkageError` is precisely what this boundary produces: a module compiled
    * against a different llm4s throws `AbstractMethodError` when its
-   * `chatProviders` is called, and one whose own dependency is missing throws
+   * `providers` is called, and one whose own dependency is missing throws
    * `NoClassDefFoundError`. Either escaping would abort the initialisation of
    * `ProviderRegistry.default` and take every working provider with it - the
    * one failure mode discovery exists to prevent. `VirtualMachineError` and the

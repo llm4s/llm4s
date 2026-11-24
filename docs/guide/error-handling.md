@@ -183,7 +183,7 @@ cause, which of several failures it reports), so none carries a marker:
 
 | Module | Package | Errors |
 |---|---|---|
-| `llm4s-core` | `org.llm4s.llmconnect.model` | `EmbeddingError`: how `EmbeddingClient.embed` and the embedding providers (OpenAI, Ollama, Voyage, Cohere, Jina) report a failure other than cancellation, except that the Cohere provider reports a 429 as a `RateLimitError` |
+| `llm4s-core` | `org.llm4s.error` | `EmbeddingError`: how `EmbeddingClient.embed` and the embedding providers (OpenAI, Ollama, Voyage, Cohere, Jina) report a failure other than cancellation, except that the Cohere provider reports a 429 as a `RateLimitError` |
 | `llm4s-rag` | `org.llm4s.rag.evaluation`, `org.llm4s.reranker` | `EvaluationError` from RAGAS evaluation and the RAG benchmark tools; `RerankError` from the Cohere and LLM rerankers (`Reranker.rerank`) |
 | `llm4s-speech` | `org.llm4s.speech.stt`, `.tts` | `STTError.ProcessingFailed` from the speech-to-text clients (an empty transcription, no recognisable speech, an unparseable response; its `retryable` flag says `true`); `TTSError.SynthesisFailed` from the text-to-speech clients (an empty audio body) |
 

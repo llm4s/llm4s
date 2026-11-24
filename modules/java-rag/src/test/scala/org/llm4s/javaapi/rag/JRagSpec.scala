@@ -4,7 +4,8 @@ import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.error.{ CancelledError, RateLimitError }
 import org.llm4s.javaapi.{ LlmErrorKind, LlmResult }
-import org.llm4s.llmconnect.model.{ EmbeddingError, InputPurpose, UserMessage }
+import org.llm4s.llmconnect.model.{ InputPurpose, UserMessage }
+import org.llm4s.error.EmbeddingError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 

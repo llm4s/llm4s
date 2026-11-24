@@ -2,10 +2,14 @@ package org.llm4s.context
 
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
+import org.llm4s.types.HeadroomPercent
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class TokenWindowSpec extends AnyFlatSpec with Matchers {
+
+  private def headroomOf(ratio: Double): HeadroomPercent =
+    HeadroomPercent.create(ratio).getOrElse(fail(s"invalid headroom $ratio"))
 
   val counter: ConversationTokenCounter = ContextTestFixtures.createSimpleCounter()
 
@@ -65,7 +69,7 @@ class TokenWindowSpec extends AnyFlatSpec with Matchers {
   it should "apply headroom percentage correctly" in {
     val conversation = ContextTestFixtures.mediumConversation
     val budget       = 100
-    val headroom     = 0.20 // 20% headroom = effective budget of 80
+    val headroom     = headroomOf(0.20) // 20% headroom = effective budget of 80
 
     val result = TokenWindow.trimToBudget(conversation, counter, budget, headroom)
 
@@ -91,24 +95,6 @@ class TokenWindowSpec extends AnyFlatSpec with Matchers {
     val conversation = ContextTestFixtures.smallConversation
 
     val result = TokenWindow.trimToBudget(conversation, counter, 0)
-
-    result.isLeft shouldBe true
-    result.swap.toOption.get shouldBe a[ValidationError]
-  }
-
-  it should "reject invalid headroom percentage (negative)" in {
-    val conversation = ContextTestFixtures.smallConversation
-
-    val result = TokenWindow.trimToBudget(conversation, counter, 100, -0.1)
-
-    result.isLeft shouldBe true
-    result.swap.toOption.get shouldBe a[ValidationError]
-  }
-
-  it should "reject invalid headroom percentage (>=1.0)" in {
-    val conversation = ContextTestFixtures.smallConversation
-
-    val result = TokenWindow.trimToBudget(conversation, counter, 100, 1.0)
 
     result.isLeft shouldBe true
     result.swap.toOption.get shouldBe a[ValidationError]
@@ -142,10 +128,10 @@ class TokenWindowSpec extends AnyFlatSpec with Matchers {
     val tokens       = counter.countConversation(conversation)
 
     // With 0% headroom, exact budget should fit
-    TokenWindow.fitsInBudget(conversation, counter, tokens, 0.0) shouldBe true
+    TokenWindow.fitsInBudget(conversation, counter, tokens, HeadroomPercent.Zero) shouldBe true
 
     // With 50% headroom, same budget should not fit
-    TokenWindow.fitsInBudget(conversation, counter, tokens, 0.50) shouldBe false
+    TokenWindow.fitsInBudget(conversation, counter, tokens, headroomOf(0.50)) shouldBe false
   }
 
   // ============ getUsageInfo ============

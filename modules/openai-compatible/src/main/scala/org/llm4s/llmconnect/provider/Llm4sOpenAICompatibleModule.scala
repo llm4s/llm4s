@@ -28,7 +28,7 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  */
 @Stable
 final class Llm4sOpenAICompatibleModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] =
+  override def providers: Seq[ProviderDescriptor] =
     Seq(
       OpenAICompatibleProvider,
       DeepSeekProvider,

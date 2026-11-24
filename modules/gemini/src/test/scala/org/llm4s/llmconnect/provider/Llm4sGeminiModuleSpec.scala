@@ -6,7 +6,7 @@ import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse, St
 import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.{ LLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, VertexAIConfig }
-import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{ ProviderConfigContext, ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendJsonResponse, streamThenHold, withServer }
 import org.llm4s.testkit.{ ContentPartCase, CredentialsRoundTrip, ProviderModuleChecks }
@@ -124,7 +124,10 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
     Seq(ContentPartCase.UserImageInline, ContentPartCase.UserPdfInline, ContentPartCase.UserTextDocumentInline)
 
   private def vertexConfig: VertexAIConfig =
-    VertexAIProvider.buildConfig("test-instance", section(VertexAIProvider).withApiKey(None)) match
+    VertexAIProvider.buildConfig(
+      section(VertexAIProvider).withApiKey(None),
+      ProviderConfigContext.of("test-instance")
+    ) match
       case Right(c: VertexAIConfig) => c
       case other                    => fail(s"expected a VertexAIConfig, got $other")
 
@@ -167,7 +170,7 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
 
     "build their own config from a config section" in {
       expectations.foreach { (descriptor, configClass, _) =>
-        descriptor.buildConfig("test-instance", section(descriptor)) match
+        descriptor.buildConfig(section(descriptor), ProviderConfigContext.of("test-instance")) match
           case Right(config) => config.getClass.getSimpleName shouldBe configClass
           case Left(error)   => fail(s"${descriptor.id.asString} failed to build a config: ${error.message}")
       }

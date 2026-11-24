@@ -1,9 +1,9 @@
 package org.llm4s.context
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ ContextError, ValidationError }
 import org.llm4s.llmconnect.model._
-import org.llm4s.types.{ Result, TokenBudget }
+import org.llm4s.types.{ HeadroomPercent, Result }
 import org.slf4j.LoggerFactory
 
 /**
@@ -15,10 +15,9 @@ import org.slf4j.LoggerFactory
  * gone. A system message after the first non-system one is history like any other. Headroom is applied to the
  * budget for safety.
  */
-@Stable
+@Experimental
 object TokenWindow {
-  private val logger                 = LoggerFactory.getLogger(getClass)
-  private val DefaultHeadroomPercent = 0.08 // 8% headroom by default
+  private val logger = LoggerFactory.getLogger(getClass)
 
   /**
    * Trim a conversation to fit within the specified token budget.
@@ -27,20 +26,20 @@ object TokenWindow {
    * @param conversation The conversation to trim
    * @param tokenCounter Token counter for the specific model
    * @param budget Maximum token budget
-   * @param headroomPercent Safety margin (default 8%)
+   * @param headroom Safety margin (default 8%)
    * @return Trimmed conversation that fits within budget, or a [[org.llm4s.error.ContextError]] when the pinned
    *         messages alone do not fit, or nothing but them would
    */
   def trimToBudget(
     conversation: Conversation,
     tokenCounter: ConversationTokenCounter,
-    budget: TokenBudget,
-    headroomPercent: Double = DefaultHeadroomPercent
+    budget: Int,
+    headroom: HeadroomPercent = HeadroomPercent.Standard
   ): Result[ConversationWindow] =
     for {
-      _               <- validateInputs(conversation, budget, headroomPercent)
+      _               <- validateInputs(conversation, budget)
       currentTokens   <- Right(tokenCounter.countConversation(conversation))
-      effectiveBudget <- Right(calculateEffectiveBudget(budget, headroomPercent))
+      effectiveBudget <- Right(calculateEffectiveBudget(budget, headroom))
       result          <- performTrimming(conversation, tokenCounter, currentTokens, effectiveBudget, budget)
     } yield result
 
@@ -50,11 +49,11 @@ object TokenWindow {
   def fitsInBudget(
     conversation: Conversation,
     tokenCounter: ConversationTokenCounter,
-    budget: TokenBudget,
-    headroomPercent: Double = DefaultHeadroomPercent
+    budget: Int,
+    headroom: HeadroomPercent = HeadroomPercent.Standard
   ): Boolean = {
     val currentTokens   = tokenCounter.countConversation(conversation)
-    val effectiveBudget = calculateEffectiveBudget(budget, headroomPercent)
+    val effectiveBudget = calculateEffectiveBudget(budget, headroom)
     currentTokens <= effectiveBudget
   }
 
@@ -64,7 +63,7 @@ object TokenWindow {
   def getUsageInfo(
     conversation: Conversation,
     tokenCounter: ConversationTokenCounter,
-    budget: TokenBudget
+    budget: Int
   ): TokenUsageInfo = {
     val currentTokens  = tokenCounter.countConversation(conversation)
     val withinBudget   = currentTokens <= budget
@@ -75,13 +74,10 @@ object TokenWindow {
 
   private def validateInputs(
     conversation: Conversation,
-    budget: TokenBudget,
-    headroomPercent: Double
+    budget: Int
   ): Result[Unit] =
     if (budget <= 0) {
       Left(ValidationError("Token budget must be positive", "budget"))
-    } else if (headroomPercent < 0 || headroomPercent >= 1.0) {
-      Left(ValidationError("Headroom percent must be between 0.0 and 1.0", "headroomPercent"))
     } else if (conversation.messages.isEmpty) {
       Left(ValidationError("Cannot trim empty conversation", "conversation"))
     } else {
@@ -89,10 +85,10 @@ object TokenWindow {
       Right(())
     }
 
-  private def calculateEffectiveBudget(budget: TokenBudget, headroomPercent: Double): TokenBudget = {
-    val effectiveBudget = (budget * (1.0 - headroomPercent)).toInt
+  private def calculateEffectiveBudget(budget: Int, headroom: HeadroomPercent): Int = {
+    val effectiveBudget = (budget * (1.0 - headroom.asRatio)).toInt
     logger.debug(
-      s"Effective budget: $effectiveBudget tokens (${(headroomPercent * 100).toInt}% headroom applied to $budget)"
+      s"Effective budget: $effectiveBudget tokens ($headroom headroom applied to $budget)"
     )
     effectiveBudget
   }
@@ -100,9 +96,9 @@ object TokenWindow {
   private def performTrimming(
     conversation: Conversation,
     tokenCounter: ConversationTokenCounter,
-    currentTokens: Int,           // current size of the conversation in tokens before trimming
-    effectiveBudget: TokenBudget, // usable portion of the budget after applying headroom
-    originalBudget: TokenBudget   // hard context budget we aim for
+    currentTokens: Int,   // current size of the conversation in tokens before trimming
+    effectiveBudget: Int, // usable portion of the budget after applying headroom
+    originalBudget: Int   // hard context budget we aim for
   ): Result[ConversationWindow] =
     currentTokens match {
       case tokens if tokens <= effectiveBudget =>
@@ -122,8 +118,8 @@ object TokenWindow {
   private def trimToEffectiveBudget(
     conversation: Conversation,
     tokenCounter: ConversationTokenCounter,
-    effectiveBudget: TokenBudget,
-    originalBudget: TokenBudget
+    effectiveBudget: Int,
+    originalBudget: Int
   ): Result[ConversationWindow] = {
     val allMessages = conversation.messages
 
@@ -209,7 +205,7 @@ object TokenWindow {
 /**
  * Result of token window processing
  */
-@Stable
+@Experimental
 final case class ConversationWindow private (
   conversation: Conversation,
   usage: TokenUsageInfo,
@@ -231,6 +227,7 @@ final case class ConversationWindow private (
     copy(removedMessageCount = removedMessageCount)
 }
 
+@Experimental
 object ConversationWindow {
 
   /** Creates a [[ConversationWindow]]. */
@@ -252,10 +249,10 @@ object ConversationWindow {
 /**
  * Token usage information for monitoring and debugging
  */
-@Stable
+@Experimental
 final case class TokenUsageInfo private (
   currentTokens: Int,
-  budgetLimit: TokenBudget,
+  budgetLimit: Int,
   withinBudget: Boolean,
   utilizationPercentage: Int
 ) {
@@ -266,7 +263,7 @@ final case class TokenUsageInfo private (
   def withCurrentTokens(currentTokens: Int): TokenUsageInfo = copy(currentTokens = currentTokens)
 
   /** Sets the token budget. */
-  def withBudgetLimit(budgetLimit: TokenBudget): TokenUsageInfo = copy(budgetLimit = budgetLimit)
+  def withBudgetLimit(budgetLimit: Int): TokenUsageInfo = copy(budgetLimit = budgetLimit)
 
   /** Sets whether the usage fits the budget. */
   def withWithinBudget(withinBudget: Boolean): TokenUsageInfo = copy(withinBudget = withinBudget)
@@ -276,12 +273,13 @@ final case class TokenUsageInfo private (
     copy(utilizationPercentage = utilizationPercentage)
 }
 
+@Experimental
 object TokenUsageInfo {
 
   /** Creates a [[TokenUsageInfo]]. */
   def apply(
     currentTokens: Int,
-    budgetLimit: TokenBudget,
+    budgetLimit: Int,
     withinBudget: Boolean,
     utilizationPercentage: Int
   ): TokenUsageInfo =

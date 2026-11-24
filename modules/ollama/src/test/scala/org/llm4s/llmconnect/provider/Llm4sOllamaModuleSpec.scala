@@ -50,7 +50,7 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "contribute both halves under the id ollama" in {
       val module = new Llm4sOllamaModule
-      module.chatProviders shouldBe Seq(OllamaProvider)
+      module.providers shouldBe Seq(OllamaProvider)
       module.embeddingProviders shouldBe Seq(OllamaEmbeddingProvider)
     }
   }
@@ -169,6 +169,13 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
         val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "nomic-embed-text", apiKey = Secret("test-key"))
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(OllamaEmbeddingProvider, config))
       }
+    }
+
+    "send its requests through the HTTP client a caller supplies, and leave it open (#2811)" in {
+      assertEmbeddingUsesSuppliedHttpClient(
+        OllamaEmbeddingProvider,
+        EmbeddingProviderConfig(baseUrl = "http://localhost:1", model = "test-model", apiKey = Secret("test-key"))
+      )
     }
 
     "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {

@@ -5,8 +5,15 @@ import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ KeylessSetting, ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.llmconnect.spi.{
+  KeylessSetting,
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigKey,
+  ProviderConfigSpec,
+  ProviderDescriptor
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -103,12 +110,11 @@ object AzureProvider extends ProviderDescriptor:
     )
   )
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
+    given ContextWindowResolver = context.contextWindows
     for
-      endpoint <- ProviderDescriptor.requireExtra(providerName, section, EndpointKey)
-      mode     <- authentication(providerName, section)
+      endpoint <- ProviderDescriptor.requireExtra(context.providerName, section, EndpointKey)
+      mode     <- authentication(context.providerName, section)
       apiVersion = section.extra(ApiVersionKey).getOrElse(AzureConfig.DEFAULT_API_VERSION)
       model      = section.model.asString
       clientId   = section.extra(ClientIdKey).map(_.trim).filter(_.nonEmpty)
@@ -120,13 +126,13 @@ object AzureProvider extends ProviderDescriptor:
         else if clientId.isDefined then
           Left(
             ConfigurationError(
-              s"llm4s.providers.$providerName.$ClientIdKey applies only with " +
+              s"llm4s.providers.${context.providerName}.$ClientIdKey applies only with " +
                 s"$AuthenticationKey = \"$EntraIdAuthentication\"; remove it, or set $AuthenticationKey"
             )
           )
         else
           ProviderDescriptor
-            .requireApiKey(providerName, section)
+            .requireApiKey(context.providerName, section)
             .flatMap(AzureConfig.fromValues(model, _, endpoint, apiVersion))
     yield config
 
@@ -143,9 +149,8 @@ object AzureProvider extends ProviderDescriptor:
           )
         )
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+    given ModelRegistryService = context.modelRegistry
     ProviderDescriptor
       .expectConfig[AzureConfig](id, config)
-      .flatMap(OpenAIClient(_, options.metrics, options.exchangeLogging))
+      .flatMap(OpenAIClient(_, context.metrics, context.exchangeLogging))

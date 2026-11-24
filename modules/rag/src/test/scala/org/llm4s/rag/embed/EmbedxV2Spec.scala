@@ -2,6 +2,7 @@ package org.llm4s.rag.embed
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.ModelDimensionRegistry
 import org.llm4s.llmconnect.model._
+import org.llm4s.error.EmbeddingError
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.config.LocalEmbeddingModels
 import org.llm4s.llmconnect.utils.ModelSelector
@@ -30,7 +31,7 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   // ----------------- Test scaffolding -----------------
 
   /** Stub provider: never hits network. */
-  private val stubClient = new EmbeddingClient(new EmbeddingProvider {
+  private val stubClient = EmbeddingClient(new EmbeddingProvider {
     override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] =
       Left(EmbeddingError(Some("418"), "stub provider (not used in these tests)", "stub"))
   })
@@ -150,9 +151,9 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
     audRes.isLeft shouldBe true
     vidRes.isLeft shouldBe true
 
-    imgRes.fold(_.code shouldBe (Some("501")), _ => fail("Expected imgRes Left(501)"))
-    audRes.fold(_.code shouldBe (Some("501")), _ => fail("Expected LaudRes eft(501)"))
-    vidRes.fold(_.code shouldBe (Some("501")), _ => fail("Expected vidRes Left(501)"))
+    imgRes.fold(_.code shouldBe None, _ => fail("Expected imgRes Left"))
+    audRes.fold(_.code shouldBe None, _ => fail("Expected audRes Left"))
+    vidRes.fold(_.code shouldBe None, _ => fail("Expected vidRes Left"))
 
     imgRes.fold(_.context.get("provider") shouldBe Some("encoder"), _ => fail("Expected imgRes Left(encoder)"))
     audRes.fold(_.context.get("provider") shouldBe Some("encoder"), _ => fail("Expected audRes Left(encoder)"))
@@ -234,9 +235,9 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
         audioModel = "wav2vec2-base",
         videoModel = "timesformer-base"
       )
-    val imgModel = ModelSelector.selectModel(Image, localModels).fold(err => fail(err.formatted), identity)
-    val audModel = ModelSelector.selectModel(Audio, localModels).fold(err => fail(err.formatted), identity)
-    val vidModel = ModelSelector.selectModel(Video, localModels).fold(err => fail(err.formatted), identity)
+    val imgModel = ModelSelector.selectModel(Modality.Image, localModels).fold(err => fail(err.formatted), identity)
+    val audModel = ModelSelector.selectModel(Modality.Audio, localModels).fold(err => fail(err.formatted), identity)
+    val vidModel = ModelSelector.selectModel(Modality.Video, localModels).fold(err => fail(err.formatted), identity)
 
     imgModel.dimensions shouldBe ModelDimensionRegistry
       .getDimension("local", imgModel.name)

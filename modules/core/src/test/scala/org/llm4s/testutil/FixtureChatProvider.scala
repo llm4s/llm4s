@@ -6,11 +6,16 @@ import org.llm4s.error.ValidationError
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.http.Llm4sHttpClient
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, ProviderTimeouts }
+import org.llm4s.llmconnect.config.{ ProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
-import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderConfigSpec, ProviderDescriptor }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.spi.{
+  Llm4sProviderModule,
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigSpec,
+  ProviderDescriptor
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.types.Result
 import java.time.Instant
@@ -45,18 +50,14 @@ object FixtureChatProvider extends ProviderDescriptor:
   override val modelLister: Option[ProviderModelLister] =
     Some(FixtureModelLister)
 
-  def buildConfig(providerName: String, section: NamedProviderConfig)(using
-    ContextWindowResolver
-  ): Result[ProviderConfig] =
+  def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
     for
-      apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
-      baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
+      apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
+      baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
       config  <- FixtureChatConfig.fromValues(section.model.asString, apiKey.reveal, baseUrl)
     yield config
 
-  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
     ProviderDescriptor.expectConfig[FixtureChatConfig](id, config).map(FixtureChatClient(_))
 
 /**
@@ -120,7 +121,7 @@ object FixtureChatClient:
 
 /** The services entry point for [[FixtureChatProvider]]; a `class`, as `ServiceLoader` requires. */
 final class FixtureChatProviderModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = Seq(FixtureChatProvider)
+  override def providers: Seq[ProviderDescriptor] = Seq(FixtureChatProvider)
 
 /**
  * [[FixtureChatProvider]]'s model lister: `GET <baseUrl>/models` through the HTTP client it is

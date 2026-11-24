@@ -202,7 +202,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
         .providerId shouldBe Some(
         ProviderId("openai")
       )
-      val embeddings = new EmbeddingClient(new EmbeddingProvider {
+      val embeddings = EmbeddingClient(new EmbeddingProvider {
         def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = Right(EmbeddingResponse(Seq(Seq(0.1))))
       })
       val cacheConfig =
@@ -234,10 +234,9 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
 
     "trace a call's usage with its provider and duration" in {
       val tracing = new Recording
-      new EmbeddingClient(
-        provider(Right(EmbeddingResponse(Seq(Seq(0.1)), usage = Some(EmbeddingUsage(4, 4))))),
-        providerId = Some(ProviderId("voyage"))
-      ).withOperation("query")
+      EmbeddingClient(provider(Right(EmbeddingResponse(Seq(Seq(0.1)), usage = Some(EmbeddingUsage(4, 4))))))
+        .withProviderId(ProviderId("voyage"))
+        .withOperation("query")
         .withTracing(tracing)
         .embed(EmbeddingRequest(input = Seq("text"), model = model))
 
@@ -250,7 +249,8 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
 
     "trace a failed call as an embeddings error" in {
       val tracing = new Recording
-      new EmbeddingClient(provider(Left(RateLimitError("voyage"))), providerId = Some(ProviderId("voyage")))
+      EmbeddingClient(provider(Left(RateLimitError("voyage"))))
+        .withProviderId(ProviderId("voyage"))
         .withTracing(tracing)
         .embed(EmbeddingRequest(input = Seq("text"), model = model))
 

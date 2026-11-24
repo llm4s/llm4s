@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.utils
 
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, LocalEmbeddingModels, ModelDimensionRegistry }
-import org.llm4s.llmconnect.model.{ Audio, Image, Modality, Text, Video }
+import org.llm4s.llmconnect.model.Modality
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -32,25 +32,25 @@ object ModelSelector {
    */
   def selectModel(modality: Modality, localModels: LocalEmbeddingModels): Result[EmbeddingModelConfig] =
     modality match {
-      case Text =>
+      case Modality.Text =>
         Left(
           ConfigurationError(
             "Text model selection is configuration-driven; load a text embedding model via your config layer and pass an EmbeddingModelConfig explicitly."
           )
         )
-      case Image =>
+      case Modality.Image =>
         val name = localModels.imageModel
         ModelDimensionRegistry.localDimension(name).map { dim =>
           logger.info(s"[ModelSelector] Image model: $name ($dim dims)")
           EmbeddingModelConfig(name, dim)
         }
-      case Audio =>
+      case Modality.Audio =>
         val name = localModels.audioModel
         ModelDimensionRegistry.localDimension(name).map { dim =>
           logger.info(s"[ModelSelector] Audio model: $name ($dim dims)")
           EmbeddingModelConfig(name, dim)
         }
-      case Video =>
+      case Modality.Video =>
         val name = localModels.videoModel
         ModelDimensionRegistry.localDimension(name).map { dim =>
           logger.info(s"[ModelSelector] Video model: $name ($dim dims)")

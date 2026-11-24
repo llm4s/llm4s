@@ -13,7 +13,11 @@ import scalafix.v1._
  *   - `import org.llm4s.error.ThrowableOps._` becomes `import org.llm4s.syntax.toLLMError`;
  *   - `import org.llm4s.syntax.syntax._` becomes `import org.llm4s.syntax.*`;
  *   - `import org.llm4s.core.safety.Safety` becomes `import org.llm4s.error.Safety`, and `NetworkSecurity` moves to
- *     `org.llm4s.security`.
+ *     `org.llm4s.security`;
+ *   - `import org.llm4s.identity.TokenizerId` becomes `import org.llm4s.context.tokens.TokenizerId` (#2818),
+ *     `import org.llm4s.llmconnect.model.EmbeddingError` becomes `import org.llm4s.error.EmbeddingError` (#2808), and
+ *     `import org.llm4s.types.TraceId` becomes `import org.llm4s.trace.model.TraceId`, in `llm4s-observability`
+ *     (#2822).
  *
  * Only imports are rewritten. A fully qualified use (`org.llm4s.core.safety.Safety.safely(...)`) and the removed
  * members (`ErrorMapper`, `Result.combine`, ...) are left for the compiler and `RemovedApis_1_0` to report.
@@ -21,7 +25,8 @@ import scalafix.v1._
 class ResultSyntaxMoved extends SemanticRule("ResultSyntaxMoved") {
 
   override def description: String =
-    "Rewrites the imports of Result, TryOps, ThrowableOps, syntax.syntax, Safety and NetworkSecurity to where they moved"
+    "Rewrites the imports of Result, TryOps, ThrowableOps, syntax.syntax, Safety, NetworkSecurity, TokenizerId, " +
+      "EmbeddingError and TraceId to where they moved"
 
   import ResultSyntaxMoved._
 
@@ -47,8 +52,15 @@ object ResultSyntaxMoved {
 
   /** By the importer's prefix: the imported name (`*` for a wildcard), and the package and name that replace it. */
   val moves: Map[String, Map[String, (String, String)]] = Map(
-    "org.llm4s"                    -> Map("Result" -> ("org.llm4s.types" -> "Result")),
-    "org.llm4s.types"              -> Map("TryOps" -> toResult, "OptionOps" -> toResult, "FutureOps" -> toResult),
+    "org.llm4s" -> Map("Result" -> ("org.llm4s.types" -> "Result")),
+    "org.llm4s.types" -> Map(
+      "TryOps"    -> toResult,
+      "OptionOps" -> toResult,
+      "FutureOps" -> toResult,
+      "TraceId"   -> ("org.llm4s.trace.model" -> "TraceId")
+    ),
+    "org.llm4s.identity"           -> Map("TokenizerId" -> ("org.llm4s.context.tokens" -> "TokenizerId")),
+    "org.llm4s.llmconnect.model"   -> Map("EmbeddingError" -> ("org.llm4s.error" -> "EmbeddingError")),
     "org.llm4s.error.ThrowableOps" -> Map("*" -> toLLMError, "RichThrowable" -> toLLMError),
     "org.llm4s.syntax.syntax" -> Map("*" -> ("org.llm4s.syntax" -> "*"), "ResultOps" -> ("org.llm4s.syntax" -> "*")),
     "org.llm4s.core.safety" -> Map(

@@ -1,6 +1,6 @@
 package org.llm4s.context
 
-import org.llm4s.types.{ ContextWindowSize, HeadroomPercent }
+import org.llm4s.types.HeadroomPercent
 import org.llm4s.types.HeadroomPercent.{ Conservative, Light }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -16,37 +16,33 @@ class ContextConfigSettersSpec extends AnyFlatSpec with Matchers {
   /** `ContextConfig.default`'s values, so each expected value below names only the field it changes. */
   private def defaults(
     headroomPercent: HeadroomPercent = HeadroomPercent.Standard,
-    maxSemanticBlocks: ContextWindowSize = 5,
+    maxSemanticBlocks: Int = 5,
     enableDeterministicCompression: Boolean = true,
     enableLLMCompression: Boolean = true,
-    summaryTokenTarget: Int = 400,
-    enableSubjectiveEdits: Boolean = false
+    summaryTokenTarget: Int = 400
   ): ContextConfig =
     ContextConfig(
       headroomPercent = headroomPercent,
       maxSemanticBlocks = maxSemanticBlocks,
       enableDeterministicCompression = enableDeterministicCompression,
       enableLLMCompression = enableLLMCompression,
-      summaryTokenTarget = summaryTokenTarget,
-      enableSubjectiveEdits = enableSubjectiveEdits
+      summaryTokenTarget = summaryTokenTarget
     )
 
   /** A config with every field different from `ContextConfig.default`. */
   private def changed(
     headroomPercent: HeadroomPercent = Conservative,
-    maxSemanticBlocks: ContextWindowSize = 12,
+    maxSemanticBlocks: Int = 12,
     enableDeterministicCompression: Boolean = false,
     enableLLMCompression: Boolean = false,
-    summaryTokenTarget: Int = 250,
-    enableSubjectiveEdits: Boolean = true
+    summaryTokenTarget: Int = 250
   ): ContextConfig =
     ContextConfig(
       headroomPercent = headroomPercent,
       maxSemanticBlocks = maxSemanticBlocks,
       enableDeterministicCompression = enableDeterministicCompression,
       enableLLMCompression = enableLLMCompression,
-      summaryTokenTarget = summaryTokenTarget,
-      enableSubjectiveEdits = enableSubjectiveEdits
+      summaryTokenTarget = summaryTokenTarget
     )
 
   private val base = ContextConfig.default
@@ -79,10 +75,5 @@ class ContextConfigSettersSpec extends AnyFlatSpec with Matchers {
   it should "set the summary token target" in {
     base.withSummaryTokenTarget(250) shouldBe defaults(summaryTokenTarget = 250)
     changed().withSummaryTokenTarget(400) shouldBe changed(summaryTokenTarget = 400)
-  }
-
-  it should "set the subjective edits toggle" in {
-    base.withEnableSubjectiveEdits(true) shouldBe defaults(enableSubjectiveEdits = true)
-    changed().withEnableSubjectiveEdits(false) shouldBe changed(enableSubjectiveEdits = false)
   }
 }

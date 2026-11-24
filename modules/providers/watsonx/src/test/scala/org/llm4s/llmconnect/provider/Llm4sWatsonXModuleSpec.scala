@@ -54,7 +54,7 @@ class Llm4sWatsonXModuleSpec extends AnyWordSpec with Matchers with ProviderModu
 
     "contribute the chat provider under the id watsonx and no embeddings" in {
       val module = new Llm4sWatsonXModule
-      module.chatProviders shouldBe Seq(WatsonXProvider)
+      module.providers shouldBe Seq(WatsonXProvider)
       module.embeddingProviders shouldBe empty
       WatsonXProvider.id.asString shouldBe "watsonx"
     }

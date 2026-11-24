@@ -74,5 +74,13 @@ object Secret {
     Secret(Base64.getEncoder.encodeToString(s"${orEmpty(user)}:$pw".getBytes(StandardCharsets.UTF_8)))
   }
 
+  /**
+   * A short-lived token that this call does not register for redaction. The client that sends it registers it
+   * while it is in use and forgets it two generations later (`TokenGenerations`); a registration made here has no
+   * end, so it would keep every token a long-running process ever held. For llm4s's own token sources: code
+   * outside llm4s builds a token with [[token]].
+   */
+  private[llm4s] def unregistered(value: String): Secret = new Secret(orEmpty(value))
+
   private def orEmpty(value: String): String = if (value == null) "" else value
 }

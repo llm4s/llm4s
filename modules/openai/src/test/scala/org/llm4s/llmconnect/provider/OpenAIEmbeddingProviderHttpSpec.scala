@@ -1,10 +1,12 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.llmconnect.spi.EmbeddingBuildContext
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
-import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse, EmbeddingUsage }
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse, EmbeddingUsage }
+import org.llm4s.error.EmbeddingError
 import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -62,7 +64,7 @@ class OpenAIEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
     } { baseUrl =>
       for key <- Seq("", "  ") do
         val config = EmbeddingProviderConfig(baseUrl, "text-embedding-3-small", Secret(key))
-        OpenAIEmbeddingProvider.build(config).left.toOption.get shouldBe a[ConfigurationError]
+        OpenAIEmbeddingProvider.build(config, EmbeddingBuildContext()).left.toOption.get shouldBe a[ConfigurationError]
         OpenAIEmbeddingProvider.fromConfig(config).embed(request).left.toOption.get shouldBe a[ConfigurationError]
     }
     requests.get shouldBe 0

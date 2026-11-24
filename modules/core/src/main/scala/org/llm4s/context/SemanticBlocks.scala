@@ -1,6 +1,6 @@
 package org.llm4s.context
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.{ Result, SemanticBlockId }
 import org.slf4j.LoggerFactory
@@ -46,7 +46,7 @@ import org.slf4j.LoggerFactory
  * @see [[HistoryCompressor]] which uses semantic blocks for history compression
  * @see [[SemanticBlockType]] for the classification of block types
  */
-@Stable
+@Experimental
 object SemanticBlocks {
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -132,7 +132,7 @@ object SemanticBlocks {
  * @param blockType The classification of this block (pair, standalone, etc.)
  * @param expectingAssistantResponse True if the block is incomplete (awaiting response)
  */
-@Stable
+@Experimental
 final case class SemanticBlock private (
   id: SemanticBlockId,
   messages: Seq[Message],
@@ -176,6 +176,7 @@ final case class SemanticBlock private (
     }
 }
 
+@Experimental
 object SemanticBlock {
 
   /** Creates a [[SemanticBlock]]; `expectingAssistantResponse` defaults to `false`. */
@@ -235,8 +236,9 @@ object SemanticBlock {
  *  - '''StandaloneTool''': Tool output without context, may need special handling
  *  - '''Other''': Unclassified, treat conservatively
  */
-@Stable
+@Experimental
 sealed trait SemanticBlockType
+@Experimental
 object SemanticBlockType {
   case object UserAssistantPair   extends SemanticBlockType
   case object StandaloneAssistant extends SemanticBlockType

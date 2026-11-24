@@ -215,7 +215,7 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
 
   "ContextPruning.tokenizerFrom" should "fall back to no tokenizer, so words are counted, when cl100k_base fails to load" in {
     ContextPruning.tokenizerFrom(Left(org.llm4s.error.TokenizerError.notAvailable("cl100k_base"))) shouldBe None
-    val loaded = org.llm4s.context.ConversationTokenCounter.openAI().value
+    val loaded = org.llm4s.context.ConversationTokenCounter.cl100k().value
     ContextPruning.tokenizerFrom(Right(loaded)) shouldBe Some(loaded)
   }
 

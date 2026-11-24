@@ -8,6 +8,7 @@ import org.llm4s.types.Result
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import pureconfig.ConfigSource
+import org.llm4s.llmconnect.spi.ProviderConfigContext
 
 /**
  * Where the generic `openai-compatible` provider gets its context window (#1217): the section's own
@@ -346,7 +347,7 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
     )
     for
       named  <- NamedProviderConfigValidator.validate(ProviderName("t"), raw)
-      config <- OpenAICompatibleProvider.buildConfig("t", named)(using resolver)
+      config <- OpenAICompatibleProvider.buildConfig(named, ProviderConfigContext("t", resolver))
     yield generic(Right(config)).contextWindow
 
   "buildConfig, against a registry of two providers that list the same model name" should {

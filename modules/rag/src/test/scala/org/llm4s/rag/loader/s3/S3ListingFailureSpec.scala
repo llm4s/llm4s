@@ -95,7 +95,7 @@ class S3ListingFailureSpec extends AnyFlatSpec with Matchers {
   }
 
   private def withRag[A](f: RAG => A): A =
-    Using.resource(RAG.buildWithClient(RAGConfig.default, new EmbeddingClient(new MockEmbeddingProvider)).toOption.get)(
+    Using.resource(RAG.buildWithClient(RAGConfig.default, EmbeddingClient(new MockEmbeddingProvider)).toOption.get)(
       f
     )
 

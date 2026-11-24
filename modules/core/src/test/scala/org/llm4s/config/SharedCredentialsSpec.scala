@@ -6,10 +6,15 @@ import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.core.read.ListAppender
 import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName }
 import org.llm4s.error.TroubleshootingLinks
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderRegistry }
-import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.llmconnect.spi.{
+  ProviderBuildContext,
+  ProviderConfigContext,
+  ProviderConfigSpec,
+  ProviderDescriptor,
+  ProviderRegistry
+}
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider, FixtureEmbeddingProvider }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -39,17 +44,15 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
     val configSpec: ProviderConfigSpec =
       ProviderConfigSpec.apiKeyAndDefaultBaseUrl(FixtureChatProvider.DefaultBaseUrl, Seq(PrimaryEnv, SecondaryEnv))
 
-    def buildConfig(providerName: String, section: NamedProviderConfig)(using
-      ContextWindowResolver
-    ): Result[ProviderConfig] =
+    def buildConfig(section: NamedProviderConfig, context: ProviderConfigContext): Result[ProviderConfig] =
       ProviderDescriptor
-        .requireApiKey(providerName, section)
+        .requireApiKey(context.providerName, section)
         .flatMap(key =>
           FixtureChatConfig.fromValues(section.model.asString, key.reveal, FixtureChatProvider.DefaultBaseUrl)
         )
 
-    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
-      FixtureChatProvider.buildClient(config, options)
+    def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =
+      FixtureChatProvider.build(config, context)
 
   private given ProviderRegistry = ProviderRegistry.of(KeyedProvider, FixtureChatProvider)
 
