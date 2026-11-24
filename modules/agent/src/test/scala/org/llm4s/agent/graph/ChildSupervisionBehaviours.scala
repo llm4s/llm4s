@@ -288,7 +288,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         case AgentStatus.Blocked(guardrail, Some(_)) =>
           val status = AgentStatus.Blocked(guardrail, None)
           ChildEnd.Ended(
-            org.llm4s.agent.AgentResult(r.threadId, r.runId, r.activeAgent, status, r.messages, r.usage),
+            org.llm4s.agent.AgentResult(r.threadId, r.runId, r.activeAgent, status, r.messages, r.usage, r.runUsage),
             usage
           )
         case _ => end

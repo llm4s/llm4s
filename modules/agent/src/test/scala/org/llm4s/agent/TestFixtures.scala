@@ -296,6 +296,7 @@ object AgentResultFixture {
       AgentId.unsafe("assistant"),
       status,
       messages,
+      UsageSummary(),
       UsageSummary()
     )
 }

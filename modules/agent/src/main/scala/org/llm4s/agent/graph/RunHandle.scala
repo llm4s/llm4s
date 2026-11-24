@@ -75,6 +75,12 @@ trait RunHandle[O]:
   private[agent] def traceContext: Option[org.llm4s.trace.TraceContext] = None
 
   /**
+   * The thread's state as the run was admitted ([[RunContext.admitted]]): what the run's own usage is counted from
+   * (#2922). `None` for a handle the runtime did not make.
+   */
+  private[agent] def admitted: Option[ThreadState] = None
+
+  /**
    * Stops the run as a queue's cancel or interrupt does (Stage 5 W3, design 4.57), settling it rather than leaving it
    * `Running`: once stopped, the run commits - under its own claim, before releasing it - a `Failed` checkpoint over
    * the last one it committed, with `settlement`'s update to the state and its outcome, so the thread is at rest and
@@ -164,7 +170,8 @@ final private[graph] class DefaultRunHandle[O](
   signal: StopSignal,
   subscribeFrom: (Long, Int, Boolean, StreamEvent => Unit) => Result[Dispatched],
   val observation: Option[Dispatched],
-  override private[agent] val traceContext: Option[org.llm4s.trace.TraceContext] = None
+  override private[agent] val traceContext: Option[org.llm4s.trace.TraceContext] = None,
+  override private[agent] val admitted: Option[ThreadState] = None
 ) extends RunHandle[O]:
 
   private val result                      = new CompletableFuture[RunResult[O]]()

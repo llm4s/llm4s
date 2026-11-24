@@ -31,7 +31,7 @@ import org.llm4s.llmconnect.model.CompletionOptions
 import org.llm4s.toolapi.{ SchemaDefinition, ToolRegistry }
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
-import upickle.default.ReadWriter
+import upickle.default.{ ReadWriter, Reader }
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -64,6 +64,7 @@ final class AgentBuilder private (
   private val interruptAfter: Vector[AgentNode],
   maxPromptSectionTokens: Int,
   output: Option[OutputFormat],
+  outputChecks: Vector[ujson.Value => Seq[String]],
   private val harness: Option[HarnessProfile],
   private val subagents: Vector[TypedAgent[?, ?]],
   private val delegation: Option[DelegationConfig],
@@ -87,6 +88,7 @@ final class AgentBuilder private (
     interruptAfter: Vector[AgentNode] = interruptAfter,
     maxPromptSectionTokens: Int = maxPromptSectionTokens,
     output: Option[OutputFormat] = output,
+    outputChecks: Vector[ujson.Value => Seq[String]] = outputChecks,
     harness: Option[HarnessProfile] = harness,
     subagents: Vector[TypedAgent[?, ?]] = subagents,
     delegation: Option[DelegationConfig] = delegation,
@@ -111,6 +113,7 @@ final class AgentBuilder private (
       interruptAfter,
       maxPromptSectionTokens,
       output,
+      outputChecks,
       harness,
       subagents,
       delegation,
@@ -197,6 +200,7 @@ final class AgentBuilder private (
    * the tool calls (see `ModelStep.fromClient`). A final answer must be JSON that matches the schema and reads as `O`, and is stored as that JSON
    * alone. An invalid answer is retried once in the same model step, with its problems; a second invalid
    * answer ends the turn with `Left(GraphError.OutputInvalid)`, the turn removed and both calls counted.
+   * A rule the schema cannot express is an application check, which shares that retry: [[withOutputCheck]].
    * Read the answer with [[AgentResult.decodeOutput]]. The format belongs to this agent only: a handoff
    * target answers in its own. [[build]] refuses a schema whose root is not an object, one with a keyword
    * the tool argument validator cannot check, and a format whose prompt section alone is over
@@ -204,6 +208,38 @@ final class AgentBuilder private (
    */
   def withOutput[O: ReadWriter](schema: SchemaDefinition[O]): AgentBuilder =
     copy(output = Some(OutputFormat.of(schema)))
+
+  /**
+   * Adds an application check on this agent's structured answers (#2920): a rule the output schema cannot express -
+   * an id that must name another element of the same document, a total that must match its lines - checked on the
+   * answer read as `O`. `check` returns the answer's problems, worded for the model; empty accepts it.
+   *
+   * It runs inside [[withOutput]]'s validation, on an answer that already matches the schema and reads as the
+   * format's type, and shares its correction: the problems go back to the model exactly as schema errors do, in the
+   * same single retry, and a second answer with problems - the schema's or a check's - ends the turn with
+   * `Left(GraphError.OutputInvalid)` carrying them, the turn removed and both calls counted. A second call adds a
+   * check: each runs, in the order added, and the model is told every problem at once. Like schema errors, at most
+   * `OutputFormat.MaxErrors` problems are reported, each cut to `OutputFormat.MaxErrorChars`.
+   *
+   * `O` is usually the type given to `withOutput`; an answer that does not read as `O` is itself a problem, sent back
+   * the same way. The check needs a format to check: [[build]] refuses a check on an agent with no `withOutput`,
+   * in either order of the two calls, and `withOutput` replacing the schema keeps the checks. Like the format, the
+   * checks belong to this agent only, not to a handoff target.
+   *
+   * `check` runs on the run's thread inside the model step, once per answer and again when a step is replayed by
+   * `recover`: keep it fast, free of side effects and a function of the answer and of state that does not change
+   * during a turn. It must not throw: an exception fails the model step as any failure in it does, rather than
+   * reaching the model. The compiled graph's version does not cover it, as it does not cover a tool's handler.
+   */
+  def withOutputCheck[O: Reader](check: O => Seq[String]): AgentBuilder =
+    copy(outputChecks = outputChecks :+ OutputFormat.typedCheck(check))
+
+  /**
+   * [[withOutputCheck]] on the answer's JSON as the schema validated it, for a check that needs no decoded type or
+   * reads fields the type drops.
+   */
+  def withOutputJsonCheck(check: ujson.Value => Seq[String]): AgentBuilder =
+    copy(outputChecks = outputChecks :+ check)
 
   /**
    * Installs `profile` (design 4.37), replacing any set before: at [[build]], its tools join this agent's, its
@@ -518,6 +554,16 @@ final class AgentBuilder private (
         (),
         ValidationError("maxSteps", s"agent '$id': must be at least 1, was $maxSteps")
       )
+      // a check with no format would never run: refused, not ignored (#2920)
+      _ <- Either.cond(
+        outputChecks.isEmpty || output.isDefined,
+        (),
+        ValidationError(
+          "outputCheck",
+          s"agent '$id': withOutputCheck needs an output schema to check answers against: add withOutput(schema)"
+        )
+      )
+      checked = output.map(_.withChecks(outputChecks))
       installed <- effective
       delegated <- delegating(graphRuntime, rootTracing, familyTaskNames, bounds)
       toolSet   <- ToolSet.of(validator, inherited.validators, installed.tools*)
@@ -526,7 +572,7 @@ final class AgentBuilder private (
       }
     yield LoopAgent(agentId, ModelStep.fromClient(client, options, streaming, output.map(_.responseFormat)), toolSet)
       .withSystemPrompt(installed.systemPrompt)
-      .withOutput(output)
+      .withOutput(checked)
       .withMaxSteps(maxSteps)
       .withMaxPromptSectionTokens(maxPromptSectionTokens)
       .withMiddleware(installed.withDelegation(delegated._1))
@@ -638,6 +684,7 @@ object AgentBuilder:
       interruptAfter = Vector.empty,
       maxPromptSectionTokens = LoopAgent.DefaultMaxPromptSectionTokens,
       output = None,
+      outputChecks = Vector.empty,
       harness = None,
       subagents = Vector.empty,
       delegation = None,

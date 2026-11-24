@@ -665,6 +665,36 @@ agent.flatMap(_.run(userInput))
 // - Base64 encoded payloads
 ```
 
+### Narrative and role-play text
+
+The default patterns are written for requests addressed to the model. Those that ask about a prompt or its rules, or
+that lift restrictions, match only when the text says whose they are - "your instructions", "the system prompt",
+"your filters" - and `dan_jailbreak` needs the jailbreak's own wording ("DAN mode", "do anything now"), so "ask Dan
+to act as lookout", "repeat the instructions" and "remove filters from the pump" pass. Some defaults still match
+ordinary sentences of a story or a game, because the words alone are the signal:
+
+| Pattern | Matches, for example |
+|---|---|
+| `creative_writing`, `how_to_dangerous` | "write a story about a smith forging a weapon" |
+| `extract_data` | "steal the secrets from the vault" |
+| `developer_mode` | "switch the console to debug mode" |
+| `you_are_now`, `opposite_day`, `no_guardrails_mode` | "you are now a knight who must defend the gate" |
+| the prompt-extraction patterns | "innkeeper, what are your rules?" |
+
+An application whose users write narrative text starts from the defaults and drops the patterns it does not want, by
+name, rather than copying the list. `without` is `Left` for a name that is not one of the detector's patterns, so a
+misspelt name does not leave its pattern on; `PromptInjectionDetector.defaultPatternNames` lists the names:
+
+```scala
+import org.llm4s.agent.guardrails.builtin.{ InjectionSensitivity, PromptInjectionDetector }
+import org.llm4s.types.Result
+
+val forStories: Result[PromptInjectionDetector] =
+  PromptInjectionDetector.defaults
+    .without("creative_writing", "how_to_dangerous", "extract_data")
+    .map(_.withSensitivity(InjectionSensitivity.Medium))
+```
+
 ---
 
 ## Error Handling
