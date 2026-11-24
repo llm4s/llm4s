@@ -275,22 +275,40 @@ case class StableDiffusionConfig(
 }
 
 /**
- * Configuration for the HuggingFace Inference API.
+ * Configuration for Hugging Face Inference Providers, through Hugging Face's own `hf-inference` provider.
  *
- * @param apiKey Your HuggingFace API token. This is required for authentication.
- * @param model The identifier of the model to use on the HuggingFace Hub, e.g., "runwayml/stable-diffusion-v1-5".
+ * Requests go to `<baseUrl>/models/<model>` on the Inference Providers router
+ * ([[https://huggingface.co/docs/inference-providers/tasks/text-to-image text-to-image task]]); the token needs the
+ * "Make calls to Inference Providers" permission. The model must be one `hf-inference` serves for text-to-image.
+ *
+ * @param apiKey Your Hugging Face access token. This is required for authentication.
+ * @param model The identifier of the model on the Hugging Face Hub, e.g. "stabilityai/stable-diffusion-3-medium-diffusers".
  * @param timeout Request timeout. Defaults to a higher value suitable for cloud APIs.
+ * @param baseUrl The `hf-inference` route on the Inference Providers router; override it for a proxy or a test server.
  */
 case class HuggingFaceConfig(
-  /** HuggingFace API token */
+  /** Hugging Face access token */
   apiKey: Secret,
-  /** Model to use (default: stable-diffusion-xl-base-1.0) */
-  model: String = "stabilityai/stable-diffusion-xl-base-1.0",
+  /** Model to use (default: stable-diffusion-3-medium-diffusers) */
+  model: String = HuggingFaceConfig.DefaultModel,
   /** Request timeout */
-  override val timeout: FiniteDuration = 2.minutes
+  override val timeout: FiniteDuration = 2.minutes,
+  /** The hf-inference route on the router */
+  baseUrl: String = HuggingFaceConfig.DefaultBaseUrl
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.HuggingFace
-  override def toString: String         = s"HuggingFaceConfig(apiKey=$apiKey, model=$model, timeout=$timeout)"
+  override def toString: String =
+    s"HuggingFaceConfig(apiKey=$apiKey, model=$model, timeout=$timeout, baseUrl=$baseUrl)"
+}
+
+/** Defaults for [[HuggingFaceConfig]]. */
+object HuggingFaceConfig {
+
+  /** The `hf-inference` provider's route on the Inference Providers router. */
+  val DefaultBaseUrl: String = "https://router.huggingface.co/hf-inference"
+
+  /** The text-to-image model Hugging Face's own `hf-inference` provider serves (checked 2026-11-24). */
+  val DefaultModel: String = "stabilityai/stable-diffusion-3-medium-diffusers"
 }
 
 /**
@@ -500,16 +518,16 @@ object ImageGeneration {
   /**
    * Get a HuggingFace client with the required API key.
    *
-   * This is a convenience method for creating a client that connects to the
-   * HuggingFace Inference API for image generation.
+   * This is a convenience method for creating a client that connects to Hugging Face
+   * Inference Providers (`hf-inference`) for image generation.
    *
    * @param apiKey Your HuggingFace API token (required).
-   * @param model The specific model to use for generation. Defaults to a standard Stable Diffusion model.
+   * @param model The specific model to use for generation. Defaults to [[HuggingFaceConfig.DefaultModel]].
    * @return Either an error or an `ImageGenerationClient` instance configured for HuggingFace.
    */
   def huggingFaceClient(
     apiKey: String,
-    model: String = "stabilityai/stable-diffusion-xl-base-1.0"
+    model: String = HuggingFaceConfig.DefaultModel
   ): Either[LLMError, ImageGenerationClient] = {
     val config = HuggingFaceConfig(apiKey = Secret(apiKey), model = model)
     client(config)

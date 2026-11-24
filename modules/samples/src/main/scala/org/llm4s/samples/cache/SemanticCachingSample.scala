@@ -84,7 +84,7 @@ object SemanticCachingSample extends App {
     println("=== Semantic Caching Demo ===\n")
     OpenAIConfig
       .fromValues(
-        modelName = "gpt-4o-mini",
+        modelName = "gpt-5.6-luna",
         apiKey = Secret(apiKey),
         organization = None,
         baseUrl = "https://api.openai.com"

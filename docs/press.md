@@ -72,7 +72,7 @@ they are, use the PNG above and ask [the contact below](#contact) for a larger s
 | **Language and runtime** | Scala {{ site.data.project.scala_versions | join: ", " }}, JDK {{ site.data.project.java_versions | join: ", " }} or later (bytecode for JDK 21) |
 | **Java** | `llm4s-java-api` (a Java facade over the client and agent), a Spring Boot starter and Reactor support |
 | **Kotlin** | `llm4s-kotlin-api`: coroutines and a DSL for tools and agents, built with Kotlin 2.0.21 for JVM 21; published from 0.6.0 |
-| **Chat providers** | OpenAI, Azure OpenAI, Anthropic, Google Gemini, Vertex AI, AWS Bedrock, Ollama, DeepSeek, Mistral, Cohere, xAI, Perplexity, OpenRouter, Requesty, Z.ai, IBM watsonx.ai (beta), and any OpenAI-compatible endpoint by configuration |
+| **Chat providers** | OpenAI, Azure OpenAI, Anthropic, Google Gemini, Vertex AI, AWS Bedrock, Ollama, DeepSeek, Mistral, Cohere, xAI, Perplexity, OpenRouter, Requesty, Z.ai, IBM watsonx.ai (beta, unverified against the live service), and any OpenAI-compatible endpoint by configuration |
 | **Embedding providers** | OpenAI, Voyage AI, Jina AI, Cohere, Ollama |
 | **Effect and stream libraries** | cats-effect and fs2, ZIO 2, Apache Pekko Streams |
 | **Governance** | Maintainers decide by lazy consensus, majority vote for contested changes; public API changes go through RFCs ([GOVERNANCE.md](https://github.com/llm4s/llm4s/blob/main/GOVERNANCE.md), [MAINTAINERS.md](https://github.com/llm4s/llm4s/blob/main/MAINTAINERS.md)) |

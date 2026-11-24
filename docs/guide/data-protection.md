@@ -116,7 +116,7 @@ Allow only what your configuration uses. The defaults below are what a section g
 | Voyage, Jina, Cohere embeddings and rerank | `api.voyageai.com`, `api.jina.ai`, `api.cohere.com` | The matching embedding provider or `CohereReranker` |
 | Ollama, generic `openai-compatible` | The `baseUrl` you set (Ollama: `localhost:11434`) | The matching provider |
 | Brave, Exa, DuckDuckGo | `api.search.brave.com`, `api.exa.ai`, `api.duckduckgo.com` | The search tools |
-| Stability AI, Hugging Face, ElevenLabs | `api.stability.ai`, `api-inference.huggingface.co`, `api.elevenlabs.io` | Image generation, text-to-speech |
+| Stability AI, Hugging Face, ElevenLabs | `api.stability.ai`, `router.huggingface.co` and `huggingface.co` (the health check), `api.elevenlabs.io` | Image generation, text-to-speech |
 | Langfuse, OTLP | `cloud.langfuse.com`; `localhost:4317` | The tracing mode |
 | Model metadata | None: the registry is bundled | Only when you set `llm4s.modelRegistry.url` |
 

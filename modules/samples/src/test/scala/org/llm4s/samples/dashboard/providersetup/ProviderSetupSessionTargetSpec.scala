@@ -115,21 +115,21 @@ class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers with Eith
       headline = "configured",
       detail = "configured detail",
       providerId = Some("openrouter"),
-      modelName = Some("openai/gpt-4o-mini"),
+      modelName = Some("openai/gpt-5.6-luna"),
       providerName = Some("openrouter-main"),
       namedProviders = Vector(
         ConfiguredProvider(
           name = "openrouter-main",
           providerId = "openrouter",
-          modelName = "openai/gpt-4o-mini",
-          discoveredModels = Vector("openai/gpt-4o-mini"),
+          modelName = "openai/gpt-5.6-luna",
+          discoveredModels = Vector("openai/gpt-5.6-luna"),
           discoveryDetail = "openrouter models",
           isDefault = true
         ),
         ConfiguredProvider(
           name = "bedrock-main",
           providerId = "bedrock",
-          modelName = "anthropic.claude-sonnet-4",
+          modelName = "us.anthropic.claude-sonnet-5-5",
           discoveredModels = Vector.empty,
           discoveryDetail = "no discovery",
           isDefault = false
@@ -150,14 +150,14 @@ class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers with Eith
       headline = "configured",
       detail = "configured detail",
       providerId = Some("anthropic"),
-      modelName = Some("claude-sonnet-4-20250514"),
+      modelName = Some("claude-sonnet-5-5"),
       providerName = Some("anthropic-main"),
       namedProviders = Vector(
         ConfiguredProvider(
           name = "anthropic-main",
           providerId = "anthropic",
-          modelName = "claude-sonnet-4-20250514",
-          discoveredModels = Vector("claude-sonnet-4-20250514"),
+          modelName = "claude-sonnet-5-5",
+          discoveredModels = Vector("claude-sonnet-5-5"),
           discoveryDetail = "anthropic models",
           isDefault = true
         ),
@@ -184,7 +184,8 @@ class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers with Eith
         defaultProviderName = ProviderName("anthropic-main"),
         providerConfigs = Map.empty,
         providerErrors = Map.empty,
-        defaultProvider = OpenAIConfig.fromValues("gpt-4o-mini", Secret("test-key"), "https://api.openai.com/v1").value,
+        defaultProvider =
+          OpenAIConfig.fromValues("gpt-5.6-luna", Secret("test-key"), "https://api.openai.com/v1").value,
         discoveredModels = Map.empty,
         exchangeLogging = ProviderExchangeLogging.Disabled
       ),

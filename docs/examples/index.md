@@ -1291,7 +1291,7 @@ sbt "samples/runMain org.llm4s.samples.streaming.StreamingAgentExample"
 
 **File:** [`ReasoningModesExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/reasoning/ReasoningModesExample.scala)
 
-Using extended thinking/reasoning modes with OpenAI o1/o3 and Anthropic Claude.
+Using extended thinking/reasoning modes with OpenAI's reasoning models (the gpt-5 family) and Anthropic Claude.
 
 ```bash
 sbt "samples/runMain org.llm4s.samples.reasoning.ReasoningModesExample"
@@ -1423,7 +1423,7 @@ samples' `application.conf`):
 llm4s.providers {
   openai-main {
     provider = "openai"
-    model    = "gpt-4o"
+    model    = "gpt-5.6-terra"
   }
 }
 ```

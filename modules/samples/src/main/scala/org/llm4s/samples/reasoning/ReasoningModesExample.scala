@@ -15,7 +15,7 @@ import org.slf4j.LoggerFactory
  * - Track thinking token usage
  *
  * Note: Actual extended thinking requires models that support it:
- * - OpenAI: o1-preview, o1-mini, o3-mini
+ * - OpenAI: the gpt-5 family (gpt-5.5, gpt-5.6-luna, gpt-5.6-terra)
  * - Anthropic: Claude models with extended thinking enabled
  *
  * This example demonstrates the API without requiring a specific model.
@@ -24,7 +24,7 @@ import org.slf4j.LoggerFactory
  * {{{
  * // Add a section to the samples' application.local.conf and select it
  * // (docs/getting-started/configuration.md#running-the-samples) - an OpenAI reasoning model
- * // (provider = "openai", model = "o1-preview") or Anthropic with
+ * // (provider = "openai", model = "gpt-5.6-terra") or Anthropic with
  * // extended thinking (provider = "anthropic", keyed by ANTHROPIC_API_KEY):
  * export OPENAI_API_KEY=sk-...
  * export LLM4S_PROVIDER=openai-main

@@ -25,7 +25,7 @@ object TracingExample {
 
         val completionEvent = TraceEvent.CompletionReceived(
           id = "test-123",
-          model = "gpt-4",
+          model = "gpt-5.6-terra",
           toolCalls = 2,
           content = "I'll check the weather for you."
         )
@@ -110,7 +110,7 @@ object TracingExample {
 
     val tokenEvent = TraceEvent.TokenUsageRecorded(
       usage = TokenUsage(10, 20, 30),
-      model = "gpt-4",
+      model = "gpt-5.6-terra",
       operation = "completion"
     )
     complexTracer.traceEvent(tokenEvent)

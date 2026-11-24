@@ -115,7 +115,7 @@ val invoice = extract[Invoice]("ACME, 12.50 EUR, two widgets") // Done(Invoice(A
 
 ```
 scala> chat()
-Chatting with default provider, gpt-4o-mini. :q leaves, :history shows the conversation, :reset forgets it.
+Chatting with default provider, gpt-5.6-luna. :q leaves, :history shows the conversation, :reset forgets it.
 you> What is a monad?
 llm> A monad is ...
 you> :q

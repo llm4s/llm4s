@@ -97,7 +97,7 @@ The starter reads Spring properties under the `llm4s` prefix. It does **not** re
 
 ```properties
 llm4s.provider=openai
-llm4s.model=gpt-4o
+llm4s.model=gpt-5.6-terra
 llm4s.api-key=${OPENAI_API_KEY}
 ```
 
@@ -106,7 +106,7 @@ The same in YAML:
 ```yaml
 llm4s:
   provider: openai
-  model: gpt-4o
+  model: gpt-5.6-terra
   api-key: ${OPENAI_API_KEY}
 ```
 

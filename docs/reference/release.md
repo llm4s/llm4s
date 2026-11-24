@@ -90,6 +90,13 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
       table of the [Roadmap](../reference/roadmap).
 - [ ] Check that everything the release is for is on the commit you will tag
       ([What gets published](#3-what-gets-published-is-whatever-the-tagged-commit-aggregates)).
+- [ ] Re-run the verified routes of the [Spark](../guide/spark) and [Flink](../guide/flink) guides against the
+      release's artifacts (a release candidate, or the staged artifacts), and set each guide's "**Verified:** date,
+      with llm4s X.Y.Z" line and its dependency tables to the release.
+- [ ] Check the model ids the guides and samples use against each vendor's model and deprecation pages (Anthropic,
+      OpenAI, Gemini, Bedrock), replace any that is retired or retires within three months, and give each id an entry
+      in the bundled model metadata ([Model Metadata](../reference/model-metadata#embedded-overrides)): refresh the
+      LiteLLM snapshot, or add an override.
 
 **0.7.0, the baseline release, in addition:**
 
@@ -112,6 +119,17 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
 - [ ] Publish the Scalafix migration rules as `org.llm4s::llm4s-scalafix` with the release
       ([#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](../reference/scalafix#migration-rules)), and put the one-line
       command in the 1.0 upgrade notes.
+- [ ] Build the site as `pages.yml` does (`bundle exec jekyll build` in `docs/`, Ruby 3.2) and check `_site`: no
+      `design/`, `superpowers/`, `events_details/`, `community/launch-1.0` or `people/README` output; the root
+      `README.md` excluded but every other `README`-named page still built; `/PRODUCTION_DEPLOYMENT` redirecting to
+      the [Production Deployment](../guide/production-deployment) guide; and "Real-World Application Patterns" in the
+      sidebar under User Guide.
+- [ ] Run `WatsonXAssumptionProbeSpec` (`modules/it`, `@Cloud`) against a real watsonx.ai account and record which
+      assumptions held on the [IBM watsonx.ai](../guide/providers#ibm-watsonxai) section; without an account, keep
+      every page's statement that `llm4s-watsonx` ships unverified against the live service.
+- [ ] Langfuse: move the `langfuse` tracing mode off the legacy ingestion API that Langfuse Cloud removed on
+      2026-11-16 onto its OpenTelemetry endpoint, or keep the warning in
+      [Langfuse Monitoring Workflow](../guide/observability/index#langfuse-monitoring-workflow).
 - [ ] Release-day wording pass: the pages that call LLM4S pre-1.0 or say the compatibility promise is still to come.
       In `README.md`, "Current Status" ("LLM4S is under active pre-1.0 development", "The path to 1.0 is focused on");
       `docs/why-llm4s.md` ("LLM4S is pre-1.0 and Scala 3 only", "Frozen modules will be binary compatible across 1.x");

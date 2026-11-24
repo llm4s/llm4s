@@ -240,7 +240,7 @@ llm4s {
   providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"        # key from OPENAI_API_KEY via llm4s.credentials.openai.apiKey
+      model    = "gpt-5.6-luna"        # key from OPENAI_API_KEY via llm4s.credentials.openai.apiKey
     }
 
     claude {

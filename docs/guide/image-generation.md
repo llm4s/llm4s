@@ -10,7 +10,7 @@ grand_parent: User Guide
 
 # Image Generation with LLM4S
 
-`llm4s-image` generates images with OpenAI (GPT Image and DALL-E), Stability AI, the Hugging Face Inference API, or a
+`llm4s-image` generates images with OpenAI (GPT Image and DALL-E), Stability AI, Hugging Face Inference Providers, or a
 Stable Diffusion server you run (the AUTOMATIC1111 web UI).
 
 ```sbt
@@ -41,8 +41,14 @@ edge and pass it in.
 
 ## OpenAI
 
-`model` is `gpt-image-1` (and its successors), `dall-e-3` or `dall-e-2` (the default). OpenAI has scheduled DALL-E
-for removal; the client logs a warning naming the GPT Image models to move to.
+`model` is a GPT Image model (any id starting `gpt-image`), `dall-e-3` or `dall-e-2` (the default).
+
+> **Checked 2026-11-24: pass a current GPT Image model.** OpenAI's
+> [deprecations page](https://developers.openai.com/api/docs/deprecations) lists `dall-e-2` and `dall-e-3` as shut down
+> on 2026-05-12 and `gpt-image-1` on 2026-10-23, so the client's default, `dall-e-2`, no longer works, and
+> `editImage` still sends `dall-e-2`. Its deprecation warning still names `gpt-image-1` among the models to move to.
+> OpenAI's [models page](https://developers.openai.com/api/docs/models) lists `gpt-image-2.5-sunburst` and the
+> `-flare` variants as current.
 
 ```scala
 import org.llm4s.imagegeneration._
@@ -50,7 +56,7 @@ import java.nio.file.Paths
 
 def drawLighthouse(apiKey: String): Unit = {
   val result = for {
-    client <- ImageGeneration.openAIClient(apiKey, model = "gpt-image-1")
+    client <- ImageGeneration.openAIClient(apiKey, model = "gpt-image-2.5-sunburst")
     image  <- client.generateImage(
                 "A watercolour of a lighthouse at dawn",
                 ImageGenerationOptions(size = ImageSize.Square1024, quality = Some("high"))
@@ -83,16 +89,20 @@ def drawWithStability(apiKey: String): Either[org.llm4s.error.LLMError, Generate
 
 ## Hugging Face
 
-The Hugging Face Inference API needs an access token. The default model is
-`stabilityai/stable-diffusion-xl-base-1.0`.
+The client calls [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index) through
+Hugging Face's own `hf-inference` provider: it posts the documented
+[text-to-image request](https://huggingface.co/docs/inference-providers/tasks/text-to-image) (`inputs`, and
+`parameters` with `guidance_scale`, `num_inference_steps`, `negative_prompt`, `width`, `height` and `seed`) to
+`https://router.huggingface.co/hf-inference/models/<model>` and reads the image back as raw bytes. It needs an access
+token with the "Make calls to Inference Providers" permission.
 
-> **Checked 2026-11-24: do not rely on this client as shipped.** It posts to
-> `https://api-inference.huggingface.co/models/<model>`. That host name did not resolve on that date, and Hugging
-> Face's [Inference Providers documentation](https://huggingface.co/docs/inference-providers/index) names only
-> `https://router.huggingface.co`. The default model's
-> [page](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0) is still on the Hub, neither gated nor
-> disabled, but the Hub lists it as served for text-to-image by a third-party provider, not by Hugging Face's own
-> `hf-inference`. The base URL is not configurable.
+The default model is `stabilityai/stable-diffusion-3-medium-diffusers`, the text-to-image model the Hub
+[lists as served by `hf-inference`](https://huggingface.co/models?inference_provider=hf-inference&pipeline_tag=text-to-image)
+(checked 2026-11-24). A model that only third-party providers serve (fal, Replicate, WaveSpeed) takes their own request
+formats, which this client does not send. `health()` asks the Hub
+([`?expand[]=inferenceProviderMapping`](https://huggingface.co/docs/inference-providers/hub-api#get-model-providers))
+whether `hf-inference` serves the configured model. `HuggingFaceConfig.baseUrl` overrides the router route, for a
+proxy or a test server.
 
 ```scala
 import org.llm4s.imagegeneration._

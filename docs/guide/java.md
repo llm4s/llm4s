@@ -113,7 +113,7 @@ llm4s {
   providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }
@@ -154,7 +154,7 @@ server that speaks OpenAI's chat-completions API) and `azureOpenAi()`. Each take
 ```java
 LlmResult<JLlmClient> openai = Llm4s.openAi()
     .apiKey(apiKey)
-    .model("gpt-4o-mini")
+    .model("gpt-5.6-luna")
     .build();
 LlmResult<JLlmClient> local = Llm4s.ollama()
     .model("llama3.2")
@@ -181,7 +181,7 @@ otherwise use, as a section's `contextWindow` does. `metrics(MetricsCollector)` 
 `build()` sends no request and does not throw. A required field left out - or set to `null` or a blank string, as
 `System.getenv` returns for a variable that is not set - is a failed result of kind `VALIDATION` whose message names
 it (`Field 'apiKey' is required`), as is a value out of range, such as a context window of zero. A builder is
-immutable, so one can be kept and forked: `base.model("gpt-4o")` returns a new builder and leaves `base` as it was.
+immutable, so one can be kept and forked: `base.model("gpt-5.6-terra")` returns a new builder and leaves `base` as it was.
 Its `toString` prints the API key as `***`, an OpenAI-compatible server's headers by name only, and a base URL or
 endpoint without its userinfo, query or fragment, so a builder can be logged.
 
@@ -209,7 +209,7 @@ essentials and fills in the rest (the default base URL, and a context window and
 model name):
 
 ```java
-LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(Secret.apply(apiKey), "gpt-4o-mini"));
+LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(Secret.apply(apiKey), "gpt-5.6-luna"));
 LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(Secret.apply(apiKey), "claude-sonnet-5-5"));
 LlmResult<JLlmClient> local = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"));
 ```
@@ -245,7 +245,7 @@ for a gateway that requires mutual TLS, a key store with the client certificate 
 ```java
 LlmResult<JLlmClient> corporate = Llm4s.openAi()
     .apiKey(apiKey)
-    .model("gpt-4o")
+    .model("gpt-5.6-terra")
     .proxy("http://proxy.corp:3128")
     .proxyCredentials(proxyUser, proxyPassword)
     .nonProxyHosts("localhost", "*.internal")
@@ -779,7 +779,7 @@ import kotlin.time.Duration.Companion.seconds
 
 val client = Llm4s.openAi {                // also anthropic, gemini, ollama, openAiCompatible, azureOpenAi
     apiKey = System.getenv("OPENAI_API_KEY")
-    model = "gpt-4o-mini"
+    model = "gpt-5.6-luna"
     requestTimeout = 30.seconds
 }
 

@@ -29,7 +29,7 @@ object ModelMetadataExample extends App:
     case Right(service) =>
       logger.info("Example 1: Looking up GPT-4o metadata")
       logger.info("-" * 80)
-      service.lookup("gpt-4o") match {
+      service.lookup("gpt-5.6-terra") match {
         case Right(metadata) =>
           logger.info("Model ID: {}", metadata.modelId)
           logger.info("Provider: {}", metadata.provider)
@@ -46,7 +46,7 @@ object ModelMetadataExample extends App:
       // Example 2: Check model capabilities
       logger.info("Example 2: Checking Claude 3.7 Sonnet capabilities")
       logger.info("-" * 80)
-      service.lookup("claude-3-7-sonnet-latest") match {
+      service.lookup("claude-sonnet-5-5") match {
         case Right(metadata) =>
           logger.info("Model: {}", metadata.modelId)
           logger.info("Supports function calling: {}", metadata.supports("function_calling"))
@@ -98,7 +98,7 @@ object ModelMetadataExample extends App:
       // Example 5: Estimate costs
       logger.info("Example 5: Estimating completion costs")
       logger.info("-" * 80)
-      service.lookup("gpt-4o") match {
+      service.lookup("gpt-5.6-terra") match {
         case Right(metadata) =>
           val inputTokens  = 10000
           val outputTokens = 2000

@@ -28,7 +28,7 @@ llm4s {
   providers {
     openai-main {                   # key from OPENAI_API_KEY
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
 
     claude {                        # key from ANTHROPIC_API_KEY

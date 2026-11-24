@@ -127,7 +127,7 @@ the model. To compile without running, use `jbang build HelloLlm4s.java`.
 
 For OpenAI instead of Ollama, change the provider module's `//DEPS` line to
 `org.llm4s:llm4s-openai_3:{{ site.data.project.latest_release }}`, change the section in `application.conf` to
-`provider = "openai"` with `model = "gpt-4o-mini"`, and set `OPENAI_API_KEY` in the shell.
+`provider = "openai"` with `model = "gpt-5.6-luna"`, and set `OPENAI_API_KEY` in the shell.
 
 ## If something goes wrong
 

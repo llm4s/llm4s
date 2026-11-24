@@ -208,7 +208,7 @@ llm4s {
   providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o"
+      model    = "gpt-5.6-terra"
     }
   }
 }

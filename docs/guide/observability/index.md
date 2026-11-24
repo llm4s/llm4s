@@ -444,6 +444,17 @@ parsed match {
 
 Langfuse provides purpose-built LLM observability. When configured, LLM4S automatically traces:
 
+> **Checked 2026-11-24: Langfuse Cloud no longer accepts what this backend sends.** `llm4s-observability` posts
+> trace, span, generation and event objects to Langfuse's legacy batch ingestion API, `POST /api/public/ingestion`.
+> Langfuse [removed it from Langfuse Cloud on 2026-11-16](https://langfuse.com/docs/compatibility), and a
+> self-hosted Langfuse v4 in its default `events_only` write mode rejects it too; only a self-hosted v3 server still
+> takes it. Langfuse's replacement is its OpenTelemetry endpoint, `/api/public/otel/v1/traces`
+> ([OpenTelemetry integration](https://langfuse.com/integrations/native/opentelemetry)), over OTLP/HTTP only (no
+> gRPC). Until the `langfuse` mode moves to it, reach Langfuse Cloud through the
+> [OpenTelemetry backend](#opentelemetry-integration), which exports OTLP over gRPC: point it at an OpenTelemetry
+> Collector whose `otlphttp` exporter sends to Langfuse's endpoint with the `Authorization: Basic` and
+> `x-langfuse-ingestion-version: 4` headers.
+
 ### What Gets Captured
 
 | Langfuse object | From | Data included |
@@ -540,7 +551,7 @@ import scala.concurrent.duration.*
 tracing.traceEvent(TraceEvent.CustomEvent("cache_hit", ujson.Obj("key" -> "query_123")))
 
 // Trace token usage explicitly
-tracing.traceTokenUsage(usage, model = "gpt-4o", operation = "completion")
+tracing.traceTokenUsage(usage, model = "gpt-5.6-terra", operation = "completion")
 
 // Trace a finished agent run (an agent built withTracing does this itself, once per run)
 tracing.traceEvent(TraceEvent.AgentRunEnded(threadId, runId, agent, status, messages, usage))
@@ -548,7 +559,7 @@ tracing.traceEvent(TraceEvent.AgentRunEnded(threadId, runId, agent, status, mess
 // Trace costs
 tracing.traceCost(
   costUsd = 0.0234,
-  model = "gpt-4o",
+  model = "gpt-5.6-terra",
   operation = "completion",
   tokenCount = 1500,
   costType = "total"
@@ -690,27 +701,27 @@ val endpoint: Option[PrometheusEndpoint] =
 | `llm4s_circuit_breaker_transitions_total` | counter | `provider`, `state` (`open`, `closed` or `half-open`) |
 | `llm4s_reliability_errors_total` | counter | `provider`, `error_type`; what a `ReliableClient` call ended on |
 
-After one successful call and one rate-limited call to `gpt-4o`, the chat series on `/metrics` look like this (comment lines left out; the second call took 90 seconds):
+After one successful call and one rate-limited call to `gpt-5.6-terra`, the chat series on `/metrics` look like this (comment lines left out; the second call took 90 seconds):
 
 ```text
-llm4s_cost_usd_total{model="gpt-4o",provider="openai"} 0.0021
+llm4s_cost_usd_total{model="gpt-5.6-terra",provider="openai"} 0.0021
 llm4s_errors_total{error_type="rate_limit",provider="openai"} 1.0
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="0.1"} 0
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="0.5"} 0
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="1.0"} 0
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="2.0"} 1
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="5.0"} 1
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="10.0"} 1
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="30.0"} 1
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="60.0"} 1
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="120.0"} 2
-llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="+Inf"} 2
-llm4s_request_duration_seconds_count{model="gpt-4o",provider="openai"} 2
-llm4s_request_duration_seconds_sum{model="gpt-4o",provider="openai"} 91.5
-llm4s_requests_total{model="gpt-4o",provider="openai",status="error_rate_limit"} 1.0
-llm4s_requests_total{model="gpt-4o",provider="openai",status="success"} 1.0
-llm4s_tokens_total{model="gpt-4o",provider="openai",type="input"} 120.0
-llm4s_tokens_total{model="gpt-4o",provider="openai",type="output"} 30.0
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="0.1"} 0
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="0.5"} 0
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="1.0"} 0
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="2.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="5.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="10.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="30.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="60.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="120.0"} 2
+llm4s_request_duration_seconds_bucket{model="gpt-5.6-terra",provider="openai",le="+Inf"} 2
+llm4s_request_duration_seconds_count{model="gpt-5.6-terra",provider="openai"} 2
+llm4s_request_duration_seconds_sum{model="gpt-5.6-terra",provider="openai"} 91.5
+llm4s_requests_total{model="gpt-5.6-terra",provider="openai",status="error_rate_limit"} 1.0
+llm4s_requests_total{model="gpt-5.6-terra",provider="openai",status="success"} 1.0
+llm4s_tokens_total{model="gpt-5.6-terra",provider="openai",type="input"} 120.0
+llm4s_tokens_total{model="gpt-5.6-terra",provider="openai",type="output"} 30.0
 ```
 
 ### Scrape it and alert on it
@@ -985,7 +996,7 @@ Pricing varies by provider and changes over time. For cost tracking:
 // Track cost through tracing (pricing logic is your responsibility)
 tracing.traceCost(
   costUsd = estimatedCost,
-  model = "gpt-4o",
+  model = "gpt-5.6-terra",
   operation = "completion",
   tokenCount = usage.totalTokens,
   costType = "total"

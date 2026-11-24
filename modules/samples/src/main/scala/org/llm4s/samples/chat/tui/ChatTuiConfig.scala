@@ -44,14 +44,13 @@ object ChatTuiConfig:
 
   /** Hand-curated list of models accepted by `/model <name>`. */
   val allowedModels: Vector[String] = Vector(
-    "openai/gpt-4o-mini",
-    "openai/gpt-4o",
-    "anthropic/claude-3-5-haiku-latest",
-    "anthropic/claude-sonnet-4-5-latest",
-    "anthropic/claude-sonnet-4-20250514",
+    "openai/gpt-5.6-luna",
+    "openai/gpt-5.6-terra",
+    "anthropic/claude-haiku-5-5",
+    "anthropic/claude-sonnet-5-5",
     "ollama/qwen2.5:0.5b",
     "ollama/llama3.2",
-    "gemini/gemini-2.0-flash"
+    "gemini/gemini-3.8-flash"
   )
 
   def load(): Result[ChatTuiConfig] =

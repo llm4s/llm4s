@@ -44,7 +44,7 @@ for the same key overrides the first only when the variable is set, which gives 
 with an environment override:
 
 ```hocon
-model = "gpt-4o-mini"
+model = "gpt-5.6-luna"
 model = ${?OPENAI_MODEL}   # used only when OPENAI_MODEL is set
 ```
 
@@ -86,7 +86,7 @@ llm4s {
   providers {
     openai-main {
       provider = "openai"
-      model    = "gpt-4o-mini"
+      model    = "gpt-5.6-luna"
     }
   }
 }
@@ -179,12 +179,12 @@ A section for a **second account** sets its own key, which wins over the shared 
 llm4s.providers {
   openai-main {                          # uses OPENAI_API_KEY
     provider = "openai"
-    model    = "gpt-4o-mini"
+    model    = "gpt-5.6-luna"
   }
 
   openai-batch {                         # billed to another account
     provider = "openai"
-    model    = "gpt-4o-mini"
+    model    = "gpt-5.6-luna"
     apiKey   = ${?OPENAI_BATCH_API_KEY}
   }
 }
@@ -204,7 +204,7 @@ or a Kubernetes secret volume - goes in `apiKeyFile` instead of `apiKey`:
 ```hocon
 llm4s.providers.openai-main {
   provider   = "openai"
-  model      = "gpt-4o-mini"
+  model      = "gpt-5.6-luna"
   apiKeyFile = "/var/run/secrets/llm4s/openai-api-key"
 }
 ```
@@ -342,7 +342,7 @@ it is a JWT, and otherwise for 5 minutes.
 ```hocon
 openai-wif {
   provider = "openai"
-  model    = "gpt-4o-mini"
+  model    = "gpt-5.6-luna"
   auth {
     identityTokenFile  = "/var/run/secrets/spiffe/openai"
     identityProviderId = ${?OPENAI_IDENTITY_PROVIDER_ID}
@@ -395,7 +395,7 @@ section with an `apiKey`.
 | Key | Meaning |
 |---|---|
 | `provider` | Required. The provider id, e.g. `openai`, `anthropic`, `ollama` (table above) |
-| `model` | Required. The model name as the provider spells it, e.g. `gpt-4o-mini` |
+| `model` | Required. The model name as the provider spells it, e.g. `gpt-5.6-luna` |
 | `apiKey` | The API key; required by every cloud provider. Optional in the section when the vendor's shared key is set ([API keys](#api-keys)) |
 | `apiKeyFile` | A file holding the API key, instead of `apiKey`. Re-read when it changes (no restart) by every built-in provider that takes a key ([Rotating keys](#rotating-keys-apikeyfile-and-apikeyprovider)) |
 | `baseUrl` | Overrides the provider's default endpoint (`ollama`: `http://localhost:11434`); **required** for `openai-compatible`. Checked when the section is loaded: an absolute `http` or `https` URL with a host, or a `ConfigurationError` naming the key (a blank value counts as unset) |
@@ -422,7 +422,7 @@ Every provider section, and every embedding section, accepts an optional `timeou
 ```hocon
 llm4s.providers.my-openai {
   provider = "openai"
-  model    = "gpt-4o"
+  model    = "gpt-5.6-terra"
   timeouts {
     request = 3m      # a call that returns one response: a completion, an embedding
     stream  = 15m     # a streamed completion
@@ -490,7 +490,7 @@ llm4s {
 
     azure-main {                          # key from AZURE_OPENAI_API_KEY
       provider   = "azure"
-      model      = "gpt-4o"
+      model      = "gpt-5.6-terra"
       endpoint   = ${?AZURE_API_BASE}      # https://<resource>.openai.azure.com
       apiVersion = ${?AZURE_API_VERSION}   # optional
     }
@@ -669,7 +669,7 @@ import org.llm4s.types.Result
 val appConfig: Config = ConfigFactory.parseString(
   """llm4s.defaultProvider = "openai-main"
     |llm4s.providers {
-    |  openai-main { provider = "openai", model = "gpt-4o-mini" }
+    |  openai-main { provider = "openai", model = "gpt-5.6-luna" }
     |}""".stripMargin
 )
 
@@ -726,7 +726,7 @@ samples' `application.conf` - and select it:
 llm4s.providers {
   openai-main {
     provider = "openai"
-    model    = "gpt-4o-mini"
+    model    = "gpt-5.6-luna"
   }
 }
 ```
@@ -1041,10 +1041,10 @@ OTEL_AUTH_HEADER="Bearer sk-otel-token"   # bound by the headers block above
 **Spans Generated** (names and attributes follow the OpenTelemetry GenAI semantic conventions; an excerpt):
 
 ```
-Span: chat gpt-4o
+Span: chat gpt-5.6-terra
   ├─ gen_ai.operation.name: chat
   ├─ gen_ai.provider.name: openai
-  ├─ gen_ai.request.model: gpt-4o
+  ├─ gen_ai.request.model: gpt-5.6-terra
   ├─ gen_ai.usage.input_tokens: 150
   └─ gen_ai.usage.output_tokens: 50
 
@@ -1098,7 +1098,7 @@ val result = for {
   settings <- Llm4sConfig.tracing()
   tracer   <- Tracing.fromSettings(settings)
   _        <- tracer.traceEvent(TraceEvent.CustomEvent("query_received", ujson.Obj("tools" -> 1)))
-  _        <- tracer.traceTokenUsage(usage, "gpt-4o", "completion")
+  _        <- tracer.traceTokenUsage(usage, "gpt-5.6-terra", "completion")
   _         = tracer.close() // always shut down to flush pending spans
 } yield ()
 ```
@@ -1416,7 +1416,7 @@ the vendor's variable holds the wrong key. The INFO line `llm4s.providers.<name>
 # ❌ Wrong: an OpenAI section reading the Anthropic key
 openai-main {
   provider = "openai"
-  model    = "gpt-4o"
+  model    = "gpt-5.6-terra"
   apiKey   = ${?ANTHROPIC_API_KEY}
 }
 ```
@@ -1453,7 +1453,7 @@ def reliable(client: LLMClient): LLMClient =
 ```hocon
 openai-main {
   provider = "openai"
-  model    = "gpt-4o-mini"   # development; gpt-4o in production
+  model    = "gpt-5.6-luna"   # development; gpt-5.6-terra in production
 }
 ```
 

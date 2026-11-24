@@ -20,7 +20,7 @@ import zio.{ ZIO, ZIOAppDefault }
  *   providers {
  *     openai-main {
  *       provider = "openai"
- *       model = "gpt-4o-mini"
+ *       model = "gpt-5.6-luna"
  *     }
  *   }
  * }

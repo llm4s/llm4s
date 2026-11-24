@@ -274,7 +274,7 @@ budget, then prunes oldest first to fit it. You pass the numbers; the
 import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }
 
 val strategy = PruningStrategy.AdaptiveWindowing(
-  contextWindowSize = 128_000,           // gpt-4o context
+  contextWindowSize = 922_000,           // gpt-5.6-terra's input limit
   inputCostPerToken = Some(0.000005),    // $5 per 1M input tokens
   outputCostPerToken = Some(0.000015),   // $15 per 1M output tokens
   costSensitivity = 0.5                  // the default
@@ -490,7 +490,7 @@ def inputCost(registry: ModelRegistryService, model: String, conversation: Conve
    `llm4s-openai`, or `ConversationTokenCounter.of` over your own `StringTokenizer`)
    ```scala
    val middleware: Result[ContextWindowMiddleware] =
-     OpenAITokenizers.counterFor("gpt-4o").map(counter => new ContextWindowMiddleware(config, counter.countMessage))
+     OpenAITokenizers.counterFor("gpt-5.6-terra").map(counter => new ContextWindowMiddleware(config, counter.countMessage))
    ```
 
 4. **Hard-code window sizes** - Derive them from the model's metadata instead

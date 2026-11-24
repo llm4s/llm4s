@@ -47,7 +47,7 @@ A section sets one of `apiKey`, `apiKeyFile` and `auth`, never two. A key provid
 ```hocon
 llm4s.providers.openai-main {
   provider   = "openai"
-  model      = "gpt-4o-mini"
+  model      = "gpt-5.6-luna"
   # no key here: llm4s.credentials.openai.apiKey is bound to OPENAI_API_KEY
 }
 

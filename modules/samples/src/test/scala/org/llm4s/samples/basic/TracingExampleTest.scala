@@ -138,7 +138,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
 
     val tokenEvent = TraceEvent.TokenUsageRecorded(
       usage = TokenUsage(10, 20, 30),
-      model = "gpt-4",
+      model = "gpt-5.6-terra",
       operation = "completion"
     )
 
