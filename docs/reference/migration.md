@@ -88,6 +88,251 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [`Modality` as an enum, multimodal embedding in `llm4s-rag` and a final `EmbeddingClient`](#modality-is-an-enum-multimodal-embedding-lives-in-llm4s-rag-and-embeddingclient-is-final-2808),
 and [opaque newtypes in `org.llm4s.types`](#newtypes-in-orgllm4stypes-are-opaque-and-headroompercent-is-always-valid-2822).
 
+## `CompletionOptions`' sampling parameters are optional, and unset ones are not sent (#2807)
+
+`temperature`, `topP`, `presencePenalty` and `frequencyPenalty` were `Double`s with defaults (`0.7`, `1.0`,
+`0.0`, `0.0`), so llm4s could not tell "unset" from "set to the default" and always sent its own temperature
+and top-p in place of the provider's. They are `Option[Double]`, `None` unless set.
+
+```scala
+// before
+val options = CompletionOptions(temperature = 0.2, topP = 0.9)
+val t: Double = options.temperature
+
+// after
+val options = CompletionOptions(temperature = Some(0.2), topP = Some(0.9))   // or .withTemperature(0.2).withTopP(0.9)
+val t: Option[Double] = options.temperature
+```
+
+- **Behaviour.** A call that sets no temperature is no longer sent `temperature: 0.7` and `top_p: 1.0`: the
+  provider's default applies, which for most models is a temperature of `1.0`. Set
+  `withTemperature(0.7)` to keep the old requests. Jlama, whose engine takes no "unset", still uses `0.7`.
+- **Reports.** A sampling option the caller left unset is neither sent nor reported. One the caller set that the
+  model cannot take is a `RequestAdjustment` whatever its value; before, an explicit value equal to the default
+  went unreported.
+- **Java.** `JCompletionOptions.temperature()`, `topP()`, `presencePenalty()` and `frequencyPenalty()` return
+  `OptionalDouble`.
+- **Tracing.** The OpenTelemetry `gen_ai.request.temperature`, `top_p` and penalty attributes are present only
+  for an option that was set.
+
+`SamplingOptionsOptional` (in `Llm4sMigrate_1_0`) wraps the named arguments in `Some`. A read of one of the four
+is left to you.
+
+## `Completion` reads `content` and `toolCalls` from its message (#2807)
+
+`Completion` stored `content` and `toolCalls` beside `message`, which has both, and three setters each updated
+one side. They are now read from the message: `completion.content` is `completion.message.content` and
+`completion.toolCalls` is `completion.message.toolCalls` (a `Seq`).
+
+```scala
+// before
+Completion(id = id, created = now, content = text, model = model, message = AssistantMessage(text, calls), toolCalls = calls.toList)
+completion.withContent("edited")
+completion.asText
+
+// after
+Completion(id = id, created = now, model = model, message = AssistantMessage(text, calls))
+completion.withMessage(completion.message.withContent("edited"))
+completion.content
+```
+
+- `Completion.apply` is `(id, created, model, message, usage, estimatedCost, citations, adjustments,
+  finishReason, servedTier)`. A positional construction or pattern loses its third and sixth places.
+- **Check each construction site:** the text and the tool calls must be on the `message` you pass. A site that
+  passed tool calls only as `toolCalls = ...` now has none.
+- `withContent`, `withToolCalls` and `asText` are removed. `AssistantMessage.withContent` unseals signed thinking,
+  as it always has.
+- A completion assembled from a stream (`StreamingAccumulator.toCompletion`) now reports its tool calls on
+  `toolCalls`; a client no longer copies them from the message.
+
+`CompletionFromMessage` drops the two arguments, rewrites `asText`, and reports `withContent`, `withToolCalls`
+and a pattern that binds either field.
+
+## A `Completion` without a finish reason is `FinishReason.Unknown` (#2807)
+
+`Completion.apply` defaulted `finishReason` to `Stop`, so a client that set none claimed a natural stop, while
+"none read" was the sentinel `FinishReason.Other("")`. `FinishReason.Unknown` says it, and is the default.
+
+```scala
+completion.finishReason match {
+  case FinishReason.Stop | FinishReason.ToolCalls => ...
+  case FinishReason.Length                        => ...
+  case FinishReason.Other(raw)                    => ...   // a provider value llm4s has no name for
+  case FinishReason.Unknown                       => ...   // the client read none
+}
+```
+
+- Replace `FinishReason.Other("")` with `FinishReason.Unknown`, in code and in patterns. `Unknown.name` is `""`,
+  as `Other("").name` was, so code that filters on `name.nonEmpty` is unaffected.
+- A test fake that builds a `Completion` without a reason and asserts `Stop` must set it:
+  `finishReason = FinishReason.Stop`.
+- JSON: `"Unknown"`. The other cases are written as before, and a stored `{"$type":"Other","raw":""}` reads as
+  `Unknown`. An older llm4s reading an event written by this one reads `Unknown` as `Other("Unknown")`.
+
+## `Completion.estimatedCost` is a `BigDecimal`; `UsageSummary` counts cache tokens (#2807)
+
+A cost was an `Option[Double]` that `UsageSummary` converted to `BigDecimal` after the precision was already
+lost. It is `Option[BigDecimal]` from `CostEstimator` on.
+
+```scala
+// before
+completion.withEstimatedCost(0.0125)
+val cost: Option[Double] = CostEstimator.estimate(model, usage)
+
+// after
+completion.withEstimatedCost(BigDecimal("0.0125"))
+val cost: Option[BigDecimal] = CostEstimator.estimate(model, usage)
+```
+
+- `UsageSummary.add`, `ModelUsage.add`, the agent's `ModelContext.recordUsage` and `AdmissionContext.recordUsage`
+  take `Option[BigDecimal]`. An `Option[Double]` you hold becomes `cost.map(BigDecimal.decimal)`.
+- What stays a `Double`: `MetricsCollector.recordCost` and `MetricsRecording.withMetrics`' `extractCost`, the
+  durable `ModelCallCompleted.estimatedCost`, `RAGQueryMetrics.costUsd` and the prices of `ModelPricing`.
+- `UsageSummary` and `ModelUsage` gain `cachedTokens` and `cacheCreationTokens` (with `with*` setters), parts of
+  `inputTokens`. A summary stored before them reads with both at zero. The Java facade exposes them on
+  `JUsageSummary` and `JModelUsage`.
+
+## `AssistantMessage.text`, and a flat stored assistant message (#2809)
+
+```scala
+// before
+message.contentOpt
+AssistantMessage(contentOpt = Some("Hello"), toolCalls = calls)
+AssistantMessage(toolCalls = calls)
+toolMessage.findToolCallName(history)            // "unknown-tool" when the call is not there
+
+// after
+message.text
+AssistantMessage(text = Some("Hello"), toolCalls = calls)
+AssistantMessage(None, calls)
+toolMessage.findToolCallName(history)            // None when the call is not there
+```
+
+- `AssistantMessage()` no longer compiles: it built a message that fails `validate`. `content`, the text or `""`,
+  and both `withContent` setters are unchanged.
+- **Stored JSON.** An assistant message is written flat, as the other roles are:
+
+  ```json
+  {"type":"assistant","content":"Hello","toolCalls":[]}
+  ```
+
+  where it was `{"type":"assistant","data":{"contentOpt":"Hello","toolCalls":[]}}`. `content` is left out when
+  the model produced only tool calls. The old shape is still read, so stored checkpoints, threads and
+  conversations load unchanged; a rewrite of one stores the new shape. Code of your own that reads the JSON
+  (a query over a store's rows, an export) must read both.
+- **Thinking bindings.** A binding of sealed thinking is a fingerprint of the conversation before it. The
+  fingerprint keeps its own encoding, so bindings made before this change still match and signed thinking is
+  still replayed.
+- `Message.validateConversation` and `Message.assistant` take a `Seq` (a `List` still passes).
+
+`MessageAndConversationShapes` renames `contentOpt` and adds the missing `None`.
+
+## One `Conversation.create`; `Conversation.empty` is a value (#2809)
+
+```scala
+// before
+Conversation.create(UserMessage("hi"))
+Conversation.create(SystemMessage("Be brief"), UserMessage("hi"))
+Conversation.empty()
+
+// after
+Conversation.create(Seq(UserMessage("hi")))
+Conversation.create(Seq(SystemMessage("Be brief"), UserMessage("hi")))
+Conversation.empty
+```
+
+`Conversation.fromPrompts`, `userOnly` and `systemOnly` are unchanged, and `Conversation(messages)` still builds
+one without validating. `MessageAndConversationShapes` rewrites both forms.
+
+## `ProviderExchange` and `ProviderExchangeRecorder` (#2809)
+
+For a sink of your own:
+
+- `exchange.provider` is a `ProviderId`: `exchange.provider.asString` for the text.
+- `exchange.duration` is still there, computed from `startedAt` and `completedAt`; `withDuration` is gone, and
+  `ProviderExchange.apply` takes no `duration`. Its required values come first and `model`, `requestId`,
+  `correlationId`, `responseBody` and `errorMessage` default to `None`.
+- `ProviderExchangeLogging.enabled(sink)` is `ProviderExchangeLogging.Enabled(sink)`.
+
+For a provider client:
+
+```scala
+// before
+ProviderExchangeRecorder.record(
+  exchangeLogging = options.exchangeLogging,
+  provider = providerName,
+  model = Some(config.model),
+  startedAt = startedAt,
+  requestBody = requestText,
+  responseBody = Some(responseText),
+  result = result
+)
+
+// after
+ProviderExchangeRecorder.record(
+  options.exchangeLogging,
+  ProviderExchangeCall(
+    provider = ProviderId(providerName),
+    startedAt = startedAt,
+    requestBody = requestText,
+    model = Some(config.model),
+    responseBody = Some(responseText)
+  ),
+  result
+)
+```
+
+The `clock` and `idGenerator` parameters were test seams and are no longer public. The JSONL file is unchanged.
+
+## `LLMConnect.getClient` is the one way to get a client (#2810)
+
+```scala
+// before
+LLMConnect.fromConfig(config)
+LLMConnect.getClient(config, metrics)
+LLMConnect.getClient(ProviderId("openai"), config)
+LLMConnect.fromProvider(ProviderId("openai"), config, options)
+Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+
+// after
+LLMConnect.getClient(config)
+LLMConnect.getClient(config, LlmClientOptions(metrics = metrics))
+LLMConnect.getClient(ProviderId("openai"), config, LlmClientOptions.default)
+LLMConnect.getClient(ProviderId("openai"), config, options)
+Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient(_))
+```
+
+`getClient(config, options = LlmClientOptions.default)` and `getClient(provider, config, options)` remain. Only
+one overload may have a default, so the provider-explicit one takes its options. `ClientEntryPoints` rewrites
+all but the method value.
+
+## `LLMClient.streamComplete` takes its callback in a second parameter list (#2810)
+
+`streamComplete(conversation, options = CompletionOptions(), onChunk)` had a defaulted parameter before a
+required one, so the default was reachable only by naming `onChunk`.
+
+```scala
+// before
+client.streamComplete(conversation, options, chunk => chunk.content.foreach(print))
+client.streamComplete(conversation, onChunk = chunk => chunk.content.foreach(print))
+
+// after
+client.streamComplete(conversation, options)(chunk => chunk.content.foreach(print))
+client.streamComplete(conversation)(chunk => chunk.content.foreach(print))
+```
+
+An `LLMClient` of your own, a wrapper or a test fake, changes its definition the same way:
+
+```scala
+override def streamComplete(conversation: Conversation, options: CompletionOptions)(
+  onChunk: StreamedChunk => Unit
+): Result[Completion] = ...
+```
+
+Java and Kotlin are unaffected: the method's JVM signature is the same three parameters. `ClientEntryPoints`
+rewrites the calls and the overriding definitions. `MetricsRecording.withMetrics` lost its two defaults in the
+same change: pass `extractUsage` and `extractCost`.
+
 ## Provider SPI: error mapping, published helpers, report types (#2811)
 
 **`HttpErrorMapper.toError`.** `mapHttpError` returned a `Result[Nothing]` that was always a `Left`; `toError`
@@ -1676,7 +1921,7 @@ client.complete(conversation, options).map { c =>
   `case Completion(id, _, content, _, _, _, _, _, _, _, _, _)`. The `PositionalPatternsGainFields` Scalafix rule adds
   them to 0.6.0's ten-field pattern, and every field since 0.5.1 to its nine-field one.
 - `Completion(...)` with named arguments keeps compiling and gets `FinishReason.Stop`. A client or fake that builds
-  one sets the reason it read; one it did not read is `FinishReason.Other("")`, which tracing leaves out.
+  one sets the reason it read; one it did not read is `FinishReason.Unknown` (#2807), which tracing leaves out.
 - Every chat client maps it (RFC 0009 PR 2 added Anthropic's `stop_reason`, Gemini's and Vertex AI's `finishReason`
   and Bedrock's `stopReason`): a natural end or stop sequence is `Stop`, a tool call `ToolCalls` (Gemini's `STOP` after
   a function call too), a token or context-window limit `Length` (`max_tokens`, `MAX_TOKENS`,
@@ -5150,7 +5395,7 @@ The three copies had drifted apart; the shared client does each thing one way:
    the missing id was defaulted to `""`, and `StreamingAccumulator` skips a chunk with no id. The
    shared client now maps each index to its call's id for the life of the stream, and a streamed
    `Completion` reports its tool calls in `toolCalls`, as a non-streaming one does.
-7. **A reply's `message.contentOpt` is `None` when the reply has no text** for all three (it was
+7. **A reply's `message.text` (`contentOpt` until #2809) is `None` when the reply has no text** for all three (it was
    `Some("")` for DeepSeek and Z.ai); `Completion.content` is `""` either way.
 8. **Replies are read leniently where the copies threw**: a missing `id`, `created` or `model`
    defaults, a streamed event with no `choices` is skipped, and a malformed non-streaming reply is

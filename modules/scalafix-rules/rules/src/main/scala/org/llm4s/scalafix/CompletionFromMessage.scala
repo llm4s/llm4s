@@ -107,7 +107,7 @@ object CompletionFromMessage {
   private val OldArities = Set(9, 10)
   private val Arity      = 10
 
-  private val Anchor = "completion-reads-content-and-toolcalls-from-its-message"
+  private val Anchor = "completion-reads-content-and-toolcalls-from-its-message-2807"
 
   private def setterRemoved(n: Term.Name): Diagnostic =
     Diagnostic(
