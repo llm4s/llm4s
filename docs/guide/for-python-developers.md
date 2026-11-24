@@ -251,7 +251,7 @@ import org.llm4s.types.Result
 def describe(result: AgentResult): String =
   result.status match {
     case AgentStatus.Completed(answer)  => answer
-    case AgentStatus.Blocked(_, reason) => s"Blocked: $reason"
+    case AgentStatus.Blocked(guardrail, _) => s"Blocked by $guardrail"
     case other                          => s"Stopped: $other"
   }
 

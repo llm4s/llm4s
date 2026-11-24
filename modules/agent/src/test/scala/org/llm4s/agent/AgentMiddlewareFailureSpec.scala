@@ -112,7 +112,7 @@ class AgentMiddlewareFailureSpec extends AnyFlatSpec with TestTimeLimit with Mat
       val (agent, middleware, _) = fixture(hook, Mode.Blocks)
 
       val blocked = agent.run(thread, "q1").value
-      blocked.status shouldBe AgentStatus.Blocked("failing", "not on a weekend")
+      blocked.status shouldBe AgentStatus.Blocked("failing", Some("not on a weekend"))
       blocked.answer shouldBe None
       blocked.messages shouldBe empty
 

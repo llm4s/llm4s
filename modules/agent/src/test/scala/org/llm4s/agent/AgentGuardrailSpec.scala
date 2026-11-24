@@ -54,7 +54,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     result.status shouldBe a[AgentStatus.Blocked]
     result.status.asInstanceOf[AgentStatus.Blocked].guardrail shouldBe "LengthCheck"
-    result.status.asInstanceOf[AgentStatus.Blocked].reason should include("too short")
+    result.status.asInstanceOf[AgentStatus.Blocked].reason.getOrElse("") should include("too short")
     result.answer shouldBe None
     result.messages shouldBe empty
     result.usage.requestCount shouldBe 0
@@ -95,7 +95,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       .run("This query is too long")
       .value
 
-    result.status.asInstanceOf[AgentStatus.Blocked].reason should include("too long")
+    result.status.asInstanceOf[AgentStatus.Blocked].reason.getOrElse("") should include("too long")
     client.callCount shouldBe 0
   }
 
@@ -121,7 +121,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     val blocked = result.status.asInstanceOf[AgentStatus.Blocked]
     blocked.guardrail shouldBe "JSONValidator"
-    blocked.reason should include("not valid JSON")
+    blocked.reason.getOrElse("") should include("not valid JSON")
     result.answer shouldBe None
     result.messages shouldBe empty
     result.usage.requestCount shouldBe 1
@@ -173,7 +173,9 @@ class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     )
     val result = guarded(client, output = Seq(secretFree)).run("q").value
 
-    result.status.asInstanceOf[AgentStatus.Blocked].reason should include("response must not contain secrets")
+    result.status.asInstanceOf[AgentStatus.Blocked].reason.getOrElse("") should include(
+      "response must not contain secrets"
+    )
     client.callCount shouldBe 2
   }
 

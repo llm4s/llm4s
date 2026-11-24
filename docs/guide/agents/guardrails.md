@@ -76,7 +76,7 @@ guardrails last. A `GuardrailMiddleware` you add keeps its own id (`guardrails` 
 
 A guardrail that refuses does not make `run` return a `Left`: the turn ends with
 `AgentStatus.Blocked(guardrail, reason)` - the first failing guardrail's name, and every failure's
-error - and the thread stays usable, so the next `run` or `continueConversation` on it works. The
+error, as `Some(reason)` - and the thread stays usable, so the next `run` or `continueConversation` on it works. The
 blocked turn is never kept: an input block stores nothing for that turn, and an output block removes
 the whole turn - the query, any tool calls and results, and the answer - so `result.messages` is the
 conversation as it was before the turn and the model never sees the blocked answer again. `usage`
@@ -88,11 +88,13 @@ Underneath, a block is the graph runtime's *Block*: the run ends as a finished f
 `recover` has nothing to continue and `start` accepts like a completed thread. A `Left` from another
 middleware's `beforeAgent` or `afterAgent` blocks the same way, but is returned as that `Left`.
 
-The `reason` is for the caller. The run's durable events and its trace name the guardrail only (the
-error's message is `Guardrail '<name>' blocked`; its `reason` field holds the rest), because a reason
-may quote the text it refused. It is stored in one place, the blocked run's closing checkpoint
-(`RunOutcome.Blocked`), from which the turn's status is rebuilt; see
-[Durable vs live](streaming#durable-vs-live-and-the-content-rule) and its limits.
+The `reason` is for the caller, and it is never stored, because a reason may quote the text it refused. The
+run's durable events and its trace name the guardrail only (the error's message is `Guardrail '<name>' blocked`;
+its `reason` field holds the rest), and so does the blocked run's closing checkpoint (`RunOutcome.Blocked(guardrail)`).
+So `reason` is `Some` on the result of the run that was blocked and `None` on a status rebuilt from the thread later -
+a parent agent reading a delegated child's refusal again, for one. Log or keep the reason yourself, where you decide
+what may be kept, if you need it after the call returns; see
+[Durable vs live](streaming#durable-vs-live-and-the-content-rule).
 
 A list of guardrails runs completely: each guardrail, in order, on the value the previous one
 returned, **even after one has failed**. That is why the block carries every failure's error, and why a
@@ -666,7 +668,8 @@ agent.run(query) match {
   case Right(result) =>
     result.status match {
       case AgentStatus.Blocked(guardrail, reason) =>
-        println(s"Guardrail '$guardrail' blocked the turn: $reason")
+        // reason is Some here, on the result of the run that was blocked; it is never stored
+        println(s"Guardrail '$guardrail' blocked the turn: ${reason.getOrElse("")}")
         // Take appropriate action (rephrase, notify user, log); agent.continueConversation(result, ...) still works
       case AgentStatus.Completed(answer) =>
         println(answer)

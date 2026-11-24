@@ -195,8 +195,28 @@ class BlockSpec extends AnyFlatSpec with Matchers with EitherValues with OptionV
     val checkpoint = store.latest(thread).value.value.checkpoint
 
     checkpoint.formatVersion shouldBe Checkpoint.CurrentFormat
-    Checkpoint.CurrentFormat shouldBe 8
+    Checkpoint.CurrentFormat shouldBe 9
     checkpoint.outcome shouldBe defined
     Checkpoint.fromJson(Checkpoint.toJson(checkpoint)).value shouldBe checkpoint
+  }
+
+  "a format-8 checkpoint of a blocked run" should "read without the reason its outcome stored (#2853)" in {
+    val store = InMemoryCheckpointer()
+    GraphRuntime(store).start(thread, guarded, "bad-1").awaited.value.failed
+    val current = store.latest(thread).value.value.checkpoint.withOutcome(RunOutcome.Blocked("LengthCheck"))
+    // format 8 wrote the same outcome with one more field, the guardrail's reason
+    val written = Checkpoint.toJson(current)
+    written("formatVersion") = 8
+    def blocked(json: ujson.Value): Option[ujson.Obj] = json match
+      case obj: ujson.Obj if obj.value.get("$type").flatMap(_.strOpt).contains("Blocked") => Some(obj)
+      case ujson.Arr(items) => items.flatMap(blocked).headOption
+      case _                => None
+    blocked(written("outcome")).value("reason") = "refused 'my card is SECRET-42'"
+    ujson.write(written) should include("SECRET-42")
+
+    val read = Checkpoint.fromJson(written).value
+    read shouldBe current
+    read.formatVersion shouldBe 9
+    (ujson.write(Checkpoint.toJson(read)) should not).include("SECRET-42")
   }
 }

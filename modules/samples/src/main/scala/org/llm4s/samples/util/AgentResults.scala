@@ -14,9 +14,10 @@ object AgentResults {
   def describe(status: AgentStatus): String = status match {
     case AgentStatus.Completed(_)       => "completed"
     case AgentStatus.Truncated(partial) => s"was cut off at the model's output limit after ${partial.length} characters"
-    case AgentStatus.Blocked(guardrail, why) => s"blocked by guardrail $guardrail: $why"
-    case AgentStatus.StepLimitReached        => "stopped at the step limit before reaching an answer"
-    case AgentStatus.TokenLimitReached       => "stopped at the token budget before reaching an answer"
+    case AgentStatus.Blocked(guardrail, why) =>
+      s"blocked by guardrail $guardrail${why.fold("")(reason => s": $reason")}"
+    case AgentStatus.StepLimitReached  => "stopped at the step limit before reaching an answer"
+    case AgentStatus.TokenLimitReached => "stopped at the token budget before reaching an answer"
     case AgentStatus.Suspended(suspension) =>
       s"suspended with ${suspension.approvals.size} pending approval(s), ${suspension.questions.size + suspension.middlewareQuestions.size} pending question(s), " +
         s"${suspension.breakpoints.size} breakpoint(s) and ${suspension.delegated.size} subagent interrupt(s)"

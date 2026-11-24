@@ -110,7 +110,7 @@ object CustomGuardrailExample extends App {
       state.status match {
         case AgentStatus.Blocked(guardrail, reason) =>
           logger.info("✓ Expected validation failure:")
-          logger.info("  Blocked by {}: {}", guardrail, reason)
+          logger.info("  Blocked by {}: {}", guardrail, reason.getOrElse("(no reason: it is never stored)"))
         case AgentStatus.Completed(_) => logger.warn("Unexpected success")
         case other                    => logger.warn("✗ Run did not complete: {}", AgentResults.describe(other))
       }

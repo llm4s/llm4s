@@ -247,8 +247,10 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
           child = _.withMiddleware(new GuardrailMiddleware(Seq(LengthCheck(1, 3)), Seq.empty))
         ),
       {
-        case ChildEnd.Ended(r, _) => r.status shouldBe a[AgentStatus.Blocked]
-        case other                => fail(s"unexpected $other")
+        // the first end is the live one: only it has the guardrail's reason, which is never stored (#2853)
+        case ChildEnd.Ended(r, _) =>
+          r.status should matchPattern { case AgentStatus.Blocked("LengthCheck", Some(_)) => }
+        case other => fail(s"unexpected $other")
       }
     ),
     (
@@ -279,6 +281,21 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     )
   )
 
+  /** `end` without a blocked turn's reason, which the live end has and one rebuilt from the child's thread has not. */
+  private def unreasoned(end: ChildEnd): ChildEnd = end match {
+    case ChildEnd.Ended(r, usage) =>
+      r.status match {
+        case AgentStatus.Blocked(guardrail, Some(_)) =>
+          val status = AgentStatus.Blocked(guardrail, None)
+          ChildEnd.Ended(
+            org.llm4s.agent.AgentResult(r.threadId, r.runId, r.activeAgent, status, r.messages, r.usage),
+            usage
+          )
+        case _ => end
+      }
+    case other => other
+  }
+
   outcomes.foreach { case (name, setupOf, check) =>
     behavior.of(s"A child that settled with $name")
     it should "give the same end after a restart, running nothing again" in {
@@ -292,7 +309,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       val runtime = new GraphRuntime(open())
       family(runtime, setup)._1.recover(thread).ok.answer shouldBe Some("composed")
       setup.childClient.callCount shouldBe calls
-      setup.allEnds(1) shouldBe setup.allEnds(0)
+      setup.allEnds(1).map(unreasoned) shouldBe setup.allEnds(0).map(unreasoned)
+      unreasoned(setup.allEnds(1).ok) shouldBe setup.allEnds(1).ok
       check(setup.allEnds(0).ok)
       onlyChild(runtime, thread).status should (be(CheckpointStatus.Completed).or(be(CheckpointStatus.Failed)))
     }

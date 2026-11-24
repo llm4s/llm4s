@@ -56,7 +56,10 @@ final case class Checkpoint private (
   fencingToken: Option[FencingToken] = None,
   /** Where a child thread came from; `None` for a top-level thread (format 7 and earlier: always `None`). */
   origin: Option[RunOrigin] = None,
-  /** How the run this terminal checkpoint closed settled; `None` on every other checkpoint, and before format 8. */
+  /**
+   * How the run this terminal checkpoint closed settled; `None` on every other checkpoint, and before format 8. From
+   * format 9 a blocked run's names its guardrail and holds no reason (#2853).
+   */
   outcome: Option[RunOutcome] = None,
   /**
    * Whether a cascade delete of the thread has begun (design 4.41, #2074): written under the thread's claim before its
@@ -130,7 +133,7 @@ object Checkpoint:
     )
 
   /** The format this build writes. */
-  val CurrentFormat: Int = 8
+  val CurrentFormat: Int = 9
 
   /**
    * Migrations of the checkpoint format itself, keyed by the version they upgrade from.
@@ -149,16 +152,20 @@ object Checkpoint:
    * ([[RunOutcome]]), and a cascade delete marks its root `deleting` (#2074); nothing to rewrite, as all three default
    * to none - every earlier thread is top-level, and none is being deleted - but a build that predates them refuses
    * format 8 rather than drive a child thread as a top-level one, or admit a half-deleted thread.
+   * 8 -> 9: a blocked run's outcome names the guardrail only (#2853): the `reason` a format-8 `Blocked` outcome
+   * holds is dropped as it is read, and a build that predates the change refuses format 9 rather than fail to read
+   * an outcome without one.
    */
   private val formatVersion: SchemaVersion =
-    SchemaVersion(8)(
+    SchemaVersion(9)(
       1 -> addSuspension,
       2 -> addTenant,
       3 -> addFailedStatus,
       4 -> addFencingToken,
       5 -> addBreakpoints,
       6 -> addTaskLineages,
-      7 -> addChildThreads
+      7 -> addChildThreads,
+      8 -> dropBlockedReason
     )
 
   private def addSuspension(json: ujson.Value): Result[ujson.Value] =
@@ -216,6 +223,20 @@ object Checkpoint:
     Try {
       val upgraded = ujson.copy(json)
       upgraded("formatVersion") = 8
+      upgraded
+    }.toResult
+
+  /** A format-8 `Blocked` outcome without its `reason`, in either form an `Option` is written in. */
+  private def dropBlockedReason(json: ujson.Value): Result[ujson.Value] =
+    Try {
+      val upgraded = ujson.copy(json)
+      def unreasoned(outcome: ujson.Value): Unit = outcome match
+        case ujson.Arr(items) => items.foreach(unreasoned)
+        case obj: ujson.Obj if obj.value.get("$type").flatMap(_.strOpt).contains("Blocked") =>
+          obj.value.remove("reason"): Unit
+        case _ => ()
+      upgraded.obj.get("outcome").foreach(unreasoned)
+      upgraded("formatVersion") = 9
       upgraded
     }.toResult
 

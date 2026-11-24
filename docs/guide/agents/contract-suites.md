@@ -38,12 +38,13 @@ mixes the trait in and implements its one or two abstract members.
 | `CheckpointerContract` | `Checkpointer` | `newCheckpointer(clock)` |
 | `RunQueueContract` | `RunQueue`, the queue that lives in the same database as a checkpointer | `newStores(clock)` |
 | `DelegationContract` | `Checkpointer`, for parent and subagent threads | `newCheckpointer()` |
+| `GuardedContentContract` | `Checkpointer` and its `RunQueue`, for what a guardrail refused | `newStores()` |
 | `LongTermStoreContract` | `LongTermStore` | `newStore(limits)`, `appliedKeys(store)` |
 | `FileBackendContract` | `FileBackend` | `newBackend()` |
 | `FileToolsContract` | `FileBackend`, through the seven file tools as a model calls them | `newBackend()` |
 | `ReplayContract` | any external target whose effects `recover` may run again | `newSubject()` |
 
-`CheckpointerContract` and `RunQueueContract` carry no stability annotation; the other five are `@Experimental`.
+`CheckpointerContract` and `RunQueueContract` carry no stability annotation; the other six are `@Experimental`.
 The stores LLM4S ships pass the same suites: `InMemoryCheckpointer`, `SqliteCheckpointer` and
 `PostgresCheckpointer` with their run queues, `InMemoryLongTermStore` and the PostgreSQL long-term store, and the
 file backends.
@@ -107,6 +108,25 @@ import org.scalatest.flatspec.AnyFlatSpec
 
 class InMemoryDelegationContractSpec extends AnyFlatSpec with DelegationContract:
   protected def newCheckpointer(): Checkpointer = new InMemoryCheckpointer()
+```
+
+### What a guardrail refused
+
+`GuardedContentContract` runs guarded agents on your store and checks that the reason a guardrail gave is in nothing
+the store was handed and nothing it gives back: each `Commit` is recorded on its way in, so a row written and then
+retracted is seen too, and checkpoint history, the event log and the thread's children are read back afterwards. It
+also checks that `EncryptingCheckpointer` over your store hands it no error text of a failed run's outcome. It takes
+a fresh store and its queue per case:
+
+```scala
+import org.llm4s.agent.graph.InMemoryCheckpointer
+import org.llm4s.agent.testkit.{ GuardedContentContract, RunQueueContract }
+import org.scalatest.flatspec.AnyFlatSpec
+
+class InMemoryGuardedContentContractSpec extends AnyFlatSpec with GuardedContentContract:
+  protected def newStores(): RunQueueContract.Stores =
+    val store = new InMemoryCheckpointer()
+    RunQueueContract.Stores(store, store.runQueue)
 ```
 
 ### Time

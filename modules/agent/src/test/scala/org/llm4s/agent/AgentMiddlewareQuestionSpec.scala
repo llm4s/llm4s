@@ -469,7 +469,7 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     agentOver(GuardrailVerdict.Edit("edited")).answer shouldBe Some("edited")
     calls.get shouldBe 1
     agentOver(GuardrailVerdict.Block).status match {
-      case AgentStatus.Blocked(guardrail, reason) =>
+      case AgentStatus.Blocked(guardrail, Some(reason)) =>
         guardrail shouldBe "judge"
         reason should include("score 1")
       case other => fail(s"expected Blocked, got $other")

@@ -14,8 +14,9 @@ import org.llm4s.error.{ LLMError, NonRecoverableError }
  * `message` names the guardrail and never holds `reason`, which may quote the text the guardrail
  * refused (#2793): the message is what the durable `TaskFailed` and `RunFailed` events, a run queue
  * entry's failure, logs and traces record. Read `reason` from this error, or from
- * `AgentStatus.Blocked`. It is stored in one place, the blocked run's closing checkpoint
- * (`RunOutcome.Blocked`), from which a settled turn's status is rebuilt.
+ * `AgentStatus.Blocked` on the result of the run that was blocked. It is stored nowhere (#2853): the
+ * blocked run's closing checkpoint records the guardrail's name (`RunOutcome.Blocked`), and a status
+ * rebuilt from it has no reason.
  */
 @Experimental
 final case class GuardrailBlocked(guardrail: String, reason: String) extends LLMError with NonRecoverableError:

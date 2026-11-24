@@ -44,8 +44,12 @@ enum AgentStatus:
    * `reason` the one it gave. An input block stores nothing of the turn; an output block removes it - the
    * query, any tool calls and the answer - so `messages` is the history from before the turn. Usage
    * keeps the turn's model calls. The thread is usable, and the next turn runs normally.
+   *
+   * `reason` is `Some` on the result of the run that was blocked and `None` everywhere else (#2853): a reason may
+   * quote the text the guardrail refused, so it is never stored, and a status rebuilt from the thread - a delegated
+   * child's, read again by its parent - names the guardrail only. Keep the reason yourself if you need it later.
    */
-  case Blocked(guardrail: String, reason: String)
+  case Blocked(guardrail: String, reason: Option[String])
 
   /** The turn used the active agent's `maxSteps` model calls without a final answer. */
   case StepLimitReached

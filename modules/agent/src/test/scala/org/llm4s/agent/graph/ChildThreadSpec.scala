@@ -735,7 +735,7 @@ class ChildThreadSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     runtime.start(thread, graph, "go").awaited.value.completed
     latest.outcome shouldBe Some(RunOutcome.Answered)
     runtime.start(thread, graph, "guard").awaited.value.failed
-    latest.outcome shouldBe Some(RunOutcome.Blocked("LengthCheck", "long"))
+    latest.outcome shouldBe Some(RunOutcome.Blocked("LengthCheck"))
     runtime.start(thread, graph, "block").awaited.value.failed
     latest.outcome shouldBe Some(RunOutcome.Failed("ValidationError", ValidationError("act", "no").message))
     val parked = runtime.start(thread, graph, "ask").awaited.value.suspended.interrupts.head.id
@@ -754,7 +754,7 @@ class ChildThreadSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
   }
 
   "RunOutcome.blocked" should "keep a guardrail's name and reason, and every error of an invalid output" in {
-    RunOutcome.blocked(GuardrailBlocked("g", "r")) shouldBe RunOutcome.Blocked("g", "r")
+    RunOutcome.blocked(GuardrailBlocked("g", "r")) shouldBe RunOutcome.Blocked("g")
     RunOutcome.blocked(GraphError.OutputInvalid(Vector("a", "b", "c", "d", "e", "f"))) shouldBe
       RunOutcome.OutputInvalid(Vector("a", "b", "c", "d", "e", "f"))
     RunOutcome.blocked(ValidationError("x", "y")) shouldBe RunOutcome.Failed(

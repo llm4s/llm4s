@@ -901,16 +901,19 @@ items an agent keeps across threads are stored in plain until you wrap it too
 ([below](#encrypting-the-long-term-store)).
 
 - **Encrypted**: a checkpoint's state values, pending task inputs and parked questions; a pending write's updates,
-  route payloads and question; a custom event's payload; an effect record's outcome; a queue entry's `Start` input
+  route payloads and question; a custom event's payload; an effect record's outcome; the error text of a settled
+  run's outcome (a failure's message, an invalid typed answer's schema errors); a queue entry's `Start` input
   and `Resume` answers.
 - **Still plain**, because the store orders, fences, lists and prunes by them: every id (thread, run, checkpoint,
-  task, node, interrupt, entry, tenant) and submission key; statuses, outcomes, timestamps, tokens and sequence
-  numbers; the graph's id, version and shape, and the names of state keys; thread metadata (keep content out of it);
+  task, node, interrupt, entry, tenant) and submission key; statuses, timestamps, tokens and sequence
+  numbers; which way a run settled (its outcome's case, a blocking guardrail's name, a failure's kind); the graph's
+  id, version and shape, and the names of state keys; thread metadata (keep content out of it);
   trace contexts; the built-in events, with a failed run's error message, and a queue entry's failure message or
   cancel note; and the digests kept beside values, which let someone who can guess a value exactly confirm the guess.
-  The size of each value shows too. Disk or database encryption still has a job. An outcome is text when a run was
-  refused or failed: a blocked run's holds its guardrail's reason, an invalid typed answer's the schema errors and a
-  failure's the error message, so a guardrail whose reason quotes its input puts that input here in plain.
+  The size of each value shows too. Disk or database encryption still has a job. A guardrail's reason is in none of
+  this: it is not stored at all, encrypted or not (see [Guardrails](guardrails)). A failed run's error message is
+  sealed in its outcome and plain in its `graph.run_failed` event, so an error that quotes content still reaches the
+  log.
 - **Bound to its place.** Each value opens only on its thread and in its place (for a checkpoint: its tenant,
   checkpoint and state key), so one copied elsewhere in the database fails to open. Two things are not bound, because
   the store numbers them itself: a custom event to its sequence number, and a queued input to its entry id.

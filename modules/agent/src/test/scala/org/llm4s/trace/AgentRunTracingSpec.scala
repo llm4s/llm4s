@@ -414,7 +414,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       .fold(e => fail(e.message), identity)
 
     ok(agent.run(thread, s"my card is $marker")).status match {
-      case AgentStatus.Blocked(guardrail, reason) =>
+      case AgentStatus.Blocked(guardrail, Some(reason)) =>
         guardrail shouldBe "QuotesInput"
         reason should include(marker)
       case other => fail(s"expected Blocked, got $other")
@@ -431,7 +431,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     tracing.all.foreach(e => (e.toJson.render() should not).include(marker))
   }
 
-  it should "stay on the closing checkpoint's outcome, which rebuilds the turn's status from the thread (#2793)" in {
+  it should "be in no checkpoint: the closing one names the guardrail only (#2853)" in {
     val marker = "SECRET-42"
     val store  = new InMemoryCheckpointer()
     val thread = ThreadId("t-outcome")
@@ -443,13 +443,10 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       .fold(e => fail(e.message), identity)
     ok(agent.run(thread, s"my card is $marker"))
 
-    // the documented limit: the checkpoint store holds the reason, and with it whatever the reason quotes
     val history = stored(store.history(thread, None, 100))
-    history.flatMap(_.outcome) should matchPattern {
-      case Vector(RunOutcome.Blocked("QuotesInput", reason: String)) if reason.contains(marker) =>
-    }
-    // and nothing else of the blocked turn: its earlier checkpoints, which held the query, are retracted
-    history.map(_.withOutcome(None)).foreach(c => (c.toString should not).include(marker))
+    history.flatMap(_.outcome) shouldBe Vector(RunOutcome.Blocked("QuotesInput"))
+    // nothing of the blocked turn is readable: neither the reason nor the query it quotes
+    history.foreach(c => (c.toString should not).include(marker))
   }
 
   "A query a beforeAgent hook redacts" should "be redacted in the thread, the event log and the trace (#2793)" in {

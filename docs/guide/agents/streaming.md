@@ -148,8 +148,9 @@ long, with what usage), and a blocked answer is in no stored event.
 A guardrail's reason can quote what it refused, so it follows the same rule: the events of a blocked
 run (`agent.guardrail_blocked`, `graph.task_failed`, `graph.run_failed`) name the guardrail and
 nothing else - the failure message is `Guardrail '<name>' blocked` - and so does a trace of the run.
-The reason is on `AgentStatus.Blocked`, for the caller. The rule is about events, not checkpoints:
-see [Limits](#limits) for what the checkpoint store holds.
+The reason is on the `AgentStatus.Blocked` of the run that was blocked, for the caller, and in no store: the
+run's closing checkpoint names the guardrail too, and nothing else. For everything else the rule is about events,
+not checkpoints: see [Limits](#limits) for what the checkpoint store holds.
 
 ## Attempts
 
@@ -473,11 +474,12 @@ stable carried in the payload, such as the tool call's `IdempotencyKey`, never b
   through the kernel event, not through an `agent.*` event. The events that begin a run
   (`graph.run_started` and those of a `recover` or `resume`) also record the run's `tenantId` and
   `principal`: identifiers, not message content, but personal data if you put a person's name there.
-- **Checkpoints hold content.** The content rule is about events. A blocked run's closing checkpoint
-  records `RunOutcome.Blocked(guardrail, reason)`, so that the turn's status can be rebuilt from the
-  thread (a parent agent reads a delegated child's refusal this way), and outcomes are stored in
-  plain even under `EncryptingCheckpointer`. A guardrail whose reason must not be stored should not
-  quote its input.
+- **Checkpoints hold content.** The content rule is about events: a thread's state is its messages.
+  A run's outcome is on its closing checkpoint, so that the turn's status can be rebuilt from the
+  thread (a parent agent reads a delegated child's refusal this way). A blocked run's is
+  `RunOutcome.Blocked(guardrail)`, the name only: a status rebuilt from it has no reason. A failed
+  run's holds its error's message and an invalid typed answer's its schema errors, which
+  `EncryptingCheckpointer` seals.
 - **A `beforeAgent` hook does not keep the submitted query out of the store.** The run's first
   checkpoint holds the query as it was submitted, and the hook runs after that checkpoint is
   committed: what the hook returns is what joins the conversation, but the original stays in
