@@ -326,7 +326,15 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
       )
       .obj
 
-    for id <- List("claude-opus-4-7", "claude-opus-4-7-20260416", "claude-opus-4-8", "claude-fable-5") do
+    for id <- List(
+        "claude-opus-4-7",
+        "claude-opus-4-7-20260416",
+        "claude-opus-4-8",
+        "claude-fable-5",
+        "claude-fable-5-1",
+        "claude-fable-5-2"
+      )
+    do
       val metadata = service.lookup(ModelName(id)).toOption.get
       metadata.capabilities.supportsBudgetThinking shouldBe Some(false)
       metadata.provider shouldBe ProviderId("anthropic")
@@ -345,6 +353,31 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
       .get
       .capabilities
       .supportsBudgetThinking shouldBe Some(false)
+
+  it should "mark every member of a patched family on the vendor's own routes, Bedrock regions included" in:
+    val service = defaultService()
+    val raw = ujson
+      .read(
+        scala.io.Source
+          .fromInputStream(getClass.getResourceAsStream(ModelRegistryConfig.DefaultResourcePath), "UTF-8")
+          .mkString
+      )
+      .obj
+    val family = """.*claude-(opus-4[-.][78]|fable-5([-.][12])?)([-.]fast)?(@default)?""".r
+    val routes = Set("anthropic", "bedrock_converse", "azure_ai", "vertex_ai-anthropic_models", "openrouter")
+    val members = raw.collect {
+      case (id, entry)
+          if family.matches(id) &&
+            (entry.obj.get("litellm_provider").exists(p => routes.contains(p.str)) ||
+              id.matches("bedrock/us-gov-(east|west)-1/anthropic\\..*")) =>
+        id
+    }.toList
+    members should not be empty
+    (members should contain).allOf("apac.anthropic.claude-opus-4-8", "us-gov.anthropic.claude-fable-5-2")
+    for id <- members do
+      val caps = service.lookup(ModelName(id)).toOption.get.capabilities
+      withClue(id)(caps.supportsBudgetThinking shouldBe Some(false))
+      if id.contains("fable-5") then withClue(id)(caps.supportsThinkingOff shouldBe Some(false))
 
   it should "leave a model that still takes a thinking budget unknown" in:
     val service = defaultService()

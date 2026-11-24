@@ -18,7 +18,7 @@ import org.llm4s.types.Result
  * a field never breaks them.
  *
  * @param apiKey        Google API key; redacted in `toString`.
- * @param model         Model identifier, e.g. `"gemini-2.0-flash"`.
+ * @param model         Model identifier, e.g. `"gemini-3.8-flash"`.
  * @param baseUrl       API base URL; defaults to [[GeminiConfig.DEFAULT_BASE_URL]].
  * @param contextWindow Model's total token capacity (prompt + completion combined).
  * @param reserveCompletion Tokens held back from prompt history for the completion.
@@ -126,7 +126,7 @@ object GeminiConfig {
    * Constructs a [[GeminiConfig]], resolving `contextWindow` and
    * `reserveCompletion` from the model name automatically.
    *
-   * @param modelName Model identifier, e.g. `"gemini-2.0-flash"`.
+   * @param modelName Model identifier, e.g. `"gemini-3.8-flash"`.
    * @param apiKey    Google API key; must be non-empty.
    * @param baseUrl   API base URL; must be non-empty.
    */

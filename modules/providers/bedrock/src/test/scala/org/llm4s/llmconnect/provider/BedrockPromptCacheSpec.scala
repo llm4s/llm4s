@@ -114,7 +114,7 @@ class BedrockPromptCacheSpec extends AnyWordSpec with Matchers {
     }
 
     "send nothing to a Claude model the registry lists without prompt caching, and report it" in {
-      val model           = "anthropic.claude-3-haiku-20240307-v1:0"
+      val model           = "anthropic.claude-3-opus-20240229-v1:0"
       val (body, outcome) = exchange(model, cache(PromptCache.Ttl.Short, all*))
       (body.toString should not).include("cachePoint")
       outcome.adjustments shouldBe List(

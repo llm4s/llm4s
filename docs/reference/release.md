@@ -114,6 +114,8 @@ quarter ([Support Policy](../reference/support-policy#release-cadence)).
       OpenAI, Gemini, Bedrock), replace any that is retired or retires within three months, and give each id an entry
       in the bundled model metadata ([Model Metadata](../reference/model-metadata#embedded-overrides)): refresh the
       LiteLLM snapshot, or add an override.
+- [ ] [Refresh the bundled model metadata](../reference/model-metadata#refreshing-the-snapshot) from LiteLLM
+      upstream, review the ids it removes, and delete the overrides upstream now carries.
 
 **0.7.0, the baseline release, in addition:**
 

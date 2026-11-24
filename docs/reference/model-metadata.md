@@ -79,11 +79,29 @@ thinking budget ([RFC 0008](../rfcs/0008-generation-controls)):
 }
 ```
 
-The overrides also carry whole entries for current models the snapshot predates, copied from LiteLLM's upstream file
-and checked against the vendor's pricing page: on 2026-11-24, `claude-sonnet-5-5`, `claude-haiku-5-5`,
-`anthropic.claude-sonnet-5-5` and `us.anthropic.claude-sonnet-5-5` (Bedrock), `gpt-5.6-luna`, `gpt-5.6-terra`,
-`gemini-3.8-flash` and `gemini/gemini-3.8-flash`, the ids the guides' examples use. The next refresh of the snapshot
-makes them redundant; delete them then.
+An override can also carry a whole entry for a current model the snapshot predates, copied from LiteLLM's upstream
+file and checked against the vendor's pricing page; the next refresh of the snapshot makes it redundant. Two whole
+entries remain because upstream no longer lists those ids at all: `gemini/gemini-1.5-flash` and
+`claude-3-7-sonnet-latest`, so that a lookup of either finds the vendor's own row rather than a substring match on
+another host's.
+
+### Refreshing the snapshot
+
+The snapshot is refreshed from upstream as a step of every release ([Release Process](../contribute/release#pre-tag-checklist)):
+
+1. Replace `litellm_model_metadata.json` with upstream's file, byte for byte:
+   `curl -sSfL -o modules/core/src/main/resources/modeldata/litellm_model_metadata.json https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json`.
+   Never edit it by hand; a correction goes in the overrides.
+2. List the ids the new file drops and search the repository for each one llm4s code, tests, docs or samples use,
+   and for a `provider/model` id its bare `model` too, which a host-inferred lookup adds the prefix to. An id a test
+   only passes as a string needs nothing; a lookup that now misses gets an override, or the test or guide moves to
+   a current id.
+3. Compare every override with upstream's new entry: delete a whole entry upstream now carries unchanged, and a patch
+   whose keys upstream now sets the same way or whose id upstream dropped (it would only be skipped with a warning).
+   A new id in a family a patch covers (another Bedrock region, a point release) gets the same patch, so the family
+   stays consistent; `ModelRegistryServiceSpec` fails on an unpatched member.
+4. Run the tests of the modules that read the registry (`core`, `capabilities`, the provider modules, `java-api` and
+   `config-policy`): some pin a window or a capability flag from the bundled data.
 
 ## Looking a model up
 

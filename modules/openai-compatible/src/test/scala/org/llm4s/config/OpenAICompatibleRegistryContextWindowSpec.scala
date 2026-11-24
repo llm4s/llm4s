@@ -64,13 +64,13 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
     }
 
     "take xAI's window" in {
-      window("https://api.x.ai/v1", "grok-2") shouldBe 131072
+      window("https://api.x.ai/v1", "grok-4.7") shouldBe 500000
     }
 
     "take Together's window from either of its hosts" in {
-      val model = "Qwen/Qwen3-235B-A22B-Instruct-2507-tput"
-      window("https://api.together.xyz/v1", model) shouldBe 262000
-      window("https://api.together.ai/v1", model) shouldBe 262000
+      val model = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+      window("https://api.together.xyz/v1", model) shouldBe 131072
+      window("https://api.together.ai/v1", model) shouldBe 131072
     }
 
     "infer the host whatever the case, with a port, or with a trailing slash" in {
@@ -117,10 +117,10 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
     "supply the window for an endpoint the host table does not know" in {
       window(
         "https://llm-gateway.internal.example/v1",
-        "llama-3.1-8b-instant",
+        "openai/gpt-oss-120b",
         """registryProvider = "groq""""
       ) shouldBe
-        128000
+        131072
     }
 
     "switch the host inference off, so a provider with no such model gives the default" in {
@@ -168,7 +168,7 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
       val cfg = generic(
         load(
           "https://api.fireworks.ai/inference/v1",
-          "accounts/fireworks/models/qwen3-coder-480b-instruct-bf16",
+          "accounts/fireworks/models/qwen3-next-80b-a3b-instruct",
           "reserveCompletion = 4096"
         )
       )
@@ -182,9 +182,8 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
     }
 
     "take the default when the registry lists the model with no input limit" in {
-      // Together's registry entry for this model carries no max_input_tokens, which is why the recipe keeps
-      // its hand-set contextWindow.
-      window("https://api.together.ai/v1", "meta-llama/Llama-3.3-70B-Instruct-Turbo") shouldBe Default
+      // Together's registry entry for this model carries no max_input_tokens.
+      window("https://api.together.ai/v1", "moonshotai/Kimi-K2-Instruct") shouldBe Default
     }
   }
 
@@ -254,7 +253,7 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
       ).contextWindow shouldBe 200000
     }
 
-    "keep the hand-set window of the recipes whose model the registry cannot give" in {
+    "give Together's and xAI's the registry's window" in {
       recipe(
         "together-main",
         """together-main {
@@ -262,7 +261,6 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
           |  baseUrl = "https://api.together.ai/v1"
           |  model = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
           |  apiKey = ${?TOGETHER_API_KEY}
-          |  contextWindow = 131072
           |}""".stripMargin
       ).contextWindow shouldBe 131072
 
@@ -273,10 +271,11 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
           |  baseUrl = "https://api.x.ai/v1"
           |  model = "grok-4.7"
           |  apiKey = ${?XAI_API_KEY}
-          |  contextWindow = 500000
           |}""".stripMargin
       ).contextWindow shouldBe 500000
+    }
 
+    "keep the hand-set window of the recipes whose model the registry cannot give" in {
       recipe(
         "nim-cloud",
         """nim-cloud {
@@ -301,8 +300,7 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
     }
 
     "explain why those recipes keep it: without it the provider would use the default" in {
-      window("https://api.together.ai/v1", "meta-llama/Llama-3.3-70B-Instruct-Turbo") shouldBe Default
-      window("https://api.x.ai/v1", "grok-4.7") shouldBe Default
+      window("https://integrate.api.nvidia.com/v1", "meta/llama-3.3-70b-instruct") shouldBe Default
       window("https://api.uberllm.dev/v1", "openai/gpt-4o-mini") shouldBe Default
     }
 
@@ -312,10 +310,10 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
         """internal-gateway {
           |  provider = "openai-compatible"
           |  baseUrl = "https://llm-gateway.internal.example/v1"   # not a known host, so name the registry provider
-          |  model = "llama-3.1-8b-instant"
-          |  registryProvider = "groq"                             # the window comes from groq/llama-3.1-8b-instant
+          |  model = "openai/gpt-oss-120b"
+          |  registryProvider = "groq"                             # the window comes from groq/openai/gpt-oss-120b
           |}""".stripMargin
-      ).contextWindow shouldBe 128000
+      ).contextWindow shouldBe 131072
     }
   }
 

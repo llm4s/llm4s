@@ -268,8 +268,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gpt-image-2.6-sunburst`, `editImage` sends the configured model, and a GPT Image request carries no `response_format` or `style` ([migration](docs/reference/migration.md#the-openai-image-client-defaults-to-gpt-image-26-sunburst-2884)) [#2884](https://github.com/llm4s/llm4s/issues/2884).
 - **Fixed** `llm4s-openai` sends `max_completion_tokens` to the GPT-6 models; a request with tools to `gpt-6-luna` is sent
   `reasoning_effort: none` (reported as a `RequestAdjustment`), and one to `gpt-6.1-terra`, which calls tools only on the Responses API, is refused with a `ValidationError` [#2886](https://github.com/llm4s/llm4s/issues/2886).
-- **Added** Bundled model metadata for `claude-sonnet-5-5`, `claude-haiku-5-5`, their Bedrock ids, `gpt-5.6-luna`,
-  `gpt-5.6-terra` and `gemini-3.8-flash`, as overrides until the next LiteLLM refresh [#2832](https://github.com/llm4s/llm4s/issues/2832).
+- **Changed** The bundled model metadata is refreshed from LiteLLM upstream (2,784 to 7,162 entries, with `claude-sonnet-5-5`, `claude-haiku-5-5`,
+  `gpt-5.6-luna`/`-terra` and `gemini-3.8-flash`); the refresh is a release-checklist step [#2832](https://github.com/llm4s/llm4s/issues/2832) [#2889](https://github.com/llm4s/llm4s/issues/2889).
+- **Changed** With the refreshed metadata, the context window an `openai-compatible` section takes from the model registry changes for some models
+  (Together's `meta-llama/Llama-3.3-70B-Instruct-Turbo` now gets 131072, not the 8192 default) [#2889](https://github.com/llm4s/llm4s/issues/2889).
 - **Changed** No client sends `temperature`, `top_p` or a penalty the caller did not set (OpenAI, the OpenAI-compatible providers, Anthropic, Gemini, Vertex AI, Bedrock, Ollama, watsonx, Perplexity); Jlama, whose engine needs a temperature, uses `0.7` when none is set. [#2807](https://github.com/llm4s/llm4s/issues/2807)
 - **Changed** A provider module's client reports `FinishReason.Unknown` where it read no finish reason, and Perplexity ignores a reported cost that is not a number in favour of the estimate. [#2807](https://github.com/llm4s/llm4s/issues/2807)
 - **Fixed** A key xAI refuses (HTTP 400) is an `AuthenticationError`, not a `ValidationError` ([#2855](https://github.com/llm4s/llm4s/issues/2855)).
