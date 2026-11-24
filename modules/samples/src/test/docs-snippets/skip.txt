@@ -157,6 +157,7 @@ guide/agents/guardrails.md | 8f11dfd07b | with | import org.llm4s.agent.Agent; i
 guide/agents/guardrails.md | fcab15ce3f | with | import org.llm4s.agent.guardrails.builtin._
 guide/agents/human-review.md | 25590550c3 | skip | runtime, graph and input stand for the reader's own GraphRuntime, compiled graph and input
 guide/agents/index.md | 32e48b77f6 | skip | sbt build definition, not Scala source
+guide/agents/middleware.md | 7316ca7315 | skip | sbt build definition, not Scala source
 guide/agents/index.md | 8f4ed128d4 | with | import org.llm4s.agent.Agent; import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService
 guide/agents/index.md | 03517fa0d9 | skip | chargeSpec and payments stand for the reader's own tool spec and payment client
 guide/agents/index.md | d1fef074f9 | skip | chargeSchema and payments stand for the reader's own schema and payment client

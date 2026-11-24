@@ -506,11 +506,19 @@ The thread's `AgentResult.messages` is the full history; to see what was sent, w
 with a small middleware of your own, placed after the context window middleware with `runsAfter`:
 
 ```scala
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelContext, ModelRequest, ModelResponse }
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  ContextWindowMiddleware,
+  MiddlewareId,
+  MiddlewareRef,
+  ModelContext,
+  ModelRequest,
+  ModelResponse
+}
 
 class LogSentMessages(logger: Logger) extends AgentMiddleware {
   val id = MiddlewareId("log-sent-messages")
-  override def runsAfter = Set(MiddlewareId("context-window"))
+  override def runsAfter = Set(MiddlewareRef.ofType[ContextWindowMiddleware])
 
   override def wrapModelCall(request: ModelRequest, context: ModelContext)(
     next: ModelRequest => Result[ModelResponse]
