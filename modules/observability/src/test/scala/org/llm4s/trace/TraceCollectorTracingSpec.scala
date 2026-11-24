@@ -359,7 +359,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   it should "keep a completion's served tier as its span's service_tier (#2750)" in {
     import org.llm4s.llmconnect.model.{ Completion, ServiceTier }
     import org.llm4s.trace.model.SpanValue
-    val completion = Completion("c-1", java.time.Instant.EPOCH, "hi", "m", AssistantMessage("hi"))
+    val completion = Completion("c-1", java.time.Instant.EPOCH, "m", AssistantMessage("hi"))
     collector.traceEvent(
       TraceEvent.CompletionReceived("c-1", "m", 0, "hi", servedTier = Some(ServiceTier.Flex))
     ) shouldBe Right(())

@@ -27,10 +27,10 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val calls = new CopyOnWriteArrayList[Call]()
     private def reply(c: Conversation, o: CompletionOptions, streamed: Boolean): Result[Completion] = {
       calls.add(Call(c.messages.toSeq, o.tools.map(_.name), streamed))
-      Right(Completion("id", Instant.EPOCH, answer, "m", AssistantMessage(answer)))
+      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(answer)))
     }
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = reply(c, o, streamed = false)
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] = {
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] = {
       f(StreamedChunk(id = "c", content = Some(answer)))
       reply(c, o, streamed = true)
     }
@@ -206,9 +206,9 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       val n    = calls.incrementAndGet()
       val call = ToolCall(s"c$n", "add", ujson.Obj("a" -> 1, "b" -> 2))
-      Right(Completion("id", Instant.EPOCH, "", "m", AssistantMessage(None, Seq(call)), toolCalls = List(call)))
+      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(None, Seq(call))))
     }
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512

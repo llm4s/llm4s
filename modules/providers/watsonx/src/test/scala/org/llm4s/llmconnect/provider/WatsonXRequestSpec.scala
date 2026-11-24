@@ -154,10 +154,19 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
     )
   }
 
-  test("defaulted options send no penalty and no response_format: the body is unchanged") {
-    ujson.read(body(x)).obj.keySet shouldBe Set("model_id", "messages", "temperature", "project_id")
-    val zeroed = CompletionOptions().withPresencePenalty(0.0).withFrequencyPenalty(0.0).withResponseFormat(None)
-    body(x, zeroed) shouldBe body(x)
+  test("defaulted options send no sampling parameter and no response_format") {
+    ujson.read(body(x)).obj.keySet shouldBe Set("model_id", "messages", "project_id")
+    body(x, CompletionOptions().withResponseFormat(None)) shouldBe body(x)
+  }
+
+  test("a sampling parameter set to the value that used to be its default is sent (#2807)") {
+    val explicit =
+      CompletionOptions().withTemperature(0.7).withTopP(1.0).withPresencePenalty(0.0).withFrequencyPenalty(0.0)
+    val sent = ujson.read(body(x, explicit))
+    sent("temperature").num shouldBe 0.7
+    sent("top_p").num shouldBe 1.0
+    sent("presence_penalty").num shouldBe 0.0
+    sent("frequency_penalty").num shouldBe 0.0
   }
 
   test("each penalty is sent on its own when only it is set, and a negative one too") {
@@ -183,7 +192,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
   test("golden: a gpt-oss model is sent reasoning_effort low, medium and high for Low, Medium and High") {
     Seq(ReasoningEffort.Low -> "low", ReasoningEffort.Medium -> "medium", ReasoningEffort.High -> "high").foreach { (effort, wire) =>
       gptOssBody(CompletionOptions().withReasoning(effort)) shouldBe
-        s"""{"model_id":"openai/gpt-oss-120b","messages":[{"role":"user","content":"x"}],"temperature":0.7,"project_id":"project-1","reasoning_effort":"$wire"}"""
+        s"""{"model_id":"openai/gpt-oss-120b","messages":[{"role":"user","content":"x"}],"project_id":"project-1","reasoning_effort":"$wire"}"""
     }
   }
 
@@ -257,7 +266,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
 
   private def streamedBody(opts: CompletionOptions): String =
     val http = streaming(streamOf(bytes(streamed)))
-    new WatsonXClient(config, httpClient = http).streamComplete(x, opts, _ => ()) shouldBe a[Right[?, ?]]
+    new WatsonXClient(config, httpClient = http).streamComplete(x, opts)(_ => ()) shouldBe a[Right[?, ?]]
     val sent = http.modelRequests.loneElement
     sent.url should include("/ml/v1/text/chat_stream")
     sent.body
@@ -345,7 +354,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
     val opts     = CompletionOptions().withReasoning(ReasoningEffort.Medium)
     val expected = gptOssBody(opts)
     val stream   = streaming(streamOf(bytes(streamed)))
-    new WatsonXClient(gptOss, httpClient = stream).streamComplete(x, opts, _ => ()) shouldBe a[Right[?, ?]]
+    new WatsonXClient(gptOss, httpClient = stream).streamComplete(x, opts)(_ => ()) shouldBe a[Right[?, ?]]
     stream.modelRequests.loneElement.body shouldBe expected
     val http = routed(_ => Right(iamToken()), _ => Right(chatReply))
     new WatsonXClient(gptOss, httpClient = http).complete(x, opts) shouldBe a[Right[?, ?]]

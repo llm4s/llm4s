@@ -206,10 +206,7 @@ class LLMIntegrationSpec extends AnyFlatSpec with Matchers {
       registry <- Llm4sConfig.modelRegistryService()
       given ModelRegistryService = registry
       client <- LLMConnect.getClient(config)
-      completion <- client.streamComplete(
-        Conversation(Seq(UserMessage("Count: 1, 2, 3"))),
-        onChunk = chunk => chunks = chunks :+ chunk
-      )
+      completion <- client.streamComplete(Conversation(Seq(UserMessage("Count: 1, 2, 3"))))(chunk => chunks = chunks :+ chunk)
     } yield completion
 
     result match {

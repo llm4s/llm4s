@@ -33,9 +33,7 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val calls = new AtomicInteger(0)
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       respond(calls.getAndIncrement())
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -44,16 +42,16 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with TestTimeLimit with Matchers
   private def usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
 
   private def answer(text: String): Completion =
-    Completion("answer", Instant.EPOCH, text, "test-model", AssistantMessage(text), usage = usage)
+    Completion("answer", Instant.EPOCH, "test-model", AssistantMessage(text), usage = usage)
 
   /** A model turn that calls a tool no agent has, so the loop goes round again. */
   private def callsMissingTool(n: Int): Result[Completion] =
     val call = ToolCall(s"call-$n", "missing_tool", ujson.Obj())
-    Right(Completion(s"turn-$n", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage))
+    Right(Completion(s"turn-$n", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call)), usage))
 
   private def calling(name: String, id: String): Completion =
     val call = ToolCall(id, name, ujson.Obj("reason" -> "needs the specialist"))
-    Completion(s"turn-$id", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)
+    Completion(s"turn-$id", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call)), usage)
 
   /** An input guardrail that fails (or passes) and records that it ran. */
   final private class Recording(val name: String, passes: Boolean, ran: CopyOnWriteArrayList[String])

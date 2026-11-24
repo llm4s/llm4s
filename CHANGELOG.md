@@ -12,6 +12,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `CompletionOptions.temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are `Option[Double]`, `None` unless set, and no client sends an unset one
+  ([migration](docs/reference/migration.md#completionoptions-sampling-parameters-are-optional-and-unset-ones-are-not-sent-2807)) [#2807](https://github.com/llm4s/llm4s/issues/2807).
+- `Completion` reads `content` and `toolCalls` from its `message`: `apply` takes neither, and `withContent`, `withToolCalls` and `asText` are removed
+  ([migration](docs/reference/migration.md#completion-reads-content-and-toolcalls-from-its-message-2807)) [#2807](https://github.com/llm4s/llm4s/issues/2807).
+- A `Completion` built without a finish reason is `FinishReason.Unknown`, not `Stop`; `Unknown` replaces `FinishReason.Other("")`
+  ([migration](docs/reference/migration.md#a-completion-without-a-finish-reason-is-finishreasonunknown-2807)) [#2807](https://github.com/llm4s/llm4s/issues/2807).
+- `Completion.estimatedCost`, `CostEstimator.estimate`, `UsageSummary.add` and the agent's `recordUsage` take a `BigDecimal` cost, not a `Double`
+  ([migration](docs/reference/migration.md#completionestimatedcost-is-a-bigdecimal-usagesummary-counts-cache-tokens-2807)) [#2807](https://github.com/llm4s/llm4s/issues/2807).
+- `AssistantMessage.contentOpt` is `text`, its stored JSON is flat (the old shape still reads), `AssistantMessage()` no longer compiles and `ToolMessage.findToolCallName` returns an `Option`
+  ([migration](docs/reference/migration.md#assistantmessagetext-and-a-flat-stored-assistant-message-2809)) [#2809](https://github.com/llm4s/llm4s/issues/2809).
+- `Conversation.create` takes one `Seq[Message]`, and `Conversation.empty` is a value
+  ([migration](docs/reference/migration.md#one-conversationcreate-conversationempty-is-a-value-2809)) [#2809](https://github.com/llm4s/llm4s/issues/2809).
+- `ProviderExchange.provider` is a `ProviderId` and `duration` is derived; `ProviderExchangeRecorder.record` takes a `ProviderExchangeCall`; `ProviderExchangeLogging.enabled` is removed
+  ([migration](docs/reference/migration.md#providerexchange-and-providerexchangerecorder-2809)) [#2809](https://github.com/llm4s/llm4s/issues/2809).
+- `MessageRole` is a Scala 3 `enum`: code that used a case as a type (`MessageRole.User.type`) or from Java (`User$.MODULE$`) changes [#2809](https://github.com/llm4s/llm4s/issues/2809).
+- `LLMConnect.fromConfig`, `fromProvider` and the `getClient` overloads taking a `MetricsCollector` are removed: `getClient(config, LlmClientOptions(metrics = m))`
+  ([migration](docs/reference/migration.md#llmconnectgetclient-is-the-one-way-to-get-a-client-2810)) [#2810](https://github.com/llm4s/llm4s/issues/2810).
+- `LLMClient.streamComplete(conversation, options)(onChunk)`: the callback is a second parameter list, in every call and every `LLMClient` implementation
+  ([migration](docs/reference/migration.md#llmclientstreamcomplete-takes-its-callback-in-a-second-parameter-list-2810)) [#2810](https://github.com/llm4s/llm4s/issues/2810).
+- `MetricsRecording.withMetrics` has no defaulted parameters: pass `extractUsage` and `extractCost` [#2810](https://github.com/llm4s/llm4s/issues/2810).
 - The context compression pipeline in `org.llm4s.context` (`ContextManager`, `TokenWindow`, the compressors,
   `SemanticBlocks`, `ArtifactStore`) is `@Experimental`; `ContextManager` is built only with `ContextManager.create`
   (`withDefaults` and the public constructor are gone), `ContextConfig.enableSubjectiveEdits` is removed,
@@ -135,14 +155,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MetricsCollector.recordRetryAttempt`, `recordCircuitBreakerTransition` and `recordError` are removed: `ReliableClient` records
   `ReliabilityMetrics.Retries`, `CircuitBreakerTransitions` and `Errors` through `increment`, so a collector that overrode them overrides `increment`;
   [migration](docs/reference/migration.md#reliableclients-metrics-are-generic-metrics-2801).
+- `MetricsCollector.observeImageGeneration` and `recordImageGenerationCost` are removed, with `MicrometerMetrics.Names`' five image constants: the image metrics are `ImageMetrics` in `llm4s-image`, recorded through `increment`/`observe`; the exported series are unchanged;
+  [migration](docs/reference/migration.md#image-metrics-are-imagemetrics-in-llm4s-image-2801).
 - `Tracing` has one abstract method, `traceEvent(TraceEvent)`: `traceToolCall`, `traceError`, `traceCompletion` and `traceTokenUsage` are `final`
   (delete your overrides), `traceToolCall` takes the call's `duration` and `success`, `shutdown()` is `close()` (`Tracing` is `AutoCloseable`), the `TracingComposer`
   trait is gone (the object stays) and the tracing mode `print` is no longer read; [migration](docs/reference/migration.md#tracing-has-one-abstract-method-2799).
+- `Tracing.create` is removed (`Tracing.fromSettings` is the only factory; write the `NoOpTracing` fallback yourself), `TracingMode.fromString("otel")` is `Named("otel")` (the alias is `llm4s-observability-otel`'s), `TracingBackends.find` returns `Result[Option[TracingBackend]]`, and two discovered backends for one mode are an error, not "the later wins";
+  [migration](docs/reference/migration.md#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799).
 - Langfuse traces are private: `LangfuseTracing` sent every trace `public: true` and as user `llm4s-user`; it now sends
   `public: false` unless `llm4s.tracing.langfuse.public = true`, and the run's own user or none;
   [migration](docs/reference/migration.md#langfuse-traces-are-private-and-name-the-runs-user-2828).
 - `ReliableClient` refuses a call on an open circuit with `CircuitOpenError`, not `ServiceError(503, "circuit-breaker")`; `RateLimitConfig.default` is disabled like `RateLimitConfig()`; `ReliabilityConfig.withoutDeadline` and the instance `disabled` are removed
   ([migration](docs/reference/migration.md#an-open-circuit-is-a-circuitopenerror-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- `new ReliableClient(...)` no longer compiles: the constructor is private. Use `ReliableClient(client, name, config)` and `.withMetrics(collector)`; the `clock` and `sleep` parameters are no longer public
+  ([migration](docs/reference/migration.md#reliableclient-has-a-private-constructor-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
 - `RegexSafetyManager.safeCompile` and `safeFind` return `Result` (a `ValidationError`), not `Either[String, _]`; `safeFind`'s `maxSteps`, `safeMatches`, `compileLiteralCaseInsensitive`, `replaceAllLiteral`, `replaceFirstLiteral` and `RegexComplexityException` are removed
   ([migration](docs/reference/migration.md#regexsafetymanager-returns-result-2825)) [#2825](https://github.com/llm4s/llm4s/issues/2825).
 - `SecretPatterns` (`SecretType`, `SecretMatch`) moved from `org.llm4s.util` in `llm4s-core` to `org.llm4s.agent.guardrails.patterns` in `llm4s-agent`; `redactAllWithPlaceholder` and `SecretMatch`'s setters are removed, and `SecretType.PrivateKeyPem` matches the whole key
@@ -212,6 +238,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Changed** No client sends `temperature`, `top_p` or a penalty the caller did not set (OpenAI, the OpenAI-compatible providers, Anthropic, Gemini, Vertex AI, Bedrock, Ollama, watsonx, Perplexity); Jlama, whose engine needs a temperature, uses `0.7` when none is set. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Changed** A provider module's client reports `FinishReason.Unknown` where it read no finish reason, and Perplexity ignores a reported cost that is not a number in favour of the estimate. [#2807](https://github.com/llm4s/llm4s/issues/2807)
 - **Fixed** A key xAI refuses (HTTP 400) is an `AuthenticationError`, not a `ValidationError` ([#2855](https://github.com/llm4s/llm4s/issues/2855)).
 - **Changed** `HttpErrorMapper.mapHttpError` is `toError`, returning the `LLMError`; `ToolCallRules`, `PartEncoding`
   and `HttpErrorMapper.mapStreamError` are public; `StreamingToolArgumentParser` is removed
@@ -292,6 +320,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Java & Kotlin APIs
 
+- **Changed** `JCompletionOptions.temperature()`, `topP()`, `presencePenalty()` and `frequencyPenalty()` return `OptionalDouble`, empty when unset. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Added** `JUsageSummary.cachedTokens()`, `cacheCreationTokens()` and the same on `JModelUsage`. [#2807](https://github.com/llm4s/llm4s/issues/2807)
 - **Added** `JThinking` (`off()`, `adaptive()`, `budget(n)`) and `JCompletionOptions.Builder.thinking`, the Kotlin
   `completionOptions { thinking = ... }` property, and `JReasoningEffort.MINIMAL`, `XHIGH` and `MAX`, replacing
   `budgetTokens` and `NONE` ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4) [#2115](https://github.com/llm4s/llm4s/issues/2115).
@@ -300,6 +330,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
+- **Changed** `CompletionOptions.temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are `Option[Double]`, `None` unless set; every client sends a sampling parameter only when the caller set it, and a set one that a model cannot take is reported as a `RequestAdjustment` whatever its value (an explicit value equal to the old default used to go unreported). [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Changed** `Completion.content` and `Completion.toolCalls` are read from `Completion.message` instead of being stored beside it, so they cannot disagree with it. **Removed** `Completion.withContent`, `withToolCalls` and `asText`. **Fixed** a completion assembled from a stream reports its tool calls on `toolCalls`, which each client used to copy over by hand. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Added** `FinishReason.Unknown`, what a `Completion` carries when the client read no reason; `Completion.apply` defaults to it instead of `Stop`, and it replaces `FinishReason.Other("")`. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Changed** `Completion.estimatedCost` and `CostEstimator.estimate` are `BigDecimal`: a cost is exact and sums of costs do not drift. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Added** `UsageSummary.cachedTokens` and `cacheCreationTokens`, and the same on `ModelUsage`: what a prompt cache read and wrote, added up across a run. A summary stored before they existed reads with both at zero. [#2807](https://github.com/llm4s/llm4s/issues/2807)
+- **Changed** `AssistantMessage.contentOpt` is `text`, and an assistant message's stored JSON is flat like the other roles' (`content`, `toolCalls`); JSON of the old nested shape still reads, and thinking bindings made before stay valid. `AssistantMessage`'s text has no default; `ToolMessage.findToolCallName` returns an `Option`. [#2809](https://github.com/llm4s/llm4s/issues/2809)
+- **Changed** `Conversation.create` takes one `Seq[Message]`; `Conversation.empty` is a value. `Message.validateConversation` and `Message.assistant` take a `Seq`. [#2809](https://github.com/llm4s/llm4s/issues/2809)
+- **Changed** `ProviderExchange.provider` is a `ProviderId` and its `duration` is derived from its two instants; `ProviderExchangeRecorder.record` takes one `ProviderExchangeCall` (**Added**) in place of eleven parameters. **Removed** `ProviderExchangeLogging.enabled`. [#2809](https://github.com/llm4s/llm4s/issues/2809)
+- **Changed** `MessageRole` is a Scala 3 `enum`. The derived JSON of `FinishReason`, `ServiceTier`, `RequestOption` and `RequestAdjustment`, which durable agent events store, is pinned by tests. [#2809](https://github.com/llm4s/llm4s/issues/2809)
+- **Changed** `LLMConnect.getClient(config, options = LlmClientOptions.default)` and `getClient(provider, config, options)` are the only entry points. **Removed** `LLMConnect.fromConfig`, `fromProvider` and the `MetricsCollector` overloads. [#2810](https://github.com/llm4s/llm4s/issues/2810)
+- **Changed** `LLMClient.streamComplete(conversation, options)(onChunk)`: the callback has its own parameter list, so the default options are reachable without named arguments. `MetricsRecording.withMetrics` has no defaulted parameters. [#2810](https://github.com/llm4s/llm4s/issues/2810)
 - **Changed** The context compression pipeline (`ContextManager`, `ContextConfig`, `ContextStep`,
   `ManagedConversation`, `TokenWindow`, `DeterministicCompressor`, `ToolOutputCompressor`, `LLMCompressor`,
   `HistoryCompressor`, `SemanticBlocks`, `ArtifactStore`) is `@Experimental`; token counting stays `@Stable`.
@@ -361,9 +402,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `ReliableClient`'s fast-fail on an open circuit was a retryable 503, so an outer retry repeated it, and several callers arriving after the recovery time all probed the service; it is a `CircuitOpenError` carrying `retryAfter` that no retry rule repeats, and exactly one caller probes
   ([migration](docs/reference/migration.md#an-open-circuit-is-a-circuitopenerror-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
 - **Added** `ReliabilityConfig.validate` (and `CircuitBreakerConfig.validate`, `RateLimitConfig.validate`): a `failureThreshold` or `burstCapacity` below 1 or a negative `requestsPerMinute` is a `ValidationError`, which a `ReliableClient` returns from every call [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- **Changed** `ReliableClient`'s constructor is private: build one with `ReliableClient(underlying, providerName, config)` (`config` defaults to `ReliabilityConfig.default`) and add a collector with `.withMetrics(collector)`
+  ([migration](docs/reference/migration.md#reliableclient-has-a-private-constructor-2797)) [#2797](https://github.com/llm4s/llm4s/issues/2797).
+- **Changed** A `TracingBackend` declares its own `aliases`, and `llm4s-observability-otel` declares `otel`, which core's mode parser no longer names; `TRACING_MODE=otel` works as before. Two backends answering to one name are a `ConfigurationError` naming both
+  ([migration](docs/reference/migration.md#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799)) [#2799](https://github.com/llm4s/llm4s/issues/2799).
+- **Removed** `Tracing.create`, which logged a missing or failing backend and returned `NoOpTracing`: `Tracing.fromSettings` returns the error
+  ([migration](docs/reference/migration.md#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799)) [#2799](https://github.com/llm4s/llm4s/issues/2799).
+- **Changed** `Secret`'s Scaladoc and the security guide state the registry contract (`Secret(value)` is never evicted, `Secret.token(value)` may be past 4096 values, so a per-tenant or per-request key is a `Secret.token`), and the over-cap warning names that cause
+  ([migration](docs/reference/migration.md#secret-or-secrettoken-which-one-stays-registered-2824)) [#2824](https://github.com/llm4s/llm4s/issues/2824).
 - **Fixed** `RegexSafetyManager.safeCompile` refused every quantified alternation, so `RegexValidator("(foo|bar)+")` failed every value and a `FileBackend`'s or the workspace's regex search for `(jpg|png)*` was refused or run as a literal; only overlapping alternatives such as `(a|ab)*` are refused now
   ([migration](docs/reference/migration.md#regexsafetymanager-returns-result-2825)) [#2825](https://github.com/llm4s/llm4s/issues/2825).
-- **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
+- **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`, and `Unknown` where the client read none, which is also what a `Completion` built without one carries), on `complete` and in
   traces too, and on each agent call's `ModelCallCompleted` (an event stored before reads with none, a reason this version cannot read as `Other(raw)`), mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider, in place of `assertStreams`
   ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1, 2, 5 and 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
 - **Changed** with `Completion.finishReason` (#2613): Ollama reads `done_reason` instead of reporting `stop` for every finished reply,
@@ -508,6 +557,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Observability
 
+- **Changed** The OpenTelemetry request attributes `gen_ai.request.temperature`, `top_p` and the penalties are set only when the caller set the option. [#2807](https://github.com/llm4s/llm4s/issues/2807)
 - **Changed** `TraceId` is `org.llm4s.trace.model.TraceId` in `llm4s-observability`, its only user; it was in
   `org.llm4s.types` in `llm4s-core` ([#2822](https://github.com/llm4s/llm4s/issues/2822)).
 - **Changed** `llm4s.agent.runs.ended` and `llm4s.agent.run.duration` report the status the run's trace does: a guardrail
@@ -524,6 +574,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `PrometheusMetrics` dropped `ReliableClient`'s retries, circuit-breaker transitions and errors: they are now generic metrics
   (`org.llm4s.reliability.ReliabilityMetrics`) that every backend exports, as `llm4s_retries_total`, `llm4s_circuit_breaker_transitions_total`
   and `llm4s_reliability_errors_total` [#2801](https://github.com/llm4s/llm4s/issues/2801).
+- **Changed** The image generation metrics are `ImageMetrics` in `llm4s-image`, generic metrics every backend exports; `MetricsCollector` has no image method. Every exported series keeps its name, type, labels and buckets, pinned by `ImageMetricsSeriesSpec`
+  ([migration](docs/reference/migration.md#image-metrics-are-imagemetrics-in-llm4s-image-2801)) [#2801](https://github.com/llm4s/llm4s/issues/2801).
+- **Added** `MetricsCollector.Errors`, the failed-operations counter (`llm4s_errors_total`) as a `Metric`, so a module above core adds its failed operations to it [#2801](https://github.com/llm4s/llm4s/issues/2801).
 - **Fixed** Langfuse traces were created public - readable, messages included, by anyone holding a trace's URL - and all as user
   `llm4s-user`: they are private unless `llm4s.tracing.langfuse.public = true`, and `userId` is the run's `RunConfig.principal`
   (new `TraceEvent.AgentRunEnded.userId`), or not sent [#2828](https://github.com/llm4s/llm4s/issues/2828).
@@ -537,6 +590,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** Scalafix rules `SamplingOptionsOptional`, `CompletionFromMessage`, `MessageAndConversationShapes` and `ClientEntryPoints`, part of `Llm4sMigrate_1_0` ([#2807](https://github.com/llm4s/llm4s/issues/2807), [#2809](https://github.com/llm4s/llm4s/issues/2809), [#2810](https://github.com/llm4s/llm4s/issues/2810)). `PositionalPatternsGainFields` no longer covers `Completion`, whose extractor also lost two fields.
 - **Changed** The scalafix rule `ResultSyntaxMoved` also rewrites the imports of `TokenizerId`, `EmbeddingError`
   and `TraceId` to where they moved ([#2818](https://github.com/llm4s/llm4s/issues/2818),
   [#2808](https://github.com/llm4s/llm4s/issues/2808), [#2822](https://github.com/llm4s/llm4s/issues/2822)).

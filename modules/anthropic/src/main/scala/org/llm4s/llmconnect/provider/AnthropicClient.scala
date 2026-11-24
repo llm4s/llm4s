@@ -1,4 +1,5 @@
 package org.llm4s.llmconnect.provider
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
@@ -317,9 +318,7 @@ curl https://api.anthropic.com/v1/messages \
     "messages": [{"role": "user", "content": "What is the weather like in San Francisco?"}]
 }'
    */
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
@@ -535,7 +534,7 @@ curl https://api.anthropic.com/v1/messages \
                   id = currentMessageId.getOrElse(""),
                   content = None,
                   toolCall = None,
-                  finishReason = Some(stopReason.fold(FinishReason.Other(""))(AnthropicClient.finishReason))
+                  finishReason = Some(stopReason.fold(FinishReason.Unknown)(AnthropicClient.finishReason))
                 )
                 accumulator.addChunk(chunk)
                 onChunk(chunk)
@@ -678,7 +677,7 @@ curl https://api.anthropic.com/v1/messages \
         // only the paired calls; dropping one unseals the thinking, which then stays out
         val am             = pairing.replayable(index, original)
         val calls          = am.toolCalls
-        val text           = am.contentOpt.filter(_.nonEmpty)
+        val text           = am.text.filter(_.nonEmpty)
         val sealedThinking = AnthropicClient.thinkingBlockParams(am.thinking)
         if (calls.isEmpty && text.isEmpty) {
           // nothing to send: every tool call went unanswered, and thinking cannot stand alone
@@ -846,7 +845,7 @@ curl https://api.anthropic.com/v1/messages \
         else None
       }
 
-      val message = AssistantMessage(contentOpt = textContent, toolCalls = toolCalls, thinking = thinking)
+      val message = AssistantMessage(text = textContent, toolCalls = toolCalls, thinking = thinking)
 
       // Extract token usage, including thinking tokens if available
       val usage = response.usage()
@@ -872,9 +871,7 @@ curl https://api.anthropic.com/v1/messages \
       // Create completion
       Completion(
         id = response.id(),
-        content = message.content,
         model = response.model().asString(),
-        toolCalls = toolCalls.toList,
         created = Instant.now(),
         message = message,
         usage = Some(tokenUsage),
@@ -883,7 +880,7 @@ curl https://api.anthropic.com/v1/messages \
         servedTier = AnthropicServiceTier.served(usage),
         finishReason = AnthropicClient
           .rawStopReason(response.stopReason())
-          .fold(FinishReason.Other(""))(
+          .fold(FinishReason.Unknown)(
             AnthropicClient.finishReason
           )
       )
@@ -944,7 +941,7 @@ curl https://api.anthropic.com/v1/messages \
     thinks: Boolean
   ): Unit =
     if (modelSupportsTemperature && !thinks)
-      builder.temperature(options.temperature.doubleValue())
+      options.temperature.foreach(t => builder.temperature(t.doubleValue()))
 
   /**
    * Whether `config.model` accepts the (deprecated) `temperature` sampling parameter.
@@ -979,13 +976,15 @@ curl https://api.anthropic.com/v1/messages \
     result: Result[?]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(config.model.asString),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = responseBody,
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(config.model.asString),
+        responseBody = responseBody
+      ),
+      result
     )
 
   /**
@@ -1038,6 +1037,7 @@ object AnthropicClient {
     case "end_turn" | "stop_sequence"                   => FinishReason.Stop
     case "tool_use"                                     => FinishReason.ToolCalls
     case "max_tokens" | "model_context_window_exceeded" => FinishReason.Length
+    case ""                                             => FinishReason.Unknown
     case other                                          => FinishReason.Other(other)
   }
 

@@ -43,8 +43,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
       body("model").str shouldBe "perplexity/sonar"
       body("input") shouldBe ujson.Arr(ujson.Obj("type" -> "message", "role" -> "user", "content" -> "Hello"))
       body("tools") shouldBe ujson.Arr(ujson.Obj("type" -> "web_search"))
-      body("temperature").num shouldBe CompletionOptions().temperature
-      body.obj.keySet should contain noneOf ("stream", "max_output_tokens", "top_p", "reasoning", "instructions")
+      body.obj.keySet should contain noneOf ("stream", "max_output_tokens", "temperature", "top_p", "reasoning", "instructions")
     }
 
     "join a base URL that already ends in /v1, and send the section's headers without letting them replace the key" in {
@@ -110,7 +109,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
 
     "send a tool result for an unknown call without a name, and drop an empty assistant turn" in {
       val conversation =
-        Conversation(Seq(UserMessage("q"), AssistantMessage(contentOpt = None), ToolMessage("r", "call_x")))
+        Conversation(Seq(UserMessage("q"), AssistantMessage(text = None), ToolMessage("r", "call_x")))
       val (http, _) = completeWith(response(s"[${textMessage("ok")}]"), conversation)
       http.lastBody("input").arr.map(_("type").str) shouldBe Seq("message", "function_call_output")
       http.lastBody("input")(1).obj.keySet should not contain "name"
@@ -324,7 +323,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
 
     "report Other(\"\") for a reply with no status, since no reason was read" in {
       completeWith(s"""{"id":"r","output":[${textMessage("done")}]}""")._2.map(_.finishReason) shouldBe
-        Right(FinishReason.Other(""))
+        Right(FinishReason.Unknown)
     }
 
     "fail a failed response with Perplexity's code and message, and any other unfinished status" in {

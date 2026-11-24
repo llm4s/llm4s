@@ -44,7 +44,7 @@ class SchemaGuidedExtractor(llmClient: LLMClient) {
     )
 
     llmClient
-      .complete(conversation, CompletionOptions(temperature = 0.0))
+      .complete(conversation, CompletionOptions(temperature = Some(0.0)))
       .flatMap(completion => GraphJsonParser.parse(completion.content, "schema_guided_extraction"))
   }
 

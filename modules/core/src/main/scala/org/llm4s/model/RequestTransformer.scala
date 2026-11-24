@@ -185,39 +185,41 @@ final private[model] class DefaultRequestTransformer(
   ): List[Violation] = {
     val disallowed = capabilities.disallowedParams.getOrElse(Set.empty)
 
-    val temperature = capabilities.temperatureConstraint.collect {
-      case (min, max) if options.temperature < min || options.temperature > max =>
-        Violation(
-          _.withTemperature(min),
-          RequestAdjustment.Adjusted(
-            RequestOption.Temperature,
-            options.temperature.toString,
-            min.toString,
-            s"allowed range for $modelId is $min-$max"
-          ),
-          Some(s"Temperature ${options.temperature} not allowed for $modelId (must be between $min and $max)")
-        )
-    }
+    // a sampling option the caller left unset is not sent, so there is nothing to adjust or drop
+    val temperature = for {
+      (min, max) <- capabilities.temperatureConstraint
+      requested  <- options.temperature
+      if requested < min || requested > max
+    } yield Violation(
+      _.withTemperature(min),
+      RequestAdjustment.Adjusted(
+        RequestOption.Temperature,
+        requested.toString,
+        min.toString,
+        s"allowed range for $modelId is $min-$max"
+      ),
+      Some(s"Temperature $requested not allowed for $modelId (must be between $min and $max)")
+    )
 
-    val topP = Option.when(disallowed.contains("top_p") && options.topP != 1.0)(
+    val topP = Option.when(disallowed.contains("top_p") && options.topP.isDefined)(
       Violation(
-        _.withTopP(1.0),
+        _.withTopP(None),
         RequestAdjustment.Dropped(RequestOption.TopP, s"top_p not supported for $modelId"),
         Some(s"top_p parameter not supported for $modelId")
       )
     )
 
-    val presencePenalty = Option.when(disallowed.contains("presence_penalty") && options.presencePenalty != 0.0)(
+    val presencePenalty = Option.when(disallowed.contains("presence_penalty") && options.presencePenalty.isDefined)(
       Violation(
-        _.withPresencePenalty(0.0),
+        _.withPresencePenalty(None),
         RequestAdjustment.Dropped(RequestOption.PresencePenalty, s"presence_penalty not supported for $modelId"),
         Some(s"presence_penalty parameter not supported for $modelId")
       )
     )
 
-    val frequencyPenalty = Option.when(disallowed.contains("frequency_penalty") && options.frequencyPenalty != 0.0)(
+    val frequencyPenalty = Option.when(disallowed.contains("frequency_penalty") && options.frequencyPenalty.isDefined)(
       Violation(
-        _.withFrequencyPenalty(0.0),
+        _.withFrequencyPenalty(None),
         RequestAdjustment.Dropped(RequestOption.FrequencyPenalty, s"frequency_penalty not supported for $modelId"),
         Some(s"frequency_penalty parameter not supported for $modelId")
       )

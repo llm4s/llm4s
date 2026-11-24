@@ -93,7 +93,7 @@ class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
       withClue(raw) {
         val chunks = ListBuffer.empty[StreamedChunk]
         withServer("/v1/messages")(sendSseResponse(_, stream(raw))) { baseUrl =>
-          clientAt(baseUrl).streamComplete(hi, onChunk = chunks += _).map(_.finishReason) shouldBe Right(reason)
+          clientAt(baseUrl).streamComplete(hi)(chunks += _).map(_.finishReason) shouldBe Right(reason)
         }
         chunks.flatMap(_.finishReason).toList shouldBe List(reason)
       }
@@ -103,7 +103,7 @@ class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
   it should "fail a refusal, keeping the text already delivered, with the usage" in {
     val chunks = ListBuffer.empty[StreamedChunk]
     withServer("/v1/messages")(sendSseResponse(_, stream("refusal"))) { baseUrl =>
-      clientAt(baseUrl).streamComplete(hi, onChunk = chunks += _) match {
+      clientAt(baseUrl).streamComplete(hi)(chunks += _) match {
         case Left(e: ContentFilteredError) =>
           e.message should include("after 3 characters")
           e.usage.map(u => (u.promptTokens, u.completionTokens)) shouldBe Some((9, 4))
@@ -127,7 +127,7 @@ class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
       withClue(s"$upTo events") {
         val chunks = ListBuffer.empty[StreamedChunk]
         withServer("/v1/messages")(sendSseResponse(_, streamUpTo(upTo))) { baseUrl =>
-          clientAt(baseUrl).streamComplete(hi, onChunk = chunks += _) match {
+          clientAt(baseUrl).streamComplete(hi)(chunks += _) match {
             case Left(e: NetworkError) => e.message should include("message_stop")
             case other                 => fail(s"expected a NetworkError, got $other")
           }
@@ -140,7 +140,7 @@ class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
   it should "fail on an error event with the error its type stands for, keeping the text delivered" in {
     val chunks = ListBuffer.empty[StreamedChunk]
     withServer("/v1/messages")(sendSseResponse(_, streamUpTo(3, errorEvent("overloaded_error")))) { baseUrl =>
-      clientAt(baseUrl).streamComplete(hi, onChunk = chunks += _) match {
+      clientAt(baseUrl).streamComplete(hi)(chunks += _) match {
         case Left(e: ServiceError) =>
           e.httpStatus shouldBe 529
           e.message should include("Overloaded")
@@ -149,13 +149,13 @@ class AnthropicFinishReasonSpec extends AnyFlatSpec with Matchers {
     }
     chunks.flatMap(_.content).mkString shouldBe "Hel"
     withServer("/v1/messages")(sendSseResponse(_, streamUpTo(1, errorEvent("rate_limit_error")))) { baseUrl =>
-      clientAt(baseUrl).streamComplete(hi, onChunk = _ => ()) match {
+      clientAt(baseUrl).streamComplete(hi)(_ => ()) match {
         case Left(e: RateLimitError) => e.message should include("Overloaded") // the provider's message, kept
         case other                   => fail(s"expected a RateLimitError, got $other")
       }
     }
     withServer("/v1/messages")(sendSseResponse(_, streamUpTo(1, errorEvent("brand_new_error")))) { baseUrl =>
-      clientAt(baseUrl).streamComplete(hi, onChunk = _ => ()) match {
+      clientAt(baseUrl).streamComplete(hi)(_ => ()) match {
         case Left(e: ServiceError) => e.httpStatus shouldBe 502
         case other                 => fail(s"expected a ServiceError, got $other")
       }

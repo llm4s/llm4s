@@ -135,11 +135,9 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
       delegate.complete(conversation, options)
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
-    ): Result[Completion] = delegate.streamComplete(conversation, options, onChunk)
+    ): Result[Completion] = delegate.streamComplete(conversation, options)(onChunk)
 
     override def getContextWindow(): Int     = delegate.getContextWindow()
     override def getReserveCompletion(): Int = delegate.getReserveCompletion()

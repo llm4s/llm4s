@@ -192,15 +192,12 @@ object LLMClientZConcurrencySpec extends ZIOSpecDefault {
               Completion(
                 id = "id",
                 created = Instant.EPOCH,
-                content = key,
                 model = "m",
                 message = AssistantMessage(Some(key))
               )
             )
           }
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = {
             val key = c.messages.head.content

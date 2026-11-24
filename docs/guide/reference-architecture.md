@@ -210,7 +210,7 @@ calls:
 
 ```scala
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
+import org.llm4s.llmconnect.{ LLMClient, LLMConnect, LlmClientOptions }
 import org.llm4s.metrics.CostTracker
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.reliability.{ RateLimitConfig, ReliabilityConfig, ReliableClient, RetryPolicy }
@@ -232,8 +232,8 @@ def reliableClient(section: String): Result[LLMClient] =
     config   <- Llm4sConfig.provider(ProviderName(section))
     registry <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
-    client <- LLMConnect.getClient(config, costs)
-  yield new ReliableClient(client, section, reliability, Some(costs))
+    client <- LLMConnect.getClient(config, LlmClientOptions(metrics = costs))
+  yield ReliableClient(client, section, reliability).withMetrics(costs)
 ```
 
 For a second region or provider, add a section beside `gateway` (here a gateway in another region; it could as well

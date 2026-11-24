@@ -17,7 +17,6 @@ class LLMClientAutoCloseableSpec extends AnyFlatSpec with Matchers {
   private val stubCompletion = Completion(
     id = "test-1",
     created = Instant.EPOCH,
-    content = "ok",
     model = "test",
     message = AssistantMessage("ok")
   )
@@ -31,9 +30,7 @@ class LLMClientAutoCloseableSpec extends AnyFlatSpec with Matchers {
       options: CompletionOptions
     ): Result[Completion] = Right(stubCompletion)
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Right(stubCompletion)
 

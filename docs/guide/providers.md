@@ -998,8 +998,8 @@ val dflt: Result[ProviderConfig]  = Llm4sConfig.defaultProvider()
 
 It sends the plain chat-completions format and reads the plain reply: text, **streaming**,
 **tool calling** (streamed and not), `response_format` for JSON output, and token usage. Every
-request carries `temperature` and `top_p`; `max_tokens` is sent when set, and
-`presence_penalty` and `frequency_penalty` only when non-zero. It never sends `stop` or
+request carries `temperature`, `top_p`, `max_tokens`, `presence_penalty` and `frequency_penalty` only
+when you set them, so an unset one is the endpoint's own default. It never sends `stop` or
 `tool_choice`. Whether a feature works also depends on the endpoint and the
 model: tool calling on a local server usually needs a server flag, as the recipes note.
 

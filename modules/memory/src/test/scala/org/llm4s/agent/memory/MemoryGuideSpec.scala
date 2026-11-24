@@ -302,7 +302,6 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
         Completion(
           id = "canned",
           created = Instant.EPOCH,
-          content = reply,
           model = "canned",
           message = AssistantMessage(reply),
           usage = None
@@ -310,9 +309,7 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

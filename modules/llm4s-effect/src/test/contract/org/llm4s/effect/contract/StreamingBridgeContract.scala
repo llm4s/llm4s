@@ -241,7 +241,7 @@ object StreamingBridgeContract {
   /** What `client` streams when called directly. */
   def directChunks(client: LLMClient): Vector[StreamedChunk] = {
     val chunks = new CopyOnWriteArrayList[StreamedChunk]()
-    client.streamComplete(conversation, CompletionOptions(), c => chunks.add(c): Unit)
+    client.streamComplete(conversation, CompletionOptions())(c => chunks.add(c): Unit)
     chunks.asScala.toVector
   }
 
@@ -270,9 +270,7 @@ object StreamingBridgeContract {
   /** Streams `chunks`, then fails with `error`. */
   final class FailingMidStream(chunks: Vector[StreamedChunk], error: LLMError) extends LLMClient {
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = Left(error)
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       chunks.foreach(onChunk)
@@ -294,20 +292,18 @@ object StreamingBridgeContract {
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       delegate.complete(conversation, options)
 
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       val result = delegate.streamComplete(
         conversation,
-        options,
-        chunk =>
-          if (!stopped.get()) {
-            val delivered = !Thread.currentThread().isInterrupted &&
-              CancelledError.catchInterrupt(scala.util.Try(onChunk(chunk))).exists(_.isSuccess)
-            if (delivered) emitted.incrementAndGet(): Unit else stopped.set(true)
-          }
+        options
+      )(chunk =>
+        if (!stopped.get()) {
+          val delivered = !Thread.currentThread().isInterrupted &&
+            CancelledError.catchInterrupt(scala.util.Try(onChunk(chunk))).exists(_.isSuccess)
+          if (delivered) emitted.incrementAndGet(): Unit else stopped.set(true)
+        }
       )
       ended.countDown()
       if (stopped.get()) Left(CancelledError("counting stream")) else result
@@ -336,12 +332,10 @@ object StreamingBridgeContract {
 
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       parked(delegate.complete(conversation, options))
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
-      parked(delegate.streamComplete(conversation, options, onChunk))
+      parked(delegate.streamComplete(conversation, options)(onChunk))
     def getContextWindow(): Int     = delegate.getContextWindow()
     def getReserveCompletion(): Int = delegate.getReserveCompletion()
   }

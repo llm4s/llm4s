@@ -54,7 +54,7 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
       val chunks = ListBuffer.empty[StreamedChunk]
       val completion =
         new MistralClient(config(baseUrl))
-          .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), chunks += _)
+          .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(chunks += _)
           .value
 
       completion.content shouldBe "Bonjour le monde"
@@ -84,7 +84,7 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
     } { baseUrl =>
       val chunks = ListBuffer.empty[StreamedChunk]
       val completion = new MistralClient(config(baseUrl))
-        .streamComplete(Conversation(Seq(UserMessage("Weather in Paris?"))), CompletionOptions(), chunks += _)
+        .streamComplete(Conversation(Seq(UserMessage("Weather in Paris?"))), CompletionOptions())(chunks += _)
         .value
 
       completion.toolCalls.map(tc => (tc.id, tc.name, tc.arguments)) shouldBe
@@ -111,7 +111,7 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
     } { baseUrl =>
       val chunks = ListBuffer.empty[StreamedChunk]
       val completion = new MistralClient(config(baseUrl).withModel(ModelName("magistral-small-latest")))
-        .streamComplete(Conversation(Seq(UserMessage("2+2?"))), CompletionOptions(), chunks += _)
+        .streamComplete(Conversation(Seq(UserMessage("2+2?"))), CompletionOptions())(chunks += _)
         .value
 
       completion.content shouldBe "It is 4."
@@ -128,14 +128,14 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
       sendJsonResponse(exchange, 429, """{"message":"Requests rate limit exceeded"}""")
     } { baseUrl =>
       var chunks = 0
-      val result = new MistralClient(config(baseUrl), exchangeLogging = ProviderExchangeLogging.enabled(sink))
-        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => chunks += 1)
+      val result = new MistralClient(config(baseUrl), exchangeLogging = ProviderExchangeLogging.Enabled(sink))
+        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => chunks += 1)
 
       result.left.value shouldBe a[RateLimitError]
       chunks shouldBe 0
     }
     recorded should have size 1
-    recorded.head.provider shouldBe "mistral"
+    recorded.head.provider.asString shouldBe "mistral"
     recorded.head.responseBody shouldBe Some("""{"message":"Requests rate limit exceeded"}""")
   }
 
@@ -146,7 +146,7 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
       Seq(baseUrl, s"$baseUrl/", s"$baseUrl/v1", s"$baseUrl/v1/").foreach { url =>
         withClue(url) {
           new MistralClient(config(url))
-            .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+            .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
             .value
             .content shouldBe "ok"
         }

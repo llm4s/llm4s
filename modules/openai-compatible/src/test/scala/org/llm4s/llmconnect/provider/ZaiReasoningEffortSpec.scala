@@ -58,7 +58,7 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
     withServer("/chat/completions") { exchange =>
       sent.set(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8))
       sendSseResponse(exchange, openAISseBody(Seq("No."), model))
-    }(baseUrl => zai(baseUrl).streamComplete(conversation, options, _ => ()).isRight shouldBe true)
+    }(baseUrl => zai(baseUrl).streamComplete(conversation, options)(_ => ()).isRight shouldBe true)
     val streamBody = ujson.read(sent.get)
     completeBody.obj.contains("stream") shouldBe false
     streamBody("stream").bool shouldBe true

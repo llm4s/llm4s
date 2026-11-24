@@ -27,7 +27,7 @@ exceptions.
 | Model metadata the clients need | `Llm4sConfig.modelRegistryService(): Result[ModelRegistryService]` | `llm4s-core` |
 | Build a client | `LLMConnect.getClient(config: ProviderConfig)(using ModelRegistryService, ProviderRegistry): Result[LLMClient]` | `llm4s-core`, plus the provider's module |
 | One completion | `LLMClient.complete(conversation: Conversation, options: CompletionOptions = CompletionOptions()): Result[Completion]` | `llm4s-core` |
-| A streamed completion | `LLMClient.streamComplete(conversation, options, onChunk: StreamedChunk => Unit): Result[Completion]` | `llm4s-core` |
+| A streamed completion | `LLMClient.streamComplete(conversation, options)(onChunk: StreamedChunk => Unit): Result[Completion]` | `llm4s-core` |
 | An agent with tools | `Agent.builder(id, client)` ... `.build()`, then `agent.run(query): Result[AgentResult]` | `llm4s-agent` |
 
 `ProviderRegistry` has a default given that finds the provider modules on the classpath, so a program brings only a

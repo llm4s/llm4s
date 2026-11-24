@@ -24,15 +24,12 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test",
           created = Instant.EPOCH,
-          content = "[]",
           model = "test",
           message = AssistantMessage("[]")
         )
       )
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

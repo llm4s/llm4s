@@ -6,7 +6,6 @@ package fix.v06
 import org.llm4s.agent.events.ModelCallCompleted
 import org.llm4s.error.ContentFilteredError
 import org.llm4s.agent.graph.toolloop.TurnState
-import org.llm4s.llmconnect.model.Completion
 import org.llm4s.llmconnect.model.CompletionOptions
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.model.ModelCapabilities
@@ -15,10 +14,6 @@ import org.llm4s.rag.RAGConfig
 import org.llm4s.trace.TraceEvent
 
 object PositionalPatternsGainFieldsTest {
-  def summary(completion: Completion): String = completion match {
-    case Completion(id, _, content, _, _, _, _, _, _, _) => s"$id $content"
-  }
-
   def vision(capabilities: ModelCapabilities): Boolean = capabilities match {
     case ModelCapabilities(_, _, vision, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => vision.contains(true)
   }
@@ -50,8 +45,8 @@ object PositionalPatternsGainFieldsTest {
   }
 
   // budgetTokens became thinking and promptCache was appended since 0.6.0 (#2115)
-  def temperature(options: CompletionOptions): Double = options match {
-    case CompletionOptions(temperature, _, _, _, _, _, _, _, _) => temperature
+  def maxTokens(options: CompletionOptions): Option[Int] = options match {
+    case CompletionOptions(_, _, maxTokens, _, _, _, _, _, _) => maxTokens
   }
 
   // gained cut since 0.6.0 (#2613)

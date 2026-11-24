@@ -537,12 +537,10 @@ private[providersetup] object ProviderSetupRuntime:
             )
             val completionResult =
               if useStreaming then
-                scopedClient.streamComplete(
-                  conversation,
-                  onChunk = chunk =>
-                    chunk.content
-                      .filter(_.nonEmpty)
-                      .foreach(text => ctx.publish(Cmd.GCmd(Msg.Global(GlobalMsg.DemoChunkReceived(text)))))
+                scopedClient.streamComplete(conversation)(chunk =>
+                  chunk.content
+                    .filter(_.nonEmpty)
+                    .foreach(text => ctx.publish(Cmd.GCmd(Msg.Global(GlobalMsg.DemoChunkReceived(text)))))
                 )
               else scopedClient.complete(conversation)
 

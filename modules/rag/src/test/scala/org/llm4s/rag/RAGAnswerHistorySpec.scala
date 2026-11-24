@@ -35,14 +35,12 @@ class RAGAnswerHistorySpec extends AnyFlatSpec with Matchers {
   private class RecordingClient extends LLMClient {
     val conversations: mutable.Buffer[Conversation] = mutable.Buffer.empty
     private val answer =
-      Completion(id = "a", created = Instant.EPOCH, content = "42", model = "m", message = AssistantMessage("42"))
+      Completion(id = "a", created = Instant.EPOCH, model = "m", message = AssistantMessage("42"))
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       conversations += conversation
       Right(answer)
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       conversations += conversation

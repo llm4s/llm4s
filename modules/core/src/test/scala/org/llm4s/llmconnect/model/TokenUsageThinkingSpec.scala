@@ -36,7 +36,7 @@ class TokenUsageThinkingSpec extends AnyFlatSpec with Matchers {
       registry.lookup("gpt-5").toOption,
       TokenUsage(1000, 1000, 6000, thinkingTokens = Some(4000))
     )
-    cost.get shouldBe 0.05125 +- 1e-9
+    cost.get.toDouble shouldBe 0.05125 +- 1e-9
   }
 
   it should "price Gemini's thoughts on top of its answer" in {
@@ -45,7 +45,7 @@ class TokenUsageThinkingSpec extends AnyFlatSpec with Matchers {
       registry.lookup("gemini-2.5-flash").toOption,
       TokenUsage(1000, 500, 3500, thinkingTokens = Some(2000))
     )
-    cost.get shouldBe 0.00655 +- 1e-9
+    cost.get.toDouble shouldBe 0.00655 +- 1e-9
   }
 
   it should "price a Gemini reply that only thought, rather than reporting it as free" in {
@@ -54,7 +54,7 @@ class TokenUsageThinkingSpec extends AnyFlatSpec with Matchers {
       registry.lookup("gemini-2.5-flash").toOption,
       TokenUsage(8, 0, 539, thinkingTokens = Some(531))
     )
-    cost.get shouldBe (8 * 3e-7 + 531 * 2.5e-6) +- 1e-9
+    cost.get.toDouble shouldBe (8 * 3e-7 + 531 * 2.5e-6) +- 1e-9
   }
 
 }

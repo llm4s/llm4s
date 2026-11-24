@@ -47,7 +47,7 @@ object RAGASFactory {
       embeddingClient   <- EmbeddingClient.from(embeddingConfig)
       // Last, because it is the one that holds resources: nothing after it can fail and
       // leave it unclosed.
-      llmClient <- LLMConnect.fromConfig(providerCfg)
+      llmClient <- LLMConnect.getClient(providerCfg)
     } yield RAGASEvaluator(llmClient, embeddingClient, embeddingModelCfg)
 
   /**
@@ -134,7 +134,7 @@ object RAGASFactory {
       embeddingClient   <- EmbeddingClient.from(embeddingConfig)
       // Last, because it is the one that holds resources: nothing after it can fail and
       // leave it unclosed.
-      llmClient <- LLMConnect.fromConfig(providerCfg)
+      llmClient <- LLMConnect.getClient(providerCfg)
     } yield RAGASEvaluator.basic(llmClient, embeddingClient, embeddingModelCfg)
 
   // Individual metric factories

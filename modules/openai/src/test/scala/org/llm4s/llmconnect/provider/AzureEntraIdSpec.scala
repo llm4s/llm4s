@@ -175,8 +175,8 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
     } { baseUrl =>
       val tokens = new CountingTokens
       val client = OpenAIClient(AzureConfig.keyless(baseUrl, ModelName("my-deploy"), tokens)).value
-      client.streamComplete(hello, CompletionOptions(), _ => ()).isLeft shouldBe true
-      client.streamComplete(hello, CompletionOptions(), _ => ()).value.content shouldBe "hello"
+      client.streamComplete(hello, CompletionOptions())(_ => ()).isLeft shouldBe true
+      client.streamComplete(hello, CompletionOptions())(_ => ()).value.content shouldBe "hello"
       client.close()
       tokens.invalidated.asScala.toList shouldBe List("token-1")
       authorizations.asScala.toList shouldBe List("Bearer token-1", "Bearer token-2")

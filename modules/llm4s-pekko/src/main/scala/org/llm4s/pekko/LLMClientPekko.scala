@@ -99,7 +99,7 @@ object LLMClientPekko {
       extends Producer[StreamedChunk] {
 
     def run(emitter: Emitter[StreamedChunk]): Either[LLMError, Unit] =
-      client.streamComplete(conversation, options, chunk => emitter.emit(chunk)).map(_ => ())
+      client.streamComplete(conversation, options)(chunk => emitter.emit(chunk)).map(_ => ())
 
     def abandon(): Unit = ()
   }

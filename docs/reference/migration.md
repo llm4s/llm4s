@@ -86,7 +86,377 @@ Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinkin
 [the provider SPI's descriptors, embedding sections and credential suppliers](#provider-spi-one-shape-for-both-descriptors-typed-embedding-sections-credential-suppliers-2811),
 [the Experimental context pipeline and token counters built over a tokenizer](#the-context-pipeline-is-experimental-and-token-counters-are-built-over-a-tokenizer-2818),
 [`Modality` as an enum, multimodal embedding in `llm4s-rag` and a final `EmbeddingClient`](#modality-is-an-enum-multimodal-embedding-lives-in-llm4s-rag-and-embeddingclient-is-final-2808),
-and [opaque newtypes in `org.llm4s.types`](#newtypes-in-orgllm4stypes-are-opaque-and-headroompercent-is-always-valid-2822).
+[opaque newtypes in `org.llm4s.types`](#newtypes-in-orgllm4stypes-are-opaque-and-headroompercent-is-always-valid-2822),
+[`ReliableClient`'s private constructor](#reliableclient-has-a-private-constructor-2797),
+[tracing backend aliases and the removal of `Tracing.create`](#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799),
+[image metrics as `ImageMetrics` in `llm4s-image`](#image-metrics-are-imagemetrics-in-llm4s-image-2801)
+and [which of `Secret` and `Secret.token` stays registered](#secret-or-secrettoken-which-one-stays-registered-2824).
+
+## `ReliableClient` has a private constructor (#2797)
+
+`ReliableClient`'s constructor is private, so that a setting can be added to it without breaking a caller. Build one
+with the companion's `apply` (`config` defaults to `ReliabilityConfig.default`) and add a collector with `withMetrics`.
+The `clock` and `sleep` parameters were test seams and are no longer public.
+
+| Before | After |
+|---|---|
+| `new ReliableClient(client, "openai", config)` | `ReliableClient(client, "openai", config)` |
+| `new ReliableClient(client, "openai", ReliabilityConfig.default)` | `ReliableClient(client, "openai")`, or as before without `new` |
+| `new ReliableClient(client, "openai", config, Some(metrics))` | `ReliableClient(client, "openai", config).withMetrics(metrics)` |
+| `new ReliableClient(client, "openai", config, None)` | `ReliableClient(client, "openai", config)` |
+| `new ReliableClient(client, "p", config, sleep = _ => ())`, in a test that must not wait | give the config a short delay: `config.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis))` |
+| `new ReliableClient(client, "p", config, clock = fake)`, in a test of the deadline or of circuit recovery | no public replacement: use a short `deadline` or `recoveryTimeout` and wait for real |
+
+`withMetrics` returns a new client with a circuit breaker and rate limit of its own, so call it where the client is
+built, not on a client that has already served requests. `providerName` is still a `String`: it is the `provider`
+label of the client's metrics, whatever name you choose, not a provider id.
+
+## A tracing backend declares its aliases, and `Tracing.create` is removed (#2799)
+
+**`Tracing.create` is removed.** It returned `NoOpTracing`, with the reason only in the log, when the configured
+backend was missing or could not start. `Tracing.fromSettings` returns that reason, and is the only factory:
+
+| Before | After |
+|---|---|
+| `Tracing.create(settings)` | `Tracing.fromSettings(settings)`, a `Result[Tracing]`; in a `for`, `tracer <- Tracing.fromSettings(settings)` |
+| `Llm4sConfig.tracing().map(Tracing.create)` | `Llm4sConfig.tracing().flatMap(Tracing.fromSettings)` |
+| the old fallback, kept on purpose | `Tracing.fromSettings(settings).getOrElse(new NoOpTracing())`, logging the error first if you want it logged |
+
+**The `otel` alias belongs to its backend.** Core's mode parser named a backend (`"otel"` meant
+`Named("opentelemetry")`). A `TracingBackend` now declares its own `aliases`, and `llm4s-observability-otel` declares
+`otel`. Nothing changes for an application that sets `TRACING_MODE=otel` and loads its settings with
+`Llm4sConfig.tracing()`: with `llm4s-observability-otel` on the classpath the settings still carry
+`TracingMode.Named("opentelemetry")` and the `llm4s.tracing.opentelemetry` block, because `Llm4sConfig.tracing()`
+replaces an alias by its backend's mode before it reads the block. What changes:
+
+- `TracingMode.fromString("otel")` returns `Named("otel")`. Code that compared it with `Named("opentelemetry")` should
+  compare the mode of the loaded `TracingSettings`, or use `"opentelemetry"`.
+- Without `llm4s-observability-otel` on the classpath, `Llm4sConfig.tracing()` with `TRACING_MODE=otel` gives
+  `Named("otel")` with empty extras, and `Tracing.fromSettings` fails naming the artifact to add, as before.
+- **A shaded jar that registers the backend explicitly must use the full name.** With no services files,
+  `Llm4sConfig.tracing()` cannot see the backend, so it cannot replace the alias, and
+  `Tracing.fromSettings(settings, TracingBackends.of(new OpenTelemetryTracingBackend))` would start the backend on its
+  defaults. Set `TRACING_MODE=opentelemetry` there.
+
+A backend of your own with more than one name overrides `aliases`:
+
+```scala
+final class DatadogTracingBackend extends TracingBackend:
+  val mode: TracingMode             = TracingMode.Named("datadog")
+  override val aliases: Set[String] = Set("dd")
+  def create(settings: TracingSettings): Result[Tracing] = ???
+```
+
+**`TracingBackends.find` returns `Result[Option[TracingBackend]]`.** `Right(None)` is "no backend answers to this
+name"; a `Left` is a `ConfigurationError` naming two that do. Explicit registration still replaces by mode
+(`withBackend`, a later argument of `TracingBackends.of`). Two *discovered* backends for one mode used to resolve to
+the later one on the classpath; they are now that error, from `find`, `Tracing.fromSettings` and
+`Llm4sConfig.tracing()`, as are two backends that share an alias or one whose alias is another's mode. Remove one
+from the classpath, or pass the one you want in a `TracingBackends.of(...)`.
+
+## Image metrics are `ImageMetrics` in `llm4s-image` (#2801)
+
+`MetricsCollector.observeImageGeneration` and `recordImageGenerationCost` are removed: image generation lives in
+`llm4s-image`, and its metrics are now declared there, as `ImageMetrics`, and recorded through the collector's
+generic `increment` and `observe`, the way `ReliabilityMetrics` are.
+
+**Nothing changes on a dashboard.** Every image series keeps its name, type, labels and buckets in both
+`llm4s-observability-prometheus` and `llm4s-observability-micrometer` (`llm4s_image_generations_total`,
+`llm4s_images_generated_total`, `llm4s_image_generation_duration_seconds`, `llm4s_image_generation_cost_usd_total`,
+`llm4s_image_generation_errors_total`), and a failed image generation still counts in `llm4s_errors_total`. Three
+things differ that are not a series' identity: the Micrometer duration meter's description gains " in seconds", the
+Prometheus duration `_sum` is exact to the nanosecond where it was to the millisecond, and the Micrometer collector no
+longer maps an unknown `operation` to `other` (the instrumented client only sends `generate` and `edit`).
+
+**A collector of your own** that overrode the two methods no longer compiles. Image generation reaches it through
+the generic methods; match on the metric:
+
+```scala
+import org.llm4s.imagegeneration.ImageMetrics
+
+override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit = metric match
+  case ImageMetrics.Generations     => () // labelValues: provider, model, operation, status
+  case ImageMetrics.ImagesGenerated => () // provider, model; amount is the number of images
+  case ImageMetrics.CostUsd         => () // provider, model; amount is the cost in USD
+  case ImageMetrics.Errors          => () // provider, model, operation, error_type
+  case _                            => ()
+
+override def observe(metric: Metric.Timer, labelValues: Seq[String], duration: FiniteDuration): Unit =
+  if metric == ImageMetrics.Duration then () // provider, model, operation
+```
+
+A collector that implements the three generic methods for every `Metric`, as the two shipped backends do, needs no
+image code at all.
+
+| Before | After |
+|---|---|
+| `MicrometerMetrics.Names.ImageGenerations` | `ImageMetrics.Generations.name` |
+| `MicrometerMetrics.Names.ImagesGenerated` | `ImageMetrics.ImagesGenerated.name` |
+| `MicrometerMetrics.Names.ImageGenerationDuration` | `ImageMetrics.Duration.name` |
+| `MicrometerMetrics.Names.ImageGenerationCostUsd` | `ImageMetrics.CostUsd.name` |
+| `MicrometerMetrics.Names.ImageGenerationErrors` | `ImageMetrics.Errors.name` |
+
+`MetricsCollector.Errors` is new: the failed-operations counter (`llm4s_errors_total`) as a `Metric`, so that a module
+of your own can add its failed operations to it with
+`metrics.increment(MetricsCollector.Errors, Seq(provider, errorType))`. A backend of your own that keeps that count in
+a meter of its own should record this metric into it.
+
+## `Secret` or `Secret.token`: which one stays registered (#2824)
+
+Nothing changed here; the contract is now written down, on `Secret` and in
+[Security best practices](../guide/patterns/security-best-practices#api-keys). Creating a `Secret` registers its value
+process-wide for exact-match scrubbing. `Secret(value)` is a configured credential and is never evicted;
+`Secret.token(value)` may be evicted once the registry holds more than 4096 values; a value under 8 characters is not
+registered; nothing can be forgotten on request.
+
+If your application creates a `Secret(...)` per tenant, per user or per request, change those to `Secret.token(...)`:
+each distinct `Secret(...)` is held, and matched against every scrubbed text, for the life of the process. llm4s logs
+one warning, naming this cause, when the registry passes 4096 values.
+
+## `CompletionOptions`' sampling parameters are optional, and unset ones are not sent (#2807)
+
+`temperature`, `topP`, `presencePenalty` and `frequencyPenalty` were `Double`s with defaults (`0.7`, `1.0`,
+`0.0`, `0.0`), so llm4s could not tell "unset" from "set to the default" and always sent its own temperature
+and top-p in place of the provider's. They are `Option[Double]`, `None` unless set.
+
+```scala
+// before
+val options = CompletionOptions(temperature = 0.2, topP = 0.9)
+val t: Double = options.temperature
+
+// after
+val options = CompletionOptions(temperature = Some(0.2), topP = Some(0.9))   // or .withTemperature(0.2).withTopP(0.9)
+val t: Option[Double] = options.temperature
+```
+
+- **Behaviour.** A call that sets no temperature is no longer sent `temperature: 0.7` and `top_p: 1.0`: the
+  provider's default applies, which for most models is a temperature of `1.0`. Set
+  `withTemperature(0.7)` to keep the old requests. Jlama, whose engine takes no "unset", still uses `0.7`.
+- **Reports.** A sampling option the caller left unset is neither sent nor reported. One the caller set that the
+  model cannot take is a `RequestAdjustment` whatever its value; before, an explicit value equal to the default
+  went unreported.
+- **Java.** `JCompletionOptions.temperature()`, `topP()`, `presencePenalty()` and `frequencyPenalty()` return
+  `OptionalDouble`.
+- **Tracing.** The OpenTelemetry `gen_ai.request.temperature`, `top_p` and penalty attributes are present only
+  for an option that was set.
+
+`SamplingOptionsOptional` (in `Llm4sMigrate_1_0`) wraps the named arguments in `Some`. A read of one of the four
+is left to you.
+
+## `Completion` reads `content` and `toolCalls` from its message (#2807)
+
+`Completion` stored `content` and `toolCalls` beside `message`, which has both, and three setters each updated
+one side. They are now read from the message: `completion.content` is `completion.message.content` and
+`completion.toolCalls` is `completion.message.toolCalls` (a `Seq`).
+
+```scala
+// before
+Completion(id = id, created = now, content = text, model = model, message = AssistantMessage(text, calls), toolCalls = calls.toList)
+completion.withContent("edited")
+completion.asText
+
+// after
+Completion(id = id, created = now, model = model, message = AssistantMessage(text, calls))
+completion.withMessage(completion.message.withContent("edited"))
+completion.content
+```
+
+- `Completion.apply` is `(id, created, model, message, usage, estimatedCost, citations, adjustments,
+  finishReason, servedTier)`. A positional construction or pattern loses its third and sixth places.
+- **Check each construction site:** the text and the tool calls must be on the `message` you pass. A site that
+  passed tool calls only as `toolCalls = ...` now has none.
+- `withContent`, `withToolCalls` and `asText` are removed. `AssistantMessage.withContent` unseals signed thinking,
+  as it always has.
+- A completion assembled from a stream (`StreamingAccumulator.toCompletion`) now reports its tool calls on
+  `toolCalls`; a client no longer copies them from the message.
+
+`CompletionFromMessage` drops the two arguments, rewrites `asText`, and reports `withContent`, `withToolCalls`
+and a pattern that binds either field.
+
+## A `Completion` without a finish reason is `FinishReason.Unknown` (#2807)
+
+`Completion.apply` defaulted `finishReason` to `Stop`, so a client that set none claimed a natural stop, while
+"none read" was the sentinel `FinishReason.Other("")`. `FinishReason.Unknown` says it, and is the default.
+
+```scala
+completion.finishReason match {
+  case FinishReason.Stop | FinishReason.ToolCalls => ...
+  case FinishReason.Length                        => ...
+  case FinishReason.Other(raw)                    => ...   // a provider value llm4s has no name for
+  case FinishReason.Unknown                       => ...   // the client read none
+}
+```
+
+- Replace `FinishReason.Other("")` with `FinishReason.Unknown`, in code and in patterns. `Unknown.name` is `""`,
+  as `Other("").name` was, so code that filters on `name.nonEmpty` is unaffected.
+- A test fake that builds a `Completion` without a reason and asserts `Stop` must set it:
+  `finishReason = FinishReason.Stop`.
+- JSON: `"Unknown"`. The other cases are written as before, and a stored `{"$type":"Other","raw":""}` reads as
+  `Unknown`. An older llm4s reading an event written by this one reads `Unknown` as `Other("Unknown")`.
+
+## `Completion.estimatedCost` is a `BigDecimal`; `UsageSummary` counts cache tokens (#2807)
+
+A cost was an `Option[Double]` that `UsageSummary` converted to `BigDecimal` after the precision was already
+lost. It is `Option[BigDecimal]` from `CostEstimator` on.
+
+```scala
+// before
+completion.withEstimatedCost(0.0125)
+val cost: Option[Double] = CostEstimator.estimate(model, usage)
+
+// after
+completion.withEstimatedCost(BigDecimal("0.0125"))
+val cost: Option[BigDecimal] = CostEstimator.estimate(model, usage)
+```
+
+- `UsageSummary.add`, `ModelUsage.add`, the agent's `ModelContext.recordUsage` and `AdmissionContext.recordUsage`
+  take `Option[BigDecimal]`. An `Option[Double]` you hold becomes `cost.map(BigDecimal.decimal)`.
+- What stays a `Double`: `MetricsCollector.recordCost` and `MetricsRecording.withMetrics`' `extractCost`, the
+  durable `ModelCallCompleted.estimatedCost`, `RAGQueryMetrics.costUsd` and the prices of `ModelPricing`.
+- `UsageSummary` and `ModelUsage` gain `cachedTokens` and `cacheCreationTokens` (with `with*` setters), parts of
+  `inputTokens`. A summary stored before them reads with both at zero. The Java facade exposes them on
+  `JUsageSummary` and `JModelUsage`.
+
+## `AssistantMessage.text`, and a flat stored assistant message (#2809)
+
+```scala
+// before
+message.contentOpt
+AssistantMessage(contentOpt = Some("Hello"), toolCalls = calls)
+AssistantMessage(toolCalls = calls)
+toolMessage.findToolCallName(history)            // "unknown-tool" when the call is not there
+
+// after
+message.text
+AssistantMessage(text = Some("Hello"), toolCalls = calls)
+AssistantMessage(None, calls)
+toolMessage.findToolCallName(history)            // None when the call is not there
+```
+
+- `AssistantMessage()` no longer compiles: it built a message that fails `validate`. `content`, the text or `""`,
+  and both `withContent` setters are unchanged.
+- **Stored JSON.** An assistant message is written flat, as the other roles are:
+
+  ```json
+  {"type":"assistant","content":"Hello","toolCalls":[]}
+  ```
+
+  where it was `{"type":"assistant","data":{"contentOpt":"Hello","toolCalls":[]}}`. `content` is left out when
+  the model produced only tool calls. The old shape is still read, so stored checkpoints, threads and
+  conversations load unchanged; a rewrite of one stores the new shape. Code of your own that reads the JSON
+  (a query over a store's rows, an export) must read both.
+- **Thinking bindings.** A binding of sealed thinking is a fingerprint of the conversation before it. The
+  fingerprint keeps its own encoding, so bindings made before this change still match and signed thinking is
+  still replayed.
+- `Message.validateConversation` and `Message.assistant` take a `Seq` (a `List` still passes).
+
+`MessageAndConversationShapes` renames `contentOpt` and adds the missing `None`.
+
+## One `Conversation.create`; `Conversation.empty` is a value (#2809)
+
+```scala
+// before
+Conversation.create(UserMessage("hi"))
+Conversation.create(SystemMessage("Be brief"), UserMessage("hi"))
+Conversation.empty()
+
+// after
+Conversation.create(Seq(UserMessage("hi")))
+Conversation.create(Seq(SystemMessage("Be brief"), UserMessage("hi")))
+Conversation.empty
+```
+
+`Conversation.fromPrompts`, `userOnly` and `systemOnly` are unchanged, and `Conversation(messages)` still builds
+one without validating. `MessageAndConversationShapes` rewrites both forms.
+
+## `ProviderExchange` and `ProviderExchangeRecorder` (#2809)
+
+For a sink of your own:
+
+- `exchange.provider` is a `ProviderId`: `exchange.provider.asString` for the text.
+- `exchange.duration` is still there, computed from `startedAt` and `completedAt`; `withDuration` is gone, and
+  `ProviderExchange.apply` takes no `duration`. Its required values come first and `model`, `requestId`,
+  `correlationId`, `responseBody` and `errorMessage` default to `None`.
+- `ProviderExchangeLogging.enabled(sink)` is `ProviderExchangeLogging.Enabled(sink)`.
+
+For a provider client:
+
+```scala
+// before
+ProviderExchangeRecorder.record(
+  exchangeLogging = options.exchangeLogging,
+  provider = providerName,
+  model = Some(config.model),
+  startedAt = startedAt,
+  requestBody = requestText,
+  responseBody = Some(responseText),
+  result = result
+)
+
+// after
+ProviderExchangeRecorder.record(
+  options.exchangeLogging,
+  ProviderExchangeCall(
+    provider = ProviderId(providerName),
+    startedAt = startedAt,
+    requestBody = requestText,
+    model = Some(config.model),
+    responseBody = Some(responseText)
+  ),
+  result
+)
+```
+
+The `clock` and `idGenerator` parameters were test seams and are no longer public. The JSONL file is unchanged.
+
+## `LLMConnect.getClient` is the one way to get a client (#2810)
+
+```scala
+// before
+LLMConnect.fromConfig(config)
+LLMConnect.getClient(config, metrics)
+LLMConnect.getClient(ProviderId("openai"), config)
+LLMConnect.fromProvider(ProviderId("openai"), config, options)
+Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+
+// after
+LLMConnect.getClient(config)
+LLMConnect.getClient(config, LlmClientOptions(metrics = metrics))
+LLMConnect.getClient(ProviderId("openai"), config, LlmClientOptions.default)
+LLMConnect.getClient(ProviderId("openai"), config, options)
+Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient(_))
+```
+
+`getClient(config, options = LlmClientOptions.default)` and `getClient(provider, config, options)` remain. Only
+one overload may have a default, so the provider-explicit one takes its options. `ClientEntryPoints` rewrites
+all but the method value.
+
+## `LLMClient.streamComplete` takes its callback in a second parameter list (#2810)
+
+`streamComplete(conversation, options = CompletionOptions(), onChunk)` had a defaulted parameter before a
+required one, so the default was reachable only by naming `onChunk`.
+
+```scala
+// before
+client.streamComplete(conversation, options, chunk => chunk.content.foreach(print))
+client.streamComplete(conversation, onChunk = chunk => chunk.content.foreach(print))
+
+// after
+client.streamComplete(conversation, options)(chunk => chunk.content.foreach(print))
+client.streamComplete(conversation)(chunk => chunk.content.foreach(print))
+```
+
+An `LLMClient` of your own, a wrapper or a test fake, changes its definition the same way:
+
+```scala
+override def streamComplete(conversation: Conversation, options: CompletionOptions)(
+  onChunk: StreamedChunk => Unit
+): Result[Completion] = ...
+```
+
+Java and Kotlin are unaffected: the method's JVM signature is the same three parameters. `ClientEntryPoints`
+rewrites the calls and the overriding definitions. `MetricsRecording.withMetrics` lost its two defaults in the
+same change: pass `extractUsage` and `extractCost`.
 
 ## Provider SPI: error mapping, published helpers, report types (#2811)
 
@@ -344,7 +714,7 @@ unchanged. The scalafix rule `ResultSyntaxMoved` rewrites the import.
 
 | Before | After |
 |---|---|
-| `LLMClientRetry.completeWithRetry(client, conversation, options, maxAttempts = 3, baseDelay = 1.second)` | `new ReliableClient(client, "openai", ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second))).complete(conversation, options)` |
+| `LLMClientRetry.completeWithRetry(client, conversation, options, maxAttempts = 3, baseDelay = 1.second)` | `ReliableClient(client, "openai", ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second))).complete(conversation, options)` |
 | `LLMClientRetry.streamCompleteWithRetry(...)` | the same client's `streamComplete`; a stream that has delivered a chunk is still not retried |
 | `ErrorRecovery.recoverWithBackoff(() => client.complete(c), 3, 1.second)` | the `ReliableClient` above |
 | `new ErrorRecovery.CircuitBreaker[A](failureThreshold, recoveryTimeout)` | `ReliabilityConfig(circuitBreaker = CircuitBreakerConfig(failureThreshold, recoveryTimeout))` |
@@ -1676,7 +2046,7 @@ client.complete(conversation, options).map { c =>
   `case Completion(id, _, content, _, _, _, _, _, _, _, _, _)`. The `PositionalPatternsGainFields` Scalafix rule adds
   them to 0.6.0's ten-field pattern, and every field since 0.5.1 to its nine-field one.
 - `Completion(...)` with named arguments keeps compiling and gets `FinishReason.Stop`. A client or fake that builds
-  one sets the reason it read; one it did not read is `FinishReason.Other("")`, which tracing leaves out.
+  one sets the reason it read; one it did not read is `FinishReason.Unknown` (#2807), which tracing leaves out.
 - Every chat client maps it (RFC 0009 PR 2 added Anthropic's `stop_reason`, Gemini's and Vertex AI's `finishReason`
   and Bedrock's `stopReason`): a natural end or stop sequence is `Stop`, a tool call `ToolCalls` (Gemini's `STOP` after
   a function call too), a token or context-window limit `Length` (`max_tokens`, `MAX_TOKENS`,
@@ -4102,18 +4472,21 @@ val reliable = ReliableProviders.wrap(client, "openai", config)
 val other    = client.withReliability("openai")
 
 // after
-val reliable = new ReliableClient(client, "openai", config)
-val other    = new ReliableClient(client, "openai", ReliabilityConfig.default)
+val reliable = ReliableClient(client, "openai", config)
+val other    = ReliableClient(client, "openai", ReliabilityConfig.default)
 ```
+
+(The constructor has since become private: this is the companion's `apply`, see
+[`ReliableClient` has a private constructor](#reliableclient-has-a-private-constructor-2797).)
 
 `ReliableClient`'s companion factories (`ReliableClient(client)`, `ReliableClient(client, config)`,
 `ReliableClient(client, config, metrics)`, `ReliableClient.withProviderName`) go too: three of them
-guessed the provider name from the client's class name. Use the constructor. For a client built
+guessed the provider name from the client's class name. Use `ReliableClient(client, name, config)`. For a client built
 from config, the name is `providerConfig.providerId.asString`.
 
 Behaviour fix: **`ReliableClient` now applies `ReliabilityConfig.rateLimit` itself**, before every
 attempt, retries included. Before, only `ReliableProviders.wrap` honoured it, so a
-`new ReliableClient(...)` with rate limiting enabled was not rate limited.
+`ReliableClient` built directly with rate limiting enabled was not rate limited.
 
 ### OpenAI's model rules leave `RequestTransformer`
 
@@ -4729,7 +5102,11 @@ belongs in `traceEvent`'s `AgentStateUpdated` case.
 
 ### `Tracing.create` finds backends on the classpath
 
-`Tracing.create(settings)` keeps its signature. It builds `NoOp` and `Console` itself and hands
+`Tracing.create` has since been removed: `Tracing.fromSettings` is the only factory, see
+[A tracing backend declares its aliases, and `Tracing.create` is removed](#a-tracing-backend-declares-its-aliases-and-tracingcreate-is-removed-2799).
+What follows describes it as it was in this slice.
+
+`Tracing.create(settings)` kept its signature. It built `NoOp` and `Console` itself and handed
 every other mode to an `org.llm4s.trace.spi.TracingBackend` registered in
 `META-INF/services/org.llm4s.trace.spi.TracingBackend`:
 
@@ -5150,7 +5527,7 @@ The three copies had drifted apart; the shared client does each thing one way:
    the missing id was defaulted to `""`, and `StreamingAccumulator` skips a chunk with no id. The
    shared client now maps each index to its call's id for the life of the stream, and a streamed
    `Completion` reports its tool calls in `toolCalls`, as a non-streaming one does.
-7. **A reply's `message.contentOpt` is `None` when the reply has no text** for all three (it was
+7. **A reply's `message.text` (`contentOpt` until #2809) is `None` when the reply has no text** for all three (it was
    `Some("")` for DeepSeek and Z.ai); `Completion.content` is `""` either way.
 8. **Replies are read leniently where the copies threw**: a missing `id`, `created` or `model`
    defaults, a streamed event with no `choices` is skipped, and a malformed non-streaming reply is

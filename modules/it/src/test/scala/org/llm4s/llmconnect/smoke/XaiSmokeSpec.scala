@@ -60,7 +60,7 @@ class XaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
 
     val client = XaiClient(config(apiKey.get)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, options, c => chunks += c).value
+    val result = client.streamComplete(conversation, options)(c => chunks += c).value
 
     val streamed = chunks.flatMap(_.content).mkString
     streamed should not be empty

@@ -128,7 +128,6 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
         Completion(
           id = "extract",
           created = Instant.EPOCH,
-          content = response,
           model = "mock-model",
           message = AssistantMessage(response),
           usage = None
@@ -136,9 +135,7 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -225,9 +222,7 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
       answer()
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

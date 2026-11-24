@@ -160,7 +160,7 @@ object SemanticCachingSample extends App {
     // Demo 4: Options mismatch (should miss cache)
     println("--- Demo 4: Same query, different options (should miss cache) ---")
     println(s"Query 5 (same as #1, but temperature=0.9): $query1")
-    cachingClient.complete(conv1, CompletionOptions(temperature = 0.9)) match {
+    cachingClient.complete(conv1, CompletionOptions(temperature = Some(0.9))) match {
       case Right(completion) => println(s"Response: ${completion.content}\n")
       case Left(error)       => println(s"Error: ${error.message}\n")
     }

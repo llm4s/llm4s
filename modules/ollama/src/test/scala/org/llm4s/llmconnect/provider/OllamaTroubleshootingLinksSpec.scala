@@ -80,7 +80,7 @@ final class OllamaTroubleshootingLinksSpec extends AnyWordSpec with Matchers {
       val client = new OllamaClient(config(s"http://127.0.0.1:$port"))
       val errors = Seq(
         client.complete(hello, CompletionOptions()),
-        client.streamComplete(hello, CompletionOptions(), _ => ())
+        client.streamComplete(hello, CompletionOptions())(_ => ())
       ).map(_.left.toOption.getOrElse(fail("expected the call to fail")))
       errors.foreach { error =>
         error shouldBe a[NetworkError]

@@ -1855,7 +1855,7 @@ final class RAG private (
     for {
       _ <- Safety.safely(onContexts(contexts))
       completion <- meter.answering(
-        client.streamComplete(answerConversation(question, history, contexts), options, onChunk)
+        client.streamComplete(answerConversation(question, history, contexts), options)(onChunk)
       )
     } yield answerResult(question, contexts, meter)(completion)
 

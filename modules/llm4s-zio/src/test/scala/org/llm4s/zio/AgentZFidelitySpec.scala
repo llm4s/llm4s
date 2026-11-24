@@ -46,25 +46,18 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
       options.add(o)
       Right(reply(i))
     }
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 8192
     def getReserveCompletion(): Int = 512
   }
 
   private def text(s: String): Completion =
-    Completion(id = "t", created = Instant.EPOCH, content = s, model = "m", message = AssistantMessage(Some(s)))
+    Completion(id = "t", created = Instant.EPOCH, model = "m", message = AssistantMessage(Some(s)))
 
   private def toolCall(i: Int): Completion = {
     val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = ujson.Obj("v" -> "x")))
-    Completion(
-      id = s"t$i",
-      created = Instant.EPOCH,
-      content = "",
-      model = "m",
-      message = AssistantMessage("", calls),
-      toolCalls = calls.toList
-    )
+    Completion(id = s"t$i", created = Instant.EPOCH, model = "m", message = AssistantMessage("", calls))
   }
 
   private def z(client: LLMClient)(configure: AgentBuilder => AgentBuilder = identity) =
@@ -83,7 +76,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
             assertTrue(client.calls.get() == 1) &&
             assertTrue(sent.collect { case m: SystemMessage => m.content }.exists(_.contains("EXTRA-INSTRUCTIONS"))) &&
             assertTrue(sent.collect { case m: UserMessage => m.content } == Seq("q")) &&
-            assertTrue(client.options.get(0).temperature == 0.123) &&
+            assertTrue(client.options.get(0).temperature == Some(0.123)) &&
             assertTrue(client.options.get(0).maxTokens == Some(77)) &&
             assertTrue(client.options.get(0).tools.map(_.name) == Seq("echo"))
           }
@@ -124,9 +117,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
         val failure = new IllegalStateException("provider exploded")
         val client = new LLMClient {
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] = throw failure
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] =
             throw failure
@@ -175,9 +166,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
         val client = new LLMClient {
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
             if (calls.getAndIncrement() == 0) Right(text("first")) else Left(SimpleError("nope"))
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = complete(c, o)
           def getContextWindow(): Int     = 1
@@ -211,9 +200,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
               case 1 => Left(SimpleError("provider down"))
               case _ => Right(text("recovered"))
             }
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = complete(c, o)
           def getContextWindow(): Int     = 8192
@@ -235,9 +222,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
               case 0 => Right(toolCall(0))
               case _ => Left(SimpleError("provider down"))
             }
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = complete(c, o)
           def getContextWindow(): Int     = 8192

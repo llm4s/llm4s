@@ -22,6 +22,7 @@ private[llm4s] object ChatCompletionsFinishReason {
     case "stop"                         => FinishReason.Stop
     case "tool_calls" | "function_call" => FinishReason.ToolCalls
     case "length"                       => FinishReason.Length
+    case ""                             => FinishReason.Unknown
     case other                          => FinishReason.Other(other)
   }
 

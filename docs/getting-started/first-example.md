@@ -260,10 +260,7 @@ import org.llm4s.llmconnect.model._
 
 class StreamingExample(client: LLMClient) {
   def run(): Unit = {
-    val result = client.streamComplete(
-      Conversation(Seq(UserMessage("Write a short poem about Scala"))),
-      onChunk = chunk => chunk.content.foreach(print)  // Print each token as it arrives
-    )
+    val result = client.streamComplete(Conversation(Seq(UserMessage("Write a short poem about Scala"))))(chunk => chunk.content.foreach(print))  // Print each token as it arrives
 
     result.fold(
       error => println(s"Error: $error"),
@@ -455,10 +452,7 @@ val result = for {
 
 ```scala
 // Assuming client is injected
-val completion = client.streamComplete(
-  Conversation(Seq(UserMessage("Your question here"))),
-  onChunk = chunk => chunk.content.foreach(print)
-)
+val completion = client.streamComplete(Conversation(Seq(UserMessage("Your question here"))))(chunk => chunk.content.foreach(print))
 ```
 
 ---
@@ -499,10 +493,7 @@ Streaming gets you the first token faster and improves perceived latency:
 import org.llm4s.llmconnect.model._
 
 // Assuming client is injected
-val streamResult = client.streamComplete(
-  Conversation(Seq(UserMessage("Write a long essay about Scala"))),
-  onChunk = chunk => chunk.content.foreach(print)  // Prints as tokens arrive
-)
+val streamResult = client.streamComplete(Conversation(Seq(UserMessage("Write a long essay about Scala"))))(chunk => chunk.content.foreach(print))  // Prints as tokens arrive
 
 streamResult match {
   case Right(completion) => println(s"\nCompleted with ${completion.usage.map(_.totalTokens).getOrElse(0)} tokens")

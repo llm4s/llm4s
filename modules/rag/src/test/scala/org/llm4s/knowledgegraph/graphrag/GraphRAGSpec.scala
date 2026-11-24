@@ -27,17 +27,14 @@ class GraphRAGSpec extends AnyFunSuite with Matchers {
         Completion(
           id = "test",
           created = Instant.ofEpochSecond(1L),
-          content = content,
           model = "test-model",
-          message = AssistantMessage(contentOpt = Some(content)),
+          message = AssistantMessage(text = Some(content)),
           usage = None
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)

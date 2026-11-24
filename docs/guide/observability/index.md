@@ -144,7 +144,7 @@ llm4s {
 
 ### OpenTelemetry Integration
 
-For teams with existing APM infrastructure (Jaeger, Grafana Tempo, Datadog), the `opentelemetry` mode (alias `otel`) exports traces via OTLP:
+For teams with existing APM infrastructure (Jaeger, Grafana Tempo, Datadog), the `opentelemetry` mode (or `otel`, an alias the module's backend declares) exports traces via OTLP:
 
 ```bash
 TRACING_MODE=opentelemetry
@@ -259,7 +259,10 @@ com.example.DatadogTracingBackend
 
 `TRACING_MODE=datadog` then selects it. `Tracing.fromSettings(settings)` returns a
 `ConfigurationError` when no backend serves the configured mode, and the backend's own error when
-`create` fails; `Tracing.create(settings)` logs either and falls back to `NoOpTracing`. Where
+`create` fails. A backend that answers to more than one name declares the others as `aliases`
+(`override val aliases = Set("dd")`); `Llm4sConfig.tracing` replaces an alias by the backend's mode, so the backend
+always reads its own `llm4s.tracing.<mode>` block. Two backends that answer to one name are a `ConfigurationError`
+naming both when that name is selected. Where
 services files do not survive packaging (some shaded jars), register the backend explicitly:
 `Tracing.fromSettings(settings, TracingBackends.of(new DatadogTracingBackend))`.
 
@@ -506,7 +509,8 @@ LANGFUSE_URL=https://cloud.langfuse.com  # or self-hosted URL
 
 Both keys are required. With either missing, `Tracing.fromSettings` returns a
 `ConfigurationError` naming what is unset - e.g. `llm4s.tracing.langfuse.publicKey
-(LANGFUSE_PUBLIC_KEY)` - and `Tracing.create` logs that error and falls back to `NoOpTracing`.
+(LANGFUSE_PUBLIC_KEY)`. An application that would rather run untraced than stop says so where it
+builds the tracer: `Tracing.fromSettings(settings).getOrElse(new NoOpTracing())`.
 Without `llm4s-observability` on the classpath, the error names the artifact to add instead.
 **Traces are private.** Every trace is created with `public: false`, so only members of your Langfuse project can
 open it. Langfuse serves a *public* trace to anyone holding its URL, without signing in, and an agent run's trace
@@ -581,7 +585,7 @@ stops its exporter, and a composed tracer closes the ones it wraps. Close the tr
 
 Tracing records what happened inside one request. Metrics count what happens across all of them: requests, tokens, cost, errors and latency, per provider and model. They are cheap enough to alert on, and they answer "is a provider failing right now?" faster than a trace search.
 
-The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, plus calls for image generation, and the generic `increment`, `observe` and `set` through which `ReliableClient` records its retries, circuit-breaker transitions and errors (`ReliabilityMetrics`) and other modules record metrics of their own ([below](#agent-runtime-metrics)). Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`. If your application already has a Micrometer `MeterRegistry` (Spring Boot Actuator, Quarkus), use `llm4s-observability-micrometer` instead: its `MicrometerMetrics` records the same series into that registry, and the Spring Boot starter wires it with no code. See [Micrometer metrics](micrometer).
+The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, and the generic `increment`, `observe` and `set` through which `ReliableClient` records its retries, circuit-breaker transitions and errors (`ReliabilityMetrics`), `llm4s-image` records image generation (`ImageMetrics`) and other modules record metrics of their own ([below](#agent-runtime-metrics)). Its `provider` argument is a metrics label, not a `ProviderId`: usually a provider's id, but for a `ReliableClient` whatever name you built it with. Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`. If your application already has a Micrometer `MeterRegistry` (Spring Boot Actuator, Quarkus), use `llm4s-observability-micrometer` instead: its `MicrometerMetrics` records the same series into that registry, and the Spring Boot starter wires it with no code. See [Micrometer metrics](micrometer).
 
 ### Add the module
 
@@ -619,7 +623,7 @@ Pass the collector to the client when you build it:
 
 ```scala
 import org.llm4s.config.{Llm4sConfig, MetricsConfigLoader}
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 
 val application = for {
@@ -628,7 +632,7 @@ val application = for {
   given ModelRegistryService = registryService
   configured <- MetricsConfigLoader.default()
   (metrics, endpoint) = configured
-  client <- LLMConnect.getClient(providerConfig, metrics).left.map { error =>
+  client <- LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics)).left.map { error =>
     endpoint.foreach(_.stop()) // release the server if client creation fails
     error
   }
@@ -677,9 +681,9 @@ val endpoint: Option[PrometheusEndpoint] =
 | `llm4s_cost_usd_total` | counter | `provider`, `model` |
 | `llm4s_errors_total` | counter | `provider`, `error_type` |
 | `llm4s_request_duration_seconds` | histogram | `provider`, `model`; buckets 0.1, 0.5, 1, 2, 5, 10, 30, 60 and 120 seconds |
-| `llm4s_image_generations_total` | counter | `provider`, `model`, `operation`, `status` |
+| `llm4s_image_generations_total` | counter | `provider`, `model`, `operation` (`generate` or `edit`), `status`; this and the four below are `ImageMetrics`, recorded by `llm4s-image`'s `InstrumentedImageGenerationClient` |
 | `llm4s_images_generated_total` | counter | `provider`, `model` |
-| `llm4s_image_generation_duration_seconds` | histogram | `provider`, `model`, `operation` |
+| `llm4s_image_generation_duration_seconds` | histogram | `provider`, `model`, `operation`; buckets 1, 2, 5, 10, 30, 60, 120 and 300 seconds |
 | `llm4s_image_generation_cost_usd_total` | counter | `provider`, `model` |
 | `llm4s_image_generation_errors_total` | counter | `provider`, `model`, `operation`, `error_type` |
 | `llm4s_retries_total` | counter | `provider`; a `ReliableClient` retry |
@@ -741,13 +745,13 @@ sum by (model) (increase(llm4s_cost_usd_total[1h]))
 
 ### Send metrics to more than one place
 
-`MetricsCollector.compose` forwards every `MetricsCollector` method, the two image-generation ones (`observeImageGeneration` and `recordImageGenerationCost`) included, to each collector it is given, so Prometheus can run next to `CostTracker` (in `llm4s-observability`) or a collector of your own, and a composed collector handed to `InstrumentedImageGenerationClient` records image metrics in every child. A collector that throws does not stop the others:
+`MetricsCollector.compose` forwards every `MetricsCollector` method, the generic `increment`, `observe` and `set` included, to each collector it is given, so Prometheus can run next to `CostTracker` (in `llm4s-observability`) or a collector of your own, and a composed collector handed to `InstrumentedImageGenerationClient` records image metrics in every child. A collector that throws does not stop the others:
 
 ```scala
 import org.llm4s.metrics.MetricsCollector
 
 val both = MetricsCollector.compose(metrics, myCollector)
-// LLMConnect.getClient(providerConfig, both)
+// LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = both))
 ```
 
 ### Agent runtime metrics
@@ -798,7 +802,7 @@ tenant id is ever a label, and no metric carries message content. Every backend 
 
 ### Limits
 
-- **Request and error rates are per attempt, not per logical call.** `ReliableClient` takes its own `collector` argument and reports its retries, circuit-breaker transitions and the errors its calls end on as `llm4s_retries_total`, `llm4s_circuit_breaker_transitions_total` and `llm4s_reliability_errors_total`; pass it the same collector as the client it wraps. The request series see every attempt as well: `ReliableClient` calls the wrapped client once per attempt, and a metrics-enabled client records each of those calls, so a call that fails twice and then succeeds adds three requests - two `error_*`, one `success` - three latency observations and two retries. `llm4s_errors_total` counts the failed attempts, `llm4s_reliability_errors_total` only the final failure.
+- **Request and error rates are per attempt, not per logical call.** `ReliableClient` takes its own collector (`withMetrics`) and reports its retries, circuit-breaker transitions and the errors its calls end on as `llm4s_retries_total`, `llm4s_circuit_breaker_transitions_total` and `llm4s_reliability_errors_total`; pass it the same collector as the client it wraps. The request series see every attempt as well: `ReliableClient` calls the wrapped client once per attempt, and a metrics-enabled client records each of those calls, so a call that fails twice and then succeeds adds three requests - two `error_*`, one `success` - three latency observations and two retries. `llm4s_errors_total` counts the failed attempts, `llm4s_reliability_errors_total` only the final failure.
 - **The latency buckets are fixed** (0.1 to 120 seconds); there is no way to configure them.
 - **Counters live in the process.** A restart starts them from zero, which is what `rate()` and `increase()` expect.
 - **The endpoint has no authentication and no TLS**: llm4s starts it with only a port and a registry. Keep it off the public network and let your network policy decide who can scrape it.

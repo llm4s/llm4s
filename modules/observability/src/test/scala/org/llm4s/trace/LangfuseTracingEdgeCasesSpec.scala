@@ -54,7 +54,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
       _.traceEvent(TraceEvent.CompletionReceived("c", "m", 0, "x", servedTier = Some(ServiceTier.Priority)))
     ) shouldBe
       "priority"
-    val completion = Completion("c", Instant.EPOCH, "x", "m", AssistantMessage("x"))
+    val completion = Completion("c", Instant.EPOCH, "m", AssistantMessage("x"))
       .withServedTier(ServiceTier.Other("scale"))
     tierOf(_.traceCompletion(completion, "m")) shouldBe "scale"
   }
@@ -403,7 +403,6 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "comp-test",
       created = Instant.EPOCH,
-      content = "test response",
       model = "gpt-4",
       message = AssistantMessage(Some("test response"), Seq.empty)
     )
@@ -426,7 +425,6 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "comp-tools",
       created = Instant.EPOCH,
-      content = "Let me calculate",
       model = "gpt-4",
       message = AssistantMessage(Some("Let me calculate"), Seq(toolCall))
     )

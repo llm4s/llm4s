@@ -213,7 +213,7 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
       withServer("/")(sendEventStream(_, frames)) { url =>
         val client = new BedrockClient(config(url))
         val c = client
-          .streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions(), _ => ())
+          .streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions())(_ => ())
           .toOption
           .value
         client.close()

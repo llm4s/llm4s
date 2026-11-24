@@ -89,7 +89,5 @@ class ConsoleTracingDefaultSpec extends AnyFlatSpec with Matchers {
     val settings = TracingConfigLoader.load(source).fold(e => fail(e.message), identity)
 
     Tracing.fromSettings(settings).left.map(_.message).left.toOption.get should include("captureContent")
-    // Tracing.create never fails: it falls back to NoOp rather than printing content.
-    (Tracing.create(settings) should not).be(a[ConsoleTracing])
   }
 }

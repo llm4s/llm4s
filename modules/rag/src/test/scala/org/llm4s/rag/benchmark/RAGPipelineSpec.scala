@@ -78,15 +78,12 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
         Completion(
           id = "mock",
           created = Instant.EPOCH,
-          content = "Answer derived from provided context.",
           model = "mock-model",
-          message = AssistantMessage(contentOpt = Some("Answer derived from provided context.")),
+          message = AssistantMessage(text = Some("Answer derived from provided context.")),
           usage = Some(TokenUsage(50, 25, 75))
         )
       )
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

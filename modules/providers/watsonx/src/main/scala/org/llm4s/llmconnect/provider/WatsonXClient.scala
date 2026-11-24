@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError, ProcessingError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
@@ -325,9 +326,7 @@ class WatsonXClient(
         .map(_.withAdjustments(unsent(options)))
     }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     createRequestBody(conversation, options)
@@ -475,7 +474,6 @@ class WatsonXClient(
       .map { c =>
         // the accumulator reports streamed calls on the message only
         c
-          .withToolCalls(c.message.toolCalls.toList)
           .withEstimatedCost(c.usage.flatMap(estimateCost))
       }
   }
@@ -534,7 +532,7 @@ class WatsonXClient(
       Left(ServiceError(502, providerName, s"generation ended abnormally with finish_reason '$reason'"))
     else Right(())
 
-  private def estimateCost(usage: TokenUsage): Option[Double] = CostEstimator.estimate(config.model.asString, usage)
+  private def estimateCost(usage: TokenUsage): Option[BigDecimal] = CostEstimator.estimate(config.model.asString, usage)
 
   private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): Result[ujson.Obj] =
     PartEncoding
@@ -543,10 +541,11 @@ class WatsonXClient(
 
   private def requestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val body = ujson.Obj(
-      "model_id"    -> config.model.asString,
-      "messages"    -> encodeMessages(conversation),
-      "temperature" -> options.temperature
+      "model_id" -> config.model.asString,
+      "messages" -> encodeMessages(conversation)
     )
+    // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
+    options.temperature.foreach(t => body("temperature") = t)
     config.spaceId match {
       case Some(space) => body("space_id") = space
       case None        => body("project_id") = config.projectId
@@ -555,10 +554,9 @@ class WatsonXClient(
     // deprecated in favour of `max_completion_tokens`, which a later change may adopt (NODE vml_v1.ts:2812-2813,
     // types/vml_v1.ts:790-803; LCIBM chat_models.py:953-959).
     options.maxTokens.foreach(max => body("max_tokens") = max)
-    if (options.topP != 1.0) body("top_p") = options.topP
-    // SDK-evidenced (see the class Scaladoc): sent only when set away from their 0.0 default
-    if (options.presencePenalty != 0.0) body("presence_penalty") = options.presencePenalty
-    if (options.frequencyPenalty != 0.0) body("frequency_penalty") = options.frequencyPenalty
+    options.topP.foreach(p => body("top_p") = p)
+    options.presencePenalty.foreach(p => body("presence_penalty") = p)
+    options.frequencyPenalty.foreach(p => body("frequency_penalty") = p)
     options.responseFormat.foreach(format => body("response_format") = encodeResponseFormat(format))
     // see "Reasoning" in the class Scaladoc
     val off = options.thinking.contains(Thinking.Off)
@@ -627,8 +625,6 @@ class WatsonXClient(
             Completion(
               id = json.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).getOrElse(java.util.UUID.randomUUID().toString),
               created = Instant.ofEpochSecond(nowSeconds()),
-              content = text,
-              toolCalls = toolCalls,
               usage = usage,
               model = config.model.asString,
               message = AssistantMessage(Some(text).filter(_.nonEmpty), toolCalls).withThinking(thinking),
@@ -646,13 +642,15 @@ class WatsonXClient(
     result: Result[Completion]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(config.model.asString),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = Option(responseBody).filter(_.nonEmpty),
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(config.model.asString),
+        responseBody = Option(responseBody).filter(_.nonEmpty)
+      ),
+      result
     )
 
   override def getContextWindow(): Int     = config.contextWindow
@@ -692,12 +690,13 @@ object WatsonXClient {
 
   /**
    * A normalised `finish_reason` as a [[FinishReason]] (RFC 0009): `stop`, `tool_calls` and `length` mapped, anything
-   * else kept as `Other`, and none (`""`) as `Other("")`.
+   * else kept as `Other`, and none (`""`) as `Unknown`.
    */
   private[provider] def toFinishReason(normalized: String): FinishReason = normalized match {
     case "stop"                         => FinishReason.Stop
     case "tool_calls" | "function_call" => FinishReason.ToolCalls
     case "length"                       => FinishReason.Length
+    case ""                             => FinishReason.Unknown
     case other                          => FinishReason.Other(other)
   }
 

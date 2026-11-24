@@ -396,7 +396,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
 
-val reliable: LLMClient = new ReliableClient(client, "openai", ReliabilityConfig.default)
+val reliable: LLMClient = ReliableClient(client, "openai", ReliabilityConfig.default)
 val response            = reliable.complete(Conversation(Seq(UserMessage("Hello!"))))
 ```
 

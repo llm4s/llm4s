@@ -81,9 +81,8 @@ class SttpGuideSpec extends AnyFlatSpec with Matchers {
       )
       completion <- client.streamComplete(
         Conversation(Seq(UserMessage("What is Scala?"))),
-        CompletionOptions(),
-        chunk => chunks += chunk
-      )
+        CompletionOptions()
+      )(chunk => chunks += chunk)
     } yield completion.content
 
     streamed shouldBe Right("A JVM language.")

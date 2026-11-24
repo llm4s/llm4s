@@ -158,7 +158,7 @@ class AnthropicWebSearchSpec extends AnyFlatSpec with Matchers {
     withServer(streamedReply) { (baseUrl, _) =>
       val chunks = List.newBuilder[StreamedChunk]
       val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl).withWebSearch(true))
-        .streamComplete(conversation, CompletionOptions(), c => chunks += c)
+        .streamComplete(conversation, CompletionOptions())(c => chunks += c)
         .fold(e => fail(e.message), identity)
       completion.citations shouldBe expected
       completion.content shouldBe "Scala 3.8 is out."

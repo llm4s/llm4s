@@ -78,6 +78,7 @@ trait BaseLifecycleLLMClient extends LLMClient with MetricsRecording {
         if (Thread.currentThread().isInterrupted) Left(CancelledError(s"$providerName.complete"))
         else CancelledError.attempt(s"$providerName.complete")(validateNotClosed.flatMap(_ => operation)),
       extractUsage = (c: Completion) => c.usage,
-      extractCost = (c: Completion) => c.estimatedCost
+      // the metrics contract counts cost as a Double
+      extractCost = (c: Completion) => c.estimatedCost.map(_.toDouble)
     )
 }

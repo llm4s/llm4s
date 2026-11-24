@@ -204,7 +204,7 @@ class MixedOkHttpClasspathSpec extends AnyFlatSpec with Matchers with EitherValu
     withSse("/v1/messages", events) { base =>
       val client =
         AnthropicConfig.fromValues("claude-3-5-sonnet-latest", Secret("k"), base).flatMap(AnthropicClient(_)).value
-      val result = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+      val result = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
       withClue(okHttpOrigin)(result.map(_.content) shouldBe Right("hi stream"))
     }
   }
@@ -234,7 +234,7 @@ class MixedOkHttpClasspathSpec extends AnyFlatSpec with Matchers with EitherValu
     )
     withSse("/v1/chat/completions", events) { base =>
       val client = OpenAIConfig.fromValues("gpt-4o-mini", Secret("k"), s"$base/v1").flatMap(OpenAIClient(_)).value
-      val result = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+      val result = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
       withClue(okHttpOrigin)(result.map(_.content) shouldBe Right("hi stream"))
     }
   }

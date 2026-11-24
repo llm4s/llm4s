@@ -55,7 +55,7 @@ private[repl] object Render {
   def message(message: Message): String =
     message match {
       case assistant: AssistantMessage =>
-        val text  = assistant.contentOpt.filter(_.nonEmpty).map(t => s"assistant: $t").toList
+        val text  = assistant.text.filter(_.nonEmpty).map(t => s"assistant: $t").toList
         val calls = assistant.toolCalls.map(call => s"assistant: ${toolCall(call)}")
         (text ++ calls).mkString("\n")
       case tool: ToolMessage => s"tool: ${toolResult(tool.content)}"

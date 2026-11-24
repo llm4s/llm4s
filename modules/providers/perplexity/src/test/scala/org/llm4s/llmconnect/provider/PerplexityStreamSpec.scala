@@ -21,7 +21,7 @@ class PerplexityStreamSpec extends AnyWordSpec with Matchers:
   private def streamed(reply: => Result[StreamingHttpResponse]): (StubHttp, Result[Completion], List[StreamedChunk]) = {
     val http   = new StubHttp(stream = _ => reply)
     val chunks = ListBuffer.empty[StreamedChunk]
-    val result = client(http).streamComplete(hello, CompletionOptions(), chunks += _)
+    val result = client(http).streamComplete(hello, CompletionOptions())(chunks += _)
     (http, result, chunks.toList)
   }
 

@@ -15,10 +15,8 @@ class SpringAiFinishReasonSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "c",
       created = Instant.EPOCH,
-      content = "x",
       model = "m",
       message = AssistantMessage(Some("x"), calls),
-      toolCalls = calls,
       finishReason = reason
     )
 
@@ -36,8 +34,8 @@ class SpringAiFinishReasonSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "name a reply whose client read no reason by its calls, which the tool-calling advisor needs" in {
-    SpringAiMapping.finishOf(completion(FinishReason.Other(""), List(call))) shouldBe "TOOL_CALLS"
-    SpringAiMapping.finishOf(completion(FinishReason.Other(""))) shouldBe "STOP"
+    SpringAiMapping.finishOf(completion(FinishReason.Unknown, List(call))) shouldBe "TOOL_CALLS"
+    SpringAiMapping.finishOf(completion(FinishReason.Unknown)) shouldBe "STOP"
   }
 
   it should "name a reply with calls TOOL_CALLS when its client has not mapped the reason yet (Bedrock's tool_use)" in {

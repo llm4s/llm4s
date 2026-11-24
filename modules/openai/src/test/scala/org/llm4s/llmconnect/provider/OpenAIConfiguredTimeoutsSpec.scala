@@ -109,7 +109,7 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
       val client = OpenAIClient(openAIConfig(baseUrl, ProviderTimeouts(stream = Some(500.millis)))).value
       try {
         val started = System.nanoTime()
-        val result  = client.streamComplete(hello, CompletionOptions(), _ => ())
+        val result  = client.streamComplete(hello, CompletionOptions())(_ => ())
         val elapsed = (System.nanoTime() - started).nanos
 
         result.isLeft shouldBe true
@@ -131,7 +131,7 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
         openAIConfig(baseUrl, ProviderTimeouts(request = Some(300.millis), stream = Some(20.seconds)))
       ).value
       try {
-        val result = client.streamComplete(hello, CompletionOptions(), _ => ())
+        val result = client.streamComplete(hello, CompletionOptions())(_ => ())
         result.value.content shouldBe "hi"
       } finally client.close()
     }

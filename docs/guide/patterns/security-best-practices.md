@@ -74,6 +74,14 @@ AWS example are in [Production Deployment](../production-deployment#secrets-and-
 [Rotating keys](../../getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider). A second account's
 section sets its own key; the config policy's `prod` preset flags one that does not.
 
+Creating a `Secret` registers its value process-wide, so that llm4s can remove it, by exact match, from the error
+messages and logs it builds. `Secret(value)` is a configured credential and is never evicted; `Secret.token(value)`
+is a short-lived one, and the oldest tokens are evicted once the registry holds more than 4096 values. A value under
+8 characters is not registered, and there is no public way to forget one. So use `Secret(...)` for the fixed set of
+long-lived credentials an application is configured with, and `Secret.token(...)` for a key you create per tenant
+or per request: created with `Secret(...)`, each distinct key stays registered until the process exits, and the
+registry grows without bound (llm4s logs one warning when it passes 4096).
+
 ## Untrusted input and output
 
 Guardrails are set on the agent (`withInputGuardrails`, `withOutputGuardrails`); a block ends the turn

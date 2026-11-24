@@ -191,7 +191,7 @@ signature.
 
 **TracingBackend** (`org.llm4s.trace.spi.TracingBackend`)
 : The extension point through which a module, such as `llm4s-observability` for Langfuse, supplies a tracing mode
-  that `Tracing.create` can select by name.
+  that `Tracing.fromSettings` can select by name.
 
 ## W
 

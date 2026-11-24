@@ -7,14 +7,19 @@ import scala.concurrent.duration.FiniteDuration
 /**
  * Minimal algebra for collecting metrics about LLM operations.
  *
- * The core metrics model tracks request latency, request outcome, token usage,
- * estimated cost and image generation usage. Everything else is a [[Metric]] its
+ * The core metrics model tracks request latency, request outcome, token usage
+ * and estimated cost. Everything else is a [[Metric]] its
  * owner declares and records through the generic [[increment]], [[observe]] and
  * [[set]]: `ReliableClient`'s retries, circuit-breaker transitions and errors
  * (`org.llm4s.reliability.ReliabilityMetrics`), and the metrics of modules above
- * core, so core names none of their concepts. A backend that implements the three
+ * core - image generation's are `ImageMetrics` in `llm4s-image` - so core names none
+ * of their concepts. A backend that implements the three
  * generic methods exports them all. Concrete implementations decide where these
  * observations are stored or exported.
+ *
+ * `provider` is a metrics label, which is why it is a `String` and not a `ProviderId`: often a
+ * provider's id, but equally a caller's own name for a client, such as the `providerName` a
+ * `ReliableClient` is built with (`"openai-main"`, `"kafka-ticket-pipeline"`).
  *
  * Implementations should be safe: failures must not propagate to callers.
  * All methods should catch and log errors internally without throwing.
@@ -95,44 +100,6 @@ trait MetricsCollector {
   ): Unit
 
   /**
-   * Record an image generation operation.
-   *
-   * The `outcome` dimension has the same meaning as in [[observeRequest]].
-   * `imageCount` records the number of generated images only for successful
-   * operations.
-   *
-   * @param provider Provider name (e.g., "openai", "stability-ai")
-   * @param model Model name (e.g., "gpt-image-1", "dall-e-3")
-   * @param operation Operation type: "generate" or "edit"
-   * @param outcome Success or Error with stable error kind
-   * @param duration Request duration
-   * @param imageCount Number of images generated
-   */
-  def observeImageGeneration(
-    provider: String,
-    model: String,
-    operation: String,
-    outcome: Outcome,
-    duration: FiniteDuration,
-    imageCount: Int
-  ): Unit = () // Default no-op
-
-  /**
-   * Record estimated image generation cost in USD.
-   *
-   * @param provider Provider name
-   * @param model Model name
-   * @param costUsd Estimated cost in USD
-   * @param imageCount Number of images
-   */
-  def recordImageGenerationCost(
-    provider: String,
-    model: String,
-    costUsd: Double,
-    imageCount: Int
-  ): Unit = () // Default no-op
-
-  /**
    * Add `amount` to counter `metric`, with `labelValues` for its label names, in order.
    *
    * The generic entry point for declared metrics (see [[Metric]]): `ReliableClient`'s retry, circuit-breaker and
@@ -166,16 +133,29 @@ object MetricsCollector {
   val MaxLabelValues: Int = 256
 
   /**
+   * The count of failed operations: the series a backend adds a failed request to in [[MetricsCollector.observeRequest]]
+   * (`llm4s_errors_total` in Prometheus). It is declared so that a module above core can add its own failed
+   * operations to that same series through [[MetricsCollector.increment]], as `llm4s-image` does for a failed image
+   * generation. Labels: `provider`, `error_type` (an [[ErrorKind]] in snake case, as
+   * `org.llm4s.reliability.ReliabilityMetrics.errorTypeLabel` gives it).
+   *
+   * A backend that keeps this count in a meter of its own must record this metric into that meter, not register
+   * a second one under the name: `PrometheusMetrics` and `MicrometerMetrics` do.
+   */
+  @Experimental
+  val Errors: Metric.Counter = Metric.counter("llm4s.errors", "Total number of errors", "provider", "error_type")
+
+  /**
    * Combine multiple collectors into one that fans out every call to all of them.
    *
-   * Every method of the trait is forwarded, the image-generation ones included; a
+   * Every method of the trait is forwarded; a
    * collector that throws does not stop the others. A method added to the trait must
    * be forwarded here too - `MetricsCollectorComposeSpec` fails otherwise.
    *
    * Useful for running a `CostTracker` (in `llm4s-observability`) alongside `PrometheusMetrics` (in `llm4s-observability-prometheus`):
    * {{{
    * val combined = MetricsCollector.compose(prometheusMetrics, costTracker)
-   * val client = LLMConnect.getClient(config, combined)
+   * val client = LLMConnect.getClient(config, LlmClientOptions(metrics = combined))
    * }}}
    */
   def compose(collectors: MetricsCollector*): MetricsCollector = new MetricsCollector {
@@ -201,22 +181,6 @@ object MetricsCollector {
       model: String,
       costUsd: Double
     ): Unit = safeForEach(_.recordCost(provider, model, costUsd))
-
-    override def observeImageGeneration(
-      provider: String,
-      model: String,
-      operation: String,
-      outcome: Outcome,
-      duration: FiniteDuration,
-      imageCount: Int
-    ): Unit = safeForEach(_.observeImageGeneration(provider, model, operation, outcome, duration, imageCount))
-
-    override def recordImageGenerationCost(
-      provider: String,
-      model: String,
-      costUsd: Double,
-      imageCount: Int
-    ): Unit = safeForEach(_.recordImageGenerationCost(provider, model, costUsd, imageCount))
 
     override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit =
       safeForEach(_.increment(metric, labelValues, amount))

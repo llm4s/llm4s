@@ -39,7 +39,6 @@ class RAGTracingSpec extends AnyFlatSpec with Matchers {
       Completion(
         id = "c",
         created = Instant.EPOCH,
-        content = text,
         model = "mock-model",
         message = AssistantMessage(text),
         usage = Some(usage),
@@ -63,9 +62,7 @@ class RAGTracingSpec extends AnyFlatSpec with Matchers {
     }
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       route(conversation)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       onChunk(StreamedChunk(id = "c", content = Some("42")))

@@ -15,13 +15,12 @@ class ProviderExchangeSpec extends AnyFlatSpec with Matchers {
 
   private val exchange = ProviderExchange(
     exchangeId = "ex-1",
-    provider = "openai",
+    provider = ProviderId("openai"),
     model = None,
     requestId = None,
     correlationId = None,
     startedAt = started,
     completedAt = started,
-    duration = Duration.Zero,
     outcome = ProviderExchangeOutcome.Success,
     requestBody = "{}",
     responseBody = None,
@@ -32,32 +31,33 @@ class ProviderExchangeSpec extends AnyFlatSpec with Matchers {
     val completed = started.plusMillis(150)
     val changed = exchange
       .withExchangeId("ex-2")
-      .withProvider("anthropic")
+      .withProvider(ProviderId("anthropic"))
       .withModel("claude")
       .withRequestId("req-1")
       .withCorrelationId("corr-1")
       .withStartedAt(started.plusMillis(1))
       .withCompletedAt(completed)
-      .withDuration(150.millis)
       .withOutcome(ProviderExchangeOutcome.Error)
       .withRequestBody("""{"a":1}""")
       .withResponseBody("""{"b":2}""")
       .withErrorMessage("boom")
 
     changed shouldBe ProviderExchange(
-      "ex-2",
-      "anthropic",
-      Some("claude"),
-      Some("req-1"),
-      Some("corr-1"),
-      started.plusMillis(1),
-      completed,
-      150.millis,
-      ProviderExchangeOutcome.Error,
-      """{"a":1}""",
-      Some("""{"b":2}"""),
-      Some("boom")
+      exchangeId = "ex-2",
+      provider = ProviderId("anthropic"),
+      startedAt = started.plusMillis(1),
+      completedAt = completed,
+      outcome = ProviderExchangeOutcome.Error,
+      requestBody = """{"a":1}""",
+      model = Some("claude"),
+      requestId = Some("req-1"),
+      correlationId = Some("corr-1"),
+      responseBody = Some("""{"b":2}"""),
+      errorMessage = Some("boom")
     )
+    // the duration is the time between the two instants, never a field that can disagree with them (#2809)
+    changed.duration shouldBe 149.millis
+    exchange.duration shouldBe Duration.Zero
   }
 
   it should "set or clear an Option field through its Option setter" in {

@@ -123,9 +123,9 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
     withServer("/chat/completions")(exchange => sendSseResponse(exchange, openAISseBody(Seq("a", "b")))) { baseUrl =>
       val c = OpenAICompatibleClient(
         OpenAICompatibleConfig(ModelName("m"), baseUrl, None),
-        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       ).value
-      c.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ()).value.usage shouldBe Some(
+      c.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ()).value.usage shouldBe Some(
         TokenUsage(10, 5, 15)
       )
     }
@@ -148,7 +148,7 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
         OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("gpt-4o-mini"), baseUrl, None)),
         dialect
       )
-      completion = Some(c.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ()).value)
+      completion = Some(c.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ()).value)
     }
     (sent, completion.get)
   }
@@ -214,7 +214,7 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
     } { baseUrl =>
       val config = OpenAICompatibleConfig.fromValues(ModelName("m"), baseUrl, streamUsage = false).value
       OpenAICompatibleClient(config).value
-        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
         .value
     }
     sent.obj.contains("stream_options") shouldBe false

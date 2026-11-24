@@ -64,9 +64,7 @@ class ChatModuleSpec extends AnyFlatSpec with Matchers {
     val client = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Left(ConfigurationError("unused"))
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = Left(ConfigurationError("unused"))
       def getContextWindow(): Int     = 4096

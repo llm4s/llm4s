@@ -2,7 +2,7 @@
 package org.llm4s.samples.metrics
 
 import org.llm4s.config.{ Llm4sConfig, MetricsConfigLoader }
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
 import org.llm4s.llmconnect.model._
 // import org.llm4s.metrics.{ MetricsCollector, PrometheusEndpoint }
 import org.slf4j.LoggerFactory
@@ -61,7 +61,7 @@ import org.slf4j.LoggerFactory
  * '''Option 1: From Configuration (recommended)'''
  * {{{
  * val (metrics, endpointOpt) = MetricsConfigLoader.default().toOption.get
- * val client = LLMConnect.getClient(config, metrics).toOption.get
+ * val client = LLMConnect.getClient(config, LlmClientOptions(metrics = metrics)).toOption.get
  * // ... make LLM calls ...
  * endpointOpt.foreach(_.stop())
  * }}}
@@ -69,7 +69,7 @@ import org.slf4j.LoggerFactory
  * '''Option 2: Noop Metrics (when disabled)'''
  * {{{
  * val metrics = MetricsCollector.noop
- * val client = LLMConnect.getClient(config, metrics).toOption.get
+ * val client = LLMConnect.getClient(config, LlmClientOptions(metrics = metrics)).toOption.get
  * // ... make LLM calls (no metrics recorded) ...
  * }}}
  *
@@ -148,7 +148,7 @@ object PrometheusMetricsExample {
                   given org.llm4s.model.ModelRegistryService = registryService
 
                   // Get LLM client with metrics injection
-                  LLMConnect.getClient(config, metrics) match {
+                  LLMConnect.getClient(config, LlmClientOptions(metrics = metrics)) match {
                     case Left(error) =>
                       logger.error("Failed to create LLM client", error)
                       println(s"ERROR: ${error.message}")

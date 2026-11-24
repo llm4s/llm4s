@@ -121,7 +121,7 @@ Respond with ONLY a JSON array of strings:"""
       )
     )
 
-    val options = CompletionOptions(temperature = 0.0, maxTokens = Some(1000))
+    val options = CompletionOptions(temperature = Some(0.0), maxTokens = Some(1000))
 
     for {
       completion <- llmClient.complete(conversation, options)
@@ -175,7 +175,7 @@ For each fact, determine if it is covered by any of the contexts. Respond with O
         )
       )
 
-      val options = CompletionOptions(temperature = 0.0, maxTokens = Some(2000))
+      val options = CompletionOptions(temperature = Some(0.0), maxTokens = Some(2000))
 
       for {
         completion   <- llmClient.complete(conversation, options)

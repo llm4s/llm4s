@@ -9,10 +9,10 @@ class CompletionOptionsSettersSpec extends AnyFlatSpec with Matchers {
   private val base = CompletionOptions()
 
   "CompletionOptions setters" should "set the sampling fields" in {
-    base.withTemperature(0.1) shouldBe CompletionOptions(temperature = 0.1)
-    base.withTopP(0.5) shouldBe CompletionOptions(topP = 0.5)
-    base.withPresencePenalty(0.3) shouldBe CompletionOptions(presencePenalty = 0.3)
-    base.withFrequencyPenalty(0.4) shouldBe CompletionOptions(frequencyPenalty = 0.4)
+    base.withTemperature(0.1) shouldBe CompletionOptions(temperature = Some(0.1))
+    base.withTopP(0.5) shouldBe CompletionOptions(topP = Some(0.5))
+    base.withPresencePenalty(0.3) shouldBe CompletionOptions(presencePenalty = Some(0.3))
+    base.withFrequencyPenalty(0.4) shouldBe CompletionOptions(frequencyPenalty = Some(0.4))
   }
 
   it should "set and clear maxTokens" in {

@@ -4,7 +4,6 @@ rule = PositionalPatternsGainFields
 package fix.v1
 
 import org.llm4s.error.{ LLMError, ServiceError }
-import org.llm4s.llmconnect.model.Completion
 import org.llm4s.trace.TraceEvent
 
 object PositionalPatternsGainFieldsTest {
@@ -16,9 +15,5 @@ object PositionalPatternsGainFieldsTest {
   def custom(event: TraceEvent): String = event match {
     case TraceEvent.CustomEvent(name, _, _) => name
     case _                                  => ""
-  }
-
-  def summary(completion: Completion): String = completion match {
-    case Completion(id, _, content, _, _, _, _, _, _) => s"$id $content"
   }
 }

@@ -75,7 +75,7 @@ class PerplexityAdjustmentsSpec extends AnyWordSpec with Matchers:
       val chunks  = ListBuffer.empty[StreamedChunk]
       val streamed =
         client(new StubHttp(stream = _ => sse(delta("ok"), completedEvent(response(s"[${textMessage("ok")}]")))))
-          .streamComplete(hello, options, chunks += _)
+          .streamComplete(hello, options)(chunks += _)
           .fold(e => fail(e.message), _.adjustments)
       streamed shouldBe adjustments(options)
       streamed should not be empty

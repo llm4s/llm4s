@@ -14,8 +14,9 @@ import scala.concurrent.duration._
  * and trace event emission.
  *
  * Records:
- *  - `observeImageGeneration` for every generate/edit call (success or failure)
- *  - `recordImageGenerationCost` when pricing is available via [[ImagePricingRegistry]]
+ *  - the [[ImageMetrics]] of every generate/edit call (success or failure), through the collector's generic
+ *    `increment` and `observe`
+ *  - [[ImageMetrics.CostUsd]] when pricing is available via [[ImagePricingRegistry]]
  *  - `TraceEvent.ImageGenerationCompleted` for observability
  *
  * Note: Cost estimation uses the requested size, not the actual provider-billed
@@ -26,7 +27,7 @@ import scala.concurrent.duration._
  *
  * @param delegate   The underlying client to delegate actual generation to
  * @param config     Image generation configuration (provides model/provider info)
- * @param metrics    Metrics collector for Prometheus counters/histograms
+ * @param metrics    Metrics collector; any backend that exports generic metrics exports these
  * @param tracing    Tracing backend for structured event emission
  */
 class InstrumentedImageGenerationClient(
@@ -149,7 +150,7 @@ class InstrumentedImageGenerationClient(
       case Left(err) => Outcome.Error(errorKindFromImageError(err))
     }
 
-    metrics.observeImageGeneration(providerName, model, operation, outcome, duration, imageCount)
+    ImageMetrics.observed(metrics, providerName, model, operation, outcome, duration, imageCount)
 
     // Cost estimation uses the requested size, not the actual provider-billed dimensions.
     // For models like dall-e-3 that normalize sizes, the estimate may differ from actual billing.
@@ -163,7 +164,7 @@ class InstrumentedImageGenerationClient(
             // breakdown) and the unified cost counter (so total spend across all operations,
             // LLM and image, stays correct). This dual recording is intentional, not double
             // counting within a single series.
-            metrics.recordImageGenerationCost(providerName, model, c, imageCount)
+            ImageMetrics.cost(metrics, providerName, model, c)
             metrics.recordCost(providerName, model, c)
           }
           cost

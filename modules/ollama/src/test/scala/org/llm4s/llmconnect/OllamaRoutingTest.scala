@@ -21,7 +21,7 @@ class OllamaRoutingTest extends AnyFunSuite with Matchers with EitherValues {
       contextWindow = 8192,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderId("ollama"), cfg)
+    val res = LLMConnect.getClient(ProviderId("ollama"), cfg, LlmClientOptions.default)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OllamaClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -42,7 +42,7 @@ class OllamaRoutingTest extends AnyFunSuite with Matchers with EitherValues {
       )
       .value
 
-    val res = LLMConnect.getClient(ProviderId("ollama"), cfg)
+    val res = LLMConnect.getClient(ProviderId("ollama"), cfg, LlmClientOptions.default)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OllamaClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")

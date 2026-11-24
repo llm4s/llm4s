@@ -120,7 +120,7 @@ class WatsonXReasoningSpec extends AnyFunSuite with Matchers with EitherValues:
   private def stream(sse: String): (Completion, List[StreamedChunk]) =
     val chunks = ListBuffer.empty[StreamedChunk]
     val result = new WatsonXClient(gptOss, httpClient = streaming(streamOf(bytes(sse))))
-      .streamComplete(ask, CompletionOptions().withReasoning(ReasoningEffort.Low), chunks += _)
+      .streamComplete(ask, CompletionOptions().withReasoning(ReasoningEffort.Low))(chunks += _)
     (result.value, chunks.toList)
 
   test("stream: delta.reasoning_content pieces become thinking deltas, in order, and the completion's thinking") {

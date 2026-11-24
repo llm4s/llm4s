@@ -1106,7 +1106,7 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
       .value
       .run(ThreadId("t1"), "go")
       .value
-    client.optionsSentTo("CHILD:researcher").loneElement.temperature shouldBe 0.123
+    client.optionsSentTo("CHILD:researcher").loneElement.temperature shouldBe Some(0.123)
   }
 
   "RunContext.remainingSteps" should "give a tool the model calls its turn has left" in {

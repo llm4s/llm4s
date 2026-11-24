@@ -76,7 +76,7 @@ class AnthropicServiceTierSpec extends AnyFlatSpec with Matchers {
       val client       = new AnthropicClient(config)
       val conversation = Conversation(Seq(UserMessage("Hi")))
       val completion =
-        if (stream) client.streamComplete(conversation, options, _ => ()) else client.complete(conversation, options)
+        if (stream) client.streamComplete(conversation, options)(_ => ()) else client.complete(conversation, options)
       (ujson.read(seen.get()), completion)
     } finally server.stop(0)
   }

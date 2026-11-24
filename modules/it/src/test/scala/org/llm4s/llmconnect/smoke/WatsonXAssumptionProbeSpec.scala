@@ -385,7 +385,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
       requireAccount()
       val text = scala.collection.mutable.ListBuffer.empty[String]
       val result = withClient()(
-        _.streamComplete(say("Say hi in one word"), CompletionOptions().withMaxTokens(20), _.content.foreach(text += _))
+        _.streamComplete(say("Say hi in one word"), CompletionOptions().withMaxTokens(20))(_.content.foreach(text += _))
       )
       val completion = result.value
       text.mkString should not be empty
@@ -442,7 +442,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
         .withPresencePenalty(0.5)
         .withFrequencyPenalty(0.5)
         .withResponseFormat(ResponseFormat.Json)
-      jsonReply(withClient()(_.streamComplete(askForJson, options, _ => ())).value)
+      jsonReply(withClient()(_.streamComplete(askForJson, options)(_ => ())).value)
     }
   }
 
@@ -463,7 +463,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
       val options  = CompletionOptions().withMaxTokens(400).withReasoning(ReasoningEffort.Low)
       val completion =
         withReasoningClient(
-          _.streamComplete(say("What is 3^3?"), options, _.thinkingDelta.foreach(thinking += _))
+          _.streamComplete(say("What is 3^3?"), options)(_.thinkingDelta.foreach(thinking += _))
         ).value
       completion.content should not be empty
       withClue(s"no streamed reasoning from $reasoningModel\n")(thinking.mkString should not be empty)

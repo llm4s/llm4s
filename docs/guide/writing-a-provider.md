@@ -426,13 +426,15 @@ once per request:
 
 ```scala
 ProviderExchangeRecorder.record(
-  exchangeLogging = options.exchangeLogging,
-  provider        = providerName,
-  model           = Some(config.model),
-  startedAt       = startedAt,           // java.time.Instant taken before the call
-  requestBody     = requestText,
-  responseBody    = Some(responseText),
-  result          = result               // the Result you are about to return
+  options.exchangeLogging,
+  ProviderExchangeCall(
+    provider     = ProviderId(providerName),
+    startedAt    = startedAt,            // java.time.Instant taken before the call
+    requestBody  = requestText,
+    model        = Some(config.model),
+    responseBody = Some(responseText)
+  ),
+  result                                 // the Result you are about to return
 )
 ```
 
@@ -710,9 +712,7 @@ final class AcmeClient(
 
   def streamComplete(
     conversation: Conversation,
-    options: CompletionOptions,
-    onChunk: StreamedChunk => Unit
-  ): Result[Completion] =
+    options: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
     completeWithMetrics(...) // postStream + SSEParser + StreamingAccumulator, as OpenAICompatibleClient does
 
   def getContextWindow(): Int     = config.contextWindow
@@ -726,8 +726,15 @@ final class AcmeClient(
       else Left(HttpErrorMapper.toError(r.statusCode, r.body, providerName, r.headers))
     }
     ProviderExchangeRecorder.record(
-      clientOptions.exchangeLogging, providerName, Some(config.model), startedAt,
-      requestText, response.toOption.map(_.body), result
+      clientOptions.exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestText,
+        model = Some(config.model),
+        responseBody = response.toOption.map(_.body)
+      ),
+      result
     )
     result
 
@@ -911,7 +918,8 @@ Every chat client reports how a reply ended the same way, on `complete` and on `
 
 - **A finish reason on every `Completion`.** Map your provider's own value to `FinishReason`
   (`Stop`, `Length`, `ToolCalls`, or `Other(raw)` for anything else), in your own module. Never
-  report `Stop` for a reason the provider did not send.
+  report `Stop` for a reason the provider did not send: a `Completion` built without one carries
+  `FinishReason.Unknown`, which is also what to report when the provider sent none.
 - **A stream is `Right` only if the provider sent its end marker** (`finish_reason`, `[DONE]`,
   `message_stop`, `done: true`, a `finishReason`...). A stream that ends without one was cut off:
   a retryable `NetworkError`, or a `ServiceError` with status 502.

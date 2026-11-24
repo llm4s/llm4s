@@ -187,10 +187,8 @@ object DelegationContract:
     Completion(
       id = "delegation-contract",
       created = Instant.EPOCH,
-      content = message.content,
       model = "contract-model",
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15)),
       finishReason = if (message.toolCalls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop
     )
@@ -222,9 +220,7 @@ object DelegationContract:
       recorded.add(messages)
       route.applyOrElse(messages, (_: Vector[Message]) => Left(ValidationError("routing", "no route for the call")))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

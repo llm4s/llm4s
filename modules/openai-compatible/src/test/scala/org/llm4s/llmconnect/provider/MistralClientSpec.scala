@@ -184,7 +184,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
       err => fail(s"Expected Right, got Left($err)"),
       completion => {
         completion.content shouldBe ""
-        completion.message.contentOpt shouldBe Some("")
+        completion.message.text shouldBe Some("")
         completion.toolCalls shouldBe empty
       }
     )
@@ -676,7 +676,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
 
     result.isRight shouldBe true
     exchanges should have size 1
-    exchanges.head.provider shouldBe "mistral"
+    exchanges.head.provider.asString shouldBe "mistral"
     exchanges.head.model shouldBe Some("mistral-small-latest")
     exchanges.head.requestBody should include("hello")
     exchanges.head.responseBody.value should include("Logged response")

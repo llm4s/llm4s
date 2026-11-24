@@ -239,11 +239,9 @@ object TicketPipelineSpec {
       inFlight.decrementAndGet()
       underlying.complete(conversation, options)
     }
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
-    ): Result[Completion] = underlying.streamComplete(conversation, options, onChunk)
+    ): Result[Completion] = underlying.streamComplete(conversation, options)(onChunk)
     def getContextWindow(): Int     = underlying.getContextWindow()
     def getReserveCompletion(): Int = underlying.getReserveCompletion()
   }

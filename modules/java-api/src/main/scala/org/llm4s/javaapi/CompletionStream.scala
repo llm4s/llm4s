@@ -90,7 +90,7 @@ final class CompletionStream private[javaapi] (
   private def run(): Unit =
     Using.resource(new AutoCloseable { def close(): Unit = delivered.countDown() }) { _ =>
       val called = CancelledError.attempt("JLlmClient.stream")(
-        Safety.safely(client.streamComplete(conversation, options, chunk => chunk.content.foreach(deliver))).flatten
+        Safety.safely(client.streamComplete(conversation, options)(chunk => chunk.content.foreach(deliver))).flatten
       )
       // a listener's own failure decides the outcome; a cancelled call that failed reports the cancellation, whatever
       // error the interrupted provider returned, and one that had already completed keeps its reply

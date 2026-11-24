@@ -46,7 +46,7 @@ class OpenAICompatibleStreamedToolCallSpec extends AnyFlatSpec with Matchers wit
       val completion = new OpenAICompatibleClient(
         OpenAICompatibleClient.settings(OpenAICompatibleConfig(ModelName("m"), baseUrl)),
         OpenAICompatibleDialect.Standard
-      ).streamComplete(conversation, CompletionOptions(), chunks += _).value
+      ).streamComplete(conversation, CompletionOptions())(chunks += _).value
       result = (chunks.toSeq, completion.toolCalls)
     }
     result
@@ -128,7 +128,7 @@ class OpenAICompatibleStreamedToolCallSpec extends AnyFlatSpec with Matchers wit
       sendSseResponse(exchange, sse(first(0, "call_1", "lookup", """{"q":"""), more(0, "\"llm4s\"}"), finish))
     } { baseUrl =>
       val completion = new DeepSeekClient(DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), baseUrl, 128000, 8192))
-        .streamComplete(conversation, CompletionOptions(), _ => ())
+        .streamComplete(conversation, CompletionOptions())(_ => ())
         .value
       completion.toolCalls shouldBe Seq(ToolCall("call_1", "lookup", ujson.Obj("q" -> "llm4s")))
     }

@@ -69,7 +69,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
 
       val client = new DeepSeekClient(
         localConfig(baseUrl),
-        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
       val result = client.complete(conversation, CompletionOptions())
 
@@ -77,7 +77,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
       recorded should have size 1
 
       val exchange = recorded.head
-      exchange.provider shouldBe "deepseek"
+      exchange.provider.asString shouldBe "deepseek"
       exchange.model shouldBe Some("deepseek-chat")
       exchange.requestBody should include("\"messages\"")
       exchange.requestBody should include("hello")
@@ -129,7 +129,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
       exchange.getResponseHeaders.add("retry-after", "7")
       sendJsonResponse(exchange, 429, """{"error":"Rate limit exceeded"}""")
     } { baseUrl =>
-      new DeepSeekClient(localConfig(baseUrl)).streamComplete(conversation, CompletionOptions(), _ => ()) match {
+      new DeepSeekClient(localConfig(baseUrl)).streamComplete(conversation, CompletionOptions())(_ => ()) match {
         case Left(err: RateLimitError) => err.retryDelay shouldBe Some(7.seconds)
         case other                     => fail(s"Expected RateLimitError, got: $other")
       }
@@ -156,7 +156,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
     } { baseUrl =>
       val client = new DeepSeekClient(localConfig(baseUrl))
       val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-      val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+      val result = client.streamComplete(conversation, CompletionOptions())(c => chunks += c)
 
       result.isRight shouldBe true
       val completion = result.toOption.get
@@ -169,7 +169,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
       sendSseResponse(exchange, openAISseBody(Seq("test"), "deepseek-chat"))
     } { baseUrl =>
       val client = new DeepSeekClient(localConfig(baseUrl))
-      val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+      val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
       result.isRight shouldBe true
       val completion = result.toOption.get
@@ -188,13 +188,13 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
 
       val client = new DeepSeekClient(
         localConfig(baseUrl),
-        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+        exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
-      val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+      val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
       result.isRight shouldBe true
       recorded should have size 1
-      recorded.head.provider shouldBe "deepseek"
+      recorded.head.provider.asString shouldBe "deepseek"
       recorded.head.requestBody should include("\"stream\":true")
       recorded.head.responseBody.value should include("data:")
       recorded.head.responseBody.value should include("Hello")
@@ -210,7 +210,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
     withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 401, """{"error":"Invalid API key"}""")) {
       baseUrl =>
         val client = new DeepSeekClient(localConfig(baseUrl))
-        val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+        val result = client.streamComplete(conversation, CompletionOptions())(_ => ())
 
         result.isLeft shouldBe true
         result.swap.toOption.get shouldBe an[AuthenticationError]
@@ -224,7 +224,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
     } { baseUrl =>
       val client     = new DeepSeekClient(localConfig(baseUrl))
       var chunkCount = 0
-      val result     = client.streamComplete(conversation, CompletionOptions(), _ => chunkCount += 1)
+      val result     = client.streamComplete(conversation, CompletionOptions())(_ => chunkCount += 1)
 
       result.isRight shouldBe true
       chunkCount shouldBe 0

@@ -168,7 +168,7 @@ class OllamaThinkSpec extends AnyWordSpec with Matchers {
       server(Some("""{"thinking":{"values":["low","medium","high"],"default":"medium"}}""")) { (client, shows, chats) =>
         val high       = CompletionOptions().withReasoning(ReasoningEffort.High)
         val completion = client.complete(Conversation(Seq(UserMessage("Hi"))), high).toOption.value
-        client.streamComplete(Conversation(Seq(UserMessage("Hi"))), high, _ => ()).isRight shouldBe true
+        client.streamComplete(Conversation(Seq(UserMessage("Hi"))), high)(_ => ()).isRight shouldBe true
         completion.adjustments shouldBe empty
         completion.thinking shouldBe Some("hmm")
         chats.asScala.map(_("think")).toList shouldBe List(ujson.Str("high"), ujson.Str("high"))

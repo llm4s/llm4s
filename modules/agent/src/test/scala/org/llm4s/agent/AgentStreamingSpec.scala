@@ -32,18 +32,14 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
       Completion(
         "c",
         Instant.EPOCH,
-        text,
         "test-model",
         AssistantMessage(Option(text).filter(_.nonEmpty), toolCalls),
-        toolCalls,
         usage
       )
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       completed.incrementAndGet()
       Right(completion)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       streamed.incrementAndGet()
@@ -107,10 +103,10 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     final class FlakyOnce extends LLMClient:
       private val inner                                                                = Streaming(Seq("x"))
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = inner.complete(c, o)
-      override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+      override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         f(StreamedChunk("c", Some("partial")))
         if failures.getAndIncrement() == 0 then Left(NetworkError("dropped", None, "test"))
-        else inner.streamComplete(c, o, f)
+        else inner.streamComplete(c, o)(f)
       override def getContextWindow(): Int     = 4096
       override def getReserveCompletion(): Int = 1024
     val retry = new AgentMiddleware:
@@ -133,11 +129,11 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     final class ToolThenText extends LLMClient:
       private val n = new AtomicInteger(0)
       private def answer(i: Int): Completion =
-        if i == 0 then Completion("c", Instant.EPOCH, "", "m", AssistantMessage(None, Seq(call)), List(call), usage)
-        else Completion("c", Instant.EPOCH, "done", "m", AssistantMessage("done"), Nil, usage)
+        if i == 0 then Completion("c", Instant.EPOCH, "m", AssistantMessage(None, Seq(call)), usage)
+        else Completion("c", Instant.EPOCH, "m", AssistantMessage("done"), usage)
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         Right(answer(n.getAndIncrement()))
-      override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+      override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         val i = n.getAndIncrement()
         if i == 0 then f(StreamedChunk("c", None, toolCall = Some(call)))
         else f(StreamedChunk("c", Some("done")))
@@ -175,8 +171,8 @@ class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val call   = ToolCall("call-1", "handoff_to_physics", ujson.Obj())
     val root = new LLMClient:
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-        Right(Completion("c", Instant.EPOCH, "", "m", AssistantMessage(None, Seq(call)), List(call), usage))
-      override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+        Right(Completion("c", Instant.EPOCH, "m", AssistantMessage(None, Seq(call)), usage))
+      override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       override def getContextWindow(): Int     = 4096
       override def getReserveCompletion(): Int = 1024

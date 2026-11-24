@@ -136,7 +136,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
   "a streamed response" should "assemble each thinking block with its signature, and redacted thinking, on the message" in {
     withServer(streamedThinkingReply) { (baseUrl, _) =>
       val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
-        .streamComplete(Conversation(Seq(UserMessage("Weather in Paris?"))), CompletionOptions(), _ => ())
+        .streamComplete(Conversation(Seq(UserMessage("Weather in Paris?"))), CompletionOptions())(_ => ())
         .toOption
         .get
       completion.message.thinking shouldBe Seq(
@@ -407,7 +407,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
     withServer(streamedThinkingReply) { (baseUrl, _) =>
       val ask = UserMessage("Weather in Paris?")
       val completion = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
-        .streamComplete(Conversation(Seq(ask)), CompletionOptions(), _ => ())
+        .streamComplete(Conversation(Seq(ask)), CompletionOptions())(_ => ())
         .toOption
         .get
       val body = requestBody(ask, completion.message, ToolMessage("sunny", "toolu_1"))

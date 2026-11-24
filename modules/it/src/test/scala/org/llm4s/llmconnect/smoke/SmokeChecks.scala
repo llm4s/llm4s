@@ -116,7 +116,7 @@ object SmokeChecks {
    */
   val StructuredPrompt = "Report the colour blue and the count 3."
 
-  private def small: CompletionOptions = CompletionOptions(temperature = 0.0, maxTokens = Some(24))
+  private def small: CompletionOptions = CompletionOptions(temperature = Some(0.0), maxTokens = Some(24))
 
   private def fail(capability: Capability, detail: String): Outcome =
     Outcome.Failed(s"[${capability.label}] $detail")
@@ -181,7 +181,7 @@ object SmokeChecks {
     val conversation = Conversation(
       Seq(
         UserMessage("Pick a four-digit favourite number for me and tell me what it is."),
-        AssistantMessage(contentOpt = Some(s"Your favourite number is $FavouriteNumber.")),
+        AssistantMessage(text = Some(s"Your favourite number is $FavouriteNumber.")),
         UserMessage("What is my favourite number? Reply with the number only.")
       )
     )
@@ -240,7 +240,7 @@ object SmokeChecks {
     } yield (call, result)
 
   private def toolOptions(tool: ToolFunction[_, _]): CompletionOptions =
-    CompletionOptions(temperature = 0.0, maxTokens = Some(64)).withTools(Seq(tool))
+    CompletionOptions(temperature = Some(0.0), maxTokens = Some(64)).withTools(Seq(tool))
 
   /**
    * A tool call round trip: the model calls the tool, the result goes back as a `ToolMessage`, and the model's
@@ -257,7 +257,7 @@ object SmokeChecks {
         called <- calledTool(tool, first)
         withResult = Conversation(
           ask.messages ++ Seq(
-            AssistantMessage(contentOpt = first.message.contentOpt, toolCalls = first.toolCalls),
+            AssistantMessage(text = first.message.text, toolCalls = first.toolCalls),
             ToolMessage(content = called._2, toolCallId = called._1.id)
           )
         )
@@ -290,9 +290,10 @@ object SmokeChecks {
         completion <- client
           .streamComplete(
             Conversation(Seq(UserMessage(ToolPrompt))),
-            toolOptions(tool),
-            chunk => { chunks += chunk; () }
-          )
+            toolOptions(tool)
+          ) { chunk =>
+            chunks += chunk; ()
+          }
           .left
           .map(e => s"the streamed request carrying a tool failed: ${e.message}")
         _ <- calledTool(tool, completion)
@@ -311,9 +312,7 @@ object SmokeChecks {
   private def fromChunks(chunks: Seq[StreamedChunk]): Either[String, Completion] = {
     val accumulator = StreamingAccumulator("")
     chunks.foreach(accumulator.addChunk)
-    accumulator.toCompletion
-      .map(c => c.withToolCalls(c.message.toolCalls.toList))
-      .left
+    accumulator.toCompletion.left
       .map(e => s"the streamed chunks did not reassemble: ${e.message}")
   }
 
@@ -352,7 +351,7 @@ object SmokeChecks {
     val jsonSchema = schema.toJsonSchema(strict = true)
     val declared   = jsonSchema.obj.get("properties").flatMap(_.objOpt).map(_.keySet.toSet).getOrElse(Set.empty)
     val options =
-      CompletionOptions(temperature = 0.0, maxTokens = Some(64))
+      CompletionOptions(temperature = Some(0.0), maxTokens = Some(64))
         .withResponseFormat(ResponseFormat.JsonSchema(jsonSchema))
     outcome(
       Capability.StructuredOutput,
@@ -424,7 +423,7 @@ object SmokeChecks {
       Capability.StreamedUsage,
       for {
         completion <- client
-          .streamComplete(Conversation(Seq(UserMessage("Say hi in one word"))), small, _ => ())
+          .streamComplete(Conversation(Seq(UserMessage("Say hi in one word"))), small)(_ => ())
           .left
           .map(e => s"the streamed call failed: ${e.message}")
         _ <- usageProblem(completion.usage).toLeft(())

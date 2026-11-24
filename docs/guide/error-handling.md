@@ -345,7 +345,7 @@ import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
 
 import scala.concurrent.duration._
 
-val reliable = new ReliableClient(
+val reliable = ReliableClient(
   client,
   providerName = "openai",
   config = ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second))

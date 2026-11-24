@@ -38,7 +38,7 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
   )(call: (String, ProviderExchangeLogging) => A): (A, Int, Seq[ProviderExchange]) = {
     val hits     = new AtomicInteger
     val recorded = ListBuffer.empty[ProviderExchange]
-    val logging = ProviderExchangeLogging.enabled(
+    val logging = ProviderExchangeLogging.Enabled(
       new ProviderExchangeSink:
         override def record(exchange: ProviderExchange): Unit = recorded += exchange
     )
@@ -73,7 +73,7 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
     var chunks = 0
     val (result, hits, recorded) =
       against("/v1/chat/completions", sendSseResponse(_, openAISseBody(Seq("never")))) { (url, logging) =>
-        mistral(url, logging).streamComplete(onlyEmptyAssistantTurns, CompletionOptions(), _ => chunks += 1)
+        mistral(url, logging).streamComplete(onlyEmptyAssistantTurns, CompletionOptions())(_ => chunks += 1)
       }
 
     result.left.value shouldBe a[ValidationError]
@@ -132,7 +132,7 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
           new DeepSeekClient(DeepSeekConfig(Secret("k"), ModelName("deepseek-chat"), url, 128000, 8192), exchangeLogging = logging)
         (
           c.complete(Conversation(Seq.empty), CompletionOptions()),
-          c.streamComplete(Conversation(Seq.empty), CompletionOptions(), _ => ())
+          c.streamComplete(Conversation(Seq.empty), CompletionOptions())(_ => ())
         )
       }
 

@@ -106,9 +106,8 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
       val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
       val result = client.streamComplete(
         conversation("Say hello in one word"),
-        CompletionOptions(),
-        c => chunks += c
-      )
+        CompletionOptions()
+      )(c => chunks += c)
 
       result.isRight shouldBe true
       val completion = result.toOption.get

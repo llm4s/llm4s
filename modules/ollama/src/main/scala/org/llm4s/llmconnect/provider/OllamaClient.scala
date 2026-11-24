@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ LLMError, NetworkError, ServiceError, TroubleshootingLinks, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
@@ -226,13 +227,15 @@ class OllamaClient(
     result: Result[Completion]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(config.model.asString),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = Option(responseBody).filter(_.nonEmpty),
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(config.model.asString),
+        responseBody = Option(responseBody).filter(_.nonEmpty)
+      ),
+      result
     )
 
   /**
@@ -249,9 +252,7 @@ class OllamaClient(
     result
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val think = thinkPlan(options)
@@ -359,7 +360,7 @@ class OllamaClient(
           .map { c =>
             // the accumulator reports streamed calls on the message only
             val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model.asString, u))
-            c.withToolCalls(c.message.toolCalls.toList).withEstimatedCost(cost)
+            c.withEstimatedCost(cost)
           }
 
         recordingExchange(startedAt, requestText, rawResponse.result())(result)
@@ -425,10 +426,10 @@ class OllamaClient(
         message
     })
 
-    val opts = ujson.Obj(
-      "temperature" -> options.temperature,
-      "top_p"       -> options.topP
-    )
+    // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
+    val opts = ujson.Obj()
+    options.temperature.foreach(t => opts("temperature") = t)
+    options.topP.foreach(p => opts("top_p") = p)
     options.maxTokens.foreach(t => opts("num_predict") = t)
 
     val body = ujson.Obj(
@@ -465,8 +466,6 @@ class OllamaClient(
       Completion(
         id = id,
         created = created,
-        content = content,
-        toolCalls = calls.toList,
         usage = usage,
         model = config.model.asString,
         message = (if (calls.isEmpty) AssistantMessage(content)
@@ -671,14 +670,15 @@ object OllamaClient {
 
   /**
    * The reply's [[FinishReason]] from its last line's `done_reason` (RFC 0009): `stop` is `ToolCalls` when the reply
-   * called a tool and `Stop` otherwise, `length` is `Length`, any other value `Other`, and none `Other("")`.
+   * called a tool and `Stop` otherwise, `length` is `Length`, any other value `Other`, and none `Unknown`.
    */
   private[provider] def finishReason(json: ujson.Value, calledTools: Boolean): FinishReason =
     json.obj.get("done_reason").flatMap(_.strOpt).filter(_.nonEmpty) match {
       case Some("stop")   => if (calledTools) FinishReason.ToolCalls else FinishReason.Stop
       case Some("length") => FinishReason.Length
+      case Some("")       => FinishReason.Unknown
       case Some(other)    => FinishReason.Other(other)
-      case None           => FinishReason.Other("")
+      case None           => FinishReason.Unknown
     }
 
   /** The `thinking` of a reply's `message`, or of one streamed line; none when absent, null or empty. */

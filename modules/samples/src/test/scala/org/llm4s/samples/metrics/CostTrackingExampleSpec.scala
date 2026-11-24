@@ -163,7 +163,8 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
       // 1. Per request: the first plain request, 20 in and 10 out.
       report.perRequest.usage.map(u => (u.promptTokens, u.completionTokens)) shouldBe Some(Plain.head)
       report.perRequest.cost
-        .getOrElse(fail("no cost")) shouldBe (cost(Plain.head, RegistryIn, RegistryOut) +- tolerance)
+        .getOrElse(fail("no cost"))
+        .toDouble shouldBe (cost(Plain.head, RegistryIn, RegistryOut) +- tolerance)
 
       // 2. Agent: the tool call and the final answer, two requests.
       report.agent.requestCount shouldBe 2
@@ -201,7 +202,7 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
         CostTrackingExample.ExampleInputPerMillion / 1.0e6,
         CostTrackingExample.ExampleOutputPerMillion / 1.0e6
       )
-      custom.request.cost.getOrElse(fail("no cost")) shouldBe (expected +- tolerance)
+      custom.request.cost.getOrElse(fail("no cost")).toDouble shouldBe (expected +- tolerance)
       custom.request.cost
         .getOrElse(fail("no cost")) should not be (cost(Plain(1), RegistryIn, RegistryOut) +- tolerance)
 
@@ -216,7 +217,9 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
     val report = runFor(config, pricedRegistry("acme-chat-7"))
 
     report.model shouldBe "acme-chat-7"
-    report.perRequest.cost.getOrElse(fail("no cost")) shouldBe (cost(Plain.head, RegistryIn, RegistryOut) +- tolerance)
+    report.perRequest.cost
+      .getOrElse(fail("no cost"))
+      .toDouble shouldBe (cost(Plain.head, RegistryIn, RegistryOut) +- tolerance)
     report.agent.requestCount shouldBe 2
   }
 

@@ -51,15 +51,12 @@ class BenchmarkRunnerSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock",
           created = Instant.EPOCH,
-          content = "A mock answer.",
           model = "mock-model",
-          message = AssistantMessage(contentOpt = Some("A mock answer.")),
+          message = AssistantMessage(text = Some("A mock answer.")),
           usage = Some(TokenUsage(50, 25, 75))
         )
       )
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

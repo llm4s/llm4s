@@ -51,7 +51,7 @@ class DeepSeekClientToolMessageTest extends AnyFlatSpec with Matchers {
       Seq(
         UserMessage("What's the weather?"),
         AssistantMessage(
-          contentOpt = None,
+          text = None,
           toolCalls = List(
             ToolCall(
               id = "call_abc123",
@@ -91,7 +91,7 @@ class DeepSeekClientToolMessageTest extends AnyFlatSpec with Matchers {
       Seq(
         UserMessage("Get weather for multiple cities"),
         AssistantMessage(
-          contentOpt = None,
+          text = None,
           toolCalls = List(
             ToolCall(
               id = "call_1",

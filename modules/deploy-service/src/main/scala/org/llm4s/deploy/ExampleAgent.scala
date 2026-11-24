@@ -33,28 +33,24 @@ final class DemoModel(toolDelay: FiniteDuration) extends LLMClient:
     val answered = conversation.messages.lastOption.exists(_.isInstanceOf[ToolMessage])
     if toolDelay > Duration.Zero && !answered then
       val call = ToolCall(s"pause-${conversation.messages.size}", ExampleAgent.PauseTool, ujson.Obj())
-      Right(completion(AssistantMessage(contentOpt = None, toolCalls = Seq(call)), ""))
+      Right(completion(AssistantMessage(text = None, toolCalls = Seq(call))))
     else
       val text = s"Echo: ${lastUser.getOrElse("")}"
-      Right(completion(AssistantMessage(text), text))
+      Right(completion(AssistantMessage(text)))
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = complete(conversation, options)
 
   override def getContextWindow(): Int     = 128000
   override def getReserveCompletion(): Int = 4096
 
-  private def completion(message: AssistantMessage, text: String): Completion =
+  private def completion(message: AssistantMessage): Completion =
     Completion(
       id = s"demo-${java.util.UUID.randomUUID()}",
       created = Instant.now(),
-      content = text,
       model = "demo",
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(promptTokens = 0, completionTokens = 0, totalTokens = 0)),
       finishReason = if (message.toolCalls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop
     )

@@ -103,7 +103,7 @@ object WorkspaceToolExample {
                 logger.info(s"Testing with named provider section '$sectionName'...")
                 registryServiceRes.flatMap { registryService =>
                   given org.llm4s.model.ModelRegistryService = registryService
-                  Llm4sConfig.provider(ProviderName(sectionName)).flatMap(LLMConnect.getClient)
+                  Llm4sConfig.provider(ProviderName(sectionName)).flatMap(LLMConnect.getClient(_))
                 } match {
                   case Right(client) => run(client, tools)
                   case Left(err) =>

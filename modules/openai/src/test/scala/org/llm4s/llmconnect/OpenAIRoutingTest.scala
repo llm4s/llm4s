@@ -54,7 +54,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderId("openai"), cfg)
+    val res = LLMConnect.getClient(ProviderId("openai"), cfg, LlmClientOptions.default)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OpenAIClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -70,7 +70,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderId("azure"), cfg)
+    val res = LLMConnect.getClient(ProviderId("azure"), cfg, LlmClientOptions.default)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OpenAIClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -80,7 +80,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
   test("OpenAI provider with non-OpenAIConfig should throw IllegalArgumentException") {
     val wrongCfg: ProviderConfig = FixtureChatConfig(apiKey = "key", modelName = "fixture-model")
 
-    val res = LLMConnect.getClient(ProviderId("openai"), wrongCfg)
+    val res = LLMConnect.getClient(ProviderId("openai"), wrongCfg, LlmClientOptions.default)
     res.isLeft shouldBe true
   }
 
@@ -94,7 +94,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
       reserveCompletion = 4096
     )
 
-    val res = LLMConnect.getClient(ProviderId("azure"), wrongCfg)
+    val res = LLMConnect.getClient(ProviderId("azure"), wrongCfg, LlmClientOptions.default)
     res.isLeft shouldBe true
   }
 
@@ -109,7 +109,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
 
     val res = withProps(props) {
       given ModelRegistryService = registryService
-      Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+      Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient(_))
     }
     res.isRight shouldBe true
     res.toOption.get.getClass.getSimpleName shouldBe "OpenAIClient"
@@ -126,7 +126,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
 
     val res = withProps(props) {
       given ModelRegistryService = registryService
-      Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+      Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient(_))
     }
     res.isRight shouldBe true
     res.toOption.get.getClass.getSimpleName shouldBe "OpenAIClient"
@@ -161,7 +161,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 4096
     )
-    LLMConnect.getClient(ProviderId("requesty"), cfg) match {
+    LLMConnect.getClient(ProviderId("requesty"), cfg, LlmClientOptions.default) match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OpenAIClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
     }

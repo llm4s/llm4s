@@ -31,7 +31,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
   /** A stream sent with the exchanged token succeeds and delivers at least one chunk. */
   private def assertStreamsWithToken(client: LLMClient): Unit =
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    client.streamComplete(conversation, CompletionOptions(), chunks += _).isRight shouldBe true
+    client.streamComplete(conversation, CompletionOptions())(chunks += _).isRight shouldBe true
     chunks should not be empty
 
   // A Windows path has backslashes, which a quoted HOCON string reads as escapes (`\U` is not one).

@@ -20,9 +20,7 @@ class AgentRunStatusSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
   private object Unused extends LLMClient:
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       Left(NetworkError("unused", None, "mock://llm"))
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

@@ -55,7 +55,7 @@ object AgentPekkoNestedEventsSpec {
 
   private def completion(text: String, calls: Seq[ToolCall] = Nil): Completion = {
     val message = if (calls.isEmpty) AssistantMessage(text, Seq.empty) else AssistantMessage(None, calls)
-    Completion("n", Instant.EPOCH, message.content, "m", message, calls.toList, Some(TokenUsage(1, 1, 2)))
+    Completion("n", Instant.EPOCH, "m", message, Some(TokenUsage(1, 1, 2)))
   }
 
   /** The lead delegates once to a streaming text subagent; its first call waits for `subscribed`. */
@@ -77,9 +77,7 @@ object AgentPekkoNestedEventsSpec {
           )
         }
       }
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] =
         complete(conversation, options).map { c =>

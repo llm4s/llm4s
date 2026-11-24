@@ -151,7 +151,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       case Left(e)  => fail(s"expected an empty answer, got $e")
     }
     completion.content shouldBe ""
-    completion.message.contentOpt shouldBe None
+    completion.message.text shouldBe None
     completion.toolCalls shouldBe empty
     completion.usage shouldBe Some(noPartsUsage)
   }
@@ -348,7 +348,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
     result.isRight shouldBe true
     exchanges should have size 1
-    exchanges.head.provider shouldBe "gemini"
+    exchanges.head.provider.asString shouldBe "gemini"
     exchanges.head.model shouldBe Some("gemini-2.0-flash")
     exchanges.head.requestBody should include("Hi")
     exchanges.head.responseBody.value should include("Hello!")
@@ -433,7 +433,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
     val chunks = scala.collection.mutable.Buffer[StreamedChunk]()
     val client = mkClient(mockHttp)
-    val result = client.streamComplete(conversation("Hi"), CompletionOptions(), chunk => chunks += chunk)
+    val result = client.streamComplete(conversation("Hi"), CompletionOptions())(chunk => chunks += chunk)
 
     result.isRight shouldBe true
     result.toOption.get.content should include("Hello")
@@ -468,7 +468,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     )
 
     client.complete(conversation("Hi"), reasoning).toOption.value.adjustments shouldBe dropped
-    client.streamComplete(conversation("Hi"), reasoning, _ => ()).toOption.value.adjustments shouldBe dropped
+    client.streamComplete(conversation("Hi"), reasoning)(_ => ()).toOption.value.adjustments shouldBe dropped
     client.complete(conversation("Hi"), CompletionOptions()).toOption.value.adjustments shouldBe empty
   }
 
@@ -498,7 +498,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     val mockHttp    = stub[StubbedHttpCalls]
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
-    val completion = mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), _ => ()).toOption.value
+    val completion = mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions())(_ => ()).toOption.value
     completion.content shouldBe "Hello world"
     completion.citations shouldBe List(
       Citation(url = "https://src/a", title = Some("A")),
@@ -516,7 +516,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val client = mkClient(mockHttp)
-    val result = client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation("Hi"), CompletionOptions())(_ => ())
 
     result.isRight shouldBe true
     val usage = result.toOption.get.usage.get
@@ -537,7 +537,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     val mockHttp = stub[StubbedHttpCalls]
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
-    val completion = mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), _ => ()).toOption.value
+    val completion = mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions())(_ => ()).toOption.value
     completion.content shouldBe "Done"
     completion.usage shouldBe Some(
       TokenUsage(
@@ -560,7 +560,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val chunks = ListBuffer.empty[StreamedChunk]
-    val completion = mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), chunks += _) match {
+    val completion = mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions())(chunks += _) match {
       case Right(c) => c
       case Left(e)  => fail(s"expected an empty answer, got $e")
     }
@@ -582,7 +582,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
             .returns(
               Right(StreamingHttpResponse(200, new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))))
             )
-          mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), chunks += _)
+          mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions())(chunks += _)
         },
         filtered
       ) should include(expected)
@@ -597,7 +597,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       (mockHttp.onPostStream _)
         .when(*, *, *, *)
         .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8)))))
-      mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
+      mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions())(_ => ())
     } should include("blockReason PROHIBITED_CONTENT")
   }
 
@@ -618,14 +618,14 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     val client = new GeminiClient(
       testConfig,
       org.llm4s.metrics.MetricsCollector.noop,
-      ProviderExchangeLogging.enabled(sink),
+      ProviderExchangeLogging.Enabled(sink),
       mockHttp
     )
-    val result = client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation("Hi"), CompletionOptions())(_ => ())
 
     result.isRight shouldBe true
     exchanges should have size 1
-    exchanges.head.provider shouldBe "gemini"
+    exchanges.head.provider.asString shouldBe "gemini"
     exchanges.head.requestBody should include("Hi")
     exchanges.head.responseBody.value should include("data:")
     exchanges.head.responseBody.value should include("Hello")
@@ -640,7 +640,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(401, inputStream)))
 
     val client = mkClient(mockHttp)
-    val result = client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation("Hi"), CompletionOptions())(_ => ())
 
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[org.llm4s.error.AuthenticationError]
@@ -701,7 +701,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     val mockHttp = stub[StubbedHttpCalls]
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, resetting)))
 
-    mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), _ => ()) match {
+    mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions())(_ => ()) match {
       case Left(e: org.llm4s.error.NetworkError) =>
         org.llm4s.error.LLMError.isRecoverable(e) shouldBe true
         (e.message should not).include("key=")
@@ -811,7 +811,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)))))
-    mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), onChunk)
+    mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions())(onChunk)
   }
 
   // ---- service tier (#2726) ----
@@ -885,7 +885,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
         )
       )
     mkClient(mockHttp)
-      .streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
+      .streamComplete(conversation("Hi"), CompletionOptions())(_ => ())
       .toOption
       .value
       .servedTier shouldBe Some(ServiceTier.Flex)

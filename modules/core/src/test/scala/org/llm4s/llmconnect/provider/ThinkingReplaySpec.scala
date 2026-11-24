@@ -233,6 +233,27 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
     turn.withContent("changed").thinkingBinding shouldBe None
     turn.withToolCalls(Seq.empty).thinkingBinding shouldBe None
     turn.withThinking(sealedThinking).thinkingBinding shouldBe None
-    turn.withContent(turn.contentOpt) shouldBe turn
+    turn.withContent(turn.text) shouldBe turn
+  }
+
+  // #2809 flattened the stored JSON of an assistant message. A fingerprint is compared with one made earlier, so
+  // what it is taken over must not move with the stored shape, or every earlier binding would stop matching.
+  "The fingerprint's encoding" should "keep the shape assistant messages were stored in when bindings were first made" in {
+    ThinkingReplay.encoded(AssistantMessage("Checking.", Seq(call))) shouldBe
+      """{"type":"assistant","data":{"contentOpt":"Checking.","toolCalls":[{"id":"tc-1","name":"get_weather",""" +
+      """"arguments":{"city":"Paris"}}]}}"""
+    ThinkingReplay.encoded(AssistantMessage(None, Seq(call)).withThinking("hmm")) shouldBe
+      """{"type":"assistant","data":{"contentOpt":null,"toolCalls":[{"id":"tc-1","name":"get_weather",""" +
+      """"arguments":{"city":"Paris"}}],"thinking":[{"type":"text","text":"hmm"}]}}"""
+    ThinkingReplay.encoded(UserMessage("hi")) shouldBe write[Message](UserMessage("hi"))
+  }
+
+  it should "keep a binding valid across a write and a read of the conversation in its new shape" in {
+    val history =
+      Seq[Message](UserMessage("hi"), AssistantMessage("Checking.", Seq(call)), ToolMessage("sunny", "tc-1"))
+    val turn   = signedTurn(history*)
+    val stored = read[Conversation](write(Conversation(history :+ turn)))
+
+    ThinkingReplay.replayable(origin, stored.messages, options).last shouldBe turn
   }
 }

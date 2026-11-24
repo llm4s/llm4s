@@ -21,11 +21,9 @@ class JStructuredOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val options = new AtomicReference[CompletionOptions]()
     override def complete(conversation: Conversation, opts: CompletionOptions): Result[Completion] = {
       options.set(opts)
-      Right(Completion("id", Instant.EPOCH, reply, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage(reply)))
     }
-    override def streamComplete(
-      c: Conversation,
-      o: CompletionOptions,
+    override def streamComplete(c: Conversation, o: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(c, o)

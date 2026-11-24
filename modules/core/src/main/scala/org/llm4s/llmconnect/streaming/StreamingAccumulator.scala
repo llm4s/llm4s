@@ -157,8 +157,8 @@ final class StreamingAccumulator private (model: String) {
    * cut the stream (`Length`) while it made tool calls. A broken call is never `{}` and never dropped.
    */
   def toCompletion(created: Instant): Result[Completion] = {
-    // the last reason a chunk carried; none read is Other(""), never a Stop the provider didn't send
-    val reason = finishReason.getOrElse(FinishReason.Other(""))
+    // the last reason a chunk carried; none read is Unknown, never a Stop the provider didn't send
+    val reason = finishReason.getOrElse(FinishReason.Unknown)
     finishedToolCalls(reason).map(completion(created, _, reason)).flatMap(ToolCallRules.checked)
   }
 
@@ -166,7 +166,7 @@ final class StreamingAccumulator private (model: String) {
     // the streamed thinking is unsigned text; a client whose provider signs its thinking blocks
     // replaces it on the message with the blocks it tracked
     val message = AssistantMessage(
-      contentOpt = if (contentBuilder.isEmpty) None else Some(contentBuilder.toString),
+      text = if (contentBuilder.isEmpty) None else Some(contentBuilder.toString),
       toolCalls = finalToolCalls
     ).withThinking(thinkingBuilder.toString)
 
@@ -189,7 +189,6 @@ final class StreamingAccumulator private (model: String) {
     Completion(
       id = messageId.getOrElse(""),
       created = created,
-      content = contentBuilder.toString(),
       model = model,
       message = message,
       usage = usage,

@@ -203,7 +203,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
       withThreeProviders() { providers =>
         (providers.all ++ providers.all).foreach { p =>
           val chunks = new ConcurrentLinkedQueue[StreamedChunk]()
-          val result = p.client.streamComplete(hello, CompletionOptions(), chunk => chunks.add(chunk): Unit).value
+          val result = p.client.streamComplete(hello, CompletionOptions())(chunk => chunks.add(chunk): Unit).value
           result.content shouldBe s"hello from ${p.id}"
           chunks.asScala.flatMap(_.content).mkString shouldBe s"hello from ${p.id}"
         }
@@ -245,7 +245,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
             usageOf(p.client.complete(hello).value) shouldBe Some((10, 5, 15))
           }
           withClue(s"${p.id} stream: ") {
-            usageOf(p.client.streamComplete(hello, CompletionOptions(), _ => ()).value) shouldBe Some((10, 5, 15))
+            usageOf(p.client.streamComplete(hello, CompletionOptions())(_ => ()).value) shouldBe Some((10, 5, 15))
           }
         }
       }
@@ -348,7 +348,7 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
       deadline = None
     )
 
-    def reliable(p: Live): ReliableClient = new ReliableClient(p.client, p.id, reliability, sleep = _ => ())
+    def reliable(p: Live): ReliableClient = ReliableClient(p.client, p.id, reliability).withSleep(_ => ())
 
     "answer from the fallback when the primary still fails after its retries" in
       withThreeProviders() { providers =>

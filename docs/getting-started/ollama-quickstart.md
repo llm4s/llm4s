@@ -412,9 +412,8 @@ object StreamingOllama extends App {
     client     <- LLMConnect.getClient(providerConfig)
     completion <- client.streamComplete(
       conversation,
-      CompletionOptions(),
-      chunk => chunk.content.foreach(print)  // Print tokens as they arrive
-    )
+      CompletionOptions()
+    )(chunk => chunk.content.foreach(print))  // Print tokens as they arrive
   } yield completion
 
   result match {

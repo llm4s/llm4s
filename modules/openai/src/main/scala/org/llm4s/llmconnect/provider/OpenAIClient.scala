@@ -236,9 +236,7 @@ class OpenAIClient private[provider] (
     result.tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
@@ -357,7 +355,6 @@ class OpenAIClient private[provider] (
           accumulator.toCompletion.map { c =>
             val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
             c
-              .withToolCalls(c.message.toolCalls.toList)
               .withEstimatedCost(cost)
               .withAdjustments(adjustments)
               .withServedTier(state.servedTier)
@@ -593,13 +590,12 @@ class OpenAIClient private[provider] (
 
   /**
    * `transformed`'s adjustments with the sampling options a reasoning-model request leaves out
-   * (`temperature`, `top_p`, the penalties) reported as `Dropped` (RFC 0008), each when the caller set it
-   * away from its `CompletionOptions` default. `requested` is what the caller asked for, before the
-   * transformer moved anything, such as the o-series temperature it adjusts to 1.0.
+   * (`temperature`, `top_p`, the penalties) reported as `Dropped` (RFC 0008), each when the caller set it,
+   * whatever its value. `requested` is what the caller asked for, before the transformer moved anything, such
+   * as the o-series temperature it adjusts to 1.0.
    *
-   * A default is not reported, so a default call reports nothing and logs no warning: a caller that treats
-   * any `Dropped` as a failure can still use these models without setting anything. The cost is that an
-   * explicit value equal to the default goes unreported too, since `CompletionOptions` cannot tell the two apart.
+   * An option the caller left unset is not reported, so a default call reports nothing and logs no warning: a
+   * caller that treats any `Dropped` as a failure can still use these models without setting anything.
    *
    * Any report the transformer made for one of these options is replaced, because in the end nothing is sent
    * for it.
@@ -610,13 +606,12 @@ class OpenAIClient private[provider] (
   ): List[RequestAdjustment] =
     if (!omitsSampling(transformed.options)) transformed.adjustments
     else {
-      val reason   = s"$model is a reasoning model, which takes no sampling parameters"
-      val defaults = CompletionOptions()
+      val reason = s"$model is a reasoning model, which takes no sampling parameters"
       val sampling = List(
-        RequestOption.Temperature      -> (requested.temperature != defaults.temperature),
-        RequestOption.TopP             -> (requested.topP != defaults.topP),
-        RequestOption.PresencePenalty  -> (requested.presencePenalty != defaults.presencePenalty),
-        RequestOption.FrequencyPenalty -> (requested.frequencyPenalty != defaults.frequencyPenalty)
+        RequestOption.Temperature      -> requested.temperature.isDefined,
+        RequestOption.TopP             -> requested.topP.isDefined,
+        RequestOption.PresencePenalty  -> requested.presencePenalty.isDefined,
+        RequestOption.FrequencyPenalty -> requested.frequencyPenalty.isDefined
       )
       val unsent = sampling.collect { case (option, true) => option }
       transformed.adjustments.filterNot(a => sampling.exists(_._1 == a.option)) ++
@@ -665,12 +660,13 @@ class OpenAIClient private[provider] (
       // reported on the Completion by withUnsentSampling
       if (omitsSampling(options))
         logger.debug(s"$displayName model $model is a reasoning model: not sending temperature, top_p or penalties")
-      else
-        builder
-          .temperature(options.temperature.doubleValue())
-          .presencePenalty(options.presencePenalty.doubleValue())
-          .frequencyPenalty(options.frequencyPenalty.doubleValue())
-          .topP(options.topP.doubleValue())
+      else {
+        // only what the caller set is sent: unset, OpenAI's own defaults apply
+        options.temperature.foreach(t => builder.temperature(t))
+        options.presencePenalty.foreach(p => builder.presencePenalty(p))
+        options.frequencyPenalty.foreach(p => builder.frequencyPenalty(p))
+        options.topP.foreach(p => builder.topP(p))
+      }
 
       effort.foreach(e => builder.reasoningEffort(e))
       serviceTierPlan(options)._1.foreach(t => builder.serviceTier(t))
@@ -830,7 +826,7 @@ class OpenAIClient private[provider] (
       .map(_.asString())
       .filter(_.nonEmpty)
       .map(ChatCompletionsFinishReason(_))
-      .getOrElse(FinishReason.Other(""))
+      .getOrElse(FinishReason.Unknown)
     // a filtered reply's calls are not read: the filter fails the reply (`filteredReply`)
     message
       .filterNot(_ => ChatCompletionsFinishReason.isFiltered(finishReason))
@@ -848,7 +844,7 @@ class OpenAIClient private[provider] (
   ): Completion = {
     val content = message.flatMap(m => known(m._content())).getOrElse("")
     val assistantMessage =
-      AssistantMessage(contentOpt = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
+      AssistantMessage(text = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
 
     val usage = known(response._usage()).map(toTokenUsage)
 
@@ -860,10 +856,8 @@ class OpenAIClient private[provider] (
       created = known(response._created())
         .flatMap(s => Try(Instant.ofEpochSecond(s.longValue)).toOption)
         .getOrElse(Instant.EPOCH),
-      content = content,
       model = known(response._model()).getOrElse(model),
       message = assistantMessage,
-      toolCalls = toolCalls.toList,
       usage = usage,
       estimatedCost = cost,
       citations = message.map(extractCitations).getOrElse(List.empty),
@@ -945,13 +939,15 @@ class OpenAIClient private[provider] (
     result: Result[Completion]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(model),
-      startedAt = startedAt,
-      requestBody = requestBody.getOrElse(""),
-      responseBody = responseBody,
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody.getOrElse(""),
+        model = Some(model),
+        responseBody = responseBody
+      ),
+      result
     )
 
   private def known[T](field: JsonField[T]): Option[T] = field.asKnown().toScala

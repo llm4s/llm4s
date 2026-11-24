@@ -60,9 +60,7 @@ object TestAgents {
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       Left(CancelledError("complete is not used: the app's agent streams"))
 
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       onChunk(StreamedChunk(id = "c1", content = Some("partial")))

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 import org.llm4s.syntax.toLLMError
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
@@ -158,9 +159,7 @@ class VertexAIClient(
       }
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
@@ -289,9 +288,6 @@ class VertexAIClient(
                     // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
                     val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
                     val completion = c
-                      .withToolCalls(
-                        c.message.toolCalls.toList
-                      ) // the accumulator keeps streamed calls on the message only
                       .withEstimatedCost(cost)
                       .withCitations(citations.distinct.toList)
                       .withMessage(
@@ -396,7 +392,7 @@ class VertexAIClient(
             .filter(_.nonEmpty)
             .foreach(callIdsSentWithId += _)
         }
-        if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.contentOpt.isDefined))
+        if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.text.isDefined))
           contents += ujson.Obj("role" -> "model", "parts" -> ujson.Arr(parts: _*))
 
       case tm: ToolMessage =>
@@ -420,7 +416,10 @@ class VertexAIClient(
         )
     }
 
-    val generationConfig = ujson.Obj("temperature" -> options.temperature, "topP" -> options.topP)
+    // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
+    val generationConfig = ujson.Obj()
+    options.temperature.foreach(t => generationConfig("temperature") = t)
+    options.topP.foreach(p => generationConfig("topP") = p)
     options.maxTokens.foreach(mt => generationConfig("maxOutputTokens") = mt)
     thinkingConfig.foreach(tc => generationConfig("thinkingConfig") = tc)
 
@@ -505,7 +504,7 @@ class VertexAIClient(
         val thinking =
           Option.when(parsed.thought.nonEmpty)(ThinkingBlock.Text(parsed.thought)).toSeq ++ parsed.signatures
         val message = AssistantMessage(
-          contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
+          text = if (textContent.nonEmpty) Some(textContent) else None,
           toolCalls = toolCalls,
           thinking = thinking
         )
@@ -514,9 +513,7 @@ class VertexAIClient(
         Right(
           Completion(
             id = UUID.randomUUID().toString,
-            content = textContent,
             model = config.model.asString,
-            toolCalls = toolCalls.toList,
             created = Instant.now(),
             message = message,
             usage = usageOpt,
@@ -571,13 +568,15 @@ class VertexAIClient(
     result: Result[?]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(config.model.asString),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = responseBody,
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(config.model.asString),
+        responseBody = responseBody
+      ),
+      result
     )
 
   // A client the caller supplied is the caller's to close (#2341).

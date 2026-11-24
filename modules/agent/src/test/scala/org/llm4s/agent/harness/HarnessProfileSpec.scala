@@ -277,9 +277,7 @@ class HarnessProfileSpec extends AnyFlatSpec with TestTimeLimit with Matchers wi
           Right(call("read_file", ujson.Obj("path" -> path, "offset" -> 1499, "limit" -> 1), "c2"))
         } else Right(CompletionFixture.simple("read"))
       }
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       def getContextWindow(): Int     = 128000

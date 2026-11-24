@@ -28,16 +28,13 @@ class GroundTruthGeneratorSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "mock-id",
           created = Instant.EPOCH,
-          content = response,
           model = "mock-model",
-          message = AssistantMessage(contentOpt = Some(response)),
+          message = AssistantMessage(text = Some(response)),
           usage = Some(TokenUsage(10, 10, 20))
         )
       )
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -58,16 +55,13 @@ class GroundTruthGeneratorSpec extends AnyFlatSpec with Matchers {
           Completion(
             id = "mock",
             created = Instant.EPOCH,
-            content = successResponse,
             model = "mock",
-            message = AssistantMessage(contentOpt = Some(successResponse)),
+            message = AssistantMessage(text = Some(successResponse)),
             usage = Some(TokenUsage(10, 10, 20))
           )
         )
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -80,9 +74,7 @@ class GroundTruthGeneratorSpec extends AnyFlatSpec with Matchers {
       conversation: Conversation,
       options: CompletionOptions
     ): Result[Completion] = Left(EvaluationError("LLM unavailable"))
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

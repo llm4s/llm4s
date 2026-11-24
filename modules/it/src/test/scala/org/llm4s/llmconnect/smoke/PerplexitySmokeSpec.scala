@@ -55,7 +55,7 @@ class PerplexitySmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
     val result =
-      PerplexityClient(config(apiKey.get)).value.streamComplete(conversation, options, c => chunks += c).value
+      PerplexityClient(config(apiKey.get)).value.streamComplete(conversation, options)(c => chunks += c).value
 
     val streamed = chunks.flatMap(_.content).mkString
     streamed should not be empty

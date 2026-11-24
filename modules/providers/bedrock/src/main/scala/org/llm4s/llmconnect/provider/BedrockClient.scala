@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.error.{
   AuthenticationError,
   CancelledError,
@@ -235,9 +236,7 @@ class BedrockClient(
     }
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     transformed(conversation, options).flatMap { (conv, opts, adjustments) =>
@@ -444,7 +443,6 @@ class BedrockClient(
                   else c.message.withThinking(reasoning.values.map(_.toBlock).toSeq)
                 c
                   .withMessage(message)
-                  .withToolCalls(c.message.toolCalls.toList)
                   .withEstimatedCost(c.usage.flatMap(u => CostEstimator.estimate(config.model.asString, u)))
                   .withServedTier(servedTier)
               }
@@ -480,11 +478,12 @@ class BedrockClient(
   }
 
   private def inferenceConfig(options: CompletionOptions): InferenceConfiguration = {
-    val cfg = InferenceConfiguration.builder().temperature(options.temperature.floatValue())
-    options.maxTokens.foreach(m => cfg.maxTokens(m))
-    // Only an explicit top-p is sent: 1.0 is the CompletionOptions default, and some models reject
+    // Only what the caller set is sent: unset, the model's own default applies, and some models reject
     // temperature and top-p together.
-    if (options.topP != 1.0) cfg.topP(options.topP.floatValue())
+    val cfg = InferenceConfiguration.builder()
+    options.temperature.foreach(t => cfg.temperature(t.floatValue()))
+    options.maxTokens.foreach(m => cfg.maxTokens(m))
+    options.topP.foreach(p => cfg.topP(p.floatValue()))
     cfg.build()
   }
 
@@ -598,7 +597,7 @@ class BedrockClient(
               ReasoningContentBlock.builder().redactedContent(BedrockClient.decodeRedacted(data)).build()
             )
         }
-        val textBlocks = msg.contentOpt.filter(_.nonEmpty).map(ContentBlock.fromText).toSeq
+        val textBlocks = msg.text.filter(_.nonEmpty).map(ContentBlock.fromText).toSeq
         val toolBlocks = msg.toolCalls.map { tc =>
           ContentBlock.fromToolUse(
             ToolUseBlock.builder().toolUseId(tc.id).name(tc.name).input(ujsonToDocument(tc.arguments)).build()
@@ -687,7 +686,7 @@ class BedrockClient(
     toolCalls.flatMap { toolCalls =>
       val message =
         AssistantMessage(
-          contentOpt = Option(textContent).filter(_.nonEmpty),
+          text = Option(textContent).filter(_.nonEmpty),
           toolCalls = toolCalls,
           thinking = thinking
         )
@@ -700,13 +699,11 @@ class BedrockClient(
         Completion(
           id = java.util.UUID.randomUUID().toString,
           created = Instant.now(),
-          content = textContent,
           model = config.model.asString,
           message = message,
-          toolCalls = toolCalls,
           usage = usage,
           estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model.asString, u)),
-          finishReason = stopReason.fold(FinishReason.Other(""))(BedrockClient.finishReason),
+          finishReason = stopReason.fold(FinishReason.Unknown)(BedrockClient.finishReason),
           servedTier = BedrockClient.servedTier(response.serviceTier())
         )
       }
@@ -762,14 +759,10 @@ class BedrockClient(
       case msg: ToolMessage =>
         ujson.Obj("role" -> "tool", "toolCallId" -> msg.toolCallId, "content" -> Message.textWithMedia(msg))
     }
-    ujson
-      .Obj(
-        "modelId"     -> config.model.asString,
-        "region"      -> config.region,
-        "temperature" -> options.temperature,
-        "messages"    -> ujson.Arr(msgs*)
-      )
-      .render()
+    val logged = ujson.Obj("modelId" -> config.model.asString, "region" -> config.region)
+    options.temperature.foreach(t => logged("temperature") = t)
+    logged("messages") = ujson.Arr(msgs*)
+    logged.render()
   }
 
   private def serializeResponseForLogging(response: ConverseResponse): String = {
@@ -791,13 +784,15 @@ class BedrockClient(
     result: Result[?]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(config.model.asString),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = responseBody,
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(config.model.asString),
+        responseBody = responseBody
+      ),
+      result
     )
 }
 
@@ -894,6 +889,7 @@ object BedrockClient {
     case "end_turn" | "stop_sequence"                   => FinishReason.Stop
     case "tool_use"                                     => FinishReason.ToolCalls
     case "max_tokens" | "model_context_window_exceeded" => FinishReason.Length
+    case ""                                             => FinishReason.Unknown
     case other                                          => FinishReason.Other(other)
   }
 

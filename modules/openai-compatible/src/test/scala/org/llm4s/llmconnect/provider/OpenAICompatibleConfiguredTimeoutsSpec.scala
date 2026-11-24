@@ -186,7 +186,7 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
         ).value
 
       val started = System.nanoTime()
-      val result  = client.streamComplete(hi, CompletionOptions(), _ => ())
+      val result  = client.streamComplete(hi, CompletionOptions())(_ => ())
       val elapsed = (System.nanoTime() - started).nanos
 
       result.isLeft shouldBe true

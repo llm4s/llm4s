@@ -86,9 +86,8 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
 
       val result = client.streamComplete(
         Conversation(Seq(UserMessage("hello"))),
-        CompletionOptions(),
-        chunk => chunk.toolCall.foreach(tc => captured += tc.arguments)
-      )
+        CompletionOptions()
+      )(chunk => chunk.toolCall.foreach(tc => captured += tc.arguments))
 
       result.left.map(_.message.contains("malformed tool call")) shouldBe Left(true)
       captured.toList shouldBe List(ujson.Obj(), ujson.Str("{not json"))
@@ -117,9 +116,8 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
 
       val result = client.streamComplete(
         Conversation(Seq(UserMessage("hello"))),
-        CompletionOptions(),
-        chunk => chunk.toolCall.foreach(tc => captured += tc.arguments)
-      )
+        CompletionOptions()
+      )(chunk => chunk.toolCall.foreach(tc => captured += tc.arguments))
 
       result.left.map(_.message.contains("malformed tool call")) shouldBe Left(true)
       captured.toList shouldBe List(ujson.Obj(), ujson.Str("{not json"))
@@ -148,9 +146,8 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
 
       val result = client.streamComplete(
         Conversation(Seq(UserMessage("hello"))),
-        CompletionOptions(),
-        chunk => chunk.toolCall.foreach(tc => captured += tc.arguments)
-      )
+        CompletionOptions()
+      )(chunk => chunk.toolCall.foreach(tc => captured += tc.arguments))
 
       result.left.map(_.message.contains("malformed tool call")) shouldBe Left(true)
       captured.toList shouldBe List(ujson.Obj(), ujson.Str("{not json"))

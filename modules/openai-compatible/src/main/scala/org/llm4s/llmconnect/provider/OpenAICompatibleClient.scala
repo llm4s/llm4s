@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.annotation.Stable
 import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
 import org.llm4s.error.{
@@ -153,9 +154,7 @@ class OpenAICompatibleClient(
     }
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
@@ -299,7 +298,6 @@ class OpenAICompatibleClient(
           if (opaqueThinking.isEmpty) c.message else c.message.withThinking(c.message.thinking ++ opaqueThinking)
         c.withMessage(message)
           .withModel(servedModel.getOrElse(settings.model))
-          .withToolCalls(c.message.toolCalls.toList)
           .withUsage(finalUsage)
           .withEstimatedCost(finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u)))
       }
@@ -486,7 +484,7 @@ class OpenAICompatibleClient(
   private def sendableMessages(conversation: Conversation, options: CompletionOptions): Seq[Message] =
     ThinkingReplay.replayable(replayOrigin, conversation.messages, options).filterNot {
       case am: AssistantMessage =>
-        !dialect.sendEmptyAssistantTurns && am.contentOpt.forall(_.isEmpty) && am.toolCalls.isEmpty &&
+        !dialect.sendEmptyAssistantTurns && am.text.forall(_.isEmpty) && am.toolCalls.isEmpty &&
         !encodesThinking(am)
       case _ => false
     }
@@ -520,7 +518,7 @@ class OpenAICompatibleClient(
       case SystemMessage(content) =>
         ujson.Obj("role" -> dialect.systemRole, "content" -> dialect.encodeContent(content))
       case am: AssistantMessage =>
-        val content   = am.contentOpt
+        val content   = am.text
         val toolCalls = am.toolCalls
         val message   = ujson.Obj("role" -> "assistant")
         content.filter(_.nonEmpty) match {
@@ -550,15 +548,16 @@ class OpenAICompatibleClient(
     }
 
     val body = ujson.Obj(
-      "model"       -> settings.model,
-      "messages"    -> ujson.Arr.from(messages),
-      "temperature" -> options.temperature,
-      "top_p"       -> options.topP
+      "model"    -> settings.model,
+      "messages" -> ujson.Arr.from(messages)
     )
 
+    // the sampling options are sent only when the caller set them: unset, the provider's own defaults apply
+    options.temperature.foreach(t => body("temperature") = t)
+    options.topP.foreach(p => body("top_p") = p)
     options.maxTokens.foreach(mt => body("max_tokens") = mt)
-    if (options.presencePenalty != 0) body("presence_penalty") = options.presencePenalty
-    if (options.frequencyPenalty != 0) body("frequency_penalty") = options.frequencyPenalty
+    options.presencePenalty.foreach(p => body("presence_penalty") = p)
+    options.frequencyPenalty.foreach(p => body("frequency_penalty") = p)
     if (options.tools.nonEmpty) body("tools") = ToolFunction.toolDefinitions(options.tools, strict = true)
     options.responseFormat.foreach { fmt =>
       dialect.encodeResponseFormat(fmt).foreach(rf => body("response_format") = rf)
@@ -586,7 +585,7 @@ class OpenAICompatibleClient(
   protected[provider] def parseCompletion(json: ujson.Value): Result[Completion] = {
     val choice       = json("choices")(0)
     val message      = choice("message")
-    val finishReason = ChatCompletionsFinishReason.of(choice).getOrElse(FinishReason.Other(""))
+    val finishReason = ChatCompletionsFinishReason.of(choice).getOrElse(FinishReason.Unknown)
     // a filtered reply's calls are not read: the filter fails the reply (`filteredReply`)
     val rawCalls =
       message.obj
@@ -624,10 +623,8 @@ class OpenAICompatibleClient(
         .flatMap(_.numOpt)
         .flatMap(s => Try(Instant.ofEpochSecond(s.toLong)).toOption)
         .getOrElse(Instant.EPOCH),
-      content = content.getOrElse(""),
       model = json.obj.get("model").flatMap(_.strOpt).getOrElse(settings.model),
-      message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList, thinking = thinking),
-      toolCalls = toolCalls.toList,
+      message = AssistantMessage(text = content, toolCalls = toolCalls.toList, thinking = thinking),
       usage = usage,
       estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u)),
       citations = parseCitations(message),
@@ -750,13 +747,15 @@ class OpenAICompatibleClient(
     result: Result[?]
   ): Unit =
     ProviderExchangeRecorder.record(
-      exchangeLogging = exchangeLogging,
-      provider = providerName,
-      model = Some(settings.model),
-      startedAt = startedAt,
-      requestBody = requestBody,
-      responseBody = responseBody,
-      result = result
+      exchangeLogging,
+      ProviderExchangeCall(
+        provider = ProviderId(providerName),
+        startedAt = startedAt,
+        requestBody = requestBody,
+        model = Some(settings.model),
+        responseBody = responseBody
+      ),
+      result
     )
 
   override def getContextWindow(): Int = settings.contextWindow

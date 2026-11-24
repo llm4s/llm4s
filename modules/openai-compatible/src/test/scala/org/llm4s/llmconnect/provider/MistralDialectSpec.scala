@@ -102,7 +102,7 @@ class MistralDialectSpec extends AnyFlatSpec with Matchers {
     )
 
     completion.content shouldBe "4"
-    completion.message.contentOpt shouldBe Some("4")
+    completion.message.text shouldBe Some("4")
     completion.thinking shouldBe Some("Add them.")
     completion.usage shouldBe Some(TokenUsage(5, 9, 14))
   }

@@ -19,7 +19,6 @@ final class ScoringJudgeClient(reply: String) extends LLMClient {
       Completion(
         id = "test-id",
         created = Instant.EPOCH,
-        content = reply,
         model = "test-model",
         message = AssistantMessage(reply),
         usage = Some(TokenUsage(promptTokens = 10, completionTokens = 1, totalTokens = 11))
@@ -27,9 +26,7 @@ final class ScoringJudgeClient(reply: String) extends LLMClient {
     )
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = complete(conversation, options)
 

@@ -60,9 +60,7 @@ final class JlamaClient private[provider] (
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     completeWithMetrics(run(conversation, options, _ => ()).map(_._1.withAdjustments(unsent(options))))
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     completeWithMetrics {
@@ -86,7 +84,7 @@ final class JlamaClient private[provider] (
           Try(
             loaded.generate(
               turns,
-              options.temperature.toFloat,
+              options.temperature.getOrElse(JlamaClient.DefaultTemperature).toFloat,
               options.maxTokens.getOrElse(config.reserveCompletion),
               stopWhenInterrupted(onToken)
             )
@@ -137,7 +135,6 @@ final class JlamaClient private[provider] (
           Completion(
             id = UUID.randomUUID().toString,
             created = Instant.now(),
-            content = generation.text,
             model = config.model.asString,
             message = AssistantMessage(generation.text),
             usage = Some(
@@ -161,13 +158,16 @@ final class JlamaClient private[provider] (
 @Experimental
 object JlamaClient:
 
+  /** The temperature the engine is given when the caller set none: it has no default of its own. */
+  private[provider] val DefaultTemperature: Double = 0.7
+
   /** What `options` sets that the engine is not given, each `Dropped` (RFC 0008): it takes a temperature and a limit. */
   private[provider] def unsentOptions(model: String, options: CompletionOptions): List[RequestAdjustment] =
     def dropped(set: Boolean, option: RequestOption) =
       Option.when(set)(RequestAdjustment.Dropped(option, s"Jlama is not given $option")).toList
-    dropped(options.topP != 1.0, RequestOption.TopP) ++
-      dropped(options.presencePenalty != 0.0, RequestOption.PresencePenalty) ++
-      dropped(options.frequencyPenalty != 0.0, RequestOption.FrequencyPenalty) ++
+    dropped(options.topP.isDefined, RequestOption.TopP) ++
+      dropped(options.presencePenalty.isDefined, RequestOption.PresencePenalty) ++
+      dropped(options.frequencyPenalty.isDefined, RequestOption.FrequencyPenalty) ++
       dropped(options.responseFormat.isDefined, RequestOption.ResponseFormat) ++
       UnmappedOptions.reasoningAndThinking(model, options) ++
       UnmappedOptions.serviceTier("Jlama", options)

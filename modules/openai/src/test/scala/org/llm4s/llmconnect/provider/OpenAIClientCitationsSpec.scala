@@ -133,7 +133,7 @@ final class OpenAIClientCitationsSpec extends AnyFlatSpec with Matchers with Eit
     )
     val client = OpenAIClient.forTest(model, transport(streaming = _ => stream(content, stop)), config)
 
-    val completion = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ()).value
+    val completion = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ()).value
 
     completion.content shouldBe "Hi"
     completion.citations shouldBe Nil

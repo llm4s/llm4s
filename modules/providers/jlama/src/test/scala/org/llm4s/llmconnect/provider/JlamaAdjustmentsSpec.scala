@@ -17,7 +17,7 @@ class JlamaAdjustmentsSpec extends AnyWordSpec with Matchers:
   private def kinds(options: CompletionOptions, streamed: Boolean = false): List[(RequestOption, String)] = {
     val c = client(new ScriptedEngine())
     val result =
-      if (streamed) c.streamComplete(hello, options, _ => ())
+      if (streamed) c.streamComplete(hello, options)(_ => ())
       else c.complete(hello, options)
     result.fold(e => fail(e.message), _.adjustments).map(a => a.option -> a.getClass.getSimpleName)
   }

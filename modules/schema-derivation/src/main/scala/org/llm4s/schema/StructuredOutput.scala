@@ -85,7 +85,7 @@ extension (client: LLMClient) {
           }
         }
       client
-        .streamComplete(conversation, options.withResponseFormat(ResponseFormat.JsonSchema(plan.schema)), onChunk)
+        .streamComplete(conversation, options.withResponseFormat(ResponseFormat.JsonSchema(plan.schema)))(onChunk)
         .flatMap(completion => plan.read(completion.content))
     }
 }

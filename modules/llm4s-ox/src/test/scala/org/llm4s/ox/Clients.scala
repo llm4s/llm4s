@@ -37,12 +37,10 @@ object Clients {
 
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       recorded(delegate.complete(conversation, options))
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
-      recorded(delegate.streamComplete(conversation, options, onChunk))
+      recorded(delegate.streamComplete(conversation, options)(onChunk))
     def getContextWindow(): Int     = delegate.getContextWindow()
     def getReserveCompletion(): Int = delegate.getReserveCompletion()
   }
@@ -64,9 +62,7 @@ object Clients {
     }
 
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = park()
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       first.foreach(onChunk)
@@ -88,9 +84,7 @@ object Clients {
       active.decrementAndGet(): Unit
       answer(conversation)
     }
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     def getContextWindow(): Int     = 8192
@@ -100,9 +94,7 @@ object Clients {
   /** Fails every `streamComplete` call by throwing `thrown` after `first`, as a buggy provider might. */
   final class Throwing(first: Seq[StreamedChunk], thrown: RuntimeException) extends LLMClient {
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = throw thrown
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       first.foreach(onChunk)
@@ -122,9 +114,7 @@ object Clients {
 
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       ScriptedLLMClient.always(Reply.text("x")).complete(conversation, options)
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       (1 to total).foreach { _ =>
@@ -142,9 +132,7 @@ object Clients {
   /** Streams `chunks`, then returns `Left(error)`. */
   final class FailingAfter(chunks: Seq[StreamedChunk], error: LLMError) extends LLMClient {
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = Left(error)
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       chunks.foreach(onChunk)

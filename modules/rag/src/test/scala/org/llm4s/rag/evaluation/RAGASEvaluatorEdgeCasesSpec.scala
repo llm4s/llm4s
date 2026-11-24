@@ -29,16 +29,13 @@ class RAGASEvaluatorEdgeCasesSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "test",
           created = Instant.EPOCH,
-          content = response,
           model = "test",
           message = AssistantMessage(response)
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -50,9 +47,7 @@ class RAGASEvaluatorEdgeCasesSpec extends AnyFlatSpec with Matchers {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       Left(EvaluationError("LLM call failed"))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

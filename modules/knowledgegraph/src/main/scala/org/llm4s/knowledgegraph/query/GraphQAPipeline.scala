@@ -107,7 +107,7 @@ class GraphQAPipeline(
     )
 
     llmClient
-      .complete(conversation, CompletionOptions(temperature = 0.0))
+      .complete(conversation, CompletionOptions(temperature = Some(0.0)))
       .flatMap(completion => parseEntityResponse(completion.content))
       .flatMap(mentions => resolveEntitiesToNodes(mentions))
   }
@@ -236,7 +236,7 @@ class GraphQAPipeline(
     )
 
     llmClient
-      .complete(conversation, CompletionOptions(temperature = config.temperature))
+      .complete(conversation, CompletionOptions(temperature = Some(config.temperature)))
       .map(_.content)
   }
 

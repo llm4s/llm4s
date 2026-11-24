@@ -28,7 +28,7 @@ object EnrichReviews {
     client.left.map(_.message).map { underlying =>
       // Retries, a deadline and a local rate limit. The rate limit is per client, so per partition: the job's
       // total is roughly requestsPerMinute times the number of partitions running at once.
-      new ReliableClient(
+      ReliableClient(
         underlying,
         "spark-example",
         ReliabilityConfig(

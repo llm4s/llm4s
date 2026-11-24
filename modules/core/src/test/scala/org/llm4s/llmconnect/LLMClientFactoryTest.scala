@@ -41,7 +41,7 @@ class LLMClientFactoryTest extends AnyFunSuite with Matchers {
 
     withProps(props) {
       given ModelRegistryService = registryService
-      val res                    = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+      val res                    = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient(_))
       res match {
         case Right(client) => client.getClass.getSimpleName shouldBe "FixtureChatClient"
         case Left(err)     => fail(s"Expected Right, got Left($err)")

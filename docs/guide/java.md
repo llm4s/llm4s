@@ -387,8 +387,9 @@ The builder has `temperature`, `topP`, `maxTokens`, `presencePenalty`, `frequenc
 budget). `JThinking.budget` throws `IllegalArgumentException` for `n <= 0`; a provider fits a positive budget to its own
 range (Anthropic: at least `1024` and below the token limit) and reports that it did. An explicit `thinking` wins over
 `reasoning`; see [Cost controls](cost-controls#thinking-and-reasoning-effort) for what each provider sends. A setting
-you leave out keeps the library's default: temperature `0.7`, top-p `1.0`, no penalties, and no token limit, reasoning
-level or thinking mode. The built options have an accessor of the same name for each setting. `maxTokens()` returns an
+you leave out is not sent, so the provider's default applies: no temperature, top-p, penalties, token limit, reasoning
+level or thinking mode. The built options have an accessor of the same name for each setting. `temperature()`, `topP()`,
+`presencePenalty()` and `frequencyPenalty()` return an `OptionalDouble`, `maxTokens()` an
 `OptionalInt`, `reasoning()` an `Optional<JReasoningEffort>` and `thinking()` an `Optional<JThinking>`, empty when unset.
 Their setters also take an `OptionalInt` or `Optional`, so an empty one clears the value.
 

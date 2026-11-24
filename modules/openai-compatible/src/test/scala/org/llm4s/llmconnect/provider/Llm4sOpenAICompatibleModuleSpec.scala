@@ -281,7 +281,7 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
         client.complete(Conversation(Seq(UserMessage("hi")))) should matchPattern {
           case Left(_: org.llm4s.error.AuthenticationError) =>
         }
-        client.streamComplete(Conversation(Seq(UserMessage("hi"))), onChunk = _ => ()) should matchPattern {
+        client.streamComplete(Conversation(Seq(UserMessage("hi"))))(_ => ()) should matchPattern {
           case Left(_: org.llm4s.error.AuthenticationError) =>
         }
         client.close()

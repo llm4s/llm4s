@@ -54,7 +54,7 @@ val answer: Result[String] = for {
 } yield completion.content
 ```
 
-Streaming without Ox is a callback, `client.streamComplete(conversation, options, chunk => ...)`, that runs on the
+Streaming without Ox is a callback, `client.streamComplete(conversation, options)(chunk => ...)`, that runs on the
 calling thread until the reply ends.
 
 ## The llm4s-ox module

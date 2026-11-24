@@ -126,7 +126,7 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
     val result = client.complete(conversation, CompletionOptions())
     result.isRight shouldBe true
     result.toOption.get.content shouldBe ""
-    result.toOption.get.message.contentOpt shouldBe None
+    result.toOption.get.message.text shouldBe None
     result.toOption.get.toolCalls shouldBe empty
   }
 
@@ -180,7 +180,7 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
     val result = client.complete(conversation, CompletionOptions())
     result.isRight shouldBe true
     exchanges should have size 1
-    exchanges.head.provider shouldBe "cohere"
+    exchanges.head.provider.asString shouldBe "cohere"
     exchanges.head.model shouldBe Some("command-r")
     exchanges.head.requestBody should include("hello")
     exchanges.head.responseBody.value should include("Logged response")

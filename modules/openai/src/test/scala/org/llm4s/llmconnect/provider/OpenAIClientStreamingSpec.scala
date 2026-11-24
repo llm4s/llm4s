@@ -54,7 +54,7 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
     val conversation = Conversation(Seq(UserMessage("hello")))
     val received     = scala.collection.mutable.ListBuffer.empty[String]
 
-    val result = client.streamComplete(conversation, CompletionOptions(), c => received += c.content.getOrElse(""))
+    val result = client.streamComplete(conversation, CompletionOptions())(c => received += c.content.getOrElse(""))
 
     result.isRight shouldBe true
 
@@ -105,14 +105,14 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
       model,
       transport(streaming = _ => stream(contentChunk, stopChunk)),
       config,
-      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
-    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions(), _ => ())
+    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())(_ => ())
 
     result.isRight shouldBe true
     recorded should have size 1
-    recorded.head.provider shouldBe "openai"
+    recorded.head.provider.asString shouldBe "openai"
     recorded.head.requestBody should include("messages")
     recorded.head.requestBody should include("hello")
     recorded.head.responseBody.value should include("chatcmpl-stream-1")
@@ -139,14 +139,14 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
       model,
       transport(streaming = _ => throw new RuntimeException("stream connection failed")),
       config,
-      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
-    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions(), _ => ())
+    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())(_ => ())
 
     result.isLeft shouldBe true
     recorded should have size 1
-    recorded.head.provider shouldBe "openai"
+    recorded.head.provider.asString shouldBe "openai"
     recorded.head.responseBody shouldBe empty
     recorded.head.errorMessage.value should include("stream connection failed")
   }

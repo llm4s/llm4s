@@ -45,8 +45,7 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
       if toolRules && broken then Left(ProcessingError("reference-tool-calls", "malformed tool call"))
       else
         Right(
-          Completion("r", Instant.EPOCH, text, "m", AssistantMessage(Option(text).filter(_.nonEmpty), calls))
-            .withToolCalls(calls)
+          Completion("r", Instant.EPOCH, "m", AssistantMessage(Option(text).filter(_.nonEmpty), calls))
             .withFinishReason(finish)
         )
 
@@ -56,7 +55,7 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
         case "filter" => Left(ContentFilteredError.reply("Reference", "filter"))
         case finish   => completion(json("text").str, callsOf(json), mapFinish(finish))
 
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       val events = fetch().linesIterator.filter(_.nonEmpty).map(ujson.read(_)).toList
       val errors = events.flatMap(_.obj.get("error")).flatMap(e => errorEvent(e.str))
       if events.exists(_.obj.get("finish").exists(_.str == "filter")) then
@@ -76,7 +75,7 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
         completion(
           chunks.flatMap(_.content).mkString,
           chunks.flatMap(_.toolCall),
-          chunks.flatMap(_.finishReason).lastOption.getOrElse(FinishReason.Other(""))
+          chunks.flatMap(_.finishReason).lastOption.getOrElse(FinishReason.Unknown)
         )
 
     def getContextWindow(): Int     = 1000

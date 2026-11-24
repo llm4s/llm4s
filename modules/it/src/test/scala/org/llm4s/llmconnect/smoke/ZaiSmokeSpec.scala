@@ -68,7 +68,7 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
 
     val client = ZaiClient(config(apiKey.get)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, options, c => chunks += c).value
+    val result = client.streamComplete(conversation, options)(c => chunks += c).value
 
     // The first delta carries `content: ""`, so `isDefined` alone passes for a stream with no
     // payload; require real text or reasoning text, and that the text is what the call returned.
@@ -95,11 +95,9 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       underlying.complete(conversation, off(options))
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
-    ): Result[Completion] = underlying.streamComplete(conversation, off(options), onChunk)
+    ): Result[Completion] = underlying.streamComplete(conversation, off(options))(onChunk)
     override def getContextWindow(): Int     = underlying.getContextWindow()
     override def getReserveCompletion(): Int = underlying.getReserveCompletion()
     override def close(): Unit               = underlying.close()
