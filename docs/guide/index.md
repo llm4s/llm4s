@@ -125,7 +125,7 @@ The sidebar groups the guides as [Core](core), [Agents](agents/), [RAG and Data]
 - **[Quarkus](quarkus)** - The `quarkus-llm4s` extension: `JLlmClient` beans from `application.properties`, checked at build time
 - **[Micronaut](micronaut)** - A `@Factory` bean for `JLlmClient` configured from `application.yml`, blocking and streamed endpoints and tests
 - **[Helidon](helidon)** - Helidon SE 4: the client built from `application.yaml`, routes on virtual threads, a health check and tests
-- **[Kotlin](/getting-started/installation#for-kotlin-coroutines-and-flow)** - `llm4s-kotlin-api`: suspend functions and `Flow`s over the Java API (experimental)
+- **[Kotlin](kotlin)** - `llm4s-kotlin-api`: suspend functions, `Flow` streaming, agents with tools and the Kotlin DSL (experimental)
 
 ### Production
 
