@@ -164,7 +164,8 @@ private[agent] object CompletionFixture {
       created = Instant.now(),
       model = "test-model",
       message = message,
-      usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
+      usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30)),
+      finishReason = FinishReason.Stop
     )
   }
 
@@ -213,7 +214,8 @@ private[agent] object CompletionFixture {
       created = Instant.now(),
       model = "test-model",
       message = message,
-      usage = Some(TokenUsage(promptTokens = prompt, completionTokens = completion, totalTokens = prompt + completion))
+      usage = Some(TokenUsage(promptTokens = prompt, completionTokens = completion, totalTokens = prompt + completion)),
+      finishReason = FinishReason.Stop
     )
   }
 }

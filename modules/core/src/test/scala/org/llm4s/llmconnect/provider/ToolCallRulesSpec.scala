@@ -49,7 +49,7 @@ class ToolCallRulesSpec extends AnyFlatSpec with Matchers {
   "blankArguments" should "accept no arguments only after ToolCalls or Stop (rule 2)" in {
     ToolCallRules.blankArguments("f", FinishReason.ToolCalls) shouldBe Right(())
     ToolCallRules.blankArguments("f", FinishReason.Stop) shouldBe Right(())
-    malformed(ToolCallRules.blankArguments("f", FinishReason.Other(""))) shouldBe true
+    malformed(ToolCallRules.blankArguments("f", FinishReason.Unknown)) shouldBe true
     malformed(ToolCallRules.blankArguments("f", FinishReason.Length)) shouldBe true
   }
 }

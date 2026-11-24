@@ -782,7 +782,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
 
     "keep any other value as Other, and none as Other(\"\")" in {
       OllamaClient.finishReason(last(Some("load")), calledTools = false) shouldBe FinishReason.Other("load")
-      OllamaClient.finishReason(last(None), calledTools = false) shouldBe FinishReason.Other("")
+      OllamaClient.finishReason(last(None), calledTools = false) shouldBe FinishReason.Unknown
     }
 
     "come from a non-streaming reply's done_reason, on the Completion" in {
@@ -800,7 +800,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         ask(client).map(_.finishReason) shouldBe Right(FinishReason.Length)
         ask(client).map(_.finishReason) shouldBe Right(FinishReason.ToolCalls)
         ask(client).map(_.finishReason) shouldBe Right(FinishReason.Stop)
-        ask(client).map(_.finishReason) shouldBe Right(FinishReason.Other(""))
+        ask(client).map(_.finishReason) shouldBe Right(FinishReason.Unknown)
       }
     }
 

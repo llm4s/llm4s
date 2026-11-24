@@ -669,14 +669,15 @@ object OllamaClient {
 
   /**
    * The reply's [[FinishReason]] from its last line's `done_reason` (RFC 0009): `stop` is `ToolCalls` when the reply
-   * called a tool and `Stop` otherwise, `length` is `Length`, any other value `Other`, and none `Other("")`.
+   * called a tool and `Stop` otherwise, `length` is `Length`, any other value `Other`, and none `Unknown`.
    */
   private[provider] def finishReason(json: ujson.Value, calledTools: Boolean): FinishReason =
     json.obj.get("done_reason").flatMap(_.strOpt).filter(_.nonEmpty) match {
       case Some("stop")   => if (calledTools) FinishReason.ToolCalls else FinishReason.Stop
       case Some("length") => FinishReason.Length
+      case Some("")       => FinishReason.Unknown
       case Some(other)    => FinishReason.Other(other)
-      case None           => FinishReason.Other("")
+      case None           => FinishReason.Unknown
     }
 
   /** The `thinking` of a reply's `message`, or of one streamed line; none when absent, null or empty. */

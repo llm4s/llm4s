@@ -16,23 +16,42 @@ class FinishReasonSpec extends AnyFlatSpec with Matchers {
     FinishReason.ToolCalls.name shouldBe "tool_calls"
     FinishReason.Length.name shouldBe "length"
     FinishReason.Other("content_filter").name shouldBe "content_filter"
-    FinishReason.Other("").name shouldBe ""
+    FinishReason.Unknown.name shouldBe ""
   }
 
   "FinishReason" should "round-trip through JSON, Other with its raw value" in {
-    Seq(FinishReason.Stop, FinishReason.ToolCalls, FinishReason.Length, FinishReason.Other("SAFETY")).foreach { r =>
-      upickle.default.read[FinishReason](upickle.default.write(r)) shouldBe r
-    }
+    Seq(
+      FinishReason.Stop,
+      FinishReason.ToolCalls,
+      FinishReason.Length,
+      FinishReason.Other("SAFETY"),
+      FinishReason.Unknown
+    ).foreach(r => upickle.default.read[FinishReason](upickle.default.write(r)) shouldBe r)
   }
 
-  "Completion.finishReason" should "default to Stop, so existing construction sites compile (open question 1)" in {
+  // the format durable events (`ModelCallCompleted.finishReason`) are stored in: it must not drift (#2809)
+  it should "be written as its case name, and Other as a tagged object" in {
+    upickle.default.write[FinishReason](FinishReason.Stop) shouldBe "\"Stop\""
+    upickle.default.write[FinishReason](FinishReason.ToolCalls) shouldBe "\"ToolCalls\""
+    upickle.default.write[FinishReason](FinishReason.Length) shouldBe "\"Length\""
+    upickle.default.write[FinishReason](FinishReason.Unknown) shouldBe "\"Unknown\""
+    upickle.default.write[FinishReason](FinishReason.Other("SAFETY")) shouldBe """{"$type":"Other","raw":"SAFETY"}"""
+  }
+
+  it should "read the empty Other that meant 'none read' before Unknown existed as Unknown" in {
+    upickle.default.read[FinishReason]("""{"$type":"Other","raw":""}""") shouldBe FinishReason.Unknown
+    upickle.default.read[FinishReason]("""{"$type":"Other","raw":"SAFETY"}""") shouldBe FinishReason.Other("SAFETY")
+    upickle.default.read[FinishReason]("\"Stop\"") shouldBe FinishReason.Stop
+  }
+
+  "Completion.finishReason" should "be Unknown unless set: a client that forgets it never claims a natural stop (#2807)" in {
     Completion(
       id = "c",
       created = created,
       model = "m",
       message = AssistantMessage("a")
     ).finishReason shouldBe
-      FinishReason.Stop
+      FinishReason.Unknown
   }
 
   it should "be set by withFinishReason and by apply" in {
@@ -48,11 +67,6 @@ class FinishReasonSpec extends AnyFlatSpec with Matchers {
     c.withFinishReason(FinishReason.ToolCalls).withModel("b").finishReason shouldBe FinishReason.ToolCalls
   }
 
-  it should "be Stop from the previous apply, which takes every argument but the reason" in {
-    Completion("c", created, "m", AssistantMessage("a"), None, None, Nil, Nil).finishReason shouldBe
-      FinishReason.Stop
-  }
-
   "StreamingAccumulator" should "put the last reason it saw on the Completion it builds" in {
     val acc = StreamingAccumulator("test-model")
     acc.addChunk(StreamedChunk(id = "s", content = Some("Hel")))
@@ -64,7 +78,7 @@ class FinishReasonSpec extends AnyFlatSpec with Matchers {
   it should "keep a real reason when a later chunk carries an empty one" in {
     val acc = StreamingAccumulator("test-model")
     acc.addChunk(StreamedChunk(id = "s", content = Some("Hel"), finishReason = Some(FinishReason.Length)))
-    acc.addChunk(StreamedChunk(id = "s", content = None, finishReason = Some(FinishReason.Other(""))))
+    acc.addChunk(StreamedChunk(id = "s", content = None, finishReason = Some(FinishReason.Unknown)))
     acc.toCompletion(created).map(_.finishReason) shouldBe Right(FinishReason.Length)
   }
 
@@ -72,6 +86,6 @@ class FinishReasonSpec extends AnyFlatSpec with Matchers {
     val acc = StreamingAccumulator("test-model")
     acc.addChunk(StreamedChunk(id = "s", content = Some("Hel")))
     acc.isComplete shouldBe false
-    acc.toCompletion(created).map(_.finishReason) shouldBe Right(FinishReason.Other(""))
+    acc.toCompletion(created).map(_.finishReason) shouldBe Right(FinishReason.Unknown)
   }
 }

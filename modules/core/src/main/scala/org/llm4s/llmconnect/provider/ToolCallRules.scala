@@ -115,15 +115,15 @@ object ToolCallRules {
     }
 
   private def callsOf(completion: Completion): Seq[ToolCall] =
-    if (completion.toolCalls.nonEmpty) completion.toolCalls else completion.message.toolCalls
+    completion.toolCalls
 
   private def notAnObject(name: String, value: ujson.Value): ProcessingError =
     malformedCall(name, s"the arguments are ${kind(value)}, not a JSON object")
 
   private def describe(reason: FinishReason): String = reason match {
-    case FinishReason.Other("") => "no finish reason"
-    case FinishReason.Other(r)  => s"'$r'"
-    case r                      => r.toString
+    case FinishReason.Unknown  => "no finish reason"
+    case FinishReason.Other(r) => s"'$r'"
+    case r                     => r.toString
   }
 
   private def kind(value: ujson.Value): String = value match {

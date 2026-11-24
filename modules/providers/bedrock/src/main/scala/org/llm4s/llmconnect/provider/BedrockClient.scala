@@ -704,7 +704,7 @@ class BedrockClient(
           message = message,
           usage = usage,
           estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model, u)),
-          finishReason = stopReason.fold(FinishReason.Other(""))(BedrockClient.finishReason),
+          finishReason = stopReason.fold(FinishReason.Unknown)(BedrockClient.finishReason),
           servedTier = BedrockClient.servedTier(response.serviceTier())
         )
       }
@@ -888,6 +888,7 @@ object BedrockClient {
     case "end_turn" | "stop_sequence"                   => FinishReason.Stop
     case "tool_use"                                     => FinishReason.ToolCalls
     case "max_tokens" | "model_context_window_exceeded" => FinishReason.Length
+    case ""                                             => FinishReason.Unknown
     case other                                          => FinishReason.Other(other)
   }
 

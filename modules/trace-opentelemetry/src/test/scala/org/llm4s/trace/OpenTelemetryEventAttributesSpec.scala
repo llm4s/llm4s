@@ -393,7 +393,7 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
       reasons(Some(FinishReason.Length)) shouldBe Some(Seq("length"))
       reasons(Some(FinishReason.ToolCalls)) shouldBe Some(Seq("tool_calls"))
       reasons(Some(FinishReason.Other("SAFETY"))) shouldBe Some(Seq("SAFETY"))
-      reasons(Some(FinishReason.Other(""))) shouldBe None
+      reasons(Some(FinishReason.Unknown)) shouldBe None
       reasons(None) shouldBe None
     }
   }

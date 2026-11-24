@@ -828,7 +828,7 @@ class OpenAIClient private[provider] (
       .map(_.asString())
       .filter(_.nonEmpty)
       .map(ChatCompletionsFinishReason(_))
-      .getOrElse(FinishReason.Other(""))
+      .getOrElse(FinishReason.Unknown)
     // a filtered reply's calls are not read: the filter fails the reply (`filteredReply`)
     message
       .filterNot(_ => ChatCompletionsFinishReason.isFiltered(finishReason))

@@ -53,6 +53,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   private def answer(text: String): Completion =
     Completion("answer", Instant.EPOCH, "test-model", AssistantMessage(text), usage = usage)
+      .withFinishReason(FinishReason.Stop)
 
   private def calling(call: ToolCall): Completion =
     Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call)), usage)

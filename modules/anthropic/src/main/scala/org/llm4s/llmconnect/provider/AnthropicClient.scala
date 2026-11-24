@@ -535,7 +535,7 @@ curl https://api.anthropic.com/v1/messages \
                   id = currentMessageId.getOrElse(""),
                   content = None,
                   toolCall = None,
-                  finishReason = Some(stopReason.fold(FinishReason.Other(""))(AnthropicClient.finishReason))
+                  finishReason = Some(stopReason.fold(FinishReason.Unknown)(AnthropicClient.finishReason))
                 )
                 accumulator.addChunk(chunk)
                 onChunk(chunk)
@@ -881,7 +881,7 @@ curl https://api.anthropic.com/v1/messages \
         servedTier = AnthropicServiceTier.served(usage),
         finishReason = AnthropicClient
           .rawStopReason(response.stopReason())
-          .fold(FinishReason.Other(""))(
+          .fold(FinishReason.Unknown)(
             AnthropicClient.finishReason
           )
       )
@@ -1036,6 +1036,7 @@ object AnthropicClient {
     case "end_turn" | "stop_sequence"                   => FinishReason.Stop
     case "tool_use"                                     => FinishReason.ToolCalls
     case "max_tokens" | "model_context_window_exceeded" => FinishReason.Length
+    case ""                                             => FinishReason.Unknown
     case other                                          => FinishReason.Other(other)
   }
 

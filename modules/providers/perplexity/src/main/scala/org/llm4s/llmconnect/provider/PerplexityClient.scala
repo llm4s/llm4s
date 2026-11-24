@@ -269,10 +269,10 @@ class PerplexityClient(
 
   /**
    * The reply's [[FinishReason]] (RFC 0009): `incomplete` (a limit) is `Length`, even with a call in it; `completed`
-   * with a call is `ToolCalls`, without one `Stop`; a reply with no `status` is `Other("")`, since none was read.
+   * with a call is `ToolCalls`, without one `Stop`; a reply with no `status` is `Unknown`, since none was read.
    */
   private def finishReasonOf(reply: Reply): FinishReason =
-    if (!reply.statusRead) FinishReason.Other("")
+    if (!reply.statusRead) FinishReason.Unknown
     else if (reply.incomplete) FinishReason.Length
     else if (reply.toolCalls.nonEmpty) FinishReason.ToolCalls
     else FinishReason.Stop

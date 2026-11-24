@@ -54,14 +54,15 @@ private[provider] object GeminiBlocked {
   /**
    * A `finishReason` as a [[FinishReason]] (RFC 0009): `STOP` is `ToolCalls` when the reply has a function call and
    * `Stop` otherwise, and `MAX_TOKENS` is `Length`. Any other (`CONTINUATION`, `MALFORMED_FUNCTION_CALL`, `OTHER`,
-   * ...) is kept as `Other`, and none read as `Other("")`. A filter finish never reaches a reply: [[filtered]] makes
+   * ...) is kept as `Other`, and none read as `Unknown`. A filter finish never reaches a reply: [[filtered]] makes
    * it an error.
    */
   def mapped(finishReason: Option[String], hasCalls: Boolean): FinishReason = finishReason match {
     case Some("STOP")       => if (hasCalls) FinishReason.ToolCalls else FinishReason.Stop
     case Some("MAX_TOKENS") => FinishReason.Length
+    case Some("")           => FinishReason.Unknown
     case Some(other)        => FinishReason.Other(other)
-    case None               => FinishReason.Other("")
+    case None               => FinishReason.Unknown
   }
 
   /** The first candidate's `finishReason`, when the response (or chunk) states one. */

@@ -10,7 +10,7 @@ import org.scalatest.matchers.should.Matchers
 
 /**
  * RFC 0009 Part 1, the chat-completions row: `stop`, `tool_calls` (and the older `function_call`) and `length` map to
- * their `FinishReason`; any other value is kept as `Other`. A reply that sent no reason is `Other("")`, never a
+ * their `FinishReason`; any other value is kept as `Other`. A reply that sent no reason is `Unknown`, never a
  * made-up `Stop`. `content_filter` is read as `Other("content_filter")`, and the client fails the call with a
  * `ContentFilteredError` on it (PR 2), on `complete` and on a stream alike.
  */
@@ -55,7 +55,7 @@ class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
   it should "give Other(\"\") for a reply with no finish_reason, a null or a blank one" in {
     Seq("", ""","finish_reason":null""", ""","finish_reason":""""").foreach { finish =>
       withClue(finish) {
-        client.parsedCompletion(reply(finish)).finishReason shouldBe FinishReason.Other("")
+        client.parsedCompletion(reply(finish)).finishReason shouldBe FinishReason.Unknown
       }
     }
   }

@@ -689,12 +689,13 @@ object WatsonXClient {
 
   /**
    * A normalised `finish_reason` as a [[FinishReason]] (RFC 0009): `stop`, `tool_calls` and `length` mapped, anything
-   * else kept as `Other`, and none (`""`) as `Other("")`.
+   * else kept as `Other`, and none (`""`) as `Unknown`.
    */
   private[provider] def toFinishReason(normalized: String): FinishReason = normalized match {
     case "stop"                         => FinishReason.Stop
     case "tool_calls" | "function_call" => FinishReason.ToolCalls
     case "length"                       => FinishReason.Length
+    case ""                             => FinishReason.Unknown
     case other                          => FinishReason.Other(other)
   }
 

@@ -586,7 +586,7 @@ class OpenAICompatibleClient(
   protected[provider] def parseCompletion(json: ujson.Value): Result[Completion] = {
     val choice       = json("choices")(0)
     val message      = choice("message")
-    val finishReason = ChatCompletionsFinishReason.of(choice).getOrElse(FinishReason.Other(""))
+    val finishReason = ChatCompletionsFinishReason.of(choice).getOrElse(FinishReason.Unknown)
     // a filtered reply's calls are not read: the filter fails the reply (`filteredReply`)
     val rawCalls =
       message.obj

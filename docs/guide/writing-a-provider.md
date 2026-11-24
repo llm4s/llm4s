@@ -858,7 +858,8 @@ Every chat client reports how a reply ended the same way, on `complete` and on `
 
 - **A finish reason on every `Completion`.** Map your provider's own value to `FinishReason`
   (`Stop`, `Length`, `ToolCalls`, or `Other(raw)` for anything else), in your own module. Never
-  report `Stop` for a reason the provider did not send.
+  report `Stop` for a reason the provider did not send: a `Completion` built without one carries
+  `FinishReason.Unknown`, which is also what to report when the provider sent none.
 - **A stream is `Right` only if the provider sent its end marker** (`finish_reason`, `[DONE]`,
   `message_stop`, `done: true`, a `finishReason`...). A stream that ends without one was cut off:
   a retryable `NetworkError`, or a `ServiceError` with status 502.

@@ -28,9 +28,9 @@ import java.time.Instant
  *                    chunks has none, since chunks carry none. Coverage is growing under RFC 0008, so an
  *                    empty list means nothing was reported, not that every option was sent: see
  *                    [[RequestAdjustment]] for what is reported today.
- * @param finishReason Why the model's turn ended (RFC 0009). `Stop` unless the client sets it; a client that read no
- *                     reason sets `FinishReason.Other("")`. A completion assembled from streamed chunks carries the
- *                     last reason a chunk had that was not empty.
+ * @param finishReason Why the model's turn ended (RFC 0009). [[FinishReason.Unknown]] unless the client sets it: a
+ *                     client that read no reason leaves it so, and never reports a `Stop` the provider did not send.
+ *                     A completion assembled from streamed chunks carries the last reason a chunk had.
  * @param servedTier The [[ServiceTier]] the provider reports it served the request at, which may differ from the
  *                   [[CompletionOptions.serviceTier]] asked for (#2746). A tier the provider names that the enum does
  *                   not is [[ServiceTier.Other]], as written. `None` when the provider reported none: one without
@@ -116,7 +116,7 @@ object Completion {
     estimatedCost: Option[Double] = None,
     citations: List[Citation] = List.empty,
     adjustments: List[RequestAdjustment] = List.empty,
-    finishReason: FinishReason = FinishReason.Stop,
+    finishReason: FinishReason = FinishReason.Unknown,
     servedTier: Option[ServiceTier] = None
   ): Completion =
     new Completion(

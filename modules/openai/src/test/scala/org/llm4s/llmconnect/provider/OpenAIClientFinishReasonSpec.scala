@@ -60,7 +60,7 @@ final class OpenAIClientFinishReasonSpec extends AnyFlatSpec with Matchers with 
   }
 
   it should "report Other(\"\") when the reply has no finish_reason" in {
-    complete("gpt-4o", "").value.finishReason shouldBe FinishReason.Other("")
+    complete("gpt-4o", "").value.finishReason shouldBe FinishReason.Unknown
   }
 
   "OpenAIClient.streamComplete" should "carry the typed reason on the chunk and the Completion" in {

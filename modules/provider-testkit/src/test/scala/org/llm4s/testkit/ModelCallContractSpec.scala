@@ -75,7 +75,7 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
         completion(
           chunks.flatMap(_.content).mkString,
           chunks.flatMap(_.toolCall),
-          chunks.flatMap(_.finishReason).lastOption.getOrElse(FinishReason.Other(""))
+          chunks.flatMap(_.finishReason).lastOption.getOrElse(FinishReason.Unknown)
         )
 
     def getContextWindow(): Int     = 1000

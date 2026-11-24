@@ -157,8 +157,8 @@ final class StreamingAccumulator private (model: String) {
    * cut the stream (`Length`) while it made tool calls. A broken call is never `{}` and never dropped.
    */
   def toCompletion(created: Instant): Result[Completion] = {
-    // the last reason a chunk carried; none read is Other(""), never a Stop the provider didn't send
-    val reason = finishReason.getOrElse(FinishReason.Other(""))
+    // the last reason a chunk carried; none read is Unknown, never a Stop the provider didn't send
+    val reason = finishReason.getOrElse(FinishReason.Unknown)
     finishedToolCalls(reason).map(completion(created, _, reason)).flatMap(ToolCallRules.checked)
   }
 

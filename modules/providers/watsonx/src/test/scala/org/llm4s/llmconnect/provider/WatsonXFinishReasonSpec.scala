@@ -125,11 +125,11 @@ class WatsonXFinishReasonSpec extends AnyFunSuite with Matchers:
     nonStream(Some("")).map(_.content) shouldBe Right("Hello")
   }
 
-  test("complete: the Completion carries the mapped reason; none read is Other(\"\")") {
+  test("complete: the Completion carries the mapped reason; none read is Unknown") {
     Seq("STOP", "length", " Tool_Calls ", "brand_new").foreach { reason =>
       withClue(s"'$reason': ")(nonStream(Some(reason)).map(_.finishReason) shouldBe Right(expectedReason(reason)))
     }
-    nonStream(None).map(_.finishReason) shouldBe Right(FinishReason.Other(""))
+    nonStream(None).map(_.finishReason) shouldBe Right(FinishReason.Unknown)
     // the older chat-completions name for a tool call (RFC 0009's chat-completions row)
     nonStream(Some("function_call")).map(_.finishReason) shouldBe Right(FinishReason.ToolCalls)
   }

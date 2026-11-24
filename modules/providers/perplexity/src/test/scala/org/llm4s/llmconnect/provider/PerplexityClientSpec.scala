@@ -323,7 +323,7 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
 
     "report Other(\"\") for a reply with no status, since no reason was read" in {
       completeWith(s"""{"id":"r","output":[${textMessage("done")}]}""")._2.map(_.finishReason) shouldBe
-        Right(FinishReason.Other(""))
+        Right(FinishReason.Unknown)
     }
 
     "fail a failed response with Perplexity's code and message, and any other unfinished status" in {

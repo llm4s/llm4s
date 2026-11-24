@@ -343,7 +343,7 @@ class OpenTelemetryTracing private[trace] (
           .flatMap(_.get("provider"))
           .flatMap(_.strOpt)
           .foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p)))
-        // the call's finish reason (RFC 0009), by name as on a client's chat span; one not read, Other(""), is left out
+        // the call's finish reason (RFC 0009), by name as on a client's chat span; one not read, Unknown, is left out
         payload
           .flatMap(_.get("finishReason"))
           .flatMap(r => Try(upickle.default.read[FinishReason](r)).toOption)

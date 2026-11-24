@@ -126,7 +126,7 @@ object SpringAiLlmClient {
         message = AssistantMessage(contentOpt = Option(content).filter(_.nonEmpty), toolCalls = calls),
         usage = usage,
         // Spring AI's reason as the model reported it: it has no common vocabulary to map
-        finishReason = FinishReason.Other(finish.getOrElse(""))
+        finishReason = finish.filter(_.nonEmpty).fold(FinishReason.Unknown)(FinishReason.Other(_))
       )
     }
   }

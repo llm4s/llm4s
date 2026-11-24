@@ -31,7 +31,8 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
     created = Instant.EPOCH,
     model = "model-2026",
     message = AssistantMessage("answer"),
-    usage = Some(TokenUsage(3, 2, 5))
+    usage = Some(TokenUsage(3, 2, 5)),
+    finishReason = FinishReason.Stop
   )
 
   private class Stub(result: Result[Completion]) extends LLMClient {
@@ -76,7 +77,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       e.usage shouldBe Some(TokenUsage(3, 2, 5))
       e.options shouldBe Some(options)
       e.input shouldBe conversation.messages
-      e.finishReasons shouldBe Seq("stop") // the Completion's reason; Stop by default
+      e.finishReasons shouldBe Seq("stop") // the Completion's reason
       e.content shouldBe "answer"
       e.servedTier shouldBe None
     }
@@ -106,19 +107,19 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       reasonsOf(FinishReason.Length) shouldBe Seq("length")
       reasonsOf(FinishReason.ToolCalls) shouldBe Seq("tool_calls")
       reasonsOf(FinishReason.Other("content_filter")) shouldBe Seq("content_filter")
-      reasonsOf(FinishReason.Other("")) shouldBe empty
+      reasonsOf(FinishReason.Unknown) shouldBe empty
     }
 
     "keep a stream's reason when a later chunk carries an empty one" in {
-      val emptyLast = new Stub(Right(completion.withFinishReason(FinishReason.Other("")))) {
+      val emptyLast = new Stub(Right(completion.withFinishReason(FinishReason.Unknown))) {
         override def streamComplete(
           conversation: Conversation,
           options: CompletionOptions,
           onChunk: StreamedChunk => Unit
         ): Result[Completion] = {
           onChunk(StreamedChunk("c-1", Some("answer"), finishReason = Some(FinishReason.Length)))
-          onChunk(StreamedChunk("c-1", None, finishReason = Some(FinishReason.Other(""))))
-          Right(completion.withFinishReason(FinishReason.Other("")))
+          onChunk(StreamedChunk("c-1", None, finishReason = Some(FinishReason.Unknown)))
+          Right(completion.withFinishReason(FinishReason.Unknown))
         }
       }
       val tracing = new Recording
