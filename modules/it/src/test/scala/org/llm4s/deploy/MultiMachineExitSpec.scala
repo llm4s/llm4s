@@ -293,7 +293,7 @@ class MultiMachineExitSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
   private def messages(t: ujson.Value): Vector[ujson.Value] = t("messages").arr.toVector.map(_("message"))
 
   private def answers(t: ujson.Value): Vector[String] =
-    messages(t).filter(_("type").str == "assistant").flatMap(_("data")("contentOpt").strOpt)
+    messages(t).filter(_("type").str == "assistant").flatMap(_.obj.get("content").flatMap(_.strOpt))
 
   /**
    * A history a provider accepts: it starts with the user, every assistant tool call is answered by a tool message
@@ -311,7 +311,7 @@ class MultiMachineExitSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
             open -= m("toolCallId").str
           case other =>
             open shouldBe empty
-            if (other == "assistant") open = m("data")("toolCalls").arr.map(_("id").str).toSet
+            if (other == "assistant") open = m("toolCalls").arr.map(_("id").str).toSet
         }
       }
       open shouldBe empty

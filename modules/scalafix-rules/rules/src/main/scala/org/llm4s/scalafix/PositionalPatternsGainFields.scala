@@ -12,7 +12,8 @@ import scalafix.v1._
  * and the `RunEvent` cases that gained fields are not here: each now holds one growth-safe class (#2781), so a
  * positional pattern on one is rewritten by hand to read its fields by name. Nor is `TraceEvent.ErrorOccurred`, whose
  * first field is no longer the exception (#2800): read `message`, `errorType` and `cause` by name. A pattern with 0.6.0's arity gets a `_` for each
- * field added since 0.6.0: `Completion`'s ten fields gain `finishReason` (#2613) and `servedTier` (#2746),
+ * field added since 0.6.0 (`Completion` is not here: its extractor also lost two fields, so `CompletionFromMessage`
+ * rewrites a pattern on it):
  * `ModelCapabilities` gains the five thinking and effort fields (#2115),
  * `TraceEvent.CompletionReceived`'s fourteen gain `servedTier` (#2750), `TokenUsage`'s six gain
  * `longCacheCreationTokens` and `ModelPricing`'s fifteen `cacheCreationInputTokenCostAbove1hr` (#2115),
@@ -63,7 +64,6 @@ object PositionalPatternsGainFields {
     "org/llm4s/agent/harness/HarnessProfile"                        -> (12 -> 13),
     "org/llm4s/config/ProvidersConfigModel.NamedProviderConfig"     -> (8  -> 9),
     "org/llm4s/llmconnect/LlmClientOptions"                         -> (2  -> 3),
-    "org/llm4s/llmconnect/model/Completion"                         -> (9  -> 12),
     "org/llm4s/llmconnect/model/CompletionOptions"                  -> (9  -> 11),
     "org/llm4s/llmconnect/model/TokenUsage"                         -> (6  -> 7),
     "org/llm4s/llmconnect/config/AnthropicConfig"                   -> (7  -> 10),
@@ -100,7 +100,6 @@ object PositionalPatternsGainFields {
    * 0.6.0 does not have 0.5.1's arity, so the two maps never both match.
    */
   val arity06: Map[String, (Int, Int)] = Map(
-    "org/llm4s/llmconnect/model/Completion"         -> (10 -> 12),
     "org/llm4s/agent/events/ModelCallCompleted"     -> (8  -> 11),
     "org/llm4s/trace/TraceEvent.CompletionReceived" -> (14 -> 15)
   )

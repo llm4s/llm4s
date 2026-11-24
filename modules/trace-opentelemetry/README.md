@@ -41,7 +41,7 @@ llm4s.tracing.opentelemetry.headers {
 }
 ```
 
-With `TRACING_MODE=opentelemetry` (or `otel`), `llm4s-core` hands this block to
+With `TRACING_MODE=opentelemetry` (or `otel`, an alias this module's backend declares), `llm4s-core` hands this block to
 `OpenTelemetryTracingBackend` as `TracingSettings.extras`, which builds the config with
 `OpenTelemetryConfig.fromExtras`.
 

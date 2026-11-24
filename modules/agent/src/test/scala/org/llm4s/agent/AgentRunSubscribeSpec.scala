@@ -40,9 +40,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
       val index = sent.size
       sent.add(conversation)
       responses(index)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -67,11 +65,11 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     def all: Vector[StreamEvent] = events.asScala.toVector
 
   private def answer(text: String): Completion =
-    Completion("answer", Instant.EPOCH, text, "test-model", AssistantMessage(text))
+    Completion("answer", Instant.EPOCH, "test-model", AssistantMessage(text))
 
   private val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
   private def calling: Completion =
-    Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall))
+    Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(toolCall)))
 
   private case class EchoResult(echo: String)
   private object EchoResult:

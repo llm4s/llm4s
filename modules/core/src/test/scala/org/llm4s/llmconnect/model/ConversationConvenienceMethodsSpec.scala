@@ -140,7 +140,7 @@ class ConversationConvenienceMethodsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return None for an empty conversation" in {
-    val conv = Conversation.empty()
+    val conv = Conversation.empty
 
     conv.lastMessage should be(None)
   }
@@ -166,7 +166,7 @@ class ConversationConvenienceMethodsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return 0 for empty conversation" in {
-    val conv = Conversation.empty()
+    val conv = Conversation.empty
 
     conv.messageCount should be(0)
   }
@@ -246,7 +246,7 @@ class ConversationConvenienceMethodsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return empty sequence for empty conversation" in {
-    val conv = Conversation.empty()
+    val conv = Conversation.empty
 
     val userMessages = conv.filterByRole(MessageRole.User)
 

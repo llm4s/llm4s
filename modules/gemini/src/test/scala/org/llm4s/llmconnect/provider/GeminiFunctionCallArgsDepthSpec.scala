@@ -124,7 +124,7 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, sse(callReply(deepArgs)))))
     (mockHttp.onPost _).when(*, *, *, *).returns(Right(HttpResponse(200, textReply, Map.empty)))
     val client = gemini(mockHttp)
-    shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions(), _ => ())))
+    shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions())(_ => ())))
   }
 
   it should "fail the stream on a chunk that is not JSON at all, as a 502 (RFC 0009, open question 5)" in {
@@ -132,7 +132,7 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, sse("{not json", textReply))))
-    gemini(mockHttp).streamComplete(question, CompletionOptions(), _ => ()) match {
+    gemini(mockHttp).streamComplete(question, CompletionOptions())(_ => ()) match {
       case Left(e: ServiceError) => e.httpStatus shouldBe 502
       case other                 => fail(s"expected Left(ServiceError(502)), got $other")
     }
@@ -148,7 +148,7 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     val mockHttp = stub[StubbedHttpCalls]
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, sse(callReply(deepArgs)))))
     val client = vertex(mockHttp, textReply)
-    shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions(), _ => ())))
+    shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions())(_ => ())))
   }
 
   it should "fail the stream on a chunk that is not JSON at all, as a 502 (RFC 0009, open question 5)" in {
@@ -156,7 +156,7 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, sse("{not json", textReply))))
-    vertex(mockHttp, textReply).streamComplete(question, CompletionOptions(), _ => ()) match {
+    vertex(mockHttp, textReply).streamComplete(question, CompletionOptions())(_ => ()) match {
       case Left(e: ServiceError) => e.httpStatus shouldBe 502
       case other                 => fail(s"expected Left(ServiceError(502)), got $other")
     }

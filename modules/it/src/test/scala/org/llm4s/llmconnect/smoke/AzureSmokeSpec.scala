@@ -101,7 +101,7 @@ class AzureSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Pr
 
     val client = OpenAIClient(classic(credentials.get)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, options, c => chunks += c)
+    val result = client.streamComplete(conversation, options)(c => chunks += c)
     client.close()
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {

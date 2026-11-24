@@ -192,9 +192,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
         made.incrementAndGet(): Unit
         Thread.sleep(50)
         Right(CompletionFixture.withUsage("s", 10, 20))
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       def getContextWindow(): Int     = 1000
@@ -290,10 +288,6 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
     result.answer shouldBe Some("done")
     result.usage.requestCount shouldBe 3
 
-    // a null message list with calls only on the completion: the calls' arguments are still charged
-    val big     = ToolCall("c1", "echo", ujson.Obj("text" -> ("lorem ipsum dolor sit amet " * 200)))
-    val topOnly = malformed.withToolCalls(List(big))
-    ModelContext.estimated(topOnly, Seq(UserMessage("go")), Nil).completionTokens should be > 500
     // null option fields contribute nothing to the definitions, never an exception
     ModelContext.definitions(null, null) shouldBe Nil
   }

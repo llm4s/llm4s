@@ -55,7 +55,7 @@ final class AdmissionContext private[agent] (
   def accounted(client: LLMClient): LLMClient = ledger.accounted(client)
 
   /** Records usage that arrived without a client call, as one request to `model`. */
-  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[Double]): Unit =
+  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[BigDecimal]): Unit =
     ledger.record(model, usage, estimatedCost)
 
   /** The usage the stages given this context have counted so far: what a test of a stage reads. */
@@ -67,7 +67,7 @@ object AdmissionContext:
   /** Where an admission stage's model calls are counted. */
   private[agent] trait Ledger:
     def accounted(client: LLMClient): LLMClient
-    def record(model: String, usage: TokenUsage, cost: Option[Double]): Unit
+    def record(model: String, usage: TokenUsage, cost: Option[BigDecimal]): Unit
     def usage: UsageSummary
 
   /**
@@ -77,7 +77,7 @@ object AdmissionContext:
   private[agent] def within(hook: ModelContext, agent: AgentId): AdmissionContext =
     val ledger = new Ledger:
       def accounted(client: LLMClient): LLMClient = hook.accounted(client)
-      def record(model: String, usage: TokenUsage, cost: Option[Double]): Unit =
+      def record(model: String, usage: TokenUsage, cost: Option[BigDecimal]): Unit =
         hook.recordUsage(model, usage, cost)
       def usage: UsageSummary = hook.run.usage.summary
     new AdmissionContext(
@@ -118,7 +118,7 @@ object AdmissionContext:
     /** This ledger for the stages of `agent`'s stack: each call is announced as that agent's. */
     def of(agent: AgentId): Ledger = new Ledger:
       def accounted(client: LLMClient): LLMClient = new Counting(client, agent)
-      def record(model: String, usage: TokenUsage, cost: Option[Double]): Unit =
+      def record(model: String, usage: TokenUsage, cost: Option[BigDecimal]): Unit =
         add(ModelContext.recordedUsage(agent, model, usage, cost))
       def usage: UsageSummary = total.get
 
@@ -126,11 +126,9 @@ object AdmissionContext:
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         counted(conversation, options, client.complete(conversation, options))
 
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
-      ): Result[Completion] = counted(conversation, options, client.streamComplete(conversation, options, onChunk))
+      ): Result[Completion] = counted(conversation, options, client.streamComplete(conversation, options)(onChunk))
 
       def getContextWindow(): Int                 = client.getContextWindow()
       def getReserveCompletion(): Int             = client.getReserveCompletion()

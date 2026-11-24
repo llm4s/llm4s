@@ -62,11 +62,10 @@ class AgentDslTest {
             )
             return Right(
                 Completion.apply(
-                    "id", Instant.EPOCH, answer, "m", AssistantMessage.apply(answer),
-                    CollectionConverters.asScala(listOf<ToolCall>()).toList(),
+                    "id", Instant.EPOCH, "m", AssistantMessage.apply(answer),
                     Option.empty(), Option.empty(),
                     CollectionConverters.asScala(listOf<Citation>()).toList(),
-                    Completion.`apply$default$10`(), Completion.`apply$default$11`(), Completion.`apply$default$12`(),
+                    Completion.`apply$default$8`(), Completion.`apply$default$9`(), Completion.`apply$default$10`(),
                 ),
             )
         }

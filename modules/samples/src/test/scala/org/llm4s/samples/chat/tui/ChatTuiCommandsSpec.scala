@@ -115,9 +115,7 @@ class ChatTuiCommandsSpec extends AnyFlatSpec with Matchers {
   private object NoopClient extends LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       throw new UnsupportedOperationException("test stub")
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       throw new UnsupportedOperationException("test stub")

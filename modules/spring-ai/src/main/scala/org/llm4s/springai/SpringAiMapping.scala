@@ -65,14 +65,14 @@ private[springai] object SpringAiMapping {
    * client did not map (`Other`, until RFC 0009 PR 2) is `TOOL_CALLS`, as Spring AI's own models report one. Any other
    * raw reason passes through, and none read is `STOP`.
    */
-  // An empty `Other("")` is a client that does not map its reason yet (Anthropic, Gemini, Vertex AI, Bedrock until
+  // `Unknown` is a client that does not map its reason yet (Anthropic, Gemini, Vertex AI, Bedrock until
   // RFC 0009 PR 2); Spring AI has no "unknown", so with no tool call it is reported as STOP, as it was before #2613.
   def finishOf(completion: Completion): String = completion.finishReason match {
-    case FinishReason.ToolCalls                                 => ToolCallsFinish
-    case FinishReason.Length                                    => LengthFinish
-    case FinishReason.Other(_) if completion.toolCalls.nonEmpty => ToolCallsFinish
-    case FinishReason.Other(raw) if raw.nonEmpty                => raw
-    case _                                                      => StopFinish
+    case FinishReason.ToolCalls                                                        => ToolCallsFinish
+    case FinishReason.Length                                                           => LengthFinish
+    case FinishReason.Other(_) | FinishReason.Unknown if completion.toolCalls.nonEmpty => ToolCallsFinish
+    case FinishReason.Other(raw) if raw.nonEmpty                                       => raw
+    case _                                                                             => StopFinish
   }
 
   // ---- Spring AI -> llm4s -------------------------------------------------------------------------------------------
@@ -90,7 +90,7 @@ private[springai] object SpringAiMapping {
     case MessageType.ASSISTANT =>
       val assistant = message.asInstanceOf[SpringAssistantMessage]
       toolCalls(assistant).map(calls =>
-        Seq(AssistantMessage(contentOpt = Option(assistant.getText).filter(_.nonEmpty), toolCalls = calls))
+        Seq(AssistantMessage(text = Option(assistant.getText).filter(_.nonEmpty), toolCalls = calls))
       )
     case MessageType.TOOL =>
       Right(
@@ -320,10 +320,11 @@ private[springai] object SpringAiMapping {
       case _                                            => ToolCallingChatOptions.builder()
     }
     // One statement per setter, as in `assistant`.
-    val _ = builder.temperature(java.lang.Double.valueOf(options.temperature))
-    val _ = builder.topP(java.lang.Double.valueOf(options.topP))
-    val _ = builder.presencePenalty(java.lang.Double.valueOf(options.presencePenalty))
-    val _ = builder.frequencyPenalty(java.lang.Double.valueOf(options.frequencyPenalty))
+    // only what the caller set: an unset sampling option keeps the model's own default
+    options.temperature.foreach(t => builder.temperature(java.lang.Double.valueOf(t)))
+    options.topP.foreach(p => builder.topP(java.lang.Double.valueOf(p)))
+    options.presencePenalty.foreach(p => builder.presencePenalty(java.lang.Double.valueOf(p)))
+    options.frequencyPenalty.foreach(p => builder.frequencyPenalty(java.lang.Double.valueOf(p)))
     val _ = builder.toolCallbacks(callbacks.asJava)
     options.maxTokens.foreach(m => builder.maxTokens(Integer.valueOf(m)))
     builder.build()
@@ -361,15 +362,14 @@ private[springai] object SpringAiMapping {
             Completion(
               id = meta.flatMap(m => Option(m.getId)).filter(_.nonEmpty).getOrElse(UUID.randomUUID().toString),
               created = Instant.now(),
-              content = text,
               model = meta.flatMap(m => Option(m.getModel)).getOrElse(""),
-              message = AssistantMessage(contentOpt = Option(text).filter(_.nonEmpty), toolCalls = calls),
-              toolCalls = calls.toList,
+              message = AssistantMessage(text = Option(text).filter(_.nonEmpty), toolCalls = calls),
               usage = meta.flatMap(m => Option(m.getUsage)).flatMap(tokenUsage),
               // Spring AI's reason as the model reported it: it has no common vocabulary to map
-              finishReason = FinishReason.Other(
-                Option(generation.getMetadata).flatMap(m => Option(m.getFinishReason)).getOrElse("")
-              )
+              finishReason = Option(generation.getMetadata)
+                .flatMap(m => Option(m.getFinishReason))
+                .filter(_.nonEmpty)
+                .fold(FinishReason.Unknown)(FinishReason.Other(_))
             )
           }
     }

@@ -42,7 +42,7 @@ object LLMClientOx {
     def streamFlow(conversation: Conversation, options: CompletionOptions = CompletionOptions())(using
       BufferCapacity
     ): Flow[StreamedChunk] =
-      CallbackFlow[StreamedChunk]("ox.streamFlow")(onChunk => client.streamComplete(conversation, options, onChunk))
+      CallbackFlow[StreamedChunk]("ox.streamFlow")(onChunk => client.streamComplete(conversation, options)(onChunk))
 
     /**
      * Completes each conversation with `client`, at most `parallelism` at a time (a bound below 1 counts as 1), on

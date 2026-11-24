@@ -74,7 +74,7 @@ class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers with BeforeA
   private def failWith(status: Int, errorType: String, stream: Boolean): LLMError = {
     nextError.set((status, errorType))
     val result =
-      if (stream) client.streamComplete(conv, CompletionOptions(), _ => ())
+      if (stream) client.streamComplete(conv, CompletionOptions())(_ => ())
       else client.complete(conv, CompletionOptions())
     result.left.toOption.value
   }
@@ -120,7 +120,7 @@ class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers with BeforeA
     "map a refused connection to NetworkError, on both paths" in {
       val client = new BedrockClient(config("http://localhost:1"))
       client.complete(conv, CompletionOptions()).left.toOption.value shouldBe a[NetworkError]
-      client.streamComplete(conv, CompletionOptions(), _ => ()).left.toOption.value shouldBe a[NetworkError]
+      client.streamComplete(conv, CompletionOptions())(_ => ()).left.toOption.value shouldBe a[NetworkError]
       client.close()
     }
 
@@ -128,7 +128,7 @@ class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers with BeforeA
       withServer("/")(sendJsonResponse(_, 502, "<html>bad gateway</html>")) { url =>
         val client = new BedrockClient(config(url))
         client.complete(conv, CompletionOptions()).isLeft shouldBe true
-        client.streamComplete(conv, CompletionOptions(), _ => ()).isLeft shouldBe true
+        client.streamComplete(conv, CompletionOptions())(_ => ()).isLeft shouldBe true
         client.close()
       }
     }
@@ -184,7 +184,7 @@ class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers with BeforeA
         ).foreach { error =>
           current.set(error)
           client.complete(conv, CompletionOptions()).left.foreach(errors += _)
-          client.streamComplete(conv, CompletionOptions(), _ => ()).left.foreach(errors += _)
+          client.streamComplete(conv, CompletionOptions())(_ => ()).left.foreach(errors += _)
         }
         client.close()
       }

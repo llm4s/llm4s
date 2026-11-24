@@ -44,7 +44,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
     val recorded = ListBuffer.empty[ProviderExchange]
     val sink = new ProviderExchangeSink:
       override def record(exchange: ProviderExchange): Unit = recorded += exchange
-    (recorded, ProviderExchangeLogging.enabled(sink))
+    (recorded, ProviderExchangeLogging.Enabled(sink))
   }
 
   /** A port nothing listens on, so a request to it fails in transport. */
@@ -105,7 +105,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
       sendSseResponse(exchange, openAISseBody(Seq("Hello", " local"), "local-model"))
     } { baseUrl =>
       val chunks = ListBuffer.empty[StreamedChunk]
-      val result = client(config(baseUrl)).streamComplete(conversation, CompletionOptions(), chunks += _)
+      val result = client(config(baseUrl)).streamComplete(conversation, CompletionOptions())(chunks += _)
       result.value.content shouldBe "Hello local"
       result.value.model shouldBe "local-model"
       chunks.flatMap(_.content).mkString shouldBe "Hello local"
@@ -175,7 +175,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
     completion.created shouldBe Instant.EPOCH
     completion.model shouldBe "local-model"
     completion.content shouldBe ""
-    completion.message.contentOpt shouldBe None
+    completion.message.text shouldBe None
     completion.usage shouldBe Some(TokenUsage(3, 4, 7))
   }
 
@@ -226,7 +226,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
       ]
     }
     recorded should have size 1
-    recorded.head.provider shouldBe "openai-compatible"
+    recorded.head.provider.asString shouldBe "openai-compatible"
     recorded.head.responseBody shouldBe Some("""{"error":"nope"}""")
   }
 
@@ -244,7 +244,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
     val c                   = client(config(deadBaseUrl), logging)
 
     c.complete(conversation, CompletionOptions()).isLeft shouldBe true
-    c.streamComplete(conversation, CompletionOptions(), _ => ()).isLeft shouldBe true
+    c.streamComplete(conversation, CompletionOptions())(_ => ()).isLeft shouldBe true
 
     recorded should have size 2
     recorded.foreach(_.requestBody should include("hello"))
@@ -254,7 +254,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
   it should "record a streaming error status with its body" in {
     val (recorded, logging) = recordingSink()
     withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 503, """{"error":"busy"}""")) { baseUrl =>
-      val result = client(config(baseUrl), logging).streamComplete(conversation, CompletionOptions(), _ => ())
+      val result = client(config(baseUrl), logging).streamComplete(conversation, CompletionOptions())(_ => ())
       result.left.value shouldBe a[ServiceError]
     }
     recorded should have size 1

@@ -59,9 +59,7 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
       Right(completion)
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -88,16 +86,13 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
         Completion(
           "turn-1",
           Instant.EPOCH,
-          "",
           "test-model",
           AssistantMessage("", Seq(toolCall)),
-          List(toolCall),
           Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
         ),
         Completion(
           "turn-2",
           Instant.EPOCH,
-          "Echoed.",
           "test-model",
           AssistantMessage("Echoed."),
           usage = Some(TokenUsage(promptTokens = 30, completionTokens = 5, totalTokens = 35))

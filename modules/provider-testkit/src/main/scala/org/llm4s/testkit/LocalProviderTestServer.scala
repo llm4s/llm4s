@@ -17,7 +17,7 @@ import scala.util.Try
  * {{{
  * withServer("/v1/chat")(exchange => sendSseResponse(exchange, body)) { baseUrl =>
  *   val client = assertBuildsClient(AcmeProvider, section.withBaseUrl(Some(BaseUrl(baseUrl))))
- *   client.streamComplete(conversation, onChunk = chunks += _)
+ *   client.streamComplete(conversation)(chunks += _)
  * }
  * }}}
  *

@@ -69,7 +69,7 @@ class AgentRunSpec extends AnyFlatSpec with Matchers {
 
     val options = client.calls.head._2
     options.tools.map(_.name) shouldBe Seq("echo")
-    options.temperature shouldBe 0.2
+    options.temperature shouldBe Some(0.2)
     options.maxTokens shouldBe Some(77)
   }
 

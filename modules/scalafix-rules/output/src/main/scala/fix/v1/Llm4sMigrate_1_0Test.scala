@@ -14,7 +14,7 @@ object Llm4sMigrate_1_0Test {
     OpenAIConfig.fromValues("gpt-4o", Secret(apiKey), baseUrl, Some("org-1"))
   )
 
-  val completion = Completion(id = "1", created = Instant.ofEpochSecond(1700000000L), content = "hi", model = "m",
+  val completion = Completion(id = "1", created = Instant.ofEpochSecond(1700000000L), model = "m",
     message = AssistantMessage("hi"))
   val seconds: Long = completion.created.getEpochSecond
 

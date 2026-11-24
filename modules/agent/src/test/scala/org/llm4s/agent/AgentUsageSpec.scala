@@ -23,10 +23,8 @@ class AgentUsageSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = s"$model-${message.content}",
       created = Instant.ofEpochSecond(1L),
-      content = message.content,
       model = model,
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(promptTokens = prompt, completionTokens = output, totalTokens = prompt + output)),
       estimatedCost = Some(cost)
     )

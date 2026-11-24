@@ -26,7 +26,7 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderId("openrouter"), cfg)
+    val res = LLMConnect.getClient(ProviderId("openrouter"), cfg, LlmClientOptions.default)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OpenRouterClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -41,7 +41,7 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 8192
     )
-    val res = LLMConnect.getClient(ProviderId("deepseek"), cfg)
+    val res = LLMConnect.getClient(ProviderId("deepseek"), cfg, LlmClientOptions.default)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "DeepSeekClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -56,7 +56,7 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderId("zai"), cfg)
+    val res = LLMConnect.getClient(ProviderId("zai"), cfg, LlmClientOptions.default)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "ZaiClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -71,7 +71,7 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderId("mistral"), cfg)
+    val res = LLMConnect.getClient(ProviderId("mistral"), cfg, LlmClientOptions.default)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "MistralClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -86,7 +86,7 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderId("cohere"), cfg)
+    val res = LLMConnect.getClient(ProviderId("cohere"), cfg, LlmClientOptions.default)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "CohereClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -96,7 +96,9 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
   test("openai-compatible provider with OpenAICompatibleConfig returns OpenAICompatibleClient") {
     val cfg: ProviderConfig = OpenAICompatibleConfig(model = "m", baseUrl = "http://localhost:8000/v1")
     LLMConnect.getClient(cfg).map(_.getClass.getSimpleName) shouldBe Right("OpenAICompatibleClient")
-    LLMConnect.getClient(ProviderId("openai-compatible"), cfg).map(_.getContextWindow()) shouldBe Right(
+    LLMConnect
+      .getClient(ProviderId("openai-compatible"), cfg, LlmClientOptions.default)
+      .map(_.getContextWindow()) shouldBe Right(
       OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW
     )
   }
@@ -104,7 +106,7 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
   test("OpenRouter provider with non-OpenAIConfig should throw IllegalArgumentException") {
     val wrongCfg: ProviderConfig = FixtureChatConfig(apiKey = "key", model = "fixture-model")
 
-    val res = LLMConnect.getClient(ProviderId("openrouter"), wrongCfg)
+    val res = LLMConnect.getClient(ProviderId("openrouter"), wrongCfg, LlmClientOptions.default)
     res.isLeft shouldBe true
   }
 
@@ -118,12 +120,12 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
       reserveCompletion = 4096
     )
 
-    val res = LLMConnect.getClient(ProviderId("zai"), wrongCfg)
+    val res = LLMConnect.getClient(ProviderId("zai"), wrongCfg, LlmClientOptions.default)
     res.isLeft shouldBe true
   }
 
   test("openai-compatible provider refuses another provider's config") {
     val wrongCfg: ProviderConfig = FixtureChatConfig(apiKey = "key", model = "fixture-model")
-    LLMConnect.getClient(ProviderId("openai-compatible"), wrongCfg).isLeft shouldBe true
+    LLMConnect.getClient(ProviderId("openai-compatible"), wrongCfg, LlmClientOptions.default).isLeft shouldBe true
   }
 }

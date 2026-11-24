@@ -25,7 +25,7 @@ class RobustnessSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     onClose: () => Unit = () => ()
   ): LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = onComplete(c, o)
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
@@ -33,7 +33,7 @@ class RobustnessSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   private def ok(text: String): Result[Completion] =
-    Right(Completion("id", Instant.EPOCH, text, "m", AssistantMessage(text)))
+    Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(text)))
 
   // ---- LlmResult ---------------------------------------------------------------------------
 

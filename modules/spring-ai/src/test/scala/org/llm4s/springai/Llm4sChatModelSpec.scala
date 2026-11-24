@@ -132,11 +132,11 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
     chat.call(new Prompt("hi", options))
 
     val sent = client.lastCall.map(_.options).get
-    sent.temperature shouldBe 0.2
-    sent.topP shouldBe 0.9
+    sent.temperature shouldBe Some(0.2)
+    sent.topP shouldBe Some(0.9)
     sent.maxTokens shouldBe Some(64)
-    sent.presencePenalty shouldBe 0.5
-    sent.frequencyPenalty shouldBe 0.25
+    sent.presencePenalty shouldBe Some(0.5)
+    sent.frequencyPenalty shouldBe Some(0.25)
     sent.tools shouldBe empty
   }
 
@@ -252,7 +252,7 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
       Seq(
         UserMessage("Weather?"),
         AssistantMessage(
-          contentOpt = None,
+          text = None,
           toolCalls =
             Seq(ToolCall("call-1", "weather", ujson.Obj("city" -> "Paris")), ToolCall("call-2", "time", ujson.Obj()))
         ),
@@ -319,9 +319,7 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
     val throwing = new LLMClient {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         Left(ValidationError("x", "unused"))
-      override def streamComplete(
-        c: Conversation,
-        o: CompletionOptions,
+      override def streamComplete(c: Conversation, o: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = throw new IllegalStateException("client bug")
       override def getContextWindow(): Int     = 1000
@@ -338,9 +336,7 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
     val blocking = new LLMClient {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         Left(ValidationError("x", "unused"))
-      override def streamComplete(
-        c: Conversation,
-        o: CompletionOptions,
+      override def streamComplete(c: Conversation, o: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = {
         onChunk(StreamedChunk("s1", Some("first")))

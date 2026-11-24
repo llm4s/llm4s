@@ -200,24 +200,20 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
       calls += 1
       val toolCalls = if (calls == 1) Seq(ToolCall("call-1", toolName, args)) else Seq.empty
       val message =
-        if (toolCalls.nonEmpty) AssistantMessage(contentOpt = None, toolCalls = toolCalls)
+        if (toolCalls.nonEmpty) AssistantMessage(text = None, toolCalls = toolCalls)
         else AssistantMessage("done")
       Right(
         Completion(
           id = s"scripted-$calls",
           created = Instant.EPOCH,
-          content = message.content,
           model = "scripted-model",
           message = message,
-          toolCalls = toolCalls.toList,
           usage = None
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

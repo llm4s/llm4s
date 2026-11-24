@@ -276,7 +276,6 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     Completion(
       "id",
       Instant.EPOCH,
-      text,
       "m",
       AssistantMessage(Some(text)),
       usage = Some(TokenUsage(7, 3, 10)),
@@ -369,7 +368,7 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def toolCall: Completion = {
     val call = ToolCall("call-1", "echo", ujson.Obj("input" -> "hi"))
-    Completion("id", Instant.EPOCH, "", "m", AssistantMessage(None, Seq(call)), List(call))
+    Completion("id", Instant.EPOCH, "m", AssistantMessage(None, Seq(call)))
   }
 
   private def echoTools: ToolRegistry =

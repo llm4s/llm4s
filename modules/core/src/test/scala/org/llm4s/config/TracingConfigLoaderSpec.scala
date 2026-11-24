@@ -1,6 +1,8 @@
 package org.llm4s.config
 
 import org.llm4s.trace.TracingMode
+import org.llm4s.trace.spi.TracingBackends
+import org.llm4s.trace.spi.fixtures.{ AliasClashTracingBackend, AliasedFixtureTracingBackend }
 import pureconfig.ConfigSource
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -62,9 +64,8 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
       load("llm4s { tracing { mode = \"langfuse\" } }").value.mode shouldBe TracingMode.Named("langfuse")
     }
 
-    "parse 'opentelemetry' and 'otel' as Named(opentelemetry)" in {
+    "parse 'opentelemetry' as Named(opentelemetry)" in {
       load("llm4s { tracing { mode = \"opentelemetry\" } }").value.mode shouldBe TracingMode.Named("opentelemetry")
-      load("llm4s { tracing { mode = \"otel\" } }").value.mode shouldBe TracingMode.Named("opentelemetry")
     }
 
     "parse 'noop' mode correctly" in {
@@ -79,8 +80,8 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
       val result = load("llm4s { tracing { mode = \"Unknown-Mode\" } }")
 
       result.value.mode shouldBe TracingMode.Named("unknown-mode")
-      // With no backend registered for it, building the tracer still degrades to NoOp.
-      org.llm4s.trace.Tracing.create(result.value) shouldBe a[org.llm4s.trace.NoOpTracing]
+      // With no backend registered for it, building the tracer is an error the caller sees.
+      org.llm4s.trace.Tracing.fromSettings(result.value).left.value.message should include("unknown-mode")
     }
 
     "handle empty mode string by using default" in {
@@ -167,7 +168,23 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
       )
     }
 
-    "carry the canonical block for an alias: otel reads llm4s.tracing.opentelemetry" in {
+    "replace a backend's alias by its mode, and carry that mode's block" in {
+      val hocon =
+        """
+          |llm4s.tracing {
+          |  mode = "Shorty"
+          |  aliased { endpoint = "http://collector:4317" }
+          |  shorty { endpoint = "never read" }
+          |}
+          |""".stripMargin
+      val backends = TracingBackends.of(new AliasedFixtureTracingBackend)
+
+      val settings = TracingConfigLoader.load(ConfigSource.string(hocon), backends).value
+      settings.mode shouldBe TracingMode.Named("aliased")
+      settings.extras shouldBe Map("endpoint" -> "http://collector:4317")
+    }
+
+    "keep a name no backend answers to as written, otel included: core knows no alias" in {
       val hocon =
         """
           |llm4s.tracing {
@@ -176,7 +193,25 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
           |}
           |""".stripMargin
 
-      load(hocon).value.extras shouldBe Map("endpoint" -> "http://collector:4317")
+      val settings = load(hocon).value
+      settings.mode shouldBe TracingMode.Named("otel")
+      settings.extras shouldBe empty
+    }
+
+    "fail when two backends answer to the selected name" in {
+      val backends = TracingBackends.of(new AliasedFixtureTracingBackend, new AliasClashTracingBackend)
+
+      val error = TracingConfigLoader.load(ConfigSource.string("llm4s.tracing.mode = ali"), backends).left.value
+      error.message should include("claimed by more than one TracingBackend")
+    }
+
+    "not look for a backend when the mode is one core builds itself" in {
+      def never: TracingBackends = fail("console and noop need no backend lookup")
+
+      TracingConfigLoader.load(ConfigSource.string("llm4s.tracing.mode = console"), never).value.mode shouldBe
+        TracingMode.Console
+      TracingConfigLoader.load(ConfigSource.string("llm4s.tracing.mode = none"), never).value.mode shouldBe
+        TracingMode.NoOp
     }
 
     "read only the selected mode's block" in {
@@ -211,9 +246,12 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
     }
 
     "check the canonical block when the mode is an alias" in {
-      // The alias resolves to the canonical block, and that block is checked too.
-      load("llm4s.tracing { mode = \"otel\", opentelemetry = 4317 }").left.value.message should include(
-        "llm4s.tracing.opentelemetry must be an object, but is a number"
+      // The alias resolves to its backend's block, and that block is checked too.
+      val backends = TracingBackends.of(new AliasedFixtureTracingBackend)
+      val source   = ConfigSource.string("llm4s.tracing { mode = \"ali\", aliased = 4317 }")
+
+      TracingConfigLoader.load(source, backends).left.value.message should include(
+        "llm4s.tracing.aliased must be an object, but is a number"
       )
     }
 

@@ -52,7 +52,7 @@ def resilient(client: LLMClient): ReliableClient = {
     circuitBreaker = CircuitBreakerConfig(failureThreshold = 5, recoveryTimeout = 30.seconds),
     deadline = Some(45.seconds)
   )
-  new ReliableClient(client, "openai-main", config)
+  ReliableClient(client, "openai-main", config)
 }
 ```
 

@@ -75,9 +75,7 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
       Right(completion)
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -101,8 +99,8 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
     val usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
     new SequencedClient(
       Seq(
-        Completion("turn-1", Instant.EPOCH, "", "mock-model", AssistantMessage("", Seq(call)), List(call), usage),
-        Completion("turn-2", Instant.EPOCH, "Echoed.", "mock-model", AssistantMessage("Echoed."), usage = usage)
+        Completion("turn-1", Instant.EPOCH, "mock-model", AssistantMessage("", Seq(call)), usage),
+        Completion("turn-2", Instant.EPOCH, "mock-model", AssistantMessage("Echoed."), usage = usage)
       )
     )
   }

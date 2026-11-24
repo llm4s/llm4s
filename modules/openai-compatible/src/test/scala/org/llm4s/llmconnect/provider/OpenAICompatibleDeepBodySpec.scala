@@ -83,7 +83,7 @@ class OpenAICompatibleDeepBodySpec extends AnyFlatSpec with Matchers {
   "OpenAICompatibleClient.streamComplete" should "return a Left for a 400 or 500 whose body is a 100,000-deep array" in {
     Seq(400, 500).foreach { status =>
       respondingWith(status, deepArray) { baseUrl =>
-        val result = onSmallStack(client(baseUrl).streamComplete(conversation, CompletionOptions(), _ => ()))
+        val result = onSmallStack(client(baseUrl).streamComplete(conversation, CompletionOptions())(_ => ()))
         result.isLeft shouldBe true
         result.left.toOption.get.message should include(s"(HTTP $status)")
       }
@@ -92,7 +92,7 @@ class OpenAICompatibleDeepBodySpec extends AnyFlatSpec with Matchers {
 
   it should "return a Left for a stream event whose data is a 100,000-deep array" in {
     respondingWith(200, s"data: $deepArray\n\ndata: [DONE]\n\n", contentType = "text/event-stream") { baseUrl =>
-      onSmallStack(client(baseUrl).streamComplete(conversation, CompletionOptions(), _ => ())).isLeft shouldBe true
+      onSmallStack(client(baseUrl).streamComplete(conversation, CompletionOptions())(_ => ())).isLeft shouldBe true
     }
   }
 

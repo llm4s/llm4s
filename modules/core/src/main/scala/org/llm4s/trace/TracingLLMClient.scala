@@ -44,21 +44,18 @@ final class TracingLLMClient private (
     traced(conversation, options, result, elapsed(startedAt), streamed = false, finishReason = None)
   }
 
-  def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
     val finishReason = new AtomicReference[Option[FinishReason]](None)
     val startedAt    = System.nanoTime()
     val result = underlying.streamComplete(
       conversation,
-      options,
-      chunk => {
-        Option(chunk).flatMap(_.finishReason).filter(_.name.nonEmpty).foreach(r => finishReason.set(Some(r)))
-        onChunk(chunk)
-      }
-    )
+      options
+    ) { chunk =>
+      Option(chunk).flatMap(_.finishReason).filter(_.name.nonEmpty).foreach(r => finishReason.set(Some(r)))
+      onChunk(chunk)
+    }
     traced(conversation, options, result, elapsed(startedAt), streamed = true, finishReason.get)
   }
 

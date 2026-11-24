@@ -583,9 +583,9 @@ LANGFUSE_SECRET_KEY=<your-langfuse-secret-key>
 LANGFUSE_URL=https://cloud.langfuse.com  # or self-hosted
 ```
 
-Both keys are required: with either unset, `Tracing.create` logs a `ConfigurationError` naming it
-(`llm4s.tracing.langfuse.publicKey (LANGFUSE_PUBLIC_KEY)`) and falls back to no tracing, so check
-startup logs, or build the tracer with `Tracing.fromSettings` to fail fast.
+Both keys are required: with either unset, `Tracing.fromSettings` returns a `ConfigurationError` naming it
+(`llm4s.tracing.langfuse.publicKey (LANGFUSE_PUBLIC_KEY)`), so a misconfigured deployment fails at startup
+rather than running untraced.
 
 What gets traced:
 

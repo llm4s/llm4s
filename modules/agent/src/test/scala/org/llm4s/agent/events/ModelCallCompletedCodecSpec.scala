@@ -140,7 +140,7 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
       FinishReason.ToolCalls,
       FinishReason.Length,
       FinishReason.Other("SAFETY"),
-      FinishReason.Other("")
+      FinishReason.Unknown
     )
 
   it should "read an event stored before it had a finish reason with none" in {

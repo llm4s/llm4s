@@ -46,7 +46,7 @@ private[config] object ProviderExchangeLoggingConfigLoader:
           .filter(_.nonEmpty)
           .toRight(ConfigurationError("Provider exchange logging is enabled but llm4s.exchangeLogging.dir is missing"))
           .flatMap(dir =>
-            ProviderExchangeSink.createRunScopedJsonl(Paths.get(dir)).map(ProviderExchangeLogging.enabled)
+            ProviderExchangeSink.createRunScopedJsonl(Paths.get(dir)).map(ProviderExchangeLogging.Enabled(_))
           )
       case _ =>
         Right(ProviderExchangeLogging.Disabled)

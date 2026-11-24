@@ -270,9 +270,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     val judge = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Right(completion(AssistantMessage("ok"), prompt = 100, completion = 1))
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       def getContextWindow(): Int     = 1000
@@ -304,9 +302,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     val judge = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Right(completion(AssistantMessage("ok"), prompt = 100, completion = 1))
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       def getContextWindow(): Int     = 1000
@@ -334,9 +330,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     val judge = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Right(completion(AssistantMessage("ok"), prompt = 100, completion = 1))
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       def getContextWindow(): Int     = 1000
@@ -658,9 +652,7 @@ class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with 
     val judge = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Right(completion(AssistantMessage("0.9"), prompt = 50, completion = 1))
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       def getContextWindow(): Int     = 1000

@@ -67,7 +67,7 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wit
 
     val client = AnthropicClient(config(apiKey.get)).toOption.get
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+    val result = client.streamComplete(conversation, CompletionOptions())(c => chunks += c)
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
       result.isRight shouldBe true
@@ -96,7 +96,7 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wit
     AnthropicClient(config(key, ThinkingModel)).map { client =>
       ReasoningSetup(
         client,
-        CompletionOptions(temperature = 1.0, maxTokens = Some(4096)).withReasoning(ReasoningEffort.Low),
+        CompletionOptions(temperature = Some(1.0), maxTokens = Some(4096)).withReasoning(ReasoningEffort.Low),
         expectsThinkingText = true
       )
     }

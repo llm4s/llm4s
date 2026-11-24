@@ -33,6 +33,10 @@ class Llm4sMigrate_1_0 extends SemanticRule("Llm4sMigrate_1_0") {
     new AgentCopyToWithSetters,
     new AgentStatusGainsTruncated,
     new ResultSyntaxMoved,
+    new SamplingOptionsOptional,
+    new CompletionFromMessage,
+    new MessageAndConversationShapes,
+    new ClientEntryPoints,
     new ToolFunctionOneTypeParameter
   )
 

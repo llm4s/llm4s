@@ -32,11 +32,11 @@ class CompletionOptionsTest {
 
     @Test
     fun `every setting reads back with Java types`() {
-        assertEquals(0.2, everySetting.temperature())
-        assertEquals(0.9, everySetting.topP())
+        assertEquals(0.2, everySetting.temperature().asDouble)
+        assertEquals(0.9, everySetting.topP().asDouble)
         assertEquals(OptionalInt.of(512), everySetting.maxTokens())
-        assertEquals(0.5, everySetting.presencePenalty())
-        assertEquals(-0.5, everySetting.frequencyPenalty())
+        assertEquals(0.5, everySetting.presencePenalty().asDouble)
+        assertEquals(-0.5, everySetting.frequencyPenalty().asDouble)
         assertEquals(Optional.of(JReasoningEffort.HIGH), everySetting.reasoning())
         assertEquals(Optional.of(JThinking.budget(4096)), everySetting.thinking())
     }
@@ -52,7 +52,7 @@ class CompletionOptionsTest {
         assertEquals(OptionalInt.empty(), cleared.maxTokens())
         assertEquals(Optional.empty(), cleared.reasoning())
         assertEquals(Optional.empty(), cleared.thinking())
-        assertEquals(0.2, cleared.temperature())
+        assertEquals(0.2, cleared.temperature().asDouble)
     }
 
     @Test
@@ -86,11 +86,11 @@ class CompletionOptionsTest {
 
         val (sentConversation, sentOptions) = model.sent.single()
         assertEquals(conversation, sentConversation)
-        assertEquals(0.2, sentOptions.temperature())
-        assertEquals(0.9, sentOptions.topP())
+        assertEquals(0.2, sentOptions.temperature().get())
+        assertEquals(0.9, sentOptions.topP().get())
         assertEquals(Option.apply<Any>(512), sentOptions.maxTokens())
-        assertEquals(0.5, sentOptions.presencePenalty())
-        assertEquals(-0.5, sentOptions.frequencyPenalty())
+        assertEquals(0.5, sentOptions.presencePenalty().get())
+        assertEquals(-0.5, sentOptions.frequencyPenalty().get())
         assertEquals("high", (sentOptions.reasoning().get() as ReasoningEffort).name())
         assertEquals<Thinking>(Thinking.budget(4096).toOption().get(), sentOptions.thinking().get())
     }

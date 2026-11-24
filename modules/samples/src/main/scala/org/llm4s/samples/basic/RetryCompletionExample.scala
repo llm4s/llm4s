@@ -38,7 +38,7 @@ object RetryCompletionExample {
       registryService <- Llm4sConfig.modelRegistryService()
       given org.llm4s.model.ModelRegistryService = registryService
       client <- LLMConnect.getClient(providerCfg)
-      reliable = new ReliableClient(client, providerCfg.providerId.asString, reliability)
+      reliable = ReliableClient(client, providerCfg.providerId.asString, reliability)
       completion <- reliable.complete(conversation, CompletionOptions())
       _ =
         logger.info("Assistant: {}", completion.message.content)

@@ -42,7 +42,7 @@ trait UsageAccounting:
   def accounted(client: LLMClient): LLMClient
 
   /** Records usage that arrived without a client call, as one request to `model`. */
-  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[Double] = None): Unit
+  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[BigDecimal] = None): Unit
 
 /**
  * What a middleware's `beforeAgent`, `wrapModelCall`, `promptSections` and `afterAgent` hooks see: the task's
@@ -73,7 +73,7 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
   def accounted(client: LLMClient): LLMClient = new ModelContext.Accounted(client, this)
 
   /** Records usage that arrived without a client call, as one request to `model`. */
-  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[Double]): Unit =
+  def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[BigDecimal]): Unit =
     record(ModelContext.recordedUsage(agent, model, usage, estimatedCost))
 
   /**
@@ -135,7 +135,7 @@ object ModelContext:
   final private[agent] case class Recorded(
     model: String,
     charged: TokenUsage,
-    cost: Option[Double],
+    cost: Option[BigDecimal],
     event: events.ModelCallCompleted
   )
 
@@ -163,7 +163,7 @@ object ModelContext:
         attempt,
         Option(completion.message).flatMap(m => Option(m.toolCalls)).fold(0)(_.size),
         completion.usage.map(events.CallUsage.fromTokenUsage),
-        completion.estimatedCost,
+        completion.estimatedCost.map(_.toDouble),
         provider,
         nonNull(completion.adjustments).toList,
         Option(completion.finishReason),
@@ -173,7 +173,12 @@ object ModelContext:
     )
 
   /** Usage that arrived without a client call, counted as one request of `agent`'s to `model`. */
-  private[agent] def recordedUsage(agent: AgentId, model: String, usage: TokenUsage, cost: Option[Double]): Recorded =
+  private[agent] def recordedUsage(
+    agent: AgentId,
+    model: String,
+    usage: TokenUsage,
+    cost: Option[BigDecimal]
+  ): Recorded =
     Recorded(
       model,
       usage,
@@ -184,7 +189,7 @@ object ModelContext:
         0,
         0,
         Some(events.CallUsage.fromTokenUsage(usage)),
-        cost,
+        cost.map(_.toDouble),
         None,
         Nil,
         None,
@@ -205,12 +210,7 @@ object ModelContext:
     // an estimate never fails the call it charges: whatever a field holds (a custom client may leave one null), each
     // part falls back, and the whole to the one-token minimum
     val usage = Try {
-      val answer = Try {
-        // a null list is an empty one, so calls only on `Completion.toolCalls` still count
-        if nonNull(completion.message.toolCalls).isEmpty && nonNull(completion.toolCalls).nonEmpty then
-          completion.message.withToolCalls(nonNull(completion.toolCalls))
-        else completion.message
-      }.getOrElse(completion.message)
+      val answer = completion.message
       val in = math.max(1, nonNull(request).map(tokens).sum + nonNull(definitions).map(d => tokens(UserMessage(d))).sum)
       val out = math.max(1, tokens(answer))
       TokenUsage(in, out, in + out)
@@ -269,12 +269,10 @@ object ModelContext:
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       context.admitted(recorded(conversation, options, client.complete(conversation, options)))
 
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
-      context.admitted(recorded(conversation, options, client.streamComplete(conversation, options, onChunk)))
+      context.admitted(recorded(conversation, options, client.streamComplete(conversation, options)(onChunk)))
 
     def getContextWindow(): Int                 = client.getContextWindow()
     def getReserveCompletion(): Int             = client.getReserveCompletion()

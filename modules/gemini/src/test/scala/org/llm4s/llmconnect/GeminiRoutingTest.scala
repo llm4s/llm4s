@@ -22,7 +22,7 @@ class GeminiRoutingTest extends AnyFunSuite with Matchers {
       contextWindow = 1048576,
       reserveCompletion = 8192
     )
-    val res = LLMConnect.getClient(ProviderId("gemini"), cfg)
+    val res = LLMConnect.getClient(ProviderId("gemini"), cfg, LlmClientOptions.default)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "GeminiClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -38,7 +38,7 @@ class GeminiRoutingTest extends AnyFunSuite with Matchers {
       contextWindow = 1048576,
       reserveCompletion = 8192
     )
-    val res = LLMConnect.getClient(ProviderId("vertexai"), cfg)
+    val res = LLMConnect.getClient(ProviderId("vertexai"), cfg, LlmClientOptions.default)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "VertexAIClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -48,6 +48,6 @@ class GeminiRoutingTest extends AnyFunSuite with Matchers {
   test("a GeminiConfig routed to the vertexai provider is refused") {
     val cfg: ProviderConfig =
       GeminiConfig(Secret("key"), "gemini-2.0-flash", "https://example.invalid/v1beta", 1048576, 8192)
-    LLMConnect.getClient(ProviderId("vertexai"), cfg).isLeft shouldBe true
+    LLMConnect.getClient(ProviderId("vertexai"), cfg, LlmClientOptions.default).isLeft shouldBe true
   }
 }

@@ -42,9 +42,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
       Left(error)
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -67,7 +65,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
     ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = Duration.Zero))
 
   private def reliable(inner: LLMClient, provider: String): ReliableClient =
-    new ReliableClient(inner, provider, retries3, sleep = _ => ())
+    ReliableClient(inner, provider, retries3).withSleep(_ => ())
 
   "Agent.run" should "return the exact NetworkError the provider produced" in {
     val original = NetworkError("connection refused", None, "https://llm.example/v1")
@@ -95,7 +93,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         if (calls.getAndIncrement() == 0) Right(CompletionFixture.withToolCall("missing_tool", ujson.Obj()))
         else Left(original)
-      override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+      override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       override def getContextWindow(): Int     = 4096
       override def getReserveCompletion(): Int = 1024
@@ -152,9 +150,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       if (calls.incrementAndGet() <= failures) Left(error) else Right(CompletionFixture.simple(reply))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -230,7 +226,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matc
     val config = ReliabilityConfig.default
       .withRetryPolicy(RetryPolicy.noRetry)
       .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 2))
-    val client = new ReliableClient(inner, "provider-x", config, sleep = _ => ())
+    val client = ReliableClient(inner, "provider-x", config).withSleep(_ => ())
 
     runError(client) shouldBe provider
     runError(client) shouldBe provider

@@ -102,7 +102,7 @@ class WatsonXAdjustmentsSpec extends AnyFunSuite with Matchers with EitherValues
     val options = CompletionOptions().withReasoning(ReasoningEffort.Minimal)
     val chunks  = ListBuffer.empty[StreamedChunk]
     val streamed = new WatsonXClient(gptOss, httpClient = streaming(streamOf(bytes(events))))
-      .streamComplete(hi, options, chunks += _)
+      .streamComplete(hi, options)(chunks += _)
       .value
     streamed.adjustments shouldBe adjustments(gptOss, options)
     streamed.adjustments should not be empty

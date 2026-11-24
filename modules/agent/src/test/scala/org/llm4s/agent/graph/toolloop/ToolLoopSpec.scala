@@ -47,10 +47,8 @@ object ToolLoopFixtures {
     Completion(
       id = "scripted",
       created = Instant.EPOCH,
-      content = message.content,
       model = "scripted",
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(prompt, completion, prompt + completion))
     )
 
@@ -1862,10 +1860,8 @@ class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     val client = new LLMClient {
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         offered.add(options.tools.map(_.name))
-        Right(Completion("id", Instant.EPOCH, "hello", "model", AssistantMessage("hello", toolCalls = List.empty)))
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+        Right(Completion("id", Instant.EPOCH, "model", AssistantMessage("hello", toolCalls = List.empty)))
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 4096

@@ -66,7 +66,7 @@ class RequestySmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
 
     val llm    = client(apiKey.get).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = llm.streamComplete(conversation, options, c => chunks += c)
+    val result = llm.streamComplete(conversation, options)(c => chunks += c)
     llm.close()
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {

@@ -25,14 +25,7 @@ class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherVa
     private var calls = 0
 
     private def reply(message: AssistantMessage): Completion =
-      Completion(
-        id = s"script-$calls",
-        created = Instant.EPOCH,
-        content = message.content,
-        model = "script",
-        message = message,
-        toolCalls = message.toolCalls.toList
-      )
+      Completion(id = s"script-$calls", created = Instant.EPOCH, model = "script", message = message)
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       calls += 1
@@ -41,7 +34,7 @@ class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherVa
         case None =>
           reply(
             AssistantMessage(
-              contentOpt = None,
+              text = None,
               toolCalls = Seq(
                 ToolCall("call-1", "calculator", ujson.Obj("operation" -> "percentage", "a" -> 15, "b" -> 850))
               )
@@ -51,9 +44,7 @@ class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherVa
       })
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

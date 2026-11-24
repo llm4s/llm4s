@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import com.typesafe.config.{ ConfigFactory, ConfigResolveOptions }
 import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.{
@@ -9,7 +10,7 @@ import org.llm4s.llmconnect.{
   ProviderExchangeOutcome,
   ProviderExchangeSink
 }
-import org.llm4s.llmconnect.provider.ProviderExchangeRecorder
+import org.llm4s.llmconnect.provider.{ ProviderExchangeCall, ProviderExchangeRecorder }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import pureconfig.ConfigSource
@@ -17,7 +18,6 @@ import pureconfig.ConfigSource
 import java.nio.file.{ Files, Path }
 import java.time.Instant
 import scala.collection.mutable.ListBuffer
-import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
 
 /**
@@ -46,13 +46,12 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
   ): ProviderExchange =
     ProviderExchange(
       exchangeId = "exchange-1",
-      provider = "provider",
+      provider = ProviderId("provider"),
       model = Some("model"),
       requestId = None,
       correlationId = None,
       startedAt = now,
-      completedAt = now,
-      duration = 5.millis,
+      completedAt = now.plusMillis(5),
       outcome = outcome,
       requestBody = requestBody,
       responseBody = responseBody,
@@ -318,12 +317,14 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
     val secret = "Authorization: Bearer abc123def456 " + ("z" * 2000)
 
     ProviderExchangeRecorder.record(
-      ProviderExchangeLogging.enabled(sink),
-      "provider",
-      Some("model"),
-      Instant.now(),
-      secret,
-      Some(secret),
+      ProviderExchangeLogging.Enabled(sink),
+      ProviderExchangeCall(
+        provider = ProviderId("provider"),
+        startedAt = Instant.now(),
+        requestBody = secret,
+        model = Some("model"),
+        responseBody = Some(secret)
+      ),
       Right("ok")
     )
 
@@ -336,12 +337,12 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
     val sink = new ProviderExchangeSink { def record(ex: ProviderExchange): Unit = seen += ex }
 
     ProviderExchangeRecorder.record(
-      ProviderExchangeLogging.enabled(sink),
-      "provider",
-      None,
-      Instant.now(),
-      "{}",
-      None,
+      ProviderExchangeLogging.Enabled(sink),
+      ProviderExchangeCall(
+        provider = ProviderId("provider"),
+        startedAt = Instant.now(),
+        requestBody = "{}"
+      ),
       Left(org.llm4s.error.AuthenticationError("provider", "bad key"))
     )
 
@@ -354,12 +355,12 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
     val sink = new ProviderExchangeSink { def record(ex: ProviderExchange): Unit = seen += ex }
 
     ProviderExchangeRecorder.record(
-      ProviderExchangeLogging.enabled(sink),
-      "provider",
-      None,
-      Instant.now(),
-      "{}",
-      None,
+      ProviderExchangeLogging.Enabled(sink),
+      ProviderExchangeCall(
+        provider = ProviderId("provider"),
+        startedAt = Instant.now(),
+        requestBody = "{}"
+      ),
       Left(CancelledError("the call"))
     )
 
@@ -372,12 +373,12 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
     }
 
     noException should be thrownBy ProviderExchangeRecorder.record(
-      ProviderExchangeLogging.enabled(sink),
-      "provider",
-      None,
-      Instant.now(),
-      "{}",
-      None,
+      ProviderExchangeLogging.Enabled(sink),
+      ProviderExchangeCall(
+        provider = ProviderId("provider"),
+        startedAt = Instant.now(),
+        requestBody = "{}"
+      ),
       Right("ok")
     )
   }

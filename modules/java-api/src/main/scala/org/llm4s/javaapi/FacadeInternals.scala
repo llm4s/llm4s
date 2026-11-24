@@ -11,7 +11,7 @@ import org.llm4s.agent.graph.toolloop.{
 }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect, LlmClientOptions }
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ModelDimensionRegistry, ProviderConfig }
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
@@ -76,7 +76,10 @@ private[llm4s] object FacadeInternals {
     else
       result(for {
         registry <- Llm4sConfig.modelRegistryService()
-        client   <- LLMConnect.getClient(config, Option(metrics).getOrElse(MetricsCollector.noop))(using registry)
+        client <- LLMConnect.getClient(
+          config,
+          LlmClientOptions(metrics = Option(metrics).getOrElse(MetricsCollector.noop))
+        )(using registry)
       } yield Llm4s.wrapClient(client))
 
   /** `agentResult` as Java and Kotlin callers read it. */
@@ -265,7 +268,9 @@ private[llm4s] object FacadeInternals {
       usage.outputTokens,
       usage.thinkingTokens,
       usage.totalCost.bigDecimal,
-      java.util.Collections.unmodifiableMap(byModel)
+      java.util.Collections.unmodifiableMap(byModel),
+      usage.cachedTokens,
+      usage.cacheCreationTokens
     )
   }
 
@@ -276,7 +281,9 @@ private[llm4s] object FacadeInternals {
       usage.inputTokens,
       usage.outputTokens,
       usage.thinkingTokens,
-      usage.totalCost.bigDecimal
+      usage.totalCost.bigDecimal,
+      usage.cachedTokens,
+      usage.cacheCreationTokens
     )
 
   /** `completion` as Java and Kotlin callers read it. */
@@ -287,9 +294,7 @@ private[llm4s] object FacadeInternals {
       completion.model,
       java.util.List.copyOf(completion.toolCalls.map(toolCall).asJava),
       completion.usage.map(tokenUsage).toJava,
-      // as core's `ModelUsage.add` converts it, so a reply's cost and an agent turn's total agree; a cost that is not a
-      // number has no decimal value and reads as unknown
-      completion.estimatedCost.filter(_.isFinite).map(BigDecimal.decimal(_).bigDecimal).toJava,
+      completion.estimatedCost.map(_.bigDecimal).toJava,
       completion.thinking.toJava,
       completion.servedTier.map(tierName).toJava
     )

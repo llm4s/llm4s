@@ -45,7 +45,7 @@ class ThreadingModelSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def concurrentCallers: Int = math.max(64, 4 * Runtime.getRuntime.availableProcessors())
 
   private def completion(text: String): Completion =
-    Completion("id", Instant.EPOCH, text, "test-model", AssistantMessage(text))
+    Completion("id", Instant.EPOCH, "test-model", AssistantMessage(text))
 
   private def lastUser(conversation: Conversation): String =
     conversation.messages.collect { case u: UserMessage => u.content }.lastOption.getOrElse("")
@@ -53,9 +53,7 @@ class ThreadingModelSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def fake(onComplete: Conversation => Result[Completion]): LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       onComplete(conversation)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

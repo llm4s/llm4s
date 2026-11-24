@@ -93,7 +93,7 @@ class SmokeContractOfflineSpec
   private val checked: Seq[Capability] = Capability.values.toSeq.filterNot(_ == Capability.Reasoning)
 
   private def reasoningSetup(client: LLMClient, expectsText: Boolean): ReasoningSetup =
-    ReasoningSetup(client, CompletionOptions(temperature = 0.0, maxTokens = Some(64)), expectsText)
+    ReasoningSetup(client, CompletionOptions(temperature = Some(0.0), maxTokens = Some(64)), expectsText)
 
   private def failedMessage(outcome: Outcome): Option[String] = outcome match {
     case Outcome.Failed(message) => Some(message)
@@ -263,10 +263,8 @@ class SmokeContractOfflineSpec
     Completion(
       id = "stub",
       created = Instant.EPOCH,
-      content = content,
       model = "stub",
-      message = AssistantMessage(contentOpt = Some(content), toolCalls = toolCalls),
-      toolCalls = toolCalls,
+      message = AssistantMessage(text = Some(content), toolCalls = toolCalls),
       usage = usage
     )
 
@@ -277,9 +275,7 @@ class SmokeContractOfflineSpec
   ): LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       onComplete(conversation, options)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = onStream(conversation, options, onChunk)
     override def getContextWindow(): Int     = 8192

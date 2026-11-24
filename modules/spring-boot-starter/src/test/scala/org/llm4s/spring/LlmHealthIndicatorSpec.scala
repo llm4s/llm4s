@@ -13,9 +13,9 @@ class LlmHealthIndicatorSpec extends AnyFlatSpec with Matchers {
 
   private val stubLlmClient: LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-      Right(Completion("id", Instant.EPOCH, "ok", "m", AssistantMessage("ok")))
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
-      Right(Completion("id", Instant.EPOCH, "ok", "m", AssistantMessage("ok")))
+      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("ok")))
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
+      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("ok")))
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
   }

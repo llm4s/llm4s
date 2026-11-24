@@ -99,7 +99,7 @@ class SpringAiOpenAiChatModelSpec extends AnyFlatSpec with Matchers with EitherV
   it should "stream a completion request and return its reply" in {
     val chunks = Vector.newBuilder[StreamedChunk]
     val completion = new SpringAiLlmClient(model())
-      .streamComplete(conversation, CompletionOptions(), c => chunks += c)
+      .streamComplete(conversation, CompletionOptions())(c => chunks += c)
       .value
     completion.content shouldBe "hi"
     chunks.result().flatMap(_.content).mkString shouldBe "hi"

@@ -142,31 +142,27 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     tracing.traceEvent(TraceEvent.RAGOperationCompleted("search", 150.millis)).isRight shouldBe true
   }
 
-  // ============ Tracing.create ============
+  // ============ Tracing.fromSettings ============
 
-  "Tracing.create" should "create NoOp tracing for NoOp mode" in {
+  "Tracing.fromSettings" should "create NoOp tracing for NoOp mode" in {
     val settings = TracingSettings(mode = TracingMode.NoOp)
 
-    val tracing = Tracing.create(settings)
-
-    tracing shouldBe a[NoOpTracing]
+    Tracing.fromSettings(settings).fold(e => fail(e.message), identity) shouldBe a[NoOpTracing]
   }
 
   it should "create Console tracing for Console mode" in {
     val settings = TracingSettings(mode = TracingMode.Console)
 
-    val tracing = Tracing.create(settings)
-
-    tracing shouldBe a[ConsoleTracing]
+    Tracing.fromSettings(settings).fold(e => fail(e.message), identity) shouldBe a[ConsoleTracing]
   }
 
-  it should "fall back to NoOp for langfuse, whose backend is in llm4s-observability, not core (#1133)" in {
+  it should "fail for langfuse, whose backend is in llm4s-observability, not core (#1133)" in {
     val settings = TracingSettings(
       mode = TracingMode.fromString("langfuse"),
       extras = Map("publicKey" -> "pk-test", "secretKey" -> "sk-test")
     )
 
-    Tracing.create(settings) shouldBe a[NoOpTracing]
+    Tracing.fromSettings(settings).isLeft shouldBe true
   }
 
   // ============ TracingComposer ============
@@ -335,7 +331,6 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "comp-123",
       created = Instant.ofEpochSecond(1234567890L),
-      content = "Hello",
       model = "gpt-4",
       message = AssistantMessage(Some("Hello"), Seq.empty),
       usage = Some(TokenUsage(100, 50, 150))

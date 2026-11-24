@@ -73,24 +73,20 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
       val toolCalls =
         script.lift(turn - 1).map { case (name, args) => ToolCall(s"call-$turn", name, args) }.toList
       val message =
-        if (toolCalls.nonEmpty) AssistantMessage(contentOpt = None, toolCalls = toolCalls)
+        if (toolCalls.nonEmpty) AssistantMessage(text = None, toolCalls = toolCalls)
         else AssistantMessage("done")
       Right(
         Completion(
           id = s"mock-$turn",
           created = Instant.EPOCH,
-          content = message.content,
           model = "mock-model",
           message = message,
-          toolCalls = toolCalls,
           usage = None
         )
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

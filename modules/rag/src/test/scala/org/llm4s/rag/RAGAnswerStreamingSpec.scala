@@ -31,7 +31,6 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
       Completion(
         id = "answer",
         created = Instant.EPOCH,
-        content = text,
         model = "mock",
         message = AssistantMessage(text),
         usage = Some(TokenUsage(10, 2, 12))
@@ -40,9 +39,7 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
       events += "complete"
       Right(completion("42"))
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       this.options += options
@@ -112,10 +109,10 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
   it should "stream with the config's completion options, or a call's own" in {
     val events = mutable.Buffer.empty[String]
     val client = new StreamingClient(events)
-    val warm   = CompletionOptions(temperature = 0.7)
+    val warm   = CompletionOptions(temperature = Some(0.7))
     val r      = rag(Some(client), RAGConfig.default.withCompletionOptions(warm))
     try {
-      val cold = CompletionOptions(temperature = 0.1, maxTokens = Some(64))
+      val cold = CompletionOptions(temperature = Some(0.1), maxTokens = Some(64))
       r.queryWithAnswerStreaming("Q?")(_ => (), _ => ()).isRight shouldBe true
       r.queryWithAnswerStreaming("Q?", Some(1), cold)(_ => (), _ => ()).isRight shouldBe true
       client.options.toList shouldBe List(warm, cold)
@@ -148,7 +145,7 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
     val r      = rag(Some(client), RAGConfig.default.withSearchIndex(OneChunkIndex).vectorOnly)
     try {
       val (onContexts, onChunk) = recorder(events)
-      val cold                  = CompletionOptions(temperature = 0.2)
+      val cold                  = CompletionOptions(temperature = Some(0.2))
       r.queryWithPermissionsAndAnswerStreaming(UserAuthorization.Admin, CollectionPattern.All, "Q?", options = cold)(
         onContexts,
         onChunk

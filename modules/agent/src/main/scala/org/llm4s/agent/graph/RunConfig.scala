@@ -397,7 +397,7 @@ final private[agent] class TaskUsage:
   /** Child runs' roll-ups (design 4.42): committed with the task, never lost usage, since each child keeps its own. */
   private val delegated = new AtomicReference(UsageSummary())
 
-  def add(model: String, usage: TokenUsage, cost: Option[Double]): Unit =
+  def add(model: String, usage: TokenUsage, cost: Option[BigDecimal]): Unit =
     recorded.updateAndGet(_.add(model, usage, cost)): Unit
 
   /** Adds usage counted before this task ran: an admission stage's own model calls (#2854). */

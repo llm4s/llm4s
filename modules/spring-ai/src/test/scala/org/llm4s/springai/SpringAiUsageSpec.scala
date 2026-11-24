@@ -65,11 +65,11 @@ class SpringAiUsageSpec extends AnyFlatSpec with Matchers {
       out   <- pricing.outputCostPerToken
     } yield uncached * in + reads * read + writes * write + output * out
     expected shouldBe defined
-    CostEstimator.estimate(model, bridged).get shouldBe expected.get +- 1e-12
+    CostEstimator.estimate(model, bridged).get.toDouble shouldBe expected.get +- 1e-12
     CostEstimator.estimate(model, bridged) shouldBe CostEstimator.estimate(model, llm4sAnthropic)
     // passed through as Spring AI reports it, the request cost no more than its uncached input and output
     val passedThrough = TokenUsage(uncached, output, uncached + output, cachedTokens = Some(reads))
-    CostEstimator.estimate(model, passedThrough).get should be < expected.get
+    CostEstimator.estimate(model, passedThrough).get.toDouble should be < expected.get
   }
 
   it should "add Bedrock Converse's cache counts to its prompt, keeping its total, which already has them" in {

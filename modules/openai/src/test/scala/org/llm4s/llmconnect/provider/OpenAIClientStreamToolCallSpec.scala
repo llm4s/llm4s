@@ -51,9 +51,8 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
     val client   = OpenAIClient.forTest(model, transport(streaming = _ => stream(events.map(chunk)*)), config)
     val result = client.streamComplete(
       Conversation(Seq(UserMessage("weather?"))),
-      CompletionOptions(),
-      received += _
-    )
+      CompletionOptions()
+    )(received += _)
     (result.value, received.toList)
   }
 

@@ -41,8 +41,10 @@ class PromptSpec extends AnyFlatSpec with Matchers {
       UserMessage("Ticket T-42\n\nIs it urgent?")
     )
     p.toConversation shouldBe Conversation.create(
-      SystemMessage("You triage tickets.\n\nAnswer in one sentence."),
-      UserMessage("Ticket T-42\n\nIs it urgent?")
+      Seq(
+        SystemMessage("You triage tickets.\n\nAnswer in one sentence."),
+        UserMessage("Ticket T-42\n\nIs it urgent?")
+      )
     )
     p.text shouldBe "You triage tickets.\n\nAnswer in one sentence.\n\nTicket T-42\n\nIs it urgent?"
     p.toString shouldBe p.text
@@ -133,7 +135,7 @@ class PromptSpec extends AnyFlatSpec with Matchers {
     (Prompt.empty ++ prompt"a") shouldBe prompt"a"
     (prompt"a" ++ Prompt.empty) shouldBe prompt"a"
     Prompt.empty.messages shouldBe empty
-    Prompt.empty.toConversation shouldBe Right(Conversation.empty())
+    Prompt.empty.toConversation shouldBe Right(Conversation.empty)
   }
 
   "Prompt.text" should "not show roles" in {

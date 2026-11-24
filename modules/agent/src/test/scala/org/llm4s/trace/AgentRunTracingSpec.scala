@@ -74,9 +74,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       sent.add(conversation)
       responses(index)
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -84,11 +82,11 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
   }
 
   private def answer(text: String): Completion =
-    Completion("answer", Instant.EPOCH, text, "test-model", AssistantMessage(text), usage = usage)
+    Completion("answer", Instant.EPOCH, "test-model", AssistantMessage(text), usage = usage)
 
   private val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
   private def toolCallCompletion: Completion =
-    Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall), usage)
+    Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(toolCall)), usage)
 
   private def usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
 
@@ -143,9 +141,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     val client = new LLMClient {
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Right(answer("hello"))
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int        = 4096
@@ -241,7 +237,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     val tracing = new Captured(console)
     val call    = ToolCall("call-1", "echo", ujson.Obj("message" -> secret))
     val calling =
-      Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)
+      Completion("turn-1", Instant.EPOCH, "test-model", AssistantMessage(None, Seq(call)), usage)
     ok(traced(new Scripted(Right(calling), Right(answer(s"Echoed $secret"))), tracing).run(s"Echo $secret"))
     eventually(tracing.printed should include("AGENT RUN ENDED"))
     tracing.printed
@@ -329,7 +325,6 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     val handoff = Completion(
       "turn-1",
       Instant.EPOCH,
-      "",
       "test-model",
       AssistantMessage(None, Seq(ToolCall("call-h", "handoff_to_specialist", ujson.Obj("reason" -> "maths")))),
       usage = usage
@@ -448,9 +443,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
         Thread.sleep(80)
         Right(answer("done"))
       }
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 4096
@@ -627,9 +620,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
         new CountDownLatch(1).await() // until interrupted
         Right(answer("never"))
       }
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 4096
@@ -699,7 +690,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
 
   it should "report each run's own usage on its AgentRunEnded, not the thread's" in {
     val tracing = Recording()
-    val costed  = (text: String) => answer(text).withEstimatedCost(Some(0.25))
+    val costed  = (text: String) => answer(text).withEstimatedCost(BigDecimal("0.25"))
     val agent   = traced(Scripted(Right(costed("first answer")), Right(costed("second answer"))), tracing)
     ok(agent.run(ThreadId("t11"), "one"))
     val two = ok(agent.run(ThreadId("t11"), "two"))

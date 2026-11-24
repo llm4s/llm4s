@@ -127,11 +127,9 @@ object CancellationSpec extends ZIOSpecDefault {
         val scripted: LLMClient = new LLMClient {
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
             if (c.messages.exists(_.isInstanceOf[ToolMessage]))
-              Right(Completion("t", Instant.EPOCH, "finished", "m", AssistantMessage(Some("finished"))))
-            else Right(Completion("t", Instant.EPOCH, "", "m", AssistantMessage("", Seq(call)), toolCalls = List(call)))
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+              Right(Completion("t", Instant.EPOCH, "m", AssistantMessage(Some("finished"))))
+            else Right(Completion("t", Instant.EPOCH, "m", AssistantMessage("", Seq(call))))
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] =
             complete(c, o)

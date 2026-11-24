@@ -26,9 +26,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] =
       Left(org.llm4s.error.NetworkError("Mock network error", None, "mock://test"))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)

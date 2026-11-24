@@ -95,7 +95,7 @@ class GeminiApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues:
         config.withApiKeyProvider(None).apiKeyProvider shouldBe None
         val client = GeminiClient(config).value
         client.complete(hello).left.value shouldBe an[AuthenticationError]
-        client.streamComplete(hello, onChunk = _ => ()).left.value shouldBe an[AuthenticationError]
+        client.streamComplete(hello)(_ => ()).left.value shouldBe an[AuthenticationError]
         client.close()
       }
       seen.asScala shouldBe empty

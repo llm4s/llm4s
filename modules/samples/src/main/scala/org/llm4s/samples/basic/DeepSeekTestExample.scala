@@ -96,12 +96,11 @@ object DeepSeekTestExample {
     val fullContent = new StringBuilder()
     val result = client.streamComplete(
       conversation,
-      CompletionOptions(),
-      onChunk = { chunk =>
-        chunkCount += 1
-        chunk.content.foreach(c => fullContent.append(c))
-      }
-    )
+      CompletionOptions()
+    ) { chunk =>
+      chunkCount += 1
+      chunk.content.foreach(c => fullContent.append(c))
+    }
 
     result match {
       case Right(completion) =>

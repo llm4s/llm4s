@@ -511,9 +511,8 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     )
     val result = client.streamComplete(
       Conversation(Seq(UserMessage("What is the weather?"))),
-      CompletionOptions(),
-      chunk => chunks += chunk
-    )
+      CompletionOptions()
+    )(chunk => chunks += chunk)
 
     result.isRight shouldBe true
     chunks should have size 1
@@ -540,7 +539,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
       ProviderExchangeLogging.Disabled,
       mockHttp
     )
-    val result = client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions(), _ => ())
+    val result = client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions())(_ => ())
 
     result.isRight shouldBe true
     result.toOption.get.content shouldBe "Hello"
@@ -564,7 +563,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
       ProviderExchangeLogging.Disabled,
       mockHttp
     )
-    val result = client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions(), _ => ())
+    val result = client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions())(_ => ())
 
     result.isRight shouldBe true
   }
@@ -620,7 +619,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
       ProviderExchangeLogging.Disabled,
       mockHttp
     )
-    client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions(), _ => ()) match {
+    client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions())(_ => ()) match {
       case Left(e: org.llm4s.error.NetworkError) => org.llm4s.error.LLMError.isRecoverable(e) shouldBe true
       case other                                 => fail(s"expected a NetworkError, got $other")
     }

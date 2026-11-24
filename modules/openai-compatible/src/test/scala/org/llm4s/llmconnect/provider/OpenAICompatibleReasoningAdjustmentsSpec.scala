@@ -50,7 +50,7 @@ class OpenAICompatibleReasoningAdjustmentsSpec extends AnyFlatSpec with Matchers
       val client = new MistralClient(MistralConfig(Secret("test-key"), model, baseUrl, 128000, 4096))
 
       client.complete(hello, reasoning).value.adjustments shouldBe dropped(model)
-      client.streamComplete(hello, reasoning, _ => ()).value.adjustments shouldBe dropped(model)
+      client.streamComplete(hello, reasoning)(_ => ()).value.adjustments shouldBe dropped(model)
       client.complete(hello, CompletionOptions()).value.adjustments shouldBe empty
     }
   }

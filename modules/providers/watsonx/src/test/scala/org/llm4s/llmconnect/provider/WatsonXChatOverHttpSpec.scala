@@ -169,7 +169,7 @@ class WatsonXChatOverHttpSpec
       val body = events.map(data => s"id: 1\nevent: message\ndata: $data\n\n").mkString
       withWatsonX((_, exchange) => sendSseResponse(exchange, body)) { (client, server) =>
         val chunks     = ListBuffer.empty[StreamedChunk]
-        val completion = client.streamComplete(askToAdd, withTools, chunks += _).value
+        val completion = client.streamComplete(askToAdd, withTools)(chunks += _).value
         val expected   = ToolCall("call-7", "add", ujson.Obj("a" -> 12, "b" -> 34))
         completion.toolCalls.loneElement shouldBe expected
         chunks.flatMap(_.toolCall).loneElement shouldBe expected
@@ -191,7 +191,7 @@ class WatsonXChatOverHttpSpec
           """{"errors":[{"code":"rate_limit_reached","message":"Too many requests"}],"status_code":429}"""
         )
       } { (client, _) =>
-        client.streamComplete(askToAdd, CompletionOptions(), _ => ()).left.value shouldBe a[RateLimitError]
+        client.streamComplete(askToAdd, CompletionOptions())(_ => ()).left.value shouldBe a[RateLimitError]
       }
     }
   }

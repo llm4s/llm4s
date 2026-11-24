@@ -19,7 +19,7 @@ import org.llm4s.llmconnect.model.{ ModelUsage, UsageSummary }
  * Example usage:
  * {{{
  * val tracker = CostTracker.create()
- * val client = LLMConnect.getClient(config, tracker)
+ * val client = LLMConnect.getClient(config, LlmClientOptions(metrics = tracker))
  * // ... make LLM calls ...
  * println(s"Total cost: $$${tracker.totalCost}")
  * println(tracker.summary)

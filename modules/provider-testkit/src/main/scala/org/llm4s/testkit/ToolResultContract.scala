@@ -72,7 +72,7 @@ object ToolResultContract:
         Conversation(
           Seq(
             UserMessage("Look up llm4s."),
-            AssistantMessage(contentOpt = None, toolCalls = Seq(call("call_a1", "lookup"))),
+            AssistantMessage(text = None, toolCalls = Seq(call("call_a1", "lookup"))),
             ToolMessage("""{"found":true}""", "call_a1")
           )
         )
@@ -104,7 +104,7 @@ object ToolResultContract:
           Seq(
             UserMessage("Do it."),
             AssistantMessage(
-              contentOpt = None,
+              text = None,
               toolCalls = Seq(call("call_c1", "no_such_tool"), call("call_c2", "lookup", ujson.Obj("limit" -> 500)))
             ),
             ToolMessage(error("Unknown tool 'no_such_tool'"), "call_c1"),
@@ -117,11 +117,11 @@ object ToolResultContract:
         Conversation(
           Seq(
             UserMessage("First question."),
-            AssistantMessage(contentOpt = None, toolCalls = Seq(call("call_0", "lookup"))),
+            AssistantMessage(text = None, toolCalls = Seq(call("call_0", "lookup"))),
             ToolMessage("first", "call_0"),
             AssistantMessage("First answer."),
             UserMessage("Second question."),
-            AssistantMessage(contentOpt = None, toolCalls = Seq(call("call_0", "lookup"), call("call_1", "fetch"))),
+            AssistantMessage(text = None, toolCalls = Seq(call("call_0", "lookup"), call("call_1", "fetch"))),
             ToolMessage("second", "call_0"),
             ToolMessage("third", "call_1")
           )
@@ -133,11 +133,11 @@ object ToolResultContract:
           Seq(
             UserMessage("I want a refund."),
             AssistantMessage(
-              contentOpt = None,
+              text = None,
               toolCalls = Seq(call("call_d1", "handoff_to_billing", ujson.Obj("reason" -> "refund")))
             ),
             ToolMessage("Transferred to billing", "call_d1"),
-            AssistantMessage(contentOpt = None, toolCalls = Seq(call("call_d2", "refund"))),
+            AssistantMessage(text = None, toolCalls = Seq(call("call_d2", "refund"))),
             ToolMessage("refunded", "call_d2")
           )
         )
@@ -148,12 +148,12 @@ object ToolResultContract:
           Seq(
             UserMessage("Refund and look up."),
             AssistantMessage(
-              contentOpt = None,
+              text = None,
               toolCalls = Seq(call("call_e1", "handoff_to_billing"), call("call_e2", "lookup"))
             ),
             ToolMessage(error("A handoff must be the only tool call in its message"), "call_e1"),
             ToolMessage(error("A handoff must be the only tool call in its message"), "call_e2"),
-            AssistantMessage(contentOpt = None, toolCalls = Seq(call("call_e3", "lookup"))),
+            AssistantMessage(text = None, toolCalls = Seq(call("call_e3", "lookup"))),
             ToolMessage("found", "call_e3")
           )
         )

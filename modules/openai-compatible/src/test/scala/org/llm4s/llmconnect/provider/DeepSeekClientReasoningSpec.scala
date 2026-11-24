@@ -85,7 +85,7 @@ class DeepSeekClientReasoningSpec extends AnyFlatSpec with Matchers with EitherV
     } { baseUrl =>
       val chunks = ListBuffer.empty[StreamedChunk]
       val completion =
-        new DeepSeekClient(localConfig(baseUrl)).streamComplete(conversation, CompletionOptions(), chunks += _).value
+        new DeepSeekClient(localConfig(baseUrl)).streamComplete(conversation, CompletionOptions())(chunks += _).value
 
       chunks.flatMap(_.thinkingDelta) shouldBe Seq("Let me ", "think.")
       completion.thinking shouldBe Some("Let me think.")

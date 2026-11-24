@@ -108,19 +108,19 @@ object LLMClientZ {
             .attemptBlockingInterrupt {
               underlying.streamComplete(
                 conversation,
-                options,
-                chunk =>
-                  Unsafe.unsafe { implicit u =>
-                    // Not `rt.unsafe.run`: if this thread is interrupted while the offer is parked
-                    // on a full queue, `run` throws and leaves the offer fiber suspended forever.
-                    val offer = rt.unsafe.fork(queue.offer(Take.single(chunk)).unit)
-                    val done  = new CountDownLatch(1)
-                    offer.unsafe.addObserver(_ => done.countDown())
-                    CancelledError.catchInterrupt(done.await()).left.foreach { e =>
-                      rt.unsafe.fork(offer.interrupt)
-                      throw e
-                    }
+                options
+              )(chunk =>
+                Unsafe.unsafe { implicit u =>
+                  // Not `rt.unsafe.run`: if this thread is interrupted while the offer is parked
+                  // on a full queue, `run` throws and leaves the offer fiber suspended forever.
+                  val offer = rt.unsafe.fork(queue.offer(Take.single(chunk)).unit)
+                  val done  = new CountDownLatch(1)
+                  offer.unsafe.addObserver(_ => done.countDown())
+                  CancelledError.catchInterrupt(done.await()).left.foreach { e =>
+                    rt.unsafe.fork(offer.interrupt)
+                    throw e
                   }
+                }
               )
             }
             .foldZIO(

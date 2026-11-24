@@ -70,4 +70,16 @@ class MessageValidationSpec extends AnyFlatSpec with Matchers {
     error.violations should not contain "conversation"
     error.message shouldBe s"Invalid conversation: ${error.violations.mkString(", ")}"
   }
+
+  // #2809: the name of a call that is not in the history was the sentinel "unknown-tool"
+  "ToolMessage.findToolCallName" should "be the name of the call it answers, and None when that call is not there" in {
+    val history = Seq[Message](
+      UserMessage("weather?"),
+      AssistantMessage(None, Seq(ToolCall("call-1", "get_weather", ujson.Obj())))
+    )
+
+    ToolMessage("sunny", "call-1").findToolCallName(history) shouldBe Some("get_weather")
+    ToolMessage("sunny", "call-2").findToolCallName(history) shouldBe None
+    ToolMessage("sunny", "call-1").findToolCallName(Seq.empty) shouldBe None
+  }
 }

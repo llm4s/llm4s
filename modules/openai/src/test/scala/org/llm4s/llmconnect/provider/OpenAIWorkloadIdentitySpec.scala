@@ -217,7 +217,7 @@ class OpenAIWorkloadIdentitySpec
         val conversation = Conversation(Seq(UserMessage("hi")))
         for result <- Seq(
             client.complete(conversation, CompletionOptions()),
-            client.streamComplete(conversation, CompletionOptions(), _ => ())
+            client.streamComplete(conversation, CompletionOptions())(_ => ())
           )
         do
           val message = result.left.value.message

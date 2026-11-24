@@ -8,7 +8,7 @@ import java.time.Instant
 /** [[Citation]] and [[Completion.citations]]: what a completion says about the sources behind its answer. */
 class CitationSpec extends AnyFlatSpec with Matchers {
 
-  private val message = AssistantMessage(contentOpt = Some("answer"))
+  private val message = AssistantMessage(text = Some("answer"))
   private val source =
     Citation(url = "https://example.com/a", title = Some("A"), startIndex = Some(0), endIndex = Some(6))
 
@@ -65,7 +65,7 @@ class CitationSpec extends AnyFlatSpec with Matchers {
   }
 
   "Completion" should "have no citations unless it is given some" in {
-    val completion = Completion(id = "1", created = Instant.EPOCH, content = "answer", model = "m", message = message)
+    val completion = Completion(id = "1", created = Instant.EPOCH, model = "m", message = message)
 
     completion.citations shouldBe Nil
     completion.hasCitations shouldBe false
@@ -73,14 +73,14 @@ class CitationSpec extends AnyFlatSpec with Matchers {
 
   it should "still be built the way it was before it had citations" in {
     // eight positional arguments: what every caller wrote when the last field was the estimated cost
-    val positional = Completion("1", Instant.EPOCH, "answer", "m", message, List.empty, None, Some(0.5))
+    val positional = Completion("1", Instant.EPOCH, "m", message, None, Some(0.5))
 
     positional.estimatedCost shouldBe Some(0.5)
     positional.citations shouldBe Nil
 
     // and by name, leaving the later fields out
     val named =
-      Completion(id = "1", created = Instant.EPOCH, content = "answer", model = "m", message = message, usage = None)
+      Completion(id = "1", created = Instant.EPOCH, model = "m", message = message, usage = None)
     named.citations shouldBe Nil
   }
 
@@ -89,7 +89,6 @@ class CitationSpec extends AnyFlatSpec with Matchers {
     val c = Completion(
       id = "1",
       created = Instant.EPOCH,
-      content = "answer",
       model = "m",
       message = message,
       citations = List(source, second)
@@ -101,7 +100,7 @@ class CitationSpec extends AnyFlatSpec with Matchers {
 
   it should "set citations with withCitations, changing nothing else" in {
     val base =
-      Completion(id = "1", created = Instant.ofEpochSecond(7L), content = "answer", model = "m", message = message)
+      Completion(id = "1", created = Instant.ofEpochSecond(7L), model = "m", message = message)
     val with1 = base.withCitations(List(source))
 
     with1.citations shouldBe List(source)
@@ -110,7 +109,7 @@ class CitationSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "treat completions that differ only in their citations as different" in {
-    val base = Completion(id = "1", created = Instant.EPOCH, content = "answer", model = "m", message = message)
+    val base = Completion(id = "1", created = Instant.EPOCH, model = "m", message = message)
 
     (base should not).equal(base.withCitations(List(source)))
     base.withCitations(List(source)) shouldBe base.withCitations(List(source))

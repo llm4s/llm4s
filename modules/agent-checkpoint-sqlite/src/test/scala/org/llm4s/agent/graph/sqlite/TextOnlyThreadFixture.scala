@@ -40,10 +40,8 @@ object TextOnlyThreadFixture:
     Completion(
       id = "fixture",
       created = Instant.EPOCH,
-      content = message.content,
       model = "test-model",
       message = message,
-      toolCalls = message.toolCalls.toList,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
     )
 
@@ -54,9 +52,7 @@ object TextOnlyThreadFixture:
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       sent = sent :+ conversation.messages.toVector
       completions.lift(index.getAndIncrement()).toRight(ValidationError("scripted", "no completion left"))
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     def getContextWindow(): Int     = 128000

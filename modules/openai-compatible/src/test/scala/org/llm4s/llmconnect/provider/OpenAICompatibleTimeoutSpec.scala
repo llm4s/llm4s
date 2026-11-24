@@ -77,7 +77,7 @@ class OpenAICompatibleTimeoutSpec extends AnyFlatSpec with Matchers with EitherV
   it should "fail streamComplete once the stream timeout passes" in {
     withSilentServer { baseUrl =>
       val result =
-        impatientClient(baseUrl).streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+        impatientClient(baseUrl).streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
       result.isLeft shouldBe true
     }
   }

@@ -81,7 +81,7 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
           reserveCompletion = 4096
         )
       )
-      zai.streamComplete(history, CompletionOptions(), _ => ()).isRight shouldBe true
+      zai.streamComplete(history, CompletionOptions())(_ => ()).isRight shouldBe true
     }
     val body = ujson.read(sent.get)
     body("stream").bool shouldBe true

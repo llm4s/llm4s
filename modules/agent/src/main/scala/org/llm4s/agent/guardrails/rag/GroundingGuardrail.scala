@@ -180,8 +180,8 @@ class GroundingGuardrail(
     )
 
     val options = CompletionOptions(
-      temperature = 0.0,    // Deterministic evaluation
-      maxTokens = Some(500) // Room for explanation and ungrounded claims
+      temperature = Some(0.0), // Deterministic evaluation
+      maxTokens = Some(500)    // Room for explanation and ungrounded claims
     )
 
     for {

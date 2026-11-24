@@ -115,16 +115,13 @@ class GuardrailWarnLoggingSpec extends AnyFlatSpec with Matchers with BeforeAndA
         Completion(
           id = "test-id",
           created = Instant.EPOCH,
-          content = response,
           model = "test-model",
           message = AssistantMessage(response),
           usage = Some(TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15))
         )
       )
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

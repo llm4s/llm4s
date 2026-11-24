@@ -135,7 +135,6 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "cmpl-123456",
       created = Instant.now(),
-      content = "Hello, I'm an AI assistant.",
       model = "gpt-4",
       message = AssistantMessage(Some("Hello, I'm an AI assistant."), Seq.empty),
       usage = Some(TokenUsage(100, 50, 150))
@@ -149,7 +148,6 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "cmpl-789",
       created = Instant.now(),
-      content = "Response without usage",
       model = "gpt-4",
       message = AssistantMessage(Some("Response without usage"), Seq.empty),
       usage = None
@@ -164,7 +162,6 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "cmpl-tools",
       created = Instant.now(),
-      content = "I'll search for that.",
       model = "gpt-4",
       message = AssistantMessage(Some("I'll search for that."), Seq(toolCall)),
       usage = Some(TokenUsage(50, 25, 75))
@@ -222,7 +219,6 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "cmpl-long",
       created = Instant.EPOCH,
-      content = longContent,
       model = "gpt-4",
       message = AssistantMessage(Some(longContent), Seq.empty),
       usage = None
@@ -312,7 +308,6 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val completion = Completion(
       id = "completion-7",
       created = Instant.EPOCH,
-      content = "Calling echo",
       model = "model-in-completion",
       message = AssistantMessage("Calling echo", Seq(toolCall, toolCall.withId("call-2")))
     )
@@ -329,7 +324,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "show the served tier when the completion reports one (#2750)" in {
-    val completion = Completion("c-1", Instant.EPOCH, "hi", "m", AssistantMessage("hi"))
+    val completion = Completion("c-1", Instant.EPOCH, "m", AssistantMessage("hi"))
     printed(new ConsoleTracing().traceCompletion(completion.withServedTier(ServiceTier.Flex), "m")) should include(
       "Served Tier: flex"
     )

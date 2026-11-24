@@ -21,21 +21,20 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     TracingMode.fromString("OPENTELEMETRY") shouldBe TracingMode.Named("opentelemetry")
   }
 
-  it should "keep otel as an alias for opentelemetry" in {
-    TracingMode.fromString("otel") shouldBe TracingMode.Named("opentelemetry")
-    TracingMode.fromString("OTEL") shouldBe TracingMode.Named("opentelemetry")
+  it should "parse otel as Named too: the alias is the backend's to declare, not core's" in {
+    TracingMode.fromString("otel") shouldBe TracingMode.Named("otel")
+    TracingMode.fromString("OTEL") shouldBe TracingMode.Named("otel")
   }
 
   // =========================================================================
-  // Tracing.create - OpenTelemetry falls back to NoOp when class not found
+  // Tracing.fromSettings - OpenTelemetry is an error when its module is not on the classpath
   // =========================================================================
 
-  "Tracing.create" should "fall back to NoOpTracing for OpenTelemetry when module not on classpath" in {
+  "Tracing.fromSettings" should "fail for OpenTelemetry when its module is not on the classpath" in {
     val settings = TracingSettings(mode = TracingMode.Named("opentelemetry"))
 
-    val tracing = Tracing.create(settings)
-    // OpenTelemetryTracing class is not on the classpath in core tests, so it falls back
-    tracing shouldBe a[NoOpTracing]
+    // The backend is not on the classpath in core tests
+    Tracing.fromSettings(settings).isLeft shouldBe true
   }
 
   // =========================================================================
@@ -328,7 +327,6 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "comp-1",
       created = Instant.EPOCH,
-      content = "Hello",
       model = "gpt-4",
       message = AssistantMessage(Some("Hello"), Seq.empty)
     )

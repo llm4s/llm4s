@@ -277,7 +277,7 @@ trait ProviderModuleChecks extends Assertions:
             ModelCallContractRun.expect(c, "complete", completed)
           val chunks = ListBuffer.empty[StreamedChunk]
           val streamed =
-            ModelCallContractRun.call(path, reply.stream, client)(_.streamComplete(_, onChunk = chunks += _))
+            ModelCallContractRun.call(path, reply.stream, client)(_.streamComplete(_)(chunks += _))
           ModelCallContractRun.expect(c, "streamComplete", streamed)
           streamed.foreach(ModelCallContractRun.delivered(c, chunks.toList, _))
     }
@@ -312,7 +312,7 @@ trait ProviderModuleChecks extends Assertions:
     // the LLM client is closed even when a check fails, so a failing provider leaks nothing
     val checked = scala.util
       .Try(sent("complete")(client.complete(conversation)))
-      .flatMap(_ => scala.util.Try(sent("streamComplete")(client.streamComplete(conversation, onChunk = _ => ()))))
+      .flatMap(_ => scala.util.Try(sent("streamComplete")(client.streamComplete(conversation)(_ => ()))))
     val closing = scala.util.Try(client.close())
     checked.get
     closing.get
@@ -377,7 +377,7 @@ trait ProviderModuleChecks extends Assertions:
   def assertCancelsStreamWhenInterrupted(client: LLMClient)(using pos: Position): Assertion =
     val firstChunk = new CountDownLatch(1)
     interrupted("streamComplete") {
-      client.streamComplete(Conversation(Seq(UserMessage("Hello"))), onChunk = _ => firstChunk.countDown())
+      client.streamComplete(Conversation(Seq(UserMessage("Hello"))))(_ => firstChunk.countDown())
     } {
       if !firstChunk.await(10, TimeUnit.SECONDS) then
         failAt("streamComplete delivered no chunk before the server stalled")

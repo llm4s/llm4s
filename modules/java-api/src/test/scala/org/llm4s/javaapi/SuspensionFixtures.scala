@@ -40,7 +40,7 @@ private[javaapi] object SuspensionFixtures {
   def call(id: String, name: String, text: String): ToolCall = ToolCall(id, name, ujson.Obj("text" -> text))
 
   def calling(calls: ToolCall*): Completion =
-    Completion("turn", Instant.EPOCH, "", "m", AssistantMessage(None, calls), calls.toList)
+    Completion("turn", Instant.EPOCH, "m", AssistantMessage(None, calls))
 
   /** A model answering each call with the next of `replies`, then `done`. */
   def scripted(replies: Either[LLMError, Completion]*): Scripted = {

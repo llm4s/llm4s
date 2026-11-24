@@ -84,7 +84,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.trace.{ ConsoleTracing, NoOpTracing, Tracing }
 
 // What the configuration selects: console, metadata only, unless TRACING_MODE says otherwise
-val configured: Tracing = Llm4sConfig.tracing().map(Tracing.create).getOrElse(new NoOpTracing())
+val configured: Tracing = Llm4sConfig.tracing().flatMap(Tracing.fromSettings).getOrElse(new NoOpTracing())
 
 // Prompts and answers too: for a developer's machine only
 val verbose: Tracing = new ConsoleTracing(captureContent = true)

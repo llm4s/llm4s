@@ -100,7 +100,7 @@ final class OllamaConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
       val client = new OllamaClient(config(baseUrl, ProviderTimeouts(stream = Some(300.millis))))
       try {
         val started = System.nanoTime()
-        val result  = client.streamComplete(hello, CompletionOptions(), _ => ())
+        val result  = client.streamComplete(hello, CompletionOptions())(_ => ())
         val elapsed = (System.nanoTime() - started).nanos
 
         result.isLeft shouldBe true
