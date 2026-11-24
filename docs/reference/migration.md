@@ -98,7 +98,7 @@ and [the removal of `ConfigKeys` and the move of `llm4s.workspace`](#configkeys-
 `org.llm4s.config.ConfigKeys` held one constant, `EMBEDDING_MODEL`, and named none of the other variables core binds.
 It is removed: use the string `"EMBEDDING_MODEL"`, or set `llm4s.embeddings.model` in `application.conf`. The
 variables llm4s reads are listed in
-[the configuration guide](../getting-started/configuration.md#environment-variables-llm4s-reads).
+[the configuration guide](../getting-started/configuration#environment-variables-llm4s-reads).
 
 The `llm4s.workspace` block (`WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT`) is bound by `llm4s-workspace-client`'s
 `reference.conf` instead of core's. An application that uses `WorkspaceConfigSupport` already depends on that module,
