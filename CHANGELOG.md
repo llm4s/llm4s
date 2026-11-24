@@ -601,11 +601,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mean for a factory, `enum` or `sealed trait` for a sum type, plain accessor names, `PascalCase` constants and
   opaque-type newtypes ([#2822](https://github.com/llm4s/llm4s/issues/2822)).
 - **Changed** the docs site groups the User Guide sidebar, and the contributor pages moved from `/reference/` to `/contribute/` (old addresses redirect) [#2834](https://github.com/llm4s/llm4s/issues/2834).
+- **Changed** the Compatibility and Deprecation Policy no longer says provider modules aim to version independently: every module shares the release version, which `llm4s-bom` pins [#2835](https://github.com/llm4s/llm4s/issues/2835).
 
 ### Build & tooling
 
-- **Added** Scalafix rules `SamplingOptionsOptional`, `CompletionFromMessage`, `MessageAndConversationShapes` and `ClientEntryPoints`, part of `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6` ([#2807](https://github.com/llm4s/llm4s/issues/2807), [#2809](https://github.com/llm4s/llm4s/issues/2809), [#2810](https://github.com/llm4s/llm4s/issues/2810)). `PositionalPatternsGainFields` no longer covers `Completion`, whose extractor also lost two fields.
 - **Changed** the Beta parts inside frozen modules, `org.llm4s.assistant` and the Mistral, Cohere and xAI dialects, are left out of the 0.7.0 MiMa baseline: `stabilityTierCheck` keeps each of their types `@Experimental` (`stabilityExperimentalFiles`), which MiMa skips with its nested types ([The Baseline](docs/reference/api-stability.md#the-baseline)) [#2835](https://github.com/llm4s/llm4s/issues/2835).
+- **Added** Scalafix rules `SamplingOptionsOptional`, `CompletionFromMessage`, `MessageAndConversationShapes` and `ClientEntryPoints`, part of `Llm4sMigrateFrom_0_5` and `Llm4sMigrateFrom_0_6` ([#2807](https://github.com/llm4s/llm4s/issues/2807), [#2809](https://github.com/llm4s/llm4s/issues/2809), [#2810](https://github.com/llm4s/llm4s/issues/2810)). `PositionalPatternsGainFields` no longer covers `Completion`, whose extractor also lost two fields.
 - **Changed** The scalafix rule `ResultSyntaxMoved` also rewrites the imports of `TokenizerId`, `EmbeddingError`
   and `TraceId` to where they moved ([#2818](https://github.com/llm4s/llm4s/issues/2818),
   [#2808](https://github.com/llm4s/llm4s/issues/2808), [#2822](https://github.com/llm4s/llm4s/issues/2822)).
