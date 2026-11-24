@@ -1,6 +1,5 @@
 package org.llm4s.trace.model
 
-import org.llm4s.types.TraceId
 import org.llm4s.trace.model.TraceModelJson._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers

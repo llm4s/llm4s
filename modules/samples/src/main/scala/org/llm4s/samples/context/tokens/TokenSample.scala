@@ -1,6 +1,6 @@
 package org.llm4s.samples.context.tokens
 
-import org.llm4s.identity.TokenizerId.{ CL100K_BASE, O200K_BASE, R50K_BASE }
+import org.llm4s.context.tokens.TokenizerId.{ CL100K_BASE, O200K_BASE, R50K_BASE }
 import org.llm4s.context.tokens.Tokenizer
 import org.slf4j.LoggerFactory
 

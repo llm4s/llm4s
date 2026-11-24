@@ -478,19 +478,7 @@ object StabilityTiers {
       "a key source case holding only the config path that set it up"
     ),
     GrowthExempt("org.llm4s.context.tokens.Token", "a single token id"),
-    GrowthExempt(
-      "org.llm4s.context.tokens.TokenizerAccuracy.Approximate",
-      "a fixed accuracy case: a description and an accuracy"
-    ),
-    GrowthExempt(
-      "org.llm4s.context.tokens.TokenizerAccuracy.Exact",
-      "a fixed accuracy case holding only its description"
-    ),
-    GrowthExempt(
-      "org.llm4s.context.tokens.TokenizerAccuracy.Unknown",
-      "a fixed accuracy case holding only its description"
-    ),
-    GrowthExempt("org.llm4s.identity.TokenizerId", "a single-name identifier"),
+    GrowthExempt("org.llm4s.context.tokens.TokenizerId", "a single-name identifier"),
     GrowthExempt("org.llm4s.llmconnect.ProviderExchangeLogging.Enabled", "a single-value wrapper over the sink"),
     GrowthExempt(
       "org.llm4s.llmconnect.auth.IdentitySource.File",

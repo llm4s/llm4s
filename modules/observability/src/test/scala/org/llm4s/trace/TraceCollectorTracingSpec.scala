@@ -42,7 +42,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     ) shouldBe Right(())
 
     store.getSpans(collector.traceId) shouldBe empty
-    val spans = store.getSpans(org.llm4s.types.TraceId(trace.traceId)).map(s => s.spanId.value -> s).toMap
+    val spans = store.getSpans(org.llm4s.trace.model.TraceId(trace.traceId)).map(s => s.spanId.value -> s).toMap
     spans.keySet shouldBe Set(run.spanId, placed.context.spanId)
     val tool = spans(placed.context.spanId)
     tool.parentSpanId.map(_.value) shouldBe Some(run.spanId)
@@ -51,7 +51,8 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     spans(run.spanId).parentSpanId shouldBe None
 
     // the placed trace is registered, with the root run as its root span, so it can be found and deleted
-    val registered = store.getTrace(org.llm4s.types.TraceId(trace.traceId)).getOrElse(fail("trace not registered"))
+    val registered =
+      store.getTrace(org.llm4s.trace.model.TraceId(trace.traceId)).getOrElse(fail("trace not registered"))
     registered.rootSpanId.map(_.value) shouldBe Some(run.spanId)
     registered.startTime shouldBe start
     store.getTrace(collector.traceId) should not be empty
@@ -63,7 +64,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     val t0    = java.time.Instant.parse("2026-10-21T10:00:00Z")
     def event(key: String, start: java.time.Instant) =
       TraceEvent.CustomEvent(key, ujson.Obj(), start, Some(TraceSpan(run.spanFor(key), Some(run), start)))
-    def stored = store.getTrace(org.llm4s.types.TraceId(trace.traceId)).getOrElse(fail("trace not registered"))
+    def stored = store.getTrace(org.llm4s.trace.model.TraceId(trace.traceId)).getOrElse(fail("trace not registered"))
 
     collector.traceEvent(event("late", t0.plusSeconds(5))) shouldBe Right(())
     stored.startTime shouldBe t0.plusSeconds(5)
@@ -95,12 +96,12 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     val flaky = new org.llm4s.trace.store.TraceStore[Try] {
       private def guarded[A](a: => A): Try[A] = if (down) Failure(new RuntimeException("down")) else Success(a)
       def saveTrace(trace: org.llm4s.trace.model.Trace)        = guarded(inner.saveTrace(trace))
-      def getTrace(id: org.llm4s.types.TraceId)                = guarded(inner.getTrace(id))
+      def getTrace(id: org.llm4s.trace.model.TraceId)          = guarded(inner.getTrace(id))
       def saveSpan(span: org.llm4s.trace.model.Span)           = Success(inner.saveSpan(span))
-      def getSpans(id: org.llm4s.types.TraceId)                = Success(inner.getSpans(id))
+      def getSpans(id: org.llm4s.trace.model.TraceId)          = Success(inner.getSpans(id))
       def queryTraces(query: org.llm4s.trace.store.TraceQuery) = Success(inner.queryTraces(query))
       def searchByMetadata(key: String, value: String)         = Success(inner.searchByMetadata(key, value))
-      def deleteTrace(id: org.llm4s.types.TraceId)             = Success(inner.deleteTrace(id))
+      def deleteTrace(id: org.llm4s.trace.model.TraceId)       = Success(inner.deleteTrace(id))
       def clear()                                              = Success(inner.clear())
     }
     val tracing = TraceCollectorTracing(flaky).getOrElse(fail("could not create the collector"))
@@ -113,7 +114,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     tracing.traceEvent(placed("a")).isLeft shouldBe true
     down = false
     tracing.traceEvent(placed("b")) shouldBe Right(())
-    inner.getTrace(org.llm4s.types.TraceId(trace.traceId)) should not be empty
+    inner.getTrace(org.llm4s.trace.model.TraceId(trace.traceId)) should not be empty
   }
 
   it should "convert ToolExecuted event to ToolCall span" in {
@@ -333,7 +334,7 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   }
 
   it should "use custom traceId when provided" in {
-    val customTraceId = org.llm4s.types.TraceId("custom-trace-123")
+    val customTraceId = org.llm4s.trace.model.TraceId("custom-trace-123")
     val customCollector =
       TraceCollectorTracing(store, customTraceId).getOrElse(fail("could not create custom collector"))
 

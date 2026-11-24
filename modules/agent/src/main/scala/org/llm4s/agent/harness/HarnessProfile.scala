@@ -331,7 +331,7 @@ final case class HarnessProfile private (
       HarnessProfile.checked("permissions")(Option.when(permissions.nonEmpty)(new PermissionMiddleware(permissions))),
       summarization.fold(Right(None))(c =>
         c.compressor
-          .fold(ConversationTokenCounter.openAI().map(SummaryCompressor.digest))(Right(_))
+          .fold(ConversationTokenCounter.cl100k().map(SummaryCompressor.digest))(Right(_))
           .flatMap(compressor =>
             HarnessProfile.checked("summarization")(
               Some(new SummarizationMiddleware(c.trigger, c.keepRecent, compressor, c.maxSummaryTokens))

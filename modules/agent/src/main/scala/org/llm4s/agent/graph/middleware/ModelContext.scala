@@ -156,7 +156,7 @@ object ModelContext:
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** The tokenizer of usage estimates: `cl100k_base`, else four characters a token when it is unavailable. */
-  private lazy val counter: Option[ConversationTokenCounter] = ConversationTokenCounter.openAI().toOption
+  private lazy val counter: Option[ConversationTokenCounter] = ConversationTokenCounter.cl100k().toOption
 
   /**
    * A conservative estimate of a call's usage, for a completion that reports none (#2084): the whole request in -

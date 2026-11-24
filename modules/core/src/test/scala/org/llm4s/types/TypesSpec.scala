@@ -26,7 +26,7 @@ class TypesSpec extends AnyFlatSpec with Matchers {
 
   "HeadroomPercent" should "create valid headroom" in {
     val result = HeadroomPercent.create(0.1)
-    result.map(_.value).getOrElse(fail("Expected success")) shouldBe 0.1
+    result.map(_.asRatio).getOrElse(fail("Expected success")) shouldBe 0.1
   }
 
   it should "reject invalid headroom" in {
@@ -35,25 +35,21 @@ class TypesSpec extends AnyFlatSpec with Matchers {
     HeadroomPercent.create(1.5).isLeft shouldBe true
   }
 
-  it should "validate with isValid" in {
-    HeadroomPercent(0.1).isValid shouldBe true
-    HeadroomPercent(0.0).isValid shouldBe true
-    HeadroomPercent(1.0).isValid shouldBe false
+  it should "accept both ends of the valid range" in {
+    HeadroomPercent.create(0.0).map(_.asRatio) shouldBe Right(0.0)
+    HeadroomPercent.create(0.999).map(_.asRatio) shouldBe Right(0.999)
+  }
+
+  it should "have no constructor that skips validation" in {
+    assertDoesNotCompile("val h: HeadroomPercent = 1.5")
+    assertDoesNotCompile("HeadroomPercent(1.5)")
   }
 
   it should "have preset constants" in {
-    HeadroomPercent.None.value shouldBe 0.0
-    HeadroomPercent.Light.value shouldBe 0.05
-    HeadroomPercent.Standard.value shouldBe 0.08
-    HeadroomPercent.Conservative.value shouldBe 0.15
-  }
-
-  it should "convert to string" in {
-    HeadroomPercent(0.15).toString shouldBe "15.0%"
-  }
-
-  it should "provide asRatio" in {
-    HeadroomPercent(0.15).asRatio shouldBe 0.15
+    HeadroomPercent.Zero.asRatio shouldBe 0.0
+    HeadroomPercent.Light.asRatio shouldBe 0.05
+    HeadroomPercent.Standard.asRatio shouldBe 0.08
+    HeadroomPercent.Conservative.asRatio shouldBe 0.15
   }
 
   // ==========================================================================
@@ -62,12 +58,12 @@ class TypesSpec extends AnyFlatSpec with Matchers {
 
   "ContentSize" should "create from string" in {
     val size = ContentSize.fromString("Hello World")
-    size.bytes shouldBe 11
+    size.asBytes shouldBe 11
   }
 
   it should "create from bytes" in {
     val size = ContentSize.fromBytes("Test".getBytes)
-    size.bytes shouldBe 4
+    size.asBytes shouldBe 4
   }
 
   it should "convert to KB and MB" in {
@@ -82,10 +78,6 @@ class TypesSpec extends AnyFlatSpec with Matchers {
     size.exceedsThreshold(2000) shouldBe false
   }
 
-  it should "convert to string" in {
-    ContentSize(1024).toString shouldBe "1024B"
-  }
-
   // ==========================================================================
   // ArtifactKey Tests
   // ==========================================================================
@@ -94,26 +86,26 @@ class TypesSpec extends AnyFlatSpec with Matchers {
     val key1 = ArtifactKey.generate()
     val key2 = ArtifactKey.generate()
 
-    key1.value should not be key2.value
+    key1.asString should not be key2.asString
   }
 
   it should "create from content with hash" in {
     val key = ArtifactKey.fromContent("Test content")
-    key.value should startWith("content_")
+    key.asString should startWith("content_")
   }
 
   it should "create same key for same content" in {
     val key1 = ArtifactKey.fromContent("Same content")
     val key2 = ArtifactKey.fromContent("Same content")
 
-    key1.value shouldBe key2.value
+    key1.asString shouldBe key2.asString
   }
 
   it should "create different keys for different content" in {
     val key1 = ArtifactKey.fromContent("Content 1")
     val key2 = ArtifactKey.fromContent("Content 2")
 
-    key1.value should not be key2.value
+    key1.asString should not be key2.asString
   }
 
   // ==========================================================================
@@ -122,7 +114,7 @@ class TypesSpec extends AnyFlatSpec with Matchers {
 
   "SemanticBlockId" should "generate short IDs" in {
     val id = SemanticBlockId.generate()
-    id.value.length shouldBe 8
+    id.asString.length shouldBe 8
   }
 
   // ==========================================================================

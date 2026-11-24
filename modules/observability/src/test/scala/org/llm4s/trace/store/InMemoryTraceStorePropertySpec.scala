@@ -1,7 +1,7 @@
 package org.llm4s.trace.store
 
 import org.llm4s.trace.model._
-import org.llm4s.types.TraceId
+import org.llm4s.trace.model.TraceId
 import org.scalacheck.Gen
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec

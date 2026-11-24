@@ -53,7 +53,7 @@ object ToolExternalizationExample {
   }
 
   private def createTokenCounter(): Result[ConversationTokenCounter] =
-    ConversationTokenCounter.openAI()
+    ConversationTokenCounter.cl100k()
 
   private def runExternalizationTests(tokenCounter: ConversationTokenCounter): Result[ExternalizationResults] = {
     val toolMessages = createSyntheticToolMessages()
@@ -175,14 +175,14 @@ java.sql.SQLException: Connection to database 'production' failed after 30 secon
     tokenCounter: ConversationTokenCounter,
     artifactStore: ArtifactStore
   ): Result[MessageTestResult] = {
-    val originalSize   = ContentSize.fromString(toolMessage.content).bytes
+    val originalSize   = ContentSize.fromString(toolMessage.content).asBytes
     val originalTokens = tokenCounter.countMessage(toolMessage)
 
     logger.debug(s"Testing '$description': $originalSize bytes, $originalTokens tokens")
 
     ToolOutputCompressor.compressToolOutputs(Seq(toolMessage), artifactStore, threshold).map { compressed =>
       val processedMessage = compressed.head
-      val compressedSize   = ContentSize.fromString(processedMessage.content).bytes
+      val compressedSize   = ContentSize.fromString(processedMessage.content).asBytes
       val compressedTokens = tokenCounter.countMessage(processedMessage)
       val wasExternalized  = processedMessage.content.contains("EXTERNALIZED")
 

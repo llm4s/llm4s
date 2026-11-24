@@ -381,7 +381,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   "The digest compressor" should "digest with no model call, extend by appending, and stay within the bound" in {
     given store: InMemoryCheckpointer = new InMemoryCheckpointer
     given thread: ThreadId            = ThreadId("digest")
-    val counter                       = ConversationTokenCounter.openAI().value
+    val counter                       = ConversationTokenCounter.cl100k().value
     val model                         = new Model()
     val mw    = new SummarizationMiddleware(SummaryTrigger.Messages(2), 1, SummaryCompressor.digest(counter))
     val state = turns(loopOf(model, Seq(mw)), "use id: ABC123", "then id: XYZ789", "and more")
@@ -403,7 +403,7 @@ class SummarizationMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
   }
 
   it should "digest a block with media, naming each part, and never drop a message it was given" in {
-    val counter = ConversationTokenCounter.openAI().value
+    val counter = ConversationTokenCounter.cl100k().value
     val image =
       ContentPart.image(MediaSource.Url(java.net.URI.create("https://example.com/c.png")), MediaType.Png).value
     val context = new ModelContext(testRunContext(), ThreadState.empty(Map.empty), agentA)

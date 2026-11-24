@@ -2,7 +2,7 @@ package org.llm4s.context
 
 import org.llm4s.error.ContextError
 import org.llm4s.llmconnect.model._
-import org.llm4s.types.{ ArtifactKey, SemanticBlockId }
+import org.llm4s.types.{ ArtifactKey, HeadroomPercent, SemanticBlockId }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -42,7 +42,7 @@ class ContextContentLossSpec extends AnyFlatSpec with Matchers with EitherValues
 
   "ContextManager" should "not externalize tool output when it has no artifact store" in {
     val big     = (1 to 2000).map(i => s"line $i of the report").mkString("\n")
-    val manager = new ContextManager(counter, ContextConfig.default)
+    val manager = ContextManager.create(counter).value
     val managed =
       manager.manageContext(Conversation(Seq(UserMessage("report?"), ToolMessage(big, "call_1"))), 100000).value
 
@@ -109,7 +109,7 @@ class ContextContentLossSpec extends AnyFlatSpec with Matchers with EitherValues
     // Room for the tool result and the answer, not for the call as well.
     val budget = counter.countMessage(result) + counter.countMessage(AssistantMessage("done")) + 2
 
-    val window = TokenWindow.trimToBudget(conv, counter, budget, headroomPercent = 0.0).value
+    val window = TokenWindow.trimToBudget(conv, counter, budget, headroom = HeadroomPercent.Zero).value
 
     window.conversation.messages.headOption.collect { case t: ToolMessage => t } shouldBe None
     window.conversation.messages shouldBe Seq(AssistantMessage("done"))
@@ -118,13 +118,13 @@ class ContextContentLossSpec extends AnyFlatSpec with Matchers with EitherValues
   it should "fail when nothing but the pinned messages fits, instead of returning them alone" in {
     val conv = Conversation(Seq(SystemMessage("sys"), UserMessage("u" * 400)))
 
-    TokenWindow.trimToBudget(conv, counter, 20, headroomPercent = 0.0).left.value shouldBe a[ContextError]
+    TokenWindow.trimToBudget(conv, counter, 20, headroom = HeadroomPercent.Zero).left.value shouldBe a[ContextError]
   }
 
   it should "fail when the pinned messages alone exceed the budget" in {
     val conv = Conversation(Seq(SystemMessage("s" * 400), UserMessage("hi")))
 
-    TokenWindow.trimToBudget(conv, counter, 20, headroomPercent = 0.0).left.value shouldBe a[ContextError]
+    TokenWindow.trimToBudget(conv, counter, 20, headroom = HeadroomPercent.Zero).left.value shouldBe a[ContextError]
   }
 
   // ============ User messages are never modified ============
