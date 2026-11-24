@@ -65,6 +65,14 @@ new_case; expect_pass "good tree"
 new_case; page guide/none.md "None" ""
 expect_fail "missing description" "guide/none.md: has no description"
 
+# Every page the site serves is checked (#2833): a top-level page, a news post and an RFC with no nav_order.
+new_case; page about.md "About" ""
+expect_fail "top-level page without a description" "src:docs/about.md: has no description"
+new_case; page _posts/2026-01-01-news.md "News" ""
+expect_fail "news post without a description" "_posts/2026-01-01-news.md: has no description"
+new_case; page rfcs/0001-x.md "RFC 0001" ""
+expect_fail "RFC page without a description" "rfcs/0001-x.md: has no description"
+
 new_case; page guide/short.md "Short" "Too short."
 expect_fail "short description" "guide/short.md: description is 10 characters"
 

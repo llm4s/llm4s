@@ -454,6 +454,11 @@ sbt scalafmtAll       # Format code
 - **Guides:** Add to `docs/guide/` for new features
 - **Examples:** Add to `modules/samples/` with runnable code
 - **API:** Generated from Scaladoc automatically
+- **Check a docs change locally:** `scripts/check-docs.sh` runs every documentation check that needs no sbt (internal
+  links, `llms.txt`, titles and descriptions, `nav_order`, the quick starts and the rest): the same list CI's Quick
+  Checks runs. `scripts/check-docs.sh --cited-issues` also checks, online through `gh`, that every issue a page links
+  is in the state its `cites_open_issues` / `cites_closed_issues` front matter says; a page that links an issue
+  declares it in one of the two lists.
 - **Links:** CI fails on a broken internal link in `docs/` (`scripts/check-docs-site-links.sh`). Links are
   checked the way llm4s.org serves them: write `[x](../guide/foo)` or `[x](/guide/foo)`, not `foo.md` (the site
   404s a `.md` link to a rendered page), and give every page front matter or it is served as raw text. Known

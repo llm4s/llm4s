@@ -6,6 +6,9 @@ search_title: "Call an LLM from Java with Maven and LLM4S"
 parent: Build Tools and Playgrounds
 nav_order: 2
 grand_parent: Getting Started
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1496]
 ---
 
 # Maven Quick Start

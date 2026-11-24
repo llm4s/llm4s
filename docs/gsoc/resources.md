@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Student Resources
+description: "Resources for Google Summer of Code students: how to apply through the Scala Center, onboarding as an LLM4S contributor, and useful links."
 parent: Google Summer of Code
 nav_order: 2
 permalink: /gsoc/resources/

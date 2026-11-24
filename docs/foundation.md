@@ -2,7 +2,7 @@
 layout: landing
 title: Foundation
 nav_order: 13
-description: "Support the LLM4S Foundation: what funding pays for, ways for individuals, companies, grant makers and universities to give or partner, and how the money is handled transparently through Open Collective."
+description: "Support the LLM4S Foundation: what funding pays for, how individuals, companies and universities can give or partner, and how Open Collective keeps it transparent."
 permalink: /foundation/
 ---
 

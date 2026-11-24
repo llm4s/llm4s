@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Checked Code Blocks
+description: "Which LLM4S documentation pages have their Scala code blocks compiled on every build, and the order the remaining pages are converted in."
 parent: Contribute
 nav_order: 8
 ---
@@ -58,9 +59,13 @@ not convert the same one.
 
 Getting-started pages first, then the user guide in the order of its navigation (the pages a newcomer reads
 first), then the examples, the reference and migration pages, and the API notes. Some guide pages also have a
-hand-written spec that copies their code (`PekkoGuideSpec`, `MemoryGuideSpec`, `JsonLibrariesGuideSpec`,
-`DerivedSchemasGuideSpec`, `CookbookDocsSpec`, ...); converting them still pays, because the spec checks a copy,
-not the page.
+hand-written spec that runs their code. Such a spec reads the page: it marks each piece of the page's code it runs as
+a `// snippet:` region and checks it against the page with `GuideSnippets` (core's test sources), which also fails on a
+block of the page that no region runs and no reason exempts (#2833). `MemoryGuideSpec`, `CachingGuideSpec`,
+`ErrorHandlingGuideSpec`, `BuiltinToolsGuideSpec`, `JevGuideSnippetsSpec`, `SttpGuideSpec` (http-transport),
+`RagValidationGuideSpec` (part of vector-store) and `ProviderExchangeLoggingGuideSpec` work this way;
+`JsonLibrariesGuideSpec` and the tutorial specs compare the page the same way with code of their own. Converting a
+page still pays when its spec runs only some of its blocks.
 
 | # | Page | Scala blocks |
 |---|---|---|

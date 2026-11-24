@@ -1,6 +1,7 @@
 ---
 layout: page
 title: RFCs
+description: "LLM4S RFCs: how a breaking change to a frozen module is proposed and decided before and after 1.0, and the RFCs with their status."
 parent: Reference
 nav_order: 7
 has_children: true

@@ -5,6 +5,9 @@ description: "The LLM4S roadmap to 1.0 as of November 2026: current status, matu
 search_title: "LLM4S roadmap: the path to 1.0"
 parent: Reference
 nav_order: 5
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: [874, 1281]
+cites_closed_issues: [1126, 1127, 1133, 1242, 1266, 2273, 2290]
 ---
 
 # LLM4S Roadmap

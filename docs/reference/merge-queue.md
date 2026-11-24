@@ -8,6 +8,9 @@ permalink: /contribute/merge-queue
 redirect_from:
   - /reference/merge-queue
   - /reference/merge-queue.html
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1638]
 ---
 
 # Protecting `main` from merge skew

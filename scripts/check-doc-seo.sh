@@ -3,8 +3,10 @@
 # <meta name="description"> (#2314). jekyll-seo-tag falls back to the site-wide description when a page sets none, so
 # a page without its own description looks like every other page in a search result.
 #
-# Pages checked: docs/index.md and every page under docs/{getting-started,guide,examples,reference,migrations,scala-ai,
-# advanced,api,community}. Scaladoc, design records and the other top-level pages are out of scope.
+# Pages checked: every page the site serves (#2833): each top-level docs/*.md, the news posts (docs/_posts, served under
+# news/) and every page under docs/{getting-started,guide,examples,reference,migrations,scala-ai,advanced,api,community,
+# rfcs,gsoc,contribute,tutorials}, with or without a nav_order. A file with no front matter is not a page. Scaladoc and
+# the design records (docs/design, docs/superpowers: excluded from the site in docs/_config.yml) are out of scope.
 #
 # Two modes, one rule set:
 #   scripts/check-doc-seo.sh                   the source: every page's front matter. No Jekyll needed, so it runs
@@ -48,7 +50,8 @@ import html, os, pathlib, re, sys
 from collections import defaultdict
 
 MODE, SITE, BASELINE = os.environ["MODE"], os.environ["SITE"], os.environ["BASELINE"]
-SECTIONS = ("getting-started", "guide", "examples", "reference", "migrations", "scala-ai", "advanced", "api", "community")
+SECTIONS = ("getting-started", "guide", "examples", "reference", "migrations", "scala-ai", "advanced", "api", "community",
+            "rfcs", "gsoc", "contribute", "tutorials")
 DENY = {"home", "index", "overview"}
 DESC_MIN, DESC_MAX = 50, 170
 SEARCH_TITLE_MAX, TITLE_MAX = 60, 70
@@ -88,7 +91,7 @@ def front_matter(text):
 
 def collect_source():
     pages = {}
-    files = [pathlib.Path("docs/index.md")]
+    files = sorted(pathlib.Path("docs").glob("*.md")) + sorted(pathlib.Path("docs/_posts").glob("*.md"))
     for sec in SECTIONS:
         files += sorted(pathlib.Path("docs", sec).rglob("*.md"))
     for p in files:
@@ -106,7 +109,7 @@ def collect_source():
 def collect_site():
     root = pathlib.Path(SITE)
     pages = {}
-    files = [root / "index.html"]
+    files = sorted(root.glob("*.html")) + sorted((root / "news").rglob("*.html"))
     for sec in SECTIONS:
         files += sorted((root / sec).rglob("*.html"))
     for p in files:

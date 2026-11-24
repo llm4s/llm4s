@@ -11,7 +11,7 @@ import org.llm4s.llmconnect.{
   ProviderExchangeOutcome,
   ProviderExchangeSink
 }
-import org.llm4s.llmconnect.config.DeepSeekConfig
+import org.llm4s.llmconnect.config.{ DeepSeekConfig, ProviderConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer._
@@ -35,7 +35,12 @@ import scala.jdk.CollectionConverters._
  * If a snippet here stops compiling or an assertion fails, the guide is describing something that no
  * longer happens: change the guide and this spec together. The sink and file format claims that need no
  * client (naming, redaction, truncation, configuration) are in `ProviderExchangeLoggingGuideCoreSpec`.
+ *
+ * Each snippet is a `// snippet:` region, and the last test reads the page and fails unless every block of it is one
+ * of them, word for word (`GuideSnippets`, #2833). They sit between `format: off` lines, so scalafmt keeps the page's
+ * layout.
  */
+@org.llm4s.tags.DocsSpec
 class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
@@ -56,29 +61,48 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
   // ---- "From configuration": the snippet compiles (it reads the application's own configuration,
   //      so it is not run here; the keys it reads are checked in the core spec)
 
+  // format: off
+
+  // snippet: from-configuration
   def fromConfiguration(): Result[LLMClient] =
     for {
       providerConfig <- Llm4sConfig.defaultProvider()
       registry       <- Llm4sConfig.modelRegistryService()
       given ModelRegistryService = registry
       exchangeLogging <- Llm4sConfig.exchangeLogging()
-      client          <- LLMConnect.getClient(providerConfig, LlmClientOptions(exchangeLogging = exchangeLogging))
+      client <- LLMConnect.getClient(providerConfig, LlmClientOptions(exchangeLogging = exchangeLogging))
     } yield client
+  // end snippet
 
-  // ---- "From code": a JSONL file for this run
+  // ---- "From code": a JSONL file for this run, and a sink of your own for a client
 
+  // snippet: jsonl-logging
   def jsonlLogging(dir: Path): Result[ProviderExchangeLogging] =
     ProviderExchangeSink.createRunScopedJsonl(dir).map(ProviderExchangeLogging.enabled)
+  // end snippet
+
+  // snippet: client-for
+  def clientFor(providerConfig: ProviderConfig, sink: ProviderExchangeSink)(using
+    ModelRegistryService
+  ): Result[LLMClient] =
+    LLMConnect.getClient(providerConfig, LlmClientOptions(exchangeLogging = ProviderExchangeLogging.enabled(sink)))
+  // end snippet
 
   // ---- "Writing your own sink"
 
+  // snippet: metadata-only-sink
   final class MetadataOnlySink(out: String => Unit) extends ProviderExchangeSink:
     def record(exchange: ProviderExchange): Unit =
       out(s"${exchange.provider} ${exchange.model.getOrElse("-")} ${exchange.outcome} ${exchange.duration.toMillis}ms")
+  // end snippet
 
+  // snippet: errors-only-sink
   final class ErrorsOnlySink(delegate: ProviderExchangeSink) extends ProviderExchangeSink:
     def record(exchange: ProviderExchange): Unit =
       if exchange.outcome == ProviderExchangeOutcome.Error then delegate.record(exchange)
+  // end snippet
+
+  // format: on
 
   // ---- helpers
 
@@ -90,9 +114,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
   }
 
   private def clientWith(baseUrl: String, sink: ProviderExchangeSink): LLMClient =
-    LLMConnect
-      .getClient(config(baseUrl), LlmClientOptions(exchangeLogging = ProviderExchangeLogging.enabled(sink)))
-      .getOrElse(fail("could not build the client"))
+    clientFor(config(baseUrl), sink).getOrElse(fail("could not build the client"))
 
   private def freeLoopbackUrl(): String = {
     val socket = new ServerSocket(0)
@@ -347,5 +369,15 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
         (sink.path.getFileName.toString should fullyMatch).regex("provider-exchanges-.*\\.jsonl")
       case other => fail(s"expected an enabled JSONL setting, got $other")
     }
+  }
+
+  "the guide" should "show exactly the code this spec runs" in {
+    org.llm4s.testutil.GuideSnippets.check(
+      "docs/guide/observability/provider-exchange-logging.md",
+      Seq(
+        "modules/openai-compatible/src/test/scala/org/llm4s/llmconnect/provider/ProviderExchangeLoggingGuideSpec.scala"
+      ),
+      notRun = Set("trait ProviderExchangeSink:") // the trait's signature, shown for reference: it is core's
+    ) shouldBe empty
   }
 }

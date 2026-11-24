@@ -4,6 +4,9 @@ title: Scalafix Rules
 description: "The Scalafix rules LLM4S enforces to keep configuration loading at the application edge and prefer Result[A] over exceptions, and how to suppress a finding."
 parent: Reference
 nav_order: 4
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: [2330]
+cites_closed_issues: [2778]
 ---
 
 # Scalafix: Configuration Boundary Enforcement

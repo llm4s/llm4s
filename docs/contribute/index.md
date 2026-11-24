@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Contribute
+description: "Contribute to LLM4S: find an issue on GitHub by label or area, check it is free, get started with the build, and read the contributor guides."
 nav_order: 9
 has_children: true
 ---

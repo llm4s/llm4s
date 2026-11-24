@@ -14,8 +14,10 @@ import scala.collection.mutable.ListBuffer
 /**
  * `docs/guide/http-transport.md`'s stub-backend example, run as written (DocSnippets only compiles it), plus the
  * streamed call the guide mentions: a provider client given an [[SttpLlm4sHttpClient]] over sttp's stub backend sends
- * its `complete` and `streamComplete` requests through it, with no network. Change the guide and this spec together.
+ * its `complete` and `streamComplete` requests through it, with no network. The `// snippet:` region is part of the
+ * page's example word for word, and the last test reads the page to check it (`GuideSnippets`, #2833).
  */
+@org.llm4s.tags.DocsSpec
 class SttpGuideSpec extends AnyFlatSpec with Matchers {
 
   // The events the streamed call is answered with; declared first, as every test closure sees them.
@@ -32,6 +34,7 @@ class SttpGuideSpec extends AnyFlatSpec with Matchers {
 
   // ---- the guide's example, as written
 
+  // snippet: stub-backend
   private val reply =
     """{"id":"c-1","object":"chat.completion","created":1700000000,"model":"my-model",
       |"choices":[{"index":0,"message":{"role":"assistant","content":"A JVM language."},"finish_reason":"stop"}],
@@ -61,6 +64,7 @@ class SttpGuideSpec extends AnyFlatSpec with Matchers {
     body("model").str shouldBe "my-model"
     body("messages")(0)("content").str shouldBe "What is Scala?"
   }
+  // end snippet
 
   // ---- the streamed call the guide mentions
 
@@ -91,5 +95,18 @@ class SttpGuideSpec extends AnyFlatSpec with Matchers {
     val body = ujson.read(backend.allInteractions.head._1.forceBodyAsString)
     body("stream").bool shouldBe true
     body("messages")(0)("content").str shouldBe "What is Scala?"
+  }
+
+  "The guide" should "show exactly the stub-backend example this spec runs" in {
+    org.llm4s.testutil.GuideSnippets.check(
+      "docs/guide/http-transport.md",
+      Seq("modules/sttp/src/test/scala/org/llm4s/sttp/SttpGuideSpec.scala"),
+      notRun = Set(
+        // the sbt dependency line
+        "libraryDependencies += \"org.llm4s\" %% \"llm4s-sttp\" % llm4sVersion // same version as llm4s-core",
+        // the logging backend over a real provider: DocSnippets compiles it, and it needs a configured provider to run
+        "import org.llm4s.config.Llm4sConfig"
+      )
+    ) shouldBe empty
   }
 }

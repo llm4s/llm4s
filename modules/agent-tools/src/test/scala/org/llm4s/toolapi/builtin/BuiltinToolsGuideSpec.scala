@@ -24,7 +24,13 @@ import scala.concurrent.duration._
  * Each test below backs one statement of the guide: the bundle tables are asserted against the real
  * bundles, the parameter table against the real schemas, and the safety section against what the tools
  * return when they refuse. Nothing here touches the network or leaves the temporary directories it makes.
+ *
+ * The page's Scala blocks are run too, as `// snippet:` regions (the agent block by `BuiltinToolsGuideAgentSpec` in
+ * `samples`, which has the agent runtime), and the last test reads the page and fails unless every block of it is one
+ * of those regions, word for word (`GuideSnippets`, #2833). The regions sit between `format: off` lines, so scalafmt
+ * keeps the page's layout; a block's imports are this file's, so they are left out of its region.
  */
+@org.llm4s.tags.DocsSpec
 class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def isWindows: Boolean = System.getProperty("os.name").toLowerCase.contains("win")
@@ -153,6 +159,93 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
         failed.left.value.message should include(s"required parameter '${params(i)._1}'")
       }
     }
+  }
+
+  // ---- the page's blocks, run as written
+
+  // format: off
+
+  "The bundle snippet" should "build a bundle with file and HTTP tools" in {
+    // snippet: pick-a-bundle
+    val tools = BuiltinTools.customSafe(
+      fileConfig = Some(FileConfig(allowedPaths = Some(Seq("/srv/agent-data")))),
+      httpConfig = Some(HttpConfig.restricted(Seq("api.example.com")))
+    ) // Result[Seq[ToolFunction[_, _]]]
+    // end snippet
+    names(tools) should contain allOf ("read_file", "http_request")
+  }
+
+  "The ToolRegistry snippet" should "run the calculator from a registry of the core bundle" in {
+    // snippet: register
+    BuiltinTools.coreSafe.flatMap(ToolRegistry.of).foreach { registry =>
+
+      registry.execute(ToolCallRequest("calculator", ujson.Obj("operation" -> "multiply", "a" -> 6, "b" -> 7))) match {
+        case Right(json)  => println(json("result")) // 42.0
+        case Left(error)  => println(error.formatted)
+      }
+    }
+    // end snippet
+    succeed // the result is asserted by "The registration snippet" below
+  }
+
+  "The web search snippet" should "add the DuckDuckGo tool to the core bundle" in {
+    // snippet: web-search
+    val registry = for {
+      config <- ToolsConfigLoader.loadDuckDuckGoSearchTool()
+      search <- DuckDuckGoSearchTool.create(config)
+      core   <- BuiltinTools.coreSafe
+      toolRegistry <- ToolRegistry.of(core :+ search)
+    } yield toolRegistry
+    // end snippet
+    registry.value.tools.map(_.name).toSet should have size (coreNames.size + 1L)
+  }
+
+  "The Brave and Exa snippet" should "load each tool's settings and build it, or say why not" in {
+    // snippet: brave-exa
+    val brave = ToolsConfigLoader
+      .loadBraveSearchTool()
+      .flatMap(config => BraveSearchTool.create[BraveWebSearchResult](config, BraveSearchCategory.Web))
+
+    val exa = ToolsConfigLoader.loadExaSearchTool().flatMap(config => ExaSearchTool.create(config))
+    // end snippet
+    // With no key configured each is a Left that says so; with one, a tool.
+    brave.fold(_.message should not be empty, _.name should not be empty)
+    exa.fold(_.message should not be empty, _.name should not be empty)
+  }
+
+  "The FileConfig snippet" should "build a bundle with the read and write tools" in {
+    // snippet: file-config
+    val tools = BuiltinTools.customSafe(
+      fileConfig = Some(FileConfig(allowedPaths = Some(Seq("/srv/agent-data")), maxFileSize = 256 * 1024)),
+      writeConfig = Some(WriteConfig(allowedPaths = Seq("/srv/agent-data/out")))
+    )
+    // end snippet
+    names(tools) should contain allOf ("read_file", "write_file")
+  }
+
+  "The own-tools snippet" should "register a tool of your own beside the core bundle" in {
+    val myTool =
+      ToolBuilder[Map[String, Any], String]("ping", "Replies pong", Schema.`object`[Map[String, Any]]("No arguments"))
+        .withHandler(_ => Right("pong"))
+        .buildSafe()
+        .value
+    // snippet: own-tool
+    // myTool: a ToolFunction you built with ToolBuilder
+    val registry = BuiltinTools.coreSafe.flatMap(core => ToolRegistry.of(core :+ myTool))
+    // end snippet
+    registry.value.tools.map(_.name).toSet shouldBe coreNames + "ping"
+  }
+
+  // format: on
+
+  "The page" should "show exactly the code this spec and BuiltinToolsGuideAgentSpec run" in {
+    org.llm4s.testutil.GuideSnippets.check(
+      "docs/guide/builtin-tools.md",
+      Seq(
+        "modules/agent-tools/src/test/scala/org/llm4s/toolapi/builtin/BuiltinToolsGuideSpec.scala",
+        "modules/samples/src/test/scala/org/llm4s/samples/toolapi/BuiltinToolsGuideAgentSpec.scala"
+      )
+    ) shouldBe empty
   }
 
   // ---- registering the tools

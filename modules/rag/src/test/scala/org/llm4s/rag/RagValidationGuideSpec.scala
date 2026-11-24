@@ -14,17 +14,19 @@ import scala.util.Try
 
 /**
  * The snippets of the "Weighted score fusion" and "Invalid chunking settings" parts of `docs/guide/vector-store.md`,
- * compiled and run as written (#1318, items 4 to 6).
+ * run as written (#1318, items 4 to 6); `DocSnippets` compiles the whole page.
  *
- * If a snippet here stops compiling or an assertion fails, the guide is teaching something that no longer works:
- * change the guide and this spec together. Each `snippet` method is the code of one block in the guide; the
- * assertions pin what the surrounding prose claims.
+ * Each `// snippet:` region is part of one of the page's Scala blocks word for word, and the last test reads the page
+ * to check it (`GuideSnippets`, #2833), so the page and this spec cannot drift. The assertions pin what the
+ * surrounding prose claims.
  */
+@org.llm4s.tags.DocsSpec
 class RagValidationGuideSpec extends AnyWordSpec with Matchers with EitherValues {
 
   // ---- Weighted score fusion: how the two channels are combined
 
   private def snippetWeakestHit(): Result[Seq[(String, Double)]] = {
+    // snippet: weakest-hit
     // Only the vector channel counts (vector weight 1.0), and the keyword channel finds nothing.
     val hits = for {
       store    <- VectorStoreFactory.inMemory()
@@ -38,6 +40,8 @@ class RagValidationGuideSpec extends AnyWordSpec with Matchers with EitherValues
         strategy = FusionStrategy.WeightedScore(vectorWeight = 1.0, keywordWeight = 0.0)
       )
     } yield found.map(hit => hit.id -> hit.score)
+    // Right(Seq("strong" -> 1.0, "weak" -> 0.1)): the weak hit is not 0.0
+    // end snippet
     hits
   }
 
@@ -57,8 +61,10 @@ class RagValidationGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
   // ---- Weighted score fusion: invalid weights
 
-  private def weightedScore(vector: Double, keyword: Double): Result[FusionStrategy] =
+  // snippet: weighted-score
+  def weightedScore(vector: Double, keyword: Double): Result[FusionStrategy] =
     Try(FusionStrategy.WeightedScore(vector, keyword)).toResult
+  // end snippet
 
   "an invalid WeightedScore" should {
     "throw IllegalArgumentException from the constructor, and from RAGConfig.withWeightedScore" in {
@@ -80,14 +86,16 @@ class RagValidationGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
   // ---- Invalid chunking settings
 
-  private def chunkingConfig(size: Int, overlap: Int): Result[ChunkingConfig] =
+  // snippet: chunking-config
+  def chunkingConfig(size: Int, overlap: Int): Result[ChunkingConfig] =
     Try(
       ChunkingConfig(
         targetSize = size,
-        maxSize = math.min(size.toLong * 3 / 2, Int.MaxValue.toLong).toInt,
+        maxSize = math.min(size.toLong * 3 / 2, Int.MaxValue.toLong).toInt, // Long: no overflow for a large size
         overlap = overlap
       )
     ).toResult
+  // end snippet
 
   "an invalid ChunkingConfig" should {
     "throw IllegalArgumentException naming the rule that failed" in {
@@ -125,6 +133,16 @@ class RagValidationGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
       val badSize = ChunkingUtils.chunkTextValidated(text, 0, 0).left.value
       badSize.asInstanceOf[ValidationError].field shouldBe "size"
+    }
+  }
+
+  "The guide" should {
+    "show exactly the code this spec runs" in {
+      org.llm4s.testutil.GuideSnippets.check(
+        "docs/guide/vector-store.md",
+        Seq("modules/rag/src/test/scala/org/llm4s/rag/RagValidationGuideSpec.scala"),
+        everyBlock = false // the rest of the page is compiled by DocSnippets and run by no spec
+      ) shouldBe empty
     }
   }
 }

@@ -14,21 +14,25 @@ import java.time.temporal.ChronoUnit
 import scala.util.Using
 
 /**
- * The snippets of `docs/guide/agents/memory.md`, compiled and run as written.
+ * The snippets of `docs/guide/agents/memory.md`, compiled and run.
  *
- * If a snippet here stops compiling or an assertion fails, the guide is teaching something that no
- * longer works: change the guide and this spec together. Each `snippet` method below is the code of
- * one block in the guide, and the assertions pin what the prose around that block claims. Blocks
- * that need a live provider (an embedding client, an agent) take that as a parameter, so they are
- * compiled but not run against one; the Postgres store lives in another module and its snippets
- * are not here.
+ * Each `// snippet:` region below is part of one of the guide's Scala blocks, word for word, and the last test reads
+ * the page and fails unless every region is on it and every block of it is run (`GuideSnippets`, #2833): change the
+ * guide and this spec together. The assertions pin what the prose around each block claims. Blocks that need a live
+ * provider (an embedding client, an agent) take that as a parameter, so they are compiled but not run against one; the
+ * SemanticMemoryMiddleware block is in another module and is not run here. The regions sit between `format: off`
+ * lines, so scalafmt keeps the page's layout.
  */
+@org.llm4s.tags.DocsSpec
 class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
+
+  // format: off
 
   // ---- Quick Start
 
   private def quickStart(): Result[String] =
     for {
+      // snippet: quick-start
       // Record a user fact
       m1 <- SimpleMemoryManager.empty.recordUserFact(
         fact = "Prefers Scala over Java",
@@ -47,10 +51,12 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       // Get relevant context for a query
       context <- m2.getRelevantContext("Tell me about Scala programming")
     } yield context
+    // end snippet
 
   // ---- Memory Manager
 
   private def managers(): (SimpleMemoryManager, SimpleMemoryManager) = {
+    // snippet: managers
     // In-memory store, default configuration
     val manager = SimpleMemoryManager.empty
 
@@ -59,101 +65,163 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       store = InMemoryStore.empty,
       config = MemoryManagerConfig(defaultImportance = 0.7)
     )
+    // end snippet
     (manager, configured)
   }
 
   // ---- Recording Memory
 
+  private def recordUserFact(manager: MemoryManager): Result[MemoryManager] = {
+    // snippet: user-fact
+    // Record a user preference
+    val result = manager.recordUserFact(
+      fact = "Prefers functional programming",
+      userId = Some("user-123"),
+      importance = Some(0.9)
+    )
+    // end snippet
+    result
+  }
+
+  private def recordEntityFact(manager: MemoryManager): Result[MemoryManager] = {
+    // snippet: entity-fact
+    // Record knowledge about an entity
+    val result = manager.recordEntityFact(
+      entityId = EntityId("scala-lang"),
+      entityName = "Scala",
+      fact = "Scala is a JVM language combining OOP and FP",
+      entityType = "language",
+      importance = Some(0.8)
+    )
+    // end snippet
+    result
+  }
+
+  private def recordKnowledge(manager: MemoryManager): Result[MemoryManager] = {
+    // snippet: knowledge
+    // Record external knowledge: `source` says where it came from
+    val result = manager.recordKnowledge(
+      content = "Orders over 50 EUR ship free",
+      source = "shipping-policy",
+      metadata = Map("region" -> "eu")
+    )
+    // end snippet
+    result
+  }
+
+  private def recordTask(manager: MemoryManager): Result[MemoryManager] = {
+    // snippet: task
+    // Record a task result
+    val result = manager.recordTask(
+      description = "Generate the quarterly report",
+      outcome = "Report generated",
+      success = true,
+      importance = Some(0.6)
+    )
+    // end snippet
+    result
+  }
+
   private def recordEverything(manager: MemoryManager): Result[MemoryManager] =
-    for {
-      m1 <- manager.recordUserFact(
-        fact = "Prefers functional programming",
-        userId = Some("user-123"),
-        importance = Some(0.9)
-      )
-      m2 <- m1.recordEntityFact(
-        entityId = EntityId("scala-lang"),
-        entityName = "Scala",
-        fact = "Scala is a JVM language combining OOP and FP",
-        entityType = "language",
-        importance = Some(0.8)
-      )
-      m3 <- m2.recordKnowledge(
-        content = "The latest LLM4S version is 0.5.0",
-        source = "release-notes",
-        metadata = Map("channel" -> "stable")
-      )
-      m4 <- m3.recordTask(
-        description = "Generate the quarterly report",
-        outcome = "Report generated",
-        success = true,
-        importance = Some(0.6)
-      )
-    } yield m4
+    recordUserFact(manager).flatMap(recordEntityFact).flatMap(recordKnowledge).flatMap(recordTask)
+
+  private def recordTurn(manager: MemoryManager): Result[MemoryManager] = {
+    // snippet: message
+    // Record a conversation turn
+    val result = manager.recordMessage(
+      message = UserMessage("What's the weather in Paris?"),
+      conversationId = "conv-789"
+    )
+    // end snippet
+    result
+  }
+
+  private def recordSeveral(manager: MemoryManager): Result[MemoryManager] = {
+    // snippet: conversation
+    // Record several messages at once
+    val result = manager.recordConversation(
+      messages = Seq(UserMessage("And in Rome?"), AssistantMessage("Sunny, 24 degrees.")),
+      conversationId = "conv-789"
+    )
+    // end snippet
+    result
+  }
 
   private def recordMessages(manager: MemoryManager): Result[MemoryManager] =
-    for {
-      // Record a conversation turn
-      m1 <- manager.recordMessage(
-        message = UserMessage("What's the weather in Paris?"),
-        conversationId = "conv-789"
-      )
-
-      // Record several messages at once
-      m2 <- m1.recordConversation(
-        messages = Seq(UserMessage("And in Rome?"), AssistantMessage("Sunny, 24 degrees.")),
-        conversationId = "conv-789"
-      )
-    } yield m2
+    recordTurn(manager).flatMap(recordSeveral)
 
   // ---- Retrieving Memory
 
-  private def relevantContext(manager: MemoryManager): Result[String] =
-    manager.getRelevantContext(
+  private def relevantContext(manager: MemoryManager): Result[String] = {
+    // snippet: relevant-context
+    val context = manager.getRelevantContext(
       query = "Tell me about Scala programming",
       maxTokens = 1000,
       filter = MemoryFilter.ByTypes(Set(MemoryType.UserFact, MemoryType.Knowledge))
     )
+    // end snippet
+    context
+  }
 
-  private def conversationContext(manager: MemoryManager): Result[String] =
-    manager.getConversationContext(conversationId = "conv-789", maxMessages = 10)
+  private def conversationContext(manager: MemoryManager): Result[String] = {
+    // snippet: conversation-context
+    val history = manager.getConversationContext(
+      conversationId = "conv-789",
+      maxMessages = 10
+    )
+    // end snippet
+    history
+  }
 
-  private def entityContext(manager: MemoryManager): Result[String] =
-    manager.getEntityContext(EntityId("anthropic"))
+  private def entityContext(manager: MemoryManager): Result[String] = {
+    // snippet: entity-context
+    val entityInfo = manager.getEntityContext(EntityId("anthropic"))
+    // end snippet
+    entityInfo
+  }
 
-  private def userContext(manager: MemoryManager): Result[String] =
-    manager.getUserContext(Some("user-123"))
+  private def userContext(manager: MemoryManager): Result[String] = {
+    // snippet: user-context
+    val userInfo = manager.getUserContext(Some("user-123"))
+    // end snippet
+    userInfo
+  }
 
   // ---- Memory Stores
 
   private def inMemoryStore(): SimpleMemoryManager = {
+    // snippet: in-memory-store
     val store = InMemoryStore.empty
-    SimpleMemoryManager.withStore(store)
+    val manager = SimpleMemoryManager.withStore(store)
+    // end snippet
+    manager
   }
 
+  // The page opens "memory.db"; this opens a temporary file instead, so that line is not a region.
   private def sqliteStores(path: String): Result[(SQLiteMemoryStore, SQLiteMemoryStore)] =
     for {
-      // File-based (persistent)
       file <- SQLiteMemoryStore(path)
 
+      // snippet: sqlite-stores
       // In-memory SQLite (fast, volatile)
       volatile <- SQLiteMemoryStore.inMemory()
     } yield (file, volatile)
+    // end snippet
 
-  // Wrap an embedding client (needs a live client to run, so the spec only compiles this)
-  private def embeddingServiceFor(
-    embeddingClient: EmbeddingClient,
-    modelConfig: EmbeddingModelConfig
-  ): EmbeddingService =
+  // snippet: vector-store
+  // Wrap an embedding client
+  def embeddingServiceFor(embeddingClient: EmbeddingClient, modelConfig: EmbeddingModelConfig): EmbeddingService =
     LLMEmbeddingService(embeddingClient, modelConfig)
 
   // A vector store in a SQLite file (VectorMemoryStore.inMemory(embeddingService) keeps it in memory)
-  private def vectorManager(embeddingService: EmbeddingService, path: String): Result[SimpleMemoryManager] =
+  def vectorManager(embeddingService: EmbeddingService, path: String): Result[SimpleMemoryManager] =
     VectorMemoryStore(path, embeddingService).map(store => SimpleMemoryManager.withStore(store))
+  // end snippet
 
   // ---- Memory with Agents
 
-  private def answerWithMemory(
+  // snippet: answer-with-memory
+  def answerWithMemory(
     manager: MemoryManager,
     userQuery: String,
     conversationId: String
@@ -168,48 +236,64 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
         |Relevant context from memory:
         |$context""".stripMargin
 
-      // Run your agent with that prompt (see the Agents guide) and keep what was said
+      // Run your agent with that prompt and keep what was said
       messages <- runAgent(systemPrompt)
       updated  <- manager.recordConversation(messages, conversationId)
     } yield updated
+  // end snippet
 
   // ---- Semantic Search
 
-  private def semanticSearch(embeddingService: EmbeddingService): Result[Seq[ScoredMemory]] =
+  // snippet: semantic-search
+  def semanticSearch(embeddingService: EmbeddingService): Result[Seq[ScoredMemory]] =
     VectorMemoryStore.inMemory(embeddingService).flatMap { store =>
       Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
         for {
-          m1      <- SimpleMemoryManager.withStore(store).recordKnowledge("Paris is the capital of France", "geography")
-          m2      <- m1.recordKnowledge("Berlin is the capital of Germany", "geography")
-          m3      <- m2.recordKnowledge("Rome is the capital of Italy", "geography")
+          m1 <- SimpleMemoryManager.withStore(store).recordKnowledge("Paris is the capital of France", "geography")
+          m2 <- m1.recordKnowledge("Berlin is the capital of Germany", "geography")
+          m3 <- m2.recordKnowledge("Rome is the capital of Italy", "geography")
           results <- m3.store.search("European capitals", topK = 2)
         } yield results
       }
     }
+  // end snippet
+
   private def searchWithFilter(store: MemoryStore): Result[Seq[ScoredMemory]] = {
+    // snippet: search-filter
     val filter = MemoryFilter.ByType(MemoryType.Knowledge) &&
       MemoryFilter.MinImportance(0.7) &&
       MemoryFilter.ByMetadata("user_id", "user-123")
 
-    store.search(query = "programming languages", topK = 5, filter = filter)
+    val results = store.search(
+      query = "programming languages",
+      topK = 5,
+      filter = filter
+    )
+    // end snippet
+    results
   }
 
   // ---- Memory Consolidation and Entity Extraction
 
-  private def consolidate(manager: MemoryManager): Result[MemoryManager] =
-    manager.consolidateMemories(
-      olderThan = Instant.now().minus(7, ChronoUnit.DAYS),
-      minCount = 10
-    )
-
-  private def llmManager(client: LLMClient): LLMMemoryManager =
+  // snippet: consolidation
+  // An LLM client is needed to write the summaries
+  def llmManager(client: LLMClient): LLMMemoryManager =
     LLMMemoryManager(
       config = MemoryManagerConfig.default,
       store = InMemoryStore.empty,
       client = client
     )
 
-  private def extractEntities(manager: MemoryManager): Result[String] =
+  // Consolidate memories older than a week, in groups of at least ten
+  def consolidate(manager: MemoryManager): Result[MemoryManager] =
+    manager.consolidateMemories(
+      olderThan = Instant.now().minus(7, ChronoUnit.DAYS),
+      minCount = 10
+    )
+  // end snippet
+
+  // snippet: extract-entities
+  def extractEntities(manager: MemoryManager): Result[String] =
     for {
       m1 <- manager.extractEntities(
         text = "Anthropic is an AI company that created Claude",
@@ -218,35 +302,47 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       // The extracted entities are ordinary entity memories
       info <- m1.getEntityContext(EntityId.fromName("Anthropic"))
     } yield info
+  // end snippet
 
   // ---- Memory Statistics
 
-  private def statistics(manager: MemoryManager): Result[String] =
-    manager.stats.map { stats =>
+  private def statistics(manager: MemoryManager): Result[String] = {
+    // snippet: statistics
+    val result = manager.stats.map { stats =>
       s"""Total memories: ${stats.totalMemories}
          |By type: ${stats.byType}
          |Oldest: ${stats.oldestMemory}
          |Newest: ${stats.newestMemory}""".stripMargin
     }
+    // end snippet
+    result
+  }
 
   // ---- Persistence Patterns
 
-  private def saveAndLoad(path: String): Result[String] =
-    SQLiteMemoryStore(path)
-      .flatMap { store =>
-        Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
-          SimpleMemoryManager.withStore(store).recordUserFact("Likes Scala", Some("user-1")).map(_ => ())
+  private def saveAndLoad(path: String): Result[String] = {
+    // snippet: save-and-load
+    // Both opened stores close even when a Result is Left.
+    val result = SQLiteMemoryStore(path).flatMap { store =>
+      Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
+        SimpleMemoryManager.withStore(store).recordUserFact("Likes Scala", Some("user-1")).map(_ => ())
+      }
+    }.flatMap { _ =>
+      SQLiteMemoryStore(path).flatMap { reopened =>
+        Using.resource(new AutoCloseable { override def close(): Unit = reopened.close() }) { _ =>
+          SimpleMemoryManager.withStore(reopened).getUserContext(Some("user-1"))
         }
       }
-      .flatMap { _ =>
-        SQLiteMemoryStore(path).flatMap { reopened =>
-          Using.resource(new AutoCloseable { override def close(): Unit = reopened.close() }) { _ =>
-            SimpleMemoryManager.withStore(reopened).getUserContext(Some("user-1"))
-          }
-        }
-      }
+    }
+    // Right("Known facts about the user:\n- Likes Scala")
+    // end snippet
+    result
+  }
 
-  private class PersistentMemory(dbPath: String) {
+  // snippet: persistent-memory
+  class PersistentMemory(dbPath: String) {
+
+    // Open the store, run something against a manager on it, and close the store again
     def withManager[A](use: MemoryManager => Result[A]): Result[A] =
       SQLiteMemoryStore(dbPath).flatMap { store =>
         Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
@@ -254,10 +350,12 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
         }
       }
   }
+  // end snippet
 
   // ---- Best Practices
 
   private def importance(manager: MemoryManager): Result[MemoryManager] =
+    // snippet: importance
     for {
       // High importance - core user preferences
       m1 <- manager.recordUserFact("Primary programming language is Scala", importance = Some(0.9))
@@ -268,17 +366,26 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       // Low importance - ephemeral information
       m3 <- m2.recordTask("Run the tests", "Passed", success = true, importance = Some(0.3))
     } yield m3
+    // end snippet
 
-  private def tokenBudget(manager: MemoryManager, query: String): Result[String] =
+  private def tokenBudget(manager: MemoryManager, query: String): Result[String] = {
+    // snippet: token-budget
     // About four characters per token: the context is cut to fit
-    manager.getRelevantContext(query, maxTokens = 500)
+    val context = manager.getRelevantContext(query, maxTokens = 500)
+    // end snippet
+    context
+  }
 
   private def cleanUp(store: MemoryStore, thirtyDaysAgo: Instant): Result[MemoryStore] =
+    // snippet: clean-up
     // Delete old, low-importance memories (there is no "maximum importance" filter: use `Custom`)
     store.deleteMatching(
       MemoryFilter.Custom(_.importance.exists(_ <= 0.3)) &&
         MemoryFilter.ByTimeRange(before = Some(thirtyDaysAgo))
     )
+    // end snippet
+
+  // format: on
 
   // ---- Test support
 
@@ -351,8 +458,12 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
     }
 
     "build the configuration of the Configuration Options block" in {
-      val config  = MemoryManagerConfig(contextTokenBudget = 500, autoExtractEntities = true)
+      // format: off
+      // snippet: config
+      val config = MemoryManagerConfig(contextTokenBudget = 500, autoExtractEntities = true)
       val tighter = config.withContextTokenBudget(250)
+      // end snippet
+      // format: on
       SimpleMemoryManager(config).contextTokenBudget shouldBe 500
       config.autoExtractEntities shouldBe true
       SimpleMemoryManager(tighter).contextTokenBudget shouldBe 250
@@ -397,8 +508,8 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       val knowledge = for {
         m <- recordEverything(SimpleMemoryManager.empty)
         k <- m.store.recall(MemoryFilter.ByType(MemoryType.Knowledge))
-      } yield k.map(memory => (memory.metadata.get("channel"), memory.importance))
-      knowledge.value shouldBe Seq((Some("stable"), None))
+      } yield k.map(memory => (memory.metadata.get("region"), memory.importance))
+      knowledge.value shouldBe Seq((Some("eu"), None))
     }
   }
 
@@ -626,9 +737,20 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
     "carry memory from one session to the next" in {
       withTempDb { path =>
         val memory = new PersistentMemory(path)
-        memory.withManager(_.recordUserFact("Likes Scala", Some("user-1"))).value
-        val context = memory.withManager(_.getUserContext(Some("user-1")))
-        context.value should include("Likes Scala")
+
+        // format: off
+        // snippet: sessions
+        // Session 1
+        val result1 = memory.withManager(_.recordUserFact("Likes Scala", Some("user-1")))
+
+        // Session 2 (later)
+        val result2 = memory.withManager(_.getUserContext(Some("user-1")))
+        // context includes "Likes Scala" from session 1
+        // end snippet
+        // format: on
+
+        result1.isRight shouldBe true
+        result2.value should include("Likes Scala")
       }
     }
   }
@@ -678,6 +800,22 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
         left <- s3.recall(MemoryFilter.All)
       } yield (n, left.flatMap(_.importance))
       remaining.value shouldBe ((1L, Seq(0.9)))
+    }
+  }
+
+  "The guide" should {
+    "show exactly the code this spec runs" in {
+      org.llm4s.testutil.GuideSnippets.check(
+        "docs/guide/agents/memory.md",
+        Seq("modules/memory/src/test/scala/org/llm4s/agent/memory/MemoryGuideSpec.scala"),
+        notRun = Set(
+          // the sbt dependency lines
+          "libraryDependencies += \"org.llm4s\" %% \"llm4s-memory\" % llm4sVersion",
+          "libraryDependencies += \"org.llm4s\" %% \"llm4s-agent-memory\" % llm4sVersion // same version as llm4s-agent",
+          // SemanticMemoryMiddleware is in llm4s-agent-memory, which this module does not depend on
+          "import org.llm4s.agent.Agent"
+        )
+      ) shouldBe empty
     }
   }
 }

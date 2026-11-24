@@ -134,45 +134,13 @@ jobs:
       
       - uses: sbt/setup-sbt@7e114eae4f32ec3f93c851c2793376a77f384409 # v1.5.15
 
-      # Fails when a docs page pins a literal llm4s version in an install snippet: the docs site fills in
-      # `latest_release` from the latest GitHub Release, so a literal one lags the release by design.
-      - name: Check install snippets do not pin a literal version
-        run: scripts/check-doc-versions.sh
-
-      # Fails when two docs pages under the same parent declare the same `nav_order`: the site then orders them by
-      # title instead, so the number stops meaning anything and nothing reports it (#1623).
-      - name: Check docs nav_order is unique within each parent
-        run: scripts/check-doc-nav-order.sh
-
-      # Fails when docs/_data/support.yml (the Support Policy's table of release lines) lacks CHANGELOG.md's newest
-      # release, or is malformed. The release workflow runs the same check against the tag before publishing (#2289).
-      - name: Check the support table lists the latest release
-        run: |
-          scripts/test-check-support-table.sh
-          scripts/check-support-table.sh
-
-      # Every docs page has its own search title and meta description, not the site-wide one: jekyll-seo-tag falls back
-      # to it, so a page without one looks like every other page in a search result. This reads the front matter; the
-      # built site is checked again in pages.yml before a deploy (#2314).
-      - name: Check docs pages have their own title and description
-        run: |
-          scripts/test-check-doc-seo.sh
-          scripts/check-doc-seo.sh
-
-      # The share-card and structured-data check that pages.yml runs on the built site (#2316), on fixture sites: a page
-      # without og:image or a large card, invalid JSON-LD or a stale SoftwareSourceCode version must fail it.
-      - name: Test the share-card and structured-data check
-        run: scripts/test-check-site-share-cards.sh
-
-      # llms.txt, llms-full.txt and llm4s-rules.md are built from the docs when the site is deployed (pages.yml). This
-      # builds them the same way and fails on a missing file, a dead link or an unmarked unchecked Scala block (#2287).
-      - name: Check llms.txt and llms-full.txt build from the docs
-        run: scripts/check-llms-txt.sh
-
-      # The cited-issue check itself needs the network and runs weekly and on docs pull requests
-      # (docs-cited-issues.yml); its tests run it against a fake `gh`.
-      - name: Test the cited-issue check
-        run: scripts/test-check-cited-issues.sh
+      # Every documentation check that needs no sbt, and the tests of those checks: install snippets, nav_order,
+      # the support table, titles and descriptions, share cards, llms.txt, the cited-issue check (against a fake `gh`;
+      # the online check is docs-cited-issues.yml), sitemaps, Scaladoc cross-links and search, internal links, the
+      # stability tiers, the Scala CLI, Mill, notebook and Flink quick starts. The list is scripts/check-docs.sh, so
+      # `scripts/check-docs.sh` runs locally exactly what this step runs (#2833).
+      - name: Check the docs
+        run: scripts/check-docs.sh
 
       # The release's docs deploy: release.yml dispatches pages.yml on `main` (the github-pages environment rejects a
       # tag ref, #1152) and waits for it. This runs the dispatcher against a fake `gh`, with no network, and checks that
@@ -185,18 +153,6 @@ jobs:
       # line and links, and that the release workflow's --check only warns.
       - name: Test the release post drafter
         run: scripts/test-new-release-post.sh
-
-      # The sitemap generator and check that pages.yml runs after the Jekyll build (#2318), on a fake built site.
-      - name: Test the sitemap scripts
-        run: scripts/test-check-site-sitemaps.sh
-
-      # Guides and Scaladoc cross-linked (#2291): the api.html link check and the Scaladoc cross-link check, which the
-      # ScalaDoc job runs on the real output, against a fake Scaladoc; the unified search index and its 20 queries,
-      # which pages.yml runs on the built site, against a fake site searched with just-the-docs's lunr (from npm).
-      - name: Test the Scaladoc cross-link and site search scripts
-        run: |
-          scripts/test-check-api-links.sh
-          scripts/test-check-site-search.sh
 
       # A merge queue on main waits for each required check to report on its merge group (#1638). Fails if CI, DCO or
       # the secret scan loses its merge_group trigger, if a required job or anything it needs would be skipped there,
@@ -223,14 +179,6 @@ jobs:
         run: |
           scripts/test-workspace-tier-changes.sh
           scripts/test-ci-changes.sh
-
-      # Fails on a broken internal link in docs/ that scripts/docs-link-baseline.txt does not list, and on a
-      # listed link that no longer breaks (the baseline only shrinks). Links are resolved the way llm4s.org serves
-      # them; see the header of the script. The test runs the check against fixture trees, with no network.
-      - name: Check internal docs links
-        run: |
-          scripts/test-check-docs-site-links.sh
-          scripts/check-docs-site-links.sh
 
       # Every sbt step below talks to this one sbt server through the thin client (`sbt --client`), instead of each
       # starting its own sbt: loading this build (65k settings) took 12-15 s per invocation, and there are some fifteen.
@@ -282,39 +230,6 @@ jobs:
       # never otherwise; this runs it against a fake command, with no network, to keep that true.
       - name: Test the transient-network retry wrapper
         run: scripts/test-retry-on-transient-network.sh
-
-      # The frozen set is written down in build.sbt (`mimaFrozen`), in three tier lists beside it, in
-      # docs/reference/v1-scope.md's Package Map and in two prose lists. This keeps them in step; it reads
-      # text only, so it needs no sbt.
-      - name: Check the documented stability tiers match the build
-        run: |
-          scripts/test-check-tier-drift.sh
-          scripts/check-tier-drift.sh
-
-      # The Scala CLI quick start pins a published llm4s version, which must be docs/_data/project.yml's
-      # latest_release (#1456). The offline check runs here; scala-cli-quickstart.yml adds Maven Central and a compile.
-      - name: Check the Scala CLI quick start pins the latest release
-        run: |
-          scripts/test-check-scala-cli-quickstart.sh
-          scripts/check-scala-cli-quickstart.sh
-
-      # The same for the Mill quick start (modules/samples/mill, #2293); mill-quickstart.yml builds and tests it.
-      - name: Check the Mill quick start pins the latest release
-        run: |
-          scripts/test-check-mill-quickstart.sh
-          scripts/check-mill-quickstart.sh
-
-      # The Almond notebooks (modules/samples/notebooks, #2296) pin latest_release and are committed without outputs;
-      # notebooks.yml executes them in the Almond kernel.
-      - name: Check the notebooks pin the latest release and carry no outputs
-        run: |
-          scripts/test-check-notebooks.sh
-          scripts/check-notebooks.sh
-
-      # The Flink guide's Scala snippets are excerpts of modules/samples/flink, which pins latest_release (#2298);
-      # flink-sample.yml runs the sample's MiniCluster test.
-      - name: Check the Flink guide's snippets are the sample's
-        run: scripts/check-flink-guide-snippets.sh
 
       # scripts/mima-dry-run.sh is a manual release-readiness script (it publishes the whole build, minutes). Its
       # tests run it against a fixture repository and a fake `sbt`, with no network, in about ten seconds, so the

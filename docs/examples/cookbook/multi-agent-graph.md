@@ -6,6 +6,9 @@ search_title: "A multi-agent graph in Scala: parallel agents and an editor"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 13
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1330]
 ---
 
 # Several agents in one graph

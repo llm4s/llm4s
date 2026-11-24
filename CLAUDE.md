@@ -175,6 +175,7 @@ sbt testOllama         # modules/it @Ollama tier
 sbt testSmoke          # modules/it @Cloud tier (live API keys)
 sbt testPerformance    # tests tagged PerformanceTest (LinearTime scaling checks), in core and agent; sbt test and coverage leave them out
 sbt testPlatform       # only the platform-sensitive tests (project/PlatformTests.scala): what CI's Windows job runs
+scripts/check-docs.sh  # every non-sbt doc check Quick Checks runs (links, llms.txt, SEO, ...); --cited-issues adds the online one
 sbt it/itTierCheck     # every suite in modules/it must declare exactly one tier
 sbt stabilityTierCheck # every top-level public type of a frozen module is @Stable or @Experimental
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"

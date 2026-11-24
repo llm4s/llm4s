@@ -1,6 +1,7 @@
 ---
 layout: page
 title: "RFC 0000: Template"
+description: "The template for an LLM4S RFC: summary, motivation, detailed design, alternatives, compatibility impact, migration and open questions."
 parent: RFCs
 grand_parent: Reference
 nav_exclude: true

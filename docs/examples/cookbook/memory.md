@@ -6,6 +6,9 @@ search_title: "Give an LLM memory between turns in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 12
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1594]
 ---
 
 # Remember facts between turns

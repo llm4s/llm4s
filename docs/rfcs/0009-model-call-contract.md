@@ -1,6 +1,7 @@
 ---
 layout: page
 title: "RFC 0009: The model call contract"
+description: "RFC 0009, implemented: what a successful LLM4S model call means, so a cut-off reply or truncated tool call is reported instead of passed as a result."
 parent: RFCs
 grand_parent: Reference
 nav_order: 9

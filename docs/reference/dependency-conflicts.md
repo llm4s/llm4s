@@ -5,6 +5,9 @@ description: "Resolve LLM4S dependency conflicts in sbt, Maven and Gradle: the d
 search_title: "Resolve LLM4S dependency conflicts: sbt, Maven, Gradle"
 parent: Reference
 nav_order: 13
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1496]
 ---
 
 # Dependency Conflict Resolution

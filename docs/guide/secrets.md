@@ -6,6 +6,9 @@ search_title: "Read LLM4S API keys from Vault or AWS Secrets Manager"
 parent: Operations
 nav_order: 704
 grand_parent: User Guide
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [2479]
 ---
 
 # Secrets and API key providers

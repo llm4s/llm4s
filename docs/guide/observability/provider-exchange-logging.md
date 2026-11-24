@@ -5,6 +5,9 @@ description: "Capture the raw request and response of each provider call in LLM4
 parent: Monitoring
 grand_parent: Operations
 nav_order: 1
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1576]
 ---
 
 # Provider Exchange Logging

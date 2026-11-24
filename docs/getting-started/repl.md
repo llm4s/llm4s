@@ -6,6 +6,9 @@ search_title: "Try LLM4S in the Scala REPL, a worksheet or a script"
 parent: Build Tools and Playgrounds
 nav_order: 6
 grand_parent: Getting Started
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [2296]
 ---
 
 # Try llm4s in the REPL
@@ -172,8 +175,8 @@ val answers = for {
 - **A Metals worksheet**: a `*.worksheet.sc` file with the `//> using dep` lines above. Metals shows each value
   beside its line; `ask` also prints the answer.
 - **A Scala CLI script**: a `*.sc` file, run with `scala-cli run hello.sc`.
-- **Almond notebooks** are tracked in [#2296](https://github.com/llm4s/llm4s/issues/2296); this page will link them
-  once they exist.
+- **An Almond notebook** in Jupyter: see [Notebooks](../guide/notebooks)
+  ([#2296](https://github.com/llm4s/llm4s/issues/2296)).
 
 The repository's [`examples/repl`](https://github.com/llm4s/llm4s/tree/main/examples/repl) has a script and a
 worksheet that run against `Session.offline`; CI runs both with Scala CLI against the library built from the

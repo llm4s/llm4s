@@ -133,13 +133,19 @@ addCommandAlias(
 // docs/ without the tag, or a module with tagged suites is missing here. `sbt test` runs them as before.
 lazy val DocsSpecTag = "org.llm4s.tags.DocsSpec"
 lazy val docsTestProjects = Seq(
+  "agentTools",
   "capabilities",
   "core",
   "examplesHttp",
   "javaApi",
   "javaRag",
+  "jev",
   "llm4sPekko",
+  "llm4sSttp",
+  "memory",
   "observabilityMicrometer",
+  "openaiCompatible",
+  "rag",
   "reactor",
   "samples",
   "schemaDerivation",

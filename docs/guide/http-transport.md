@@ -6,6 +6,9 @@ search_title: "Use your own sttp backend as the LLM4S HTTP transport"
 parent: Core
 nav_order: 112
 grand_parent: User Guide
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [2341]
 ---
 
 # Your HTTP client

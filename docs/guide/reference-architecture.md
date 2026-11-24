@@ -6,6 +6,9 @@ search_title: "LLM4S enterprise reference architecture"
 parent: Operations
 nav_order: 702
 grand_parent: User Guide
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [2115, 2273, 2313]
 ---
 
 # Enterprise Reference Architecture

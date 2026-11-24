@@ -8,6 +8,9 @@ permalink: /contribute/release
 redirect_from:
   - /reference/release
   - /reference/release.html
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: [1281, 2330]
+cites_closed_issues: [1150, 1152, 2778, 2785]
 ---
 
 # Release Process

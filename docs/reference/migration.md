@@ -4,6 +4,9 @@ title: Migration Guide
 description: "Per-change migration notes for LLM4S releases after 0.4.1, from Secret credentials to multimodal content parts and subagent changes."
 parent: Reference
 nav_order: 2
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: [1281]
+cites_closed_issues: [712, 922, 925, 960, 1126, 1128, 1129, 1130, 1131, 1132, 1133, 1215, 1242, 1270, 1277, 1278, 1279, 1307, 1326, 1327, 1328, 1329, 1330, 1331, 1381, 1388, 1408, 1699, 1700, 1701, 1702, 1703, 1704, 1705, 1708, 1847, 1848, 1901, 1902, 1903, 1906, 1907, 1908, 1911, 1913, 1914, 1915, 1921, 1926, 1934, 1939, 1983, 2044, 2063, 2071, 2129, 2262, 2263, 2264, 2265, 2266, 2275, 2276, 2300, 2311, 2345, 2346, 2356, 2358, 2360, 2377, 2378, 2379, 2380, 2381, 2382, 2383, 2384, 2478, 2531, 2785]
 ---
 
 # Migration Guide
@@ -5058,9 +5061,9 @@ you depend on the old behaviour.
 `OpenAICompatibleClient.complete` - DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and the generic
 `openai-compatible` provider - sent its request with no timeout, so an endpoint that never
 answered hung the caller. It now fails after two minutes (`OpenAICompatibleClient.RequestTimeout`),
-the value the old Mistral and Cohere clients used; streaming keeps five minutes. Neither is
-configurable yet ([#712](https://github.com/llm4s/llm4s/issues/712)): a slow local model with a
-long prompt should stream.
+the value the old Mistral and Cohere clients used; streaming keeps five minutes. Neither was
+configurable then; a provider section's `timeouts` block now sets both
+([#712](https://github.com/llm4s/llm4s/issues/712)).
 
 ### Streaming requests send `stream_options`
 

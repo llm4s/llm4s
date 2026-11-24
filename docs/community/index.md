@@ -4,6 +4,9 @@ title: Community
 description: "Join the LLM4S community: Discord, GitHub issues and contributions, the starter kit, talks and Google Summer of Code."
 search_title: "LLM4S community: Discord, GitHub and contributing"
 nav_order: 8
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [2115]
 ---
 
 # Community

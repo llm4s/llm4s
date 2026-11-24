@@ -5,6 +5,9 @@ description: "Configure the LLM4S workspace sandbox: command allowlists, program
 search_title: "LLM4S workspace sandbox configuration"
 parent: Reference
 nav_order: 17
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [870, 1721, 1728, 1730, 1738, 1756, 1761, 1763, 1766, 1774, 1776, 1790, 1792, 1805, 1807, 1845, 1906, 1983, 2008, 2009, 2014]
 ---
 
 # Workspace Sandbox Configuration

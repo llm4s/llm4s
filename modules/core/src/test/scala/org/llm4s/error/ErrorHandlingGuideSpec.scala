@@ -16,28 +16,35 @@ import scala.concurrent.duration._
 import scala.util.Try
 
 /**
- * The snippets of `docs/guide/error-handling.md`, compiled and run as written.
+ * The snippets of `docs/guide/error-handling.md`, run as written (`DocSnippets` compiles the page).
  *
- * If a snippet here stops compiling or its assertion fails, the guide is teaching something that
- * no longer works: change the guide and this spec together. Each `snippet` method below is the
- * code of one block in the guide; the assertions pin what the surrounding prose claims. Section 1 only
- * shows definitions, and section 10's snippet is the class [[ResultSpec]] below, run as a nested suite.
+ * Each `// snippet:` region is part of one of the guide's Scala blocks word for word, and the last test reads the page
+ * and fails unless every region is on it and every block of it is run or listed as not run (`GuideSnippets`, #2833),
+ * so the page and this spec cannot drift. The assertions pin what the surrounding prose claims. Section 10's snippet
+ * is the class [[ResultSpec]] below, run as a nested suite. The regions sit between `format: off` lines, so scalafmt
+ * keeps the page's layout.
  */
+@org.llm4s.tags.DocsSpec
 class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
 
   override def nestedSuites: IndexedSeq[Suite] = Vector(new ResultSpec)
 
+  // format: off
+
   // ---- 2. The basic pattern
 
-  private def basicPattern(result: Result[Completion]): String =
+  // snippet: basic-pattern
+  def basicPattern(result: Result[Completion]): String =
     result match {
       case Right(completion) => s"Response: ${completion.content}"
       case Left(error)       => s"Error: ${error.message}"
     }
+  // end snippet
 
   // ---- 3. Chaining with for-comprehensions
 
-  private def chained(): Result[String] =
+  // snippet: chained
+  def chained(): Result[String] =
     for {
       providerConfig <- Llm4sConfig.defaultProvider()
       registry       <- Llm4sConfig.modelRegistryService()
@@ -46,27 +53,33 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
       conversation <- Conversation.userOnly("What is Scala?")
       completion   <- client.complete(conversation)
     } yield completion.content
+  // end snippet
 
   // ---- 5. Handling specific error types
 
-  private def describe(result: Result[String]): String =
+  // snippet: describe
+  def describe(result: Result[String]): String =
     result match {
-      case Right(text)             => s"ok: $text"
-      case Left(e: RateLimitError) => s"wait ${e.retryDelay.getOrElse(RateLimitError.DefaultRetryDelay)}, then retry"
+      case Right(text) => s"ok: $text"
+      case Left(e: RateLimitError) =>
+        s"wait ${e.retryDelay.getOrElse(RateLimitError.DefaultRetryDelay)}, then retry"
       case Left(e: AuthenticationError) => s"fix the credentials for ${e.provider}"
       case Left(e: RecoverableError)    => s"transient, may succeed on retry: ${e.message}"
       case Left(e)                      => s"not retried (permanent, or not marked either way): ${e.message}"
     }
+  // end snippet
 
   // ---- 9. Recovering from failures: `client` and `conversation` are "built as in section 3"
 
   private val client = new SimpleMock("recovered")
 
-  private val reliable = ReliableClient(
+  // snippet: reliable
+  val reliable = ReliableClient(
     client,
     providerName = "openai",
     config = ReliabilityConfig(retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second))
   )
+  // end snippet
 
   private def recovering() = reliable.complete(conversation)
 
@@ -93,13 +106,19 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
   // ---- 6. Converting to exceptions
 
-  private def orThrow[A](result: Result[A]): A =
+  // snippet: or-throw
+  def orThrow[A](result: Result[A]): A =
     result.fold(error => throw new RuntimeException(error.formatted), identity)
+  // end snippet
 
   // ---- 8. Combining many Results
 
-  private def parseAll(inputs: List[String]): Result[List[Int]] =
+  // snippet: parse-all
+  def parseAll(inputs: List[String]): Result[List[Int]] =
     Result.traverse(inputs)(s => Try(s.toInt).toResult)
+  // end snippet
+
+  // format: on
 
   private val conversation: Conversation = Conversation.userOnly("hi").value
 
@@ -142,7 +161,9 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
     }
 
     "need a catch-all, because LLMError is an open trait (not sealed), and a custom error mixes in a marker" in {
-      final case class VendorError(message: String)      extends LLMError with NonRecoverableError
+      // snippet: vendor-error
+      final case class VendorError(message: String) extends LLMError with NonRecoverableError
+      // end snippet
       final case class FlakyVendorError(message: String) extends LLMError with RecoverableError
       describe(Left(VendorError("custom"))) shouldBe
         "not retried (permanent, or not marked either way): custom"
@@ -359,10 +380,27 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
       RetryPolicy.exponentialBackoff().isRetryable(rejected) shouldBe false
     }
   }
+
+  "the guide" should {
+    "show exactly the code this spec runs" in {
+      org.llm4s.testutil.GuideSnippets.check(
+        "docs/guide/error-handling.md",
+        Seq("modules/core/src/test/scala/org/llm4s/error/ErrorHandlingGuideSpec.scala"),
+        notRun = Set(
+          "type Result[+A] = Either[LLMError, A]", // section 1: the definition, not code to run
+          "import org.llm4s.syntax.toResult // Try(...).toResult; or org.llm4s.syntax.* for all the extensions", // imports
+          // expressions shown with their results; "converting exceptions into errors" runs each with an assertion
+          "import org.llm4s.error.NotFoundError",
+          "import org.llm4s.error.{ ConfigurationError, NotFoundError, ValidationError }" // constructors only
+        )
+      ) shouldBe empty
+    }
+  }
 }
 
 /** Section 10's snippet, as the guide shows it; [[ErrorHandlingGuideSpec]] runs it as a nested suite. */
 private class ResultSpec extends AnyWordSpec with Matchers with EitherValues {
+  // snippet: result-spec
   "a Result" should {
     "unwrap with EitherValues, and check the error type" in {
       val ok: Result[String]     = Right("expected")
@@ -374,4 +412,5 @@ private class ResultSpec extends AnyWordSpec with Matchers with EitherValues {
       failed.left.value.message should include("empty")
     }
   }
+  // end snippet
 }

@@ -6,6 +6,9 @@ search_title: "Agent memory in Scala: persistent context across turns"
 nav_order: 3
 parent: Agents
 grand_parent: User Guide
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1579, 1594]
 ---
 
 # Memory System
@@ -619,13 +622,15 @@ distinct conversations) and `embeddedCount`. `byType` leaves out types with no m
 ```scala
 import scala.util.Using
 
+val path = "memory.db"
+
 // Both opened stores close even when a Result is Left.
-val result = SQLiteMemoryStore("memory.db").flatMap { store =>
+val result = SQLiteMemoryStore(path).flatMap { store =>
   Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
     SimpleMemoryManager.withStore(store).recordUserFact("Likes Scala", Some("user-1")).map(_ => ())
   }
 }.flatMap { _ =>
-  SQLiteMemoryStore("memory.db").flatMap { reopened =>
+  SQLiteMemoryStore(path).flatMap { reopened =>
     Using.resource(new AutoCloseable { override def close(): Unit = reopened.close() }) { _ =>
       SimpleMemoryManager.withStore(reopened).getUserContext(Some("user-1"))
     }

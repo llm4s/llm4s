@@ -2,8 +2,11 @@
 layout: default
 title: People
 nav_order: 12
-description: "People who build, maintain, and grow LLM4S."
+description: "The people who build, maintain and grow LLM4S: directors, maintainers, committees, chapter leaders, contributors and volunteers."
 permalink: /people/
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1117]
 ---
 
 # LLM4S People

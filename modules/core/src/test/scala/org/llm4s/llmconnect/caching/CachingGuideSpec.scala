@@ -25,8 +25,10 @@ import scala.concurrent.duration._
  * If a snippet stops compiling or an assertion fails, the guide is teaching something that no longer works:
  * change the guide and this spec together. The blocks themselves are in [[guide.CachingGuideSnippets]], each
  * with only the imports the guide shows for it; the assertions here pin what the surrounding prose claims. The stand-ins at the bottom replace the
- * real provider clients, which the guide's snippets receive as `baseClient` and `embeddingClient`.
+ * real provider clients, which the guide's snippets receive as `baseClient` and `embeddingClient`. The last test reads
+ * the page and fails unless every block of it is one of those snippets, word for word (`GuideSnippets`, #2833).
  */
+@org.llm4s.tags.DocsSpec
 class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with OptionValues {
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
@@ -383,6 +385,15 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
       llm.calls.get shouldBe 3
       client.complete(conversation("two")) // was evicted
       llm.calls.get shouldBe 4
+    }
+  }
+
+  "the guide" should {
+    "show exactly the code of CachingGuideSnippets" in {
+      org.llm4s.testutil.GuideSnippets.check(
+        "docs/guide/caching.md",
+        Seq("modules/core/src/test/scala/org/llm4s/llmconnect/caching/guide/CachingGuideSnippets.scala")
+      ) shouldBe empty
     }
   }
 

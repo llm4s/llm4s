@@ -4,6 +4,9 @@ title: 1.0 launch plan
 description: "How LLM4S 1.0 is announced beyond the Scala community: Show HN, r/java and r/Kotlin, JVM newsletters, InfoQ and cross-posts, with dates, owners and drafts."
 search_title: "LLM4S 1.0 launch plan for the wider JVM community"
 nav_exclude: true
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: [1281, 2302, 2310, 2323, 2324]
+cites_closed_issues: [2286, 2316, 2319, 2322]
 ---
 
 # 1.0 launch plan

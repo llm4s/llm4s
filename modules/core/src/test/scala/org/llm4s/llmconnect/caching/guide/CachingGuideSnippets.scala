@@ -7,7 +7,8 @@ package org.llm4s.llmconnect.caching.guide
  * `org.llm4s.llmconnect.caching` is in scope by accident: each block compiles with exactly the imports the
  * guide shows for it. The method parameters stand in for the values the guide's prose supplies (`base`,
  * `baseClient`, `embeddingClient`, `tracing`, `cacheConfig`, `clock`); they are not part of the blocks, so
- * their types are fully qualified.
+ * their types are fully qualified. Each block is a `// snippet:` region, which `CachingGuideSpec` checks against the
+ * page word for word (`GuideSnippets`, #2833).
  */
 object CachingGuideSnippets {
 
@@ -16,6 +17,7 @@ object CachingGuideSnippets {
   def embeddingCache(
     base: org.llm4s.llmconnect.provider.EmbeddingProvider
   ): org.llm4s.types.Result[Option[org.llm4s.llmconnect.caching.CacheStats]] = {
+    // snippet: embedding-cache
     import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
     import org.llm4s.llmconnect.model.EmbeddingRequest
@@ -29,11 +31,13 @@ object CachingGuideSnippets {
       _ <- cached.embed(EmbeddingRequest(Seq("hello", "world"), model)) // two misses, sent as one batched call
       _ <- cached.embed(EmbeddingRequest(Seq("hello", "again"), model)) // "hello" is served from the cache
     } yield cached.cacheStats
+    // end snippet
   }
 
   def queryCache(
     base: org.llm4s.llmconnect.provider.EmbeddingProvider
   ): org.llm4s.types.Result[Option[org.llm4s.llmconnect.caching.CacheStats]] = {
+    // snippet: query-cache
     import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
     import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
@@ -47,19 +51,23 @@ object CachingGuideSnippets {
       _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a hit
       _ <- queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model))                     // a miss: a document
     } yield queries.cacheStats
+    // end snippet
   }
 
   def asEmbeddingClient(base: org.llm4s.llmconnect.provider.EmbeddingProvider)(using
     org.llm4s.model.ModelRegistryService
   ): org.llm4s.types.Result[org.llm4s.llmconnect.EmbeddingClient] = {
+    // snippet: as-embedding-client
     import org.llm4s.llmconnect.EmbeddingClient
     import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
 
     // A CachedEmbeddingClient is an EmbeddingProvider; wrap it where an EmbeddingClient is required.
     InMemoryEmbeddingCache.create().map(cache => EmbeddingClient(new CachedEmbeddingClient(base, cache)))
+    // end snippet
   }
 
   class TenantKey(base: org.llm4s.llmconnect.provider.EmbeddingProvider) {
+    // snippet: tenant-key
     import org.llm4s.llmconnect.caching.{ CacheKeyGenerator, CachedEmbeddingClient, InMemoryEmbeddingCache }
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
     import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
@@ -72,9 +80,11 @@ object CachingGuideSnippets {
       InMemoryEmbeddingCache.create().map(cache => new CachedEmbeddingClient(base, cache, tenantKey("tenant-a")))
 
     cached.flatMap(_.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("text-embedding-3-small", 1536))))
+    // end snippet
   }
 
   object OwnStorage {
+    // snippet: own-storage
     import org.llm4s.llmconnect.caching.{ CacheStats, EmbeddingCache }
     import org.llm4s.types.Result
     import java.util.concurrent.ConcurrentHashMap
@@ -95,11 +105,13 @@ object CachingGuideSnippets {
       def clear(): Result[Unit]                                  = { store.clear(); Right(()) }
       override def stats(): Option[CacheStats] = Some(CacheStats(store.size(), hits.get(), misses.get()))
     }
+    // end snippet
   }
 
   // ---- 4. Caching completions
 
   def config(): org.llm4s.types.Result[org.llm4s.llmconnect.caching.CacheConfig] = {
+    // snippet: cache-config
     import org.llm4s.llmconnect.caching.CacheConfig
     import scala.concurrent.duration._
 
@@ -108,6 +120,7 @@ object CachingGuideSnippets {
       ttl = 5.minutes,            // an older entry is ignored
       maxSize = 100               // least recently used entry is evicted beyond this
     )
+    // end snippet
   }
 
   def semanticCache(
@@ -116,6 +129,7 @@ object CachingGuideSnippets {
     tracing: org.llm4s.trace.Tracing,
     cacheConfig: org.llm4s.llmconnect.caching.CacheConfig
   ): org.llm4s.llmconnect.caching.CachingLLMClient = {
+    // snippet: semantic-cache
     import org.llm4s.llmconnect.caching.CachingLLMClient
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
 
@@ -126,6 +140,7 @@ object CachingGuideSnippets {
       config = cacheConfig,
       tracing = tracing
     )
+    // end snippet
   }
 
   def ttlClock(
@@ -135,6 +150,7 @@ object CachingGuideSnippets {
     cacheConfig: org.llm4s.llmconnect.caching.CacheConfig,
     clock: java.time.Clock
   ): org.llm4s.llmconnect.caching.CachingLLMClient = {
+    // snippet: ttl-clock
     import org.llm4s.llmconnect.caching.CachingLLMClient
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
 
@@ -147,11 +163,13 @@ object CachingGuideSnippets {
       tracing,
       clock
     )
+    // end snippet
   }
 
   // ---- 5. Seeing what the cache did
 
   object Observing {
+    // snippet: observing
     import org.llm4s.trace.{ TraceEvent, Tracing }
     import org.llm4s.types.Result
     import scala.collection.mutable.ListBuffer
@@ -169,5 +187,6 @@ object CachingGuideSnippets {
       case TraceEvent.CacheMiss(reason, _)               => s"miss: ${reason.value}"
       case other                                         => other.eventType
     }
+    // end snippet
   }
 }

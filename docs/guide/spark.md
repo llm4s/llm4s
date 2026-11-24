@@ -6,6 +6,9 @@ search_title: "Call LLMs from Spark and Databricks with LLM4S"
 parent: RAG and Data
 nav_order: 308
 grand_parent: User Guide
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1354]
 ---
 
 # Using LLM4S from Spark and Databricks

@@ -17,7 +17,8 @@ import java.time.Instant
  * `agent` and `agent-tools` are separate modules that do not depend on each other, so the tool snippets are
  * checked by `BuiltinToolsGuideSpec` in `agent-tools` and this one, which needs both, lives here. The client is a
  * script, not a model: it asks for the calculator once and then answers with what the tool returned, which shows
- * the registry built from a bundle really is what the agent runs its tool calls against.
+ * the registry built from a bundle really is what the agent runs its tool calls against. The `// snippet:` region is
+ * checked against the page, word for word, by `BuiltinToolsGuideSpec` (`GuideSnippets`, #2833).
  */
 class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherValues {
 
@@ -64,14 +65,17 @@ class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherVa
   "The agent snippet" should "run a tool call against a registry built from a bundle" in {
     val client = new CalculatorScript
 
-    // The snippet of the guide, from here ...
+    // format: off
+    // snippet: agent
+    // `client` is an LLMClient: see Basic Usage for how to create one
     val result = for {
       tools        <- BuiltinTools.coreSafe
       toolRegistry <- ToolRegistry.of(tools)
       agent        <- Agent.builder("calculator-agent", client).withTools(toolRegistry).build()
       state        <- agent.run("What is 15% of 850?")
     } yield state
-    // ... to here.
+    // end snippet
+    // format: on
 
     val answer = result.value.answer.getOrElse(fail(s"the run did not complete: ${result.value.status}"))
     answer should include("127.5")

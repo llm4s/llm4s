@@ -1,6 +1,7 @@
 ---
 layout: page
 title: "RFC 0008: Generation controls and reported adjustments"
+description: "RFC 0008, implemented: the generation controls a model call takes, and how a provider reports the adjustments it made to them."
 parent: RFCs
 grand_parent: Reference
 nav_order: 8

@@ -5,6 +5,9 @@ description: "Which parts of the LLM4S API are safe to build on ahead of 1.0: ma
 search_title: "LLM4S 1.0 scope: stable, beta and experimental APIs"
 parent: Reference
 nav_order: 6
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: [1281, 2280]
+cites_closed_issues: [1023, 1126, 1128, 1129, 1130, 1131, 1132, 1133, 1141, 1242, 1493, 1582, 2274, 2479, 2778, 2785, 2818]
 ---
 
 # 1.0 Scope

@@ -6,6 +6,9 @@ search_title: "Use LLM4S with Micronaut: LLM client as a bean"
 parent: Java and Kotlin
 nav_order: 410
 grand_parent: User Guide
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: [1463]
+cites_closed_issues: []
 ---
 
 # Using LLM4S with Micronaut

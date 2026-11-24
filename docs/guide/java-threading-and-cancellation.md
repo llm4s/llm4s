@@ -5,6 +5,9 @@ description: "Which thread an llm4s-java-api call blocks, whether a client can b
 parent: Java and Kotlin
 nav_order: 405
 grand_parent: User Guide
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1330]
 ---
 
 # Java Threading and Cancellation

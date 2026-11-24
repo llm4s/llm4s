@@ -6,6 +6,9 @@ search_title: "Build AI agents in Scala with LLM4S"
 nav_order: 200
 parent: User Guide
 has_children: true
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1750]
 ---
 
 # Agent Framework

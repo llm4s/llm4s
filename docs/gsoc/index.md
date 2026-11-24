@@ -4,7 +4,7 @@ title: Google Summer of Code
 nav_order: 10
 has_children: true
 permalink: /gsoc/
-description: "LLM4S participation in Google Summer of Code."
+description: "LLM4S in Google Summer of Code: the years it took part, the project ideas, and how students apply through the Scala Center."
 ---
 
 # Google Summer of Code (GSoC)

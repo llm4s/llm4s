@@ -6,6 +6,9 @@ search_title: "LLM providers for Scala: OpenAI, Anthropic, Gemini, Ollama"
 parent: Core
 nav_order: 102
 grand_parent: User Guide
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1023, 1133, 1215, 2274]
 ---
 
 # Providers Guide

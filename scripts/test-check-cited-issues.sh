@@ -73,6 +73,29 @@ expect_fail "an issue whose state cannot be read" "Could not read the state of #
 page $'title2: x' "$(link 1) in the body, with no lists in the front matter"
 expect_fail "a page with links but no lists" "links #1, which neither"
 
+# With no arguments the check finds the pages itself (#2833): a guide page that links an issue must declare it, a
+# design record is skipped unless it declares a list, and a declared design record is checked.
+DOCS="$WORK/docs"
+mkdir -p "$DOCS/guide" "$DOCS/design"
+run_default() { GH="$WORK/gh" DOCS_ROOT="$DOCS" "$CHECK" > "$WORK/out" 2>&1; }
+expect_default() {
+  local name="$1" outcome="$2" message="${3:-}"
+  if run_default; then
+    [ "$outcome" = pass ] && PASSED=$((PASSED + 1)) || { FAILED=$((FAILED + 1)); echo "FAIL: $name: expected failure"; }
+  elif [ "$outcome" = fail ] && grep -qF -- "$message" "$WORK/out"; then
+    PASSED=$((PASSED + 1))
+  else
+    FAILED=$((FAILED + 1)); echo "FAIL: $name: expected $outcome ${message:+with '$message'} in:"; cat "$WORK/out"
+  fi
+}
+printf -- '---\ntitle: G\n---\n\n%s\n' "$(link 1)" > "$DOCS/guide/g.md"
+printf -- '---\ntitle: D\n---\n\n%s\n' "$(link 2)" > "$DOCS/design/d.md"
+expect_default "a guide page found by default that declares nothing" fail "guide/g.md links #1, which neither"
+printf -- '---\ntitle: G\ncites_open_issues: [1]\ncites_closed_issues: []\n---\n\n%s\n' "$(link 1)" > "$DOCS/guide/g.md"
+expect_default "an undeclared design record is not checked" pass
+printf -- '---\ntitle: D\ncites_open_issues: [2]\ncites_closed_issues: []\n---\n\n%s\n' "$(link 2)" > "$DOCS/design/d.md"
+expect_default "a design record that declares a list is checked" fail "design/d.md cites #2 as open, but it is closed"
+
 # The real comparison page is well-formed: every issue it links is listed. (Its states are checked in CI, online.)
 awk 'NR == 1 && $0 == "---" { inside = 1; next } inside && $0 == "---" { exit } inside { print }' \
   "$REPO_ROOT/docs/guide/comparison.md" | grep -q '^cites_open_issues:' &&

@@ -5,6 +5,9 @@ description: "The upgrade path to LLM4S 1.0 from any 0.x release: which migratio
 search_title: "Migrate LLM4S from 0.x to 1.0"
 parent: Migrations
 nav_order: 10
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1131]
 ---
 
 # Migrating from 0.x to 1.0

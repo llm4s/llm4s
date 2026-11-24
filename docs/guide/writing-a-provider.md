@@ -6,6 +6,9 @@ search_title: "Write a custom LLM provider module for LLM4S"
 parent: Core
 nav_order: 115
 grand_parent: User Guide
+# Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one changes state.
+cites_open_issues: []
+cites_closed_issues: [1493, 1818]
 ---
 
 # Writing a Provider
@@ -822,7 +825,7 @@ The testkit **requires JDK 21**: `assertCancelsWhenInterrupted` and its siblings
 virtual thread (`Thread.ofVirtual`), and `LocalProviderTestServer` answers on
 `Executors.newVirtualThreadPerTaskExecutor`, both JDK 21 APIs. The build that runs your
 `Llm4s<Name>ModuleSpec` needs a JDK 21 toolchain, whatever your provider module itself targets
-(the library's own minimum JDK is settled in
+(the library's own minimum JDK is 21 too, settled in
 [#1493](https://github.com/llm4s/llm4s/issues/1493)).
 
 It has these parts, all in `org.llm4s.testkit`:
