@@ -127,7 +127,6 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
     "record no prompt or completion text by default" in withTracing() { (tracing, spans) =>
       TracingLLMClient(new Stub("openai"), tracing).complete(conversation, options)
       TracingLLMClient(new Stub("openai"), tracing).streamComplete(conversation, options, _ => ())
-      tracing.traceEvent(TraceEvent.AgentInitialized(Prompt, Vector("search")))
       tracing.traceEvent(
         TraceEvent.ToolExecuted("search", Prompt, Answer, scala.concurrent.duration.Duration.Zero, true)
       )
@@ -250,13 +249,11 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
         input(2)("parts")(0)("response").str shouldBe "Paris"
     }
 
-    "record an agent's query and tool input and output, redacted" in withTracing(captureContent = true) {
-      (tracing, spans) =>
-        tracing.traceEvent(TraceEvent.AgentInitialized(Prompt, Vector.empty))
-        tracing.traceEvent(TraceEvent.ToolExecuted("t", Prompt, Answer, scala.concurrent.duration.Duration.Zero, true))
-        val texts = recorded(spans())
-        texts.exists(_.contains("capital of France")) shouldBe true
-        texts.filter(_.contains(Secret)) shouldBe empty
+    "record a tool's input and output, redacted" in withTracing(captureContent = true) { (tracing, spans) =>
+      tracing.traceEvent(TraceEvent.ToolExecuted("t", Prompt, Answer, scala.concurrent.duration.Duration.Zero, true))
+      val texts = recorded(spans())
+      texts.exists(_.contains("capital of France")) shouldBe true
+      texts.filter(_.contains(Secret)) shouldBe empty
     }
   }
 
@@ -282,18 +279,24 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
           "thread-1",
           "run-1",
           "assistant",
-          "completed",
+          TraceEvent.RunStatus.Completed,
           Seq.empty,
           UsageSummary(),
           t0.plusSeconds(2),
           span = Some(TraceSpan(run, None, t0)),
-          provider = Some(ProviderId("bedrock"))
+          provider = Some(ProviderId("bedrock")),
+          blockedBy = Some("pii"),
+          activeAgent = Some("billing")
         )
       )
 
       val byName = spans().map(s => s.getName -> s).toMap
       str(byName("chat claude-sonnet-4-5"), "gen_ai.provider.name") shouldBe "anthropic"
       str(byName("invoke_agent assistant"), "gen_ai.provider.name") shouldBe "aws.bedrock"
+      // the span is the root agent's; the guardrail and the agent active at the end are attributes (#2829)
+      str(byName("invoke_agent assistant"), "gen_ai.agent.name") shouldBe "assistant"
+      str(byName("invoke_agent assistant"), "blocked_by") shouldBe "pii"
+      str(byName("invoke_agent assistant"), "active_agent") shouldBe "billing"
     }
   }
 

@@ -49,7 +49,14 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
    * `llm4s-agent`, whose `AgentRunTracingSpec` covers building it.
    */
   private val agentRunEnded =
-    TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", runMessages, UsageSummary())
+    TraceEvent.AgentRunEnded(
+      "thread-1",
+      "run-1",
+      "assistant",
+      TraceEvent.RunStatus.Completed,
+      runMessages,
+      UsageSummary()
+    )
 
   private val completionWithToolCalls = Completion(
     id = "completion-1",
@@ -64,28 +71,27 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
   /** One of every `TraceEvent` case. */
   private val everyEvent: Seq[TraceEvent] = Seq(
-    TraceEvent.AgentInitialized("What is 1 + 2?", Vector("calculator")),
     TraceEvent.CompletionReceived("completion-1", "test-model", toolCalls = 1, content = ""),
     TraceEvent.ToolExecuted("calculator", """{"a":1,"b":2}""", "3", duration = 5.millis, success = true),
     TraceEvent.ToolExecuted("calculator", "{}", "missing argument 'a'", duration = 1.millis, success = false),
-    TraceEvent.ErrorOccurred(new IllegalStateException("boom", new RuntimeException("cause")), "agent step"),
+    TraceEvent.ErrorOccurred.of(new IllegalStateException("boom", new RuntimeException("cause")), "agent step"),
     TraceEvent.TokenUsageRecorded(usage, "test-model", "completion"),
     agentRunEnded,
     TraceEvent.CustomEvent("custom", ujson.Obj("nested" -> ujson.Arr(1, 2, 3))),
     TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(100, 100), "embed-model", "indexing", inputCount = 4),
     TraceEvent.CostRecorded(0.002, "test-model", "completion", tokenCount = 20, costType = "total"),
     TraceEvent.RAGOperationCompleted("answer", 150.millis, Some(100), Some(12), Some(8), Some(0.003)),
-    TraceEvent.ImageGenerationCompleted("image-model", "provider", "generate", 1, "1024x1024", "hd", 900.millis),
+    TraceEvent.ImageGenerationCompleted("image-model", "generate", 1, "1024x1024", "hd", 900.millis),
     TraceEvent.CacheHit(similarity = 0.97, threshold = 0.9),
     TraceEvent.CacheMiss(TraceEvent.CacheMissReason.TtlExpired)
   )
 
   /**
-   * An exception that fails the test if anything reads it. A tracer that renders the error -
+   * An exception that fails the test if anything reads more than its message, which the event carries. A tracer that renders the error -
    * as `ConsoleTracing` and `LangfuseTracing` do - would call `getMessage` or `getStackTrace`.
    */
   private class UntouchableException extends RuntimeException {
-    override def getMessage: String                      = fail("NoOpTracing read the error's message")
+    override def getMessage: String                      = "untouchable"
     override def getStackTrace: Array[StackTraceElement] = fail("NoOpTracing read the error's stack trace")
     override def getCause: Throwable                     = fail("NoOpTracing read the error's cause")
     override def toString: String                        = fail("NoOpTracing rendered the error")
@@ -133,13 +139,13 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
     everyEvent.foreach(event => withClue(event.eventType)(tracing.traceEvent(event) shouldBe Right(())))
     // Every case is represented, so a new TraceEvent case shows up here as a missing type.
-    everyEvent.map(_.eventType).distinct should have size 13
+    everyEvent.map(_.eventType).distinct should have size 12
   }
 
   it should "trace agent state as an ordinary event, whatever the state holds" in {
     val tracing = new NoOpTracing()
     val empty   = agentRunEnded.withMessages(Seq.empty)
-    val failed  = agentRunEnded.withStatus("failed")
+    val failed  = agentRunEnded.withStatus(TraceEvent.RunStatus.Failed)
 
     tracing.traceEvent(agentRunEnded) shouldBe Right(())
     tracing.traceEvent(empty) shouldBe Right(())
@@ -161,7 +167,7 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
     tracing.traceError(error) shouldBe Right(())
     tracing.traceError(error, "agent step") shouldBe Right(())
-    tracing.traceEvent(TraceEvent.ErrorOccurred(error, "agent step")) shouldBe Right(())
+    tracing.traceEvent(TraceEvent.ErrorOccurred.of(error, "agent step")) shouldBe Right(())
   }
 
   it should "succeed for completions with tool calls, thinking and no usage" in {

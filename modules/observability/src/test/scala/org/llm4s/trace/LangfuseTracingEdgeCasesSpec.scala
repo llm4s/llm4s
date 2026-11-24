@@ -11,7 +11,7 @@ import java.time.Instant
 
 class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
-  private def ended(status: String, messages: Seq[Message]): TraceEvent.AgentRunEnded =
+  private def ended(status: TraceEvent.RunStatus, messages: Seq[Message]): TraceEvent.AgentRunEnded =
     TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", status, messages, UsageSummary())
 
   private def makeTracing(mockClient: MockHttpClient) = new LangfuseTracing(
@@ -24,27 +24,6 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     httpClient = mockClient,
     restoreInterrupt = () => ()
   )
-
-  // =========================================================================
-  // traceEvent - AgentInitialized
-  // =========================================================================
-
-  "LangfuseTracing" should "handle AgentInitialized event" in {
-    val mock    = new MockHttpClient(HttpResponse(200, ""))
-    val tracing = makeTracing(mock)
-
-    val result = tracing.traceEvent(TraceEvent.AgentInitialized("test query", Vector("tool1", "tool2")))
-
-    result.isRight shouldBe true
-    mock.postCallCount shouldBe 1
-    val body  = ujson.read(mock.lastBody.get)
-    val event = body("batch")(0)
-    event("type").str shouldBe "trace-create"
-    event("body")("input").str shouldBe "test query"
-    event("body")("name").str shouldBe "LLM4S Agent Run"
-    event("body")("environment").str shouldBe "test"
-    event("body")("release").str shouldBe "v1.0.0"
-  }
 
   // =========================================================================
   // traceEvent - CompletionReceived
@@ -88,7 +67,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val result = tracing.traceEvent(TraceEvent.ErrorOccurred(new RuntimeException("test error"), "test-context"))
+    val result = tracing.traceEvent(TraceEvent.ErrorOccurred.of(new RuntimeException("test error"), "test-context"))
 
     result.isRight shouldBe true
     val body  = ujson.read(mock.lastBody.get)
@@ -104,10 +83,15 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   it should "carry a failed call's billed usage in the ErrorOccurred event's metadata (#2676)" in {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
-    val error   = TraceEvent.ErrorOccurred(new RuntimeException("filtered"), "chat", usage = Some(TokenUsage(7, 4, 11)))
+    val error = TraceEvent.ErrorOccurred("filtered", "ContentFilteredError", "chat", usage = Some(TokenUsage(7, 4, 11)))
 
     tracing.traceEvent(error).isRight shouldBe true
-    val usage = ujson.read(mock.lastBody.get)("batch")(0)("body")("metadata")("usage")
+    val body = ujson.read(mock.lastBody.get)("batch")(0)("body")
+    // the error's own type and message, not those of an exception wrapped around it (#2800)
+    body("metadata")("error_type").str shouldBe "ContentFilteredError"
+    body("statusMessage").str shouldBe "filtered"
+    body("metadata")("stack_trace").str shouldBe ""
+    val usage = body("metadata")("usage")
     usage("prompt_tokens").num shouldBe 7
     usage("completion_tokens").num shouldBe 4
     usage("total_tokens").num shouldBe 11
@@ -144,7 +128,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val result = tracing.traceEvent(ended("failed", Seq.empty))
+    val result = tracing.traceEvent(ended(TraceEvent.RunStatus.Failed, Seq.empty))
 
     result.isRight shouldBe true
     val body  = ujson.read(mock.lastBody.get)
@@ -157,7 +141,14 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
     val usage   = UsageSummary().add("m", TokenUsage(10, 5, 15), Some(0.5)).add("m", TokenUsage(2, 1, 3), None)
-    val event   = TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", Seq(UserMessage("hi")), usage)
+    val event = TraceEvent.AgentRunEnded(
+      "thread-1",
+      "run-1",
+      "assistant",
+      TraceEvent.RunStatus.Completed,
+      Seq(UserMessage("hi")),
+      usage
+    )
 
     tracing.traceEvent(event).isRight shouldBe true
     val metadata = ujson.read(mock.lastBody.get)("batch")(0)("body")("metadata")
@@ -309,7 +300,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracing = makeTracing(mock)
 
     val event = ended(
-      "completed",
+      TraceEvent.RunStatus.Completed,
       Seq(
         SystemMessage("You are helpful"),
         UserMessage("Hello"),
@@ -355,7 +346,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val call    = ToolCall("call-1", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
 
     val event = ended(
-      "completed",
+      TraceEvent.RunStatus.Completed,
       Seq(UserMessage("1 + 2?"), AssistantMessage(None, Seq(call)), ToolMessage("3", "call-1"), AssistantMessage("3"))
     )
 
@@ -379,7 +370,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val event = ended("blocked:profanity", Seq.empty)
+    val event = ended(TraceEvent.RunStatus.Blocked, Seq.empty).withBlockedBy("profanity")
 
     val result = tracing.traceEvent(event)
 
@@ -396,7 +387,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mock    = new MockHttpClient(HttpResponse(500, "boom"))
     val tracing = makeTracing(mock)
 
-    val event = ended("completed", Seq(UserMessage("Hello")))
+    val event = ended(TraceEvent.RunStatus.Completed, Seq(UserMessage("Hello")))
 
     tracing.traceEvent(event).isLeft shouldBe true
   }

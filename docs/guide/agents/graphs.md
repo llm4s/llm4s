@@ -239,7 +239,8 @@ val config = RunConfig(
 
 - `maxSupersteps` (default 1000) counts the supersteps of one run. A run that reaches it with work still scheduled
   fails with `GraphError.SuperstepLimitExceeded`; the checkpoint stays `Running`, and `recover` continues with a fresh
-  allowance.
+  allowance. The error is a `NonRecoverableError`, so nothing retries it for you: the limit guards against a graph
+  that does not stop, and continuing past it is your call.
 - `timeout` (default none) is measured from the run's claim on the thread. When it passes, the run stops as a cancel
   stops it and fails with `GraphError.DeadlineExceeded`; `recover` with a new budget continues it. Nodes can read the
   deadline as `context.deadline`.

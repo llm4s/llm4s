@@ -1,7 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.annotation.Stable
-import org.llm4s.error.{ ConfigurationError, UnknownError }
+import org.llm4s.error.{ ConfigurationError, LLMError, UnknownError }
 import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.llmconnect.model.{ Completion, EmbeddingUsage, TokenUsage }
 import org.llm4s.trace.spi.{ TracingBackend, TracingBackends }
@@ -37,7 +37,7 @@ import scala.util.control.NonFatal
  *
  * // Trace events functionally
  * for {
- *   _ <- tracing.traceEvent(TraceEvent.AgentInitialized("query", tools))
+ *   _ <- tracing.traceEvent(TraceEvent.CustomEvent("query_received", ujson.Obj("tools" -> tools.size)))
  *   _ <- tracing.traceTokenUsage(usage, "gpt-4", "completion")
  * } yield ()
  * }}}
@@ -106,7 +106,17 @@ trait Tracing extends AutoCloseable {
    * @param context the operation in which the error occurred, such as "fetching weather data"
    */
   final def traceError(error: Throwable, context: String = ""): Result[Unit] =
-    this.traceEvent(TraceEvent.ErrorOccurred(error, context))
+    this.traceEvent(TraceEvent.ErrorOccurred.of(error, context))
+
+  /**
+   * Records an `LLMError` - the `Left` of a `Result`, which is not an exception - with where it occurred: a
+   * [[TraceEvent.ErrorOccurred]] with its message and type, passed to `traceEvent`.
+   *
+   * @param error the error to record
+   * @param context the operation in which the error occurred, such as "fetching weather data"
+   */
+  final def traceError(error: LLMError, context: String): Result[Unit] =
+    this.traceEvent(TraceEvent.ErrorOccurred.of(error, context))
 
   /**
    * Records a completion received from a model: a [[TraceEvent.CompletionReceived]] - the completion's id, `model`,

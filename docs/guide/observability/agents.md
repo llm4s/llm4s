@@ -140,11 +140,11 @@ spans are named after the event: `graph.<event>` for the runtime's events (`grap
 
 | Span | From | OpenTelemetry | Langfuse |
 |---|---|---|---|
-| `invoke_agent <agent>` | `TraceEvent.AgentRunEnded`, once, when the run ends | `INTERNAL`; `gen_ai.operation.name` = `invoke_agent`, `gen_ai.agent.name`, `gen_ai.conversation.id` (the thread), `gen_ai.provider.name` (the run's first model call's), `thread_id`, `run_id`, `agent`, `status`, `message_count`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`; a delegated child's also `llm4s.parent.thread_id` and `llm4s.parent.run_id`. Status `ERROR` when `status` is `failed`, `cancelled` or `timed_out` | A span observation; metadata `framework`, `agent`, `status`, `thread_id`, `run_id`, `message_count`, `input_tokens`, `output_tokens`, `total_cost` and a child's `parent_thread_id`, `parent_run_id`; input the turn's first user message, output its last assistant message. Level `ERROR` (and `statusMessage` = the status) for the same three statuses |
+| `invoke_agent <agent>` | `TraceEvent.AgentRunEnded`, once, when the run ends | `INTERNAL`; `gen_ai.operation.name` = `invoke_agent`, `gen_ai.agent.name`, `gen_ai.conversation.id` (the thread), `gen_ai.provider.name` (the run's first model call's), `thread_id`, `run_id`, `agent`, `active_agent`, `status`, `blocked_by` (a blocked run's guardrail), `message_count`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`; a delegated child's also `llm4s.parent.thread_id` and `llm4s.parent.run_id`. Status `ERROR` when `status` is `failed`, `cancelled` or `timed_out` | A span observation; metadata `framework`, `agent`, `active_agent`, `status`, `blocked_by`, `thread_id`, `run_id`, `message_count`, `input_tokens`, `output_tokens`, `total_cost` and a child's `parent_thread_id`, `parent_run_id`; input the turn's first user message, output its last assistant message. Level `ERROR` (and `statusMessage` = the status) for the same three statuses |
 | `chat <model>` | `agent.model_call_completed` | `CLIENT`; `gen_ai.operation.name` = `chat`, `gen_ai.request.model`, `gen_ai.agent.name` (the agent that made the call), `gen_ai.conversation.id`, `gen_ai.provider.name`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `llm4s.model_call.attempt`, `llm4s.model_call.tool_calls`, `cost.usd` | A generation with `model` and `usage` (`input`, `output`, `total`, `unit` = `TOKENS`); metadata is the event's data |
 | `execute_tool <tool>` | `agent.tool_executed` | `INTERNAL`; `gen_ai.operation.name` = `execute_tool`, `gen_ai.tool.name`, `tool.name`, `gen_ai.tool.call.id`, `gen_ai.agent.name`, `gen_ai.conversation.id`, `data` (the event as JSON). Status `ERROR` when the outcome is `Errored` | A span; level `ERROR` when the outcome is `Errored`; metadata is the event's data |
 | `Token Usage - agent_completion` | `TraceEvent.TokenUsageRecorded`, one per model call that reported usage | `INTERNAL`; `gen_ai.request.model`, `operation`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.total_tokens` | An event with the same counts |
-| `Error` | `TraceEvent.ErrorOccurred` with context `agent run`, for a failed run or one that ended without a terminal event | `INTERNAL`; `error.message`, `error.type`, `context`; the exception recorded | An event, level `ERROR` |
+| `Error` | `TraceEvent.ErrorOccurred` with context `agent run`, for a failed run or one that ended without a terminal event | `INTERNAL`; `error.message`, `error.type` (the error's type, such as `NodeFailed`), `context` | An event, level `ERROR` |
 | `graph.*`, `agent.*` (the rest) | the other durable events | `INTERNAL`; `event.type` = `custom`, `data` (the event as JSON) | An event; input is the event's data |
 
 Every event's data holds `threadId`, `runId`, `seq`, `checkpointId`, `taskId` and `nodeId`, and the event's own
@@ -159,18 +159,20 @@ latency is the `llm4s.request.duration` metric below.
 
 ### The run's status
 
-`AgentRunEnded.status` is one of `completed`, `step_limit_reached`, `token_limit_reached`, `truncated`, `suspended`,
-`blocked:<guardrail>`, `cancelled`, `timed_out` or `failed`. Its `usage` is this run's own model calls, not the
-thread's earlier runs, so per-run figures add up; `agent` is the agent active when the run ended.
+`AgentRunEnded.status` is a `TraceEvent.RunStatus`, written as `completed`, `step_limit_reached`,
+`token_limit_reached`, `truncated`, `suspended`, `blocked`, `cancelled`, `timed_out` or `failed`; a blocked run's
+`blockedBy` names the guardrail. The `llm4s.agent.runs.ended` metric reports the same values. Its `usage` is this run's
+own model calls, not the thread's earlier runs, so per-run figures add up. `agent` is the run's root agent, the one it
+was started on, and `activeAgent` the agent active when the run ended.
 
 | What happened | In the trace |
 |---|---|
-| A handoff | Same run, same trace: an `agent.handed_off` span (`from`, `to`), later `chat` spans carry the new agent's `gen_ai.agent.name`, and `invoke_agent` is named after the agent active at the end |
+| A handoff | Same run, same trace: an `agent.handed_off` span (`from`, `to`), later `chat` spans carry the new agent's `gen_ai.agent.name`. `invoke_agent` stays named after the root agent; its `active_agent` is the agent active at the end |
 | A delegated subagent | A nested span, not a separate trace: the child's `invoke_agent` sits under the parent's `execute_tool task` span, on whichever machine ran it, with `llm4s.parent.*` set. In Langfuse the child creates no trace of its own. The parent's `agent.task_ended` carries the child's status and usage |
 | Suspended for approval or a question | `invoke_agent` with status `suspended`, sent when the run suspends; the suspending tool call is a span of its own (`execute_tool <tool>` with outcome `NeedsApproval` or `Asked`) |
-| Resumed | A new run with its own `invoke_agent`, in the same trace: under the context the first run continued, or else under the first run's span. In Langfuse each top-level run sends the trace again, and its run span has no parent |
+| Resumed | A new run with its own `invoke_agent`, in the same trace: under the context the first run continued, or else under the first run's span. In Langfuse each top-level run sends the trace again - an upsert by trace id, so the trace's input, output, metadata and timestamp are its latest run's - and its run span has no parent |
 | Recovered after a crash | A new run starting `graph.run_recovered` (with `takenOverFrom` when it took over an expired claim), placed as a resume is. The run that died sent no `AgentRunEnded`, so its events point at a run span the backend never receives |
-| Blocked by a guardrail | `agent.guardrail_blocked` (`guardrail`, `phase`), then `graph.task_failed` and `graph.run_failed`; status `blocked:<guardrail>`; no messages; not an `ERROR` span |
+| Blocked by a guardrail | `agent.guardrail_blocked` (`guardrail`, `phase`), then `graph.task_failed` and `graph.run_failed`; status `blocked`, `blocked_by` the guardrail; no messages; not an `ERROR` span |
 | Step or token limit | Status `step_limit_reached` or `token_limit_reached`; not an `ERROR` span |
 | Cancelled, timed out, failed | Status `cancelled`, `timed_out` or `failed`; `ERROR` span (Langfuse level `ERROR`); a failed run also sends an `Error` span |
 | Process died mid-run | No `AgentRunEnded`. A run that ends without its terminal event in a live process sends `Error` and logs a WARN |
@@ -180,7 +182,7 @@ thread's earlier runs, so per-run figures add up; `agent` is the agent active wh
 | Where | Content recorded | Setting |
 |---|---|---|
 | Durable events (`chat`, `execute_tool`, `graph.*`, `agent.*` spans) | None of the messages, tool arguments or results. They do carry the run's `tenantId` and `principal` (`graph.run_started`, `graph.run_resumed`, `graph.run_recovered`) and failure messages (`graph.task_failed`, `graph.run_failed`; for a guardrail block `Guardrail '<name>' blocked`, without its reason) | none |
-| OpenTelemetry `invoke_agent` | Message count only | `llm4s.tracing.opentelemetry.captureContent` (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`, default `false`) applies to `TracingLLMClient`'s spans and the `TraceEvent.AgentInitialized` and `TraceEvent.ToolExecuted` events, not to an agent run's spans |
+| OpenTelemetry `invoke_agent` | Message count only | `llm4s.tracing.opentelemetry.captureContent` (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`, default `false`) applies to `TracingLLMClient`'s spans and the `TraceEvent.ToolExecuted` event, not to an agent run's spans |
 | Langfuse | `AgentRunEnded.messages`: the turn's messages from its user message on, as the trace's input and output and one span per message. Empty when blocked, cancelled, timed out or failed | none in the backend; filter them out as below |
 | Console | Metadata only | `llm4s.tracing.console.captureContent` (default `false`) |
 
@@ -235,7 +237,7 @@ interrupt). The names below are Micrometer's; Prometheus writes `_` for `.`, add
 | Metric | Type | Labels | Meaning | Recorded by |
 |---|---|---|---|---|
 | `llm4s.agent.runs.started` | counter | `graph`, `trigger` (`start`, `resume`, `recover`) | Runs that began | checkpointer |
-| `llm4s.agent.runs.ended` | counter | `graph`, `status` (`completed`, `suspended`, `failed`, `cancelled`, `timed_out`) | Runs that ended with a terminal event | checkpointer |
+| `llm4s.agent.runs.ended` | counter | `graph`, `status` (`completed`, `step_limit_reached`, `token_limit_reached`, `truncated`, `suspended`, `blocked`, `cancelled`, `timed_out`, `failed`) | Runs that ended with a terminal event | checkpointer |
 | `llm4s.agent.run.duration` | timer, 100 ms to 1 h | `graph`, `status` | From the run's first event to its terminal event | checkpointer |
 | `llm4s.agent.claims` | counter | `result` (`acquired`, `taken_over`, `busy`, `failed`) | Thread claims asked of the store; `taken_over` replaced an expired claim | checkpointer |
 | `llm4s.agent.claim.renewals` | counter | `result` (`renewed`, `lost`, `failed`) | Claim renewals | checkpointer |
@@ -259,9 +261,10 @@ interrupt). The names below are Micrometer's; Prometheus writes `_` for `.`, add
 | `llm4s.agent.sweep.entries.reclaimed` | counter | none | Closed entries past their ticket lifetime reclaimed | worker |
 | `llm4s.agent.worker.drained` | counter | `result` (`finished`, `cancelled`, `abandoned`) | Runs of a draining worker, by how they ended | worker |
 
-- **Statuses differ from the trace's.** `runs.ended` counts the runtime's terminal event: a guardrail block is
-  `failed`, and a step- or token-limited turn is `completed`. Only child tasks (`tasks.ended`) and the trace's `status`
-  tell them apart.
+- **Statuses are the trace's.** `runs.ended` and `run.duration` report the status the run's `AgentRunEnded` does: a
+  guardrail block is `blocked`, not `failed`, and a step- or token-limited turn is `step_limit_reached` or
+  `token_limit_reached`, not `completed`. No label names the guardrail; that is the trace's `blocked_by`. A graph that
+  is not an agent turn ends `completed`, `suspended`, `failed`, `cancelled` or `timed_out`.
 - **A run that dies** without a terminal event ends nothing; its recovery counts as `runs.started{trigger="recover"}`.
 - **The queue gauges are store-wide**, sampled every `llm4s.agent.worker.metrics.queueDepthEvery` (15 seconds): every
   worker reports the same numbers, so aggregate with `max`, not `sum`.
@@ -312,9 +315,9 @@ In PromQL over the Prometheus series; thresholds are yours.
 | Machines dying mid-run | `rate(llm4s_agent_queue_lease_expiries_total[10m]) > 0`, `rate(llm4s_agent_runs_started_total{trigger="recover"}[10m])` | Runs recovered after their worker stopped renewing |
 | Workers cut off from the store | `increase(llm4s_agent_queue_lease_losses_total{reason="unrenewed"}[10m]) > 0`, `increase(llm4s_agent_claim_renewals_total{result=~"lost\|failed"}[10m]) > 0`, `increase(llm4s_agent_claims_total{result="failed"}[10m]) > 0` | Renewals not landing; runs cancelled or taken over |
 | Store unhealthy | `sum(rate(llm4s_agent_commit_duration_seconds_count{result="failed"}[5m])) > 0`, p99 of `llm4s_agent_commit_duration_seconds` | Commits failing or slow |
-| Runs failing | `sum(rate(llm4s_agent_runs_ended_total{status=~"failed\|timed_out"}[15m])) / sum(rate(llm4s_agent_runs_ended_total[15m]))` | Includes guardrail blocks, which end `failed` |
+| Runs failing | `sum(rate(llm4s_agent_runs_ended_total{status=~"failed\|timed_out"}[15m])) / sum(rate(llm4s_agent_runs_ended_total[15m]))` | Guardrail blocks are not among them: they end `blocked` |
 | Subagents hitting limits or blocked | `increase(llm4s_agent_tasks_ended_total{status=~"step_limit_reached\|token_limit_reached\|blocked"}[1h])` | Children cut off or refused |
-| Top-level step limit or block | the `status` attribute of `invoke_agent` spans (`step_limit_reached`, `blocked:*`) in the tracing backend | Not distinguishable in `runs.ended` |
+| Top-level step limit, token limit or block | `increase(llm4s_agent_runs_ended_total{status=~"step_limit_reached\|token_limit_reached\|blocked"}[1h])` | Turns cut off or refused; the trace's `blocked_by` names the guardrail |
 | Provider errors | `sum by (provider) (rate(llm4s_requests_total{status!="success"}[5m])) / sum by (provider) (rate(llm4s_requests_total[5m]))`, `rate(llm4s_errors_total{error_type="rate_limit"}[5m])` | Per attempt: a retried call counts each try |
 | Retries and open circuits (Micrometer) | `rate(llm4s_retries_total[5m])`, `increase(llm4s_circuit_breaker_transitions_total{state="open"}[10m]) > 0` | `ReliableClient` retrying or refusing calls |
 | Retention sweep failing | `increase(llm4s_agent_sweep_passes_total{result="failed"}[1h]) > 0` | Old threads and entries not reclaimed |

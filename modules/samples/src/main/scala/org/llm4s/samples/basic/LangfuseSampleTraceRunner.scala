@@ -20,7 +20,7 @@ object LangfuseSampleTraceRunner {
       threadId = "sample-thread",
       runId = java.util.UUID.randomUUID().toString,
       agent = "sample-agent",
-      status = "completed",
+      status = TraceEvent.RunStatus.Completed,
       messages = messages,
       usage = UsageSummary()
     )

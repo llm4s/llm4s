@@ -61,7 +61,14 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
     "map an ended agent run to an invoke_agent span" in {
       val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
       val usage   = UsageSummary().add("m", TokenUsage(10, 5, 15), None)
-      val event = TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", Seq(UserMessage("hi")), usage)
+      val event = TraceEvent.AgentRunEnded(
+        "thread-1",
+        "run-1",
+        "assistant",
+        TraceEvent.RunStatus.Completed,
+        Seq(UserMessage("hi")),
+        usage
+      )
 
       tracing.getSpanKind(event) shouldBe io.opentelemetry.api.trace.SpanKind.INTERNAL
       val (name, attributes) = tracing.mapEventToAttributes(event)
@@ -89,7 +96,7 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
         "parent/~task/researcher/abc",
         "child-run",
         "researcher",
-        "completed",
+        TraceEvent.RunStatus.Completed,
         Seq.empty,
         UsageSummary(),
         parentThreadId = Some("parent"),

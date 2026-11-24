@@ -2,7 +2,7 @@ package org.llm4s.trace
 
 import org.llm4s.testutil.TestTimeLimit
 
-import org.llm4s.agent.{ Agent, AgentResult }
+import org.llm4s.agent.{ Agent, AgentResult, Handoff }
 import org.llm4s.agent.graph.{
   CheckpointStatus,
   Checkpointer,
@@ -258,11 +258,16 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
   private def endedOf(tracing: Recording): Vector[TraceEvent.AgentRunEnded] =
     tracing.all.collect { case e: TraceEvent.AgentRunEnded => e }
 
-  /** A store that refuses every commit carrying a `RunCompleted`: the run ends without a terminal event. */
-  final private class NoTerminal extends Checkpointer {
+  /**
+   * A store that refuses the first `refusals` commits carrying a `RunCompleted` - every one, by default: the run ends
+   * without a terminal event.
+   */
+  final private class NoTerminal(refusals: Int = Int.MaxValue) extends Checkpointer {
     private val underlying = new InMemoryCheckpointer()
+    private val refused    = new java.util.concurrent.atomic.AtomicInteger(0)
     def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
-      if (!commit.events.exists(_.event == RunEvent.RunCompleted)) underlying.commit(threadId, commit)
+      if (!commit.events.exists(_.event == RunEvent.RunCompleted) || refused.getAndIncrement() >= refusals)
+        underlying.commit(threadId, commit)
       else Left(ProcessingError("store", "store down"))
     def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
     def renew(
@@ -313,10 +318,33 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     ended.head.threadId shouldBe "t1"
     ended.head.runId shouldBe first.runId.value
     ended.head.agent shouldBe "assistant"
-    ended.head.status shouldBe "completed"
+    ended.head.status shouldBe TraceEvent.RunStatus.Completed
     ended.head.messages.head shouldBe UserMessage("first")
     ended.head.messages.last shouldBe AssistantMessage("done")
     ended.head.usage.inputTokens shouldBe 40 // two calls of 20
+  }
+
+  it should "name a run that hands off after its root agent, and the agent active at its end beside it (#2829)" in {
+    val tracing = Recording()
+    val handoff = Completion(
+      "turn-1",
+      Instant.EPOCH,
+      "",
+      "test-model",
+      AssistantMessage(None, Seq(ToolCall("call-h", "handoff_to_specialist", ujson.Obj("reason" -> "maths")))),
+      usage = usage
+    )
+    val specialist = Agent.builder("specialist", Scripted(Right(answer("2x"))))
+    val agent = Agent
+      .builder("triage", Scripted(Right(handoff)))
+      .withHandoffs(Handoff.to("specialist", specialist, "Maths"))
+      .withTracing(tracing)
+      .build()
+      .fold(e => fail(e.message), identity)
+    ok(agent.run(ThreadId("t-handoff"), "derive x^2")).activeAgent.value shouldBe "specialist"
+    val ended = endedOf(tracing)
+    ended.map(_.agent) shouldBe Vector("triage")
+    ended.map(_.activeAgent) shouldBe Vector(Some("specialist"))
   }
 
   it should "end truncated when the answer was cut off at the output limit (RFC 0009, open question 6)" in {
@@ -325,7 +353,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     val agent   = traced(Scripted(Right(cut)), tracing)
     agent.run(ThreadId("t-cut"), "go").fold(e => fail(e.message), identity)
     val ended = endedOf(tracing)
-    ended.map(_.status) shouldBe Vector("truncated")
+    ended.map(_.status.name) shouldBe Vector("truncated")
     ended.head.messages.last shouldBe AssistantMessage("half an ans")
   }
 
@@ -368,7 +396,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     eventually(endedOf(tracing).size shouldBe 1)
   }
 
-  it should "trace a blocked turn with no messages and status blocked:<guardrail>" in {
+  it should "trace a blocked turn with no messages, status blocked and the guardrail that blocked it" in {
     val marker  = "SECRET-42"
     val tracing = Recording()
     val guard   = LengthCheck(1, 3)
@@ -381,7 +409,8 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     ok(agent.run(ThreadId("t6"), "tell me")).status should matchPattern { case AgentStatus.Blocked(_, _) => }
     val ended = endedOf(tracing)
     ended.size shouldBe 1
-    ended.head.status shouldBe s"blocked:${guard.name}"
+    ended.head.status shouldBe TraceEvent.RunStatus.Blocked
+    ended.head.blockedBy shouldBe Some(guard.name)
     ended.head.messages shouldBe empty
     tracing.all.foreach(e => (e.toJson.render() should not).include(marker))
   }
@@ -523,9 +552,15 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       .isLeft shouldBe true
     val ended = endedOf(tracing)
     ended.size shouldBe 1
-    ended.head.status shouldBe "failed"
+    ended.head.status shouldBe TraceEvent.RunStatus.Failed
     ended.head.messages shouldBe empty
-    tracing.all.collect { case e: TraceEvent.ErrorOccurred => e }.size shouldBe 1
+    val errors = tracing.all.collect { case e: TraceEvent.ErrorOccurred => e }
+    errors.size shouldBe 1
+    // the run's error as it is - an LLMError, with its type - not an exception wrapped around its message (#2800)
+    errors.head.errorType should not be "RuntimeException"
+    errors.head.errorType should not be empty
+    errors.head.message should include("down")
+    errors.head.cause shouldBe None
   }
 
   it should "trace a cancelled run as cancelled" in {
@@ -549,7 +584,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     entered.await(5, TimeUnit.SECONDS) shouldBe true
     run.cancel()
     run.await()
-    eventually(endedOf(tracing).map(_.status) shouldBe Vector("cancelled"))
+    eventually(endedOf(tracing).map(_.status.name) shouldBe Vector("cancelled"))
   }
 
   it should "trace a run that ends without a terminal event as ErrorOccurred, with no AgentRunEnded" in {
@@ -567,6 +602,32 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     tracing.names should not contain "graph.run_completed"
     endedOf(tracing) shouldBe empty
     tracing.all.collect { case e: TraceEvent.ErrorOccurred => e }.size shouldBe 1
+  }
+
+  // A known limit, pinned (#2829): a run's span is sent when it ends, so a run that never ends sends none.
+  it should "leave a run that died under a span no AgentRunEnded names, and place its recovery under that span" in {
+    val tracing = Recording()
+    val agent = Agent
+      .builder("assistant", Scripted(Right(answer("done")), Right(answer("done"))))
+      .withRuntime(GraphRuntime(new NoTerminal(refusals = 1)))
+      .withTracing(tracing)
+      .build()
+      .fold(e => fail(e.message), identity)
+    agent.start(ThreadId("t11"), "go").fold(e => fail(e.message), identity).await().isLeft shouldBe true
+    endedOf(tracing) shouldBe empty
+    // every event of the run that died is under one span: its run's, which the backend is never sent
+    val unsent = tracing.custom.flatMap(_.span).flatMap(_.parent).distinct
+    unsent should have size 1
+
+    ok(agent.recover(ThreadId("t11")))
+    val recovered = endedOf(tracing)
+    recovered should have size 1
+    val span = recovered.head.span.getOrElse(fail("the recovered run has no span"))
+    // the recovery is a run of its own, in the same trace, continuing the span of the run that died
+    span.context.traceId shouldBe unsent.head.traceId
+    span.context.spanId should not be unsent.head.spanId
+    span.parent shouldBe Some(unsent.head)
+    endedOf(tracing).map(_.span.map(_.context.spanId)) should not contain Some(unsent.head.spanId)
   }
 
   it should "keep two runs on one thread apart" in {
@@ -632,7 +693,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       Seq(UserMessage("one"), AssistantMessage("first answer")),
       Seq(UserMessage("two"), AssistantMessage("second answer"))
     )
-    ended.map(_.status) shouldBe Vector("completed", "completed")
+    ended.map(_.status.name) shouldBe Vector("completed", "completed")
     ended.map(_.usage.requestCount) shouldBe Vector(1L, 1L)
   }
 }

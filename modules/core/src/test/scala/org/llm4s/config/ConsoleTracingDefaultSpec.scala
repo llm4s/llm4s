@@ -17,7 +17,7 @@ import scala.concurrent.duration._
  * in full.
  *
  * Core cannot run an agent (`llm4s-agent` depends on core), so the run is the events an agent
- * emits: `AgentInitialized`, the model's `CompletionReceived` and usage, the tool's
+ * emits: the model's `CompletionReceived` and usage, the tool's
  * `ToolExecuted`, the `agent.*` custom events that carry its messages, an `ErrorOccurred` and
  * `AgentRunEnded`.
  */
@@ -33,7 +33,6 @@ class ConsoleTracingDefaultSpec extends AnyFlatSpec with Matchers {
   private def run(tracing: Tracing): String = {
     val out = new ByteArrayOutputStream()
     Console.withOut(out) {
-      tracing.traceEvent(TraceEvent.AgentInitialized(query, Vector("balance")))
       tracing.traceEvent(TraceEvent.CustomEvent("agent.turn_started", ujson.Obj("runId" -> "r", "input" -> query)))
       tracing.traceEvent(TraceEvent.CompletionReceived("c-1", "test-model", 1, answer))
       tracing.traceTokenUsage(org.llm4s.llmconnect.model.TokenUsage(20, 10, 30), "test-model", "agent_completion")
@@ -45,7 +44,7 @@ class ConsoleTracingDefaultSpec extends AnyFlatSpec with Matchers {
           "thread-1",
           "run-1",
           "assistant",
-          "completed",
+          TraceEvent.RunStatus.Completed,
           Seq(UserMessage(query), AssistantMessage(answer)),
           UsageSummary()
         )
@@ -62,8 +61,6 @@ class ConsoleTracingDefaultSpec extends AnyFlatSpec with Matchers {
     tracing shouldBe a[ConsoleTracing]
 
     val output = run(tracing)
-    output should include("AGENT INITIALIZED")
-    output should include("Tools: balance")
     output should include("Model: test-model")
     output should include("Total Tokens: 30")
     output should include("Tool: balance")
@@ -79,7 +76,7 @@ class ConsoleTracingDefaultSpec extends AnyFlatSpec with Matchers {
     val settings = TracingConfigLoader.load(source).fold(e => fail(e.message), identity)
     val output   = run(Tracing.fromSettings(settings).fold(e => fail(e.message), identity))
 
-    output should include(s"Query: $query")
+    output should include(query)
     output should include(s"Content: $answer")
     output should include(s"Input: $toolInput")
     output should include(s"Output: $toolOutput")

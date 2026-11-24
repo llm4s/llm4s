@@ -150,7 +150,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       e.operation shouldBe Some("chat")
       e.model shouldBe Some("model")
       e.provider shouldBe Some(ProviderId("openai"))
-      e.errorType shouldBe Some("RateLimitError")
+      e.errorType shouldBe "RateLimitError"
       e.duration should not be empty
       e.toJson("error_type").str shouldBe "RateLimitError"
       e.toJson("operation").str shouldBe "chat"
@@ -168,7 +168,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       val errors = tracing.events.collect { case e: TraceEvent.ErrorOccurred => e }
       errors should have size 2
       all(errors.map(_.usage)) shouldBe Some(TokenUsage(7, 4, 11))
-      errors.head.errorType shouldBe Some("ContentFilteredError")
+      errors.head.errorType shouldBe "ContentFilteredError"
       errors.head.toJson("prompt_tokens").num shouldBe 7
       errors.head.toJson("completion_tokens").num shouldBe 4
     }
@@ -256,7 +256,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       e.operation shouldBe Some("embeddings")
       e.model shouldBe Some("embed-1")
       e.provider shouldBe Some(ProviderId("voyage"))
-      e.errorType shouldBe Some("RateLimitError")
+      e.errorType shouldBe "RateLimitError"
     }
   }
 
@@ -299,7 +299,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
         .keySet should contain noneOf ("provider", "server_address", "duration_ms", "response_model", "prompt_tokens")
 
       val error = TraceEvent
-        .ErrorOccurred(new RuntimeException("x"), "ctx", Instant.EPOCH, None)
+        .ErrorOccurred("x", "RuntimeException", "ctx", timestamp = Instant.EPOCH)
         .withOperation("chat")
         .withModel("m")
         .withProvider(ProviderId("p"))
@@ -312,7 +312,6 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
         .withOperation(None)
         .withModel(None)
         .withProvider(None)
-        .withErrorType(None)
         .withDuration(None)
         .operation shouldBe None
 
@@ -329,7 +328,18 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
         .keySet should contain noneOf ("provider", "duration_ms")
 
       val ended = TraceEvent
-        .AgentRunEnded("t", "r", "a", "completed", Seq.empty, UsageSummary(), Instant.EPOCH, None, None, None)
+        .AgentRunEnded(
+          "t",
+          "r",
+          "a",
+          TraceEvent.RunStatus.Completed,
+          Seq.empty,
+          UsageSummary(),
+          Instant.EPOCH,
+          None,
+          None,
+          None
+        )
         .withProvider(ProviderId("anthropic"))
       ended.toJson("provider").str shouldBe "anthropic"
       ended.withProvider(None).provider shouldBe None

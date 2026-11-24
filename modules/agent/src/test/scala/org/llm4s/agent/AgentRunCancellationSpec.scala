@@ -322,10 +322,10 @@ class AgentRunCancellationSpec extends AnyFlatSpec with TestTimeLimit with Match
     interruptedCall(client.entered)(agent.run(thread, "q"))._1.left.toOption.get shouldBe a[CancelledError]
 
     // no waiting: the turn's tracing delivered its AgentRunEnded and detached before run returned
-    tracing.ended.map(_.status) shouldBe Vector("cancelled")
+    tracing.ended.map(_.status.name) shouldBe Vector("cancelled")
     agent.recover(thread).value.answer shouldBe Some("done")
     // the recovery is traced once, by its own run's tracing: nothing of the cancelled turn's is still attached
-    tracing.ended.map(_.status) shouldBe Vector("cancelled", "completed")
+    tracing.ended.map(_.status.name) shouldBe Vector("cancelled", "completed")
   }
 
   "Agent.run interrupted while its turn commits" should "return the turn's real outcome, with the interrupt flag still set" in {
