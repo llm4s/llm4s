@@ -325,5 +325,381 @@
         "llm4s_patch": true,
         "supports_budget_thinking": false,
         "supports_none_reasoning_effort": false
+    },
+    "anthropic.claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "anthropic.claude-mythos-5-1": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "anthropic.claude-mythos-5-2": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "anthropic.claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "anthropic.claude-opus-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "anthropic.claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "anthropic.claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "apac.anthropic.claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "apac.anthropic.claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "apac.anthropic.claude-opus-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "apac.anthropic.claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "apac.anthropic.claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "au.anthropic.claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "au.anthropic.claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "au.anthropic.claude-opus-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "au.anthropic.claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "au.anthropic.claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "azure_ai/claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "azure_ai/claude-mythos-5-1": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "azure_ai/claude-mythos-5-2": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "azure_ai/claude-mythos-5-2-fast": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "azure_ai/claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "azure_ai/claude-opus-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "azure_ai/claude-opus-5-5-fast": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "azure_ai/claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "azure_ai/claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "bedrock/us-gov-east-1/anthropic.claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "bedrock/us-gov-east-1/anthropic.claude-mythos-5-2": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "bedrock/us-gov-east-1/anthropic.claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "bedrock/us-gov-east-1/anthropic.claude-opus-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "bedrock/us-gov-east-1/anthropic.claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "bedrock/us-gov-east-1/anthropic.claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "bedrock/us-gov-west-1/anthropic.claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "bedrock/us-gov-west-1/anthropic.claude-mythos-5-2": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "bedrock/us-gov-west-1/anthropic.claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "bedrock/us-gov-west-1/anthropic.claude-opus-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "bedrock/us-gov-west-1/anthropic.claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "bedrock/us-gov-west-1/anthropic.claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "ca.anthropic.claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "ca.anthropic.claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "claude-mythos-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "claude-mythos-5-1": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "claude-mythos-5-2": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "claude-opus-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "eu.anthropic.claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "eu.anthropic.claude-mythos-5-2": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "eu.anthropic.claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "eu.anthropic.claude-opus-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "eu.anthropic.claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "eu.anthropic.claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "global.anthropic.claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "global.anthropic.claude-mythos-5-1": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "global.anthropic.claude-mythos-5-2": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "global.anthropic.claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "global.anthropic.claude-opus-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "global.anthropic.claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "global.anthropic.claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "in.anthropic.claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "in.anthropic.claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "jp.anthropic.claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "jp.anthropic.claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "jp.anthropic.claude-opus-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "jp.anthropic.claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "jp.anthropic.claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us-gov.anthropic.claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us-gov.anthropic.claude-mythos-5-2": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us-gov.anthropic.claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us-gov.anthropic.claude-opus-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us-gov.anthropic.claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us-gov.anthropic.claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us.anthropic.claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us.anthropic.claude-mythos-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us.anthropic.claude-mythos-5-1": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us.anthropic.claude-mythos-5-2": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us.anthropic.claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us.anthropic.claude-opus-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us.anthropic.claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us.anthropic.claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-haiku-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-haiku-5-5@default": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-mythos-5-2": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-mythos-5-2@default": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-opus-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-opus-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-opus-5-5@default": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-opus-5@default": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-sonnet-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-sonnet-5-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-sonnet-5-5@default": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-sonnet-5@default": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
     }
 }

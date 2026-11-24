@@ -52,13 +52,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.auth.{ ApiKeyProvider, CachingAccessTokenProvider }
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.*
-import org.llm4s.model.{
-  AdjustmentLog,
-  ModelCapabilities,
-  ModelRegistryService,
-  RequestTransformer,
-  TransformationResult
-}
+import org.llm4s.model.{ AdjustmentLog, ModelCapabilities, ModelRegistryService, TransformationResult }
 import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.toolapi.{ RawJsonSchema, ToolFunction }
 import org.llm4s.types.Result
@@ -236,7 +230,7 @@ final class AnthropicClient private[provider] (
         config.model,
         options,
         conversation.messages,
-        RequestTransformer.default(registryService),
+        AnthropicModelRules.transformer(registryService),
         dropUnsupported = true
       )
       // a part Anthropic cannot take fails the request here, before anything is sent
@@ -259,12 +253,12 @@ final class AnthropicClient private[provider] (
         // thinking and effort, from the model's capabilities (RFC 0008; see AnthropicThinking)
         val thinkingPlan = AnthropicThinking.plan(config.model.asString, transformed.options, maxTokens, capabilities)
         applyThinking(paramsBuilder, thinkingPlan)
-        applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
+        val samplingAdjustments = applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
         val (serviceTier, tierAdjustments) = AnthropicServiceTier.plan(transformed.options)
         serviceTier.foreach(paramsBuilder.serviceTier)
         val adjustments =
-          transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options) ++
-            tierAdjustments
+          transformed.adjustments ++ samplingAdjustments ++ thinkingPlan.adjustments ++
+            AnthropicPromptCache.requested(transformed.options) ++ tierAdjustments
         adjustmentLog.record(config.model.asString, adjustments)
         // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
         AnthropicPromptCache
@@ -336,7 +330,7 @@ curl https://api.anthropic.com/v1/messages \
         config.model,
         options,
         conversation.messages,
-        RequestTransformer.default(registryService),
+        AnthropicModelRules.transformer(registryService),
         dropUnsupported = true
       )
       // a part Anthropic cannot take fails the request here, before anything is sent
@@ -358,12 +352,12 @@ curl https://api.anthropic.com/v1/messages \
         // thinking and effort, from the model's capabilities (RFC 0008; see AnthropicThinking)
         val thinkingPlan = AnthropicThinking.plan(config.model.asString, transformed.options, maxTokens, capabilities)
         applyThinking(paramsBuilder, thinkingPlan)
-        applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
+        val samplingAdjustments = applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
         val (serviceTier, tierAdjustments) = AnthropicServiceTier.plan(transformed.options)
         serviceTier.foreach(paramsBuilder.serviceTier)
         val adjustments =
-          transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options) ++
-            tierAdjustments
+          transformed.adjustments ++ samplingAdjustments ++ thinkingPlan.adjustments ++
+            AnthropicPromptCache.requested(transformed.options) ++ tierAdjustments
         adjustmentLog.record(config.model.asString, adjustments)
         // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
         AnthropicPromptCache
@@ -616,9 +610,15 @@ curl https://api.anthropic.com/v1/messages \
       .map(_ => ())
   }
 
-  /** This client's model's registry capabilities, looked up once: the registry is a static snapshot. */
+  /**
+   * This client's model's capabilities, looked up once (the registry is a static snapshot): the registry's, with
+   * what the model's name says where the registry is silent or does not know the id ([[AnthropicModelRules]]).
+   */
   private lazy val capabilities: Option[ModelCapabilities] =
-    registryService.lookup(config.model).toOption.map(_.capabilities)
+    AnthropicModelRules.capabilities(
+      config.model.asString,
+      registryService.lookup(config.model).toOption.map(_.capabilities)
+    )
 
   /** Puts `plan`'s `thinking` and `output_config.effort` on the request. */
   private def applyThinking(builder: MessageCreateParams.Builder, plan: AnthropicThinking.Plan): Unit = {
@@ -940,42 +940,39 @@ curl https://api.anthropic.com/v1/messages \
   private def serializeStreamEvent(event: RawMessageStreamEvent): String =
     ObjectMappers.jsonMapper().writeValueAsString(event)
 
-  // anthropic-java 2.42 deprecated `temperature`: models released after Claude Opus 4.6
-  // reject any value other than 1.0 with a 400 error. We omit the parameter entirely for
-  // those models so that even a default `CompletionOptions()` (temperature 0.7) works;
-  // models that still accept it receive the configured value. The deprecation warning is
-  // unavoidable on the supported-model path, hence the suppression.
+  // The sampling parameters. A model that takes none (Claude Opus 4.7 and later, every Claude 5 model: the
+  // registry's `supports_sampling_params`, or the model's name, see AnthropicModelRules) has had a set
+  // temperature dropped and reported by the request transformer, so `options` carries none for it.
   //
-  // Anthropic rejects some requests that specify both temperature and top_p, so we prefer
-  // temperature as the single sampling control for our default path.
+  // Thinking accepts no temperature other than 1, so when the request thinks (a budget or adaptive) a set
+  // temperature is left out too (the API then uses its default, 1), and reported.
   //
-  // Thinking accepts no temperature other than 1, so when the request thinks (a budget or
-  // adaptive) the parameter is omitted too (the API then uses its default, 1); otherwise
-  // the default `CompletionOptions()` temperature of 0.7 would make every thinking request a 400.
+  // `top_p` is never sent: Anthropic rejects a request that sets both it and a temperature, so the temperature
+  // is this client's one sampling control, and a `top_p` the caller set is reported. `top_k` has no option.
+  //
+  // anthropic-java 2.42 deprecated `temperature`; the models that still take it need it, hence the suppression.
   @scala.annotation.nowarn("cat=deprecation")
   private def applySamplingParameters(
     builder: MessageCreateParams.Builder,
     options: CompletionOptions,
     thinks: Boolean
-  ): Unit =
-    if (modelSupportsTemperature && !thinks)
-      options.temperature.foreach(t => builder.temperature(t.doubleValue()))
-
-  /**
-   * Whether `config.model` accepts the (deprecated) `temperature` sampling parameter.
-   *
-   * A model-registry capability override (`disallowedParams` containing `"temperature"`)
-   * takes precedence; otherwise we fall back to a name-based check for the Anthropic models
-   * that dropped sampling support (Claude Opus 4.7 and newer).
-   */
-  private def modelSupportsTemperature: Boolean = {
-    val disallowedByRegistry =
-      registryService
-        .lookup(config.model)
-        .toOption
-        .flatMap(_.capabilities.disallowedParams)
-        .exists(_.contains("temperature"))
-    !disallowedByRegistry && !AnthropicClient.rejectsSamplingTemperature(config.model.asString)
+  ): List[RequestAdjustment] = {
+    val temperature = options.temperature match {
+      case Some(_) if thinks =>
+        val reason = s"${config.model} takes no temperature in a request that thinks"
+        List(RequestAdjustment.Dropped(RequestOption.Temperature, reason))
+      case Some(t) =>
+        builder.temperature(t.doubleValue())
+        Nil
+      case None => Nil
+    }
+    val topP = options.topP.toList.map { _ =>
+      RequestAdjustment.Dropped(
+        RequestOption.TopP,
+        "llm4s-anthropic sends no top_p: temperature is its sampling control"
+      )
+    }
+    temperature ++ topP
   }
 
   override protected def releaseResources(): Unit =
@@ -1464,37 +1461,6 @@ object AnthropicClient {
     }
     val input = ObjectMappers.jsonMapper().readValue(arguments.render(), classOf[ToolUseBlockParam.Input])
     ContentBlockParam.ofToolUse(ToolUseBlockParam.builder().id(call.id.asString).name(call.name).input(input).build())
-  }
-
-  /**
-   * Whether an Anthropic model rejects the deprecated `temperature` sampling parameter.
-   *
-   * anthropic-java 2.42 deprecated `temperature`: models released after Claude Opus 4.6
-   * accept only `1.0` and return a 400 for any other value. We detect those models by name
-   * (Claude Opus 4.7+ and any Opus 5+) so the parameter can be omitted; this mirrors the
-   * name-based handling of o-series models in `llm4s-openai`'s `OpenAIModelRules`.
-   * Other models can be flagged via a registry `disallowedParams = ["temperature"]` override.
-   *
-   * Model identifiers may carry a provider prefix and/or a date suffix
-   * (e.g. `anthropic/claude-opus-4-8`, `claude-opus-4-1-20250805`); only short (1-2 digit)
-   * leading segments after `opus-` are treated as version numbers so date suffixes such as
-   * `claude-opus-4-20250514` (Opus 4.0) and legacy names like `claude-3-opus-20240229` are
-   * not misread as high versions.
-   */
-  private[provider] def rejectsSamplingTemperature(model: String): Boolean = {
-    val normalized = model.toLowerCase
-    val marker     = "opus-"
-    val idx        = normalized.indexOf(marker)
-    if (idx < 0) false
-    else {
-      val parts = normalized.substring(idx + marker.length).split("-")
-      def shortVersion(s: String): Option[Int] =
-        if (s.length <= 2 && s.nonEmpty && s.forall(_.isDigit)) s.toIntOption else None
-      parts.headOption.flatMap(shortVersion).exists { major =>
-        val minor = parts.lift(1).flatMap(shortVersion).getOrElse(0)
-        major > 4 || (major == 4 && minor >= 7)
-      }
-    }
   }
 
   /**
