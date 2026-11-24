@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
@@ -20,14 +22,15 @@ final class OpenAICredentialEchoSpec extends AnyFlatSpec with Matchers with Eith
 
   "OpenAIClient" should "keep an echoed OpenAI key out of the error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
-      val config = OpenAIConfig.fromValues("gpt-4o", Secret(echoKey), s"$baseUrl/v1").value
+      val config = OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret(echoKey), BaseUrl(s"$baseUrl/v1")).value
       OpenAIClient(config).value.complete(hello, CompletionOptions())
     }
   }
 
   it should "keep an echoed Azure key out of the error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
-      val config = AzureConfig.fromValues("gpt-4o", Secret(echoKey), baseUrl, "2025-01-01-preview").value
+      val config =
+        AzureConfig.fromValues(ModelName("gpt-4o"), Secret(echoKey), BaseUrl(baseUrl), "2025-01-01-preview").value
       OpenAIClient(config).value.complete(hello, CompletionOptions())
     }
   }

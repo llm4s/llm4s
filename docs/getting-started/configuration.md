@@ -1091,6 +1091,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 ```scala
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.trace.{ TraceEvent, Tracing }
+import org.llm4s.types.ProviderModelTypes.ModelName
 
 // Build the tracer that llm4s.tracing.mode selects. fromSettings fails if the mode's
 // backend - here llm4s-observability-otel - is not on the classpath. To run untraced
@@ -1099,7 +1100,7 @@ val result = for {
   settings <- Llm4sConfig.tracing()
   tracer   <- Tracing.fromSettings(settings)
   _        <- tracer.traceEvent(TraceEvent.CustomEvent("query_received", ujson.Obj("tools" -> 1)))
-  _        <- tracer.traceTokenUsage(usage, "gpt-4o", "completion")
+  _        <- tracer.traceTokenUsage(usage, ModelName("gpt-4o"), "completion")
   _         = tracer.close() // always shut down to flush pending spans
 } yield ()
 ```

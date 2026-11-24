@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ProviderName
 
 // scalafix:off DisableSyntax.NoConfigFactory
@@ -142,19 +143,19 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
       val openAI = load("openai-it", hocon).value
       openAI shouldBe a[OpenAIConfig]
       openAI.model.asString shouldBe "gpt-4o-mini"
-      openAI.asInstanceOf[OpenAIConfig].baseUrl shouldBe "http://openai.invalid/v1"
+      openAI.asInstanceOf[OpenAIConfig].baseUrl shouldBe BaseUrl("http://openai.invalid/v1")
       openAI.asInstanceOf[OpenAIConfig].apiKey.reveal shouldBe OpenAIKey
 
       val anthropic = load("claude-it", hocon).value
       anthropic shouldBe a[AnthropicConfig]
       anthropic.model.asString shouldBe "claude-3-5-haiku-latest"
-      anthropic.asInstanceOf[AnthropicConfig].baseUrl shouldBe "http://anthropic.invalid"
+      anthropic.asInstanceOf[AnthropicConfig].baseUrl shouldBe BaseUrl("http://anthropic.invalid")
       anthropic.asInstanceOf[AnthropicConfig].apiKey.reveal shouldBe AnthropicKey
 
       val ollama = load("ollama-it", hocon).value
       ollama shouldBe a[OllamaConfig]
       ollama.model.asString shouldBe "llama3"
-      ollama.asInstanceOf[OllamaConfig].baseUrl shouldBe "http://ollama.invalid"
+      ollama.asInstanceOf[OllamaConfig].baseUrl shouldBe BaseUrl("http://ollama.invalid")
     }
 
     "answer in turn from one JVM, OpenAI -> Anthropic -> Ollama -> OpenAI, each request reaching only its own server" in

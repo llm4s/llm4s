@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.security.Secret
 import org.scalatest.funsuite.AnyFunSuite
@@ -23,7 +24,7 @@ class OpenAIConfigSpec extends AnyFunSuite with Matchers {
     val adjusted = openai
       .withApiKey(Secret("k2"))
       .withOrganization("org-1")
-      .withBaseUrl("https://proxy.example.com/v1")
+      .withBaseUrl(BaseUrl("https://proxy.example.com/v1"))
       .withContextWindow(64000)
       .withReserveCompletion(2048)
       .withExplicitProviderId(ProviderId("requesty"))
@@ -32,7 +33,7 @@ class OpenAIConfigSpec extends AnyFunSuite with Matchers {
       Secret("k2"),
       ModelName("gpt-4o"),
       Some("org-1"),
-      "https://proxy.example.com/v1",
+      BaseUrl("https://proxy.example.com/v1"),
       64000,
       2048,
       Some(ProviderId("requesty"))

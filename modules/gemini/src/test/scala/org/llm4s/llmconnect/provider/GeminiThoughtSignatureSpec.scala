@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, StreamingHttpResponse, StubbedHttpCalls }
@@ -56,7 +57,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     val config = GeminiConfig(
       apiKey = Secret("test-key"),
       model = ModelName(model),
-      baseUrl = "https://generativelanguage.googleapis.com/v1beta",
+      baseUrl = BaseUrl("https://generativelanguage.googleapis.com/v1beta"),
       contextWindow = 1048576,
       reserveCompletion = 8192
     )

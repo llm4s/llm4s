@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.testutil.TestTimeLimit
@@ -91,7 +92,7 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
     val sent: ArrayBuffer[Conversation] = ArrayBuffer.empty
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       sent += c
-      Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(answer)))
+      Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(answer)))
     }
     override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
@@ -165,7 +166,7 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
             Completion(
               id = "r1",
               created = Instant.EPOCH,
-              model = "gpt-4o-mini-2024-07-18",
+              model = ModelName("gpt-4o-mini-2024-07-18"),
               message = AssistantMessage(
                 "Let me look.",
                 Seq(ToolCall(ToolCallId("c1"), "weather", ujson.Obj("city" -> "Paris")))
@@ -206,7 +207,7 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
     def client: JEmbeddingClient =
       Llm4s.wrapEmbeddingClient(
         EmbeddingClient(this)(using ModelRegistryService.fromModels(Nil)),
-        EmbeddingModelConfig("text-embedding-3-small", 1536)
+        EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)
       )
   }
 
@@ -417,7 +418,7 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
               Completion(
                 "id",
                 Instant.EPOCH,
-                "m",
+                ModelName("m"),
                 AssistantMessage(text = None, toolCalls = calls)
               )
             )
@@ -523,12 +524,12 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
       val openai = OpenAIConfig.apply(Secret("sk-test"), ModelName("gpt-4o-mini"))
       openai.withContextWindow(1000).contextWindow shouldBe 1000
       openai.withReserveCompletion(10).reserveCompletion shouldBe 10
-      openai.withBaseUrl("http://example.test/v1").baseUrl shouldBe "http://example.test/v1"
+      openai.withBaseUrl(BaseUrl("http://example.test/v1")).baseUrl shouldBe BaseUrl("http://example.test/v1")
       openai.withOrganization("org-1").organization shouldBe Some("org-1")
       AnthropicConfig.apply(Secret("sk-test"), ModelName("m")).withContextWindow(1000).contextWindow shouldBe 1000
       AnthropicConfig.apply(Secret("sk-test"), ModelName("m")).withReserveCompletion(10).reserveCompletion shouldBe 10
-      OllamaConfig.apply(ModelName("m"), "http://h").withContextWindow(1000).contextWindow shouldBe 1000
-      OllamaConfig.apply(ModelName("m"), "http://h").withReserveCompletion(10).reserveCompletion shouldBe 10
+      OllamaConfig.apply(ModelName("m"), BaseUrl("http://h")).withContextWindow(1000).contextWindow shouldBe 1000
+      OllamaConfig.apply(ModelName("m"), BaseUrl("http://h")).withReserveCompletion(10).reserveCompletion shouldBe 10
     }
 
     "fail, not throw, for a null config" in {
@@ -556,7 +557,7 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
       val closes = new java.util.concurrent.atomic.AtomicInteger(0)
       val underlying = new LLMClient {
         override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-          Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("ok")))
+          Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage("ok")))
         override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit) = complete(c, o)
         override def getContextWindow(): Int                                                         = 4096
         override def getReserveCompletion(): Int                                                     = 512

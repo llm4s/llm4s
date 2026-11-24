@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ ObjectSchema, Schema }
@@ -33,7 +34,7 @@ class CompleteStructuredContractSpec extends AnyFlatSpec with Matchers {
     Completion(
       id = "id",
       created = Instant.EPOCH,
-      model = "m",
+      model = ModelName("m"),
       message = AssistantMessage(Some(content))
     )
 

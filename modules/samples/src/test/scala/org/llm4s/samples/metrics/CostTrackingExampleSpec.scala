@@ -1,5 +1,7 @@
 package org.llm4s.samples.metrics
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.ProviderModelTypes.ProviderName
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.config.Llm4sConfig
@@ -136,8 +138,8 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
 
   private def metadata(model: String, pricing: ModelPricing): ModelMetadata =
     ModelMetadata(
-      modelId = model,
-      provider = "openai-compatible",
+      modelId = ModelName(model),
+      provider = ProviderId("openai-compatible"),
       mode = ModelMode.Chat,
       maxInputTokens = None,
       maxOutputTokens = None,
@@ -258,18 +260,18 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
     val result =
       CostTrackingExample.withCustomPricing(base, "my-model", "acme", 3.0, 9.0).fold(e => fail(e.formatted), identity)
 
-    val mine = result.lookup("my-model").fold(e => fail(e.formatted), identity)
+    val mine = result.lookup(ModelName("my-model")).fold(e => fail(e.formatted), identity)
     mine.pricing.inputCostPerToken.getOrElse(fail("no price")) shouldBe (3.0e-6 +- tolerance)
     mine.pricing.outputCostPerToken.getOrElse(fail("no price")) shouldBe (9.0e-6 +- tolerance)
-    result.lookup("known-model").isRight shouldBe true
+    result.lookup(ModelName("known-model")).isRight shouldBe true
   }
 
   it should "leave the registry it was given as it was" in {
     val base = pricedRegistry("known-model")
     CostTrackingExample.withCustomPricing(base, "my-model", "acme", 3.0, 9.0).isRight shouldBe true
 
-    base.lookup("my-model").isLeft shouldBe true
-    base.lookup("known-model").isRight shouldBe true
+    base.lookup(ModelName("my-model")).isLeft shouldBe true
+    base.lookup(ModelName("known-model")).isRight shouldBe true
   }
 
   it should "replace the price of a model the base registry already has" in {
@@ -278,8 +280,16 @@ class CostTrackingExampleSpec extends AnyFlatSpec with Matchers {
       .withCustomPricing(base, "known-model", "acme", 5.0, 7.0)
       .fold(e => fail(e.formatted), identity)
 
-    result.lookup("known-model").fold(e => fail(e.formatted), identity).pricing.inputCostPerToken shouldBe Some(5.0e-6)
-    base.lookup("known-model").fold(e => fail(e.formatted), identity).pricing.inputCostPerToken shouldBe Some(
+    result
+      .lookup(ModelName("known-model"))
+      .fold(e => fail(e.formatted), identity)
+      .pricing
+      .inputCostPerToken shouldBe Some(5.0e-6)
+    base
+      .lookup(ModelName("known-model"))
+      .fold(e => fail(e.formatted), identity)
+      .pricing
+      .inputCostPerToken shouldBe Some(
       RegistryIn
     )
   }

@@ -1,5 +1,6 @@
 package org.llm4s.javaapi.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.javaapi.{ JEmbeddingClient, JEmbeddingPurpose }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse, InputPurpose }
@@ -17,7 +18,7 @@ import scala.jdk.CollectionConverters.*
 final private[rag] class JEmbeddingProvider(client: JEmbeddingClient) extends EmbeddingProvider {
 
   /** The model the client asks for, as the pipeline records it. */
-  val model: EmbeddingModelConfig = EmbeddingModelConfig(client.model, client.dimensions.orElse(0))
+  val model: EmbeddingModelConfig = EmbeddingModelConfig(ModelName(client.model), client.dimensions.orElse(0))
 
   override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
     val purpose = request.purpose match {

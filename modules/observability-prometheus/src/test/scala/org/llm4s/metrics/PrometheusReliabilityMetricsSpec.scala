@@ -1,5 +1,6 @@
 package org.llm4s.metrics
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import io.prometheus.metrics.expositionformats.PrometheusTextFormatWriter
 import org.llm4s.error.TimeoutError
 import org.llm4s.llmconnect.LLMClient
@@ -28,7 +29,7 @@ class PrometheusReliabilityMetricsSpec extends AnyFlatSpec with Matchers {
   }
 
   private val completion =
-    Completion("id", Instant.EPOCH, "test-model", AssistantMessage(content = "ok", toolCalls = List.empty))
+    Completion("id", Instant.EPOCH, ModelName("test-model"), AssistantMessage(content = "ok", toolCalls = List.empty))
 
   /** Fails its first `failures` calls with a retryable timeout, then answers. */
   private def client(failures: Int): LLMClient = new LLMClient {

@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.metrics.{ MetricsCollector, Outcome, ErrorKind }
 import org.llm4s.trace.{ Tracing, TraceEvent }
@@ -173,7 +174,7 @@ class InstrumentedImageGenerationClient(
     }
 
     val event = TraceEvent.ImageGenerationCompleted(
-      model = model,
+      model = ModelName(model),
       operation = operation,
       imageCount = imageCount,
       size = sizeStr,

@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import cats.Id
 import org.llm4s.llmconnect.model.{ EmbeddingUsage, TokenUsage }
 import org.llm4s.trace.model._
@@ -65,7 +66,7 @@ class TraceCollectorPropertySpec
       toolCalls <- Gen.choose(0, 10)
       content   <- Gen.alphaStr
       ts        <- genInstant
-    } yield TraceEvent.CompletionReceived(id, model, toolCalls, content, ts)
+    } yield TraceEvent.CompletionReceived(id, ModelName(model), toolCalls, content, ts)
 
   val genToolExecutedSuccess: Gen[TraceEvent] =
     for {
@@ -98,7 +99,7 @@ class TraceCollectorPropertySpec
       model     <- genNonEmptyString
       operation <- genNonEmptyString
       ts        <- genInstant
-    } yield TraceEvent.TokenUsageRecorded(usage, model, operation, ts)
+    } yield TraceEvent.TokenUsageRecorded(usage, ModelName(model), operation, ts)
 
   val genAgentRunEnded: Gen[TraceEvent] =
     for {
@@ -122,7 +123,7 @@ class TraceCollectorPropertySpec
       operation  <- genNonEmptyString
       inputCount <- Gen.choose(1, 100)
       ts         <- genInstant
-    } yield TraceEvent.EmbeddingUsageRecorded(usage, model, operation, inputCount, ts)
+    } yield TraceEvent.EmbeddingUsageRecorded(usage, ModelName(model), operation, inputCount, ts)
 
   val genCostRecorded: Gen[TraceEvent] =
     for {
@@ -132,7 +133,7 @@ class TraceCollectorPropertySpec
       tokenCount <- Gen.choose(0, 10000)
       costType   <- genNonEmptyString
       ts         <- genInstant
-    } yield TraceEvent.CostRecorded(cost, model, operation, tokenCount, costType, ts)
+    } yield TraceEvent.CostRecorded(cost, ModelName(model), operation, tokenCount, costType, ts)
 
   val genRAGOperationCompleted: Gen[TraceEvent] =
     for {
@@ -334,10 +335,10 @@ class TraceCollectorPropertySpec
       val completion = org.llm4s.llmconnect.model.Completion(
         id = "cmp-1",
         created = Instant.EPOCH,
-        model = model,
+        model = ModelName(model),
         message = org.llm4s.llmconnect.model.AssistantMessage("", List.empty)
       )
-      tc.traceCompletion(completion, model)
+      tc.traceCompletion(completion, ModelName(model))
       val spans = store.getSpans(tc.traceId)
       spans should have size 1L
       spans.head.kind shouldBe SpanKind.LlmCall
@@ -351,7 +352,7 @@ class TraceCollectorPropertySpec
     forAll(genTokenUsage, genNonEmptyString, genNonEmptyString) { (usage, model, operation) =>
       store.clear()
       val tc = collector()
-      tc.traceTokenUsage(usage, model, operation)
+      tc.traceTokenUsage(usage, ModelName(model), operation)
       val spans = store.getSpans(tc.traceId)
       spans should have size 1L
       spans.head.kind shouldBe SpanKind.Internal

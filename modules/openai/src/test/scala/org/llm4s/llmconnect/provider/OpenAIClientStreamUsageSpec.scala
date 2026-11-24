@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.openai.models.chat.completions.ChatCompletionCreateParams
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIConfig, ProviderConfig }
@@ -27,10 +29,10 @@ final class OpenAIClientStreamUsageSpec extends AnyFlatSpec with Matchers with E
   private val hello = Conversation(Seq(UserMessage("hello")))
 
   private def openAI(model: String): OpenAIConfig =
-    OpenAIConfig.fromValues(model, Secret("sk-test"), "https://example.invalid/v1").value
+    OpenAIConfig.fromValues(ModelName(model), Secret("sk-test"), BaseUrl("https://example.invalid/v1")).value
 
   private def azure(apiVersion: String, endpoint: String = "https://r.openai.azure.com"): AzureConfig =
-    AzureConfig.fromValues("my-deploy", Secret("azure-key"), endpoint, apiVersion).value
+    AzureConfig.fromValues(ModelName("my-deploy"), Secret("azure-key"), BaseUrl(endpoint), apiVersion).value
 
   private val content = chunk(
     """{"id":"c1","created":0,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"}}]}"""

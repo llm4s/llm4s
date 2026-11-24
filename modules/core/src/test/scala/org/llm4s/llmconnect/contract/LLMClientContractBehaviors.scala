@@ -57,7 +57,7 @@ trait LLMClientContractBehaviors { this: AnyWordSpec with Matchers =>
     "produce a completion with non-empty model string" in {
       val client     = createClient()
       val completion = client.complete(validConversation)
-      completion.foreach(c => c.model should not be empty)
+      completion.foreach(c => c.model.asString should not be empty)
     }
 
     "produce a completion whose message role is Assistant" in {
@@ -85,7 +85,7 @@ trait LLMClientContractBehaviors { this: AnyWordSpec with Matchers =>
       val result = client.streamComplete(validConversation)(_ => ())
       result.foreach { c =>
         c.id should not be empty
-        c.model should not be empty
+        c.model.asString should not be empty
       }
     }
 

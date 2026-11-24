@@ -78,12 +78,12 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
           .loadProvider("local", s"""llm4s.providers.local { provider = "ollama", model = "llama3.1"$section }""", env)
           .map(_.asInstanceOf[OllamaConfig].baseUrl)
 
-      baseUrl("") shouldBe Right("http://localhost:11434")
-      baseUrl(""", baseUrl = "http://gpu-box:11434"""") shouldBe Right("http://gpu-box:11434")
+      baseUrl("") shouldBe Right(BaseUrl("http://localhost:11434"))
+      baseUrl(""", baseUrl = "http://gpu-box:11434"""") shouldBe Right(BaseUrl("http://gpu-box:11434"))
 
       val bound = ", baseUrl = ${?OLLAMA_BASE_URL}"
-      baseUrl(bound) shouldBe Right("http://localhost:11434")
-      baseUrl(bound, Map("OLLAMA_BASE_URL" -> "http://ollama:11434")) shouldBe Right("http://ollama:11434")
+      baseUrl(bound) shouldBe Right(BaseUrl("http://localhost:11434"))
+      baseUrl(bound, Map("OLLAMA_BASE_URL" -> "http://ollama:11434")) shouldBe Right(BaseUrl("http://ollama:11434"))
     }
 
     "refuse a config belonging to another provider" in {

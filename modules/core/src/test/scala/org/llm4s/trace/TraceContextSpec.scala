@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -113,7 +114,10 @@ class TraceContextSpec extends AnyFlatSpec with Matchers with EitherValues:
       )
     run.toJson.obj.contains("parent_span_id") shouldBe false
     run.toJson("trace_id").str shouldBe trace
-    TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "m", "op", span = Some(placed)).toJson("span_id").str shouldBe
+    TraceEvent
+      .TokenUsageRecorded(TokenUsage(1, 1, 2), ModelName("m"), "op", span = Some(placed))
+      .toJson("span_id")
+      .str shouldBe
       placed.context.spanId
     TraceEvent.ErrorOccurred("x", "RuntimeException", "c", span = Some(placed)).span shouldBe Some(placed)
   }

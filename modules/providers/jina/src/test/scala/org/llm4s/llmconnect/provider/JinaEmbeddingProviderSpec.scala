@@ -34,7 +34,7 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFacto
     apiKey = Some(Secret("jina-test-key"))
   )
 
-  private val modelCfg = EmbeddingModelConfig("jina-embeddings-v3", 1024)
+  private val modelCfg = EmbeddingModelConfig(ModelName("jina-embeddings-v3"), 1024)
   private val req      = EmbeddingRequest(Seq("hello", "world"), modelCfg)
 
   private def httpOk(body: String): HttpResponse               = HttpResponse(200, body, Map.empty)

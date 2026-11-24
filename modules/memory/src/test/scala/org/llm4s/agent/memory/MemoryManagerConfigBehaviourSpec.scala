@@ -1,5 +1,6 @@
 package org.llm4s.agent.memory
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -128,7 +129,7 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
         Completion(
           id = "extract",
           created = Instant.EPOCH,
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = AssistantMessage(response),
           usage = None
         )

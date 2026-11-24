@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.model.ModelPricing
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -29,7 +30,7 @@ class UsageWireFormatSpec extends AnyFlatSpec with Matchers {
     outputTokens = 60,
     thinkingTokens = 10,
     totalCost = BigDecimal("0.5"),
-    byModel = Map("gpt-4o" -> modelUsage)
+    byModel = Map(ModelName("gpt-4o") -> modelUsage)
   )
 
   private val summaryJson =

@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ServiceError
 import org.llm4s.javaapi.{ JLlmClient, JLlmClientTestFactory, LlmErrorKind, LlmException }
 import org.llm4s.llmconnect.LLMClient
@@ -90,7 +91,9 @@ object AsyncAndHealthSpec {
     override def awaitTermination(t: Long, u: TimeUnit): Boolean = pool.awaitTermination(t, u)
   }
 
-  def ok(text: String): Result[Completion] = Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(text)))
+  def ok(text: String): Result[Completion] = Right(
+    Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(text))
+  )
 
   def echo: FakeProvider = new FakeProvider(_ => ok("echo"))
 

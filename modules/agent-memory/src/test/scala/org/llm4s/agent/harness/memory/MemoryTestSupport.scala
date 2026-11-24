@@ -1,5 +1,6 @@
 package org.llm4s.agent.harness.memory
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.memory.*
 import org.llm4s.error.ProcessingError
@@ -24,7 +25,7 @@ object MemoryTestSupport:
         Completion(
           id = s"memory-${calls.get}",
           created = Instant.EPOCH,
-          model = "memory-model",
+          model = ModelName("memory-model"),
           message = AssistantMessage(text, Seq.empty),
           usage = Some(TokenUsage(promptTokens = 3, completionTokens = 2, totalTokens = 5))
         )

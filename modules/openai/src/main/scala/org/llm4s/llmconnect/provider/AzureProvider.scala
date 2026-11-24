@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.config.NamedProviderConfig
@@ -116,13 +117,13 @@ object AzureProvider extends ProviderDescriptor:
       endpoint <- ProviderDescriptor.requireExtra(context.providerName, section, EndpointKey)
       mode     <- authentication(context.providerName, section)
       apiVersion = section.extra(ApiVersionKey).getOrElse(AzureConfig.DEFAULT_API_VERSION)
-      model      = section.model.asString
+      model      = section.model
       clientId   = section.extra(ClientIdKey).map(_.trim).filter(_.nonEmpty)
       config <-
         if mode == EntraIdAuthentication then
           AzureEntraIdSupport
             .tokenProvider(clientId)
-            .flatMap(AzureConfig.fromTokenProvider(model, _, endpoint, apiVersion))
+            .flatMap(AzureConfig.fromTokenProvider(model, _, BaseUrl(endpoint), apiVersion))
         else if clientId.isDefined then
           Left(
             ConfigurationError(
@@ -133,7 +134,7 @@ object AzureProvider extends ProviderDescriptor:
         else
           ProviderDescriptor
             .requireApiKey(context.providerName, section)
-            .flatMap(AzureConfig.fromValues(model, _, endpoint, apiVersion))
+            .flatMap(AzureConfig.fromValues(model, _, BaseUrl(endpoint), apiVersion))
     yield config
 
   /** The section's `authentication`, normalised: [[ApiKeyAuthentication]] or [[EntraIdAuthentication]]. */

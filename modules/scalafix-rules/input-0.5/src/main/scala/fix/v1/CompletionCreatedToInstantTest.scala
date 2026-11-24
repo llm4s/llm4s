@@ -1,5 +1,5 @@
 /*
-rules = [CompletionCreatedToInstant, CompletionFromMessage]
+rules = [CompletionCreatedToInstant, CompletionFromMessage, ModelIdNewtypes]
 */
 package fix.v1
 

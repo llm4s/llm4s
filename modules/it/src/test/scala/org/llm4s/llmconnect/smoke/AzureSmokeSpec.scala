@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 
 import org.llm4s.error.AuthenticationError
@@ -67,8 +69,8 @@ class AzureSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Pr
   private def config(key: String, at: String): AzureConfig =
     AzureConfig
       .fromValues(
-        modelName = deployment.getOrElse("gpt-4o-mini"),
-        endpoint = at,
+        modelName = ModelName(deployment.getOrElse("gpt-4o-mini")),
+        endpoint = BaseUrl(at),
         apiKey = Secret(key),
         apiVersion = AzureConfig.DEFAULT_API_VERSION
       )

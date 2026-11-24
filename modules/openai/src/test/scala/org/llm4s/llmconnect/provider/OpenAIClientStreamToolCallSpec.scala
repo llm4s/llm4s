@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, ToolCallId, UserMessage }
@@ -26,7 +28,7 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
 
   private val model = "gpt-4o"
   private val config =
-    OpenAIConfig.fromValues(model, Secret("test-api-key"), "https://example.invalid/v1").value
+    OpenAIConfig.fromValues(ModelName(model), Secret("test-api-key"), BaseUrl("https://example.invalid/v1")).value
 
   /** A chunk whose delta carries the given `tool_calls` entries. */
   private def toolDelta(calls: String*): String =
@@ -81,7 +83,7 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
     // The caller's chunks reassemble too: each fragment reaches it verbatim, so `"Paris"` keeps
     // its quotes (#1212, PR #1406 review).
     toolChunks.map(_.arguments).collect { case ujson.Str(s) => s }.mkString shouldBe """{"city":"Paris"}"""
-    val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator("test-model")
+    val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator(ModelName("test-model"))
     chunks.foreach(accumulator.addChunk)
     accumulator.currentToolCalls shouldBe completion.toolCalls
   }
@@ -118,7 +120,7 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
     completion.toolCalls.find(_.id == ToolCallId("call_1")).map(_.arguments("limit").num) shouldBe Some(10.0)
     completion.toolCalls.find(_.id == ToolCallId("call_2")).map(_.arguments("b").num) shouldBe Some(3.0)
     completion.usage.map(_.totalTokens) shouldBe Some(19)
-    completion.model shouldBe model
+    completion.model.asString shouldBe model
   }
 
   it should "leave a stream without tool calls with none" in {

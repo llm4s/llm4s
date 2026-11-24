@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.config.VoyageConfigKeys
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
 import org.llm4s.http.{ HttpClientOptions, HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
@@ -44,7 +46,7 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
-    defaultBaseUrl = Some("https://api.voyageai.com/v1"),
+    defaultBaseUrl = Some(BaseUrl("https://api.voyageai.com/v1")),
     // Bound to the shared llm4s.credentials.voyage.apiKey in this module's reference.conf.
     apiKeyEnv = Seq(VoyageConfigKeys.VOYAGE_API_KEY),
     modelEnv = Some(VoyageConfigKeys.VOYAGE_EMBEDDING_MODEL)
@@ -55,18 +57,18 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
    * `output_dimension` request parameter; the client does not send one, so the
    * default is what it gets.
    */
-  override val modelDimensions: Map[String, Int] = Map(
-    "voyage-2"         -> 1024,
-    "voyage-3"         -> 1024,
-    "voyage-3-lite"    -> 512,
-    "voyage-3-large"   -> 1024,
-    "voyage-3.5"       -> 1024,
-    "voyage-3.5-lite"  -> 1024,
-    "voyage-code-2"    -> 1536,
-    "voyage-code-3"    -> 1024,
-    "voyage-finance-2" -> 1024,
-    "voyage-law-2"     -> 1024,
-    "voyage-context-3" -> 1024
+  override val modelDimensions: Map[ModelName, Int] = Map(
+    ModelName("voyage-2")         -> 1024,
+    ModelName("voyage-3")         -> 1024,
+    ModelName("voyage-3-lite")    -> 512,
+    ModelName("voyage-3-large")   -> 1024,
+    ModelName("voyage-3.5")       -> 1024,
+    ModelName("voyage-3.5-lite")  -> 1024,
+    ModelName("voyage-code-2")    -> 1536,
+    ModelName("voyage-code-3")    -> 1024,
+    ModelName("voyage-finance-2") -> 1024,
+    ModelName("voyage-law-2")     -> 1024,
+    ModelName("voyage-context-3") -> 1024
   )
 
   /**
@@ -99,7 +101,7 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
       override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
         CancelledError.attempt("voyage.embed") {
-          val model = request.model.name
+          val model = request.model.name.asString
           val input = request.input
           val payload = Obj(
             "input"      -> Arr.from(input),

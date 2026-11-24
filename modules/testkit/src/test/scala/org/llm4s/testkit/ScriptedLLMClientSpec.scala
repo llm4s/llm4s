@@ -1,5 +1,6 @@
 package org.llm4s.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ AuthenticationError, LLMError, NonRecoverableError, RateLimitError, TimeoutError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
@@ -38,7 +39,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val result = ask(client, "q").value
     result.content shouldBe "hi"
     result.message shouldBe AssistantMessage("hi")
-    result.model shouldBe "gpt-test"
+    result.model shouldBe ModelName("gpt-test")
     result.usage shouldBe Some(usage)
     result.toolCalls shouldBe empty
     result.id shouldBe "scripted-1"
@@ -46,7 +47,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   it should "report the default model and no usage unless the reply sets them" in {
     val result = ask(ScriptedLLMClient.sequence(Reply.text("hi")), "q").value
-    result.model shouldBe Reply.DefaultModel
+    result.model.asString shouldBe Reply.DefaultModel
     result.usage shouldBe None
   }
 

@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ContentFilteredError
 import org.llm4s.llmconnect.LLMClient
@@ -34,7 +35,7 @@ import scala.util.Try
 final class TracingLLMClient private (
   underlying: LLMClient,
   tracing: Tracing,
-  requestModel: Option[String],
+  requestModel: Option[ModelName],
   serverAddress: Option[String]
 ) extends LLMClient {
 
@@ -89,7 +90,7 @@ final class TracingLLMClient private (
           serverAddress = serverAddress,
           streamed = streamed,
           duration = Some(duration),
-          responseModel = Option(completion.model).filter(_.nonEmpty),
+          responseModel = Option(completion.model).filter(_.asString.nonEmpty),
           // a stream's last chunk reason, else the Completion's; an empty Other (none read) is left out
           finishReasons = finishReason.orElse(Option(completion.finishReason)).map(_.name).filter(_.nonEmpty).toSeq,
           usage = completion.usage,
@@ -134,7 +135,7 @@ object TracingLLMClient {
     new TracingLLMClient(
       client,
       tracing,
-      Option(config.model.asString).filter(_.nonEmpty),
+      Option(config.model).filter(_.asString.nonEmpty),
       config.endpointUrl.map(_.asUrl).flatMap(host)
     )
 

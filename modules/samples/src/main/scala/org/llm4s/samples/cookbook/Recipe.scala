@@ -75,7 +75,7 @@ final class ScriptedClient(reply: (Conversation, Int) => Result[AssistantMessage
       Completion(
         id = s"scripted-$callNumber",
         created = Instant.EPOCH,
-        model = "scripted",
+        model = ModelName("scripted"),
         message = message,
         finishReason = if (message.toolCalls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop
       )
@@ -108,9 +108,9 @@ final class ScriptedClient(reply: (Conversation, Int) => Result[AssistantMessage
 object BagOfWordsEmbeddings extends EmbeddingProviderDescriptor {
   val id: ProviderId                                           = ProviderId("bagofwords")
   val configSpec: org.llm4s.llmconnect.spi.EmbeddingConfigSpec = org.llm4s.llmconnect.spi.EmbeddingConfigSpec()
-  val Model: String                                            = "words-256"
+  val Model: ModelName                                         = ModelName("words-256")
   val Dimensions: Int                                          = 256
-  override val modelDimensions: Map[String, Int]               = Map(Model -> Dimensions)
+  override val modelDimensions: Map[ModelName, Int]            = Map(Model -> Dimensions)
 
   /** The vector of `text`: its word counts, hashed into buckets, at length 1 (all zeros for a text with no words). */
   def vector(text: String): Seq[Double] = {
@@ -130,7 +130,7 @@ object BagOfWordsEmbeddings extends EmbeddingProviderDescriptor {
   )
 
   /** The provider config a pipeline built on this provider needs: it has no endpoint and no key. */
-  val config: EmbeddingProviderConfig = EmbeddingProviderConfig(id, BaseUrl(""), ModelName(Model))
+  val config: EmbeddingProviderConfig = EmbeddingProviderConfig(id, BaseUrl(""), Model)
 }
 
 /**

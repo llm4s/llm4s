@@ -1,5 +1,6 @@
 package org.llm4s.chunking
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
@@ -30,7 +31,7 @@ class SurrogatePairChunkingSpec extends AnyFlatSpec with Matchers {
     "markdown" -> MarkdownChunker(),
     "semantic" -> SemanticChunker(
       EmbeddingClient(new HashEmbeddingProvider),
-      EmbeddingModelConfig("hash-model", 4)
+      EmbeddingModelConfig(ModelName("hash-model"), 4)
     )
   )
 

@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.NetworkError
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
@@ -39,7 +40,7 @@ class RAGTracingSpec extends AnyFlatSpec with Matchers {
       Completion(
         id = "c",
         created = Instant.EPOCH,
-        model = "mock-model",
+        model = ModelName("mock-model"),
         message = AssistantMessage(text),
         usage = Some(usage),
         estimatedCost = Some(0.25)
@@ -76,7 +77,9 @@ class RAGTracingSpec extends AnyFlatSpec with Matchers {
     val events: mutable.Buffer[TraceEvent]          = mutable.Buffer.empty
     def traceEvent(event: TraceEvent): Result[Unit] = { events += event; Right(()) }
     def usages: Seq[(String, String, Int)] =
-      events.collect { case e: TraceEvent.TokenUsageRecorded => (e.operation, e.model, e.usage.totalTokens) }.toSeq
+      events.collect { case e: TraceEvent.TokenUsageRecorded =>
+        (e.operation, e.model.asString, e.usage.totalTokens)
+      }.toSeq
     def ragEvents: Seq[TraceEvent.RAGOperationCompleted] =
       events.collect { case e: TraceEvent.RAGOperationCompleted => e }.toSeq
     def completions: Int = events.count(_.isInstanceOf[TraceEvent.CompletionReceived])

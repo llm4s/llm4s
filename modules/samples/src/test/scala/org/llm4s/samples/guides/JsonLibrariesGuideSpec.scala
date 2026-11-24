@@ -1,5 +1,6 @@
 package org.llm4s.samples.guides
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -43,7 +44,7 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
         Completion(
           id = "script",
           created = Instant.EPOCH,
-          model = "script",
+          model = ModelName("script"),
           message = AssistantMessage(reply)
         )
       )

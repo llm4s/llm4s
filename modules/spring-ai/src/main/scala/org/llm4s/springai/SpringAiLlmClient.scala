@@ -1,5 +1,6 @@
 package org.llm4s.springai
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.provider.SdkErrorMapper
 import org.llm4s.error.LLMError
@@ -120,7 +121,7 @@ object SpringAiLlmClient {
       Completion(
         id = id.getOrElse(UUID.randomUUID().toString),
         created = Instant.now(),
-        model = model.getOrElse(""),
+        model = ModelName(model.getOrElse("")),
         message = AssistantMessage(text = Option(content).filter(_.nonEmpty), toolCalls = calls),
         usage = usage,
         // Spring AI's reason as the model reported it: it has no common vocabulary to map

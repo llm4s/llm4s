@@ -1,6 +1,7 @@
 package org.llm4s.agent
 
 import org.llm4s.toolapi.IdempotencyKey
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.agent.events._
 import org.llm4s.agent.graph._
@@ -106,9 +107,9 @@ class GrowthSafeTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   "ModelCallCompleted" should "set each field through its own setter" in {
-    val base = ModelCallCompleted("a", "a", 1, 1, None, None, None, Nil, None, None)
+    val base = ModelCallCompleted("a", ModelName("a"), 1, 1, None, None, None, Nil, None, None)
     base.withAgent("b").agent shouldBe "b"
-    base.withModel("b").model shouldBe "b"
+    base.withModel(ModelName("b")).model shouldBe ModelName("b")
     base.withDuration(scala.concurrent.duration.Duration(7, "ms")).duration.toMillis shouldBe 7L
     base.withAttempts(7).attempts shouldBe 7
     base.withToolCalls(7).toolCalls shouldBe 7

@@ -49,7 +49,7 @@ object GeminiProvider extends ProviderDescriptor:
       apiKey  <- ProviderDescriptor.requireApiKey(context.providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(context.providerName, section, configSpec)
       search  <- GeminiGrounding.googleSearch(context.providerName, section)
-      config  <- GeminiConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      config  <- GeminiConfig.fromValues(section.model, apiKey, baseUrl)
     yield config.withGoogleSearch(search)
 
   def build(config: ProviderConfig, context: ProviderBuildContext): Result[LLMClient] =

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, FinishReason, ToolCall, ToolCallId }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -11,7 +12,7 @@ import java.time.Instant
 class ToolCallRulesSpec extends AnyFlatSpec with Matchers {
 
   private def reply(reason: FinishReason, calls: ToolCall*): Completion =
-    Completion("r", Instant.EPOCH, "m", AssistantMessage(None, calls.toList))
+    Completion("r", Instant.EPOCH, ModelName("m"), AssistantMessage(None, calls.toList))
       .withFinishReason(reason)
 
   private val call = ToolCall(ToolCallId("c1"), "lookup", ujson.Obj("q" -> "x"))
@@ -41,7 +42,7 @@ class ToolCallRulesSpec extends AnyFlatSpec with Matchers {
   }
 
   "wholeCall" should "keep a whole call's explicit {} as arguments the accumulator reads, whatever the finish" in {
-    val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator("test-model")
+    val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator(ModelName("test-model"))
     val chunk =
       org.llm4s.llmconnect.model.StreamedChunk("m", None, Some(ToolCall(ToolCallId("c1"), "now", ujson.Obj())), None)
     accumulator.addChunk(ToolCallRules.wholeCall(chunk))

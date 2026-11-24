@@ -1,5 +1,6 @@
 package org.llm4s.agent.memory
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.GuideMirror
 
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
@@ -335,7 +336,7 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
         Completion(
           id = "canned",
           created = Instant.EPOCH,
-          model = "canned",
+          model = ModelName("canned"),
           message = AssistantMessage(reply),
           usage = None
         )

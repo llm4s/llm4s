@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.error._
@@ -33,7 +34,7 @@ class RobustnessSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   private def ok(text: String): Result[Completion] =
-    Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(text)))
+    Right(Completion("id", Instant.EPOCH, ModelName("m"), AssistantMessage(text)))
 
   // ---- LlmResult ---------------------------------------------------------------------------
 

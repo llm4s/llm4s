@@ -162,7 +162,7 @@ object Llm4s {
     new JEmbeddingClient(
       FacadeToken.INSTANCE,
       Objects.requireNonNull(client, "client must not be null"),
-      Objects.requireNonNull(model, "model must not be null").name,
+      Objects.requireNonNull(model, "model must not be null").name.asString,
       OptionalInt.of(model.dimensions)
     )
 

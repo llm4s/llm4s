@@ -23,8 +23,9 @@ object CachingGuideSnippets {
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
     import org.llm4s.llmconnect.model.EmbeddingRequest
     import scala.concurrent.duration._
+    import org.llm4s.types.ProviderModelTypes.ModelName
 
-    val model = EmbeddingModelConfig("text-embedding-3-small", 1536)
+    val model = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)
 
     for {
       cache <- InMemoryEmbeddingCache.create(maxSize = 10000, ttl = Some(1.hour))
@@ -42,8 +43,9 @@ object CachingGuideSnippets {
     import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
     import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
+    import org.llm4s.types.ProviderModelTypes.ModelName
 
-    val model = EmbeddingModelConfig("text-embedding-3-small", 1536)
+    val model = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)
 
     for {
       cache <- InMemoryEmbeddingCache.create()
@@ -72,15 +74,18 @@ object CachingGuideSnippets {
     import org.llm4s.llmconnect.caching.{ CacheKeyGenerator, CachedEmbeddingClient, InMemoryEmbeddingCache }
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
     import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
+    import org.llm4s.types.ProviderModelTypes.ModelName
 
     // The tenant is one more part of the key; sha256 keeps every part apart from the others.
-    def tenantKey(tenant: String)(text: String, model: String, purpose: InputPurpose): String =
-      CacheKeyGenerator.sha256(tenant, model, purpose.toString, text)
+    def tenantKey(tenant: String)(text: String, model: ModelName, purpose: InputPurpose): String =
+      CacheKeyGenerator.sha256(tenant, model.asString, purpose.toString, text)
 
     val cached =
       InMemoryEmbeddingCache.create().map(cache => new CachedEmbeddingClient(base, cache, tenantKey("tenant-a")))
 
-    cached.flatMap(_.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("text-embedding-3-small", 1536))))
+    cached.flatMap(
+      _.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)))
+    )
     // end-guide-block
   }
 
@@ -133,11 +138,12 @@ object CachingGuideSnippets {
     // guide-block
     import org.llm4s.llmconnect.caching.CachingLLMClient
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
+    import org.llm4s.types.ProviderModelTypes.ModelName
 
     new CachingLLMClient(
       baseClient = baseClient,
       embeddingClient = embeddingClient,
-      embeddingModel = EmbeddingModelConfig("text-embedding-3-small", 1536),
+      embeddingModel = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536),
       config = cacheConfig,
       tracing = tracing
     )
@@ -154,12 +160,13 @@ object CachingGuideSnippets {
     // guide-block
     import org.llm4s.llmconnect.caching.CachingLLMClient
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
+    import org.llm4s.types.ProviderModelTypes.ModelName
 
     // The clock only decides whether an entry is still within its TTL. Tests pass a fixed, movable one.
     new CachingLLMClient(
       baseClient,
       embeddingClient,
-      EmbeddingModelConfig("text-embedding-3-small", 1536),
+      EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536),
       cacheConfig,
       tracing,
       clock

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.annotation.Stable
 
 /**
@@ -136,7 +137,7 @@ object ProviderConfigKey:
 final case class ProviderConfigSpec private (
   requiresApiKey: Boolean,
   requiresBaseUrl: Boolean,
-  defaultBaseUrl: Option[String],
+  defaultBaseUrl: Option[BaseUrl],
   baseUrlExample: String,
   baseUrlEnv: Option[String],
   extras: Seq[ProviderConfigKey],
@@ -146,15 +147,15 @@ final case class ProviderConfigSpec private (
 ):
   def withRequiresApiKey(requiresApiKey: Boolean): ProviderConfigSpec   = copy(requiresApiKey = requiresApiKey)
   def withRequiresBaseUrl(requiresBaseUrl: Boolean): ProviderConfigSpec = copy(requiresBaseUrl = requiresBaseUrl)
-  def withDefaultBaseUrl(defaultBaseUrl: String): ProviderConfigSpec    = copy(defaultBaseUrl = Some(defaultBaseUrl))
-  def withDefaultBaseUrl(defaultBaseUrl: Option[String]): ProviderConfigSpec = copy(defaultBaseUrl = defaultBaseUrl)
-  def withBaseUrlExample(baseUrlExample: String): ProviderConfigSpec         = copy(baseUrlExample = baseUrlExample)
-  def withBaseUrlEnv(baseUrlEnv: String): ProviderConfigSpec                 = copy(baseUrlEnv = Some(baseUrlEnv))
-  def withBaseUrlEnv(baseUrlEnv: Option[String]): ProviderConfigSpec         = copy(baseUrlEnv = baseUrlEnv)
-  def withExtras(extras: Seq[ProviderConfigKey]): ProviderConfigSpec         = copy(extras = extras)
-  def withApiKeyEnv(apiKeyEnv: Seq[String]): ProviderConfigSpec              = copy(apiKeyEnv = apiKeyEnv)
-  def withAuthExtras(authExtras: Seq[ProviderConfigKey]): ProviderConfigSpec = copy(authExtras = authExtras)
-  def withKeylessWhen(keylessWhen: KeylessSetting): ProviderConfigSpec       = copy(keylessWhen = Some(keylessWhen))
+  def withDefaultBaseUrl(defaultBaseUrl: BaseUrl): ProviderConfigSpec   = copy(defaultBaseUrl = Some(defaultBaseUrl))
+  def withDefaultBaseUrl(defaultBaseUrl: Option[BaseUrl]): ProviderConfigSpec = copy(defaultBaseUrl = defaultBaseUrl)
+  def withBaseUrlExample(baseUrlExample: String): ProviderConfigSpec          = copy(baseUrlExample = baseUrlExample)
+  def withBaseUrlEnv(baseUrlEnv: String): ProviderConfigSpec                  = copy(baseUrlEnv = Some(baseUrlEnv))
+  def withBaseUrlEnv(baseUrlEnv: Option[String]): ProviderConfigSpec          = copy(baseUrlEnv = baseUrlEnv)
+  def withExtras(extras: Seq[ProviderConfigKey]): ProviderConfigSpec          = copy(extras = extras)
+  def withApiKeyEnv(apiKeyEnv: Seq[String]): ProviderConfigSpec               = copy(apiKeyEnv = apiKeyEnv)
+  def withAuthExtras(authExtras: Seq[ProviderConfigKey]): ProviderConfigSpec  = copy(authExtras = authExtras)
+  def withKeylessWhen(keylessWhen: KeylessSetting): ProviderConfigSpec        = copy(keylessWhen = Some(keylessWhen))
   def withKeylessWhen(key: String, value: String, others: String*): ProviderConfigSpec =
     copy(keylessWhen = Some(KeylessSetting(key, value, others*)))
   def withKeylessWhen(keylessWhen: Option[KeylessSetting]): ProviderConfigSpec =
@@ -179,7 +180,7 @@ object ProviderConfigSpec:
   def apply(
     requiresApiKey: Boolean = false,
     requiresBaseUrl: Boolean = false,
-    defaultBaseUrl: Option[String] = None,
+    defaultBaseUrl: Option[BaseUrl] = None,
     baseUrlExample: String = "e.g. https://api.example.com/",
     baseUrlEnv: Option[String] = None,
     extras: Seq[ProviderConfigKey] = Seq.empty,
@@ -217,7 +218,7 @@ object ProviderConfigSpec:
    * @param apiKeyEnv the variables the module binds to `llm4s.credentials.<id>.apiKey`; see
    *                  [[ProviderConfigSpec.apiKeyEnv]].
    */
-  def apiKeyAndDefaultBaseUrl(defaultBaseUrl: String, apiKeyEnv: Seq[String] = Seq.empty): ProviderConfigSpec =
+  def apiKeyAndDefaultBaseUrl(defaultBaseUrl: BaseUrl, apiKeyEnv: Seq[String] = Seq.empty): ProviderConfigSpec =
     ProviderConfigSpec(requiresApiKey = true, defaultBaseUrl = Some(defaultBaseUrl), apiKeyEnv = apiKeyEnv)
 
 /**

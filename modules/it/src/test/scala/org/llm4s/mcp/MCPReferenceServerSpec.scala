@@ -1,5 +1,6 @@
 package org.llm4s.mcp
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.agent.Agent
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.McpReference
@@ -206,7 +207,7 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = s"scripted-$calls",
           created = Instant.EPOCH,
-          model = "scripted-model",
+          model = ModelName("scripted-model"),
           message = message,
           usage = None
         )

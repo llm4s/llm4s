@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
   EmbeddingUsage,
@@ -24,17 +25,17 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
   // ============ CompletionReceived ============
 
   "TraceEvent.CompletionReceived" should "have correct event type" in {
-    val event = TraceEvent.CompletionReceived("comp-123", "gpt-4", 2, "Hello world", fixedTimestamp)
+    val event = TraceEvent.CompletionReceived("comp-123", ModelName("gpt-4"), 2, "Hello world", fixedTimestamp)
 
     event.eventType shouldBe "completion_received"
     event.id shouldBe "comp-123"
-    event.model shouldBe "gpt-4"
+    event.model shouldBe ModelName("gpt-4")
     event.toolCalls shouldBe 2
     event.content shouldBe "Hello world"
   }
 
   it should "serialize to JSON correctly" in {
-    val event = TraceEvent.CompletionReceived("comp-123", "gpt-4", 2, "Hello", fixedTimestamp)
+    val event = TraceEvent.CompletionReceived("comp-123", ModelName("gpt-4"), 2, "Hello", fixedTimestamp)
 
     val json = event.toJson
 
@@ -119,17 +120,17 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
 
   "TraceEvent.TokenUsageRecorded" should "have correct event type" in {
     val usage = TokenUsage(100, 50, 150)
-    val event = TraceEvent.TokenUsageRecorded(usage, "gpt-4", "completion", fixedTimestamp)
+    val event = TraceEvent.TokenUsageRecorded(usage, ModelName("gpt-4"), "completion", fixedTimestamp)
 
     event.eventType shouldBe "token_usage_recorded"
     event.usage shouldBe usage
-    event.model shouldBe "gpt-4"
+    event.model shouldBe ModelName("gpt-4")
     event.operation shouldBe "completion"
   }
 
   it should "serialize to JSON correctly" in {
     val usage = TokenUsage(100, 50, 150)
-    val event = TraceEvent.TokenUsageRecorded(usage, "gpt-4", "completion", fixedTimestamp)
+    val event = TraceEvent.TokenUsageRecorded(usage, ModelName("gpt-4"), "completion", fixedTimestamp)
 
     val json = event.toJson
 
@@ -144,7 +145,7 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
   // ============ AgentRunEnded ============
 
   "AgentRunEnded" should "serialise a flat summary without messages" in {
-    val usage = UsageSummary().add("m", TokenUsage(10, 5, 15), None)
+    val usage = UsageSummary().add(ModelName("m"), TokenUsage(10, 5, 15), None)
     val e = TraceEvent.AgentRunEnded(
       "thread-1",
       "run-1",
@@ -221,18 +222,20 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
 
   "TraceEvent.EmbeddingUsageRecorded" should "have correct event type" in {
     val usage = EmbeddingUsage(500, 500)
-    val event = TraceEvent.EmbeddingUsageRecorded(usage, "text-embedding-3-small", "indexing", 10, fixedTimestamp)
+    val event =
+      TraceEvent.EmbeddingUsageRecorded(usage, ModelName("text-embedding-3-small"), "indexing", 10, fixedTimestamp)
 
     event.eventType shouldBe "embedding_usage_recorded"
     event.usage shouldBe usage
-    event.model shouldBe "text-embedding-3-small"
+    event.model shouldBe ModelName("text-embedding-3-small")
     event.operation shouldBe "indexing"
     event.inputCount shouldBe 10
   }
 
   it should "serialize to JSON correctly" in {
     val usage = EmbeddingUsage(500, 500)
-    val event = TraceEvent.EmbeddingUsageRecorded(usage, "text-embedding-3-small", "query", 5, fixedTimestamp)
+    val event =
+      TraceEvent.EmbeddingUsageRecorded(usage, ModelName("text-embedding-3-small"), "query", 5, fixedTimestamp)
 
     val json = event.toJson
 
@@ -247,18 +250,18 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
   // ============ CostRecorded ============
 
   "TraceEvent.CostRecorded" should "have correct event type" in {
-    val event = TraceEvent.CostRecorded(0.0025, "gpt-4", "completion", 1000, "total", fixedTimestamp)
+    val event = TraceEvent.CostRecorded(0.0025, ModelName("gpt-4"), "completion", 1000, "total", fixedTimestamp)
 
     event.eventType shouldBe "cost_recorded"
     event.costUsd shouldBe 0.0025
-    event.model shouldBe "gpt-4"
+    event.model shouldBe ModelName("gpt-4")
     event.operation shouldBe "completion"
     event.tokenCount shouldBe 1000
     event.costType shouldBe "total"
   }
 
   it should "serialize to JSON correctly" in {
-    val event = TraceEvent.CostRecorded(0.005, "gpt-4", "completion", 2000, "embedding", fixedTimestamp)
+    val event = TraceEvent.CostRecorded(0.005, ModelName("gpt-4"), "completion", 2000, "embedding", fixedTimestamp)
 
     val json = event.toJson
 
@@ -332,15 +335,15 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
 
   "TraceEvent" should "have timestamp on all events" in {
     val events: Seq[TraceEvent] = Seq(
-      TraceEvent.CompletionReceived("id", "model", 0, "c", fixedTimestamp),
+      TraceEvent.CompletionReceived("id", ModelName("model"), 0, "c", fixedTimestamp),
       TraceEvent.ToolExecuted("t", "i", "o", 0.millis, true, fixedTimestamp),
       TraceEvent.ErrorOccurred.of(new Exception(), "").withTimestamp(fixedTimestamp),
-      TraceEvent.TokenUsageRecorded(TokenUsage(0, 0, 0), "m", "o", fixedTimestamp),
+      TraceEvent.TokenUsageRecorded(TokenUsage(0, 0, 0), ModelName("m"), "o", fixedTimestamp),
       TraceEvent
         .AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary(), fixedTimestamp),
       TraceEvent.CustomEvent("n", ujson.Obj(), fixedTimestamp),
-      TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(0, 0), "m", "o", 0, fixedTimestamp),
-      TraceEvent.CostRecorded(0.0, "m", "o", 0, "t", fixedTimestamp),
+      TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(0, 0), ModelName("m"), "o", 0, fixedTimestamp),
+      TraceEvent.CostRecorded(0.0, ModelName("m"), "o", 0, "t", fixedTimestamp),
       TraceEvent.RAGOperationCompleted("o", 0.millis, timestamp = fixedTimestamp)
     )
 
@@ -349,14 +352,14 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
 
   it should "serialize all events to JSON" in {
     val events: Seq[TraceEvent] = Seq(
-      TraceEvent.CompletionReceived("id", "model", 0, "c"),
+      TraceEvent.CompletionReceived("id", ModelName("model"), 0, "c"),
       TraceEvent.ToolExecuted("t", "i", "o", 0.millis, true),
       TraceEvent.ErrorOccurred.of(new Exception("e"), ""),
-      TraceEvent.TokenUsageRecorded(TokenUsage(0, 0, 0), "m", "o"),
+      TraceEvent.TokenUsageRecorded(TokenUsage(0, 0, 0), ModelName("m"), "o"),
       TraceEvent.AgentRunEnded("t", "r", "a", TraceEvent.RunStatus.Completed, Seq.empty, UsageSummary()),
       TraceEvent.CustomEvent("n", ujson.Obj()),
-      TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(0, 0), "m", "o", 0),
-      TraceEvent.CostRecorded(0.0, "m", "o", 0, "t"),
+      TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(0, 0), ModelName("m"), "o", 0),
+      TraceEvent.CostRecorded(0.0, ModelName("m"), "o", 0, "t"),
       TraceEvent.RAGOperationCompleted("o", 0.millis)
     )
 

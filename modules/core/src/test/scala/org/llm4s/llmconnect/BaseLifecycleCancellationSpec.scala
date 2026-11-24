@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.{ CancelledError, NetworkError }
 import org.llm4s.llmconnect.model.*
 import org.llm4s.metrics.MetricsCollector
@@ -14,7 +16,7 @@ class BaseLifecycleCancellationSpec extends AnyFlatSpec with Matchers {
   final private class Stub(behaviour: () => Result[Completion]) extends BaseLifecycleLLMClient {
     protected def clientDescription = "stub client"
     protected def providerName      = "stub"
-    protected def modelName         = "stub-model"
+    protected def modelName         = ModelName("stub-model")
     protected def metrics           = MetricsCollector.noop
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       completeWithMetrics(behaviour())
@@ -54,7 +56,7 @@ class BaseLifecycleCancellationSpec extends AnyFlatSpec with Matchers {
         Completion(
           id = "id",
           created = Instant.EPOCH,
-          model = "stub-model",
+          model = ModelName("stub-model"),
           message = AssistantMessage("answer")
         )
       )

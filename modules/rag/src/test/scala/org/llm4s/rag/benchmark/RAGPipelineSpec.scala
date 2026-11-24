@@ -1,5 +1,6 @@
 package org.llm4s.rag.benchmark
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.chunking.ChunkerFactory
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.model.ModelRegistryService
@@ -78,7 +79,7 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
         Completion(
           id = "mock",
           created = Instant.EPOCH,
-          model = "mock-model",
+          model = ModelName("mock-model"),
           message = AssistantMessage(text = Some("Answer derived from provided context.")),
           usage = Some(TokenUsage(50, 25, 75))
         )

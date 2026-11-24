@@ -113,8 +113,8 @@ final case class NamedProviderConfig private (
    *  @param default by-name fallback string used to construct a `BaseUrl`
    *  @return the configured or default `BaseUrl`
    */
-  def baseUrlOrDefault(default: => String): BaseUrl =
-    baseUrl.getOrElse(BaseUrl(default))
+  def baseUrlOrDefault(default: => BaseUrl): BaseUrl =
+    baseUrl.getOrElse(default)
 
   /**
    * Returns the configured API key or fails with a `ConfigurationError` if absent.

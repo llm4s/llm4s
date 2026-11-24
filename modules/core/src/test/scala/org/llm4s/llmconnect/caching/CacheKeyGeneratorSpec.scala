@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.InputPurpose
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -41,23 +42,25 @@ class CacheKeyGeneratorSpec extends AnyFlatSpec with Matchers {
   it should "preserve isolated UTF-16 surrogates instead of replacing them" in {
     val strings = Seq(0xd800.toChar.toString, 0xd801.toChar.toString, 0xdc00.toChar.toString, "?")
     strings.map(CacheKeyGenerator.sha256(_)).distinct should have size strings.size
-    strings.map(s => CacheKeyGenerator.embeddingKey(s, "m", InputPurpose.Query)).distinct should have size strings.size
+    strings
+      .map(s => CacheKeyGenerator.embeddingKey(s, ModelName("m"), InputPurpose.Query))
+      .distinct should have size strings.size
   }
 
   "CacheKeyGenerator.embeddingKey" should "differ by purpose" in {
-    CacheKeyGenerator.embeddingKey("t", "m", InputPurpose.Query) should not be
-      CacheKeyGenerator.embeddingKey("t", "m", InputPurpose.Document)
+    CacheKeyGenerator.embeddingKey("t", ModelName("m"), InputPurpose.Query) should not be
+      CacheKeyGenerator.embeddingKey("t", ModelName("m"), InputPurpose.Document)
   }
 
   it should "not let a model name stand in for a purpose" in {
-    CacheKeyGenerator.embeddingKey("t", "m", InputPurpose.Query) should not be
-      CacheKeyGenerator.embeddingKey("t", "m#query", InputPurpose.Document)
-    CacheKeyGenerator.embeddingKey("t", "m", InputPurpose.Query) should not be
-      CacheKeyGenerator.embeddingKey("t", "mquery", InputPurpose.Document)
+    CacheKeyGenerator.embeddingKey("t", ModelName("m"), InputPurpose.Query) should not be
+      CacheKeyGenerator.embeddingKey("t", ModelName("m#query"), InputPurpose.Document)
+    CacheKeyGenerator.embeddingKey("t", ModelName("m"), InputPurpose.Query) should not be
+      CacheKeyGenerator.embeddingKey("t", ModelName("mquery"), InputPurpose.Document)
   }
 
   it should "not let a text and a model name trade characters" in {
-    CacheKeyGenerator.embeddingKey("a:b", "c", InputPurpose.Document) should not be
-      CacheKeyGenerator.embeddingKey("a", "b:c", InputPurpose.Document)
+    CacheKeyGenerator.embeddingKey("a:b", ModelName("c"), InputPurpose.Document) should not be
+      CacheKeyGenerator.embeddingKey("a", ModelName("b:c"), InputPurpose.Document)
   }
 }

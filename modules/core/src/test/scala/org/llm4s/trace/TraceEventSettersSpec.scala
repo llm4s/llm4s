@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.model.{ EmbeddingUsage, ServiceTier, TokenUsage, UsageSummary, UserMessage }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
@@ -24,13 +25,13 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
   }
 
   "CompletionReceived" should "default its timestamp and set every field" in {
-    stampedNow(TraceEvent.CompletionReceived("id", "m", 0, "c").timestamp)
-    val e = TraceEvent.CompletionReceived("id", "m", 0, "c", t0)
-    e.withId("id2").withModel("m2").withToolCalls(2).withContent("c2").withTimestamp(t1) shouldBe
-      TraceEvent.CompletionReceived("id2", "m2", 2, "c2", t1)
+    stampedNow(TraceEvent.CompletionReceived("id", ModelName("m"), 0, "c").timestamp)
+    val e = TraceEvent.CompletionReceived("id", ModelName("m"), 0, "c", t0)
+    e.withId("id2").withModel(ModelName("m2")).withToolCalls(2).withContent("c2").withTimestamp(t1) shouldBe
+      TraceEvent.CompletionReceived("id2", ModelName("m2"), 2, "c2", t1)
     e.servedTier shouldBe None
     e.withServedTier(ServiceTier.Default) shouldBe
-      TraceEvent.CompletionReceived("id", "m", 0, "c", t0, servedTier = Some(ServiceTier.Default))
+      TraceEvent.CompletionReceived("id", ModelName("m"), 0, "c", t0, servedTier = Some(ServiceTier.Default))
   }
 
   "TraceEvent.serviceTierName" should "write the named tiers lower case and Other as the provider wrote it" in {
@@ -82,17 +83,17 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
   }
 
   "TokenUsageRecorded" should "default its timestamp and span and set every field" in {
-    val d = TraceEvent.TokenUsageRecorded(TokenUsage(1, 2, 3), "m", "op")
+    val d = TraceEvent.TokenUsageRecorded(TokenUsage(1, 2, 3), ModelName("m"), "op")
     stampedNow(d.timestamp)
     d.span shouldBe None
     val c = TraceEvent
-      .TokenUsageRecorded(TokenUsage(1, 2, 3), "m", "op", t0)
+      .TokenUsageRecorded(TokenUsage(1, 2, 3), ModelName("m"), "op", t0)
       .withUsage(TokenUsage(4, 5, 9))
-      .withModel("m2")
+      .withModel(ModelName("m2"))
       .withOperation("op2")
       .withTimestamp(t1)
       .withSpan(span)
-    c shouldBe TraceEvent.TokenUsageRecorded(TokenUsage(4, 5, 9), "m2", "op2", t1, Some(span))
+    c shouldBe TraceEvent.TokenUsageRecorded(TokenUsage(4, 5, 9), ModelName("m2"), "op2", t1, Some(span))
     c.withSpan(None).span shouldBe None
     c.withSpan(Some(span)).span shouldBe Some(span)
   }
@@ -112,7 +113,7 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
     d.withBlockedBy("pii").withActiveAgent("billing").activeAgent shouldBe Some("billing")
     d.withBlockedBy(Some("pii")).withBlockedBy(None).blockedBy shouldBe None
     d.withActiveAgent(Some("billing")).withActiveAgent(None).activeAgent shouldBe None
-    val usage = UsageSummary().add("m", TokenUsage(1, 2, 3), None)
+    val usage = UsageSummary().add(ModelName("m"), TokenUsage(1, 2, 3), None)
     val msgs  = Seq(UserMessage("hi"))
     val c = d
       .withThreadId("th2")
@@ -154,24 +155,30 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
   }
 
   "EmbeddingUsageRecorded" should "default its timestamp and set every field" in {
-    val d = TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(1, 1), "m", "query", 1)
+    val d = TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(1, 1), ModelName("m"), "query", 1)
     stampedNow(d.timestamp)
     d.withUsage(EmbeddingUsage(2, 2))
-      .withModel("m2")
+      .withModel(ModelName("m2"))
       .withOperation("indexing")
       .withInputCount(3)
-      .withTimestamp(t1) shouldBe TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(2, 2), "m2", "indexing", 3, t1)
+      .withTimestamp(t1) shouldBe TraceEvent.EmbeddingUsageRecorded(
+      EmbeddingUsage(2, 2),
+      ModelName("m2"),
+      "indexing",
+      3,
+      t1
+    )
   }
 
   "CostRecorded" should "default its timestamp and set every field" in {
-    val d = TraceEvent.CostRecorded(0.1, "m", "op", 1, "total")
+    val d = TraceEvent.CostRecorded(0.1, ModelName("m"), "op", 1, "total")
     stampedNow(d.timestamp)
     d.withCostUsd(0.2)
-      .withModel("m2")
+      .withModel(ModelName("m2"))
       .withOperation("op2")
       .withTokenCount(2)
       .withCostType("completion")
-      .withTimestamp(t1) shouldBe TraceEvent.CostRecorded(0.2, "m2", "op2", 2, "completion", t1)
+      .withTimestamp(t1) shouldBe TraceEvent.CostRecorded(0.2, ModelName("m2"), "op2", 2, "completion", t1)
   }
 
   "RAGOperationCompleted" should "default its optional metrics and timestamp and set every field" in {
@@ -198,11 +205,11 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
   }
 
   "ImageGenerationCompleted" should "default cost, success, error and timestamp and set every field" in {
-    val d = TraceEvent.ImageGenerationCompleted("m", "generate", 1, "1024x1024", "hd", 1.milli)
+    val d = TraceEvent.ImageGenerationCompleted(ModelName("m"), "generate", 1, "1024x1024", "hd", 1.milli)
     stampedNow(d.timestamp)
     (d.costUsd, d.success, d.errorMessage, d.provider) shouldBe ((None, true, None, None))
     val c = d
-      .withModel("m2")
+      .withModel(ModelName("m2"))
       .withProvider(ProviderId("p2"))
       .withOperation("edit")
       .withImageCount(2)
@@ -214,7 +221,7 @@ class TraceEventSettersSpec extends AnyFlatSpec with Matchers {
       .withErrorMessage("bad")
       .withTimestamp(t1)
     c shouldBe TraceEvent.ImageGenerationCompleted(
-      "m2",
+      ModelName("m2"),
       "edit",
       2,
       "512x512",

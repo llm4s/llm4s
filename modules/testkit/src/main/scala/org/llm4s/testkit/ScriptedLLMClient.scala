@@ -1,5 +1,6 @@
 package org.llm4s.testkit
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
@@ -162,7 +163,7 @@ final class ScriptedLLMClient private (
     Completion(
       id = s"scripted-${index + 1}",
       created = Instant.EPOCH,
-      model = reply.model,
+      model = ModelName(reply.model),
       message = AssistantMessage(
         text = Some(reply.content).filter(_.nonEmpty),
         toolCalls = calls

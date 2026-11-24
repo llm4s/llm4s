@@ -244,7 +244,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
 
       Llm4sConfig.provider(ConfigSource.string(hocon), ProviderName("azure-main")) match
         case Right(azure: AzureConfig) =>
-          azure.endpoint shouldBe "https://my-resource.openai.azure.com"
+          azure.endpoint shouldBe BaseUrl("https://my-resource.openai.azure.com")
           azure.apiVersion shouldBe AzureConfig.DEFAULT_API_VERSION
         case other =>
           fail(s"Expected AzureConfig, got $other")

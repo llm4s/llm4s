@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.error.{ CancelledError, ServiceError, ValidationError }
@@ -25,7 +26,7 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private val full: Completion = Completion(
     id = "reply-1",
     created = Instant.EPOCH,
-    model = "gpt-4o-2024-08-06",
+    model = ModelName("gpt-4o-2024-08-06"),
     message = AssistantMessage("Let me check.", Seq(toolCall, ToolCall(ToolCallId("call-2"), "clock", ujson.Obj())))
       .withThinking("The user wants the weather."),
     usage = Some(
@@ -41,7 +42,7 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     estimatedCost = Some(0.0015)
   )
 
-  private val bare: Completion = Completion("reply-2", Instant.EPOCH, "m", AssistantMessage("4"))
+  private val bare: Completion = Completion("reply-2", Instant.EPOCH, ModelName("m"), AssistantMessage("4"))
 
   /** A client that records each conversation and options it is sent, and answers with `reply`. */
   private class Recording(reply: => Result[Completion]) extends LLMClient {
@@ -124,7 +125,7 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   it should "give the cost as core's agent usage adds it, so a reply's cost and an agent turn's total agree" in {
     val cost  = 0.1 + 0.2 // 0.30000000000000004 as a Double
     val reply = Llm4s.wrapClient(replying(full.withEstimatedCost(cost))).completion("q").get()
-    val turn  = UsageSummary().add("m", full.usage.get, Some(cost))
+    val turn  = UsageSummary().add(ModelName("m"), full.usage.get, Some(cost))
 
     reply.estimatedCost.get() shouldBe turn.totalCost.bigDecimal
   }
@@ -229,7 +230,7 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
     reply(full) shouldBe reply(full)
     reply(full).hashCode shouldBe reply(full).hashCode
-    reply(full) should not be reply(full.withModel("other"))
+    reply(full) should not be reply(full.withModel(ModelName("other")))
     reply(full) should not be reply(full.withEstimatedCost(None))
     reply(full) should not be reply(full.withServedTier(ServiceTier.Flex))
     reply(full.withServedTier(ServiceTier.Flex)) shouldBe reply(full.withServedTier(ServiceTier.Flex))
@@ -301,7 +302,8 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   it should "count what an agent turn's usage sums: prompt tokens as input, completion and thinking as output" in {
     val tokens = full.usage.get
     val usage  = FacadeInternals.tokenUsage(tokens)
-    val turn   = FacadeInternals.usageSummary(UsageSummary().add("m", tokens, None).add("m", tokens, None))
+    val turn =
+      FacadeInternals.usageSummary(UsageSummary().add(ModelName("m"), tokens, None).add(ModelName("m"), tokens, None))
 
     turn.inputTokens shouldBe 2L * usage.promptTokens
     turn.outputTokens shouldBe 2L * (usage.completionTokens + usage.thinkingTokens)

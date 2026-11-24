@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.funsuite.AnyFunSuite
@@ -14,7 +15,7 @@ class GeminiClientSpec extends AnyFunSuite {
   private val testConfig = GeminiConfig(
     apiKey = Secret("test-key"),
     model = ModelName("gemini-2.0-flash-exp"),
-    baseUrl = "https://generativelanguage.googleapis.com",
+    baseUrl = BaseUrl("https://generativelanguage.googleapis.com"),
     contextWindow = 1048576,
     reserveCompletion = 8192
   )

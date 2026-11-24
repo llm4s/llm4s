@@ -48,7 +48,7 @@ class MistralDefaultProviderIntegrationSpec extends AnyWordSpec with Matchers {
           case mistral: MistralConfig =>
             mistral.model.asString shouldBe "mistral-small-latest"
             mistral.apiKey.reveal shouldBe "sys-test-key"
-            mistral.baseUrl should startWith("https://api.mistral.ai")
+            mistral.baseUrl.asUrl should startWith("https://api.mistral.ai")
           case other => fail(s"Expected MistralConfig, got $other")
         }
       }

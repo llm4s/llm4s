@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 
 /**
@@ -16,12 +17,12 @@ import org.llm4s.annotation.Stable
  */
 @Stable
 final case class EmbeddingModelConfig private (
-  name: String,
+  name: ModelName,
   dimensions: Int
 ) {
 
   /** Sets the model identifier. */
-  def withName(name: String): EmbeddingModelConfig = copy(name = name)
+  def withName(name: ModelName): EmbeddingModelConfig = copy(name = name)
 
   /** Sets the number of dimensions in the embedding vectors. */
   def withDimensions(dimensions: Int): EmbeddingModelConfig = copy(dimensions = dimensions)
@@ -35,6 +36,6 @@ object EmbeddingModelConfig {
    * @param name       model identifier
    * @param dimensions number of dimensions in the embedding vectors
    */
-  def apply(name: String, dimensions: Int): EmbeddingModelConfig =
+  def apply(name: ModelName, dimensions: Int): EmbeddingModelConfig =
     new EmbeddingModelConfig(name, dimensions)
 }

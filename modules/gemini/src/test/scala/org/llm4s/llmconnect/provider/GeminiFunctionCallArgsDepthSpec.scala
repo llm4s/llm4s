@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.error.ServiceError
 import org.llm4s.security.Secret
@@ -32,7 +33,7 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
   private val geminiConfig = GeminiConfig(
     apiKey = Secret("test-key"),
     model = ModelName("gemini-2.0-flash"),
-    baseUrl = "https://generativelanguage.googleapis.com/v1beta",
+    baseUrl = BaseUrl("https://generativelanguage.googleapis.com/v1beta"),
     contextWindow = 1048576,
     reserveCompletion = 8192
   )

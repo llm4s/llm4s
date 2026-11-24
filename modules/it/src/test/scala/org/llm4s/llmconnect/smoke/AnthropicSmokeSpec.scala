@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
@@ -37,9 +39,9 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wit
   private def config(key: String, model: String = "claude-3-haiku-20240307"): AnthropicConfig =
     AnthropicConfig
       .fromValues(
-        modelName = model,
+        modelName = ModelName(model),
         apiKey = Secret(key),
-        baseUrl = "https://api.anthropic.com"
+        baseUrl = BaseUrl("https://api.anthropic.com")
       )
       .value
 

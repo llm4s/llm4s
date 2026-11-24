@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.model
 
 import org.llm4s.llmconnect.model.ToolCallId
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import java.time.Instant
@@ -13,7 +14,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1677652288L),
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage("hi")
     )
 
@@ -25,7 +26,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val base = Completion(
       id = "test-id",
       created = Instant.EPOCH,
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage("hi")
     )
     val at      = Instant.parse("2026-10-23T12:00:00Z")
@@ -35,7 +36,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     updated shouldBe Completion(
       id = "test-id",
       created = at,
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage("hi")
     )
     base.created shouldBe Instant.EPOCH
@@ -46,7 +47,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage(None, Seq(toolCall))
     )
 
@@ -57,7 +58,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage("Hello")
     )
 
@@ -68,7 +69,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      model = "claude-3",
+      model = ModelName("claude-3"),
       message = AssistantMessage("The answer is 4").withThinking("Let me calculate 2 + 2...")
     )
 
@@ -79,7 +80,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      model = "claude-3",
+      model = ModelName("claude-3"),
       message = AssistantMessage("The answer is 4").withThinking(Seq(ThinkingBlock.Redacted("opaque")))
     )
 
@@ -91,7 +92,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage("Hello").withThinking("")
     )
 
@@ -102,7 +103,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      model = "claude-3",
+      model = ModelName("claude-3"),
       message = AssistantMessage("The answer is 4").withThinking("Let me think...")
     )
 
@@ -115,7 +116,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val completion = Completion(
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
-      model = "gpt-4",
+      model = ModelName("gpt-4"),
       message = AssistantMessage("Hello")
     )
 

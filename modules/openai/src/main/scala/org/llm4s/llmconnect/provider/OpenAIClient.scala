@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.annotation.Stable
 
 import com.fasterxml.jackson.databind.json.JsonMapper
@@ -154,7 +155,7 @@ class OpenAIClient private[provider] (
 
   protected def clientDescription: String = s"$displayName client for model $model"
   protected def providerName: String      = provider.asString
-  protected def modelName: String         = model
+  protected def modelName: ModelName      = ModelName(model)
 
   // what the transformer dropped goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
@@ -214,7 +215,7 @@ class OpenAIClient private[provider] (
     // Transform options and messages for model-specific constraints
     val result = for {
       transformed <- TransformationResult.transform(
-        model,
+        modelName,
         options,
         conversation.messages,
         OpenAIModelRules.transformer(registryService),
@@ -252,7 +253,7 @@ class OpenAIClient private[provider] (
     // already record their own exchange on both success and failure.
     TransformationResult
       .transform(
-        model,
+        modelName,
         options,
         conversation.messages,
         OpenAIModelRules.transformer(registryService),
@@ -334,7 +335,7 @@ class OpenAIClient private[provider] (
     adjustments: List[RequestAdjustment],
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    val accumulator = StreamingAccumulator(model)
+    val accumulator = StreamingAccumulator(modelName)
     val toolCalls   = new StreamToolCalls
     val rawStream   = StringBuilder()
     val state       = new StreamState
@@ -363,7 +364,7 @@ class OpenAIClient private[provider] (
           // The accumulator holds the service's own usage report, with its reasoning and cached-token
           // breakdown and its total (`StreamingAccumulator.updateUsage`).
           accumulator.toCompletion.map { c =>
-            val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
+            val cost = c.usage.flatMap(u => CostEstimator.estimate(modelName, u))
             c
               .withEstimatedCost(cost)
               .withAdjustments(adjustments)
@@ -859,14 +860,14 @@ class OpenAIClient private[provider] (
     val usage = known(response._usage()).map(toTokenUsage)
 
     // Estimate cost using CostEstimator
-    val cost = usage.flatMap(u => CostEstimator.estimate(this.model, u))
+    val cost = usage.flatMap(u => CostEstimator.estimate(modelName, u))
 
     Completion(
       id = known(response._id()).getOrElse(""),
       created = known(response._created())
         .flatMap(s => Try(Instant.ofEpochSecond(s.longValue)).toOption)
         .getOrElse(Instant.EPOCH),
-      model = known(response._model()).getOrElse(model),
+      model = known(response._model()).map(ModelName(_)).getOrElse(modelName),
       message = assistantMessage,
       usage = usage,
       estimatedCost = cost,
@@ -954,7 +955,7 @@ class OpenAIClient private[provider] (
         provider = ProviderId(providerName),
         startedAt = startedAt,
         requestBody = requestBody.getOrElse(""),
-        model = Some(model),
+        model = Some(modelName),
         responseBody = responseBody
       ),
       result
@@ -1246,14 +1247,14 @@ private[provider] object OpenAIClientTransport {
       case None =>
         val builder = OpenAIOkHttpClient
           .builder()
-          .baseUrl(config.baseUrl)
+          .baseUrl(config.baseUrl.asUrl)
           .organization(config.organization.orNull)
         config.apiKeyProvider match {
           case None => builder.apiKey(config.apiKey.reveal)
           // The SDK asks the credential for its token on each request (#2313).
           case Some(keys) => builder.credential(BearerTokenCredential.create(new RotatingKey(keys)))
         }
-        sdk(withNetwork(builder, config.network, config.baseUrl).build(), config.timeouts)
+        sdk(withNetwork(builder, config.network, config.baseUrl.asUrl).build(), config.timeouts)
     }
   }
 
@@ -1270,7 +1271,7 @@ private[provider] object OpenAIClientTransport {
    */
   private def workloadIdentityClient(config: OpenAIConfig, wi: OpenAIWorkloadIdentity): SdkClient = {
     val http = OkHttpClient.builder().timeout(Timeout.default())
-    applyNetwork(config.network, config.baseUrl)(
+    applyNetwork(config.network, config.baseUrl.asUrl)(
       http.proxy(_),
       http.proxyAuthenticator(_),
       (factory, trust) => http.sslSocketFactory(factory).trustManager(trust)
@@ -1288,7 +1289,7 @@ private[provider] object OpenAIClientTransport {
       ClientOptions
         .builder()
         .httpClient(new RegisteringBearer(base))
-        .baseUrl(config.baseUrl)
+        .baseUrl(config.baseUrl.asUrl)
         .organization(config.organization.orNull)
         .workloadIdentity(sdkWorkloadIdentity(wi))
         .build()
@@ -1447,16 +1448,16 @@ private[provider] object OpenAIClientTransport {
    * is sent only when `apiVersion` was set to something other than the default.
    */
   def azure(config: AzureConfig): OpenAIClientTransport = {
-    val pathMode = azureUrlPathMode(config.endpoint)
+    val pathMode = azureUrlPathMode(config.endpoint.asUrl)
     val builder = OpenAIOkHttpClient
       .builder()
-      .baseUrl(config.endpoint)
+      .baseUrl(config.endpoint.asUrl)
       .azureUrlPathMode(pathMode)
     if (pathMode == AzureUrlPathMode.LEGACY || config.apiVersion != AzureConfig.DEFAULT_API_VERSION)
       builder.azureServiceVersion(azureServiceVersion(config.apiVersion))
     // The bearer goes through the same OkHttp client as the key would: the section's proxy and TLS apply to both.
     def transport(): OpenAIClientTransport =
-      sdk(withNetwork(builder, config.network, config.endpoint).build(), config.timeouts)
+      sdk(withNetwork(builder, config.network, config.endpoint.asUrl).build(), config.timeouts)
     (config.tokenProvider, config.apiKeyProvider) match {
       case (None, None) =>
         builder.credential(AzureApiKeyCredential.create(config.apiKey.reveal))

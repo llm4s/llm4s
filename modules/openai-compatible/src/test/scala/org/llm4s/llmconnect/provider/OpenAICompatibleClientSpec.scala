@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
@@ -33,7 +34,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
   private def config(baseUrl: String, apiKey: Option[String] = None, headers: Map[String, String] = Map.empty) =
     OpenAICompatibleConfig(
       model = ModelName("local-model"),
-      baseUrl = baseUrl,
+      baseUrl = BaseUrl(baseUrl),
       apiKey = apiKey.map(Secret(_)),
       headers = headers
     )
@@ -113,12 +114,12 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
       val chunks = ListBuffer.empty[StreamedChunk]
       val result = client(config(baseUrl)).streamComplete(conversation, CompletionOptions())(chunks += _)
       result.value.content shouldBe "Hello local"
-      result.value.model shouldBe "local-model"
+      result.value.model shouldBe ModelName("local-model")
       chunks.flatMap(_.content).mkString shouldBe "Hello local"
     }
 
   it should "report the configured context window and reserve" in {
-    val c = client(OpenAICompatibleConfig(ModelName("m"), "http://localhost:1/v1", None, 32768, 4096))
+    val c = client(OpenAICompatibleConfig(ModelName("m"), BaseUrl("http://localhost:1/v1"), None, 32768, 4096))
     (c.getContextWindow(), c.getReserveCompletion()) shouldBe (32768, 4096)
   }
 
@@ -179,7 +180,7 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
     )
     completion.id shouldBe ""
     completion.created shouldBe Instant.EPOCH
-    completion.model shouldBe "local-model"
+    completion.model shouldBe ModelName("local-model")
     completion.content shouldBe ""
     completion.message.text shouldBe None
     completion.usage shouldBe Some(TokenUsage(3, 4, 7))

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.types.ProviderModelTypes.BaseUrl
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.config._
@@ -18,37 +20,37 @@ class ProviderConfigConstructionTest extends AnyFunSuite with Matchers with Eith
   test("OpenAIConfig.load returns Right on success") {
     val cfg = OpenAIConfig
       .fromValues(
-        modelName = "gpt-4o",
+        modelName = ModelName("gpt-4o"),
         apiKey = Secret("sk-test"),
         organization = None,
-        baseUrl = DEFAULT_OPENAI_BASE_URL
+        baseUrl = BaseUrl(DEFAULT_OPENAI_BASE_URL)
       )
       .value
     cfg.model.asString shouldBe "gpt-4o"
     cfg.apiKey.reveal shouldBe "sk-test"
-    cfg.baseUrl shouldBe DEFAULT_OPENAI_BASE_URL
+    cfg.baseUrl.asUrl shouldBe DEFAULT_OPENAI_BASE_URL
   }
 
   test("OpenAIConfig.load returns Left when api key missing") {
     val res =
-      OpenAIConfig.fromValues("gpt-4o", Secret(""), DEFAULT_OPENAI_BASE_URL)
+      OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret(""), BaseUrl(DEFAULT_OPENAI_BASE_URL))
     res.isLeft shouldBe true
   }
 
   test("OpenAIConfig.fromValues constructs an OpenAI config") {
-    val openAi = OpenAIConfig.fromValues("gpt-4o", Secret("sk"), DEFAULT_OPENAI_BASE_URL).value
+    val openAi = OpenAIConfig.fromValues(ModelName("gpt-4o"), Secret("sk"), BaseUrl(DEFAULT_OPENAI_BASE_URL)).value
     openAi shouldBe a[OpenAIConfig]
   }
 
   test("OpenAIConfig.fromValues preserves an OpenRouter base URL") {
     val cfg = OpenAIConfig
       .fromValues(
-        modelName = "gpt-4o",
+        modelName = ModelName("gpt-4o"),
         apiKey = Secret("sk"),
         organization = None,
-        baseUrl = "https://openrouter.ai/api/v1"
+        baseUrl = BaseUrl("https://openrouter.ai/api/v1")
       )
       .value
-    cfg.baseUrl should include("openrouter.ai")
+    cfg.baseUrl.asUrl should include("openrouter.ai")
   }
 }

@@ -48,10 +48,13 @@ class GrowthSafeEmbeddingConfigsSpec extends AnyFunSuite with Matchers {
   }
 
   test("EmbeddingModelConfig's setters each change one field") {
-    val model = EmbeddingModelConfig("text-embedding-3-small", 1536)
+    val model = EmbeddingModelConfig(ModelName("text-embedding-3-small"), 1536)
 
-    model.withName("text-embedding-3-large") shouldBe EmbeddingModelConfig("text-embedding-3-large", 1536)
-    model.withDimensions(3072) shouldBe EmbeddingModelConfig("text-embedding-3-small", 3072)
+    model.withName(ModelName("text-embedding-3-large")) shouldBe EmbeddingModelConfig(
+      ModelName("text-embedding-3-large"),
+      1536
+    )
+    model.withDimensions(3072) shouldBe EmbeddingModelConfig(ModelName("text-embedding-3-small"), 3072)
   }
 
   test("EmbeddingModelConfig keeps its constructor and copy private") {

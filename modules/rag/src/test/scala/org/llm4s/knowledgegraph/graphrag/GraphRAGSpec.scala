@@ -1,5 +1,6 @@
 package org.llm4s.knowledgegraph.graphrag
 
+import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.knowledgegraph.storage.InMemoryGraphStore
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import org.llm4s.llmconnect.LLMClient
@@ -27,7 +28,7 @@ class GraphRAGSpec extends AnyFunSuite with Matchers {
         Completion(
           id = "test",
           created = Instant.ofEpochSecond(1L),
-          model = "test-model",
+          model = ModelName("test-model"),
           message = AssistantMessage(text = Some(content)),
           usage = None
         )
