@@ -11,10 +11,31 @@ import scala.io.Source
 import scala.util.{ Try, Using }
 
 /**
- * Read-only service interface for model registry operations.
+ * The model catalogue: a [[ModelMetadata]] per model id - its provider, mode, input and output token limits,
+ * [[ModelCapabilities]], pricing and deprecation date - looked up by id, by provider, by mode or by capability.
  *
- * Implementations are immutable snapshots of model metadata that can be passed
- * through the application without relying on global process state.
+ * llm4s reads it wherever a decision depends on the model rather than the provider: `LLMConnect.getClient` and
+ * `EmbeddingClient` take it as a `using` parameter, for the context window (`ContextWindowResolver`), the
+ * capabilities a request is checked against (`RequestTransformer`) and cost estimates (`CostEstimator`). An
+ * instance is an immutable snapshot, passed explicitly rather than read from global state, so two registries can
+ * coexist in one process.
+ *
+ * Obtain one from:
+ *  - `Llm4sConfig.modelRegistryService()`: the catalogue the application's `llm4s.modelRegistry` block selects;
+ *  - [[ModelRegistryService.default]]: the catalogue bundled with llm4s, with no configuration read;
+ *  - [[ModelRegistryService.fromConfig]]: a resource, file or URL of your own;
+ *  - [[ModelRegistryService.fromModels]]: a fixed set of entries, as in a test.
+ *
+ * {{{
+ * for {
+ *   registry <- Llm4sConfig.modelRegistryService()
+ *   given ModelRegistryService = registry
+ *   config <- Llm4sConfig.defaultProvider()
+ *   client <- LLMConnect.getClient(config)
+ * } yield client
+ * }}}
+ *
+ * A lookup that finds nothing is a `Left`; [[search]] and [[listProviders]] return a possibly empty list.
  */
 @Stable
 trait ModelRegistryService:

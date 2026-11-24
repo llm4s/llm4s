@@ -17,7 +17,30 @@ import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
 /**
- * How an agent's turn ended, or why it is waiting.
+ * How an agent's turn ended, or why it is waiting: the `status` of every [[AgentResult]].
+ *
+ * Six cases are a turn that ended, after which the next turn on the thread runs normally:
+ *  - `Completed(answer)`: the active agent's final answer, also [[AgentResult.answer]].
+ *  - `Truncated(partialAnswer)`: the answer was cut off at the model's output limit.
+ *  - `Blocked(guardrail, reason)`: a guardrail, or a middleware, refused the turn.
+ *  - `StepLimitReached` and `TokenLimitReached`: the turn used its model calls (`maxSteps`) or its token budget
+ *    (`RunBudgets.maxTokens`) without a final answer.
+ *
+ * `Suspended(suspension)` is the turn that has not ended: it waits on the approvals, questions and breakpoints its
+ * [[Suspension]] lists until [[Agent.resume]] answers them.
+ *
+ * None of them is a failure: a provider, tool or middleware failure is the run's `Left`, never a status. A caller
+ * matches on the status:
+ *
+ * {{{
+ * result.status match
+ *   case AgentStatus.Completed(answer)          => answer
+ *   case AgentStatus.Truncated(partial)         => s"cut off: $partial"
+ *   case AgentStatus.Blocked(guardrail, _)      => s"blocked by $guardrail"
+ *   case AgentStatus.StepLimitReached           => "out of steps"
+ *   case AgentStatus.TokenLimitReached          => "out of tokens"
+ *   case AgentStatus.Suspended(suspension)      => s"waiting on ${suspension.approvals.size} approvals"
+ * }}}
  *
  * `Completed`, `Truncated` and `Blocked` are closed: each is exactly the fields it has, and anything more about the
  * turn goes on [[AgentResult]]. `Suspended` holds a [[Suspension]], which can gain a kind of pending interrupt
