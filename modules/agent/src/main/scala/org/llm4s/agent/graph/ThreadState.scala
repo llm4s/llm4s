@@ -43,7 +43,7 @@ final class ThreadState private[graph] (
         case StateOperation.Restore(key, value) =>
           Right(new ThreadState(keys, values.updated(key.id, value)))
 
-  private[graph] def applyUpdate(update: StateUpdate): Result[ThreadState] =
+  private[agent] def applyUpdate(update: StateUpdate): Result[ThreadState] =
     update.operations.foldLeft[Result[ThreadState]](Right(this))((state, op) => state.flatMap(_.applyOperation(op)))
 
   override def toString: String =
