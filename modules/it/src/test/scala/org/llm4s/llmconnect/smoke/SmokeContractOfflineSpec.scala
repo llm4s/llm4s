@@ -275,9 +275,7 @@ class SmokeContractOfflineSpec
   ): LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       onComplete(conversation, options)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = onStream(conversation, options, onChunk)
     override def getContextWindow(): Int     = 8192

@@ -75,9 +75,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
     val calls = new java.util.concurrent.atomic.AtomicInteger(0)
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       reply(calls.incrementAndGet())
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

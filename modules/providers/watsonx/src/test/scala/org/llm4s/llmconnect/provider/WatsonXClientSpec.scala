@@ -159,7 +159,8 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
 
   test("a space id replaces the project id, and top_p is sent only when it is not the default") {
     val spaced = config.copy(spaceId = Some("space-9"))
-    val body = client(new MockHttpClient(iam), spaced).createRequestBody(hi, CompletionOptions(topP = Some(0.5))).toOption.get
+    val body =
+      client(new MockHttpClient(iam), spaced).createRequestBody(hi, CompletionOptions(topP = Some(0.5))).toOption.get
     body("space_id").str shouldBe "space-9"
     body.obj.contains("project_id") shouldBe false
     body("top_p").num shouldBe 0.5
@@ -181,7 +182,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
     val chunks = ListBuffer.empty[StreamedChunk]
 
     val completion = client(http)
-      .streamComplete(hi, CompletionOptions(), chunks += _)
+      .streamComplete(hi, CompletionOptions())(chunks += _)
       .getOrElse(fail("expected a completion"))
 
     http.lastUrl shouldBe Some("https://wx.example.com/ml/v1/text/chat_stream?version=2026-09-25")
@@ -194,7 +195,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
 
   test("a streaming error status is mapped, not parsed as events") {
     val http   = new MockHttpClient(Seq(iam, HttpResponse(429, """{"errors":[{"message":"slow down"}]}""")))
-    val result = client(http).streamComplete(hi, CompletionOptions(), _ => ())
+    val result = client(http).streamComplete(hi, CompletionOptions())(_ => ())
     result.left.toOption.exists(_.isInstanceOf[RateLimitError]) shouldBe true
   }
 

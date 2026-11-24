@@ -77,9 +77,7 @@ object AgentPekkoNestedEventsSpec {
           )
         }
       }
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] =
         complete(conversation, options).map { c =>

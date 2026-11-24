@@ -37,7 +37,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
     options: CompletionOptions = CompletionOptions()
   ) = {
     val chunks = ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conv, options, chunk => chunks += chunk)
+    val result = client.streamComplete(conv, options)(chunk => chunks += chunk)
     (result, chunks.toList)
   }
 
@@ -85,7 +85,8 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
             UserMessage("2+2?")
           )
         )
-        new BedrockClient(config(url)).complete(conv, CompletionOptions(maxTokens = Some(100), temperature = Some(0.25)))
+        new BedrockClient(config(url))
+          .complete(conv, CompletionOptions(maxTokens = Some(100), temperature = Some(0.25)))
       }
 
       val (path, body) = seen.value
@@ -371,7 +372,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
       client.close()
       client.close() // idempotent
       client.complete(conversation, CompletionOptions()).isLeft shouldBe true
-      client.streamComplete(conversation, CompletionOptions(), _ => ()).isLeft shouldBe true
+      client.streamComplete(conversation, CompletionOptions())(_ => ()).isLeft shouldBe true
     }
 
     "close an async client that streaming started" in {

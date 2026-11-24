@@ -125,7 +125,7 @@ class CancellationSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         if (c.messages.exists(_.isInstanceOf[ToolMessage]))
           Right(Completion("t", Instant.EPOCH, "m", AssistantMessage(Some("finished"))))
         else Right(Completion("t", Instant.EPOCH, "m", AssistantMessage("", Seq(call))))
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 4096
       def getReserveCompletion(): Int = 256

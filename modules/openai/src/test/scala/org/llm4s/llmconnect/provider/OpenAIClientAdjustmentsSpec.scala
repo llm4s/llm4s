@@ -82,12 +82,12 @@ final class OpenAIClientAdjustmentsSpec extends AnyFlatSpec with Matchers with E
   "OpenAIClient.streamComplete" should "report the same adjustments from a faked stream" in {
     // o-series models do not stream natively, so this is the faked stream
     val (c, _) = client("o3-mini")
-    c.streamComplete(hello, CompletionOptions(topP = Some(0.5)), _ => ()).value.adjustments shouldBe oSeries
+    c.streamComplete(hello, CompletionOptions(topP = Some(0.5)))(_ => ()).value.adjustments shouldBe oSeries
   }
 
   it should "report nothing from a native stream whose options were all sent" in {
     val (c, _)     = client("gpt-4o")
-    val completion = c.streamComplete(hello, CompletionOptions(topP = Some(0.5)), _ => ()).value
+    val completion = c.streamComplete(hello, CompletionOptions(topP = Some(0.5)))(_ => ()).value
     completion.content shouldBe "ok"
     completion.adjustments shouldBe empty
   }
@@ -95,7 +95,12 @@ final class OpenAIClientAdjustmentsSpec extends AnyFlatSpec with Matchers with E
   // gpt-5 and o4-mini are reasoning models that no OpenAIModelRules rule names, so only the client reports
   "A reasoning model's request" should "report each sampling option it leaves out, from complete and a native stream" in {
     val sampling =
-      CompletionOptions(temperature = Some(0.2), topP = Some(0.5), presencePenalty = Some(0.3), frequencyPenalty = Some(0.3))
+      CompletionOptions(
+        temperature = Some(0.2),
+        topP = Some(0.5),
+        presencePenalty = Some(0.3),
+        frequencyPenalty = Some(0.3)
+      )
     for (model <- List("gpt-5", "o4-mini")) {
       val (c, sent) = client(model)
       val expected = notSent(
@@ -108,7 +113,7 @@ final class OpenAIClientAdjustmentsSpec extends AnyFlatSpec with Matchers with E
 
       withClue(model) {
         c.complete(hello, sampling).value.adjustments shouldBe expected
-        c.streamComplete(hello, sampling, _ => ()).value.adjustments shouldBe expected
+        c.streamComplete(hello, sampling)(_ => ()).value.adjustments shouldBe expected
         sent.foreach(sendsNoSampling)
       }
     }
@@ -120,7 +125,7 @@ final class OpenAIClientAdjustmentsSpec extends AnyFlatSpec with Matchers with E
       val (c, sent) = client(model)
       withClue(model) {
         c.complete(hello, CompletionOptions()).value.adjustments shouldBe empty
-        c.streamComplete(hello, CompletionOptions(), _ => ()).value.adjustments shouldBe empty
+        c.streamComplete(hello, CompletionOptions())(_ => ()).value.adjustments shouldBe empty
         sent.foreach(sendsNoSampling)
       }
     }

@@ -66,7 +66,9 @@ object CostEstimator {
       val longWrites  = math.min(math.max(0, usage.longCacheCreationTokens.getOrElse(0)), cacheCreationTokens)
       val shortWrites = cacheCreationTokens - longWrites
       def writeCost(cacheCreate: BigDecimal): BigDecimal =
-        cacheCreate * shortWrites + price(pricing.cacheCreationInputTokenCostAbove1hr).getOrElse(cacheCreate) * longWrites
+        cacheCreate * shortWrites + price(pricing.cacheCreationInputTokenCostAbove1hr).getOrElse(
+          cacheCreate
+        ) * longWrites
       val hasCacheBreakdown = usage.cachedTokens.isDefined || usage.cacheCreationTokens.isDefined
 
       val normalInputTokens =

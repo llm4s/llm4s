@@ -30,9 +30,7 @@ class LLMClientAutoCloseableSpec extends AnyFlatSpec with Matchers {
       options: CompletionOptions
     ): Result[Completion] = Right(stubCompletion)
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Right(stubCompletion)
 

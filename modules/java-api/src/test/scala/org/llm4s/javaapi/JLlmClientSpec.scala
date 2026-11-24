@@ -15,9 +15,7 @@ class JLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def successClient(content: String): LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage(content)))
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -27,9 +25,7 @@ class JLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def errorClient(error: LLMError): LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       Left(error)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Left(error)
     override def getContextWindow(): Int     = 4096
@@ -77,9 +73,7 @@ class JLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         capturedOptions = Some(options)
         Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage("ok")))
       }
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 4096
@@ -99,9 +93,7 @@ class JLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val trackingClient = new LLMClient {
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("")))
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 4096

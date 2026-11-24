@@ -10,9 +10,8 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
 
   behavior.of("CostEstimator")
 
-  private def assertBigDecimalClose(actual: BigDecimal, expected: BigDecimal, tolerance: BigDecimal): Unit = {
+  private def assertBigDecimalClose(actual: BigDecimal, expected: BigDecimal, tolerance: BigDecimal): Unit =
     (actual - expected).abs should be <= tolerance
-  }
 
   val sampleUsage = TokenUsage(
     promptTokens = 100,

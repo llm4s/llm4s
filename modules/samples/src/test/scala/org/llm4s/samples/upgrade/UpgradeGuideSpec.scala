@@ -101,9 +101,7 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = Right(reply)
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Right(reply)
 

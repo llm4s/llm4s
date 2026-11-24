@@ -55,7 +55,7 @@ class ModelCallContractSpec extends AnyFlatSpec with Matchers with ProviderModul
         case "filter" => Left(ContentFilteredError.reply("Reference", "filter"))
         case finish   => completion(json("text").str, callsOf(json), mapFinish(finish))
 
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       val events = fetch().linesIterator.filter(_.nonEmpty).map(ujson.read(_)).toList
       val errors = events.flatMap(_.obj.get("error")).flatMap(e => errorEvent(e.str))
       if events.exists(_.obj.get("finish").exists(_.str == "filter")) then

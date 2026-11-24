@@ -481,7 +481,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       val (client, wire) = make("gemini-2.0-flash")
       wire.sse = sse(text("Let me check. "), call("get_weather", city, Some("SIG-STREAM")))
       val chunks     = ListBuffer.empty[StreamedChunk]
-      val completion = client.streamComplete(firstTurn, CompletionOptions(), chunks += _).value
+      val completion = client.streamComplete(firstTurn, CompletionOptions())(chunks += _).value
       val message    = completion.message
 
       completion.toolCalls should have size 1
@@ -506,7 +506,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     it should "record where a signature on a later empty text chunk sits, and send it back after the text" in {
       val (client, wire) = make("gemini-2.0-flash")
       wire.sse = sse(text("Hel"), text("lo."), text("", Some("SIG-LAST")))
-      val message = client.streamComplete(firstTurn, CompletionOptions(), _ => ()).value.message
+      val message = client.streamComplete(firstTurn, CompletionOptions())(_ => ()).value.message
 
       message.content shouldBe "Hello."
       blocksOf(message, provider).map(b => (b("at").num.toInt, b("text").str, b("sig").str)) shouldBe Seq(
@@ -529,7 +529,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       val rome           = ujson.Obj("city" -> "Rome")
       wire.sse = sse(call("get_weather", city, Some("SIG-FIRST")) + "," + call("get_weather", rome))
       val chunks     = ListBuffer.empty[StreamedChunk]
-      val completion = client.streamComplete(firstTurn, CompletionOptions(), chunks += _).value
+      val completion = client.streamComplete(firstTurn, CompletionOptions())(chunks += _).value
 
       completion.toolCalls.map(_.arguments("city").str) shouldBe Seq("Paris", "Rome")
       chunks.flatMap(_.toolCall).map(_.id).distinct should have size 2

@@ -50,9 +50,7 @@ final class SpringAiLlmClient(chatModel: ChatModel, contextWindow: Int, reserveC
       .attempt(chatModel.call(SpringAiMapping.prompt(conversation, options, chatModel.getOptions)))
       .flatMap(SpringAiMapping.completion)
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
     val acc = new SpringAiLlmClient.Accumulator

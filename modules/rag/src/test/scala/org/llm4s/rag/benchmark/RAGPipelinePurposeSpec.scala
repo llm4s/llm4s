@@ -38,9 +38,7 @@ class RAGPipelinePurposeSpec extends AnyFlatSpec with Matchers {
           usage = None
         )
       )
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

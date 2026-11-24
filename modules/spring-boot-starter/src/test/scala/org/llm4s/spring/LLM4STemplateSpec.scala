@@ -15,7 +15,7 @@ class LLM4STemplateSpec extends AnyFlatSpec with Matchers {
 
   private def stubClient(response: Result[Completion]): LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = response
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       response
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512

@@ -74,7 +74,7 @@ class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matcher
         Right(Completion("2", Instant.EPOCH, "m", AssistantMessage(toolOutput)))
       }
     }
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
@@ -165,7 +165,7 @@ class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matcher
           seen.synchronized(seen += c.messages.collect { case m: UserMessage => m.content }.toSeq)
           Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("ok")))
         }
-        override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit) =
+        override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit) =
           complete(c, o)
         override def getContextWindow(): Int     = 4096
         override def getReserveCompletion(): Int = 512

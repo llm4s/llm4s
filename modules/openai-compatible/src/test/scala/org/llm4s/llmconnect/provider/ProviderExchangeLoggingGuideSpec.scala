@@ -166,7 +166,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
       baseUrl =>
         val (sink, recorded) = collecting()
         clientWith(baseUrl, sink)
-          .streamComplete(conversation("stream it"), CompletionOptions(), _ => ())
+          .streamComplete(conversation("stream it"), CompletionOptions())(_ => ())
           .isRight shouldBe true
 
         recorded should have size 1

@@ -166,7 +166,7 @@ class LiteLLMGatewaySpec
     "stream a reply through LiteLLM" in withGateway { url =>
       val llm    = client(keyFile(masterKey), url)
       val pieces = new ConcurrentLinkedQueue[String]()
-      val done   = llm.streamComplete(hello, onChunk = chunk => chunk.content.foreach(pieces.add)).value
+      val done   = llm.streamComplete(hello)(chunk => chunk.content.foreach(pieces.add)).value
       llm.close()
 
       pieces.asScala.mkString shouldBe "Hello from upstream"

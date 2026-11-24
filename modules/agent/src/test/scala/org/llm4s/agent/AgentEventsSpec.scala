@@ -41,9 +41,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
       val index = sent.size
       sent.add(conversation)
       responses(index)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -503,9 +501,7 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     val streamed = new LLMClient:
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Left(NetworkError("complete is not called when the agent streams", None, "test"))
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] =
         onChunk(StreamedChunk(id = "s", content = Some("cut"), finishReason = Some(FinishReason.Length)))

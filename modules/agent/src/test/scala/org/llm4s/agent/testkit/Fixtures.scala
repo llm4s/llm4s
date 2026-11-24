@@ -74,7 +74,7 @@ object Fixtures {
   ) extends LLMClient {
     val streamCalls: AtomicInteger                                          = new AtomicInteger(0)
     def complete(c: Conversation, o: CompletionOptions): Result[Completion] = onComplete()
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = {
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] = {
       streamCalls.incrementAndGet()
       onStream(onChunk)
     }

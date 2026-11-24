@@ -76,15 +76,17 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
     val now        = Instant.now()
 
     val disabled =
-      Try(ProviderExchangeRecorder.record(
-        ProviderExchangeLogging.Disabled,
-        ProviderExchangeCall(
-          provider = ProviderId("p"),
-          startedAt = now,
-          requestBody = "req"
-        ),
-        nullResult
-      ))
+      Try(
+        ProviderExchangeRecorder.record(
+          ProviderExchangeLogging.Disabled,
+          ProviderExchangeCall(
+            provider = ProviderId("p"),
+            startedAt = now,
+            requestBody = "req"
+          ),
+          nullResult
+        )
+      )
     val control = Try(
       ProviderExchangeRecorder.record(
         ProviderExchangeLogging.Enabled(new CollectingSink),

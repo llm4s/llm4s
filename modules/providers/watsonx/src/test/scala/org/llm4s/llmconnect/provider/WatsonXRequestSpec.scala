@@ -265,7 +265,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
 
   private def streamedBody(opts: CompletionOptions): String =
     val http = streaming(streamOf(bytes(streamed)))
-    new WatsonXClient(config, httpClient = http).streamComplete(x, opts, _ => ()) shouldBe a[Right[?, ?]]
+    new WatsonXClient(config, httpClient = http).streamComplete(x, opts)(_ => ()) shouldBe a[Right[?, ?]]
     val sent = http.modelRequests.loneElement
     sent.url should include("/ml/v1/text/chat_stream")
     sent.body
@@ -353,7 +353,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
     val opts     = CompletionOptions().withReasoning(ReasoningEffort.Medium)
     val expected = gptOssBody(opts)
     val stream   = streaming(streamOf(bytes(streamed)))
-    new WatsonXClient(gptOss, httpClient = stream).streamComplete(x, opts, _ => ()) shouldBe a[Right[?, ?]]
+    new WatsonXClient(gptOss, httpClient = stream).streamComplete(x, opts)(_ => ()) shouldBe a[Right[?, ?]]
     stream.modelRequests.loneElement.body shouldBe expected
     val http = routed(_ => Right(iamToken()), _ => Right(chatReply))
     new WatsonXClient(gptOss, httpClient = http).complete(x, opts) shouldBe a[Right[?, ?]]

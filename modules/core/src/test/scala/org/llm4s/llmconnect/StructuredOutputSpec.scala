@@ -35,9 +35,7 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
       lastOptions = options
       stubResponse
     }
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): org.llm4s.types.Result[Completion] =
       stubResponse

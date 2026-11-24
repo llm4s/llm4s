@@ -290,9 +290,10 @@ object SmokeChecks {
         completion <- client
           .streamComplete(
             Conversation(Seq(UserMessage(ToolPrompt))),
-            toolOptions(tool),
-            chunk => { chunks += chunk; () }
-          )
+            toolOptions(tool)
+          ) { chunk =>
+            chunks += chunk; ()
+          }
           .left
           .map(e => s"the streamed request carrying a tool failed: ${e.message}")
         _ <- calledTool(tool, completion)
@@ -422,7 +423,7 @@ object SmokeChecks {
       Capability.StreamedUsage,
       for {
         completion <- client
-          .streamComplete(Conversation(Seq(UserMessage("Say hi in one word"))), small, _ => ())
+          .streamComplete(Conversation(Seq(UserMessage("Say hi in one word"))), small)(_ => ())
           .left
           .map(e => s"the streamed call failed: ${e.message}")
         _ <- usageProblem(completion.usage).toLeft(())

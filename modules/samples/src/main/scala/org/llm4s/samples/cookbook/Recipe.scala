@@ -84,9 +84,7 @@ final class ScriptedClient(reply: (Conversation, Int) => Result[AssistantMessage
   }
 
   /** Sends the scripted reply a word at a time, each word with the space after it, as a model streams its tokens. */
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     complete(conversation, options).map { completion =>

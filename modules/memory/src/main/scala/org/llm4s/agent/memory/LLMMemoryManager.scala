@@ -199,7 +199,7 @@ final case class LLMMemoryManager(
         )
       ),
       options = CompletionOptions(
-        maxTokens = Some(500), // Cap output length for stable summaries
+        maxTokens = Some(500),  // Cap output length for stable summaries
         temperature = Some(0.3) // Low temperature for consistent, factual summaries
       )
     )

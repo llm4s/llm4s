@@ -83,9 +83,7 @@ class SuppliedHttpClientChecksSpec extends AnyWordSpec with Matchers with Provid
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       if completeSends then send("complete")
       Right(answer)
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       if streamSends then send("stream")

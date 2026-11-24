@@ -26,14 +26,14 @@ class AnthropicRoutingTest extends AnyFunSuite with Matchers {
   )
 
   test("Anthropic provider with AnthropicConfig returns AnthropicClient") {
-    LLMConnect.getClient(ProviderId("anthropic"), anthropic) match {
+    LLMConnect.getClient(ProviderId("anthropic"), anthropic, LlmClientOptions.default) match {
       case Right(client) => client.getClass.getSimpleName shouldBe "AnthropicClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
     }
   }
 
   test("an AnthropicConfig routed to another provider is refused") {
-    LLMConnect.getClient(ProviderId("openai"), anthropic).isLeft shouldBe true
+    LLMConnect.getClient(ProviderId("openai"), anthropic, LlmClientOptions.default).isLeft shouldBe true
   }
 
   test("LLMConnect.getClient returns AnthropicClient for the default named Anthropic provider") {
@@ -52,7 +52,7 @@ class AnthropicRoutingTest extends AnyFunSuite with Matchers {
         |}
         |""".stripMargin
 
-    Llm4sConfig.providerFrom(ConfigSource.string(hocon)).flatMap(LLMConnect.getClient) match {
+    Llm4sConfig.providerFrom(ConfigSource.string(hocon)).flatMap(LLMConnect.getClient(_)) match {
       case Right(client) => client.getClass.getSimpleName shouldBe "AnthropicClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
     }

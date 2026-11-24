@@ -38,9 +38,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
   private class Stub(result: Result[Completion]) extends LLMClient {
     var closed                                                                               = false
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = result
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       onChunk(StreamedChunk("c-1", Some("answer")))
@@ -91,7 +89,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       )
       val streamed = new Recording
       TracingLLMClient(new Stub(Right(completion.withServedTier(ServiceTier.Other("scale")))), streamed)
-        .streamComplete(conversation, options, _ => ())
+        .streamComplete(conversation, options)(_ => ())
       streamed.events.loneElement.asInstanceOf[TraceEvent.CompletionReceived].servedTier shouldBe Some(
         ServiceTier.Other("scale")
       )
@@ -112,9 +110,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
 
     "keep a stream's reason when a later chunk carries an empty one" in {
       val emptyLast = new Stub(Right(completion.withFinishReason(FinishReason.Unknown))) {
-        override def streamComplete(
-          conversation: Conversation,
-          options: CompletionOptions,
+        override def streamComplete(conversation: Conversation, options: CompletionOptions)(
           onChunk: StreamedChunk => Unit
         ): Result[Completion] = {
           onChunk(StreamedChunk("c-1", Some("answer"), finishReason = Some(FinishReason.Length)))
@@ -123,14 +119,14 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
         }
       }
       val tracing = new Recording
-      TracingLLMClient(emptyLast, tracing).streamComplete(conversation, options, _ => ())
+      TracingLLMClient(emptyLast, tracing).streamComplete(conversation, options)(_ => ())
       tracing.events.loneElement.asInstanceOf[TraceEvent.CompletionReceived].finishReasons shouldBe Seq("length")
     }
 
     "trace a streamed completion with its finish reason, passing every chunk on" in {
       val tracing = new Recording
       val chunks  = ArrayBuffer.empty[StreamedChunk]
-      TracingLLMClient(new Stub(Right(completion)), tracing).streamComplete(conversation, options, chunks += _)
+      TracingLLMClient(new Stub(Right(completion)), tracing).streamComplete(conversation, options)(chunks += _)
 
       chunks should have size 2
       val e = tracing.events.loneElement.asInstanceOf[TraceEvent.CompletionReceived]
@@ -163,7 +159,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       val tracing  = new Recording
       val client   = TracingLLMClient(new Stub(Left(filtered)), tracing, config)
       client.complete(conversation, options).isLeft shouldBe true
-      client.streamComplete(conversation, options, _ => ()).isLeft shouldBe true
+      client.streamComplete(conversation, options)(_ => ()).isLeft shouldBe true
 
       val errors = tracing.events.collect { case e: TraceEvent.ErrorOccurred => e }
       errors should have size 2

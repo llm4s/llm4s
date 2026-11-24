@@ -39,7 +39,7 @@ object ChatTuiStreaming:
     pump: TokenPump
   )(using ec: ExecutionContext): AsyncResult[Completion] =
     Future {
-      client.streamComplete(conversation, options, onChunk = chunk => pump.offer(chunk))
+      client.streamComplete(conversation, options)(chunk => pump.offer(chunk))
     }.map {
       case Right(completion) => Right(completion)
       case Left(err)         => Left(toTermFlowError(err))

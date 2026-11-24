@@ -198,7 +198,7 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
           http
             .post(url, Map("Content-Type" -> "application/json"), encode(rewrite(c.messages)).render(), 10.seconds)
             .map(_ => Completion("id", Instant.EPOCH, "test", AssistantMessage("done")))
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 1000
     def getReserveCompletion(): Int = 100

@@ -26,9 +26,7 @@ class JRagHistorySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       conversations += conversation
       failure.toLeft(Completion("id", Instant.EPOCH, "fixed", AssistantMessage(reply)))
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

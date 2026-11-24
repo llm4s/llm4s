@@ -22,9 +22,7 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
       Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage(reply)))
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -71,7 +69,7 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
   it should "keep the options it is given" in {
     val client = new Scripted(invoiceJson)
     client.completeStructuredOf[Invoice](conversation, CompletionOptions().withTemperature(0.0))
-    client.asked.get.map(_.temperature) shouldBe Some(0.0)
+    client.asked.get.flatMap(_.temperature) shouldBe Some(0.0)
   }
 
   it should "refuse a type that is not a JSON object, without calling the model" in {

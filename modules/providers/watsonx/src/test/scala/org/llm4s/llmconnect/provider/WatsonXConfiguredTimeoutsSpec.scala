@@ -89,7 +89,7 @@ final class WatsonXConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers {
       WatsonXTestConfig.config.withTimeouts(ProviderTimeouts(stream = Some(11.seconds))),
       httpClient = http
     )
-    client.streamComplete(hi, CompletionOptions(), _ => ()).isRight shouldBe true
+    client.streamComplete(hi, CompletionOptions())(_ => ()).isRight shouldBe true
 
     http.modelRequests.filter(_.streaming).map(_.timeout) shouldBe Seq(11.seconds)
   }

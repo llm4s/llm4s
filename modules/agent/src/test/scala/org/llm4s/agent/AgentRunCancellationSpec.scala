@@ -64,9 +64,7 @@ class AgentRunCancellationSpec extends AnyFlatSpec with TestTimeLimit with Match
         }
       } else Right(CompletionFixture.simple("done"))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -94,9 +92,7 @@ class AgentRunCancellationSpec extends AnyFlatSpec with TestTimeLimit with Match
         Right(CompletionFixture.simple("late"))
       } else Right(CompletionFixture.simple("done"))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -370,9 +366,7 @@ class AgentRunCancellationSpec extends AnyFlatSpec with TestTimeLimit with Match
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         if (down.getAndIncrement() == 0) Left(ValidationError("model", "down"))
         else Right(CompletionFixture.simple("ok"))
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 8192
@@ -394,9 +388,7 @@ class AgentRunCancellationSpec extends AnyFlatSpec with TestTimeLimit with Match
     val client = new LLMClient {
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         Left(ValidationError("model", "down"))
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 8192
@@ -441,9 +433,7 @@ class AgentRunCancellationSpec extends AnyFlatSpec with TestTimeLimit with Match
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         if (calls.incrementAndGet() == 2) Left(ValidationError("model", "down"))
         else Right(CompletionFixture.simple("ok"))
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 8192

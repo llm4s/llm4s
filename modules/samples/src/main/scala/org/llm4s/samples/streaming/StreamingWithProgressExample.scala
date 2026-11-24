@@ -60,31 +60,30 @@ object StreamingWithProgressExample {
         options = CompletionOptions(
           temperature = Some(0.5),
           maxTokens = Some(1000)
-        ),
-        onChunk = chunk => {
-          // Add to accumulator
-          accumulator.addChunk(chunk)
+        )
+      ) { chunk =>
+        // Add to accumulator
+        accumulator.addChunk(chunk)
 
-          // Update counts
-          chunkCount += 1
-          chunk.content.foreach(c => charCount += c.length)
+        // Update counts
+        chunkCount += 1
+        chunk.content.foreach(c => charCount += c.length)
 
-          // Print content
-          chunk.content.foreach(print)
+        // Print content
+        chunk.content.foreach(print)
 
-          // Update progress in terminal title (if supported)
-          if (chunkCount % 5 == 0) {
-            val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
-            // Spinner is printed directly to stdout for streaming UX,
-            // then cleared to avoid interfering with structured logs
-            print(s"\r${spinner(spinnerIndex)} Streaming... [${chunkCount} chunks, ${charCount} chars, ${elapsed}s]")
-            spinnerIndex = (spinnerIndex + 1) % spinner.length
+        // Update progress in terminal title (if supported)
+        if (chunkCount % 5 == 0) {
+          val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
+          // Spinner is printed directly to stdout for streaming UX,
+          // then cleared to avoid interfering with structured logs
+          print(s"\r${spinner(spinnerIndex)} Streaming... [${chunkCount} chunks, ${charCount} chars, ${elapsed}s]")
+          spinnerIndex = (spinnerIndex + 1) % spinner.length
 
-            // Move cursor back to continue printing content
-            print("\r" + " " * 70 + "\r")
-          }
+          // Move cursor back to continue printing content
+          print("\r" + " " * 70 + "\r")
         }
-      )
+      }
       _ = {
         // Ensure we end the streaming line cleanly before logging stats
         logger.info("")

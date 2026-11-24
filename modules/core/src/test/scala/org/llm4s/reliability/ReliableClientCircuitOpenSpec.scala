@@ -31,9 +31,7 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
       result()
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -172,7 +170,7 @@ class ReliableClientCircuitOpenSpec extends AnyFlatSpec with Matchers {
       val expected   = config.validate.left.toOption.get
       expected.asInstanceOf[ValidationError].field shouldBe field
       client.complete(conversation) shouldBe Left(expected)
-      client.streamComplete(conversation, CompletionOptions(), _ => ()) shouldBe Left(expected)
+      client.streamComplete(conversation, CompletionOptions())(_ => ()) shouldBe Left(expected)
       client.validate() shouldBe Left(expected)
       underlying.calls.get() shouldBe 0
     }

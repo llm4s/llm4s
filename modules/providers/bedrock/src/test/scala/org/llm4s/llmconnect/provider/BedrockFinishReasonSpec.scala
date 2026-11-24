@@ -48,7 +48,7 @@ class BedrockFinishReasonSpec extends AnyWordSpec with Matchers {
 
   private def stream(stopReason: String) = {
     val chunks = ListBuffer.empty[StreamedChunk]
-    val result = withResult(sendEventStream(_, frames(stopReason)))(_.streamComplete(conv, onChunk = chunks += _))
+    val result = withResult(sendEventStream(_, frames(stopReason)))(_.streamComplete(conv)(chunks += _))
     (result, chunks.toList)
   }
 

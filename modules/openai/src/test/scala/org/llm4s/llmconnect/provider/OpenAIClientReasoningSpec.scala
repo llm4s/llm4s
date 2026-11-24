@@ -109,7 +109,10 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
   it should "never send reasoning_effort to a model the registry knows does not reason" in {
     Seq("gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-3.5-turbo").foreach { model =>
       withClue(model) {
-        val sent = body(model, CompletionOptions(temperature = Some(0.7), maxTokens = Some(64)).withReasoning(ReasoningEffort.High))
+        val sent = body(
+          model,
+          CompletionOptions(temperature = Some(0.7), maxTokens = Some(64)).withReasoning(ReasoningEffort.High)
+        )
         sent.contains("reasoning_effort") shouldBe false
         // Nothing else changes for it either.
         sent("temperature").num shouldBe 0.7
@@ -151,7 +154,8 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
   }
 
   it should "send reasoning_effort but keep sampling parameters for an open-weight gpt-oss model" in {
-    val sent = body("openai/gpt-oss-120b", CompletionOptions(temperature = Some(0.3)).withReasoning(ReasoningEffort.Medium))
+    val sent =
+      body("openai/gpt-oss-120b", CompletionOptions(temperature = Some(0.3)).withReasoning(ReasoningEffort.Medium))
     sent("reasoning_effort").str shouldBe "medium"
     sent("temperature").num shouldBe 0.3
   }

@@ -709,9 +709,7 @@ final class AcmeClient(
 
   def streamComplete(
     conversation: Conversation,
-    options: CompletionOptions,
-    onChunk: StreamedChunk => Unit
-  ): Result[Completion] =
+    options: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
     completeWithMetrics(...) // postStream + SSEParser + StreamingAccumulator, as OpenAICompatibleClient does
 
   def getContextWindow(): Int     = config.contextWindow

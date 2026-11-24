@@ -29,9 +29,7 @@ class RunScopeEndSpec extends AnyFlatSpec with Matchers with Eventually:
   private object Answering extends LLMClient:
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       Right(Completion("answer", Instant.EPOCH, "test-model", AssistantMessage("hi")))
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

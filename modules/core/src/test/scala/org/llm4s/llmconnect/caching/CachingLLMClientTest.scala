@@ -45,9 +45,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       Left(org.llm4s.error.ProcessingError("mock", "streamComplete not implemented in mock"))

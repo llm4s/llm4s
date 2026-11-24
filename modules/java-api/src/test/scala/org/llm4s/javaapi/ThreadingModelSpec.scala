@@ -53,9 +53,7 @@ class ThreadingModelSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def fake(onComplete: Conversation => Result[Completion]): LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       onComplete(conversation)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

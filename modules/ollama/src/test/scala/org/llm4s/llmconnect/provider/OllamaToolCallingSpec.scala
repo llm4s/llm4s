@@ -460,9 +460,8 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
     def streamAsk(client: OllamaClient, tools: Seq[ToolFunction[_, _]] = Seq(weatherTool)): Result[Completion] =
       client.streamComplete(
         Conversation(Seq(UserMessage("What is the weather in Paris?"))),
-        CompletionOptions().withTools(tools),
-        _ => ()
-      )
+        CompletionOptions().withTools(tools)
+      )(_ => ())
 
     def validation(result: Result[Completion]): ValidationError =
       result.left.toOption.getOrElse(fail("expected a failure")) match {
@@ -565,9 +564,8 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       val chunks = ListBuffer.empty[StreamedChunk]
       val result = client.streamComplete(
         Conversation(Seq(UserMessage("What is the weather in Paris?"))),
-        CompletionOptions().withTools(Seq(weatherTool)),
-        chunks += _
-      )
+        CompletionOptions().withTools(Seq(weatherTool))
+      )(chunks += _)
       (result, chunks.toList)
     }
 
@@ -807,7 +805,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
     "end a streamed reply cut at the limit with Length, on the chunk and the Completion" in {
       withOllama(ndjson(line("Hel"), last(Some("length")))) { (client, _) =>
         val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-        val result = client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions(), chunks += _)
+        val result = client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions())(chunks += _)
         chunks.last.finishReason shouldBe Some(FinishReason.Length)
         result.map(_.finishReason) shouldBe Right(FinishReason.Length)
       }

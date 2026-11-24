@@ -25,9 +25,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
       result
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -85,8 +83,8 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
       .withRetryPolicy(noRetry)
     val client = new ReliableClient(underlying, "test-provider", config)
 
-    client.streamComplete(conversation, CompletionOptions(), _ => ()).isRight shouldBe true
-    client.streamComplete(conversation, CompletionOptions(), _ => ()).isLeft shouldBe true
+    client.streamComplete(conversation, CompletionOptions())(_ => ()).isRight shouldBe true
+    client.streamComplete(conversation, CompletionOptions())(_ => ()).isLeft shouldBe true
     underlying.callCount.get() shouldBe 1
   }
 

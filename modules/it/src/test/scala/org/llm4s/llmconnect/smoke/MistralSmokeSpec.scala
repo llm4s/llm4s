@@ -87,7 +87,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     val client = MistralClient(config(apiKey.get)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, options, c => chunks += c).value
+    val result = client.streamComplete(conversation, options)(c => chunks += c).value
 
     // The first delta carries `content: ""` (the role chunk), so `isDefined` alone would pass for a
     // stream with no text at all; require real text, and that it is what the call returned.
@@ -168,7 +168,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     val client = MistralClient(config(apiKey.get, ReasoningModel)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, CompletionOptions(maxTokens = Some(2048)), c => chunks += c)
+    val result = client.streamComplete(conversation, CompletionOptions(maxTokens = Some(2048)))(c => chunks += c)
     client.close()
 
     withClue(s"Streaming from $ReasoningModel failed: ${result.swap.toOption}") {

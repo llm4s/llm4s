@@ -94,7 +94,11 @@ final private[agent] class AgentTracing(
         case AgentEvents.ModelCallCompleted(m) =>
           if m.provider.isDefined then provider.compareAndSet(None, m.provider): Unit
           usage.updateAndGet(
-            _.add(m.model, m.usage.map(_.toTokenUsage).getOrElse(TokenUsage(0, 0, 0)), m.estimatedCost.map(BigDecimal.decimal))
+            _.add(
+              m.model,
+              m.usage.map(_.toTokenUsage).getOrElse(TokenUsage(0, 0, 0)),
+              m.estimatedCost.map(BigDecimal.decimal)
+            )
           ): Unit
           m.usage.foreach(u =>
             trace(

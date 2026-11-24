@@ -40,9 +40,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers
       val index = sent.size
       sent.add(conversation)
       responses(index)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

@@ -26,9 +26,7 @@ object MockLLMClients {
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)
@@ -57,9 +55,7 @@ object MockLLMClients {
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)
@@ -73,9 +69,7 @@ object MockLLMClients {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       Left(NetworkError(errorMessage, None, "mock://test"))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)

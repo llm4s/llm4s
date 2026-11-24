@@ -50,7 +50,7 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
     withServer("/chat/completions") { exchange =>
       sent.set(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8))
       sendSseResponse(exchange, openAISseBody(Seq("No."), model))
-    }(baseUrl => new XaiClient(config(baseUrl, model)).streamComplete(conv, options, _ => ()).isRight shouldBe true)
+    }(baseUrl => new XaiClient(config(baseUrl, model)).streamComplete(conv, options)(_ => ()).isRight shouldBe true)
     val streamBody = ujson.read(sent.get)
     completeBody.obj.contains("stream") shouldBe false
     streamBody("stream").bool shouldBe true
@@ -149,7 +149,7 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
     } { baseUrl =>
       val chunks = ListBuffer.empty[StreamedChunk]
       val completion = new XaiClient(config(baseUrl, "grok-3-mini"))
-        .streamComplete(conversation, CompletionOptions(), chunks += _)
+        .streamComplete(conversation, CompletionOptions())(chunks += _)
         .value
       chunks.flatMap(_.thinkingDelta) shouldBe Seq("91 = ", "7 x 13.")
       completion.thinking shouldBe Some("91 = 7 x 13.")

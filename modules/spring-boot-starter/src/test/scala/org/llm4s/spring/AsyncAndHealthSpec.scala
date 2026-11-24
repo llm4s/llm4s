@@ -61,7 +61,7 @@ object AsyncAndHealthSpec {
             throw e
         }
       }
-      override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+      override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       override def getContextWindow(): Int     = 4096
       override def getReserveCompletion(): Int = 512

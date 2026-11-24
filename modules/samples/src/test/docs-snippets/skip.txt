@@ -9,14 +9,14 @@ getting-started/ollama-quickstart.md | b523e171b9 | skip | sbt build definition,
 getting-started/first-example.md | 9beb2bb95c | skip | sbt build definition, not Scala source
 getting-started/first-example.md | a984c0ef30 | skip | three lines of a for-comprehension shown on their own: they are the generators of the full example above
 getting-started/configuration.md | 92f27ec027 | with | import org.llm4s.config.Llm4sConfig
-getting-started/configuration.md | 7b6f72222c | with | import org.llm4s.llmconnect.model._
+getting-started/configuration.md | 9377ccc0b9 | with | import org.llm4s.llmconnect.model._
 getting-started/configuration.md | 04567a0cb2 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 89f9b90d1e | with | import org.llm4s.types.Result
 getting-started/first-example.md | 5845843420 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | f69eeea180 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 755ae2a95f | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 1e6757e734 | with | import org.llm4s.agent.Agent; import org.llm4s.toolapi.ToolRegistry
-getting-started/first-example.md | 14b2aad038 | with | import org.llm4s.llmconnect.model._
+getting-started/first-example.md | 4637150377 | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 3efbf67f4d | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService
 getting-started/first-example.md | 7cb679647e | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 5a602dab3e | with | import org.llm4s.llmconnect.model._
@@ -194,7 +194,7 @@ getting-started/installation.md | 0d09a75d93 | skip | sbt build definition, not 
 guide/http-transport.md | 0d09a75d93 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 5668a267bd | skip | sbt build definition, not Scala source
 getting-started/local-jlama.md | 8d860f48e1 | skip | sbt build definition, not Scala source
-tutorials/support-assistant/part-1-first-call.md | f191562fc0 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.llmconnect.model.CompletionOptions; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part1FirstCall.conversationFor
+tutorials/support-assistant/part-1-first-call.md | 072104ccef | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.llmconnect.model.CompletionOptions; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part1FirstCall.conversationFor
 tutorials/support-assistant/part-1-first-call.md | 243847ae3c | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result
 tutorials/support-assistant/part-2-typed-answers.md | 8e136f7a09 | with | import org.llm4s.schema.*; import org.llm4s.samples.tutorial.supportassistant.Part2TypedAnswers.Ticket
 tutorials/support-assistant/part-2-typed-answers.md | 5af41b0c73 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part2TypedAnswers.{ Ticket, classify }

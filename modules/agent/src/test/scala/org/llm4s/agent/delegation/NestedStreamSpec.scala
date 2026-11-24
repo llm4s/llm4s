@@ -582,9 +582,7 @@ object NestedStreamSpec {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       inner.complete(conversation, options)
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       inner.complete(conversation, options).map { completion =>

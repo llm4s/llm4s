@@ -28,7 +28,7 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
       received += o
       Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("4")))
     }
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
@@ -106,7 +106,12 @@ class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     )
     sent(CompletionOptionsCheck.cleared(set)) shouldBe CompletionOptions()
     sent(CompletionOptionsCheck.cleared(CompletionOptionsCheck.everySetting())) shouldBe
-      CompletionOptions(temperature = Some(0.2), topP = Some(0.9), presencePenalty = Some(0.5), frequencyPenalty = Some(-0.5))
+      CompletionOptions(
+        temperature = Some(0.2),
+        topP = Some(0.9),
+        presencePenalty = Some(0.5),
+        frequencyPenalty = Some(-0.5)
+      )
   }
 
   "every reasoning level" should "map to core's level of the same name, and back" in {

@@ -60,7 +60,7 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
 
     val client = new OpenRouterClient(config(apiKey.get))
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+    val result = client.streamComplete(conversation, CompletionOptions())(c => chunks += c)
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
       result.isRight shouldBe true

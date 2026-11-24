@@ -40,7 +40,7 @@ class OpenAICompatibleStreamEndingSpec extends AnyFlatSpec with Matchers with Ei
       val config = OpenAICompatibleConfig(model = "local-model", baseUrl = baseUrl, apiKey = Some(Secret(clientKey)))
       val client = OpenAICompatibleClient(config).value
       val chunks = ListBuffer.empty[StreamedChunk]
-      val result = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), chunks += _)
+      val result = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(chunks += _)
       check(result, chunks.toList)
     }
 
@@ -125,7 +125,7 @@ class OpenAICompatibleStreamEndingSpec extends AnyFlatSpec with Matchers with Ei
       val config = OpenAICompatibleConfig(model = "local-model", baseUrl = baseUrl, apiKey = Some(Secret(clientKey)))
         .withTimeouts(ProviderTimeouts.default.withStream(3.seconds))
       val result = OpenAICompatibleClient(config).value
-        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
       result.left.value shouldBe a[ServiceError]
       result.left.value.message should include("overloaded")
     }

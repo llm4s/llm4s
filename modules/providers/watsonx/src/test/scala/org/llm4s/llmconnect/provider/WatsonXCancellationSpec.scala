@@ -70,9 +70,8 @@ class WatsonXCancellationSpec extends AnyFunSuite with Matchers:
       val worker = Thread.ofVirtual().start { () =>
         val r = client.streamComplete(
           Conversation(Seq(UserMessage("Hi"))),
-          CompletionOptions(),
-          _ => firstChunk.countDown()
-        )
+          CompletionOptions()
+        )(_ => firstChunk.countDown())
         flagKept.set(Thread.currentThread().isInterrupted)
         result.set(Some(r))
       }

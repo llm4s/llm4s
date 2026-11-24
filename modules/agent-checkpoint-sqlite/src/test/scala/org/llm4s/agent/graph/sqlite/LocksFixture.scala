@@ -53,9 +53,7 @@ object LocksFixture:
     private val index = new AtomicInteger()
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       completions.lift(index.getAndIncrement()).toRight(ValidationError("scripted", "no completion left"))
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     def getContextWindow(): Int     = 128000

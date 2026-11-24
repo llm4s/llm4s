@@ -26,9 +26,7 @@ final private[agent] class DeterministicFakeLLMClient(
   ): Result[Completion] =
     Right(response)
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     complete(conversation, options)
@@ -66,9 +64,7 @@ final private[agent] class TwoTurnDeterministicFakeLLMClient(
     if (hasToolResult || hasAssistantMessage) Right(second) else Right(first)
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     complete(conversation, options)
@@ -97,9 +93,7 @@ final private[agent] class FailingLLMClient(error: LLMError) extends LLMClient {
   ): Result[Completion] =
     Left(error)
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     Left(error)
@@ -132,9 +126,7 @@ final private[agent] class NTurnFakeLLMClient(responses: Completion*) extends LL
     else Right(responses(index % responses.size))
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     complete(conversation, options)
@@ -249,9 +241,7 @@ final private[agent] class ScriptedLLMClient(responses: Result[Completion]*) ext
       .getOrElse(Left(org.llm4s.error.ValidationError("scripted", s"no response scripted for call $index")))
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = complete(conversation, options)
 

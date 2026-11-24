@@ -26,9 +26,7 @@ final class ScoringJudgeClient(reply: String) extends LLMClient {
     )
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = complete(conversation, options)
 

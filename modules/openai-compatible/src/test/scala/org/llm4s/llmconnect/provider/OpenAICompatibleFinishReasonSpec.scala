@@ -95,7 +95,7 @@ class OpenAICompatibleFinishReasonSpec extends AnyFlatSpec with Matchers {
     ).mkString("", "\n\n", "\n\n")
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
     withServer("/")(sendSseResponse(_, stream)) { baseUrl =>
-      clientAt(baseUrl).streamComplete(Conversation(Seq(UserMessage("Hi"))), onChunk = chunks += _) match {
+      clientAt(baseUrl).streamComplete(Conversation(Seq(UserMessage("Hi"))))(chunks += _) match {
         case Left(e: ContentFilteredError) =>
           e.message should include("after 4 characters")
           e.usage.map(_.totalTokens) shouldBe Some(13)

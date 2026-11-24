@@ -326,9 +326,7 @@ class WatsonXClient(
         .map(_.withAdjustments(unsent(options)))
     }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     createRequestBody(conversation, options)
@@ -543,8 +541,8 @@ class WatsonXClient(
 
   private def requestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val body = ujson.Obj(
-      "model_id"    -> config.model,
-      "messages"    -> encodeMessages(conversation)
+      "model_id" -> config.model,
+      "messages" -> encodeMessages(conversation)
     )
     // the sampling options are sent only when the caller set them: unset, the model's own defaults apply
     options.temperature.foreach(t => body("temperature") = t)

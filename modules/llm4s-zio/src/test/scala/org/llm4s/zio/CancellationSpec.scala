@@ -129,9 +129,7 @@ object CancellationSpec extends ZIOSpecDefault {
             if (c.messages.exists(_.isInstanceOf[ToolMessage]))
               Right(Completion("t", Instant.EPOCH, "m", AssistantMessage(Some("finished"))))
             else Right(Completion("t", Instant.EPOCH, "m", AssistantMessage("", Seq(call))))
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] =
             complete(c, o)

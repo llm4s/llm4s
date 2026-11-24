@@ -9,8 +9,8 @@ object Llm4sMigrate_1_0Test {
   val options = CompletionOptions().withThinking(Thinking.Off)
 
   def warnOnLength(client: LLMClient, conversation: Conversation, warn: () => Unit) =
-    client.streamComplete(conversation, options, chunk => chunk.finishReason.map(_.name).foreach(r => if (r == "length") warn()))
+    client.streamComplete(conversation, options)(chunk => chunk.finishReason.map(_.name).foreach(r => if (r == "length") warn()))
 
   def logStop(client: LLMClient, conversation: Conversation) =
-    client.streamComplete(conversation, options, chunk => if (chunk.finishReason.contains(FinishReason.Stop)) println("done"))
+    client.streamComplete(conversation, options)(chunk => if (chunk.finishReason.contains(FinishReason.Stop)) println("done"))
 }

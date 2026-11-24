@@ -65,7 +65,7 @@ class BedrockSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
     val chunks = ListBuffer.empty[StreamedChunk]
     val result =
-      client(region.get).streamComplete(conversation, CompletionOptions(maxTokens = Some(64)), c => chunks += c)
+      client(region.get).streamComplete(conversation, CompletionOptions(maxTokens = Some(64)))(c => chunks += c)
 
     withClue(s"Streaming failed: ${result.swap.toOption}") {
       result.isRight shouldBe true

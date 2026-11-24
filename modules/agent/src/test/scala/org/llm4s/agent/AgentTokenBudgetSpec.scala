@@ -192,9 +192,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
         made.incrementAndGet(): Unit
         Thread.sleep(50)
         Right(CompletionFixture.withUsage("s", 10, 20))
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       def getContextWindow(): Int     = 1000

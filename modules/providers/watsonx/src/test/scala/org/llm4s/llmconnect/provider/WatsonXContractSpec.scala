@@ -128,7 +128,7 @@ class WatsonXContractSpec extends AnyFunSuite with Matchers:
     val abnormal  = complete(reply("""{"content":"x"}""", "error"))
     val malformed = complete(reply("""{"tool_calls":"nope"}"""))
     val streamed = new WatsonXClient(config, httpClient = streaming(streamOf(bytes(""))))
-      .streamComplete(hi, CompletionOptions(), _ => ())
+      .streamComplete(hi, CompletionOptions())(_ => ())
     Seq(abnormal, malformed, streamed).foreach { r =>
       r.isLeft shouldBe true
       val text = r.left.toOption.map(e => e.toString + e.message).getOrElse("")

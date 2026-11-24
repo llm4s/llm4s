@@ -54,7 +54,7 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
       conversations.add(c)
       Right(reply(i))
     }
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 8192
     def getReserveCompletion(): Int = 512
@@ -65,11 +65,7 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
 
   private def callWith(i: Int, args: ujson.Value): Completion = {
     val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = args))
-    Completion(
-      id = s"t$i",
-      created = Instant.EPOCH,
-      model = "m",
-      message = AssistantMessage("", calls))
+    Completion(id = s"t$i", created = Instant.EPOCH, model = "m", message = AssistantMessage("", calls))
   }
 
   private def toolResults(c: Conversation): Seq[ToolMessage] = c.messages.collect { case m: ToolMessage => m }
@@ -143,9 +139,7 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
               case 1 => Right(callWith(1, ujson.Obj()))
               case _ => Left(SimpleError("provider down"))
             }
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = complete(c, o)
           def getContextWindow(): Int     = 1

@@ -249,9 +249,10 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "keep a binding valid across a write and a read of the conversation in its new shape" in {
-    val history = Seq[Message](UserMessage("hi"), AssistantMessage("Checking.", Seq(call)), ToolMessage("sunny", "tc-1"))
-    val turn    = signedTurn(history*)
-    val stored  = read[Conversation](write(Conversation(history :+ turn)))
+    val history =
+      Seq[Message](UserMessage("hi"), AssistantMessage("Checking.", Seq(call)), ToolMessage("sunny", "tc-1"))
+    val turn   = signedTurn(history*)
+    val stored = read[Conversation](write(Conversation(history :+ turn)))
 
     ThinkingReplay.replayable(origin, stored.messages, options).last shouldBe turn
   }

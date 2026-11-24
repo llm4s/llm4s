@@ -48,7 +48,7 @@ final class OpenAIClientStreamUsageSpec extends AnyFlatSpec with Matchers with E
   private def streamedParams(config: ProviderConfig, model: String): ChatCompletionCreateParams = {
     val seen   = new AtomicReference[ChatCompletionCreateParams]()
     val client = OpenAIClient.forTest(model, transport(streaming = p => { seen.set(p); stream(content, stop) }), config)
-    client.streamComplete(hello, CompletionOptions(), _ => ()).value
+    client.streamComplete(hello, CompletionOptions())(_ => ()).value
     seen.get()
   }
 
@@ -64,7 +64,7 @@ final class OpenAIClientStreamUsageSpec extends AnyFlatSpec with Matchers with E
       OpenAIClient.forTest("gpt-4o", transport(streaming = _ => stream(content, stop, usageOnly)), openAI("gpt-4o"))
     val chunks = scala.collection.mutable.ListBuffer.empty[String]
 
-    val completion = client.streamComplete(hello, CompletionOptions(), c => chunks += c.content.getOrElse("")).value
+    val completion = client.streamComplete(hello, CompletionOptions())(c => chunks += c.content.getOrElse("")).value
 
     completion.content shouldBe "Hi"
     val usage = completion.usage.value
@@ -83,7 +83,7 @@ final class OpenAIClientStreamUsageSpec extends AnyFlatSpec with Matchers with E
 
   it should "report no usage when the stream carries none" in {
     val client = OpenAIClient.forTest("gpt-4o", transport(streaming = _ => stream(content, stop)), openAI("gpt-4o"))
-    client.streamComplete(hello, CompletionOptions(), _ => ()).value.usage shouldBe None
+    client.streamComplete(hello, CompletionOptions())(_ => ()).value.usage shouldBe None
   }
 
   it should "not send stream_options on a faked stream, which is an ordinary completion call" in {
@@ -93,7 +93,7 @@ final class OpenAIClientStreamUsageSpec extends AnyFlatSpec with Matchers with E
       """{"id":"c1","created":0,"model":"o1","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}]}"""
     )
     val client = OpenAIClient.forTest("o1", transport(complete = p => { seen.set(p); response }), openAI("o1"))
-    client.streamComplete(hello, CompletionOptions().withReasoning(ReasoningEffort.Low), _ => ()).value
+    client.streamComplete(hello, CompletionOptions().withReasoning(ReasoningEffort.Low))(_ => ()).value
     seen.get().streamOptions().toScala shouldBe None
     seen.get().reasoningEffort().toScala.map(_.asString()) shouldBe Some("low")
   }

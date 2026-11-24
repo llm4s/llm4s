@@ -32,9 +32,9 @@ class CompletionFromMessage extends SemanticRule("CompletionFromMessage") {
       case p: Pat.Extract if Migration.symbolOf(p.fun).exists(s => Migration.owner(s) == Type) => pattern(p)
       case n: Term.Name =>
         Migration.symbolOf(n).map(_.value) match {
-          case Some(AsText)                    => Patch.replaceTree(n, "content")
-          case Some(s) if RemovedSetters(s)    => Patch.lint(setterRemoved(n))
-          case _                               => Patch.empty
+          case Some(AsText)                 => Patch.replaceTree(n, "content")
+          case Some(s) if RemovedSetters(s) => Patch.lint(setterRemoved(n))
+          case _                            => Patch.empty
         }
     }.asPatch
 
@@ -45,7 +45,7 @@ class CompletionFromMessage extends SemanticRule("CompletionFromMessage") {
       val args       = t.argClause.values
       val positional = args.takeWhile(!_.is[Term.Assign]).size
       val dropped = args.zipWithIndex.collect {
-        case (Term.Assign(Term.Name("content" | "toolCalls"), _), i)       => i
+        case (Term.Assign(Term.Name("content" | "toolCalls"), _), i)      => i
         case (_, i) if i < positional && (i == ContentAt || i == CallsAt) => i
       }
       remove(args, dropped)

@@ -17,7 +17,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-observability-micrometer" % llm4sVe
 
 ```scala
 val metrics = new MicrometerMetrics(meterRegistry)
-val client  = LLMConnect.getClient(providerConfig, metrics) // needs a ModelRegistryService in scope
+val client  = LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics)) // needs a ModelRegistryService in scope
 ```
 
 The meters, their tags and how they relate to the Prometheus module's series are in the

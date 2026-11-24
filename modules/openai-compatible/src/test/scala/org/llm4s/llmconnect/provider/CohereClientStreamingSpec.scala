@@ -50,7 +50,7 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVal
     } { root =>
       val chunks = ListBuffer.empty[StreamedChunk]
       val completion = new CohereClient(config(s"$root/compatibility/v1"))
-        .streamComplete(Conversation(Seq(UserMessage("Write a haiku"))), CompletionOptions(), chunks += _)
+        .streamComplete(Conversation(Seq(UserMessage("Write a haiku"))), CompletionOptions())(chunks += _)
         .value
 
       completion.content shouldBe "Recursive loops"
@@ -76,7 +76,7 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVal
       )
     } { root =>
       val completion = new CohereClient(config(s"$root/compatibility/v1"))
-        .streamComplete(Conversation(Seq(UserMessage("Next flight?"))), CompletionOptions(), _ => ())
+        .streamComplete(Conversation(Seq(UserMessage("Next flight?"))), CompletionOptions())(_ => ())
         .value
 
       completion.toolCalls.map(tc => (tc.id, tc.name, tc.arguments)) shouldBe List(
@@ -87,7 +87,7 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVal
   it should "reach the compatibility endpoint from a configured native API root" in
     withServer(path)(exchange => sendSseResponse(exchange, sse(event("""{"content":"hi"}""", "\"stop\"")))) { root =>
       new CohereClient(config(root))
-        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
         .value
         .content shouldBe "hi"
     }
@@ -102,7 +102,7 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVal
       val result = new CohereClient(
         config(s"$root/compatibility/v1"),
         exchangeLogging = ProviderExchangeLogging.Enabled(sink)
-      ).streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => chunks += 1)
+      ).streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => chunks += 1)
 
       result.left.value shouldBe an[AuthenticationError]
       chunks shouldBe 0

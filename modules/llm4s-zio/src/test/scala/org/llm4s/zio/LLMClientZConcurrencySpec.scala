@@ -197,9 +197,7 @@ object LLMClientZConcurrencySpec extends ZIOSpecDefault {
               )
             )
           }
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = {
             val key = c.messages.head.content

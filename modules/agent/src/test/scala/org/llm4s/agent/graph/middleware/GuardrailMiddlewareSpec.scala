@@ -159,9 +159,7 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
       val s = scores(n.getAndIncrement())
       Right(Completion("id", Instant.EPOCH, "test", AssistantMessage(s)))
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

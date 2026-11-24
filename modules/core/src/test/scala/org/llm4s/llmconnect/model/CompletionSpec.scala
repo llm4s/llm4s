@@ -46,7 +46,8 @@ class CompletionSpec extends AnyFunSuite with Matchers {
       id = "test-id",
       created = Instant.ofEpochSecond(1234567890L),
       model = "gpt-4",
-      message = AssistantMessage(None, Seq(toolCall)))
+      message = AssistantMessage(None, Seq(toolCall))
+    )
 
     completion.hasToolCalls shouldBe true
   }

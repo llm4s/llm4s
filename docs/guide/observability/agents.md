@@ -30,7 +30,7 @@ Three independent pieces, each off until you ask for it:
 | Piece | What turns it on | Module |
 |---|---|---|
 | Traces of each run | `AgentBuilder.withTracing(tracing)`, the tracer from `Tracing.create(Llm4sConfig.tracing())` | `llm4s-observability` (Langfuse, `TRACING_MODE=langfuse`) or `llm4s-observability-otel` (OpenTelemetry, `TRACING_MODE=opentelemetry` or `otel`) |
-| Per-call model metrics | `LLMConnect.getClient(providerConfig, metrics)` | `llm4s-observability-prometheus` or `llm4s-observability-micrometer` |
+| Per-call model metrics | `LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics))` | `llm4s-observability-prometheus` or `llm4s-observability-micrometer` |
 | Agent runtime and run queue metrics | `MeteredCheckpointer(store.checkpointer, metrics)`, and the same `metrics` given to `AgentWorker` and `RunSubmitter` | `llm4s-agent`, recording into either metrics module |
 
 `llm4s.tracing.mode` (bound to `TRACING_MODE`) selects the backend; core builds `console` (the default) and `noop`
@@ -46,7 +46,7 @@ import org.llm4s.agent.Agent
 import org.llm4s.agent.metrics.MeteredCheckpointer
 import org.llm4s.agent.service.{ AgentWorker, QueuedAgent, RunSubmitter }
 import org.llm4s.config.{ CheckpointerConfigLoader, Llm4sConfig, MetricsConfigLoader, RunQueueConfigLoader, RuntimeConfigLoader, WorkerConfigLoader }
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.trace.Tracing
 
@@ -58,7 +58,7 @@ val service = for {
   (metrics, endpoint) = configured
   tracingSettings <- Llm4sConfig.tracing()               // llm4s.tracing.mode, from TRACING_MODE
   tracing          = Tracing.create(tracingSettings)
-  client          <- LLMConnect.getClient(providerConfig, metrics)       // requests, tokens, cost, errors
+  client          <- LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics))       // requests, tokens, cost, errors
   store           <- CheckpointerConfigLoader.open()                     // llm4s.agent.checkpointer
   queue           <- store.runQueue
   metered          = MeteredCheckpointer(store.checkpointer, metrics)    // runs, claims, commits, child tasks
@@ -288,7 +288,7 @@ import org.llm4s.metrics.{ CostTracker, MetricsCollector, PrometheusMetrics }
 
 val tracker   = CostTracker.create()
 val collector = MetricsCollector.compose(PrometheusMetrics.create(), tracker)
-// LLMConnect.getClient(providerConfig, collector), then at any point:
+// LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = collector)), then at any point:
 println(tracker.summary)
 ```
 

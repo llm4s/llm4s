@@ -114,7 +114,8 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
   }
 
   "UsageSummary.merge" should "sum the cache counters" in {
-    val one = UsageSummary().add("m", TokenUsage(10, 1, 11, cachedTokens = Some(4), cacheCreationTokens = Some(2)), None)
+    val one =
+      UsageSummary().add("m", TokenUsage(10, 1, 11, cachedTokens = Some(4), cacheCreationTokens = Some(2)), None)
     val two = UsageSummary().add("m", TokenUsage(10, 1, 11, cachedTokens = Some(3)), None)
 
     val merged = one.merge(two)

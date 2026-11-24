@@ -135,9 +135,7 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 
@@ -224,9 +222,7 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
       answer()
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

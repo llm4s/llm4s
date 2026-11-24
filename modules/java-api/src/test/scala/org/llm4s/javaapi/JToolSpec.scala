@@ -33,7 +33,7 @@ class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Before
     val last = new java.util.concurrent.atomic.AtomicReference[Conversation]()
     new org.llm4s.llmconnect.LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = { last.set(c); reply(c) }
-      def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 4096
       def getReserveCompletion(): Int = 256

@@ -2,7 +2,7 @@ package org.llm4s.samples.metrics
 
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
+import org.llm4s.llmconnect.{ LLMClient, LLMConnect, LlmClientOptions }
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.model.{ Conversation, TokenUsage, UsageSummary, UserMessage }
 import org.llm4s.metrics.{ CostTracker, MetricsCollector }
@@ -132,7 +132,9 @@ object CostTrackingExample {
     use: LLMClient => Result[A]
   ): Result[A] = {
     given ModelRegistryService = registry
-    LLMConnect.getClient(providerCfg, metrics).flatMap(client => Using.resource(client)(use))
+    LLMConnect
+      .getClient(providerCfg, LlmClientOptions(metrics = metrics))
+      .flatMap(client => Using.resource(client)(use))
   }
 
   /** Demos 1 and 2 on `client`: the per-request cost, then an agent run, and the session tracker after both. */

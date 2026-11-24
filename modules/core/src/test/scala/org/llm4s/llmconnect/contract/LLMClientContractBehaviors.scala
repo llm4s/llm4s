@@ -26,7 +26,7 @@ trait LLMClientContractBehaviors { this: AnyWordSpec with Matchers =>
   def honoursStreaming(createClient: () => LLMClient): Unit =
     "actually stream, not silently fall back to complete()" in {
       val chunks = ListBuffer.empty[StreamedChunk]
-      val result = createClient().streamComplete(validConversation, onChunk = chunks += _)
+      val result = createClient().streamComplete(validConversation)(chunks += _)
       result.isRight shouldBe true
       chunks should not be empty
     }
@@ -76,13 +76,13 @@ trait LLMClientContractBehaviors { this: AnyWordSpec with Matchers =>
 
     "return Right from streamComplete for a valid conversation" in {
       val client = createClient()
-      val result = client.streamComplete(validConversation, onChunk = _ => ())
+      val result = client.streamComplete(validConversation)(_ => ())
       result.isRight shouldBe true
     }
 
     "produce a stream completion with non-empty id and model" in {
       val client = createClient()
-      val result = client.streamComplete(validConversation, onChunk = _ => ())
+      val result = client.streamComplete(validConversation)(_ => ())
       result.foreach { c =>
         c.id should not be empty
         c.model should not be empty
@@ -92,7 +92,7 @@ trait LLMClientContractBehaviors { this: AnyWordSpec with Matchers =>
     "invoke onChunk at least once when content is non-empty (if supported)" in {
       val client = createClient()
       val chunks = ListBuffer.empty[StreamedChunk]
-      val result = client.streamComplete(validConversation, onChunk = chunks += _)
+      val result = client.streamComplete(validConversation)(chunks += _)
       result.foreach { _ =>
         // Only assert if the implementation actually calls onChunk.
         // Mocks that delegate to complete() without calling onChunk are acceptable.
@@ -105,7 +105,7 @@ trait LLMClientContractBehaviors { this: AnyWordSpec with Matchers =>
     "pass StreamedChunks with non-empty id to onChunk (if chunks are emitted)" in {
       val client = createClient()
       val chunks = ListBuffer.empty[StreamedChunk]
-      client.streamComplete(validConversation, onChunk = chunks += _)
+      client.streamComplete(validConversation)(chunks += _)
       chunks.foreach(_.id should not be empty)
     }
 
@@ -186,7 +186,7 @@ trait LLMClientContractBehaviors { this: AnyWordSpec with Matchers =>
     "produce structurally equivalent results from complete and streamComplete" in {
       val client         = createClient()
       val completeResult = client.complete(validConversation)
-      val streamResult   = client.streamComplete(validConversation, onChunk = _ => ())
+      val streamResult   = client.streamComplete(validConversation)(_ => ())
       for {
         c <- completeResult
         s <- streamResult

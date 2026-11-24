@@ -132,9 +132,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
 
   it should "end a half-streamed answer's line before printing the failure" in {
     val client = new FixedClient(completion("unused")) {
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = {
         onChunk(StreamedChunk("1", Some("partial")))
@@ -360,9 +358,7 @@ class ReplHelpersSpec extends AnyFlatSpec with Matchers {
   private class FixedClient(answer: Completion) extends LLMClient {
     @volatile var closed                                                                              = false
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = Right(answer)
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = Right(answer)
     override def getContextWindow(): Int     = 1000

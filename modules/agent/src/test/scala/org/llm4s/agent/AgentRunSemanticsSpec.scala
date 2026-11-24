@@ -33,9 +33,7 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     val calls = new AtomicInteger(0)
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       respond(calls.getAndIncrement())
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

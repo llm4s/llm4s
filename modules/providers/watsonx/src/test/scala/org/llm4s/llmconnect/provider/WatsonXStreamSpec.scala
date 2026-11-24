@@ -88,7 +88,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
     val http   = streaming(streamOf(in))
     val chunks = ListBuffer.empty[(Option[String], Option[FinishReason])]
     val result = new WatsonXClient(config, httpClient = http)
-      .streamComplete(hi, CompletionOptions(), c => chunks += ((c.content, c.finishReason)))
+      .streamComplete(hi, CompletionOptions())(c => chunks += ((c.content, c.finishReason)))
       .map(c =>
         Observed(chunks.toList, c.content, c.usage.map(u => (u.promptTokens, u.completionTokens, u.totalTokens)))
       )
@@ -191,7 +191,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
   test("an error-type ending never returns the partial text as a success (chunks were still delivered)") {
     val chunks = ListBuffer.empty[StreamedChunk]
     val result = new WatsonXClient(config, httpClient = streaming(streamOf(bytes(sse(Seq(event("partial", "error")))))))
-      .streamComplete(hi, CompletionOptions(), chunks += _)
+      .streamComplete(hi, CompletionOptions())(chunks += _)
     result.isLeft shouldBe true
     result.toOption shouldBe None
     chunks.flatMap(_.content).mkString shouldBe "partial"
@@ -220,7 +220,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
     val text   = sse(Seq(event("Hel", "not_finished"))) + "\ndata: {not json\n\n" + sse(Seq(event("lo", "stop")))
     val chunks = ListBuffer.empty[StreamedChunk]
     val result = new WatsonXClient(config, httpClient = streaming(streamOf(bytes(text))))
-      .streamComplete(hi, CompletionOptions(), chunks += _)
+      .streamComplete(hi, CompletionOptions())(chunks += _)
     result.isLeft shouldBe true
     chunks.flatMap(_.content).mkString shouldBe "Hel"
   }
@@ -247,7 +247,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
       new FailingStream((sse(Seq(event("Hel", "not_finished"))) + "\n").getBytes("UTF-8"), new IOException("reset"))
     val seen = ListBuffer.empty[StreamedChunk]
     val result = new WatsonXClient(config, httpClient = streaming(streamOf(stream)))
-      .streamComplete(hi, CompletionOptions(), seen += _)
+      .streamComplete(hi, CompletionOptions())(seen += _)
     result.left.toOption.exists(_.isInstanceOf[NetworkError]) shouldBe true
     seen.flatMap(_.content).mkString shouldBe "Hel"
     stream.closedFlag.get() shouldBe true
@@ -256,7 +256,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
   test("an interrupt surfacing from the read is a CancelledError and the stream is closed") {
     val stream = new FailingStream(Array.emptyByteArray, new InterruptedException("stop"))
     val result = new WatsonXClient(config, httpClient = streaming(streamOf(stream)))
-      .streamComplete(hi, CompletionOptions(), _ => ())
+      .streamComplete(hi, CompletionOptions())(_ => ())
     Thread.interrupted(): Unit
     result.left.toOption.exists(_.isInstanceOf[CancelledError]) shouldBe true
     stream.closedFlag.get() shouldBe true
@@ -273,7 +273,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
 
     val err = new SegmentedStream("""{"errors":[{"message":"x"}]}""".getBytes("UTF-8"), Nil)
     val res = new WatsonXClient(config, httpClient = streaming(streamOf(err, 500)))
-      .streamComplete(hi, CompletionOptions(), _ => ())
+      .streamComplete(hi, CompletionOptions())(_ => ())
     res.isLeft shouldBe true
     err.closedFlag.get() shouldBe true
   }
@@ -282,7 +282,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
     val s = new SegmentedStream(sample.getBytes("UTF-8"), Nil)
     val result = scala.util.Try(
       new WatsonXClient(config, httpClient = streaming(streamOf(s)))
-        .streamComplete(hi, CompletionOptions(), _ => throw new IllegalStateException("boom"))
+        .streamComplete(hi, CompletionOptions())(_ => throw new IllegalStateException("boom"))
     )
     result.toOption.exists(_.isLeft) shouldBe true
     s.closedFlag.get() shouldBe true
@@ -312,7 +312,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
   private def completionOf(events: Seq[String]): (Either[org.llm4s.error.LLMError, Completion], Seq[StreamedChunk]) =
     val chunks = ListBuffer.empty[StreamedChunk]
     val result = new WatsonXClient(config, httpClient = streaming(streamOf(bytes(sse(events)))))
-      .streamComplete(hi, CompletionOptions(), chunks += _)
+      .streamComplete(hi, CompletionOptions())(chunks += _)
     (result, chunks.toSeq)
 
   test("tool call fragments are merged by index and reported once, whole, after the last delta") {
@@ -466,7 +466,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
     val chunks = ListBuffer.empty[StreamedChunk]
     val text   = sse(Seq(event("par", "not_finished"))) + errorFrame(ibmError(Some(500)))
     val result = new WatsonXClient(config, httpClient = streaming(streamOf(bytes(text))))
-      .streamComplete(hi, CompletionOptions(), chunks += _)
+      .streamComplete(hi, CompletionOptions())(chunks += _)
     result.left.toOption match
       case Some(e: ServiceError) =>
         e.httpStatus shouldBe 500
@@ -524,7 +524,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
       _ => Right(org.llm4s.http.StreamingHttpResponse(200, bytes(errorFrame(leaky))))
     )
     val error = new WatsonXClient(config, httpClient = http)
-      .streamComplete(hi, CompletionOptions(), _ => ())
+      .streamComplete(hi, CompletionOptions())(_ => ())
       .left
       .toOption
       .getOrElse(fail("expected Left"))
@@ -543,10 +543,10 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
         else Right(org.llm4s.http.StreamingHttpResponse(200, bytes(sample)))
     )
     val c = new WatsonXClient(config, httpClient = http)
-    c.streamComplete(hi, CompletionOptions(), _ => ())
+    c.streamComplete(hi, CompletionOptions())(_ => ())
       .left
       .toOption
       .exists(_.isInstanceOf[AuthenticationError]) shouldBe true
-    c.streamComplete(hi, CompletionOptions(), _ => ()).isRight shouldBe true
+    c.streamComplete(hi, CompletionOptions())(_ => ()).isRight shouldBe true
     http.iamRequests.size shouldBe 2
   }

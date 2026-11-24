@@ -105,9 +105,8 @@ object LLMClientIO {
             F.interruptible {
               underlying.streamComplete(
                 conversation,
-                options,
-                chunk => dispatcher.unsafeRunSync(queue.offer(Some(Right(chunk))))
-              )
+                options
+              )(chunk => dispatcher.unsafeRunSync(queue.offer(Some(Right(chunk)))))
             }.attempt
               .flatMap { outcome =>
                 val terminal: Option[Throwable] = outcome match {

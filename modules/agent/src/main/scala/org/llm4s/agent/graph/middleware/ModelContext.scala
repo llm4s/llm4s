@@ -173,7 +173,12 @@ object ModelContext:
     )
 
   /** Usage that arrived without a client call, counted as one request of `agent`'s to `model`. */
-  private[agent] def recordedUsage(agent: AgentId, model: String, usage: TokenUsage, cost: Option[BigDecimal]): Recorded =
+  private[agent] def recordedUsage(
+    agent: AgentId,
+    model: String,
+    usage: TokenUsage,
+    cost: Option[BigDecimal]
+  ): Recorded =
     Recorded(
       model,
       usage,
@@ -264,12 +269,10 @@ object ModelContext:
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       context.admitted(recorded(conversation, options, client.complete(conversation, options)))
 
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
-      context.admitted(recorded(conversation, options, client.streamComplete(conversation, options, onChunk)))
+      context.admitted(recorded(conversation, options, client.streamComplete(conversation, options)(onChunk)))
 
     def getContextWindow(): Int                 = client.getContextWindow()
     def getReserveCompletion(): Int             = client.getReserveCompletion()

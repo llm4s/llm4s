@@ -30,7 +30,7 @@ class ExampleAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   it should "answer at once with no tool delay, and stream the same completion" in {
     val model  = new DemoModel(Duration.Zero)
     val chunks = new AtomicReference[Vector[StreamedChunk]](Vector.empty)
-    val reply  = model.streamComplete(Conversation(Seq(UserMessage("hi"))), options, c => chunks.updateAndGet(_ :+ c))
+    val reply  = model.streamComplete(Conversation(Seq(UserMessage("hi"))), options)(c => chunks.updateAndGet(_ :+ c))
     reply.map(_.content) shouldBe Right("Echo: hi")
     model.complete(Conversation(Seq.empty), options).map(_.content) shouldBe Right("Echo: ")
     model.getContextWindow() should be > model.getReserveCompletion()

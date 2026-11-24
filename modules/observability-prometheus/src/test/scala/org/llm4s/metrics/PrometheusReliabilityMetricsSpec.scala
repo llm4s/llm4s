@@ -37,9 +37,7 @@ class PrometheusReliabilityMetricsSpec extends AnyFlatSpec with Matchers {
       calls += 1
       if (calls <= failures) Left(TimeoutError("timeout", 1.second, "test")) else Right(completion)
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096

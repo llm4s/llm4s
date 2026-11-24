@@ -37,9 +37,7 @@ class QuestionCondenserSpec extends AnyFlatSpec with Matchers {
         condensed.map(completion)
       else Right(completion("42"))
     }
-    override def streamComplete(
-      conversation: Conversation,
-      opts: CompletionOptions,
+    override def streamComplete(conversation: Conversation, opts: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, opts)
     override def getContextWindow(): Int     = 4096

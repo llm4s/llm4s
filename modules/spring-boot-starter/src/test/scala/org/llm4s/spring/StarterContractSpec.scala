@@ -24,7 +24,7 @@ object StarterContractSpec {
   def client(onClose: () => Unit = () => ()): LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
       Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("mock")))
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
@@ -346,7 +346,7 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
         val text = c.messages.last.content
         Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(text)))
       }
-      override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+      override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       override def getContextWindow(): Int     = 4096
       override def getReserveCompletion(): Int = 512
@@ -379,7 +379,7 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
         seenConv.set(c); seenOptions.set(o)
         Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("r")))
       }
-      override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+      override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       override def getContextWindow(): Int     = 4096
       override def getReserveCompletion(): Int = 512

@@ -49,7 +49,7 @@ class WatsonXFinishReasonSpec extends AnyFunSuite with Matchers:
   private def stream(events: String): Run =
     val chunks = ListBuffer.empty[StreamedChunk]
     val result = new WatsonXClient(config, httpClient = streaming(streamOf(bytes(events))))
-      .streamComplete(hi, CompletionOptions(), chunks += _)
+      .streamComplete(hi, CompletionOptions())(chunks += _)
     Run(result, chunks.toList)
 
   private def nonStream(finish: Option[String]): Either[org.llm4s.error.LLMError, Completion] =

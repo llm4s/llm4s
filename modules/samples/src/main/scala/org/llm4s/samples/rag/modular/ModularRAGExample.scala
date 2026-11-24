@@ -133,7 +133,7 @@ object ModularRAGExample extends App {
     }
 
   private def loadOptionalLlmClient()(using ModelRegistryService): Option[LLMClient] =
-    Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient) match {
+    Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient(_)) match {
       case Right(client) =>
         logger.info("LLM provider detected; generation module will run.")
         Some(client)

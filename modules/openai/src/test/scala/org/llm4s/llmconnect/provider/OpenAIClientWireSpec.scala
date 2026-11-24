@@ -120,7 +120,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
     } { baseUrl =>
       val config = OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl).value
       val client = OpenAIClient(config).value
-      val result = client.streamComplete(hello, CompletionOptions(), _ => ())
+      val result = client.streamComplete(hello, CompletionOptions())(_ => ())
       client.close()
 
       seen.get().body("stream").bool shouldBe true
@@ -149,7 +149,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       )
     } { baseUrl =>
       val client = OpenAIClient(OpenAIConfig.fromValues("gpt-5-mini", Secret("sk-test"), baseUrl).value).value
-      val result = client.streamComplete(hello, CompletionOptions().withReasoning(ReasoningEffort.Medium), _ => ())
+      val result = client.streamComplete(hello, CompletionOptions().withReasoning(ReasoningEffort.Medium))(_ => ())
       client.close()
 
       val body = seen.get().body
@@ -264,7 +264,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       val config =
         AzureConfig.fromValues("team-reasoner", Secret("azure-key"), baseUrl, AzureConfig.DEFAULT_API_VERSION).value
       val client = OpenAIClient(config).value
-      val result = client.streamComplete(hello, CompletionOptions().withReasoning(ReasoningEffort.Low), _ => ())
+      val result = client.streamComplete(hello, CompletionOptions().withReasoning(ReasoningEffort.Low))(_ => ())
       client.close()
 
       val request = seen.get()

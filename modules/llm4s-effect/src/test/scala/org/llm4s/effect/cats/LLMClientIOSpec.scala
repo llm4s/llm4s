@@ -34,7 +34,7 @@ class LLMClientIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def mockClient(completion: Completion, chunks: Seq[StreamedChunk] = Seq.empty): LLMClient =
     new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Right(completion)
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = {
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] = {
         chunks.foreach(onChunk)
         Right(completion)
       }
@@ -45,7 +45,7 @@ class LLMClientIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private val failingClient: LLMClient = new LLMClient {
     def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
       Left(SimpleError("boom"))
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       Left(SimpleError("boom"))
     def getContextWindow(): Int     = 4096
     def getReserveCompletion(): Int = 256
@@ -91,7 +91,7 @@ class LLMClientIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val released = new java.util.concurrent.CountDownLatch(1)
     val client = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Right(testCompletion)
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = {
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] = {
         onChunk(StreamedChunk(id = "c1", content = Some("a")))
         // Only returns normally if the consumer observed c1 while this call is still running.
         if (released.await(Fixtures.DeadlineSeconds, java.util.concurrent.TimeUnit.SECONDS)) {
@@ -114,7 +114,7 @@ class LLMClientIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   it should "emit chunks received before a mid-stream error, then fail" in {
     val client = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Right(testCompletion)
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = {
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] = {
         onChunk(StreamedChunk(id = "c1", content = Some("a")))
         onChunk(StreamedChunk(id = "c2", content = Some("b")))
         Left(SimpleError("mid-stream"))
@@ -135,7 +135,7 @@ class LLMClientIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val sawInterrupt = new java.util.concurrent.atomic.AtomicBoolean(false)
     val client = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Right(testCompletion)
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = {
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] = {
         // A cancellation that lands while `onChunk` waits for the chunk to be taken is thrown from
         // it as InterruptedException; one that lands later sets the flag, ending the park.
         val delivered = CancelledError.catchInterrupt(onChunk(StreamedChunk(id = "c1", content = Some("a"))))

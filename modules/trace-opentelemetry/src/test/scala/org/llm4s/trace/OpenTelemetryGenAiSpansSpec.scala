@@ -68,9 +68,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
       )
     )
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = answer
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       onChunk(StreamedChunk("chatcmpl-1", Some(Answer)))
@@ -125,7 +123,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
 
     "record no prompt or completion text by default" in withTracing() { (tracing, spans) =>
       TracingLLMClient(new Stub("openai"), tracing).complete(conversation, options)
-      TracingLLMClient(new Stub("openai"), tracing).streamComplete(conversation, options, _ => ())
+      TracingLLMClient(new Stub("openai"), tracing).streamComplete(conversation, options)(_ => ())
       tracing.traceEvent(
         TraceEvent.ToolExecuted("search", Prompt, Answer, scala.concurrent.duration.Duration.Zero, true)
       )
@@ -141,7 +139,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
 
     "be one CLIENT span `chat <model>` with the stream's finish reason" in withTracing() { (tracing, spans) =>
       val chunks = Vector.newBuilder[StreamedChunk]
-      TracingLLMClient(new Stub("anthropic"), tracing).streamComplete(conversation, options, chunks += _)
+      TracingLLMClient(new Stub("anthropic"), tracing).streamComplete(conversation, options)(chunks += _)
 
       chunks.result() should have size 2
       val span = spans().loneElement
@@ -218,7 +216,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
     "record the messages as gen_ai.input.messages and gen_ai.output.messages, secrets redacted" in withTracing(
       captureContent = true
     ) { (tracing, spans) =>
-      TracingLLMClient(new Stub("openai"), tracing).streamComplete(conversation, options, _ => ())
+      TracingLLMClient(new Stub("openai"), tracing).streamComplete(conversation, options)(_ => ())
 
       val span   = spans().loneElement
       val input  = ujson.read(str(span, "gen_ai.input.messages"))

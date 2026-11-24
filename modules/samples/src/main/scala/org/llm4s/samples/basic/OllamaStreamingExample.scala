@@ -39,13 +39,13 @@ object OllamaStreamingExample {
       client <- LLMConnect.getClient(providerCfg, options)
       completion <- client.streamComplete(
         conversation,
-        CompletionOptions(),
-        chunk =>
-          chunk.content.foreach { text =>
-            // Print incremental content as it arrives
-            print(text)
-            buffer.append(text)
-          }
+        CompletionOptions()
+      )(chunk =>
+        chunk.content.foreach { text =>
+          // Print incremental content as it arrives
+          print(text)
+          buffer.append(text)
+        }
       )
       _ = {
         // Ensure line break after streaming

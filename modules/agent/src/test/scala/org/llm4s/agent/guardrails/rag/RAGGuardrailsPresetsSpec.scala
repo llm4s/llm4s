@@ -35,9 +35,7 @@ class RAGGuardrailsPresetsSpec extends AnyFlatSpec with Matchers {
         )
       )
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)

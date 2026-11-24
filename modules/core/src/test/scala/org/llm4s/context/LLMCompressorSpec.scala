@@ -33,9 +33,7 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       onChunk(StreamedChunk(id = "chunk-1", content = Some("Compressed.")))

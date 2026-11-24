@@ -38,7 +38,7 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   private def answering(answer: String): LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
       Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(answer)))
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512

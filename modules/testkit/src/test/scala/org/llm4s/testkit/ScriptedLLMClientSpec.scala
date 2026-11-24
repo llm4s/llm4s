@@ -190,7 +190,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "mark a request that came through streamComplete" in {
     val client = ScriptedLLMClient.sequence(Reply.text("a"), Reply.text("b"))
     client.complete(conversation("q1"), options)
-    client.streamComplete(conversation("q2"), options, _ => ())
+    client.streamComplete(conversation("q2"), options)(_ => ())
     client.calls.map(_.streamed) shouldBe Vector(false, true)
   }
 
@@ -217,7 +217,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   "streamComplete" should "replay the text in chunks of at most chunkSize characters that join back to the text" in {
     val client = ScriptedLLMClient.sequence(Reply.text("abcdefghij")).withChunkSize(3)
     val chunks = ArrayBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation("q"), options, chunks += _).value
+    val result = client.streamComplete(conversation("q"), options)(chunks += _).value
     chunks.flatMap(_.content).toList shouldBe List("abc", "def", "ghi", "j")
     chunks.flatMap(_.content).mkString shouldBe "abcdefghij"
     result.content shouldBe "abcdefghij"
@@ -226,7 +226,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "end with one chunk that carries the finish reason 'stop'" in {
     val client = ScriptedLLMClient.sequence(Reply.text("hello"))
     val chunks = ArrayBuffer.empty[StreamedChunk]
-    client.streamComplete(conversation("q"), options, chunks += _).value
+    client.streamComplete(conversation("q"), options)(chunks += _).value
     chunks.last.finishReason shouldBe Some(FinishReason.Stop)
     chunks.last.content shouldBe None
     chunks.init.flatMap(_.finishReason) shouldBe empty
@@ -237,7 +237,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
       Reply.toolCalls(ToolCall("", "one", ujson.Obj()), ToolCall("", "two", ujson.Obj()))
     )
     val chunks = ArrayBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation("q"), options, chunks += _).value
+    val result = client.streamComplete(conversation("q"), options)(chunks += _).value
     chunks.flatMap(_.toolCall).map(_.name).toList shouldBe List("one", "two")
     chunks.flatMap(_.toolCall).map(_.id).toList shouldBe List("call-1-1", "call-1-2")
     chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
@@ -256,13 +256,13 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "give every chunk the id of the completion" in {
     val client = ScriptedLLMClient.sequence(Reply.text("abcd")).withChunkSize(2)
     val chunks = ArrayBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation("q"), options, chunks += _).value
+    val result = client.streamComplete(conversation("q"), options)(chunks += _).value
     chunks.map(_.id).toSet shouldBe Set(result.id)
   }
 
   it should "return the same completion complete would" in {
     val reply     = Reply.text("same").withModel("m")
-    val streamed  = ScriptedLLMClient.sequence(reply).streamComplete(conversation("q"), options, _ => ()).value
+    val streamed  = ScriptedLLMClient.sequence(reply).streamComplete(conversation("q"), options)(_ => ()).value
     val completed = ScriptedLLMClient.sequence(reply).complete(conversation("q"), options).value
     streamed shouldBe completed
   }
@@ -270,19 +270,19 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "send no chunk for a failure reply" in {
     val client = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("p")))
     val chunks = ArrayBuffer.empty[StreamedChunk]
-    client.streamComplete(conversation("q"), options, chunks += _).left.value shouldBe RateLimitError("p")
+    client.streamComplete(conversation("q"), options)(chunks += _).left.value shouldBe RateLimitError("p")
     chunks shouldBe empty
   }
 
   it should "send no chunk for an unscripted call" in {
     val chunks = ArrayBuffer.empty[StreamedChunk]
-    unscripted(ScriptedLLMClient.sequence().streamComplete(conversation("q"), options, chunks += _))
+    unscripted(ScriptedLLMClient.sequence().streamComplete(conversation("q"), options)(chunks += _))
     chunks shouldBe empty
   }
 
   it should "send no text chunk for a reply with empty text" in {
     val chunks = ArrayBuffer.empty[StreamedChunk]
-    ScriptedLLMClient.sequence(Reply.text("")).streamComplete(conversation("q"), options, chunks += _).value
+    ScriptedLLMClient.sequence(Reply.text("")).streamComplete(conversation("q"), options)(chunks += _).value
     chunks.map(_.finishReason) shouldBe List(Some(FinishReason.Stop))
   }
 
@@ -389,7 +389,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "count a streamed call and a call that returned a scripted failure as using their reply" in {
     val client = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("openai")), Reply.text("streamed"))
     ask(client, "a").isLeft shouldBe true
-    client.streamComplete(conversation("b"), options, _ => ()).value.content shouldBe "streamed"
+    client.streamComplete(conversation("b"), options)(_ => ()).value.content shouldBe "streamed"
     client.remaining shouldBe 0
     client.assertExhausted() shouldBe Right(())
   }

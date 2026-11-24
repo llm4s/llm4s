@@ -81,7 +81,7 @@ class OllamaToolCallingIntegrationSpec extends AnyFlatSpec with Matchers {
     Tier.require(ollamaAvailable, s"Ollama not available with model $testModel")
     withClient { client =>
       val chunks = ListBuffer.empty[StreamedChunk]
-      val result = client.streamComplete(question, options, chunks += _)
+      val result = client.streamComplete(question, options)(chunks += _)
       withClue(s"streamComplete failed: ${result.swap.toOption}")(result.isRight shouldBe true)
       val calls = result.toOption.get.toolCalls
       assumeToolCalled(calls)

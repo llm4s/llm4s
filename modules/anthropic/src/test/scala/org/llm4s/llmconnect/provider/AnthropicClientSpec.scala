@@ -159,7 +159,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
         val client = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
         val errors = Seq(
           client.complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions()),
-          client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions(), _ => ())
+          client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())(_ => ())
         ).map(_.left.toOption.value)
         errors.foreach { e =>
           withClue(s"$status ${e.getClass.getSimpleName}: ") {
@@ -184,7 +184,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
       exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
-    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions(), _ => ())
+    val result = client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())(_ => ())
 
     assert(result.isLeft)
     exchanges should have size 1
@@ -233,9 +233,8 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
 
       val result = client.streamComplete(
         Conversation(Seq(UserMessage("hello"))),
-        CompletionOptions(),
-        chunk => chunk.content.foreach(chunks += _)
-      )
+        CompletionOptions()
+      )(chunk => chunk.content.foreach(chunks += _))
 
       assert(result.isRight)
       chunks.mkString shouldBe "Hello"

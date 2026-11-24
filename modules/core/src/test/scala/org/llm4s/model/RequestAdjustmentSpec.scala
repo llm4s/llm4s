@@ -55,7 +55,12 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
 
   test("transform reports each dropped or adjusted option, in the order found") {
     val options = withPingTool(
-      CompletionOptions(temperature = Some(0.7), topP = Some(0.5), presencePenalty = Some(0.2), frequencyPenalty = Some(0.3))
+      CompletionOptions(
+        temperature = Some(0.7),
+        topP = Some(0.5),
+        presencePenalty = Some(0.2),
+        frequencyPenalty = Some(0.3)
+      )
         .withResponseFormat(ResponseFormat.Json)
     )
 

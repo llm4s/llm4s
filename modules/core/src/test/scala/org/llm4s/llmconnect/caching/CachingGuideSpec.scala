@@ -310,7 +310,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
 
     "bypass the cache for streaming, and not fill it" in {
       val (client, llm, _, seen, _) = fixture()
-      client.streamComplete(conversation("hello"), CompletionOptions(), _ => ()).isRight shouldBe true
+      client.streamComplete(conversation("hello"), CompletionOptions())(_ => ()).isRight shouldBe true
       client.complete(conversation("hello"))
       llm.calls.get shouldBe 2
       seen().map(describe) shouldBe List("miss: low_similarity")
@@ -430,9 +430,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues with 
     }
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = answer()
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = answer()
     override def getContextWindow(): Int     = 4096

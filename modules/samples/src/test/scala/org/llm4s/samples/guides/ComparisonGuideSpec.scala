@@ -34,11 +34,7 @@ import java.time.Instant
 class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def completionOf(message: AssistantMessage): Completion =
-    Completion(
-      id = "script",
-      created = Instant.EPOCH,
-      model = "script",
-      message = message)
+    Completion(id = "script", created = Instant.EPOCH, model = "script", message = message)
 
   /** Answers every request with `reply(conversation)` and records the requests. */
   private class ScriptedClient(reply: Conversation => AssistantMessage) extends LLMClient {
@@ -51,9 +47,7 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
       Right(completionOf(reply(conversation)))
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

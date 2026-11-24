@@ -41,9 +41,7 @@ class RAGGuardrailSpec extends AnyFlatSpec with Matchers {
       )
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)
@@ -62,9 +60,7 @@ class RAGGuardrailSpec extends AnyFlatSpec with Matchers {
     ): Result[Completion] =
       Left(NetworkError("Mock network error", None, "mock://test"))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options)

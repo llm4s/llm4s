@@ -126,11 +126,9 @@ object AdmissionContext:
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         counted(conversation, options, client.complete(conversation, options))
 
-      def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
-      ): Result[Completion] = counted(conversation, options, client.streamComplete(conversation, options, onChunk))
+      ): Result[Completion] = counted(conversation, options, client.streamComplete(conversation, options)(onChunk))
 
       def getContextWindow(): Int                 = client.getContextWindow()
       def getReserveCompletion(): Int             = client.getReserveCompletion()

@@ -40,9 +40,7 @@ class RAGAnswerHistorySpec extends AnyFlatSpec with Matchers {
       conversations += conversation
       Right(answer)
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       conversations += conversation

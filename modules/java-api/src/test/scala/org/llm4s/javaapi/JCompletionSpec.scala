@@ -50,7 +50,7 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       sent += (c -> o)
       reply
     }
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
@@ -130,7 +130,11 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   }
 
   it should "read a null text as empty, as the agent's messages do" in {
-    Llm4s.wrapClient(replying(bare.withMessage(bare.message.withContent(null: String)))).completion("q").get().content shouldBe ""
+    Llm4s
+      .wrapClient(replying(bare.withMessage(bare.message.withContent(null: String))))
+      .completion("q")
+      .get()
+      .content shouldBe ""
   }
 
   it should "send the query as one user message with default options" in {

@@ -123,7 +123,7 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
     } { baseUrl =>
       val chunks = ListBuffer.empty[StreamedChunk]
       val completion = new OpenRouterClient(config("anthropic/claude-3.5-sonnet", baseUrl))
-        .streamComplete(Conversation(Seq(hi)), CompletionOptions(), chunks += _)
+        .streamComplete(Conversation(Seq(hi)), CompletionOptions())(chunks += _)
         .value
       chunks.flatMap(_.thinkingDelta) shouldBe Seq("hmm ", "ok")
       completion.thinking shouldBe Some("hmm ok")

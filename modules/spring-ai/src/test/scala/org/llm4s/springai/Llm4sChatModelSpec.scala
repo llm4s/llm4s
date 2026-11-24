@@ -319,9 +319,7 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
     val throwing = new LLMClient {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         Left(ValidationError("x", "unused"))
-      override def streamComplete(
-        c: Conversation,
-        o: CompletionOptions,
+      override def streamComplete(c: Conversation, o: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = throw new IllegalStateException("client bug")
       override def getContextWindow(): Int     = 1000
@@ -338,9 +336,7 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
     val blocking = new LLMClient {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         Left(ValidationError("x", "unused"))
-      override def streamComplete(
-        c: Conversation,
-        o: CompletionOptions,
+      override def streamComplete(c: Conversation, o: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = {
         onChunk(StreamedChunk("s1", Some("first")))

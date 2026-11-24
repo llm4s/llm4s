@@ -60,9 +60,7 @@ final class JlamaClient private[provider] (
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     completeWithMetrics(run(conversation, options, _ => ()).map(_._1.withAdjustments(unsent(options))))
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     completeWithMetrics {

@@ -364,10 +364,10 @@ object ModelStep:
       else
         client.streamComplete(
           Conversation(messages),
-          withTools,
-          chunk =>
-            chunk.thinkingDelta.filter(_.nonEmpty).foreach(call.thinkingDelta)
-            chunk.content.filter(_.nonEmpty).foreach(call.textDelta)
+          withTools
+        )(chunk =>
+          chunk.thinkingDelta.filter(_.nonEmpty).foreach(call.thinkingDelta)
+          chunk.content.filter(_.nonEmpty).foreach(call.textDelta)
         )
 
 /**

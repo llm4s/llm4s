@@ -396,9 +396,7 @@ object GuardedContentContract:
       sent.add(conversation.messages.toVector)
       responses(math.min(calls.getAndIncrement(), responses.size - 1))
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

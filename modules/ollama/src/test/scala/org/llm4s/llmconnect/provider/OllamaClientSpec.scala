@@ -351,7 +351,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       )
 
     assert(client.complete(conversation("Hello"), reasoning).toOption.get.adjustments == dropped)
-    assert(client.streamComplete(conversation("Hello"), reasoning, _ => ()).toOption.get.adjustments == dropped)
+    assert(client.streamComplete(conversation("Hello"), reasoning)(_ => ()).toOption.get.adjustments == dropped)
     assert(client.complete(conversation("Hello"), CompletionOptions()).toOption.get.adjustments.isEmpty)
   }
 
@@ -387,7 +387,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
 
     val chunks = scala.collection.mutable.Buffer[StreamedChunk]()
     val client = mkClient(mockHttp)
-    val result = client.streamComplete(conversation("Hello"), CompletionOptions(), chunk => chunks += chunk)
+    val result = client.streamComplete(conversation("Hello"), CompletionOptions())(chunk => chunks += chunk)
 
     assert(result.isRight)
     val completion = result.toOption.get
@@ -403,7 +403,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val mockHttp = stub[StubbedHttpCalls]
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, resetting)))
 
-    val result = mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val result = mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     result match {
       case Left(e: NetworkError) =>
@@ -418,7 +418,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     (mockHttp.onPostStream _)
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(lines.getBytes(StandardCharsets.UTF_8)))))
-    mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions(), chunks += _)
+    mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions())(chunks += _)
   }
 
   test("a stream that ends before done: true is a NetworkError, the text delivered staying delivered (RFC 0009)") {
@@ -454,7 +454,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val client = mkClient(mockHttp)
-    val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     assert(result.isRight)
     val usage = result.toOption.get.usage.get
@@ -477,7 +477,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val client = mkClient(mockHttp, ProviderExchangeLogging.Enabled(sink))
-    val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     assert(result.isRight)
     assert(recorded.size == 1)
@@ -499,7 +499,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(401, inputStream)))
 
     val client = mkClient(mockHttp)
-    val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     assert(result.isLeft)
     assert(result.left.toOption.get.isInstanceOf[org.llm4s.error.AuthenticationError])
@@ -515,7 +515,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Left(failure))
 
     val client = mkClient(mockHttp, ProviderExchangeLogging.Enabled(sink))
-    val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val result = client.streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     assert(result == Left(failure))
     assert(recorded.size == 1)
@@ -529,7 +529,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       .when(*, *, *, *)
       .returns(Right(StreamingHttpResponse(429, body, Map("retry-after" -> Seq("9")))))
 
-    mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions(), _ => ()) match {
+    mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions())(_ => ()) match {
       case Left(err: RateLimitError) => assert(err.retryDelay.contains(9.seconds))
       case other                     => fail(s"Expected RateLimitError, got: $other")
     }
@@ -562,7 +562,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val mockHttp = stub[StubbedHttpCalls]
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, heldOpen)))
 
-    val result = mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val result = mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     result match {
       case Left(_: ProcessingError) => ()
@@ -582,7 +582,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     (mockHttp.onPostStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, body)))
 
     val result = mkClient(mockHttp, ProviderExchangeLogging.Enabled(sink))
-      .streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+      .streamComplete(conversation("Hello"), CompletionOptions())(_ => ())
 
     assert(result.isLeft)
     assert(recorded.head.responseBody.exists(_.contains("not-json")))
@@ -635,7 +635,7 @@ class OllamaClientRateLimitSpec extends AnyFunSuite with org.scalatest.BeforeAnd
   }
 
   test("streamComplete() turns a 429 with Retry-After: 5 into a RateLimitError with a 5 second delay") {
-    client.streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions(), _ => ()) match {
+    client.streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions())(_ => ()) match {
       case Left(err: RateLimitError) => assert(err.retryDelay.contains(5.seconds))
       case other                     => fail(s"Expected RateLimitError, got: $other")
     }

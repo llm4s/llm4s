@@ -36,7 +36,7 @@ class JavaAiServicesGuideSpec extends AnyWordSpec with TestTimeLimit with Matche
       val message = script(n)
       Right(Completion(s"s$n", Instant.EPOCH, "scripted", message))
     }
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 128000
     override def getReserveCompletion(): Int = 4096

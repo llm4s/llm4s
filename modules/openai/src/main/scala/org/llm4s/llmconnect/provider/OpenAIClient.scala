@@ -236,9 +236,7 @@ class OpenAIClient private[provider] (
     result.tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
   }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()

@@ -23,9 +23,7 @@ class JStructuredOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers
       options.set(opts)
       Right(Completion("id", Instant.EPOCH, "test-model", AssistantMessage(reply)))
     }
-    override def streamComplete(
-      c: Conversation,
-      o: CompletionOptions,
+    override def streamComplete(c: Conversation, o: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(c, o)

@@ -158,9 +158,8 @@ class OllamaStructuredOutputSpec extends AnyFunSuite with Matchers with BeforeAn
     stub.reply = """{"message":{"content":"{\"name\":\"Ada\",\"age\":36}"},"done":true}""" + "\n"
     val res = serverClient.streamComplete(
       conv,
-      CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(complexSchema)),
-      _ => ()
-    )
+      CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(complexSchema))
+    )(_ => ())
     res.isRight shouldBe true
     val sent = ujson.read(received.asScala.toList.head)
     sent("stream").bool shouldBe true

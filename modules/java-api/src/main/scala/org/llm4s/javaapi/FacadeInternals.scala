@@ -11,7 +11,7 @@ import org.llm4s.agent.graph.toolloop.{
 }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect, LlmClientOptions }
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ModelDimensionRegistry, ProviderConfig }
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
@@ -76,7 +76,10 @@ private[llm4s] object FacadeInternals {
     else
       result(for {
         registry <- Llm4sConfig.modelRegistryService()
-        client   <- LLMConnect.getClient(config, Option(metrics).getOrElse(MetricsCollector.noop))(using registry)
+        client <- LLMConnect.getClient(
+          config,
+          LlmClientOptions(metrics = Option(metrics).getOrElse(MetricsCollector.noop))
+        )(using registry)
       } yield Llm4s.wrapClient(client))
 
   /** `agentResult` as Java and Kotlin callers read it. */

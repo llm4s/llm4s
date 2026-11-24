@@ -39,9 +39,7 @@ class RAGAnswerStreamingSpec extends AnyFlatSpec with Matchers {
       events += "complete"
       Right(completion("42"))
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       this.options += options

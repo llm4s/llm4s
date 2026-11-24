@@ -318,9 +318,7 @@ curl https://api.anthropic.com/v1/messages \
     "messages": [{"role": "user", "content": "What is the weather like in San Francisco?"}]
 }'
    */
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
+  override def streamComplete(conversation: Conversation, options: CompletionOptions = CompletionOptions())(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()

@@ -30,7 +30,7 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(answer)))
     }
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = reply(c, o, streamed = false)
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] = {
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] = {
       f(StreamedChunk(id = "c", content = Some(answer)))
       reply(c, o, streamed = true)
     }
@@ -208,7 +208,7 @@ class JAgentBuilderSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       val call = ToolCall(s"c$n", "add", ujson.Obj("a" -> 1, "b" -> 2))
       Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(None, Seq(call))))
     }
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512

@@ -22,7 +22,7 @@ class LlmBoot4HealthIndicatorSpec extends AnyFlatSpec with Matchers {
 
   private def client(reply: Result[Completion]): JLlmClient = JLlmClientTestFactory.create(new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = reply
-    override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
+    override def streamComplete(c: Conversation, o: CompletionOptions)(f: StreamedChunk => Unit): Result[Completion] =
       reply
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512

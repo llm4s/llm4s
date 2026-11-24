@@ -66,7 +66,7 @@ which settings keep message content out of traces, is in
 
 Metrics are off until you ask for them. With `llm4s-observability-prometheus` on the classpath and
 `llm4s.metrics.enabled = true`, `MetricsConfigLoader.default()` returns the collector and starts the endpoint; pass the
-collector to `LLMConnect.getClient(providerConfig, metrics)` and every call is counted by provider and model. The
+collector to `LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics))` and every call is counted by provider and model. The
 [metrics section](../observability/#metrics) has the configuration, the series and example alert queries (error
 share, p95 latency, rate-limit errors, spend per hour).
 

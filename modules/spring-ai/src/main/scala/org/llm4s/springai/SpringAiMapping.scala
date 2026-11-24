@@ -68,8 +68,8 @@ private[springai] object SpringAiMapping {
   // `Unknown` is a client that does not map its reason yet (Anthropic, Gemini, Vertex AI, Bedrock until
   // RFC 0009 PR 2); Spring AI has no "unknown", so with no tool call it is reported as STOP, as it was before #2613.
   def finishOf(completion: Completion): String = completion.finishReason match {
-    case FinishReason.ToolCalls                                 => ToolCallsFinish
-    case FinishReason.Length                                    => LengthFinish
+    case FinishReason.ToolCalls                                                        => ToolCallsFinish
+    case FinishReason.Length                                                           => LengthFinish
     case FinishReason.Other(_) | FinishReason.Unknown if completion.toolCalls.nonEmpty => ToolCallsFinish
     case FinishReason.Other(raw) if raw.nonEmpty                                       => raw
     case _                                                                             => StopFinish

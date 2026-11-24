@@ -39,9 +39,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
           Right(Completion("id", Instant.EPOCH, "test-model", msg))
         }
       }
-      override def streamComplete(
-        conv: Conversation,
-        opts: CompletionOptions,
+      override def streamComplete(conv: Conversation, opts: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conv, opts)
       override def getContextWindow(): Int     = 4096
@@ -119,9 +117,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
     val underlying = new LLMClient {
       override def complete(conv: Conversation, opts: CompletionOptions): Result[Completion] =
         Left(ServiceError(503, "test-provider", "rate limited"))
-      override def streamComplete(
-        conv: Conversation,
-        opts: CompletionOptions,
+      override def streamComplete(conv: Conversation, opts: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conv, opts)
       override def getContextWindow(): Int     = 4096
@@ -169,9 +165,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matcher
         seen.set(conv)
         Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("ok")))
       }
-      override def streamComplete(
-        conv: Conversation,
-        opts: CompletionOptions,
+      override def streamComplete(conv: Conversation, opts: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conv, opts)
       override def getContextWindow(): Int     = 4096

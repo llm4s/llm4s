@@ -30,7 +30,7 @@ class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModu
           SimpleError("swallowed")
         }
 
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       http
         .postStream(url, Map.empty, "{}", 30.seconds)
         .flatMap { response =>
@@ -75,7 +75,7 @@ class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModu
       afterInterrupt()
 
     def complete(c: Conversation, o: CompletionOptions): Result[Completion] = waitThen()
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       waitThen()
     def getContextWindow(): Int     = 1000
     def getReserveCompletion(): Int = 100

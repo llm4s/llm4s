@@ -31,7 +31,7 @@ object LLMClientZSpec extends ZIOSpecDefault {
   private def mockClient(completion: Completion, chunks: Seq[StreamedChunk] = Seq.empty): LLMClient =
     new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Right(completion)
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = {
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] = {
         chunks.foreach(onChunk)
         Right(completion)
       }
@@ -42,7 +42,7 @@ object LLMClientZSpec extends ZIOSpecDefault {
   private val failingClient: LLMClient = new LLMClient {
     def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
       Left(SimpleError("boom"))
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       Left(SimpleError("boom"))
     def getContextWindow(): Int     = 4096
     def getReserveCompletion(): Int = 256
@@ -83,9 +83,7 @@ object LLMClientZSpec extends ZIOSpecDefault {
         val released = new java.util.concurrent.CountDownLatch(1)
         val client = new LLMClient {
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Right(testCompletion)
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = {
             onChunk(StreamedChunk(id = "c1", content = Some("a")))
@@ -107,9 +105,7 @@ object LLMClientZSpec extends ZIOSpecDefault {
       test("streamComplete emits chunks received before a mid-stream error, then fails") {
         val client = new LLMClient {
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Right(testCompletion)
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = {
             onChunk(StreamedChunk(id = "c1", content = Some("a")))
@@ -134,9 +130,7 @@ object LLMClientZSpec extends ZIOSpecDefault {
         val sawInterrupt = new java.util.concurrent.atomic.AtomicBoolean(false)
         val client = new LLMClient {
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Right(testCompletion)
-          def streamComplete(
-            c: Conversation,
-            o: CompletionOptions,
+          def streamComplete(c: Conversation, o: CompletionOptions)(
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = {
             // A cancellation that lands while `onChunk` waits for the chunk to be taken is thrown from

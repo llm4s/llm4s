@@ -5,7 +5,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.micrometer.prometheusmetrics.{ PrometheusConfig, PrometheusMeterRegistry }
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
@@ -32,14 +32,14 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
       registryService <- Llm4sConfig.modelRegistryService()
       given ModelRegistryService = registryService
       metrics                    = new MicrometerMetrics(meterRegistry)
-      client <- LLMConnect.getClient(providerConfig, metrics)
+      client <- LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics))
     } yield client
 
   // The "Errors and ReliableClient" example, compiled (not run, for the same reason).
   def reliableWithMetrics(meterRegistry: MeterRegistry, providerConfig: ProviderConfig)(using ModelRegistryService) = {
     val metrics = new MicrometerMetrics(meterRegistry)
     val client = LLMConnect
-      .getClient(providerConfig, metrics)
+      .getClient(providerConfig, LlmClientOptions(metrics = metrics))
       .map(c => new ReliableClient(c, "openai", ReliabilityConfig.default, Some(metrics)))
     client
   }
@@ -47,7 +47,7 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
   private val ReliableLines = Seq(
     "val metrics = new MicrometerMetrics(meterRegistry)",
     "val client = LLMConnect",
-    ".getClient(providerConfig, metrics)",
+    ".getClient(providerConfig, LlmClientOptions(metrics = metrics))",
     """.map(c => new ReliableClient(c, "openai", ReliabilityConfig.default, Some(metrics)))"""
   )
 
@@ -55,7 +55,7 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
   private val QuickStartLines = Seq(
     "import io.micrometer.core.instrument.MeterRegistry",
     "import org.llm4s.config.Llm4sConfig",
-    "import org.llm4s.llmconnect.LLMConnect",
+    "import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }",
     "import org.llm4s.metrics.MicrometerMetrics",
     "import org.llm4s.model.ModelRegistryService",
     "def clientWithMetrics(meterRegistry: MeterRegistry) =",
@@ -63,7 +63,7 @@ class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
     "registryService <- Llm4sConfig.modelRegistryService()",
     "given ModelRegistryService = registryService",
     "metrics                    = new MicrometerMetrics(meterRegistry)",
-    "client <- LLMConnect.getClient(providerConfig, metrics)"
+    "client <- LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics))"
   )
 
   private val GuidePath = "docs/guide/observability/micrometer.md"

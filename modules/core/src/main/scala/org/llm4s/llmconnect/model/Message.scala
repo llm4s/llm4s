@@ -77,8 +77,8 @@ object Message {
 
   implicit val rw: RW[Message] = readwriter[ujson.Value].bimap[Message](
     {
-      case um: UserMessage      => partsJson(um.parts, ujson.Obj("type" -> ujson.Str("user")))
-      case sm: SystemMessage    => ujson.Obj("type" -> ujson.Str("system"), "content" -> ujson.Str(sm.content))
+      case um: UserMessage   => partsJson(um.parts, ujson.Obj("type" -> ujson.Str("user")))
+      case sm: SystemMessage => ujson.Obj("type" -> ujson.Str("system"), "content" -> ujson.Str(sm.content))
       case am: AssistantMessage =>
         val obj = ujson.Obj("type" -> ujson.Str("assistant"))
         AssistantMessage.fields(am).value.foreach { case (key, value) => obj(key) = value }
@@ -89,8 +89,8 @@ object Message {
     json => {
       val obj = json.obj
       obj("type").str match {
-        case "user"      => UserMessage(readParts(obj))
-        case "system"    => SystemMessage(obj("content").str)
+        case "user"   => UserMessage(readParts(obj))
+        case "system" => SystemMessage(obj("content").str)
         // nested under "data" until #2809, flat since: both are read
         case "assistant" => read[AssistantMessage](obj.getOrElse("data", json))
         case "tool"      => ToolMessage(readParts(obj), obj("toolCallId").str)

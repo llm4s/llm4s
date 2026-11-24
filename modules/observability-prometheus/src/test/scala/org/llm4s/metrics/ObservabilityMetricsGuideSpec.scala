@@ -4,7 +4,7 @@ import org.llm4s.reliability.ReliabilityMetrics
 import com.typesafe.config.ConfigFactory
 import io.prometheus.metrics.model.registry.PrometheusRegistry
 import org.llm4s.config.{ Llm4sConfig, MetricsConfigLoader }
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.model.*
@@ -64,9 +64,7 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
     protected def metrics           = collector
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       completeWithMetrics(reply())
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = completeWithMetrics(reply())
     def getContextWindow(): Int     = 128000
@@ -140,7 +138,7 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
       given ModelRegistryService = registryService
       configured <- MetricsConfigLoader.default()
       (metrics, endpoint) = configured
-      client <- LLMConnect.getClient(providerConfig, metrics).left.map { error =>
+      client <- LLMConnect.getClient(providerConfig, LlmClientOptions(metrics = metrics)).left.map { error =>
         endpoint.foreach(_.stop()) // release the server if client creation fails
         error
       }
@@ -186,7 +184,7 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
   "a streamed call" should "be recorded once, when the stream has finished" in
     withEndpoint { (metrics, endpoint) =>
       val client = new Stub(metrics, () => answer(Some(TokenUsage(10, 5, 15)), None))
-      client.streamComplete(conversation, CompletionOptions(), _ => ()).isRight shouldBe true
+      client.streamComplete(conversation, CompletionOptions())(_ => ()).isRight shouldBe true
 
       samples(scrape(endpoint)) should contain(
         """llm4s_requests_total{model="gpt-4o",provider="openai",status="success"} 1.0"""

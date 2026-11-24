@@ -29,9 +29,7 @@ class AiServiceSpec extends AnyWordSpec with TestTimeLimit with Matchers {
       Right(Completion(s"r$n", Instant.EPOCH, "recording", message))
     }
 
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
 

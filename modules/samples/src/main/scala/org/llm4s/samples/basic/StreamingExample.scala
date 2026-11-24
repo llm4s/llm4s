@@ -49,27 +49,26 @@ object StreamingExample {
       completion <-
         client.streamComplete(
           conversation,
-          CompletionOptions(),
-          onChunk = { chunk =>
-            chunkCount += 1
+          CompletionOptions()
+        ) { chunk =>
+          chunkCount += 1
 
-            // Process content chunks
-            chunk.content.foreach { content =>
-              print(content) // Print each chunk as it arrives (Keep print for Streaming UI)
-              fullContent += content
-            }
-
-            // Handle tool calls if present
-            chunk.toolCall.foreach(toolCall => logger.info("[Tool Call: {}]", toolCall.name))
-
-            // Check if streaming is finished
-            chunk.finishReason.foreach { reason =>
-              // Ensure we break the line after streaming finishes
-              println()
-              logger.info("[Stream finished: {}]", reason.name)
-            }
+          // Process content chunks
+          chunk.content.foreach { content =>
+            print(content) // Print each chunk as it arrives (Keep print for Streaming UI)
+            fullContent += content
           }
-        )
+
+          // Handle tool calls if present
+          chunk.toolCall.foreach(toolCall => logger.info("[Tool Call: {}]", toolCall.name))
+
+          // Check if streaming is finished
+          chunk.finishReason.foreach { reason =>
+            // Ensure we break the line after streaming finishes
+            println()
+            logger.info("[Stream finished: {}]", reason.name)
+          }
+        }
       _ = {
         val endTime  = System.currentTimeMillis()
         val duration = endTime - startTime

@@ -44,7 +44,7 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
           .build()
         HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString()): Unit
         Completion(id = "x", created = Instant.EPOCH, model = "m", message = AssistantMessage("ok"))
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 1000
     def getReserveCompletion(): Int = 100
@@ -111,7 +111,7 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
       val request  = HttpRequest.newBuilder(URI.create(baseUrl)).POST(HttpRequest.BodyPublishers.ofString("{}")).build()
       val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
       Left(map(response.statusCode(), response.body()))
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 1000
     def getReserveCompletion(): Int = 100

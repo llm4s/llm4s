@@ -256,7 +256,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val model  = new FakeChatModel(_ => reply("unused"), _ => pieces)
     val chunks = Vector.newBuilder[StreamedChunk]
     val done = new SpringAiLlmClient(model)
-      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), chunk => chunks += chunk)
+      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(chunk => chunks += chunk)
       .value
 
     chunks.result().map(c => (c.content, c.finishReason)) shouldBe Vector(
@@ -280,7 +280,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val model  = new FakeChatModel(_ => reply("unused"), _ => pieces)
     val chunks = Vector.newBuilder[StreamedChunk]
     val done = new SpringAiLlmClient(model)
-      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), chunk => chunks += chunk)
+      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(chunk => chunks += chunk)
       .value
 
     chunks.result().flatMap(_.toolCall) shouldBe Vector(ToolCall("c1", "weather", ujson.Obj("city" -> "Paris")))
@@ -294,7 +294,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "return a streaming error, or a bad tool call in a stream, as a Left" in {
     val failing = new FakeChatModel(_ => reply("unused"))
     new SpringAiLlmClient(failing)
-      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
       .left
       .value
       .message should include("no streaming")
@@ -304,7 +304,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
       _ => Flux.just(reply("", calls = Seq(new SpringAssistantMessage.ToolCall("c", "function", "weather", "{x"))))
     )
     new SpringAiLlmClient(bad)
-      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+      .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())(_ => ())
       .left
       .value shouldBe a[ValidationError]
   }
@@ -331,7 +331,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
 
     val chunks = Vector.newBuilder[String]
     client
-      .streamComplete(conversation, CompletionOptions(), c => c.content.foreach(chunks += _))
+      .streamComplete(conversation, CompletionOptions())(c => c.content.foreach(chunks += _))
       .value
       .content shouldBe "streamed"
     chunks.result().mkString shouldBe "streamed"

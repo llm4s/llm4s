@@ -120,9 +120,7 @@ final class ScriptedLLMClient private (
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     answer(conversation, options, streamed = false).map { case (_, completion) => completion }
 
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions,
+  override def streamComplete(conversation: Conversation, options: CompletionOptions)(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     answer(conversation, options, streamed = true).map { case (index, completion) =>

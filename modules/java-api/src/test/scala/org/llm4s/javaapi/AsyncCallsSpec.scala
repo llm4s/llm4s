@@ -69,9 +69,7 @@ class AsyncCallsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
         Right(Completion("id", Instant.EPOCH, "m", AssistantMessage("late")))
       else Left(CancelledError("Blocking"))
     }
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    override def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
     override def getContextWindow(): Int     = 4096
@@ -296,9 +294,7 @@ class AsyncCallsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
           Right(Completion("id", Instant.EPOCH, "m", AssistantMessage(text)))
         else Left(ProcessingError("concurrency", "the calls did not run at once"))
       }
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions,
+      override def streamComplete(conversation: Conversation, options: CompletionOptions)(
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = complete(conversation, options)
       override def getContextWindow(): Int     = 4096

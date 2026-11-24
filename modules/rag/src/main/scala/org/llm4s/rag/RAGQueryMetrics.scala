@@ -203,12 +203,10 @@ private[rag] object RAGTracing {
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       tagged(traced.complete(conversation, options))
 
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
+    def streamComplete(conversation: Conversation, options: CompletionOptions)(
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
-      tagged(traced.streamComplete(conversation, options, onChunk))
+      tagged(traced.streamComplete(conversation, options)(onChunk))
 
     private def tagged(result: Result[Completion]): Result[Completion] = {
       result.foreach(c => c.usage.foreach(u => Try(tracing.traceTokenUsage(u, c.model, operation)): Unit))

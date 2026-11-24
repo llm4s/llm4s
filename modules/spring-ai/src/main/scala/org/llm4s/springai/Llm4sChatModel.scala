@@ -58,9 +58,9 @@ final class Llm4sChatModel(client: LLMClient) extends ChatModel with StreamingCh
             Try(
               client.streamComplete(
                 conversation,
-                options,
-                chunk =>
-                  chunk.content.filter(_.nonEmpty).foreach(text => sink.next(SpringAiMapping.textChunk(chunk.id, text)))
+                options
+              )(chunk =>
+                chunk.content.filter(_.nonEmpty).foreach(text => sink.next(SpringAiMapping.textChunk(chunk.id, text)))
               )
             ) match {
               case Success(Right(completion)) =>

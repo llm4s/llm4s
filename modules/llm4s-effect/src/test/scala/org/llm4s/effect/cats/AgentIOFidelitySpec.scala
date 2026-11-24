@@ -48,7 +48,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       options.add(o)
       Right(reply(i))
     }
-    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+    def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 8192
     def getReserveCompletion(): Int = 512
@@ -59,11 +59,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def toolCall(i: Int): Completion = {
     val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = ujson.Obj("v" -> "x")))
-    Completion(
-      id = s"t$i",
-      created = Instant.EPOCH,
-      model = "m",
-      message = AssistantMessage("", calls))
+    Completion(id = s"t$i", created = Instant.EPOCH, model = "m", message = AssistantMessage("", calls))
   }
 
   private def tools: ToolRegistry = ToolRegistry.of(Seq(echoTool)).toOption.get
@@ -126,7 +122,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val failure = new IllegalStateException("provider exploded")
     val client = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = throw failure
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         throw failure
       def getContextWindow(): Int     = 1
       def getReserveCompletion(): Int = 1
@@ -174,7 +170,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     val client = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         if (calls.getAndIncrement() == 0) Right(text("first")) else Left(SimpleError("nope"))
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 1
       def getReserveCompletion(): Int = 1
@@ -237,7 +233,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
           case 1 => Left(SimpleError("provider down"))
           case _ => Right(text("recovered"))
         }
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 8192
       def getReserveCompletion(): Int = 512
@@ -257,7 +253,7 @@ class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
           case 0 => Right(toolCall(0))
           case _ => Left(SimpleError("provider down"))
         }
-      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      def streamComplete(c: Conversation, o: CompletionOptions)(onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 8192
       def getReserveCompletion(): Int = 512
